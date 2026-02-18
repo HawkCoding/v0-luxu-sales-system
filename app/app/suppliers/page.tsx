@@ -29,10 +29,10 @@ export default function ProductsPage() {
   )
 
   return (
-    <div className="p-6 space-y-4 max-w-5xl">
+    <div className="p-6 space-y-6 max-w-5xl">
       <div>
-        <h1 className="text-2xl font-semibold text-foreground tracking-tight">Products & Rate Cards</h1>
-        <p className="text-sm text-muted-foreground mt-1">{rates.length} rate entries across {Object.keys(grouped).length} routes</p>
+        <h1 className="text-foreground tracking-tight">Suppliers & Rate Cards</h1>
+        <p className="text-muted-foreground mt-2">{rates.length} rate entries across {Object.keys(grouped).length} routes</p>
       </div>
 
       <div className="relative max-w-sm">

@@ -1,8 +1,9 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { RoleProvider, useRole } from "@/lib/role-context"
+import { AuthProvider, useAuth } from "@/lib/auth-context"
 import { cn } from "@/lib/utils"
 import type { Role } from "@/lib/types"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -13,21 +14,21 @@ import {
   LayoutDashboard, Kanban, MessageSquare, Briefcase, Users,
   FileText, CreditCard, FolderOpen, Mail, Package,
   FileCode, BarChart3, ClipboardList, Settings, Search,
-  ChevronLeft, Menu,
+  ChevronLeft, Menu, LogOut,
 } from "lucide-react"
-import { useState, type ReactNode } from "react"
+import { useState, useEffect, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 
 const navItems = [
   { label: "Dashboard", href: "/app", icon: LayoutDashboard, permission: "view:dashboard" },
   { label: "Pipeline", href: "/app/pipeline", icon: Kanban, permission: "view:pipeline" },
+  { label: "Jobs", href: "/app/jobs", icon: Briefcase, permission: "view:jobs" },
   { label: "Customers", href: "/app/customers", icon: Users, permission: "view:customers" },
-  { label: "Quotes", href: "/app/quotes", icon: FileText, permission: "view:quotes" },
+  { label: "Suppliers", href: "/app/suppliers", icon: Package, permission: "view:products" },
   { label: "Payments", href: "/app/payments", icon: CreditCard, permission: "view:payments" },
   { label: "Documents", href: "/app/documents", icon: FolderOpen, permission: "view:documents" },
   { label: "Correspondence", href: "/app/correspondence", icon: Mail, permission: "view:correspondence" },
   { type: "separator" as const, label: "Admin" },
-  { label: "Suppliers", href: "/app/suppliers", icon: Package, permission: "view:products" },
   { label: "Templates", href: "/app/templates", icon: FileCode, permission: "view:templates" },
   { type: "separator" as const, label: "Manager" },
   { label: "Reporting", href: "/app/reporting", icon: BarChart3, permission: "view:reporting" },
@@ -38,9 +39,44 @@ const navItems = [
 
 function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname()
+  const router = useRouter()
+  const { user, logout } = useAuth()
   const { role, setRole, can } = useRole()
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
+
+  // Protect route - redirect to login if not authenticated
+  useEffect(() => {
+    if (!user) {
+      router.push("/login")
+    }
+  }, [user, router])
+
+  // Sync role with user's assigned role
+  useEffect(() => {
+    if (user && role !== user.role) {
+      setRole(user.role)
+    }
+  }, [user, role, setRole])
+
+  // Show loading while checking auth
+  if (!user) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <div className="text-center space-y-3">
+          <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto animate-pulse">
+            <span className="text-xl font-bold text-primary">LT</span>
+          </div>
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    )
+  }
+
+  const handleLogout = () => {
+    logout()
+    router.push("/login")
+  }
 
   return (
     <div className="flex h-screen bg-background overflow-hidden">
@@ -90,13 +126,13 @@ function AppShell({ children }: { children: ReactNode }) {
                   href={item.href!}
                   onClick={() => setMobileOpen(false)}
                   className={cn(
-                    "flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm transition-colors",
-                    active ? "bg-secondary text-foreground font-medium" : "text-muted-foreground hover:text-foreground hover:bg-secondary/50",
+                    "flex items-center gap-3 px-3 py-2.5 rounded-lg text-[15px] font-medium transition-all",
+                    active ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-secondary",
                     collapsed && "justify-center px-0",
                   )}
                   title={collapsed ? item.label : undefined}
                 >
-                  <Icon className="w-4 h-4 flex-shrink-0" />
+                  <Icon className="w-5 h-5 flex-shrink-0" />
                   {!collapsed && <span>{item.label}</span>}
                 </Link>
               )
@@ -118,30 +154,20 @@ function AppShell({ children }: { children: ReactNode }) {
               <Menu className="w-4 h-4" />
             </Button>
             <div className="relative hidden sm:block">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input placeholder="Search jobs, customers..." className="pl-8 w-64 h-8 text-sm bg-secondary border-0" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+              <Input placeholder="Search jobs, customers..." className="pl-10 w-80 h-10 bg-secondary/50 border-border hover:border-primary/50 focus:border-primary transition-colors" />
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground hidden sm:block">Role:</span>
-              <Select value={role} onValueChange={(v) => setRole(v as Role)}>
-                <SelectTrigger className="h-8 w-32 text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="admin">Admin</SelectItem>
-                  <SelectItem value="manager">Manager</SelectItem>
-                  <SelectItem value="consultant">Consultant</SelectItem>
-                  <SelectItem value="readonly">ReadOnly</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-md bg-secondary/50">
+              <span className="text-sm font-medium text-foreground">{user.name}</span>
+              <span className="text-xs text-muted-foreground">•</span>
+              <span className="text-xs text-muted-foreground capitalize">{role}</span>
             </div>
-            <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center">
-              <span className="text-xs font-medium text-foreground" style={{ fontFamily: "var(--font-inter)" }}>
-                {role[0].toUpperCase()}
-              </span>
-            </div>
+            <Button variant="ghost" size="sm" onClick={handleLogout} className="gap-2" title="Logout">
+              <LogOut className="w-4 h-4" />
+              <span className="hidden sm:inline">Logout</span>
+            </Button>
           </div>
         </header>
         <main className="flex-1 overflow-auto">
@@ -154,8 +180,10 @@ function AppShell({ children }: { children: ReactNode }) {
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (
-    <RoleProvider>
-      <AppShell>{children}</AppShell>
-    </RoleProvider>
+    <AuthProvider>
+      <RoleProvider>
+        <AppShell>{children}</AppShell>
+      </RoleProvider>
+    </AuthProvider>
   )
 }
