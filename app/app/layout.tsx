@@ -21,15 +21,13 @@ import { Button } from "@/components/ui/button"
 const navItems = [
   { label: "Dashboard", href: "/app", icon: LayoutDashboard, permission: "view:dashboard" },
   { label: "Pipeline", href: "/app/pipeline", icon: Kanban, permission: "view:pipeline" },
-  { label: "Enquiries", href: "/app/enquiries", icon: MessageSquare, permission: "view:enquiries" },
-  { label: "Jobs", href: "/app/jobs", icon: Briefcase, permission: "view:jobs" },
   { label: "Customers", href: "/app/customers", icon: Users, permission: "view:customers" },
   { label: "Quotes", href: "/app/quotes", icon: FileText, permission: "view:quotes" },
   { label: "Payments", href: "/app/payments", icon: CreditCard, permission: "view:payments" },
   { label: "Documents", href: "/app/documents", icon: FolderOpen, permission: "view:documents" },
   { label: "Correspondence", href: "/app/correspondence", icon: Mail, permission: "view:correspondence" },
   { type: "separator" as const, label: "Admin" },
-  { label: "Products & Rates", href: "/app/products", icon: Package, permission: "view:products" },
+  { label: "Suppliers", href: "/app/suppliers", icon: Package, permission: "view:products" },
   { label: "Templates", href: "/app/templates", icon: FileCode, permission: "view:templates" },
   { type: "separator" as const, label: "Manager" },
   { label: "Reporting", href: "/app/reporting", icon: BarChart3, permission: "view:reporting" },
@@ -60,15 +58,15 @@ function AppShell({ children }: { children: ReactNode }) {
         <div className="h-14 flex items-center px-4 border-b border-border">
           {!collapsed && (
             <Link href="/app" className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-brand-gold flex items-center justify-center flex-shrink-0">
-                <span className="text-xs font-bold text-card" style={{ fontFamily: "var(--font-inter)" }}>LT</span>
+              <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
+                <span className="text-xs font-bold text-primary-foreground" style={{ fontFamily: "var(--font-inter)" }}>LT</span>
               </div>
               <span className="text-sm font-semibold text-foreground tracking-tight">Luxu</span>
             </Link>
           )}
           {collapsed && (
-            <div className="w-8 h-8 rounded-full bg-brand-gold flex items-center justify-center mx-auto">
-              <span className="text-xs font-bold text-card" style={{ fontFamily: "var(--font-inter)" }}>L</span>
+            <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center mx-auto">
+              <span className="text-xs font-bold text-primary-foreground" style={{ fontFamily: "var(--font-inter)" }}>L</span>
             </div>
           )}
         </div>

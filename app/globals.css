@@ -4,43 +4,42 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: #FAFAF8;
-  --foreground: #1A1A1A;
+  --background: #F7F7F6;
+  --foreground: rgb(77,77,77);
   --card: #FFFFFF;
-  --card-foreground: #1A1A1A;
+  --card-foreground: rgb(77,77,77);
   --popover: #FFFFFF;
-  --popover-foreground: #1A1A1A;
-  --primary: #1A1A1A;
-  --primary-foreground: #FAFAF8;
-  --secondary: #F5F0EB;
-  --secondary-foreground: #1A1A1A;
-  --muted: #F5F0EB;
-  --muted-foreground: #6B6B6B;
-  --accent: #C5A572;
-  --accent-foreground: #1A1A1A;
+  --popover-foreground: rgb(77,77,77);
+  --primary: rgb(94,117,130);
+  --primary-foreground: #FFFFFF;
+  --secondary: rgba(94,117,130,0.08);
+  --secondary-foreground: rgb(77,77,77);
+  --muted: rgba(94,117,130,0.08);
+  --muted-foreground: rgb(110,115,117);
+  --accent: rgb(94,117,130);
+  --accent-foreground: #FFFFFF;
   --destructive: #DC2626;
-  --destructive-foreground: #DC2626;
-  --border: #E8E4DF;
-  --input: #E8E4DF;
-  --ring: #C5A572;
-  --chart-1: #C5A572;
-  --chart-2: #1A1A1A;
-  --chart-3: #6B6B6B;
-  --chart-4: #E8E4DF;
-  --chart-5: #F5F0EB;
+  --destructive-foreground: #FFFFFF;
+  --border: rgba(94,117,130,0.15);
+  --input: rgba(94,117,130,0.15);
+  --ring: rgb(94,117,130);
+  --chart-1: rgb(94,117,130);
+  --chart-2: rgb(110,115,117);
+  --chart-3: rgb(77,77,77);
+  --chart-4: rgba(94,117,130,0.4);
+  --chart-5: rgba(94,117,130,0.2);
   --radius: 0.5rem;
-  --sidebar: #FAFAF8;
-  --sidebar-foreground: #1A1A1A;
-  --sidebar-primary: #1A1A1A;
-  --sidebar-primary-foreground: #FAFAF8;
-  --sidebar-accent: #F5F0EB;
-  --sidebar-accent-foreground: #1A1A1A;
-  --sidebar-border: #E8E4DF;
-  --sidebar-ring: #C5A572;
-  --brand-gold: #C5A572;
-  --brand-gold-light: #D4BC94;
-  --brand-dark: #1A1A1A;
-  --brand-warm-bg: #F5F0EB;
+  --sidebar: #FAFAFA;
+  --sidebar-foreground: rgb(77,77,77);
+  --sidebar-primary: rgb(94,117,130);
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: rgba(94,117,130,0.08);
+  --sidebar-accent-foreground: rgb(77,77,77);
+  --sidebar-border: rgba(94,117,130,0.15);
+  --sidebar-ring: rgb(94,117,130);
+  --brand-primary: rgb(94,117,130);
+  --brand-primary-soft: rgba(94,117,130,0.4);
+  --brand-secondary: rgb(110,115,117);
   --payment-green: #16A34A;
   --payment-yellow: #EAB308;
   --payment-red: #DC2626;
@@ -51,12 +50,11 @@
 
 
 @theme inline {
-  --font-sans: var(--font-cormorant-garamond), 'Georgia', serif;
+  --font-sans: var(--font-inter), -apple-system, system-ui, sans-serif;
   --font-mono: 'Geist Mono', 'Geist Mono Fallback';
-  --color-brand-gold: var(--brand-gold);
-  --color-brand-gold-light: var(--brand-gold-light);
-  --color-brand-dark: var(--brand-dark);
-  --color-brand-warm-bg: var(--brand-warm-bg);
+  --color-brand-primary: var(--brand-primary);
+  --color-brand-primary-soft: var(--brand-primary-soft);
+  --color-brand-secondary: var(--brand-secondary);
   --color-payment-green: var(--payment-green);
   --color-payment-yellow: var(--payment-yellow);
   --color-payment-red: var(--payment-red);
@@ -106,5 +104,10 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    line-height: 1.3;
   }
 }
