@@ -82,32 +82,32 @@ function AppShell({ children }: { children: ReactNode }) {
     <div 
       className="flex h-screen overflow-hidden"
       style={{
-        background: `radial-gradient(1200px circle at 20% 0%, rgba(94,117,130,0.35) 0%, rgba(11,42,58,1) 50%, rgba(7,24,34,1) 100%)`
+        background: `var(--app-bg-gradient)`
       }}
     >
       {/* Mobile overlay */}
       {mobileOpen && (
-        <div className="fixed inset-0 bg-foreground/20 z-40 lg:hidden" onClick={() => setMobileOpen(false)} />
+        <div className="fixed inset-0 bg-black/40 z-40 lg:hidden" onClick={() => setMobileOpen(false)} />
       )}
 
       {/* Sidebar */}
       <aside className={cn(
-        "h-screen bg-bg-surface border-r border-stroke flex flex-col transition-all duration-200 z-50",
+        "h-screen bg-chrome-1 border-r border-chrome-border flex flex-col transition-all duration-200 z-50",
         collapsed ? "w-16" : "w-60",
         mobileOpen ? "fixed inset-y-0 left-0 w-60" : "hidden lg:flex",
       )}>
-        <div className="h-14 flex items-center px-4 border-b border-stroke">
+        <div className="h-14 flex items-center px-4 border-b border-chrome-border">
           {!collapsed && (
             <Link href="/app" className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
-                <span className="text-xs font-bold text-primary-foreground" style={{ fontFamily: "var(--font-inter)" }}>LT</span>
+              <div className="w-8 h-8 rounded-lg bg-accent/20 flex items-center justify-center flex-shrink-0">
+                <span className="text-xs font-bold text-on-chrome-strong" style={{ fontFamily: "var(--font-inter)" }}>LT</span>
               </div>
-              <span className="text-sm font-semibold text-foreground tracking-tight">Luxu</span>
+              <span className="text-sm font-semibold text-on-chrome-strong tracking-tight">Luxu</span>
             </Link>
           )}
           {collapsed && (
-            <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center mx-auto">
-              <span className="text-xs font-bold text-primary-foreground" style={{ fontFamily: "var(--font-inter)" }}>L</span>
+            <div className="w-8 h-8 rounded-lg bg-accent/20 flex items-center justify-center mx-auto">
+              <span className="text-xs font-bold text-on-chrome-strong" style={{ fontFamily: "var(--font-inter)" }}>L</span>
             </div>
           )}
         </div>
@@ -117,8 +117,8 @@ function AppShell({ children }: { children: ReactNode }) {
               if ("type" in item && item.type === "separator") {
                 return (
                   <div key={i} className="pt-4 pb-1 px-2">
-                    {!collapsed && <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">{item.label}</p>}
-                    {collapsed && <Separator />}
+                    {!collapsed && <p className="text-[10px] font-semibold text-on-chrome-muted uppercase tracking-widest">{item.label}</p>}
+                    {collapsed && <Separator className="bg-chrome-border" />}
                   </div>
                 )
               }
@@ -131,8 +131,10 @@ function AppShell({ children }: { children: ReactNode }) {
                   href={item.href!}
                   onClick={() => setMobileOpen(false)}
                   className={cn(
-                    "flex items-center gap-3 px-3 py-2.5 rounded-lg text-[15px] font-medium transition-all",
-                    active ? "bg-accent-hover text-white shadow-sm" : "text-text-muted hover:text-text-heading hover:bg-bg-raised",
+                    "flex items-center gap-3 px-3 py-2.5 rounded-lg text-[15px] font-medium transition-all relative",
+                    active 
+                      ? "bg-chrome-2 text-on-chrome-strong before:absolute before:left-0 before:top-1 before:bottom-1 before:w-0.5 before:bg-accent before:rounded-r" 
+                      : "text-on-chrome-muted hover:text-on-chrome hover:bg-chrome-2/50",
                     collapsed && "justify-center px-0",
                   )}
                   title={collapsed ? item.label : undefined}
@@ -144,8 +146,13 @@ function AppShell({ children }: { children: ReactNode }) {
             })}
           </nav>
         </ScrollArea>
-        <div className="border-t border-stroke p-2 hidden lg:block">
-          <Button variant="ghost" size="sm" onClick={() => setCollapsed(!collapsed)} className="w-full">
+        <div className="border-t border-chrome-border p-2 hidden lg:block">
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={() => setCollapsed(!collapsed)} 
+            className="w-full text-on-chrome-muted hover:text-on-chrome hover:bg-chrome-2"
+          >
             <ChevronLeft className={cn("w-4 h-4 transition-transform", collapsed && "rotate-180")} />
           </Button>
         </div>
@@ -153,23 +160,37 @@ function AppShell({ children }: { children: ReactNode }) {
 
       {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-14 border-b border-stroke bg-bg-surface flex items-center justify-between px-4 gap-4">
+        <header className="h-14 border-b border-chrome-border bg-chrome-1 flex items-center justify-between px-4 gap-4">
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="sm" className="lg:hidden" onClick={() => setMobileOpen(true)}>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="lg:hidden text-on-chrome hover:text-on-chrome-strong hover:bg-chrome-2" 
+              onClick={() => setMobileOpen(true)}
+            >
               <Menu className="w-4 h-4" />
             </Button>
             <div className="relative hidden sm:block">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
-              <Input placeholder="Search jobs, customers..." className="pl-10 w-80 h-10 bg-bg-white border-stroke hover:border-accent focus:border-accent-hover transition-colors" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-on-chrome-muted" />
+              <Input 
+                placeholder="Search jobs, customers..." 
+                className="pl-10 w-80 h-10 bg-white/6 border-white/10 text-on-chrome placeholder:text-on-chrome-muted hover:border-accent focus:border-accent transition-colors" 
+              />
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-md bg-bg-raised">
-              <span className="text-sm font-medium text-text-heading">{user.name}</span>
-              <span className="text-xs text-text-muted">•</span>
-              <span className="text-xs text-text-muted capitalize">{role}</span>
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-md bg-chrome-2 border border-chrome-border">
+              <span className="text-sm font-medium text-on-chrome-strong">{user.name}</span>
+              <span className="text-xs text-on-chrome-muted">•</span>
+              <span className="text-xs text-on-chrome capitalize">{role}</span>
             </div>
-            <Button variant="ghost" size="sm" onClick={handleLogout} className="gap-2 hover:text-text-heading" title="Logout">
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={handleLogout} 
+              className="gap-2 text-on-chrome hover:text-on-chrome-strong hover:bg-chrome-2" 
+              title="Logout"
+            >
               <LogOut className="w-4 h-4" />
               <span className="hidden sm:inline">Logout</span>
             </Button>
