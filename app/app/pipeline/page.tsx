@@ -15,6 +15,8 @@ import { useRole } from "@/lib/role-context"
 import Link from "next/link"
 import { useState } from "react"
 import { GripVertical, Search, Clipboard, Plus } from "lucide-react"
+import { parseEmailDraft, type ParsedDraft } from "@/lib/import/parseEmailDraft"
+import { ReviewImportedDraftModal } from "@/components/review-imported-draft-modal"
 
 interface PipelineJob {
   id: string
@@ -47,6 +49,8 @@ export default function PipelinePage() {
   const [pasteOpen, setPasteOpen] = useState(false)
   const [pasteText, setPasteText] = useState("")
   const [pasting, setPasting] = useState(false)
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const [parsedDraft, setParsedDraft] = useState<ParsedDraft | null>(null)
 
   const handleDragStart = (e: React.DragEvent, jobId: string) => {
     if (!can("edit:pipeline")) return
@@ -81,42 +85,27 @@ export default function PipelinePage() {
     mutateJobs()
   }
 
-  const handlePasteImport = async () => {
+  const handlePasteImport = () => {
     if (!pasteText.trim()) return
-    setPasting(true)
-    try {
-      const lines = pasteText.split("\n").map((l: string) => l.trim()).filter(Boolean)
-      const nameMatch = pasteText.match(/(?:regards|sincerely|cheers),?\s*\n?\s*([A-Z][a-z]+)\s+([A-Z][a-z]+)/i)
-      const emailMatch = pasteText.match(/[\w.-]+@[\w.-]+\.\w+/)
-      const phoneMatch = pasteText.match(/\+[\d\s-]{8,}/)
+    
+    // Parse the email text
+    const parsed = parseEmailDraft(pasteText)
+    setParsedDraft(parsed)
+    
+    // Close paste modal and open review modal
+    setPasteOpen(false)
+    setReviewOpen(true)
+  }
 
-      await fetch("/api/enquiries", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rawText: pasteText,
-          purpose: "quote",
-          title: "Mr",
-          name: nameMatch?.[1] || "Unknown",
-          surname: nameMatch?.[2] || "Unknown",
-          contactNumber: phoneMatch?.[0] || "",
-          email: emailMatch?.[0] || "",
-          country: "Other",
-          direction: "Pretoria to Cape Town",
-          departureDate: "2026-06-01",
-          noOfSuites: 1,
-          noOfAdults: 2,
-          noOfChildren: 0,
-          suiteTypes: ["Pullman Twin Suite"],
-          termsAccepted: true,
-        }),
-      })
-      mutateAll()
-      setPasteOpen(false)
-      setPasteText("")
-    } finally {
-      setPasting(false)
-    }
+  const handleBackToP aste = () => {
+    setReviewOpen(false)
+    setPasteOpen(true)
+  }
+
+  const handleReviewClose = () => {
+    setReviewOpen(false)
+    setPasteText("")
+    setParsedDraft(null)
   }
 
   if (loadingJobs || loadingAll || !jobs || !data) {
@@ -195,8 +184,8 @@ export default function PipelinePage() {
               />
               <div className="flex justify-end gap-2">
                 <Button variant="outline" size="sm" onClick={() => setPasteOpen(false)}>Cancel</Button>
-                <Button size="sm" onClick={handlePasteImport} disabled={pasting || !pasteText.trim()}>
-                  {pasting ? "Importing..." : "Import Draft"}
+                <Button size="sm" onClick={handlePasteImport} disabled={!pasteText.trim()}>
+                  Review & Import
                 </Button>
               </div>
             </DialogContent>
@@ -349,6 +338,14 @@ export default function PipelinePage() {
           </div>
         </TabsContent>
       </Tabs>
+
+      {/* Review Imported Draft Modal */}
+      <ReviewImportedDraftModal
+        open={reviewOpen}
+        onOpenChange={handleReviewClose}
+        parsedDraft={parsedDraft}
+        onBack={handleBackToPaste}
+      />
     </div>
   )
 }
