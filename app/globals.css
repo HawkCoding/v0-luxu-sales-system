@@ -4,25 +4,22 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  /* Theme tint base */
+  --luxu-theme-tint: #566e7b;
+
   /* App canvas background - BOLD BLUE */
-  --app-bg: #071822;
-  --app-bg-gradient: radial-gradient(1200px circle at 20% 0%, rgba(94,117,130,0.35) 0%, rgba(11,42,58,1) 45%, rgba(7,24,34,1) 100%);
+  --luxu-app-bg: #0B2A3A; /* Deep blue for app canvas */
 
-  /* Chrome (dark surfaces for sidebar/topbar) */
-  --chrome-1: #0A2331;
-  --chrome-2: #0F2F42;
-  --chrome-border: rgba(255,255,255,0.08);
+  /* Background layers (4) - light surfaces for content */
+  --luxu-bg-0: #f5f6f7; /* Not used for app, kept for other contexts */
+  --luxu-bg-1: #eef0f2; /* Surface */
+  --luxu-bg-2: #e7ebed; /* Surface raised */
+  --luxu-bg-3: #e1e5e7; /* Surface inset */
+  --luxu-bg-white: #ffffff; /* Pure white for inputs/popovers */
 
-  /* Text on chrome (near-white, not pure) */
-  --on-chrome-strong: rgba(255,255,255,0.92);
-  --on-chrome: rgba(255,255,255,0.82);
-  --on-chrome-muted: rgba(255,255,255,0.62);
-
-  /* Light content surfaces (slightly blue-tinted) */
-  --surface-1: #F3F6F8;
-  --surface-2: #ECF1F4;
-  --surface-3: #E6EDF1;
-  --surface-border: rgba(10,35,49,0.12);
+  /* Strokes (2) */
+  --luxu-stroke-1: #d0d6da; /* Default border */
+  --luxu-stroke-2: #c2cbcf; /* Strong divider */
 
   /* Text variants (3) - based on "% white" grayscale */
   --luxu-text-heading: #1c1c1c; /* ~11% white - headings */
@@ -52,33 +49,33 @@
   --luxu-warning-border: #fed7aa;
 
   /* Mapped to shadcn/Tailwind tokens */
-  --background: var(--app-bg);
+  --background: var(--luxu-bg-0);
   --foreground: var(--luxu-text-body);
-  --card: var(--surface-1);
+  --card: var(--luxu-bg-1);
   --card-foreground: var(--luxu-text-body);
-  --popover: var(--surface-1);
+  --popover: var(--luxu-bg-white);
   --popover-foreground: var(--luxu-text-body);
   --primary: var(--luxu-accent-hover);
   --primary-foreground: #FFFFFF;
-  --secondary: var(--surface-2);
+  --secondary: var(--luxu-bg-2);
   --secondary-foreground: var(--luxu-text-body);
-  --muted: var(--surface-3);
+  --muted: var(--luxu-bg-3);
   --muted-foreground: var(--luxu-text-muted);
   --accent: var(--luxu-accent-base);
   --accent-foreground: #FFFFFF;
   --destructive: var(--luxu-danger-base);
   --destructive-foreground: #FFFFFF;
-  --border: var(--surface-border);
-  --input: var(--surface-border);
+  --border: var(--luxu-stroke-1);
+  --input: var(--luxu-stroke-2);
   --ring: var(--luxu-accent-base);
   --radius: 0.5rem;
-  --sidebar: var(--chrome-1);
-  --sidebar-foreground: var(--on-chrome);
-  --sidebar-primary: var(--chrome-2);
-  --sidebar-primary-foreground: var(--on-chrome-strong);
-  --sidebar-accent: var(--chrome-2);
-  --sidebar-accent-foreground: var(--on-chrome);
-  --sidebar-border: var(--chrome-border);
+  --sidebar: var(--luxu-bg-1);
+  --sidebar-foreground: var(--luxu-text-body);
+  --sidebar-primary: var(--luxu-accent-hover);
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: var(--luxu-bg-2);
+  --sidebar-accent-foreground: var(--luxu-text-body);
+  --sidebar-border: var(--luxu-stroke-1);
   --sidebar-ring: var(--luxu-accent-base);
 
   /* Chart colors (keep minimal) */
@@ -103,21 +100,17 @@
   --font-sans: var(--font-inter), -apple-system, system-ui, sans-serif;
   --font-mono: 'Geist Mono', 'Geist Mono Fallback';
 
-  /* Chrome surfaces - Tailwind mappings */
-  --color-chrome-1: var(--chrome-1);
-  --color-chrome-2: var(--chrome-2);
-  --color-chrome-border: var(--chrome-border);
+  /* Background layers - Tailwind mappings */
+  --color-app-canvas: var(--luxu-app-bg);
+  --color-bg-app: var(--luxu-bg-0);
+  --color-bg-surface: var(--luxu-bg-1);
+  --color-bg-raised: var(--luxu-bg-2);
+  --color-bg-inset: var(--luxu-bg-3);
+  --color-bg-white: var(--luxu-bg-white);
 
-  /* Text on chrome - Tailwind mappings */
-  --color-on-chrome-strong: var(--on-chrome-strong);
-  --color-on-chrome: var(--on-chrome);
-  --color-on-chrome-muted: var(--on-chrome-muted);
-
-  /* Light content surfaces - Tailwind mappings */
-  --color-surface-1: var(--surface-1);
-  --color-surface-2: var(--surface-2);
-  --color-surface-3: var(--surface-3);
-  --color-surface-border: var(--surface-border);
+  /* Strokes - Tailwind mappings */
+  --color-stroke: var(--luxu-stroke-1);
+  --color-stroke-strong: var(--luxu-stroke-2);
 
   /* Text variants - Tailwind mappings */
   --color-text-heading: var(--luxu-text-heading);

@@ -12,7 +12,7 @@ export default function DashboardPage() {
   const { data, isLoading } = useAllData()
 
   if (isLoading || !data) {
-    return <div className="p-6"><div className="animate-pulse space-y-4">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-24 bg-surface-2 rounded-lg" />)}</div></div>
+    return <div className="p-6"><div className="animate-pulse space-y-4">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-24 bg-bg-raised rounded-lg" />)}</div></div>
   }
 
   const stageCount = PIPELINE_STAGES.map(s => ({
@@ -49,9 +49,8 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="shadow-sm border border-surface-border bg-surface-1 overflow-hidden">
-          <div className="h-0.5 bg-gradient-to-r from-accent/20 via-accent/10 to-transparent" />
-          <CardHeader className="pb-4 bg-surface-2">
+        <Card className="shadow-lg border-2 border-stroke-strong bg-bg-white">
+          <CardHeader className="pb-4 bg-bg-inset">
             <CardTitle className="text-xl font-semibold text-text-heading">Jobs by Stage</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -64,16 +63,15 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="shadow-sm border border-surface-border bg-surface-1 overflow-hidden">
-          <div className="h-0.5 bg-gradient-to-r from-accent/20 via-accent/10 to-transparent" />
-          <CardHeader className="pb-4 bg-surface-2">
+        <Card className="shadow-lg border-2 border-stroke-strong bg-bg-white">
+          <CardHeader className="pb-4 bg-bg-inset">
             <CardTitle className="text-xl font-semibold text-text-heading">Recent Jobs</CardTitle>
           </CardHeader>
           <CardContent className="space-y-0">
             {recentJobs.map((job: { id: string; jobNumber: string; customerId: string; stage: string; purpose: string; createdAt: string }) => {
               const customer = data.customers.find((c: { id: string }) => c.id === job.customerId)
               return (
-                <Link key={job.id} href={`/app/jobs/${job.id}`} className="flex items-center justify-between py-4 border-b border-surface-border last:border-0 hover:bg-surface-2 -mx-4 px-4 rounded transition-colors group">
+                <Link key={job.id} href={`/app/jobs/${job.id}`} className="flex items-center justify-between py-4 border-b border-stroke last:border-0 hover:bg-bg-raised -mx-4 px-4 rounded transition-colors group">
                   <div>
                     <p className="font-medium text-text-heading group-hover:text-accent-link transition-colors">{job.jobNumber}</p>
                     <p className="text-text-muted mt-1">{customer?.firstName} {customer?.lastName}</p>
@@ -89,9 +87,8 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      <Card className="shadow-sm border border-surface-border bg-surface-1 overflow-hidden">
-        <div className="h-0.5 bg-gradient-to-r from-accent/20 via-accent/10 to-transparent" />
-        <CardHeader className="pb-4 bg-surface-2">
+      <Card className="shadow-lg border-2 border-stroke-strong bg-bg-white">
+        <CardHeader className="pb-4 bg-bg-inset">
           <CardTitle className="text-xl font-semibold text-text-heading flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-accent/15 flex items-center justify-center">
               <Clock className="w-6 h-6 text-accent-hover" />
@@ -109,7 +106,7 @@ export default function DashboardPage() {
                 <Link 
                   key={cor.id} 
                   href={`/app/jobs/${cor.jobId}`}
-                  className="flex items-center justify-between py-4 border-b border-surface-border last:border-0 hover:bg-surface-2 -mx-4 px-4 rounded transition-colors group"
+                  className="flex items-center justify-between py-4 border-b border-stroke last:border-0 hover:bg-bg-raised -mx-4 px-4 rounded transition-colors group"
                 >
                   <div className="space-y-1 flex-1 min-w-0">
                     <p className="font-medium text-text-heading group-hover:text-accent-link transition-colors">{cor.subject}</p>
@@ -147,26 +144,23 @@ export default function DashboardPage() {
 
 function StatCard({ icon: Icon, label, value, href }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string | number; href?: string }) {
   const content = (
-    <>
-      <div className="h-0.5 bg-gradient-to-r from-accent/20 via-accent/10 to-transparent" />
-      <CardContent className="p-6">
-        <div className="flex items-center gap-5">
-          <div className="w-16 h-16 rounded-lg bg-accent/15 flex items-center justify-center flex-shrink-0">
-            <Icon className="w-8 h-8 text-accent-hover" />
-          </div>
-          <div>
-            <p className="text-base text-text-muted mb-1">{label}</p>
-            <p className="text-4xl font-bold text-text-heading">{value}</p>
-          </div>
+    <CardContent className="p-6">
+      <div className="flex items-center gap-5">
+        <div className="w-16 h-16 rounded-lg bg-accent/15 flex items-center justify-center flex-shrink-0">
+          <Icon className="w-8 h-8 text-accent-hover" />
         </div>
-      </CardContent>
-    </>
+        <div>
+          <p className="text-base text-text-muted mb-1">{label}</p>
+          <p className="text-4xl font-bold text-text-heading">{value}</p>
+        </div>
+      </div>
+    </CardContent>
   )
 
   if (href) {
     return (
       <Link href={href}>
-        <Card className="shadow-sm hover:shadow-md transition-all cursor-pointer border border-surface-border bg-surface-1 hover:border-accent overflow-hidden">
+        <Card className="shadow-lg hover:shadow-xl transition-all cursor-pointer border-2 border-stroke-strong bg-bg-white hover:border-accent">
           {content}
         </Card>
       </Link>
@@ -174,7 +168,7 @@ function StatCard({ icon: Icon, label, value, href }: { icon: React.ComponentTyp
   }
 
   return (
-    <Card className="shadow-sm border border-surface-border bg-surface-1 overflow-hidden">
+    <Card className="shadow-lg border-2 border-stroke-strong bg-bg-white">
       {content}
     </Card>
   )
