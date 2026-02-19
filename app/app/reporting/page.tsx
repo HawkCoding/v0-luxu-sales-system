@@ -60,7 +60,7 @@ export default function ReportingPage() {
         <KPI label="Total Revenue" value={`R ${totalRevenue.toLocaleString()}`} />
         <KPI label="Pipeline Value" value={`R ${pipelineValue.toLocaleString()}`} />
         <KPI label="Open Jobs" value={openJobs} />
-        <KPI label="Closed" value={closedJobs} />
+        <KPI label="Closed/Won" value={closedJobs} />
         <KPI label="Conversion" value={`${conversionRate}%`} />
       </div>
 

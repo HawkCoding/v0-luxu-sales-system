@@ -83,8 +83,8 @@ export const quotes: Quote[] = [
 export const payments: Payment[] = [
   { id: "p1", jobId: "j6", amount: 10000, receivedAt: "2025-10-08T10:00:00Z", method: "EFT", reference: "REF-PRN-001", notes: "Deposit payment - 25% of total" },
   { id: "p2", jobId: "j7", amount: 52325, receivedAt: "2025-10-22T14:00:00Z", method: "Credit Card", reference: "CC-MR-001", notes: "Full payment received" },
-  { id: "p3", jobId: "j8", amount: 25000, receivedAt: "2025-10-25T09:00:00Z", method: "Wire Transfer", reference: "WT-ET-001", notes: "Deposit" },
-  { id: "p4", jobId: "j8", amount: 55000, receivedAt: "2025-10-30T16:00:00Z", method: "Wire Transfer", reference: "WT-ET-002", notes: "Final balance" },
+  { id: "p3", jobId: "j8", amount: 25000, receivedAt: "2025-10-25T09:00:00Z", method: "EFT", reference: "EFT-ET-001", notes: "Deposit" },
+  { id: "p4", jobId: "j8", amount: 55000, receivedAt: "2025-10-30T16:00:00Z", method: "Credit Card", reference: "CC-ET-002", notes: "Final balance" },
   { id: "p5", jobId: "j5", amount: 5000, receivedAt: "2025-09-30T11:00:00Z", method: "EFT", reference: "REF-RC-001", notes: "Partial deposit - below threshold" },
   { id: "p6", jobId: "j9", amount: 28000, receivedAt: "2025-11-05T10:00:00Z", method: "EFT", reference: "REF-DK-001", notes: "Full payment" },
   { id: "p7", jobId: "j9", amount: -2000, receivedAt: "2025-11-08T15:00:00Z", method: "Credit Adjustment", reference: "ADJ-DK-001", notes: "Credit adjustment for service not rendered" },

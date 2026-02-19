@@ -15,7 +15,7 @@ const inter = Inter({
 })
 
 export const metadata: Metadata = {
-  title: 'Luxu - Travel Sales Operations',
+  title: 'Luxus - Travel Sales Operations',
   description: 'Internal sales ops system for Luxus Travel & Tours',
 }
 

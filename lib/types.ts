@@ -24,7 +24,7 @@ export const PIPELINE_STAGES: { key: PipelineStage; label: string }[] = [
   { key: "deposit_paid", label: "Deposit Paid" },
   { key: "final_paid", label: "Final Paid" },
   { key: "voucher_sent", label: "Voucher Sent" },
-  { key: "closed", label: "Closed" },
+  { key: "closed", label: "Closed/Won" },
   { key: "lost", label: "Lost" },
 ]
 

@@ -113,7 +113,7 @@ function AppShell({ children }: { children: ReactNode }) {
               <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
                 <span className="text-xs font-bold text-primary-foreground" style={{ fontFamily: "var(--font-inter)" }}>LT</span>
               </div>
-              <span className="text-sm font-semibold text-foreground tracking-tight">Luxu</span>
+              <span className="text-sm font-semibold text-foreground tracking-tight">Luxus</span>
             </Link>
           )}
           {collapsed && (

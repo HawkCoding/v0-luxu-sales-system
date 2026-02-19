@@ -55,7 +55,7 @@ function LoginForm() {
             <span className="text-2xl font-bold text-primary-foreground">LT</span>
           </div>
           <CardTitle className="text-3xl">Welcome Back</CardTitle>
-          <CardDescription className="text-base mt-2">Sign in to Luxu Sales Operations</CardDescription>
+          <CardDescription className="text-base mt-2">Sign in to Luxus Sales Operations</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleLogin} className="space-y-5">

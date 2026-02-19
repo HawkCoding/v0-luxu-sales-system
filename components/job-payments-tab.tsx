@@ -65,7 +65,6 @@ export function JobPaymentsTab({ payments, jobId, mutate }: { payments: Payment[
                     <SelectContent>
                       <SelectItem value="EFT">EFT</SelectItem>
                       <SelectItem value="Credit Card">Credit Card</SelectItem>
-                      <SelectItem value="Wire Transfer">Wire Transfer</SelectItem>
                       <SelectItem value="Credit Adjustment">Credit Adjustment</SelectItem>
                     </SelectContent>
                   </Select>
