@@ -97,7 +97,7 @@ export default function PipelinePage() {
     setReviewOpen(true)
   }
 
-  const handleBackToP aste = () => {
+  const handleBackToPaste = () => {
     setReviewOpen(false)
     setPasteOpen(true)
   }
