@@ -18,8 +18,8 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 
 const USERS: Record<string, { password: string; role: Role }> = {
   Carmen: { password: "14789", role: "admin" },
-  Leonie: { password: "14789", role: "manager" },
-  Dirk: { password: "14789", role: "consultant" },
+  Leonie: { password: "14789", role: "admin" },
+  Dirk: { password: "14789", role: "manager" },
   Monade: { password: "14789", role: "consultant" },
   Douwlien: { password: "14789", role: "consultant" },
 }
