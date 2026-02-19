@@ -4,45 +4,88 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: #F7F7F6;
-  --foreground: rgb(77,77,77);
-  --card: #FFFFFF;
-  --card-foreground: rgb(77,77,77);
-  --popover: #FFFFFF;
-  --popover-foreground: rgb(77,77,77);
-  --primary: rgb(94,117,130);
+  /* Theme tint base */
+  --luxu-theme-tint: #566e7b;
+
+  /* Background layers (4) - with theme wash */
+  --luxu-bg-0: #f5f6f7; /* App background */
+  --luxu-bg-1: #eef0f2; /* Surface */
+  --luxu-bg-2: #e7ebed; /* Surface raised */
+  --luxu-bg-3: #e1e5e7; /* Surface inset */
+  --luxu-bg-white: #ffffff; /* Pure white for inputs/popovers */
+
+  /* Strokes (2) */
+  --luxu-stroke-1: #d0d6da; /* Default border */
+  --luxu-stroke-2: #c2cbcf; /* Strong divider */
+
+  /* Text variants (3) - based on "% white" grayscale */
+  --luxu-text-heading: #1c1c1c; /* ~11% white - headings */
+  --luxu-text-body: #262626; /* ~15% white - primary body */
+  --luxu-text-body-secondary: #333333; /* ~20% white - secondary body */
+  --luxu-text-muted: #4d4d4d; /* ~30% white - default muted */
+  --luxu-text-muted-extra: #666666; /* ~40% white - extra muted */
+
+  /* Accent scale (functional) */
+  --luxu-accent-base: #5e7582;
+  --luxu-accent-hover: #44505a; /* Darker - for primary CTAs */
+  --luxu-accent-link: #778e99; /* Lighter - for links */
+
+  /* Semantic colors - Danger */
+  --luxu-danger-base: #b42318;
+  --luxu-danger-bg: #fde8e8;
+  --luxu-danger-border: #f5b5b0;
+
+  /* Semantic colors - Success */
+  --luxu-success-base: #067647;
+  --luxu-success-bg: #ecfdf3;
+  --luxu-success-border: #abefc6;
+
+  /* Semantic colors - Warning */
+  --luxu-warning-base: #b54708;
+  --luxu-warning-bg: #fff7ed;
+  --luxu-warning-border: #fed7aa;
+
+  /* Mapped to shadcn/Tailwind tokens */
+  --background: var(--luxu-bg-0);
+  --foreground: var(--luxu-text-body);
+  --card: var(--luxu-bg-1);
+  --card-foreground: var(--luxu-text-body);
+  --popover: var(--luxu-bg-white);
+  --popover-foreground: var(--luxu-text-body);
+  --primary: var(--luxu-accent-hover);
   --primary-foreground: #FFFFFF;
-  --secondary: rgba(94,117,130,0.08);
-  --secondary-foreground: rgb(77,77,77);
-  --muted: rgba(94,117,130,0.08);
-  --muted-foreground: rgb(110,115,117);
-  --accent: rgb(94,117,130);
+  --secondary: var(--luxu-bg-2);
+  --secondary-foreground: var(--luxu-text-body);
+  --muted: var(--luxu-bg-3);
+  --muted-foreground: var(--luxu-text-muted);
+  --accent: var(--luxu-accent-base);
   --accent-foreground: #FFFFFF;
-  --destructive: #DC2626;
+  --destructive: var(--luxu-danger-base);
   --destructive-foreground: #FFFFFF;
-  --border: rgba(94,117,130,0.15);
-  --input: rgba(94,117,130,0.15);
-  --ring: rgb(94,117,130);
-  --chart-1: rgb(94,117,130);
-  --chart-2: rgb(110,115,117);
-  --chart-3: rgb(77,77,77);
+  --border: var(--luxu-stroke-1);
+  --input: var(--luxu-stroke-2);
+  --ring: var(--luxu-accent-base);
+  --radius: 0.5rem;
+  --sidebar: var(--luxu-bg-1);
+  --sidebar-foreground: var(--luxu-text-body);
+  --sidebar-primary: var(--luxu-accent-hover);
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: var(--luxu-bg-2);
+  --sidebar-accent-foreground: var(--luxu-text-body);
+  --sidebar-border: var(--luxu-stroke-1);
+  --sidebar-ring: var(--luxu-accent-base);
+
+  /* Chart colors (keep minimal) */
+  --chart-1: var(--luxu-accent-base);
+  --chart-2: var(--luxu-text-muted);
+  --chart-3: var(--luxu-text-body);
   --chart-4: rgba(94,117,130,0.4);
   --chart-5: rgba(94,117,130,0.2);
-  --radius: 0.5rem;
-  --sidebar: #FAFAFA;
-  --sidebar-foreground: rgb(77,77,77);
-  --sidebar-primary: rgb(94,117,130);
-  --sidebar-primary-foreground: #FFFFFF;
-  --sidebar-accent: rgba(94,117,130,0.08);
-  --sidebar-accent-foreground: rgb(77,77,77);
-  --sidebar-border: rgba(94,117,130,0.15);
-  --sidebar-ring: rgb(94,117,130);
-  --brand-primary: rgb(94,117,130);
-  --brand-primary-soft: rgba(94,117,130,0.4);
-  --brand-secondary: rgb(110,115,117);
-  --payment-green: #16A34A;
-  --payment-yellow: #EAB308;
-  --payment-red: #DC2626;
+
+  /* Payment status colors (semantic) */
+  --payment-green: var(--luxu-success-base);
+  --payment-yellow: var(--luxu-warning-base);
+  --payment-red: var(--luxu-danger-base);
   --payment-purple: #9333EA;
   --payment-blue: #2563EB;
 }
@@ -50,16 +93,45 @@
 
 
 @theme inline {
+  /* Fonts */
   --font-sans: var(--font-inter), -apple-system, system-ui, sans-serif;
   --font-mono: 'Geist Mono', 'Geist Mono Fallback';
-  --color-brand-primary: var(--brand-primary);
-  --color-brand-primary-soft: var(--brand-primary-soft);
-  --color-brand-secondary: var(--brand-secondary);
-  --color-payment-green: var(--payment-green);
-  --color-payment-yellow: var(--payment-yellow);
-  --color-payment-red: var(--payment-red);
-  --color-payment-purple: var(--payment-purple);
-  --color-payment-blue: var(--payment-blue);
+
+  /* Background layers - Tailwind mappings */
+  --color-bg-app: var(--luxu-bg-0);
+  --color-bg-surface: var(--luxu-bg-1);
+  --color-bg-raised: var(--luxu-bg-2);
+  --color-bg-inset: var(--luxu-bg-3);
+  --color-bg-white: var(--luxu-bg-white);
+
+  /* Strokes - Tailwind mappings */
+  --color-stroke: var(--luxu-stroke-1);
+  --color-stroke-strong: var(--luxu-stroke-2);
+
+  /* Text variants - Tailwind mappings */
+  --color-text-heading: var(--luxu-text-heading);
+  --color-text-body: var(--luxu-text-body);
+  --color-text-body-secondary: var(--luxu-text-body-secondary);
+  --color-text-muted: var(--luxu-text-muted);
+  --color-text-muted-extra: var(--luxu-text-muted-extra);
+
+  /* Accent scale - Tailwind mappings */
+  --color-accent: var(--luxu-accent-base);
+  --color-accent-hover: var(--luxu-accent-hover);
+  --color-accent-link: var(--luxu-accent-link);
+
+  /* Semantic colors - Tailwind mappings */
+  --color-danger: var(--luxu-danger-base);
+  --color-danger-bg: var(--luxu-danger-bg);
+  --color-danger-border: var(--luxu-danger-border);
+  --color-success: var(--luxu-success-base);
+  --color-success-bg: var(--luxu-success-bg);
+  --color-success-border: var(--luxu-success-border);
+  --color-warning: var(--luxu-warning-base);
+  --color-warning-bg: var(--luxu-warning-bg);
+  --color-warning-border: var(--luxu-warning-border);
+
+  /* shadcn/Tailwind standard tokens */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -72,22 +144,33 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+
+  /* Chart colors */
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+
+  /* Payment status */
+  --color-payment-green: var(--payment-green);
+  --color-payment-yellow: var(--payment-yellow);
+  --color-payment-red: var(--payment-red);
+  --color-payment-purple: var(--payment-purple);
+  --color-payment-blue: var(--payment-blue);
+
+  /* Radius */
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
+  /* Sidebar */
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -100,20 +183,33 @@
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-stroke outline-ring/50;
   }
+  
   body {
-    @apply bg-background text-foreground;
     font-size: 17px;
     line-height: 1.65;
     letter-spacing: -0.01em;
+    color: var(--luxu-text-body);
+    /* Theme wash: subtle tinted gradient over base background */
+    background: 
+      linear-gradient(
+        180deg, 
+        rgba(86, 110, 123, 0.04) 0%, 
+        rgba(86, 110, 123, 0.02) 40%,
+        transparent 70%
+      ),
+      var(--luxu-bg-0);
   }
+  
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-playfair), Georgia, serif;
     line-height: 1.25;
     letter-spacing: -0.02em;
     font-weight: 600;
+    color: var(--luxu-text-heading);
   }
+  
   h1 {
     font-size: 2.5rem;
   }
@@ -126,10 +222,17 @@
   h4 {
     font-size: 1.25rem;
   }
+  
   button {
     font-weight: 500;
   }
+  
   a {
     transition: color 0.15s ease-in-out;
+  }
+  
+  /* Ensure text variants use proper colors */
+  p, span, div {
+    color: var(--luxu-text-body);
   }
 }

@@ -79,7 +79,7 @@ function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen bg-background overflow-hidden">
+    <div className="flex h-screen bg-bg-app overflow-hidden">
       {/* Mobile overlay */}
       {mobileOpen && (
         <div className="fixed inset-0 bg-foreground/20 z-40 lg:hidden" onClick={() => setMobileOpen(false)} />
@@ -87,11 +87,11 @@ function AppShell({ children }: { children: ReactNode }) {
 
       {/* Sidebar */}
       <aside className={cn(
-        "h-screen bg-card border-r border-border flex flex-col transition-all duration-200 z-50",
+        "h-screen bg-bg-surface border-r border-stroke flex flex-col transition-all duration-200 z-50",
         collapsed ? "w-16" : "w-60",
         mobileOpen ? "fixed inset-y-0 left-0 w-60" : "hidden lg:flex",
       )}>
-        <div className="h-14 flex items-center px-4 border-b border-border">
+        <div className="h-14 flex items-center px-4 border-b border-stroke">
           {!collapsed && (
             <Link href="/app" className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
@@ -127,7 +127,7 @@ function AppShell({ children }: { children: ReactNode }) {
                   onClick={() => setMobileOpen(false)}
                   className={cn(
                     "flex items-center gap-3 px-3 py-2.5 rounded-lg text-[15px] font-medium transition-all",
-                    active ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-secondary",
+                    active ? "bg-accent-hover text-white shadow-sm" : "text-text-muted hover:text-text-heading hover:bg-bg-raised",
                     collapsed && "justify-center px-0",
                   )}
                   title={collapsed ? item.label : undefined}
@@ -139,7 +139,7 @@ function AppShell({ children }: { children: ReactNode }) {
             })}
           </nav>
         </ScrollArea>
-        <div className="border-t border-border p-2 hidden lg:block">
+        <div className="border-t border-stroke p-2 hidden lg:block">
           <Button variant="ghost" size="sm" onClick={() => setCollapsed(!collapsed)} className="w-full">
             <ChevronLeft className={cn("w-4 h-4 transition-transform", collapsed && "rotate-180")} />
           </Button>
@@ -148,23 +148,23 @@ function AppShell({ children }: { children: ReactNode }) {
 
       {/* Main */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-14 border-b border-border bg-card flex items-center justify-between px-4 gap-4">
+        <header className="h-14 border-b border-stroke bg-bg-surface flex items-center justify-between px-4 gap-4">
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="sm" className="lg:hidden" onClick={() => setMobileOpen(true)}>
               <Menu className="w-4 h-4" />
             </Button>
             <div className="relative hidden sm:block">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-              <Input placeholder="Search jobs, customers..." className="pl-10 w-80 h-10 bg-secondary/50 border-border hover:border-primary/50 focus:border-primary transition-colors" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
+              <Input placeholder="Search jobs, customers..." className="pl-10 w-80 h-10 bg-bg-white border-stroke hover:border-accent focus:border-accent-hover transition-colors" />
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-md bg-secondary/50">
-              <span className="text-sm font-medium text-foreground">{user.name}</span>
-              <span className="text-xs text-muted-foreground">•</span>
-              <span className="text-xs text-muted-foreground capitalize">{role}</span>
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-md bg-bg-raised">
+              <span className="text-sm font-medium text-text-heading">{user.name}</span>
+              <span className="text-xs text-text-muted">•</span>
+              <span className="text-xs text-text-muted capitalize">{role}</span>
             </div>
-            <Button variant="ghost" size="sm" onClick={handleLogout} className="gap-2" title="Logout">
+            <Button variant="ghost" size="sm" onClick={handleLogout} className="gap-2 hover:text-text-heading" title="Logout">
               <LogOut className="w-4 h-4" />
               <span className="hidden sm:inline">Logout</span>
             </Button>
