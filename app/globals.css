@@ -7,8 +7,11 @@
   /* Theme tint base */
   --luxu-theme-tint: #566e7b;
 
-  /* Background layers (4) - with theme wash */
-  --luxu-bg-0: #f5f6f7; /* App background */
+  /* App canvas background - BOLD BLUE */
+  --luxu-app-bg: #0B2A3A; /* Deep blue for app canvas */
+
+  /* Background layers (4) - light surfaces for content */
+  --luxu-bg-0: #f5f6f7; /* Not used for app, kept for other contexts */
   --luxu-bg-1: #eef0f2; /* Surface */
   --luxu-bg-2: #e7ebed; /* Surface raised */
   --luxu-bg-3: #e1e5e7; /* Surface inset */
@@ -98,6 +101,7 @@
   --font-mono: 'Geist Mono', 'Geist Mono Fallback';
 
   /* Background layers - Tailwind mappings */
+  --color-app-canvas: var(--luxu-app-bg);
   --color-bg-app: var(--luxu-bg-0);
   --color-bg-surface: var(--luxu-bg-1);
   --color-bg-raised: var(--luxu-bg-2);

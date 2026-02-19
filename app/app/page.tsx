@@ -49,7 +49,7 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="shadow-md border-stroke bg-bg-white">
+        <Card className="shadow-lg border-2 border-stroke-strong bg-bg-white">
           <CardHeader className="pb-4 bg-bg-inset">
             <CardTitle className="text-xl font-semibold text-text-heading">Jobs by Stage</CardTitle>
           </CardHeader>
@@ -63,7 +63,7 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        <Card className="shadow-md border-stroke bg-bg-white">
+        <Card className="shadow-lg border-2 border-stroke-strong bg-bg-white">
           <CardHeader className="pb-4 bg-bg-inset">
             <CardTitle className="text-xl font-semibold text-text-heading">Recent Jobs</CardTitle>
           </CardHeader>
@@ -87,7 +87,7 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      <Card className="shadow-md border-stroke bg-bg-white">
+      <Card className="shadow-lg border-2 border-stroke-strong bg-bg-white">
         <CardHeader className="pb-4 bg-bg-inset">
           <CardTitle className="text-xl font-semibold text-text-heading flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-accent/15 flex items-center justify-center">
@@ -160,7 +160,7 @@ function StatCard({ icon: Icon, label, value, href }: { icon: React.ComponentTyp
   if (href) {
     return (
       <Link href={href}>
-        <Card className="shadow-md hover:shadow-lg transition-all cursor-pointer border-stroke bg-bg-white hover:border-accent">
+        <Card className="shadow-lg hover:shadow-xl transition-all cursor-pointer border-2 border-stroke-strong bg-bg-white hover:border-accent">
           {content}
         </Card>
       </Link>
@@ -168,7 +168,7 @@ function StatCard({ icon: Icon, label, value, href }: { icon: React.ComponentTyp
   }
 
   return (
-    <Card className="shadow-md border-stroke bg-bg-white">
+    <Card className="shadow-lg border-2 border-stroke-strong bg-bg-white">
       {content}
     </Card>
   )

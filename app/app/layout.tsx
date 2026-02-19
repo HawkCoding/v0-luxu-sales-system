@@ -79,7 +79,12 @@ function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen bg-bg-app overflow-hidden">
+    <div 
+      className="flex h-screen overflow-hidden"
+      style={{
+        background: `radial-gradient(1200px circle at 20% 0%, rgba(94,117,130,0.35) 0%, rgba(11,42,58,1) 50%, rgba(7,24,34,1) 100%)`
+      }}
+    >
       {/* Mobile overlay */}
       {mobileOpen && (
         <div className="fixed inset-0 bg-foreground/20 z-40 lg:hidden" onClick={() => setMobileOpen(false)} />
