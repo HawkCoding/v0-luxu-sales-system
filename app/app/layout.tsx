@@ -44,13 +44,19 @@ function AppShell({ children }: { children: ReactNode }) {
   const { role, setRole, can } = useRole()
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [mounted, setMounted] = useState(false)
+
+  // Wait for component to mount
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   // Protect route - redirect to login if not authenticated
   useEffect(() => {
-    if (!user) {
+    if (mounted && !user) {
       router.push("/login")
     }
-  }, [user, router])
+  }, [mounted, user, router])
 
   // Sync role with user's assigned role
   useEffect(() => {
@@ -64,15 +70,14 @@ function AppShell({ children }: { children: ReactNode }) {
     router.push("/login")
   }
 
-  // Show loading while checking auth
-  if (!user) {
+  // Show consistent loading state on server and initial client render
+  if (!mounted || !user) {
     return (
       <div 
         className="flex h-screen items-center justify-center overflow-hidden"
         style={{
           background: `radial-gradient(1200px circle at 20% 0%, rgba(94,117,130,0.35) 0%, rgba(11,42,58,1) 50%, rgba(7,24,34,1) 100%)`
         }}
-        suppressHydrationWarning
       >
         <div className="text-center space-y-3">
           <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto animate-pulse">
@@ -90,7 +95,6 @@ function AppShell({ children }: { children: ReactNode }) {
       style={{
         background: `radial-gradient(1200px circle at 20% 0%, rgba(94,117,130,0.35) 0%, rgba(11,42,58,1) 50%, rgba(7,24,34,1) 100%)`
       }}
-      suppressHydrationWarning
     >
       {/* Mobile overlay */}
       {mobileOpen && (
