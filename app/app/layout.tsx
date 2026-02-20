@@ -28,7 +28,7 @@ const navItems = [
   { label: "Bookings", href: "/app/bookings", icon: CalendarCheck, permission: "view:jobs" },
   { label: "Customers", href: "/app/customers", icon: Users, permission: "view:customers" },
   { label: "Suppliers", href: "/app/suppliers", icon: Package, permission: "view:products" },
-  { label: "Payments", href: "/app/payments", icon: CreditCard, permission: "view:payments" },
+  { label: "Payments Rcvd", href: "/app/payments", icon: CreditCard, permission: "view:payments" },
   { label: "Documents", href: "/app/documents", icon: FolderOpen, permission: "view:documents" },
   { label: "Correspondence", href: "/app/correspondence", icon: Mail, permission: "view:correspondence" },
   { type: "separator" as const, label: "Admin" },
