@@ -21,8 +21,8 @@ import { Button } from "@/components/ui/button"
 
 const navItems = [
   { label: "Dashboard", href: "/app", icon: LayoutDashboard, permission: "view:dashboard" },
+  { label: "Enquiries", href: "/app/enquiries", icon: ClipboardList, permission: "view:jobs" },
   { label: "Pipeline", href: "/app/pipeline", icon: Kanban, permission: "view:pipeline" },
-  { label: "Jobs", href: "/app/jobs", icon: Briefcase, permission: "view:jobs" },
   { label: "Customers", href: "/app/customers", icon: Users, permission: "view:customers" },
   { label: "Suppliers", href: "/app/suppliers", icon: Package, permission: "view:products" },
   { label: "Payments", href: "/app/payments", icon: CreditCard, permission: "view:payments" },
@@ -32,7 +32,7 @@ const navItems = [
   { label: "Templates", href: "/app/templates", icon: FileCode, permission: "view:templates" },
   { type: "separator" as const, label: "Manager" },
   { label: "Reporting", href: "/app/reporting", icon: BarChart3, permission: "view:reporting" },
-  { label: "Audit Log", href: "/app/audit", icon: ClipboardList, permission: "view:audit" },
+  { label: "Audit Log", href: "/app/audit", icon: Briefcase, permission: "view:audit" },
   { type: "separator" as const, label: "System" },
   { label: "Settings", href: "/app/settings", icon: Settings, permission: "view:settings" },
 ]
