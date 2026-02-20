@@ -13,7 +13,7 @@ import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
 import {
   LayoutDashboard, Kanban, MessageSquare, Briefcase, Users,
-  FileText, CreditCard, FolderOpen, Mail, Package,
+  FileText, CreditCard, FolderOpen, Mail, Package, CalendarCheck,
   FileCode, BarChart3, ClipboardList, Settings, Search,
   ChevronLeft, Menu, LogOut,
 } from "lucide-react"
@@ -25,6 +25,7 @@ const navItems = [
   { label: "Dashboard", href: "/app", icon: LayoutDashboard, permission: "view:dashboard" },
   { label: "Enquiries", href: "/app/enquiries", icon: ClipboardList, permission: "view:jobs" },
   { label: "Pipeline", href: "/app/pipeline", icon: Kanban, permission: "view:pipeline" },
+  { label: "Bookings", href: "/app/bookings", icon: CalendarCheck, permission: "view:jobs" },
   { label: "Customers", href: "/app/customers", icon: Users, permission: "view:customers" },
   { label: "Suppliers", href: "/app/suppliers", icon: Package, permission: "view:products" },
   { label: "Payments", href: "/app/payments", icon: CreditCard, permission: "view:payments" },
