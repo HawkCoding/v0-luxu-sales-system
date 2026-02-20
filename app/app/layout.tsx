@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
+import { Badge } from "@/components/ui/badge"
 import {
   LayoutDashboard, Kanban, MessageSquare, Briefcase, Users,
   FileText, CreditCard, FolderOpen, Mail, Package,
@@ -18,6 +19,7 @@ import {
 } from "lucide-react"
 import { useState, useEffect, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
+import { useAllData } from "@/lib/use-data"
 
 const navItems = [
   { label: "Dashboard", href: "/app", icon: LayoutDashboard, permission: "view:dashboard" },
@@ -42,9 +44,16 @@ function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter()
   const { user, logout } = useAuth()
   const { role, setRole, can } = useRole()
+  const { data } = useAllData()
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
+
+  // Calculate enquiries count (items in "enquiry" stage)
+  const enquiriesCount = data?.enquiries?.filter((e: any) => {
+    const job = data.jobs.find((j: any) => j.id === e.jobId)
+    return job?.stage === "enquiry"
+  }).length || 0
 
   // Wait for component to mount
   useEffect(() => {
@@ -136,6 +145,8 @@ function AppShell({ children }: { children: ReactNode }) {
               if (!("href" in item) || !item.permission || !can(item.permission)) return null
               const Icon = item.icon!
               const active = pathname === item.href || (item.href !== "/app" && pathname.startsWith(item.href!))
+              const isEnquiries = item.href === "/app/enquiries"
+              const showBadge = isEnquiries && enquiriesCount > 0
               return (
                 <Link
                   key={item.href}
@@ -149,7 +160,16 @@ function AppShell({ children }: { children: ReactNode }) {
                   title={collapsed ? item.label : undefined}
                 >
                   <Icon className="w-5 h-5 flex-shrink-0" />
-                  {!collapsed && <span>{item.label}</span>}
+                  {!collapsed && (
+                    <>
+                      <span className="flex-1">{item.label}</span>
+                      {showBadge && (
+                        <Badge variant="default" className="h-5 min-w-[20px] px-1.5 text-xs font-semibold">
+                          {enquiriesCount}
+                        </Badge>
+                      )}
+                    </>
+                  )}
                 </Link>
               )
             })}
