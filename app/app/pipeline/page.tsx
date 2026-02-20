@@ -14,10 +14,12 @@ import { Textarea } from "@/components/ui/textarea"
 import { useRole } from "@/lib/role-context"
 import Link from "next/link"
 import { useState, useEffect } from "react"
-import { GripVertical, Search, Clipboard, Plus, Settings } from "lucide-react"
+import { GripVertical, Search, Clipboard, Plus, Settings, Download } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import { downloadAuditLog } from "@/lib/export-audit"
+import { toast } from "sonner"
 import { parseEmailDraft, type ParsedDraft } from "@/lib/import/parseEmailDraft"
 import { ReviewImportedDraftModal } from "@/components/review-imported-draft-modal"
 
@@ -350,6 +352,7 @@ export default function PipelinePage() {
                           isDragging={draggedJob === job.id}
                           canDrag={can("edit:pipeline")}
                           onDragStart={handleDragStart}
+                          auditLogs={data.auditLogs || []}
                         />
                       ))}
                       {stageJobs.length === 0 && (
@@ -418,21 +421,38 @@ function PipelineCard({
   isDragging,
   canDrag,
   onDragStart,
+  auditLogs,
 }: {
   job: PipelineJob
   isDragging: boolean
   canDrag: boolean
   onDragStart: (e: React.DragEvent, id: string) => void
+  auditLogs: any[]
 }) {
   const paymentDotClass = PAYMENT_COLORS[job.paymentColor] || "bg-muted-foreground"
+  
+  const handleDownloadAudit = async (e: React.MouseEvent, allAuditLogs: any[]) => {
+    e.preventDefault()
+    e.stopPropagation()
+    
+    try {
+      const jobAuditLogs = allAuditLogs.filter(log => log.entityId === job.id || 
+        (log.entityType === 'job' && log.entityId === job.id))
+      downloadAuditLog(jobAuditLogs, job.jobNumber)
+      toast.success("Audit log downloaded")
+    } catch (error) {
+      console.error("[v0] Failed to download audit:", error)
+      toast.error("Failed to download audit log")
+    }
+  }
 
   return (
     <Card
       draggable={canDrag}
       onDragStart={(e) => onDragStart(e, job.id)}
-      className={`transition-all ${isDragging ? "opacity-40 scale-95" : ""} ${
+      className={`group transition-all ${isDragging ? "opacity-40 scale-95" : ""} ${
         canDrag ? "cursor-grab active:cursor-grabbing" : ""
-      } hover:shadow-sm`}
+      } hover:shadow-sm relative`}
     >
       <CardContent className="p-3">
         <div className="flex items-start justify-between gap-1 mb-1">
@@ -456,6 +476,13 @@ function PipelineCard({
             Dep: {new Date(job.departureDate).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" })}
           </p>
         )}
+        <button
+          onClick={(e) => handleDownloadAudit(e, auditLogs)}
+          className="absolute bottom-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-secondary rounded"
+          title="Download audit log"
+        >
+          <Download className="w-3 h-3 text-muted-foreground" />
+        </button>
       </CardContent>
     </Card>
   )

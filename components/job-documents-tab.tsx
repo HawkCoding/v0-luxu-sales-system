@@ -2,16 +2,81 @@
 
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import type { DocRecord } from "@/lib/types"
-import { FileText } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import type { DocRecord, Enquiry, Job, Customer, ConsultantAbbreviation } from "@/lib/types"
+import { FileText, FileOutput } from "lucide-react"
+import { generateVoucherHTML, downloadVoucherPDF } from "@/lib/generate-voucher"
+import { CONSULTANTS } from "@/lib/types"
+import { toast } from "sonner"
 
-export function JobDocumentsTab({ documents }: { documents: DocRecord[] }) {
-  if (documents.length === 0) {
-    return <div className="text-center py-8 text-sm text-muted-foreground">No documents generated</div>
+interface JobDocumentsTabProps {
+  documents: DocRecord[]
+  job?: Job
+  enquiry?: Enquiry
+  customer?: Customer
+}
+
+export function JobDocumentsTab({ documents, job, enquiry, customer }: JobDocumentsTabProps) {
+  const canGenerateVoucher = job && enquiry && customer && 
+    (job.stage === "deposit_paid" || job.stage === "final_paid" || job.stage === "voucher_sent" || job.stage === "closed")
+
+  const handleGenerateVoucher = () => {
+    if (!job || !enquiry || !customer) {
+      toast.error("Missing required data for voucher generation")
+      return
+    }
+
+    const consultant = CONSULTANTS.find(c => c.key === job.consultant)
+    const guestNames = `${enquiry.title} ${enquiry.name} ${enquiry.surname}`
+    
+    const voucherData = {
+      voucherNumber: job.jobNumber,
+      guestNames,
+      consultantName: consultant?.name || "Unknown",
+      supplierName: "Rovos Rail",
+      route: enquiry.direction,
+      departure: new Date(enquiry.departureDate).toLocaleDateString("en-ZA", { day: "numeric", month: "long", year: "numeric" }),
+      arrival: "",
+      suiteType: enquiry.suiteTypes[0] || "Suite",
+      numberOfGuests: enquiry.noOfAdults + enquiry.noOfChildren,
+      specialRequests: enquiry.additionalServicesDetails || "",
+      customerEmail: customer.email,
+      customerPhone: customer.phone,
+      enquiry,
+      consultant: job.consultant
+    }
+
+    const html = generateVoucherHTML(voucherData)
+    downloadVoucherPDF(html, `voucher-${job.jobNumber}.html`)
+    
+    toast.success("Voucher generated successfully", {
+      description: "The voucher will open in a new window for printing/saving as PDF"
+    })
   }
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
+      {canGenerateVoucher && (
+        <Card className="border-primary/20 bg-primary/5">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-foreground">Generate Travel Voucher</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Create a PDF voucher for this booking</p>
+              </div>
+              <Button size="sm" onClick={handleGenerateVoucher}>
+                <FileOutput className="w-4 h-4 mr-1.5" />
+                Generate Voucher
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      
+      {documents.length === 0 && !canGenerateVoucher && (
+        <div className="text-center py-8 text-sm text-muted-foreground">No documents generated</div>
+      )}
+      
       {documents.map(d => (
         <Card key={d.id}>
           <CardContent className="p-4 flex items-center justify-between gap-4">

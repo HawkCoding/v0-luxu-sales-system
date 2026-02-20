@@ -29,6 +29,20 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
   const [tripExpanded, setTripExpanded] = useState(true)
   const [guestsExpanded, setGuestsExpanded] = useState(true)
   const [notesExpanded, setNotesExpanded] = useState(false)
+  const [validationExpanded, setValidationExpanded] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('review-validation-expanded')
+      return saved !== null ? saved === 'true' : true
+    }
+    return true
+  })
+
+  // Save validation expanded state to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('review-validation-expanded', validationExpanded.toString())
+    }
+  }, [validationExpanded])
 
   useEffect(() => {
     if (parsedDraft) {
@@ -387,8 +401,16 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
           {/* Right column: Missing & Warnings */}
           <div className="space-y-4 overflow-y-auto border-l pl-4 hidden lg:block">
             <div>
-              <h3 className="text-sm font-semibold mb-2">Validation Status</h3>
-              <div className="space-y-2">
+              <div 
+                className="flex items-center justify-between mb-2 cursor-pointer hover:bg-secondary/50 rounded px-2 py-1 -mx-2"
+                onClick={() => setValidationExpanded(!validationExpanded)}
+              >
+                <h3 className="text-sm font-semibold flex items-center gap-2">
+                  {validationExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  Validation Status
+                </h3>
+              </div>
+              {validationExpanded && (<div className="space-y-2">
                 {validation.missingRequired.length > 0 && (
                   <Card className="border-destructive/50 bg-destructive/5">
                     <CardContent className="p-3 space-y-2">
@@ -438,6 +460,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                   </Card>
                 )}
               </div>
+              )}
             </div>
           </div>
         </div>

@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Search, Plus, FileText, Clipboard, Send, AlertCircle } from "lucide-react"
+import { Search, Plus, FileText, Clipboard, Send, AlertCircle, Download } from "lucide-react"
 import Link from "next/link"
 import { useState } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog"
@@ -15,6 +15,7 @@ import { useRole } from "@/lib/role-context"
 import { useAuth } from "@/lib/auth-context"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { toast } from "sonner"
+import { downloadAuditLog } from "@/lib/export-audit"
 
 export default function EnquiriesPage() {
   const { data, isLoading, mutate } = useAllData()
@@ -80,6 +81,22 @@ export default function EnquiriesPage() {
       setPasteText("")
     } finally {
       setPasting(false)
+    }
+  }
+
+  const handleDownloadAudit = (e: React.MouseEvent, enquiry: any) => {
+    e.preventDefault()
+    e.stopPropagation()
+    
+    try {
+      const jobAuditLogs = (data.auditLogs || []).filter((log: any) => 
+        log.entityId === enquiry.jobId || (log.entityType === 'job' && log.entityId === enquiry.jobId)
+      )
+      downloadAuditLog(jobAuditLogs, enquiry.jobNumber)
+      toast.success("Audit log downloaded")
+    } catch (error) {
+      console.error("[v0] Failed to download audit:", error)
+      toast.error("Failed to download audit log")
     }
   }
 
@@ -197,7 +214,7 @@ export default function EnquiriesPage() {
           const isSending = sending === e.id
 
           return (
-            <Card key={e.id} className="hover:shadow-md transition-shadow border-2 relative">
+            <Card key={e.id} className="group hover:shadow-md transition-shadow border-2 relative">
               <CardContent className="p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-start gap-4 min-w-0 flex-1">
@@ -259,6 +276,13 @@ export default function EnquiriesPage() {
                     </Button>
                   </div>
                 </div>
+                <button
+                  onClick={(ev) => handleDownloadAudit(ev, e)}
+                  className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-secondary rounded"
+                  title="Download audit log"
+                >
+                  <Download className="w-3.5 h-3.5 text-muted-foreground" />
+                </button>
               </CardContent>
             </Card>
           )

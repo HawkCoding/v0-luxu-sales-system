@@ -142,7 +142,7 @@ export default function JobDetailPage() {
           <JobCorrespondenceTab correspondence={correspondence} jobId={id} mutate={mutate} />
         </TabsContent>
         <TabsContent value="documents">
-          <JobDocumentsTab documents={documents} />
+          <JobDocumentsTab documents={documents} job={job} enquiry={enquiry} customer={customer} />
         </TabsContent>
         <TabsContent value="audit">
           <JobAuditTab auditLogs={auditLogs} />
