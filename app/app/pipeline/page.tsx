@@ -1,7 +1,7 @@
 "use client"
 
 import { usePipeline, useAllData } from "@/lib/use-data"
-import { PIPELINE_STAGES, type PipelineStage } from "@/lib/types"
+import { PIPELINE_STAGES, KANBAN_STAGES, type PipelineStage } from "@/lib/types"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
@@ -13,8 +13,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Textarea } from "@/components/ui/textarea"
 import { useRole } from "@/lib/role-context"
 import Link from "next/link"
-import { useState } from "react"
-import { GripVertical, Search, Clipboard, Plus } from "lucide-react"
+import { useState, useEffect } from "react"
+import { GripVertical, Search, Clipboard, Plus, Settings } from "lucide-react"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import { parseEmailDraft, type ParsedDraft } from "@/lib/import/parseEmailDraft"
 import { ReviewImportedDraftModal } from "@/components/review-imported-draft-modal"
 
@@ -51,6 +54,21 @@ export default function PipelinePage() {
   const [pasting, setPasting] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [parsedDraft, setParsedDraft] = useState<ParsedDraft | null>(null)
+  const [showAllItems, setShowAllItems] = useState(false)
+
+  // Load showAllItems setting from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem("pipeline_showAllItems")
+    if (saved !== null) {
+      setShowAllItems(saved === "true")
+    }
+  }, [])
+
+  // Save showAllItems setting to localStorage
+  const toggleShowAllItems = (checked: boolean) => {
+    setShowAllItems(checked)
+    localStorage.setItem("pipeline_showAllItems", checked.toString())
+  }
 
   const handleDragStart = (e: React.DragEvent, jobId: string) => {
     if (!can("edit:pipeline")) return
@@ -112,9 +130,10 @@ export default function PipelinePage() {
     return <div className="p-6"><div className="animate-pulse space-y-4">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-24 bg-secondary rounded-lg" />)}</div></div>
   }
 
-  const grouped = PIPELINE_STAGES.reduce(
+  // Group jobs by kanban stages (merging quoted and quote_sent)
+  const grouped = KANBAN_STAGES.reduce(
     (acc, stage) => {
-      acc[stage.key] = ((jobs as PipelineJob[]) || []).filter((j) => j.stage === stage.key)
+      acc[stage.key] = ((jobs as PipelineJob[]) || []).filter((j) => stage.includes.includes(j.stage))
       return acc
     },
     {} as Record<string, PipelineJob[]>
@@ -163,41 +182,63 @@ export default function PipelinePage() {
           <h1 className="text-3xl font-semibold text-foreground tracking-tight">Pipeline</h1>
           <p className="text-base text-muted-foreground mt-2">Manage all jobs across pipeline stages</p>
         </div>
-        {can("create:enquiry") && (
-          <Dialog open={pasteOpen} onOpenChange={setPasteOpen}>
-            <DialogTrigger asChild>
-              <Button size="sm" variant="default">
-                <Plus className="w-4 h-4 mr-1.5" /> New Draft
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-lg">
-              <DialogHeader>
-                <DialogTitle>Paste Email Import</DialogTitle>
-                <DialogDescription>Paste an email or enquiry text to create a draft enquiry.</DialogDescription>
-              </DialogHeader>
-              <Textarea
-                placeholder="Paste the email or text content here..."
-                value={pasteText}
-                onChange={(e) => setPasteText(e.target.value)}
-                rows={10}
-                className="text-sm"
-              />
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" size="sm" onClick={() => setPasteOpen(false)}>Cancel</Button>
-                <Button size="sm" onClick={handlePasteImport} disabled={!pasteText.trim()}>
-                  Review & Import
+        <div className="flex items-center gap-2">
+          {can("create:enquiry") && (
+            <Dialog open={pasteOpen} onOpenChange={setPasteOpen}>
+              <DialogTrigger asChild>
+                <Button size="sm" variant="default">
+                  <Plus className="w-4 h-4 mr-1.5" /> New Draft
                 </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>Paste Email Import</DialogTitle>
+                  <DialogDescription>Paste an email or enquiry text to create a draft enquiry.</DialogDescription>
+                </DialogHeader>
+                <Textarea
+                  placeholder="Paste the email or text content here..."
+                  value={pasteText}
+                  onChange={(e) => setPasteText(e.target.value)}
+                  rows={10}
+                  className="text-sm"
+                />
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setPasteOpen(false)}>Cancel</Button>
+                  <Button size="sm" onClick={handlePasteImport} disabled={!pasteText.trim()}>
+                    Review & Import
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+          )}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button size="sm" variant="ghost">
+                <Settings className="w-4 h-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-64" align="end">
+              <div className="space-y-3">
+                <h4 className="font-medium text-sm">Pipeline Settings</h4>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="show-all-items" className="text-sm">Show All Items tab</Label>
+                  <Switch
+                    id="show-all-items"
+                    checked={showAllItems}
+                    onCheckedChange={toggleShowAllItems}
+                  />
+                </div>
               </div>
-            </DialogContent>
-          </Dialog>
-        )}
+            </PopoverContent>
+          </Popover>
+        </div>
       </div>
 
-      <Tabs defaultValue="table" className="w-full">
-        <TabsList className="grid w-full max-w-md grid-cols-3">
-          <TabsTrigger value="table">All Items</TabsTrigger>
-          <TabsTrigger value="kanban">Kanban</TabsTrigger>
-          <TabsTrigger value="drafts">Draft Enquiries</TabsTrigger>
+      <Tabs defaultValue="kanban" className="w-full">
+        <TabsList className={`grid w-full max-w-md ${showAllItems ? 'grid-cols-3' : 'grid-cols-2'}`}>
+          {showAllItems && <TabsTrigger value="table">All Items</TabsTrigger>}
+          <TabsTrigger value="kanban">Status board</TabsTrigger>
+          <TabsTrigger value="drafts">Draft enquiries</TabsTrigger>
         </TabsList>
 
         <TabsContent value="table" className="mt-5 space-y-4">
@@ -258,9 +299,11 @@ export default function PipelinePage() {
           </div>
           <ScrollArea className="w-full">
             <div className="flex gap-3 pb-4 min-h-[500px]">
-              {PIPELINE_STAGES.map((stage) => {
+              {KANBAN_STAGES.map((stage) => {
                 const stageJobs = grouped[stage.key] || []
                 const isOver = dragOverStage === stage.key
+                // For merged quoted column, allow dropping on either quoted or quote_sent
+                const acceptDropStage = stage.key === "quoted_combined" ? "quoted" : stage.includes[0]
                 return (
                   <div
                     key={stage.key}
@@ -269,7 +312,7 @@ export default function PipelinePage() {
                     }`}
                     onDragOver={(e) => handleDragOver(e, stage.key)}
                     onDragLeave={handleDragLeave}
-                    onDrop={(e) => handleDrop(e, stage.key)}
+                    onDrop={(e) => handleDrop(e, acceptDropStage as PipelineStage)}
                   >
                     <div className="px-3 py-3 flex items-center justify-between border-b border-border">
                       <span className="text-xs font-bold text-foreground uppercase tracking-wider">

@@ -18,14 +18,27 @@ export type PipelineStage =
 export const PIPELINE_STAGES: { key: PipelineStage; label: string }[] = [
   { key: "enquiry", label: "Enquiry" },
   { key: "quoted", label: "Quoted" },
-  { key: "quote_sent", label: "Quote Sent" },
-  { key: "accepted", label: "Accepted" },
-  { key: "deposit_requested", label: "Deposit Req." },
+  { key: "quote_sent", label: "Quoted" }, // Merged with "quoted" for display
+  { key: "accepted", label: "Reservation" },
+  { key: "deposit_requested", label: "Waiting on Deposit" },
   { key: "deposit_paid", label: "Deposit Paid" },
   { key: "final_paid", label: "Final Paid" },
   { key: "voucher_sent", label: "Voucher Sent" },
   { key: "closed", label: "Closed/Won" },
   { key: "lost", label: "Lost" },
+]
+
+// Kanban board stages - merges quoted and quote_sent into one column
+export const KANBAN_STAGES: { key: PipelineStage | "quoted_combined"; label: string; includes: PipelineStage[] }[] = [
+  { key: "enquiry", label: "Enquiry", includes: ["enquiry"] },
+  { key: "quoted_combined", label: "Quoted", includes: ["quoted", "quote_sent"] },
+  { key: "accepted", label: "Reservation", includes: ["accepted"] },
+  { key: "deposit_requested", label: "Waiting on Deposit", includes: ["deposit_requested"] },
+  { key: "deposit_paid", label: "Deposit Paid", includes: ["deposit_paid"] },
+  { key: "final_paid", label: "Final Paid", includes: ["final_paid"] },
+  { key: "voucher_sent", label: "Voucher Sent", includes: ["voucher_sent"] },
+  { key: "closed", label: "Closed/Won", includes: ["closed"] },
+  { key: "lost", label: "Lost", includes: ["lost"] },
 ]
 
 export interface Customer {
