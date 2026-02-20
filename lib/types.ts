@@ -3,6 +3,16 @@ export type Role = "admin" | "manager" | "consultant" | "readonly"
 export type Purpose = "quote" | "availability" | "reservation"
 export type Source = "web_form" | "paste_import"
 
+export type ConsultantAbbreviation = "LB" | "CDJ" | "DR" | "MVE" | "DL"
+
+export const CONSULTANTS: { key: ConsultantAbbreviation; name: string }[] = [
+  { key: "LB", name: "Leonie" },
+  { key: "CDJ", name: "Carmen" },
+  { key: "DR", name: "Dirk" },
+  { key: "MVE", name: "Monade" },
+  { key: "DL", name: "Douwlien" },
+]
+
 export type PipelineStage =
   | "enquiry"
   | "quoted"
