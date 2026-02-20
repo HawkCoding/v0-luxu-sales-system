@@ -338,7 +338,7 @@ export default function PipelinePage() {
             <Dialog open={pasteOpen} onOpenChange={setPasteOpen}>
               <DialogTrigger asChild>
                 <Button size="sm" variant="default">
-                  <Plus className="w-4 h-4 mr-1.5" /> New Draft
+                  <Plus className="w-4 h-4 mr-1.5" /> New Enquiry
                 </Button>
               </DialogTrigger>
               <DialogContent className="max-w-lg">
