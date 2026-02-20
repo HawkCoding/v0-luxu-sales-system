@@ -84,10 +84,7 @@ function AppShell({ children }: { children: ReactNode }) {
   if (!mounted || !user) {
     return (
       <div 
-        className="flex h-screen items-center justify-center overflow-hidden"
-        style={{
-          background: `radial-gradient(1200px circle at 20% 0%, rgba(94,117,130,0.35) 0%, rgba(11,42,58,1) 50%, rgba(7,24,34,1) 100%)`
-        }}
+        className="flex h-screen items-center justify-center overflow-hidden bg-app-canvas"
       >
         <div className="text-center space-y-3">
           <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto animate-pulse">
@@ -101,10 +98,7 @@ function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div 
-      className="flex h-screen overflow-hidden"
-      style={{
-        background: `radial-gradient(1200px circle at 20% 0%, rgba(94,117,130,0.35) 0%, rgba(11,42,58,1) 50%, rgba(7,24,34,1) 100%)`
-      }}
+      className="flex h-screen overflow-hidden bg-app-canvas"
     >
       {/* Mobile overlay */}
       {mobileOpen && (

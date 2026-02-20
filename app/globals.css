@@ -7,8 +7,8 @@
   /* Theme tint base */
   --luxu-theme-tint: #566e7b;
 
-  /* App canvas background - BOLD BLUE */
-  --luxu-app-bg: #0B2A3A; /* Deep blue for app canvas */
+  /* App canvas background - Flat neutral */
+  --luxu-app-bg: #8FA3AE; /* Flat neutral gray-blue for app canvas */
 
   /* Background layers (4) - light surfaces for content */
   --luxu-bg-0: #f5f6f7; /* Not used for app, kept for other contexts */
@@ -195,15 +195,8 @@
     line-height: 1.65;
     letter-spacing: -0.01em;
     color: var(--luxu-text-body);
-    /* Theme wash: subtle tinted gradient over base background */
-    background: 
-      linear-gradient(
-        180deg, 
-        rgba(86, 110, 123, 0.04) 0%, 
-        rgba(86, 110, 123, 0.02) 40%,
-        transparent 70%
-      ),
-      var(--luxu-bg-0);
+    /* Flat background - no gradients */
+    background: var(--luxu-bg-0);
   }
   
   h1, h2, h3, h4, h5, h6 {
