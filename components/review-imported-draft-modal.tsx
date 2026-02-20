@@ -231,7 +231,6 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                       <SelectContent>
                         <SelectItem value="Rovos Rail">Rovos Rail</SelectItem>
                         <SelectItem value="Blue Train">Blue Train</SelectItem>
-                        <SelectItem value="Hotel Package">Hotel Package</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -328,29 +327,27 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                       className={!draft.guests.suites ? 'border-destructive' : ''}
                     />
                   </div>
-                  {draft.trip.supplier !== 'Hotel Package' && (
-                    <div className="space-y-1.5">
-                      <Label className="text-sm flex items-center gap-1.5">
-                        Suite Type
-                        {draft.confidence['guests.suiteType'] === 'low' && (
-                          <Badge variant="outline" className="text-[10px] h-4">Check</Badge>
-                        )}
-                      </Label>
-                      <Select value={draft.guests.suiteType} onValueChange={(v) => updateDraft('guests.suiteType', v)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select suite type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Pullman Double Suite">Pullman Double Suite</SelectItem>
-                          <SelectItem value="Pullman Twin Suite">Pullman Twin Suite</SelectItem>
-                          <SelectItem value="Deluxe Double Suite">Deluxe Double Suite</SelectItem>
-                          <SelectItem value="Deluxe Twin Suite">Deluxe Twin Suite</SelectItem>
-                          <SelectItem value="Royal Double Suite">Royal Double Suite</SelectItem>
-                          <SelectItem value="Royal Twin Suite">Royal Twin Suite</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
+                  <div className="space-y-1.5">
+                    <Label className="text-sm flex items-center gap-1.5">
+                      Suite Type
+                      {draft.confidence['guests.suiteType'] === 'low' && (
+                        <Badge variant="outline" className="text-[10px] h-4">Check</Badge>
+                      )}
+                    </Label>
+                    <Select value={draft.guests.suiteType} onValueChange={(v) => updateDraft('guests.suiteType', v)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select suite type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Pullman Double Suite">Pullman Double Suite</SelectItem>
+                        <SelectItem value="Pullman Twin Suite">Pullman Twin Suite</SelectItem>
+                        <SelectItem value="Deluxe Double Suite">Deluxe Double Suite</SelectItem>
+                        <SelectItem value="Deluxe Twin Suite">Deluxe Twin Suite</SelectItem>
+                        <SelectItem value="Royal Double Suite">Royal Double Suite</SelectItem>
+                        <SelectItem value="Royal Twin Suite">Royal Twin Suite</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </CardContent>
               )}
             </Card>

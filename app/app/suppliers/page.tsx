@@ -31,8 +31,8 @@ export default function ProductsPage() {
   return (
     <div className="p-6 space-y-6 max-w-5xl">
       <div>
-        <h1 className="text-foreground tracking-tight">Suppliers & Rate Cards</h1>
-        <p className="text-muted-foreground mt-2">{rates.length} rate entries across {Object.keys(grouped).length} routes</p>
+        <h1 className="text-3xl font-semibold text-foreground tracking-tight">Suppliers & Rate Cards</h1>
+        <p className="text-base text-muted-foreground mt-2">Rovos Rail and Blue Train pricing • {rates.length} rate entries across {Object.keys(grouped).length} routes</p>
       </div>
 
       <div className="relative max-w-sm">

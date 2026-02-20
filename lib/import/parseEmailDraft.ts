@@ -61,7 +61,7 @@ export function parseEmailDraft(text: string): ParsedDraft {
     confidence['customer.surname'] = 'low'
   }
   
-  // Extract supplier (high confidence)
+  // Extract supplier (high confidence) - Only Rovos Rail and Blue Train
   let supplier = ''
   if (/rovos/i.test(text)) {
     supplier = 'Rovos Rail'
@@ -69,9 +69,6 @@ export function parseEmailDraft(text: string): ParsedDraft {
   } else if (/blue\s*train/i.test(text)) {
     supplier = 'Blue Train'
     confidence['trip.supplier'] = 'high'
-  } else if (/hotel/i.test(text)) {
-    supplier = 'Hotel Package'
-    confidence['trip.supplier'] = 'low'
   }
   
   // Extract route/direction (medium confidence)
