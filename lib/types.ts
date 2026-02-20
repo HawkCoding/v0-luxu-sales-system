@@ -66,6 +66,7 @@ export interface Job {
   jobNumber: string
   ownerUser: string
   customerId: string
+  consultant: ConsultantAbbreviation
   purpose: Purpose
   source: Source
   stage: PipelineStage

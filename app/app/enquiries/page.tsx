@@ -36,7 +36,7 @@ export default function EnquiriesPage() {
     const job = data.jobs.find((j: any) => j.id === e.jobId)
     const quotes = data.quotes?.filter((q: any) => q.jobId === e.jobId) || []
     const totalQuote = quotes.reduce((sum: number, q: any) => sum + (q.total || 0), 0)
-    return { ...e, jobNumber: job?.jobNumber, stage: job?.stage, job, totalQuote, quotes }
+    return { ...e, jobNumber: job?.jobNumber, stage: job?.stage, consultant: job?.consultant, job, totalQuote, quotes }
   }).filter((e: any) => e.stage === "enquiry") // Only show items in enquiry stage
 
   const filtered = enquiries.filter((e: any) => {
@@ -211,6 +211,9 @@ export default function EnquiriesPage() {
                         <Link href={`/app/jobs/${e.jobId}`} className="text-base font-semibold text-foreground hover:text-primary transition-colors">
                           {e.jobNumber}
                         </Link>
+                        {e.consultant && (
+                          <Badge variant="default" className="text-xs font-bold">{e.consultant}</Badge>
+                        )}
                         <Badge variant="outline" className="text-xs">{e.source.replace("_", " ")}</Badge>
                         <Badge variant="secondary" className="text-xs">{e.purpose}</Badge>
                       </div>

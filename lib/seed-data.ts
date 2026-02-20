@@ -19,18 +19,18 @@ export const customers: Customer[] = [
 ]
 
 export const jobs: Job[] = [
-  { id: "j1", jobNumber: "LUX-2025-000001", ownerUser: "consultant", customerId: "c1", purpose: "reservation", source: "web_form", stage: "enquiry", createdAt: "2025-09-01T08:05:00Z", updatedAt: "2025-09-01T08:05:00Z" },
-  { id: "j2", jobNumber: "LUX-2025-000002", ownerUser: "consultant", customerId: "c2", purpose: "quote", source: "web_form", stage: "quoted", createdAt: "2025-09-05T10:35:00Z", updatedAt: "2025-09-08T14:00:00Z" },
-  { id: "j3", jobNumber: "LUX-2025-000003", ownerUser: "consultant", customerId: "c3", purpose: "reservation", source: "paste_import", stage: "quote_sent", createdAt: "2025-09-10T14:05:00Z", updatedAt: "2025-09-15T09:00:00Z" },
-  { id: "j4", jobNumber: "LUX-2025-000004", ownerUser: "consultant", customerId: "c4", purpose: "availability", source: "web_form", stage: "accepted", createdAt: "2025-09-15T09:05:00Z", updatedAt: "2025-09-22T11:00:00Z" },
-  { id: "j5", jobNumber: "LUX-2025-000005", ownerUser: "consultant", customerId: "c5", purpose: "reservation", source: "web_form", stage: "deposit_requested", createdAt: "2025-09-20T16:05:00Z", updatedAt: "2025-09-28T10:00:00Z" },
-  { id: "j6", jobNumber: "LUX-2025-000006", ownerUser: "consultant", customerId: "c6", purpose: "reservation", source: "web_form", stage: "deposit_paid", createdAt: "2025-10-01T07:05:00Z", updatedAt: "2025-10-10T15:00:00Z" },
-  { id: "j7", jobNumber: "LUX-2025-000007", ownerUser: "consultant", customerId: "c7", purpose: "quote", source: "web_form", stage: "final_paid", createdAt: "2025-10-05T11:05:00Z", updatedAt: "2025-10-25T16:00:00Z" },
-  { id: "j8", jobNumber: "LUX-2025-000008", ownerUser: "consultant", customerId: "c8", purpose: "reservation", source: "web_form", stage: "voucher_sent", createdAt: "2025-10-10T06:05:00Z", updatedAt: "2025-11-01T08:00:00Z" },
-  { id: "j9", jobNumber: "LUX-2025-000009", ownerUser: "consultant", customerId: "c9", purpose: "quote", source: "paste_import", stage: "closed", createdAt: "2025-10-15T13:05:00Z", updatedAt: "2025-11-10T12:00:00Z" },
-  { id: "j10", jobNumber: "LUX-2025-000010", ownerUser: "consultant", customerId: "c10", purpose: "availability", source: "web_form", stage: "lost", createdAt: "2025-10-20T08:35:00Z", updatedAt: "2025-11-15T09:00:00Z" },
-  { id: "j11", jobNumber: "LUX-2025-000011", ownerUser: "consultant", customerId: "c11", purpose: "reservation", source: "web_form", stage: "enquiry", createdAt: "2025-11-01T10:05:00Z", updatedAt: "2025-11-01T10:05:00Z" },
-  { id: "j12", jobNumber: "LUX-2025-000012", ownerUser: "consultant", customerId: "c12", purpose: "quote", source: "web_form", stage: "quoted", createdAt: "2025-11-05T12:05:00Z", updatedAt: "2025-11-08T14:00:00Z" },
+  { id: "j1", jobNumber: "LUX-2025-000001", ownerUser: "consultant", customerId: "c1", consultant: "LB", purpose: "reservation", source: "web_form", stage: "enquiry", createdAt: "2025-09-01T08:05:00Z", updatedAt: "2025-09-01T08:05:00Z" },
+  { id: "j2", jobNumber: "LUX-2025-000002", ownerUser: "consultant", customerId: "c2", consultant: "CDJ", purpose: "quote", source: "web_form", stage: "quoted", createdAt: "2025-09-05T10:35:00Z", updatedAt: "2025-09-08T14:00:00Z" },
+  { id: "j3", jobNumber: "LUX-2025-000003", ownerUser: "consultant", customerId: "c3", consultant: "DR", purpose: "reservation", source: "paste_import", stage: "quote_sent", createdAt: "2025-09-10T14:05:00Z", updatedAt: "2025-09-15T09:00:00Z" },
+  { id: "j4", jobNumber: "LUX-2025-000004", ownerUser: "consultant", customerId: "c4", consultant: "MVE", purpose: "availability", source: "web_form", stage: "accepted", createdAt: "2025-09-15T09:05:00Z", updatedAt: "2025-09-22T11:00:00Z" },
+  { id: "j5", jobNumber: "LUX-2025-000005", ownerUser: "consultant", customerId: "c5", consultant: "DL", purpose: "reservation", source: "web_form", stage: "deposit_requested", createdAt: "2025-09-20T16:05:00Z", updatedAt: "2025-09-28T10:00:00Z" },
+  { id: "j6", jobNumber: "LUX-2025-000006", ownerUser: "consultant", customerId: "c6", consultant: "LB", purpose: "reservation", source: "web_form", stage: "deposit_paid", createdAt: "2025-10-01T07:05:00Z", updatedAt: "2025-10-10:15:00:00Z" },
+  { id: "j7", jobNumber: "LUX-2025-000007", ownerUser: "consultant", customerId: "c7", consultant: "CDJ", purpose: "quote", source: "web_form", stage: "final_paid", createdAt: "2025-10-05T11:05:00Z", updatedAt: "2025-10-25T16:00:00Z" },
+  { id: "j8", jobNumber: "LUX-2025-000008", ownerUser: "consultant", customerId: "c8", consultant: "DR", purpose: "reservation", source: "web_form", stage: "voucher_sent", createdAt: "2025-10-10T06:05:00Z", updatedAt: "2025-11-01T08:00:00Z" },
+  { id: "j9", jobNumber: "LUX-2025-000009", ownerUser: "consultant", customerId: "c9", consultant: "MVE", purpose: "quote", source: "paste_import", stage: "closed", createdAt: "2025-10-15T13:05:00Z", updatedAt: "2025-11-10T12:00:00Z" },
+  { id: "j10", jobNumber: "LUX-2025-000010", ownerUser: "consultant", customerId: "c10", consultant: "DL", purpose: "availability", source: "web_form", stage: "lost", createdAt: "2025-10-20T08:35:00Z", updatedAt: "2025-11-15T09:00:00Z" },
+  { id: "j11", jobNumber: "LUX-2025-000011", ownerUser: "consultant", customerId: "c11", consultant: "LB", purpose: "reservation", source: "web_form", stage: "enquiry", createdAt: "2025-11-01T10:05:00Z", updatedAt: "2025-11-01T10:05:00Z" },
+  { id: "j12", jobNumber: "LUX-2025-000012", ownerUser: "consultant", customerId: "c12", consultant: "CDJ", purpose: "quote", source: "web_form", stage: "quoted", createdAt: "2025-11-05T12:05:00Z", updatedAt: "2025-11-08T14:00:00Z" },
 ]
 
 const directions = [

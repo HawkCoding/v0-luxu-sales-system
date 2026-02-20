@@ -1,7 +1,7 @@
 "use client"
 
 import { usePipeline, useAllData } from "@/lib/use-data"
-import { PIPELINE_STAGES, KANBAN_STAGES, type PipelineStage } from "@/lib/types"
+import { PIPELINE_STAGES, KANBAN_STAGES, CONSULTANTS, type PipelineStage, type ConsultantAbbreviation } from "@/lib/types"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
@@ -28,6 +28,7 @@ interface PipelineJob {
   direction: string
   departureDate: string
   stage: PipelineStage
+  consultant: ConsultantAbbreviation
   paymentColor: string
   totalPaid: number
   quoteTotal: number
@@ -55,6 +56,7 @@ export default function PipelinePage() {
   const [reviewOpen, setReviewOpen] = useState(false)
   const [parsedDraft, setParsedDraft] = useState<ParsedDraft | null>(null)
   const [showAllItems, setShowAllItems] = useState(false)
+  const [consultantFilter, setConsultantFilter] = useState<"all" | ConsultantAbbreviation>("all")
 
   // Load showAllItems setting from localStorage
   useEffect(() => {
@@ -130,10 +132,15 @@ export default function PipelinePage() {
     return <div className="p-6"><div className="animate-pulse space-y-4">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-24 bg-secondary rounded-lg" />)}</div></div>
   }
 
+  // Filter jobs by consultant before grouping
+  const filteredJobs = consultantFilter === "all" 
+    ? (jobs as PipelineJob[])
+    : ((jobs as PipelineJob[]) || []).filter((j: any) => j.consultant === consultantFilter)
+
   // Group jobs by kanban stages (merging quoted and quote_sent)
   const grouped = KANBAN_STAGES.reduce(
     (acc, stage) => {
-      acc[stage.key] = ((jobs as PipelineJob[]) || []).filter((j) => stage.includes.includes(j.stage))
+      acc[stage.key] = (filteredJobs || []).filter((j) => stage.includes.includes(j.stage))
       return acc
     },
     {} as Record<string, PipelineJob[]>
@@ -294,8 +301,21 @@ export default function PipelinePage() {
         </TabsContent>
 
         <TabsContent value="kanban" className="mt-5">
-          <div className="mb-3 text-sm text-muted-foreground">
-            {can("edit:pipeline") ? "Drag jobs between stages to update their status" : "View-only mode"}
+          <div className="mb-4 flex items-center justify-between">
+            <div className="text-sm text-muted-foreground">
+              {can("edit:pipeline") ? "Drag jobs between stages to update their status" : "View-only mode"}
+            </div>
+            <Select value={consultantFilter} onValueChange={(v) => setConsultantFilter(v as any)}>
+              <SelectTrigger className="w-44 h-9 text-sm">
+                <SelectValue placeholder="Consultant" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Consultants</SelectItem>
+                {CONSULTANTS.map(c => (
+                  <SelectItem key={c.key} value={c.key}>{c.key} - {c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <ScrollArea className="w-full">
             <div className="flex gap-3 pb-4 min-h-[500px]">
@@ -415,11 +435,14 @@ function PipelineCard({
       } hover:shadow-sm`}
     >
       <CardContent className="p-3">
-        <div className="flex items-start justify-between gap-1">
+        <div className="flex items-start justify-between gap-1 mb-1">
           <Link href={`/app/jobs/${job.id}`} className="text-xs font-bold text-foreground hover:text-primary transition-colors">
             {job.jobNumber}
           </Link>
           <div className="flex items-center gap-1.5">
+            {job.consultant && (
+              <Badge variant="default" className="text-[10px] h-4 px-1 font-bold">{job.consultant}</Badge>
+            )}
             <div className={`w-2.5 h-2.5 rounded-full ${paymentDotClass}`} title={`Payment: ${job.paymentColor}`} />
             {canDrag && <GripVertical className="w-3.5 h-3.5 text-muted-foreground/50" />}
           </div>
