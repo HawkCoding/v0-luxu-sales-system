@@ -2,7 +2,7 @@
  * SA-Rail website scraper
  *
  * Fetches and parses pricing/schedule information from sa-rail.co.za for
- * Rovos Rail and The Blue Train, returning normalized records that map onto
+ * Rovos Rail and Blue Train, returning normalized records that map onto
  * the Supabase schema:  suppliers → packages → routes → suite_types → rate_cards
  */
 
@@ -337,7 +337,7 @@ function parseBlueTrain(html: string, warnings: string[]): Omit<ScrapeResult, "w
 
   const suppliers: ScrapedSupplier[] = [
     {
-      name: "The Blue Train",
+      name: "Blue Train",
       kind: "train_operator",
       website: BLUE_TRAIN_URL,
       phone: "+27 (0)21 100 3596",
@@ -346,19 +346,19 @@ function parseBlueTrain(html: string, warnings: string[]): Omit<ScrapeResult, "w
   ]
 
   const packages: ScrapedPackage[] = [
-    { supplierName: "The Blue Train", name: "The Blue Train", description: "South Africa's iconic 5-star luxury train between Pretoria and Cape Town." },
+    { supplierName: "Blue Train", name: "Blue Train", description: "South Africa's iconic 5-star luxury train between Pretoria and Cape Town." },
   ]
 
   const routes: ScrapedRoute[] = [
     {
-      packageName: "The Blue Train",
+      packageName: "Blue Train",
       name: "Pretoria – Cape Town",
       originName: "Pretoria",
       destinationName: "Cape Town",
       durationNights: "2 Nights",
     },
     {
-      packageName: "The Blue Train",
+      packageName: "Blue Train",
       name: "Cape Town – Pretoria",
       originName: "Cape Town",
       destinationName: "Pretoria",
@@ -422,15 +422,15 @@ function parseBlueTrain(html: string, warnings: string[]): Omit<ScrapeResult, "w
       if (amount <= 0) return
 
       const suiteName = suiteRaw.replace(/\s+/g, " ").trim()
-      if (!knownSuites.has(`The Blue Train|${suiteName}`)) {
-        suiteTypes.push({ packageName: "The Blue Train", name: suiteName })
-        knownSuites.add(`The Blue Train|${suiteName}`)
+      if (!knownSuites.has(`Blue Train|${suiteName}`)) {
+        suiteTypes.push({ packageName: "Blue Train", name: suiteName })
+        knownSuites.add(`Blue Train|${suiteName}`)
       }
 
       const key = `${routeName}|${suiteName}|${validFrom}|${validTo}`
       if (!rateCards.find(rc => `${rc.routeName}|${rc.suiteTypeName}|${rc.validFrom}|${rc.validTo}` === key)) {
         rateCards.push({
-          packageName: "The Blue Train",
+          packageName: "Blue Train",
           routeName,
           suiteTypeName: suiteName,
           pricePerPerson: amount,

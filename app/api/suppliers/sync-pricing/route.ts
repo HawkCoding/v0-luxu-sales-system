@@ -1,7 +1,9 @@
 /**
  * POST /api/suppliers/sync-pricing
  *
- * Protected by a server-only token (`SUPPLIER_SYNC_TOKEN`).
+ * Protected by either:
+ *   1) authenticated admin/manager Supabase session, or
+ *   2) optional server-only token (`SUPPLIER_SYNC_TOKEN`) for automation.
  * Fetches SA-Rail pricing pages, parses them, and upserts into Supabase:
  *   locations → suppliers → packages → routes → suite_types → rate_cards
  *
@@ -10,21 +12,39 @@
  */
 
 import { NextResponse } from "next/server"
-import { createServiceClient } from "@/lib/supabase/server"
+import { createServiceClient, createSessionClient } from "@/lib/supabase/server"
 import { scrapeSaRail } from "@/lib/suppliers/sa-rail-scraper"
 import type { ScrapeResult } from "@/lib/suppliers/sa-rail-scraper"
+
+export const runtime = "nodejs"
 
 // ---------------------------------------------------------------------------
 // Auth guard
 // ---------------------------------------------------------------------------
 
-function isAuthorized(req: Request): boolean {
-  const token = process.env.SUPPLIER_SYNC_TOKEN
-  if (!token) {
-    // If no token is configured, reject for safety
-    return false
-  }
-  return req.headers.get("x-sync-token") === token
+function isTokenAuthorized(req: Request): boolean {
+  const configuredToken = process.env.SUPPLIER_SYNC_TOKEN
+  const requestToken = req.headers.get("x-sync-token")
+  if (!configuredToken || !requestToken) return false
+  return requestToken === configuredToken
+}
+
+async function isSessionAuthorized(): Promise<boolean> {
+  const sessionClient = await createSessionClient()
+  const {
+    data: { user },
+  } = await sessionClient.auth.getUser()
+
+  if (!user) return false
+
+  const { data: profile, error } = await sessionClient
+    .from("profiles")
+    .select("clearance_level")
+    .eq("user_id", user.id)
+    .single()
+
+  if (error || !profile?.clearance_level) return false
+  return profile.clearance_level === "admin" || profile.clearance_level === "manager"
 }
 
 // ---------------------------------------------------------------------------
@@ -268,7 +288,10 @@ async function upsertRateCards(
 // ---------------------------------------------------------------------------
 
 export async function POST(req: Request) {
-  if (!isAuthorized(req)) {
+  const authorizedViaToken = isTokenAuthorized(req)
+  const authorizedViaSession = authorizedViaToken ? false : await isSessionAuthorized()
+
+  if (!authorizedViaToken && !authorizedViaSession) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 

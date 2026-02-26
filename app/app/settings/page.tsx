@@ -42,13 +42,9 @@ function SupplierSyncCard() {
     setLoading(true)
     setResult(null)
     try {
-      const syncToken = process.env.NEXT_PUBLIC_SUPPLIER_SYNC_TOKEN ?? ""
       const res = await fetch("/api/suppliers/sync-pricing", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-sync-token": syncToken,
-        },
+        headers: { "Content-Type": "application/json" },
       })
       const json = (await res.json()) as SyncResult
       setResult(json)

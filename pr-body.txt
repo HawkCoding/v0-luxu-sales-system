@@ -1,0 +1,28 @@
+## Summary
+
+- Adds a **Sync SA-Rail pricing** button in Settings, visible only to admin and manager roles.
+- On click, the button calls a protected API endpoint (`POST /api/suppliers/sync-pricing`) that scrapes both the Rovos Rail and Blue Train pages from sa-rail.co.za and upserts all supplier data into Supabase.
+- Endpoint auth is now hardened: admin/manager session auth for in-app usage, with optional server-only `SUPPLIER_SYNC_TOKEN` support for automation (no browser token required).
+- Records upserted: `locations`, `suppliers`, `packages`, `routes`, `suite_types`, and `rate_cards` (prices + validity windows per season).
+- Idempotent: repeated syncs update rather than duplicate records using stable natural keys (`ON CONFLICT`).
+- Returns a per-entity count summary and any parser warnings back to the UI.
+
+## Files changed
+
+- `lib/suppliers/sa-rail-scraper.ts` — normalized Blue Train naming to keep supplier/package keys consistent
+- `app/api/suppliers/sync-pricing/route.ts` — session + optional token auth guard; Node runtime; service-role upserts
+- `app/app/settings/page.tsx` — sync call no longer sends a browser token header
+- `lib/supabase/server.ts` — clearer validation error when `SUPABASE_SERVICE_ROLE_KEY` is not a full JWT
+- `.env.local.example` — documents server-only optional `SUPPLIER_SYNC_TOKEN` and removes public sync token variable
+- `package.json` / `package-lock.json` — added `cheerio` dependency
+
+## Test plan
+
+- [ ] Log in as **manager** (e.g. Dirk) and navigate to Settings — "Supplier Data" card should be visible
+- [ ] Log in as **consultant** (e.g. Monade) — Settings page hidden from nav, card not visible
+- [ ] Set `SUPABASE_SERVICE_ROLE_KEY` to the full service role JWT from Supabase dashboard
+- [ ] (Optional) Set `SUPPLIER_SYNC_TOKEN` in `.env.local` for server-to-server sync calls
+- [ ] Click **Sync pricing** — verify green success panel with counts for all 6 entity types
+- [ ] Check Supabase tables: suppliers, packages, routes, suite_types, rate_cards populated
+- [ ] Click sync again — verify counts remain the same (idempotent, no duplicates)
+- [ ] Without auth/session and without token, verify 401 response
