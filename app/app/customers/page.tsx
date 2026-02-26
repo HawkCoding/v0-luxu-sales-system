@@ -12,6 +12,7 @@ import { Search, Globe, Filter, X } from "lucide-react"
 import { useState } from "react"
 import { CONSULTANTS, type ConsultantAbbreviation } from "@/lib/types"
 import { format } from "date-fns"
+import { CustomerImportDialogTrigger } from "@/components/customer-import-dialog"
 
 export default function CustomersPage() {
   const { data, isLoading } = useAllData()
@@ -26,36 +27,28 @@ export default function CustomersPage() {
   }
 
   const customers = data.customers.map((c: any) => {
-    const customerJobs = data.jobs.filter((j: any) => j.customerId === c.id)
-    const jobCount = customerJobs.length
-    
-    // Get consultants involved
-    const consultants = [...new Set(customerJobs.map((j: any) => j.consultant))]
-    
-    // Get suppliers involved (from enquiries)
+    const customerBookings = data.bookings.filter((b: any) => b.customerId === c.id)
+    const jobCount = customerBookings.length
+
+    const consultants = [...new Set(customerBookings.map((b: any) => b.consultant).filter(Boolean))]
+
     const suppliers = new Set<string>()
-    customerJobs.forEach((job: any) => {
-      const enquiry = data.enquiries.find((e: any) => e.jobId === job.id)
-      if (enquiry?.direction) {
-        // Infer supplier from direction or other fields
-        // For now, we'll use a simple heuristic
-        if (enquiry.direction.toLowerCase().includes('rovos')) {
-          suppliers.add('Rovos Rail')
-        } else if (enquiry.direction.toLowerCase().includes('blue')) {
-          suppliers.add('Blue Train')
+    customerBookings.forEach((b: any) => {
+      if (b.direction) {
+        if (b.direction.toLowerCase().includes("blue")) {
+          suppliers.add("Blue Train")
         } else {
-          // Default to Rovos Rail if not specified
-          suppliers.add('Rovos Rail')
+          suppliers.add("Rovos Rail")
         }
       }
     })
-    
-    return { 
-      ...c, 
+
+    return {
+      ...c,
       jobCount,
       consultants,
       suppliers: Array.from(suppliers),
-      jobs: customerJobs
+      jobs: customerBookings.map((b: any) => ({ ...b, jobNumber: b.bookingNumber })),
     }
   })
 
@@ -91,11 +84,14 @@ export default function CustomersPage() {
 
   return (
     <div className="p-6 space-y-5 max-w-6xl">
-      <div>
-        <h1 className="text-3xl font-semibold text-foreground tracking-tight">Customers</h1>
-        <p className="text-base text-muted-foreground mt-2">
-          {filtered.length} of {customers.length} customers
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-semibold text-foreground tracking-tight">Customers</h1>
+          <p className="text-base text-muted-foreground mt-2">
+            {filtered.length} of {customers.length} customers
+          </p>
+        </div>
+        <CustomerImportDialogTrigger />
       </div>
 
       {/* Filter Bar */}
