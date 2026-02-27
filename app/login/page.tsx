@@ -13,18 +13,19 @@ const USERS = ["Carmen", "Leonie", "Dirk", "Monade", "Douwlien"]
 
 function LoginForm() {
   const router = useRouter()
-  const { user, login } = useAuth()
+  const { user, loading, login } = useAuth()
   const [selectedName, setSelectedName] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
+  const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
-    if (user) {
+    if (!loading && user) {
       router.push("/app")
     }
-  }, [user, router])
+  }, [loading, user, router])
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
 
@@ -32,19 +33,36 @@ function LoginForm() {
       setError("Please select your name")
       return
     }
-
     if (!password) {
       setError("Please enter your password")
       return
     }
 
-    const success = login(selectedName, password)
-    if (success) {
-      router.push("/app")
-    } else {
-      setError("Invalid credentials")
-      setPassword("")
+    setSubmitting(true)
+    try {
+      const success = await login(selectedName, password)
+      if (success) {
+        router.push("/app")
+      } else {
+        setError("Invalid credentials. Make sure your account has been created in Supabase.")
+        setPassword("")
+      }
+    } finally {
+      setSubmitting(false)
     }
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center space-y-3">
+          <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto animate-pulse">
+            <span className="text-xl font-bold text-primary">LT</span>
+          </div>
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -93,8 +111,8 @@ function LoginForm() {
               </div>
             )}
 
-            <Button type="submit" className="w-full h-11 text-base font-medium">
-              Sign In
+            <Button type="submit" className="w-full h-11 text-base font-medium" disabled={submitting}>
+              {submitting ? "Signing in..." : "Sign In"}
             </Button>
           </form>
         </CardContent>

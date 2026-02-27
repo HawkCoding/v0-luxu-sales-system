@@ -43,30 +43,27 @@ const navItems = [
 function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
-  const { user, logout } = useAuth()
+  const { user, loading: authLoading, logout } = useAuth()
   const { role, setRole, can } = useRole()
   const { data } = useAllData()
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
 
-  // Calculate enquiries count (items in "enquiry" stage)
-  const enquiriesCount = data?.enquiries?.filter((e: any) => {
-    const job = data.jobs.find((j: any) => j.id === e.jobId)
-    return job?.stage === "enquiry"
-  }).length || 0
+  // Calculate enquiries count (bookings in "enquiry" stage)
+  const enquiriesCount = data?.bookings?.filter((b: any) => b.stage === "enquiry").length || 0
 
   // Wait for component to mount
   useEffect(() => {
     setMounted(true)
   }, [])
 
-  // Protect route - redirect to login if not authenticated
+  // Protect route - redirect to login if not authenticated (wait for auth to initialize)
   useEffect(() => {
-    if (mounted && !user) {
+    if (mounted && !authLoading && !user) {
       router.push("/login")
     }
-  }, [mounted, user, router])
+  }, [mounted, authLoading, user, router])
 
   // Sync role with user's assigned role
   useEffect(() => {
@@ -80,8 +77,8 @@ function AppShell({ children }: { children: ReactNode }) {
     router.push("/login")
   }
 
-  // Show consistent loading state on server and initial client render
-  if (!mounted || !user) {
+  // Show consistent loading state on server, auth init, and before redirect
+  if (!mounted || authLoading || !user) {
     return (
       <div 
         className="flex h-screen items-center justify-center overflow-hidden bg-app-canvas"
