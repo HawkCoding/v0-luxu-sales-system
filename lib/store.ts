@@ -1,10 +1,14 @@
+// DEPRECATED — This in-memory store is no longer used by any API routes.
+// All data is now read from and written to Supabase.
+// This file is kept temporarily so any missed references fail loudly rather than silently.
+// Safe to delete once no imports remain.
+
 import type {
   Customer, Job, Enquiry, Itinerary, Quote, Payment,
   DocRecord, Template, Correspondence, AuditLog, RateCard, PipelineHistory,
 } from "./types"
 import * as seed from "./seed-data"
 
-// Simple in-memory store for the server session
 const store = {
   customers: [...seed.customers] as Customer[],
   jobs: [...seed.jobs] as Job[],

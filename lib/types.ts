@@ -56,11 +56,46 @@ export interface Customer {
   firstName: string
   lastName: string
   email: string
-  phone: string
-  country: string
+  phone: string | null
+  country: string | null
+  title?: string | null
   createdAt: string
+  updatedAt?: string
 }
 
+// Booking is the primary entity — replaces the old Job + Enquiry combination.
+export interface Booking {
+  id: string
+  bookingNumber: string
+  customerId: string
+  stage: PipelineStage
+  purpose: Purpose
+  source: Source
+  consultant: string | null
+  ownerUserId: string | null
+  departureDate: string | null
+  durationNights: number | null
+  noOfAdults: number
+  noOfChildren: number
+  noOfSuites: number
+  childAges: number[] | null
+  routeId: string | null
+  direction: string | null
+  rawText: string | null
+  extractedJson: unknown
+  termsAccepted: boolean
+  additionalServices: boolean
+  additionalServicesDetails: string | null
+  promotionCode: string | null
+  extendStay: boolean
+  extraNights: number | null
+  hotelPhase: string
+  hotelSupplierId: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+// Legacy alias — kept so existing components that reference Job still compile
 export interface Job {
   id: string
   jobNumber: string

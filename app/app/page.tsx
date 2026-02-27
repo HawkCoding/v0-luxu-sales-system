@@ -17,19 +17,19 @@ export default function DashboardPage() {
 
   const stageCount = PIPELINE_STAGES.map(s => ({
     ...s,
-    count: data.jobs.filter((j: { stage: string }) => j.stage === s.key).length,
+    count: data.bookings.filter((b: { stage: string }) => b.stage === s.key).length,
   }))
 
-  const openJobs = data.jobs.filter((j: { stage: string }) => !["closed", "lost"].includes(j.stage)).length
-  const quotedJobs = data.jobs.filter((j: { stage: string }) => ["quoted", "re_quoted"].includes(j.stage)).length
-  const depositsPaid = data.payments.filter((p: { type: string }) => p.type === "deposit").length
-  const fullPayments = data.payments.filter((p: { type: string }) => p.type === "full_payment").length
-  
-  const recentJobs = [...data.jobs].sort((a: { createdAt: string }, b: { createdAt: string }) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 5)
-  
+  const openJobs = data.bookings.filter((b: { stage: string }) => !["closed", "lost"].includes(b.stage)).length
+  const quotedJobs = data.bookings.filter((b: { stage: string }) => ["quoted", "re_quoted"].includes(b.stage)).length
+  const depositsPaid = data.bookings.filter((b: { stage: string }) => b.stage === "deposit_paid").length
+  const fullPayments = data.bookings.filter((b: { stage: string }) => b.stage === "final_paid").length
+
+  const recentJobs = [...data.bookings].sort((a: { createdAt: string }, b: { createdAt: string }) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 5)
+
   const upcomingFollowups = data.correspondences
     .filter((c: { status: string; scheduledAt?: string }) => c.status === "scheduled" && c.scheduledAt)
-    .sort((a: { scheduledAt?: string }, b: { scheduledAt?: string }) => 
+    .sort((a: { scheduledAt?: string }, b: { scheduledAt?: string }) =>
       new Date(a.scheduledAt!).getTime() - new Date(b.scheduledAt!).getTime()
     )
     .slice(0, 5)
@@ -68,17 +68,17 @@ export default function DashboardPage() {
             <CardTitle className="text-xl font-semibold text-text-heading">Recent Jobs</CardTitle>
           </CardHeader>
           <CardContent className="space-y-0">
-            {recentJobs.map((job: { id: string; jobNumber: string; customerId: string; stage: string; purpose: string; createdAt: string }) => {
-              const customer = data.customers.find((c: { id: string }) => c.id === job.customerId)
+            {recentJobs.map((booking: { id: string; bookingNumber: string; customerId: string; stage: string; createdAt: string }) => {
+              const customer = data.customers.find((c: { id: string }) => c.id === booking.customerId)
               return (
-                <Link key={job.id} href={`/app/jobs/${job.id}`} className="flex items-center justify-between py-4 border-b border-stroke last:border-0 hover:bg-bg-raised -mx-4 px-4 rounded transition-colors group">
+                <Link key={booking.id} href={`/app/jobs/${booking.id}`} className="flex items-center justify-between py-4 border-b border-stroke last:border-0 hover:bg-bg-raised -mx-4 px-4 rounded transition-colors group">
                   <div>
-                    <p className="font-medium text-text-heading group-hover:text-accent-link transition-colors">{job.jobNumber}</p>
+                    <p className="font-medium text-text-heading group-hover:text-accent-link transition-colors">{booking.bookingNumber}</p>
                     <p className="text-text-muted mt-1">{customer?.firstName} {customer?.lastName}</p>
                   </div>
                   <div className="text-right">
-                    <Badge variant="outline" className="text-sm">{job.stage.replace(/_/g, " ")}</Badge>
-                    <p className="text-sm text-text-muted mt-1">{new Date(job.createdAt).toLocaleDateString()}</p>
+                    <Badge variant="outline" className="text-sm">{booking.stage.replace(/_/g, " ")}</Badge>
+                    <p className="text-sm text-text-muted mt-1">{new Date(booking.createdAt).toLocaleDateString()}</p>
                   </div>
                 </Link>
               )
@@ -98,28 +98,22 @@ export default function DashboardPage() {
         </CardHeader>
         <CardContent className="space-y-0">
           {upcomingFollowups.length > 0 ? (
-            upcomingFollowups.map((cor: { id: string; subject: string; scheduledAt?: string; jobId: string }) => {
-              const job = data.jobs.find((j: { id: string }) => j.id === cor.jobId)
-              const customer = job ? data.customers.find((c: { id: string }) => c.id === job.customerId) : null
-              
+            upcomingFollowups.map((cor: { id: string; subject: string; scheduledAt?: string; bookingId: string }) => {
+              const booking = data.bookings.find((b: { id: string }) => b.id === cor.bookingId)
+              const customer = booking ? data.customers.find((c: { id: string }) => c.id === booking.customerId) : null
+
               return (
-                <Link 
-                  key={cor.id} 
-                  href={`/app/jobs/${cor.jobId}`}
+                <Link
+                  key={cor.id}
+                  href={`/app/jobs/${cor.bookingId}`}
                   className="flex items-center justify-between py-4 border-b border-stroke last:border-0 hover:bg-bg-raised -mx-4 px-4 rounded transition-colors group"
                 >
                   <div className="space-y-1 flex-1 min-w-0">
                     <p className="font-medium text-text-heading group-hover:text-accent-link transition-colors">{cor.subject}</p>
                     <div className="flex items-center gap-3 text-sm text-text-muted">
-                      <span className="font-medium">{job?.jobNumber || "N/A"}</span>
+                      <span className="font-medium">{booking?.bookingNumber || "N/A"}</span>
                       <span>•</span>
                       <span>{customer ? `${customer.firstName} ${customer.lastName}` : "Unknown"}</span>
-                      {job?.consultantId && (
-                        <>
-                          <span>•</span>
-                          <span className="capitalize">{job.consultantId}</span>
-                        </>
-                      )}
                     </div>
                   </div>
                   <div className="text-right flex-shrink-0 ml-4">

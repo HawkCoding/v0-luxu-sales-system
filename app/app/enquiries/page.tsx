@@ -32,16 +32,29 @@ export default function EnquiriesPage() {
     return <div className="p-6"><div className="animate-pulse space-y-3">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-16 bg-secondary rounded-lg" />)}</div></div>
   }
 
-  // Only show enquiries that are in "enquiry" stage (intake queue)
-  const enquiries = data.enquiries.map((e: any) => {
-    const job = data.jobs.find((j: any) => j.id === e.jobId)
-    const quotes = data.quotes?.filter((q: any) => q.jobId === e.jobId) || []
-    const totalQuote = quotes.reduce((sum: number, q: any) => sum + (q.total || 0), 0)
-    return { ...e, jobNumber: job?.jobNumber, stage: job?.stage, consultant: job?.consultant, job, totalQuote, quotes }
-  }).filter((e: any) => e.stage === "enquiry") // Only show items in enquiry stage
+  // Enquiry intake queue: bookings in "enquiry" stage
+  const enquiries = data.bookings
+    .filter((b: any) => b.stage === "enquiry")
+    .map((b: any) => {
+      const customer = data.customers.find((c: any) => c.id === b.customerId)
+      const quotes = data.quotes?.filter((q: any) => q.bookingId === b.id) || []
+      const totalQuote = quotes.reduce((sum: number, q: any) => sum + (q.total || 0), 0)
+      return {
+        ...b,
+        // Legacy field names used by the UI below
+        jobNumber: b.bookingNumber,
+        jobId: b.id,
+        name: customer?.firstName || "",
+        surname: customer?.lastName || "",
+        email: customer?.email || "",
+        title: customer?.title || "",
+        totalQuote,
+        quotes,
+      }
+    })
 
   const filtered = enquiries.filter((e: any) => {
-    const matchSearch = !search || [e.name, e.surname, e.email, e.jobNumber, e.direction].some((f: string) => f?.toLowerCase().includes(search.toLowerCase()))
+    const matchSearch = !search || [e.name, e.surname, e.email, e.bookingNumber, e.direction].some((f: string) => f?.toLowerCase().includes(search.toLowerCase()))
     const matchSource = sourceFilter === "all" || e.source === sourceFilter
     return matchSearch && matchSource
   })
@@ -90,9 +103,9 @@ export default function EnquiriesPage() {
     
     try {
       const jobAuditLogs = (data.auditLogs || []).filter((log: any) => 
-        log.entityId === enquiry.jobId || (log.entityType === 'job' && log.entityId === enquiry.jobId)
+        log.entityId === enquiry.id || (log.entityType === 'Booking' && log.entityId === enquiry.id)
       )
-      downloadAuditLog(jobAuditLogs, enquiry.jobNumber)
+      downloadAuditLog(jobAuditLogs, enquiry.bookingNumber)
       toast.success("Audit log downloaded")
     } catch (error) {
       console.error("[v0] Failed to download audit:", error)
@@ -118,7 +131,7 @@ export default function EnquiriesPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          jobId: enquiry.jobId,
+          bookingId: enquiry.id,
           channel: "email",
           subject: "Invoice / Deposit Request",
           bodyHtml: `<p>Dear ${enquiry.title} ${enquiry.surname},</p>
@@ -131,8 +144,8 @@ export default function EnquiriesPage() {
         }),
       })
 
-      // 2. Update job stage to "deposit_requested"
-      await fetch(`/api/jobs/${enquiry.jobId}`, {
+      // 2. Update booking stage to "deposit_requested"
+      await fetch(`/api/jobs/${enquiry.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -146,8 +159,8 @@ export default function EnquiriesPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           actor: user?.name || "Unknown",
-          entityType: "job",
-          entityId: enquiry.jobId,
+          entityType: "Booking",
+          entityId: enquiry.id,
           action: "send_deposit_request",
           metaJson: JSON.stringify({ depositAmount, totalQuote: enquiry.totalQuote }),
         }),

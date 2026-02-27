@@ -27,7 +27,7 @@ import { useAuth } from "@/lib/auth-context"
 
 interface PipelineJob {
   id: string
-  jobNumber: string
+  bookingNumber: string
   customerName: string
   direction: string
   departureDate: string
@@ -98,9 +98,9 @@ export default function PipelinePage() {
     setDragOverStage(null)
   }
 
-  // Check if required email has been sent for this job
+  // Check if required email has been sent for this booking
   const checkRequiredEmail = (jobId: string, toStage: PipelineStage): RequiredEmail | null => {
-    const correspondence = data.correspondence?.filter((c: any) => c.jobId === jobId) || []
+    const correspondence = data.correspondences?.filter((c: any) => c.bookingId === jobId) || []
     
     // Check for Invoice/Deposit Request when moving to deposit_requested
     if (toStage === "deposit_requested") {
@@ -290,11 +290,10 @@ export default function PipelinePage() {
     {} as Record<string, PipelineJob[]>
   )
 
-  const enriched = data.jobs.map((j: any) => {
-    const customer = data.customers.find((c: any) => c.id === j.customerId)
-    const enquiry = data.enquiries.find((e: any) => e.jobId === j.id)
-    const payments = data.payments.filter((p: any) => p.jobId === j.id)
-    const quotes = data.quotes.filter((q: any) => q.jobId === j.id)
+  const enriched = data.bookings.map((b: any) => {
+    const customer = data.customers.find((c: any) => c.id === b.customerId)
+    const payments = data.payments.filter((p: any) => p.bookingId === b.id)
+    const quotes = data.quotes.filter((q: any) => q.bookingId === b.id)
     const totalPaid = payments.reduce((s: number, p: any) => s + p.amount, 0)
     const quoteTotal = quotes.reduce((s: number, q: any) => Math.max(s, q.total), 0) || 1
     let paymentColor = "red"
@@ -303,27 +302,29 @@ export default function PipelinePage() {
     else if (totalPaid >= quoteTotal * 0.25) paymentColor = "yellow"
     else if (totalPaid > 0) paymentColor = "purple"
     return {
-      ...j,
+      ...b,
       customerName: customer ? `${customer.firstName} ${customer.lastName}` : "Unknown",
-      direction: enquiry?.direction || "",
-      departureDate: enquiry?.departureDate || "",
       paymentColor,
       totalPaid,
-      source: enquiry?.source || "unknown",
     }
   })
 
-  const filtered = enriched.filter((j: any) => {
-    const matchSearch = !search || [j.jobNumber, j.customerName, j.direction].some((f: string) => f?.toLowerCase().includes(search.toLowerCase()))
-    const matchStage = stageFilter === "all" || j.stage === stageFilter
+  const filtered = enriched.filter((b: any) => {
+    const matchSearch = !search || [b.bookingNumber, b.customerName, b.direction].some((f: string) => f?.toLowerCase().includes(search.toLowerCase()))
+    const matchStage = stageFilter === "all" || b.stage === stageFilter
     return matchSearch && matchStage
   })
 
-  const draftEnquiries = data.enquiries
-    .filter((e: any) => e.source === "paste_import")
-    .map((e: any) => {
-      const job = data.jobs.find((j: any) => j.id === e.jobId)
-      return { ...e, jobNumber: job?.jobNumber, stage: job?.stage }
+  const draftEnquiries = data.bookings
+    .filter((b: any) => b.source === "paste_import" && b.stage === "enquiry")
+    .map((b: any) => {
+      const customer = data.customers.find((c: any) => c.id === b.customerId)
+      return {
+        ...b,
+        jobNumber: b.bookingNumber,
+        name: customer?.firstName || "",
+        surname: customer?.lastName || "",
+      }
     })
 
   return (
@@ -412,26 +413,26 @@ export default function PipelinePage() {
           </div>
 
           <div className="space-y-3">
-            {filtered.map((j: any) => (
-              <Link key={j.id} href={`/app/jobs/${j.id}`}>
+            {filtered.map((b: any) => (
+              <Link key={b.id} href={`/app/jobs/${b.id}`}>
                 <Card className="hover:shadow-md transition-shadow cursor-pointer">
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between gap-4">
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className={`w-3 h-3 rounded-full flex-shrink-0 ${PAYMENT_COLORS[j.paymentColor] || "bg-muted-foreground"}`} />
+                        <div className={`w-3 h-3 rounded-full flex-shrink-0 ${PAYMENT_COLORS[b.paymentColor] || "bg-muted-foreground"}`} />
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="text-sm font-semibold text-foreground">{j.jobNumber}</span>
-                            <span className="text-sm text-muted-foreground">{j.customerName}</span>
+                            <span className="text-sm font-semibold text-foreground">{b.bookingNumber}</span>
+                            <span className="text-sm text-muted-foreground">{b.customerName}</span>
                           </div>
                           <p className="text-sm text-muted-foreground truncate mt-1">
-                            {j.direction}{j.departureDate ? ` | Dep: ${new Date(j.departureDate).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" })}` : ""}
+                            {b.direction}{b.departureDate ? ` | Dep: ${new Date(b.departureDate).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" })}` : ""}
                           </p>
                         </div>
                       </div>
                       <div className="text-right flex-shrink-0">
-                        <Badge variant="outline" className="text-xs">{j.stage.replace(/_/g, " ")}</Badge>
-                        <p className="text-xs text-muted-foreground mt-1">{new Date(j.updatedAt).toLocaleDateString()}</p>
+                        <Badge variant="outline" className="text-xs">{b.stage.replace(/_/g, " ")}</Badge>
+                        <p className="text-xs text-muted-foreground mt-1">{new Date(b.updatedAt).toLocaleDateString()}</p>
                       </div>
                     </div>
                   </CardContent>
@@ -439,7 +440,7 @@ export default function PipelinePage() {
               </Link>
             ))}
             {filtered.length === 0 && (
-              <div className="text-center py-12 text-sm text-muted-foreground">No jobs found</div>
+              <div className="text-center py-12 text-sm text-muted-foreground">No bookings found</div>
             )}
           </div>
         </TabsContent>
@@ -514,8 +515,8 @@ export default function PipelinePage() {
         <TabsContent value="drafts" className="mt-5 space-y-3">
           <p className="text-sm text-muted-foreground">Enquiries imported from pasted emails and text</p>
           <div className="space-y-3">
-            {draftEnquiries.map((e: any) => (
-              <Link key={e.id} href={`/app/jobs/${e.jobId}`}>
+            {draftEnquiries.map((b: any) => (
+              <Link key={b.id} href={`/app/jobs/${b.id}`}>
                 <Card className="hover:shadow-md transition-shadow cursor-pointer">
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between gap-4">
@@ -523,17 +524,17 @@ export default function PipelinePage() {
                         <Clipboard className="w-5 h-5 text-muted-foreground flex-shrink-0" />
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="text-sm font-semibold text-foreground">{e.jobNumber}</span>
-                            <Badge variant="secondary" className="text-xs">{e.purpose}</Badge>
+                            <span className="text-sm font-semibold text-foreground">{b.bookingNumber}</span>
+                            <Badge variant="secondary" className="text-xs">{b.purpose}</Badge>
                           </div>
                           <p className="text-sm text-muted-foreground truncate mt-1">
-                            {e.title} {e.name} {e.surname} &middot; {e.direction} &middot; {new Date(e.departureDate).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" })}
+                            {b.name} {b.surname} &middot; {b.direction} &middot; {b.departureDate ? new Date(b.departureDate).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" }) : ""}
                           </p>
                         </div>
                       </div>
                       <div className="text-right flex-shrink-0">
-                        <Badge variant="outline" className="text-xs">{e.stage?.replace(/_/g, " ")}</Badge>
-                        <p className="text-xs text-muted-foreground mt-1">{new Date(e.createdAt).toLocaleDateString()}</p>
+                        <Badge variant="outline" className="text-xs">{b.stage?.replace(/_/g, " ")}</Badge>
+                        <p className="text-xs text-muted-foreground mt-1">{new Date(b.createdAt).toLocaleDateString()}</p>
                       </div>
                     </div>
                   </CardContent>
@@ -560,7 +561,7 @@ export default function PipelinePage() {
         open={emailModalOpen}
         onOpenChange={setEmailModalOpen}
         requiredEmail={requiredEmail}
-        jobNumber={(jobs as PipelineJob[]).find(j => j.id === pendingJobId)?.jobNumber || ""}
+        jobNumber={(jobs as PipelineJob[]).find(j => j.id === pendingJobId)?.bookingNumber || ""}
         jobId={pendingJobId || ""}
         onSendAndProceed={handleSendEmailAndProceed}
       />
@@ -589,8 +590,8 @@ function PipelineCard({
     
     try {
       const jobAuditLogs = allAuditLogs.filter(log => log.entityId === job.id || 
-        (log.entityType === 'job' && log.entityId === job.id))
-      downloadAuditLog(jobAuditLogs, job.jobNumber)
+        (log.entityType === 'Booking' && log.entityId === job.id))
+      downloadAuditLog(jobAuditLogs, job.bookingNumber)
       toast.success("Audit log downloaded")
     } catch (error) {
       console.error("[v0] Failed to download audit:", error)
@@ -609,7 +610,7 @@ function PipelineCard({
       <CardContent className="p-3">
         <div className="flex items-start justify-between gap-1 mb-1">
           <Link href={`/app/jobs/${job.id}`} className="text-xs font-bold text-foreground hover:text-primary transition-colors">
-            {job.jobNumber}
+            {job.bookingNumber}
           </Link>
           <div className="flex items-center gap-1.5">
             {job.consultant && (

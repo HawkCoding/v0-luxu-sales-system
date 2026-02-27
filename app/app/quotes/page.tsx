@@ -27,10 +27,10 @@ export default function QuotesPage() {
   }
 
   const quotes = data.quotes.map((q: any) => {
-    const job = data.jobs.find((j: any) => j.id === q.jobId)
-    const customer = data.customers.find((c: any) => c.id === job?.customerId)
+    const booking = data.bookings.find((b: any) => b.id === q.bookingId)
+    const customer = data.customers.find((c: any) => c.id === booking?.customerId)
     const itinerary = data.itineraries.find((i: any) => i.id === q.itineraryId)
-    return { ...q, jobNumber: job?.jobNumber, customerName: customer ? `${customer.firstName} ${customer.lastName}` : "Unknown", itineraryName: itinerary?.name }
+    return { ...q, jobId: q.bookingId, jobNumber: booking?.bookingNumber, customerName: customer ? `${customer.firstName} ${customer.lastName}` : "Unknown", itineraryName: itinerary?.name }
   })
 
   const filtered = quotes.filter((q: any) => {

@@ -25,9 +25,9 @@ export default function CorrespondencePage() {
   }
 
   const items = data.correspondences.map((c: any) => {
-    const job = data.jobs.find((j: any) => j.id === c.jobId)
-    const customer = data.customers.find((cu: any) => cu.id === job?.customerId)
-    return { ...c, jobNumber: job?.jobNumber, customerName: customer ? `${customer.firstName} ${customer.lastName}` : "Unknown" }
+    const booking = data.bookings.find((b: any) => b.id === c.bookingId)
+    const customer = data.customers.find((cu: any) => cu.id === booking?.customerId)
+    return { ...c, jobId: c.bookingId, jobNumber: booking?.bookingNumber, customerName: customer ? `${customer.firstName} ${customer.lastName}` : "Unknown" }
   }).sort((a: any, b: any) => {
     const aDate = a.sentAt || a.scheduledAt || ""
     const bDate = b.sentAt || b.scheduledAt || ""

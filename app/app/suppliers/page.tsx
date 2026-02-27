@@ -368,7 +368,7 @@ export default function SuppliersPage() {
                       {category === "Train" && supplierRates.length > 0 && (
                         <div className="space-y-3">
                           <h4 className="text-sm font-semibold text-foreground">Rate Cards</h4>
-                          {supplierRates.map(([direction, directionRates]) => (
+                          {(supplierRates as [string, any[]][]).map(([direction, directionRates]) => (
                             <div key={direction} className="border border-border rounded-lg overflow-hidden">
                               <div className="bg-secondary px-3 py-2">
                                 <p className="text-xs font-semibold text-foreground">{direction}</p>

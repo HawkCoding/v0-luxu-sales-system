@@ -38,17 +38,18 @@ export default function PaymentsPage() {
   }
 
   const payments = data.payments.map((p: any) => {
-    const job = data.jobs.find((j: any) => j.id === p.jobId)
-    const customer = data.customers.find((c: any) => c.id === job?.customerId)
-    const quotes = data.quotes?.filter((q: any) => q.jobId === p.jobId) || []
+    const booking = data.bookings.find((b: any) => b.id === p.bookingId)
+    const customer = data.customers.find((c: any) => c.id === booking?.customerId)
+    const quotes = data.quotes?.filter((q: any) => q.bookingId === p.bookingId) || []
     const totalQuote = quotes.reduce((sum: number, q: any) => sum + (q.total || 0), 0)
-    return { 
-      ...p, 
-      jobNumber: job?.jobNumber, 
+    return {
+      ...p,
+      jobId: p.bookingId,
+      jobNumber: booking?.bookingNumber,
       customerName: customer ? `${customer.firstName} ${customer.lastName}` : "Unknown",
       customerEmail: customer?.email,
       totalQuote,
-      stage: job?.stage,
+      stage: booking?.stage,
     }
   }).sort((a: any, b: any) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
 
@@ -102,7 +103,7 @@ export default function PaymentsPage() {
       await fetch(`/api/payments/${allocatingPayment.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId: targetJobId }),
+        body: JSON.stringify({ bookingId: targetJobId }),
       })
 
       // Log audit
@@ -111,10 +112,10 @@ export default function PaymentsPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           actor: user?.name || "Unknown",
-          entityType: "payment",
+          entityType: "Payment",
           entityId: allocatingPayment.id,
           action: "allocate_payment",
-          metaJson: JSON.stringify({ targetJobId }),
+          metaJson: JSON.stringify({ targetBookingId: targetJobId }),
         }),
       })
 
@@ -129,25 +130,24 @@ export default function PaymentsPage() {
     }
   }
 
-  // Get all jobs/enquiries for allocation search
-  const allJobs = data.jobs.map((j: any) => {
-    const customer = data.customers.find((c: any) => c.id === j.customerId)
-    const enquiry = data.enquiries.find((e: any) => e.jobId === j.id)
-    const quotes = data.quotes?.filter((q: any) => q.jobId === j.id) || []
+  // Get all bookings for allocation search
+  const allJobs = data.bookings.map((b: any) => {
+    const customer = data.customers.find((c: any) => c.id === b.customerId)
+    const quotes = data.quotes?.filter((q: any) => q.bookingId === b.id) || []
     const totalQuote = quotes.reduce((sum: number, q: any) => sum + (q.total || 0), 0)
     return {
-      ...j,
+      ...b,
+      jobNumber: b.bookingNumber,
       customerName: customer ? `${customer.firstName} ${customer.lastName}` : "Unknown",
       totalQuote,
-      direction: enquiry?.direction,
     }
   })
 
   const filteredJobs = allJobs.filter((j: any) => {
     if (!allocationSearch) return true
-    return [j.jobNumber, j.customerName]
+    return [j.bookingNumber, j.customerName]
       .some((f: string) => f?.toLowerCase().includes(allocationSearch.toLowerCase()))
-  }).slice(0, 10) // Limit to 10 results
+  }).slice(0, 10)
 
   return (
     <div className="p-6 space-y-5 max-w-6xl">

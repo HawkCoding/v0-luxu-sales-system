@@ -37,51 +37,42 @@ export default function BookingsPage() {
     )
   }
 
-  // Define bookings as jobs with stage "deposit_paid" or "final_paid"
+  // Confirmed bookings: stages where payment has been received
   const bookingStages = ["deposit_paid", "final_paid", "voucher_sent", "closed"]
-  
-  const bookings = data.jobs
-    .filter((job: any) => bookingStages.includes(job.stage))
-    .map((job: any) => {
-      const customer = data.customers.find((c: any) => c.id === job.customerId)
-      const enquiry = data.enquiries.find((e: any) => e.jobId === job.id)
-      const payments = data.payments?.filter((p: any) => p.jobId === job.id) || []
+
+  const bookings = data.bookings
+    .filter((b: any) => bookingStages.includes(b.stage))
+    .map((b: any) => {
+      const customer = data.customers.find((c: any) => c.id === b.customerId)
+      const payments = data.payments?.filter((p: any) => p.bookingId === b.id) || []
       const totalPaid = payments.reduce((sum: number, p: any) => sum + p.amount, 0)
-      const quotes = data.quotes?.filter((q: any) => q.jobId === job.id) || []
+      const quotes = data.quotes?.filter((q: any) => q.bookingId === b.id) || []
       const totalQuote = quotes.reduce((sum: number, q: any) => sum + (q.total || 0), 0)
-      
-      // Determine supplier from direction
+
+      // Infer supplier from route direction name
       let supplier = "Unknown"
-      if (enquiry?.direction) {
-        if (
-          enquiry.direction.includes("Pretoria") ||
-          enquiry.direction.includes("Cape Town") ||
-          enquiry.direction.includes("Victoria Falls") ||
-          enquiry.direction.includes("Durban")
-        ) {
-          supplier = "Rovos Rail"
-        } else if (enquiry.direction.includes("Blue Train")) {
+      if (b.direction) {
+        if (b.direction.toLowerCase().includes("blue train")) {
           supplier = "Blue Train"
+        } else {
+          supplier = "Rovos Rail"
         }
       }
 
-      // Determine payment status
-      let paymentStatus = "Deposit Paid"
-      if (job.stage === "final_paid" || job.stage === "voucher_sent" || job.stage === "closed") {
-        paymentStatus = "Full Paid"
-      }
+      const paymentStatus =
+        b.stage === "final_paid" || b.stage === "voucher_sent" || b.stage === "closed"
+          ? "Full Paid"
+          : "Deposit Paid"
 
       return {
-        ...job,
+        ...b,
+        jobNumber: b.bookingNumber,
         customerName: customer ? `${customer.firstName} ${customer.lastName}` : "Unknown",
         customerEmail: customer?.email || "",
-        direction: enquiry?.direction || "",
-        departureDate: enquiry?.departureDate || "",
         supplier,
         paymentStatus,
         totalPaid,
         totalQuote,
-        createdAt: job.createdAt,
       }
     })
 
@@ -90,7 +81,7 @@ export default function BookingsPage() {
     // Search filter (job number, customer name, email)
     const matchSearch =
       !search ||
-      booking.jobNumber.toLowerCase().includes(search.toLowerCase()) ||
+      booking.bookingNumber.toLowerCase().includes(search.toLowerCase()) ||
       booking.customerName.toLowerCase().includes(search.toLowerCase()) ||
       booking.customerEmail.toLowerCase().includes(search.toLowerCase())
 
@@ -330,7 +321,7 @@ export default function BookingsPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-base font-semibold text-foreground">
-                          {booking.jobNumber}
+                          {booking.bookingNumber}
                         </span>
                         {booking.consultant && (
                           <Badge variant="default" className="text-xs font-bold">

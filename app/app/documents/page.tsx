@@ -28,27 +28,23 @@ export default function DocumentsPage() {
   }
 
   const docs = data.documents.map((d: any) => {
-    const job = data.jobs.find((j: any) => j.id === d.jobId)
-    const customer = data.customers.find((c: any) => c.id === job?.customerId)
-    const enquiry = data.enquiries.find((e: any) => e.jobId === d.jobId)
-    
-    // Infer supplier from enquiry direction
-    let supplier = "Rovos Rail" // Default
-    if (enquiry?.direction) {
-      if (enquiry.direction.toLowerCase().includes('blue')) {
-        supplier = "Blue Train"
-      }
-    }
-    
+    const booking = data.bookings.find((b: any) => b.id === d.bookingId)
+    const customer = data.customers.find((c: any) => c.id === booking?.customerId)
+
+    let supplier = "Rovos Rail"
+    if (booking?.direction?.toLowerCase().includes("blue")) supplier = "Blue Train"
+
     return {
       ...d,
-      jobNumber: job?.jobNumber,
-      consultant: job?.consultant,
+      jobId: d.bookingId,
+      jobNumber: booking?.bookingNumber,
+      consultant: booking?.consultant,
       customerName: customer ? `${customer.firstName} ${customer.lastName}` : "Unknown",
       customerEmail: customer?.email || "",
-      supplier
+      generatedAt: d.createdAt,
+      supplier,
     }
-  }).sort((a: any, b: any) => new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime())
+  }).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
 
   const filtered = docs.filter((d: any) => {
     // Search filter (job number or customer name/email)

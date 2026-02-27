@@ -41,7 +41,7 @@ export function JobDocumentsTab({ documents, job, enquiry, customer }: JobDocume
       numberOfGuests: enquiry.noOfAdults + enquiry.noOfChildren,
       specialRequests: enquiry.additionalServicesDetails || "",
       customerEmail: customer.email,
-      customerPhone: customer.phone,
+      customerPhone: customer.phone ?? "",
       enquiry,
       consultant: job.consultant
     }

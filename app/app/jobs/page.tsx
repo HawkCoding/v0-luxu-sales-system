@@ -27,11 +27,10 @@ export default function JobsPage() {
     return <div className="p-6"><div className="animate-pulse space-y-3">{Array.from({ length: 8 }).map((_, i) => <div key={i} className="h-14 bg-secondary rounded-lg" />)}</div></div>
   }
 
-  const enriched = data.jobs.map((j: any) => {
-    const customer = data.customers.find((c: any) => c.id === j.customerId)
-    const enquiry = data.enquiries.find((e: any) => e.jobId === j.id)
-    const payments = data.payments.filter((p: any) => p.jobId === j.id)
-    const quotes = data.quotes.filter((q: any) => q.jobId === j.id)
+  const enriched = data.bookings.map((b: any) => {
+    const customer = data.customers.find((c: any) => c.id === b.customerId)
+    const payments = data.payments.filter((p: any) => p.bookingId === b.id)
+    const quotes = data.quotes.filter((q: any) => q.bookingId === b.id)
     const totalPaid = payments.reduce((s: number, p: any) => s + p.amount, 0)
     const quoteTotal = quotes.reduce((s: number, q: any) => Math.max(s, q.total), 0) || 1
     let paymentColor = "red"
@@ -40,18 +39,16 @@ export default function JobsPage() {
     else if (totalPaid >= quoteTotal * 0.25) paymentColor = "yellow"
     else if (totalPaid > 0) paymentColor = "purple"
     return {
-      ...j,
+      ...b,
       customerName: customer ? `${customer.firstName} ${customer.lastName}` : "Unknown",
-      direction: enquiry?.direction || "",
-      departureDate: enquiry?.departureDate || "",
       paymentColor,
       totalPaid,
     }
   })
 
-  const filtered = enriched.filter((j: any) => {
-    const matchSearch = !search || [j.jobNumber, j.customerName, j.direction].some((f: string) => f?.toLowerCase().includes(search.toLowerCase()))
-    const matchStage = stageFilter === "all" || j.stage === stageFilter
+  const filtered = enriched.filter((b: any) => {
+    const matchSearch = !search || [b.bookingNumber, b.customerName, b.direction].some((f: string) => f?.toLowerCase().includes(search.toLowerCase()))
+    const matchStage = stageFilter === "all" || b.stage === stageFilter
     return matchSearch && matchStage
   })
 
@@ -59,7 +56,7 @@ export default function JobsPage() {
     <div className="p-6 space-y-4 max-w-5xl">
       <div>
         <h1 className="text-2xl font-semibold text-foreground tracking-tight">Jobs</h1>
-        <p className="text-sm text-muted-foreground mt-1">{filtered.length} jobs</p>
+        <p className="text-sm text-muted-foreground mt-1">{filtered.length} bookings</p>
       </div>
 
       <div className="flex items-center gap-3">
@@ -81,26 +78,26 @@ export default function JobsPage() {
       </div>
 
       <div className="space-y-2">
-        {filtered.map((j: any) => (
-          <Link key={j.id} href={`/app/jobs/${j.id}`}>
+        {filtered.map((b: any) => (
+          <Link key={b.id} href={`/app/jobs/${b.id}`}>
             <Card className="hover:shadow-sm transition-shadow cursor-pointer">
               <CardContent className="p-4">
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${PAYMENT_COLORS[j.paymentColor] || "bg-muted-foreground"}`} />
+                    <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${PAYMENT_COLORS[b.paymentColor] || "bg-muted-foreground"}`} />
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-foreground" style={{ fontFamily: "var(--font-inter)" }}>{j.jobNumber}</span>
-                        <span className="text-xs text-muted-foreground">{j.customerName}</span>
+                        <span className="text-sm font-medium text-foreground" style={{ fontFamily: "var(--font-inter)" }}>{b.bookingNumber}</span>
+                        <span className="text-xs text-muted-foreground">{b.customerName}</span>
                       </div>
                       <p className="text-xs text-muted-foreground truncate mt-0.5">
-                        {j.direction}{j.departureDate ? ` | Dep: ${new Date(j.departureDate).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" })}` : ""}
+                        {b.direction}{b.departureDate ? ` | Dep: ${new Date(b.departureDate).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" })}` : ""}
                       </p>
                     </div>
                   </div>
                   <div className="text-right flex-shrink-0">
-                    <Badge variant="outline" className="text-[10px]">{j.stage.replace(/_/g, " ")}</Badge>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">{new Date(j.updatedAt).toLocaleDateString()}</p>
+                    <Badge variant="outline" className="text-[10px]">{b.stage.replace(/_/g, " ")}</Badge>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">{new Date(b.updatedAt).toLocaleDateString()}</p>
                   </div>
                 </div>
               </CardContent>

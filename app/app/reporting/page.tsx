@@ -14,14 +14,14 @@ export default function ReportingPage() {
   }
 
   const totalRevenue = data.payments.reduce((s: number, p: any) => s + p.amount, 0)
-  const openJobs = data.jobs.filter((j: any) => !["closed", "lost"].includes(j.stage)).length
-  const closedJobs = data.jobs.filter((j: any) => j.stage === "closed").length
-  const lostJobs = data.jobs.filter((j: any) => j.stage === "lost").length
-  const conversionRate = data.jobs.length > 0 ? ((closedJobs / data.jobs.length) * 100).toFixed(1) : "0"
+  const openJobs = data.bookings.filter((b: any) => !["closed", "lost"].includes(b.stage)).length
+  const closedJobs = data.bookings.filter((b: any) => b.stage === "closed").length
+  const lostJobs = data.bookings.filter((b: any) => b.stage === "lost").length
+  const conversionRate = data.bookings.length > 0 ? ((closedJobs / data.bookings.length) * 100).toFixed(1) : "0"
 
   const stageCounts = PIPELINE_STAGES.map(s => ({
     ...s,
-    count: data.jobs.filter((j: any) => j.stage === s.key).length,
+    count: data.bookings.filter((b: any) => b.stage === s.key).length,
   }))
 
   // Revenue by method
@@ -72,7 +72,7 @@ export default function ReportingPage() {
           </CardHeader>
           <CardContent className="space-y-2">
             {stageCounts.map(s => {
-              const pct = data.jobs.length > 0 ? (s.count / data.jobs.length) * 100 : 0
+              const pct = data.bookings.length > 0 ? (s.count / data.bookings.length) * 100 : 0
               return (
                 <div key={s.key} className="space-y-1">
                   <div className="flex items-center justify-between">
