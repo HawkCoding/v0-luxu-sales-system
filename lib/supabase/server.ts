@@ -3,13 +3,23 @@ import { createClient } from "@supabase/supabase-js"
 import { cookies } from "next/headers"
 import type { Database } from "./types"
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+function getPublicSupabaseEnv() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error(
+      "Supabase public env vars are missing. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY."
+    )
+  }
+
+  return { supabaseUrl, supabaseAnonKey }
+}
 
 // Cookie-based SSR client — reads the logged-in user's JWT from request cookies.
 // Use this in internal API routes and Server Components so RLS is enforced.
 export async function createSessionClient() {
+  const { supabaseUrl, supabaseAnonKey } = getPublicSupabaseEnv()
   const cookieStore = await cookies()
   return createSSRServerClient<Database>(supabaseUrl, supabaseAnonKey, {
     cookies: {
@@ -33,6 +43,9 @@ export async function createSessionClient() {
 // Use ONLY in trusted server-side contexts (e.g. /api/enquiries public intake route,
 // background jobs, migrations). Never expose this client to the browser.
 export function createServiceClient() {
+  const { supabaseUrl } = getPublicSupabaseEnv()
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+
   if (!supabaseServiceKey) {
     throw new Error(
       "SUPABASE_SERVICE_ROLE_KEY is not set. Add it to .env.local (never commit it)."

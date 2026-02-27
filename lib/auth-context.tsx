@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react"
-import { supabase } from "@/lib/supabase/client"
+import { getSupabase } from "@/lib/supabase/client"
 import type { Role } from "./types"
 
 export interface User {
@@ -34,6 +34,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   const loadProfile = useCallback(async (userId: string, fallbackEmail: string) => {
+    const supabase = getSupabase()
     const { data: profile } = await supabase
       .from("profiles")
       .select("name, clearance_level")
@@ -52,6 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let mounted = true
+    const supabase = getSupabase()
 
     // Check existing session on mount
     const init = async () => {
@@ -80,6 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [loadProfile])
 
   const login = async (name: string, password: string): Promise<boolean> => {
+    const supabase = getSupabase()
     const email = NAME_TO_EMAIL[name]
     if (!email) return false
 
@@ -88,6 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   const logout = async () => {
+    const supabase = getSupabase()
     await supabase.auth.signOut()
     setUser(null)
   }
