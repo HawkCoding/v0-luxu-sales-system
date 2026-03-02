@@ -358,7 +358,7 @@ export function CustomerImportDialog({ open, onOpenChange }: CustomerImportDialo
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="flex max-h-[90vh] max-w-5xl flex-col">
+      <DialogContent className="flex max-h-[90vh] w-[96vw] max-w-[1200px] flex-col">
         <DialogHeader>
           <DialogTitle>Import Customers</DialogTitle>
           <DialogDescription>
@@ -487,19 +487,19 @@ export function CustomerImportDialog({ open, onOpenChange }: CustomerImportDialo
                 </p>
               </div>
 
-              <div className="overflow-auto">
-                <Table className="min-w-[900px]">
-                  <TableHeader>
+            <div className="max-h-[45vh] overflow-y-auto rounded-md border">
+              <Table className="min-w-[1120px] table-fixed">
+                <TableHeader className="sticky top-0 z-10 bg-background">
                     <TableRow>
                       <TableHead className="w-10">Use</TableHead>
-                      <TableHead className="w-20">Title</TableHead>
-                      <TableHead className="w-28">First</TableHead>
-                      <TableHead className="w-28">Last</TableHead>
-                      <TableHead className="w-48">Email</TableHead>
-                      <TableHead className="w-32">Phone</TableHead>
-                      <TableHead className="w-24">Country</TableHead>
-                      <TableHead className="w-36">Source</TableHead>
-                      <TableHead className="w-20">Actions</TableHead>
+                    <TableHead className="w-24">Title</TableHead>
+                    <TableHead className="w-36">First</TableHead>
+                    <TableHead className="w-36">Last</TableHead>
+                    <TableHead className="w-80">Email</TableHead>
+                    <TableHead className="w-40">Phone</TableHead>
+                    <TableHead className="w-32">Country</TableHead>
+                    <TableHead className="w-56">Source</TableHead>
+                    <TableHead className="w-24">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -513,38 +513,40 @@ export function CustomerImportDialog({ open, onOpenChange }: CustomerImportDialo
                               onCheckedChange={(checked) => updateRow(row.id, { selected: checked === true })}
                             />
                           </TableCell>
-                          <TableCell className="w-20">
+                          <TableCell className="w-24">
                             <Input value={row.title} onChange={(e) => updateRow(row.id, { title: e.target.value })} className="h-8 w-full" />
                           </TableCell>
-                          <TableCell className="w-28">
+                          <TableCell className="w-36">
                             <Input
                               value={row.first_name}
                               onChange={(e) => updateRow(row.id, { first_name: e.target.value })}
                               className={cn("h-8 w-full", row.first_name.trim() ? "" : "border-destructive")}
                             />
                           </TableCell>
-                          <TableCell className="w-28">
+                          <TableCell className="w-36">
                             <Input
                               value={row.last_name}
                               onChange={(e) => updateRow(row.id, { last_name: e.target.value })}
                               className={cn("h-8 w-full", row.last_name.trim() ? "" : "border-destructive")}
                             />
                           </TableCell>
-                          <TableCell className="w-48">
+                          <TableCell className="w-80">
                             <Input
                               value={row.email}
                               onChange={(e) => updateRow(row.id, { email: e.target.value.toLowerCase() })}
                               className={cn("h-8 w-full", /^[\w.+-]+@[\w-]+\.[\w.-]+$/.test(row.email.trim()) ? "" : "border-destructive")}
                             />
                           </TableCell>
-                          <TableCell className="w-32">
+                          <TableCell className="w-40">
                             <Input value={row.phone} onChange={(e) => updateRow(row.id, { phone: e.target.value })} className="h-8 w-full" />
                           </TableCell>
-                          <TableCell className="w-24">
+                          <TableCell className="w-32">
                             <Input value={row.country} onChange={(e) => updateRow(row.id, { country: e.target.value })} className="h-8 w-full" />
                           </TableCell>
-                          <TableCell className="w-36 text-xs text-muted-foreground">{row.sourceLabel}</TableCell>
-                          <TableCell className="w-20">
+                          <TableCell className="w-56 truncate text-xs text-muted-foreground" title={row.sourceLabel}>
+                            {row.sourceLabel}
+                          </TableCell>
+                          <TableCell className="w-24">
                             <Button variant="ghost" size="sm" onClick={() => removeRow(row.id)}>
                               Remove
                             </Button>
