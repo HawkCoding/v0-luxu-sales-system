@@ -1,8 +1,13 @@
 import type { Metadata } from 'next'
 import { Playfair_Display, Inter } from 'next/font/google'
-import { Analytics } from '@vercel/analytics/next'
+import dynamic from 'next/dynamic'
 import { Toaster } from 'sonner'
 import './globals.css'
+
+const Analytics = dynamic(
+  () => import('@vercel/analytics/next').then((mod) => mod.Analytics),
+  { ssr: false }
+)
 
 const playfair = Playfair_Display({
   subsets: ["latin"],
@@ -30,7 +35,7 @@ export default function RootLayout({
       <body className="font-sans antialiased">
         {children}
         <Toaster position="top-right" />
-        <Analytics />
+        {process.env.VERCEL && <Analytics />}
       </body>
     </html>
   )
