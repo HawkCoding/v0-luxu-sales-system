@@ -38,6 +38,7 @@ const permissions: Record<string, Role[]> = {
   "view:settings": ["admin", "manager"],
   "edit:settings": ["admin"],
   "sync:suppliers": ["admin", "manager"],
+  "manage:users": ["admin"],
 }
 
 const ROLE_STORAGE_KEY = "luxu_user_role"
