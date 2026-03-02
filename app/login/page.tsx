@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { Suspense, useState, useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { AuthProvider, useAuth } from "@/lib/auth-context"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -298,7 +298,9 @@ function LoginForm() {
 export default function LoginPage() {
   return (
     <AuthProvider>
-      <LoginForm />
+      <Suspense>
+        <LoginForm />
+      </Suspense>
     </AuthProvider>
   )
 }
