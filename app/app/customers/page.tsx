@@ -13,9 +13,11 @@ import { useState } from "react"
 import { CONSULTANTS, type ConsultantAbbreviation } from "@/lib/types"
 import { format } from "date-fns"
 import { CustomerImportDialogTrigger } from "@/components/customer-import-dialog"
+import { useRole } from "@/lib/role-context"
 
 export default function CustomersPage() {
   const { data, isLoading } = useAllData()
+  const { can } = useRole()
   const [search, setSearch] = useState("")
   const [consultantFilter, setConsultantFilter] = useState<"all" | ConsultantAbbreviation>("all")
   const [supplierFilter, setSupplierFilter] = useState("all")
@@ -91,7 +93,7 @@ export default function CustomersPage() {
             {filtered.length} of {customers.length} customers
           </p>
         </div>
-        <CustomerImportDialogTrigger />
+        {can("import:customers") && <CustomerImportDialogTrigger />}
       </div>
 
       {/* Filter Bar */}
