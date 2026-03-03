@@ -1,25 +1,14 @@
 "use client"
 
 import { useCallback, useMemo, useRef, useState } from "react"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
-import { Progress } from "@/components/ui/progress"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { FileText, Plus, UploadCloud, X } from "lucide-react"
+import { FileText, X } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { parseScannedCustomer } from "@/lib/import/parseScannedCustomer"
 import { toast } from "sonner"
 import { mutate } from "swr"
-
-interface CustomerImportDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-}
-
-type ImportMode = "scan" | "csv"
 
 interface EditableCustomerRow {
   id: string
@@ -31,7 +20,6 @@ interface EditableCustomerRow {
   phone: string
   country: string
   sourceLabel: string
-  lowConfidence: boolean
 }
 
 interface ImportResult {
@@ -70,10 +58,6 @@ function parseCsvLine(line: string): string[] {
   return values
 }
 
-function isPdf(file: File): boolean {
-  return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
-}
-
 function isRowValid(row: EditableCustomerRow): boolean {
   const hasName = row.first_name.trim().length > 0 && row.last_name.trim().length > 0
   const isEmail = /^[\w.+-]+@[\w-]+\.[\w.-]+$/.test(row.email.trim())
@@ -85,23 +69,19 @@ function newRowId(): string {
   return `${Date.now()}-${Math.random()}`
 }
 
-export function CustomerImportDialog({ open, onOpenChange }: CustomerImportDialogProps) {
-  const [mode, setMode] = useState<ImportMode>("scan")
+export function CustomerBulkImportPanel() {
   const [files, setFiles] = useState<File[]>([])
   const [rows, setRows] = useState<EditableCustomerRow[]>([])
   const [result, setResult] = useState<ImportResult | null>(null)
   const [isDragOver, setIsDragOver] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [overallProgress, setOverallProgress] = useState(0)
-  const [currentFileLabel, setCurrentFileLabel] = useState("")
-  const [currentFileProgress, setCurrentFileProgress] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const handleFiles = useCallback((incoming: FileList | null) => {
     if (!incoming || incoming.length === 0) return
     setResult(null)
-    setFiles(Array.from(incoming))
+    setFiles([incoming[0]])
   }, [])
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -166,92 +146,16 @@ export function CustomerImportDialog({ open, onOpenChange }: CustomerImportDialo
         phone: idxPhone >= 0 ? values[idxPhone] ?? "" : "",
         country: idxCountry >= 0 ? values[idxCountry] ?? "" : "",
         sourceLabel: `${file.name} row ${index + 2}`,
-        lowConfidence: false,
       }
     })
-  }
-
-  const pdfToImages = async (file: File): Promise<Blob[]> => {
-    const pdfjsLib = await import("pdfjs-dist")
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.mjs`
-
-    const loadingTask = pdfjsLib.getDocument(await file.arrayBuffer())
-    const pdf = await loadingTask.promise
-    const pageBlobs: Blob[] = []
-
-    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
-      const page = await pdf.getPage(pageNumber)
-      const viewport = page.getViewport({ scale: 1.5 })
-      const canvas = document.createElement("canvas")
-      const context = canvas.getContext("2d")
-      if (!context) continue
-
-      canvas.width = Math.floor(viewport.width)
-      canvas.height = Math.floor(viewport.height)
-      await page.render({ canvasContext: context, viewport }).promise
-      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"))
-      if (blob) pageBlobs.push(blob)
-      page.cleanup()
-    }
-
-    return pageBlobs
-  }
-
-  const parseScanFiles = async (queuedFiles: File[]): Promise<EditableCustomerRow[]> => {
-    const { createWorker } = await import("tesseract.js")
-    const worker = await createWorker("eng", 1, {
-      logger: (message: { status?: string; progress?: number }) => {
-        if (message.status === "recognizing text") {
-          setCurrentFileProgress(Math.round((message.progress ?? 0) * 100))
-        }
-      },
-    })
-
-    const extractedRows: EditableCustomerRow[] = []
-    let completedFiles = 0
-
-    try {
-      for (const file of queuedFiles) {
-        setCurrentFileLabel(file.name)
-        setCurrentFileProgress(0)
-
-        const targets = isPdf(file) ? await pdfToImages(file) : [file]
-        for (let pageIndex = 0; pageIndex < targets.length; pageIndex++) {
-          const target = targets[pageIndex]
-          const { data } = await worker.recognize(target, { rotateAuto: true })
-          const parsed = parseScannedCustomer(data.text)
-          extractedRows.push({
-            id: newRowId(),
-            selected: true,
-            title: parsed.title ?? "",
-            first_name: parsed.firstName,
-            last_name: parsed.lastName,
-            email: parsed.email,
-            phone: parsed.phone ?? "",
-            country: parsed.country ?? "",
-            sourceLabel: isPdf(file) ? `${file.name} page ${pageIndex + 1}` : file.name,
-            lowConfidence: Object.values(parsed.confidence).some((value) => value === "low"),
-          })
-        }
-
-        completedFiles++
-        setOverallProgress(Math.round((completedFiles / queuedFiles.length) * 100))
-      }
-    } finally {
-      await worker.terminate()
-    }
-
-    return extractedRows
   }
 
   const handlePrepareRows = async () => {
     if (files.length === 0) return
     setIsProcessing(true)
     setResult(null)
-    setCurrentFileProgress(0)
-    setOverallProgress(0)
     try {
-      const nextRows = mode === "csv" ? await parseCsvFile(files[0]) : await parseScanFiles(files)
+      const nextRows = await parseCsvFile(files[0])
       if (nextRows.length === 0) {
         toast.error("No records found", { description: "Please check the uploaded file content." })
         return
@@ -264,8 +168,6 @@ export function CustomerImportDialog({ open, onOpenChange }: CustomerImportDialo
       })
     } finally {
       setIsProcessing(false)
-      setCurrentFileLabel("")
-      setCurrentFileProgress(0)
     }
   }
 
@@ -301,7 +203,7 @@ export function CustomerImportDialog({ open, onOpenChange }: CustomerImportDialo
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mode,
+          mode: "csv",
           customers: selectedValidRows.map((row) => ({
             title: row.title.trim() || null,
             first_name: row.first_name.trim(),
@@ -338,275 +240,186 @@ export function CustomerImportDialog({ open, onOpenChange }: CustomerImportDialo
     }
   }
 
-  const resetState = () => {
-    setMode("scan")
-    setFiles([])
-    setRows([])
-    setResult(null)
-    setIsDragOver(false)
-    setIsProcessing(false)
-    setIsSubmitting(false)
-    setOverallProgress(0)
-    setCurrentFileLabel("")
-    setCurrentFileProgress(0)
-  }
-
-  const handleOpenChange = (next: boolean) => {
-    if (!next) resetState()
-    onOpenChange(next)
-  }
-
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="flex max-h-[90vh] w-[96vw] max-w-[1200px] flex-col">
-        <DialogHeader>
-          <DialogTitle>Import Customers</DialogTitle>
-          <DialogDescription>
-            Process scanned documents or CSV files in-browser. Files are not uploaded or stored.
-          </DialogDescription>
-        </DialogHeader>
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold text-foreground">Bulk Import Customers</h2>
+        <p className="text-sm text-muted-foreground">
+          Upload a CSV file, review the rows, then import them in bulk.
+        </p>
+      </div>
 
-        <div className="flex-1 space-y-3 overflow-y-auto pr-1">
-          <Tabs value={mode} onValueChange={(value) => setMode(value as ImportMode)}>
-            <TabsList>
-              <TabsTrigger value="scan">Scan (Image/PDF)</TabsTrigger>
-              <TabsTrigger value="csv">CSV</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="scan" className="space-y-3">
-              <div
-                role="button"
-                tabIndex={0}
-                aria-label="Scan file drop area"
-                onClick={() => inputRef.current?.click()}
-                onKeyDown={(e) => e.key === "Enter" && inputRef.current?.click()}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                className={cn(
-                  "flex cursor-pointer select-none flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed p-8 transition-colors",
-                  isDragOver
-                    ? "border-primary bg-primary/5"
-                    : "border-border hover:border-primary/50 hover:bg-muted/40"
-                )}
-              >
-                <UploadCloud className={cn("h-9 w-9 transition-colors", isDragOver ? "text-primary" : "text-muted-foreground")} />
-                <div className="text-center">
-                  <p className="text-sm font-medium text-foreground">
-                    {isDragOver ? "Release to drop files" : "Drag & drop scan files here"}
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">Supports JPG, PNG, WEBP, PDF. Batch upload supported.</p>
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="csv" className="space-y-3">
-              <div
-                role="button"
-                tabIndex={0}
-                aria-label="CSV file drop area"
-                onClick={() => inputRef.current?.click()}
-                onKeyDown={(e) => e.key === "Enter" && inputRef.current?.click()}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                className={cn(
-                  "flex cursor-pointer select-none flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed p-8 transition-colors",
-                  isDragOver
-                    ? "border-primary bg-primary/5"
-                    : "border-border hover:border-primary/50 hover:bg-muted/40"
-                )}
-              >
-                <FileText className={cn("h-9 w-9 transition-colors", isDragOver ? "text-primary" : "text-muted-foreground")} />
-                <div className="text-center">
-                  <p className="text-sm font-medium text-foreground">
-                    {isDragOver ? "Release to drop CSV" : "Drag & drop your CSV file"}
-                  </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Use the template for best results:{" "}
-                    <a href="/customer-import-template.csv" download className="text-primary underline" onClick={(e) => e.stopPropagation()}>
-                      Download template
-                    </a>
-                  </p>
-                </div>
-              </div>
-            </TabsContent>
-          </Tabs>
-
-          <input
-            ref={inputRef}
-            type="file"
-            multiple={mode === "scan"}
-            accept={mode === "scan" ? ".jpg,.jpeg,.png,.webp,.pdf,application/pdf,image/*" : ".csv,text/csv"}
-            className="sr-only"
-            onChange={handleInputChange}
-            aria-hidden="true"
-            tabIndex={-1}
-          />
-
-          {files.length > 0 && (
-            <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium">{files.length} file(s) selected</p>
-                <Button variant="ghost" size="sm" onClick={handleClear}>
-                  <X className="mr-1 h-4 w-4" />
-                  Clear
-                </Button>
-              </div>
-              <div className="max-h-32 space-y-1 overflow-auto">
-                {files.map((selectedFile) => (
-                  <div key={`${selectedFile.name}-${selectedFile.size}`} className="text-xs text-muted-foreground">
-                    {selectedFile.name} ({formatBytes(selectedFile.size)})
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {isProcessing && (
-            <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
-              <p className="text-sm font-medium">Processing files...</p>
-              <Progress value={overallProgress} />
-              <p className="text-xs text-muted-foreground">Overall: {overallProgress}%</p>
-              {currentFileLabel ? (
-                <>
-                  <p className="truncate text-xs text-muted-foreground">Current: {currentFileLabel}</p>
-                  <Progress value={currentFileProgress} />
-                  <p className="text-xs text-muted-foreground">Current file: {currentFileProgress}%</p>
-                </>
-              ) : null}
-            </div>
-          )}
-
-          {rows.length > 0 && (
-            <div className="space-y-2 rounded-lg border p-3">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium">Review extracted customers ({rows.length})</p>
-                <p className="text-xs text-muted-foreground">
-                  Valid selected: {selectedValidRows.length} | Invalid selected: {selectedInvalidCount}
-                </p>
-              </div>
-
-            <div className="max-h-[45vh] overflow-y-auto rounded-md border">
-              <Table className="min-w-[1120px] table-fixed">
-                <TableHeader className="sticky top-0 z-10 bg-background">
-                    <TableRow>
-                      <TableHead className="w-10">Use</TableHead>
-                    <TableHead className="w-24">Title</TableHead>
-                    <TableHead className="w-36">First</TableHead>
-                    <TableHead className="w-36">Last</TableHead>
-                    <TableHead className="w-80">Email</TableHead>
-                    <TableHead className="w-40">Phone</TableHead>
-                    <TableHead className="w-32">Country</TableHead>
-                    <TableHead className="w-56">Source</TableHead>
-                    <TableHead className="w-24">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {rows.map((row) => {
-                      const valid = isRowValid(row)
-                      return (
-                        <TableRow key={row.id} className={!valid ? "bg-destructive/5" : row.lowConfidence ? "bg-amber-50/50" : ""}>
-                          <TableCell className="w-10">
-                            <Checkbox
-                              checked={row.selected}
-                              onCheckedChange={(checked) => updateRow(row.id, { selected: checked === true })}
-                            />
-                          </TableCell>
-                          <TableCell className="w-24">
-                            <Input value={row.title} onChange={(e) => updateRow(row.id, { title: e.target.value })} className="h-8 w-full" />
-                          </TableCell>
-                          <TableCell className="w-36">
-                            <Input
-                              value={row.first_name}
-                              onChange={(e) => updateRow(row.id, { first_name: e.target.value })}
-                              className={cn("h-8 w-full", row.first_name.trim() ? "" : "border-destructive")}
-                            />
-                          </TableCell>
-                          <TableCell className="w-36">
-                            <Input
-                              value={row.last_name}
-                              onChange={(e) => updateRow(row.id, { last_name: e.target.value })}
-                              className={cn("h-8 w-full", row.last_name.trim() ? "" : "border-destructive")}
-                            />
-                          </TableCell>
-                          <TableCell className="w-80">
-                            <Input
-                              value={row.email}
-                              onChange={(e) => updateRow(row.id, { email: e.target.value.toLowerCase() })}
-                              className={cn("h-8 w-full", /^[\w.+-]+@[\w-]+\.[\w.-]+$/.test(row.email.trim()) ? "" : "border-destructive")}
-                            />
-                          </TableCell>
-                          <TableCell className="w-40">
-                            <Input value={row.phone} onChange={(e) => updateRow(row.id, { phone: e.target.value })} className="h-8 w-full" />
-                          </TableCell>
-                          <TableCell className="w-32">
-                            <Input value={row.country} onChange={(e) => updateRow(row.id, { country: e.target.value })} className="h-8 w-full" />
-                          </TableCell>
-                          <TableCell className="w-56 truncate text-xs text-muted-foreground" title={row.sourceLabel}>
-                            {row.sourceLabel}
-                          </TableCell>
-                          <TableCell className="w-24">
-                            <Button variant="ghost" size="sm" onClick={() => removeRow(row.id)}>
-                              Remove
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      )
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
-          )}
-
-          {result && (
-            <div className="space-y-1 rounded-lg border bg-muted/30 p-3">
-              <p className="text-sm font-medium">Import complete</p>
-              <p className="text-xs text-muted-foreground">
-                Inserted: {result.inserted} | Duplicates: {result.duplicates.length} | Invalid skipped: {result.skippedInvalid}
-              </p>
-              {result.duplicates.length > 0 ? (
-                <p className="break-all text-xs text-muted-foreground">Duplicate emails: {result.duplicates.join(", ")}</p>
-              ) : null}
-            </div>
-          )}
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label="CSV file drop area"
+        onClick={() => inputRef.current?.click()}
+        onKeyDown={(e) => e.key === "Enter" && inputRef.current?.click()}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={cn(
+          "flex cursor-pointer select-none flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed p-8 transition-colors",
+          isDragOver
+            ? "border-primary bg-primary/5"
+            : "border-border hover:border-primary/50 hover:bg-muted/40"
+        )}
+      >
+        <FileText className={cn("h-9 w-9 transition-colors", isDragOver ? "text-primary" : "text-muted-foreground")} />
+        <div className="text-center">
+          <p className="text-sm font-medium text-foreground">
+            {isDragOver ? "Release to drop CSV" : "Drag & drop your CSV file"}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Use the template for best results:{" "}
+            <a href="/customer-import-template.csv" download className="text-primary underline" onClick={(e) => e.stopPropagation()}>
+              Download template
+            </a>
+          </p>
         </div>
+      </div>
 
-        <DialogFooter>
-          <Button variant="outline" size="sm" onClick={() => handleOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={files.length === 0 || isProcessing}
-            onClick={handlePrepareRows}
-          >
-            {isProcessing ? "Processing..." : "Extract"}
-          </Button>
-          <Button
-            size="sm"
-            disabled={selectedValidRows.length === 0 || isSubmitting || isProcessing}
-            onClick={handleImport}
-          >
-            Import
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
+      <input
+        ref={inputRef}
+        type="file"
+        multiple={false}
+        accept=".csv,text/csv"
+        className="sr-only"
+        onChange={handleInputChange}
+        aria-hidden="true"
+        tabIndex={-1}
+      />
 
-export function CustomerImportDialogTrigger() {
-  const [open, setOpen] = useState(false)
-  return (
-    <>
-      <Button size="default" onClick={() => setOpen(true)}>
-        <Plus className="w-4 h-4 mr-2" />
-        Add Customer
-      </Button>
-      <CustomerImportDialog open={open} onOpenChange={setOpen} />
-    </>
+      {files.length > 0 && (
+        <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium">{files.length} file(s) selected</p>
+            <Button variant="ghost" size="sm" onClick={handleClear}>
+              <X className="mr-1 h-4 w-4" />
+              Clear
+            </Button>
+          </div>
+          <div className="max-h-32 space-y-1 overflow-auto">
+            {files.map((selectedFile) => (
+              <div key={`${selectedFile.name}-${selectedFile.size}`} className="text-xs text-muted-foreground">
+                {selectedFile.name} ({formatBytes(selectedFile.size)})
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {rows.length > 0 && (
+        <div className="space-y-2 rounded-lg border p-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium">Review extracted customers ({rows.length})</p>
+            <p className="text-xs text-muted-foreground">
+              Valid selected: {selectedValidRows.length} | Invalid selected: {selectedInvalidCount}
+            </p>
+          </div>
+
+          <div className="max-h-[45vh] overflow-y-auto rounded-md border">
+            <Table className="min-w-[1120px] table-fixed">
+              <TableHeader className="sticky top-0 z-10 bg-background">
+                <TableRow>
+                  <TableHead className="w-10">Use</TableHead>
+                  <TableHead className="w-24">Title</TableHead>
+                  <TableHead className="w-36">First</TableHead>
+                  <TableHead className="w-36">Last</TableHead>
+                  <TableHead className="w-80">Email</TableHead>
+                  <TableHead className="w-40">Phone</TableHead>
+                  <TableHead className="w-32">Country</TableHead>
+                  <TableHead className="w-56">Source</TableHead>
+                  <TableHead className="w-24">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((row) => {
+                  const valid = isRowValid(row)
+                  return (
+                    <TableRow key={row.id} className={!valid ? "bg-destructive/5" : ""}>
+                      <TableCell className="w-10">
+                        <Checkbox
+                          checked={row.selected}
+                          onCheckedChange={(checked) => updateRow(row.id, { selected: checked === true })}
+                        />
+                      </TableCell>
+                      <TableCell className="w-24">
+                        <Input value={row.title} onChange={(e) => updateRow(row.id, { title: e.target.value })} className="h-8 w-full" />
+                      </TableCell>
+                      <TableCell className="w-36">
+                        <Input
+                          value={row.first_name}
+                          onChange={(e) => updateRow(row.id, { first_name: e.target.value })}
+                          className={cn("h-8 w-full", row.first_name.trim() ? "" : "border-destructive")}
+                        />
+                      </TableCell>
+                      <TableCell className="w-36">
+                        <Input
+                          value={row.last_name}
+                          onChange={(e) => updateRow(row.id, { last_name: e.target.value })}
+                          className={cn("h-8 w-full", row.last_name.trim() ? "" : "border-destructive")}
+                        />
+                      </TableCell>
+                      <TableCell className="w-80">
+                        <Input
+                          value={row.email}
+                          onChange={(e) => updateRow(row.id, { email: e.target.value.toLowerCase() })}
+                          className={cn("h-8 w-full", /^[\w.+-]+@[\w-]+\.[\w.-]+$/.test(row.email.trim()) ? "" : "border-destructive")}
+                        />
+                      </TableCell>
+                      <TableCell className="w-40">
+                        <Input value={row.phone} onChange={(e) => updateRow(row.id, { phone: e.target.value })} className="h-8 w-full" />
+                      </TableCell>
+                      <TableCell className="w-32">
+                        <Input value={row.country} onChange={(e) => updateRow(row.id, { country: e.target.value })} className="h-8 w-full" />
+                      </TableCell>
+                      <TableCell className="w-56 truncate text-xs text-muted-foreground" title={row.sourceLabel}>
+                        {row.sourceLabel}
+                      </TableCell>
+                      <TableCell className="w-24">
+                        <Button variant="ghost" size="sm" onClick={() => removeRow(row.id)}>
+                          Remove
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      )}
+
+      {result && (
+        <div className="space-y-1 rounded-lg border bg-muted/30 p-3">
+          <p className="text-sm font-medium">Import complete</p>
+          <p className="text-xs text-muted-foreground">
+            Inserted: {result.inserted} | Duplicates: {result.duplicates.length} | Invalid skipped: {result.skippedInvalid}
+          </p>
+          {result.duplicates.length > 0 ? (
+            <p className="break-all text-xs text-muted-foreground">Duplicate emails: {result.duplicates.join(", ")}</p>
+          ) : null}
+        </div>
+      )}
+
+      <div className="flex items-center justify-end gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={files.length === 0 || isProcessing}
+          onClick={handlePrepareRows}
+        >
+          {isProcessing ? "Processing..." : "Extract Rows"}
+        </Button>
+        <Button
+          size="sm"
+          disabled={selectedValidRows.length === 0 || isSubmitting || isProcessing}
+          onClick={handleImport}
+        >
+          Import Customers
+        </Button>
+      </div>
+    </div>
   )
 }

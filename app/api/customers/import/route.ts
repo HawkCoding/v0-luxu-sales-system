@@ -13,10 +13,10 @@ const rowSchema = z.object({
 
 const payloadSchema = z.object({
   customers: z.array(rowSchema).min(1).max(1000),
-  mode: z.enum(["scan", "csv"]).optional(),
+  mode: z.literal("csv").optional(),
 })
 
-const allowedRoles = new Set(["admin", "manager", "consultant"])
+const allowedRoles = new Set(["admin", "manager"])
 
 export async function POST(req: Request) {
   const supabase = await createSessionClient()

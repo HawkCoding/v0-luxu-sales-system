@@ -11,7 +11,7 @@ interface RoleContextValue {
 
 const RoleContext = createContext<RoleContextValue | null>(null)
 
-const permissions: Record<string, Role[]> = {
+export const permissions: Record<string, Role[]> = {
   "view:dashboard": ["admin", "manager", "consultant", "readonly"],
   "view:pipeline": ["admin", "manager", "consultant", "readonly"],
   "edit:pipeline": ["admin", "manager", "consultant"],
@@ -20,7 +20,7 @@ const permissions: Record<string, Role[]> = {
   "view:jobs": ["admin", "manager", "consultant", "readonly"],
   "edit:jobs": ["admin", "manager", "consultant"],
   "view:customers": ["admin", "manager", "consultant", "readonly"],
-  "import:customers": ["admin", "manager", "consultant"],
+  "import:customers": ["admin", "manager"],
   "view:quotes": ["admin", "manager", "consultant", "readonly"],
   "edit:quotes": ["admin", "manager", "consultant"],
   "view:payments": ["admin", "manager", "consultant", "readonly"],
@@ -44,6 +44,11 @@ const permissions: Record<string, Role[]> = {
 
 const ROLE_STORAGE_KEY = "luxu_user_role"
 
+export function canRolePerform(role: Role, action: string) {
+  const allowed = permissions[action]
+  return allowed ? allowed.includes(role) : false
+}
+
 export function RoleProvider({ children }: { children: ReactNode }) {
   // Initialize from localStorage, fallback to consultant
   const [role, setRoleState] = useState<Role>(() => {
@@ -62,10 +67,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const can = (action: string) => {
-    const allowed = permissions[action]
-    return allowed ? allowed.includes(role) : false
-  }
+  const can = (action: string) => canRolePerform(role, action)
 
   return (
     <RoleContext.Provider value={{ role, setRole, can }}>
