@@ -20,6 +20,7 @@ const permissions: Record<string, Role[]> = {
   "view:jobs": ["admin", "manager", "consultant", "readonly"],
   "edit:jobs": ["admin", "manager", "consultant"],
   "view:customers": ["admin", "manager", "consultant", "readonly"],
+  "import:customers": ["admin", "manager", "consultant"],
   "view:quotes": ["admin", "manager", "consultant", "readonly"],
   "edit:quotes": ["admin", "manager", "consultant"],
   "view:payments": ["admin", "manager", "consultant", "readonly"],

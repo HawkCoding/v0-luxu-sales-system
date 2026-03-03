@@ -1,0 +1,51 @@
+# Package Manager — Always Use pnpm
+
+## Rule
+
+This project uses **pnpm exclusively**. Never run `npm install` or `yarn` in this project.
+
+## Installing dependencies
+
+Always use pnpm when adding or installing packages:
+
+```bash
+# Correct
+pnpm add tesseract.js pdfjs-dist
+pnpm install
+
+# NEVER do this — it only updates package-lock.json, not pnpm-lock.yaml
+npm install tesseract.js pdfjs-dist   # WRONG
+```
+
+## Why this matters
+
+Vercel CI runs `pnpm install --frozen-lockfile`. If `pnpm-lock.yaml` is out of sync with `package.json`, the build fails immediately. Using `npm install` silently updates `package-lock.json` but never touches `pnpm-lock.yaml`, causing this exact failure.
+
+## If pnpm is not available in the terminal
+
+Run this once to enable it:
+
+```bash
+npm install -g corepack@latest
+corepack enable
+# pnpm is now available
+pnpm add <package>
+```
+
+## Recovery (if npm install was accidentally used)
+
+If `npm install` was already run and `pnpm-lock.yaml` is stale, recover with:
+
+```bash
+pnpm import          # regenerates pnpm-lock.yaml from package-lock.json
+git add pnpm-lock.yaml
+git commit -m "fix: sync pnpm-lock.yaml"
+```
+
+## Verification before committing
+
+After adding any package, confirm both lockfiles are consistent:
+
+```bash
+Select-String "new-package-name" pnpm-lock.yaml   # must appear
+```
