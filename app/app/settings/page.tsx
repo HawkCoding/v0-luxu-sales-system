@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -15,7 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { RefreshCw, CheckCircle2, AlertCircle, Loader2, KeyRound } from "lucide-react"
+import { RefreshCw, CheckCircle2, AlertCircle, Loader2, KeyRound, Upload } from "lucide-react"
 import { useRole } from "@/lib/role-context"
 
 // ---------------------------------------------------------------------------
@@ -409,6 +410,25 @@ export default function SettingsPage() {
 
       {/* Supplier sync — only visible to admin and manager */}
       {can("sync:suppliers") && <SupplierSyncCard />}
+
+      {can("import:customers") && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Customer Data</CardTitle>
+            <CardDescription className="text-xs">
+              Import customer records in bulk using a CSV template.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild size="sm" className="gap-2">
+              <Link href="/app/settings/customer-import">
+                <Upload className="h-4 w-4" />
+                Bulk Import Customers
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {/* User management — admin only */}
       {can("manage:users") && <UserManagementCard />}
