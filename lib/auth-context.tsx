@@ -16,19 +16,7 @@ interface AuthContextValue {
   loginWithMicrosoft: () => Promise<boolean>
   loginWithPassword: (email: string, password: string) => Promise<boolean>
   requestPasswordReset: (email: string) => Promise<{ ok: boolean; error?: string }>
-  login: (name: string, password: string) => Promise<boolean>
   logout: () => void
-}
-
-// Internal email mapping — must match what you create in Supabase Auth dashboard.
-// Create these users at: Supabase Dashboard → Authentication → Users → Add User
-// Email: carmen@luxustravel.co.za  Password: <the user's PIN>
-const NAME_TO_EMAIL: Record<string, string> = {
-  Carmen: "carmen@luxustravel.co.za",
-  Leonie: "leonie@luxustravel.co.za",
-  Dirk: "dirk@luxustravel.co.za",
-  Monade: "monade@luxustravel.co.za",
-  Douwlien: "douwlien@luxustravel.co.za",
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -36,7 +24,6 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
-  const devAuthEnabled = process.env.NEXT_PUBLIC_DEV_AUTH === "true"
 
   const loadProfile = useCallback(async (userId: string, fallbackEmail: string) => {
     const supabase = getSupabase()
@@ -91,16 +78,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [loadProfile])
 
-  const login = async (name: string, password: string): Promise<boolean> => {
-    if (!devAuthEnabled) return false
-    const supabase = getSupabase()
-    const email = NAME_TO_EMAIL[name]
-    if (!email) return false
-
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    return !error
-  }
-
   const loginWithMicrosoft = async (): Promise<boolean> => {
     const supabase = getSupabase()
     const { error } = await supabase.auth.signInWithOAuth({
@@ -140,7 +117,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, loginWithMicrosoft, loginWithPassword, requestPasswordReset, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, loginWithMicrosoft, loginWithPassword, requestPasswordReset, logout }}>
       {children}
     </AuthContext.Provider>
   )
