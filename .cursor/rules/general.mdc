@@ -1,0 +1,53 @@
+---
+description: Core project stack, structure, and naming conventions for all work
+alwaysApply: true
+---
+
+# General Project Rules
+
+This project uses:
+
+- Next.js 16 App Router
+- React 19
+- TypeScript with `strict: true`
+- Supabase for auth and database access
+- Tailwind CSS v4
+- Shadcn UI components in `@/components/ui`
+- SWR for client-side data fetching
+- Zod for runtime validation
+- `pnpm` only for package management
+
+## Project Structure
+
+- There is no `src/` directory in this project.
+- Main directories live at the repo root: `app/`, `components/`, `lib/`, `hooks/`.
+- Use the `@/` path alias for imports from the project root.
+
+## Naming And Exports
+
+- Use kebab-case for file names.
+- Prefer named exports for components, utilities, and helpers.
+- Default exports are acceptable for Next.js route files such as `page.tsx`, `layout.tsx`, and `route.ts`.
+- Keep naming aligned with existing files such as `customer-import-dialog.tsx`, `job-quotes-tab.tsx`, and `use-data.ts`.
+
+## General Coding Style
+
+- Prefer concise, readable TypeScript over clever abstractions.
+- Prefer functional and declarative patterns over classes.
+- Reuse existing project patterns before introducing new ones.
+- Keep changes consistent with nearby files.
+- Prefer small focused helpers over large monolithic files.
+
+## React And Next.js Defaults
+
+- Prefer Server Components by default.
+- Add `"use client"` only when hooks, event handlers, browser APIs, or client-only libraries are required.
+- Prefer API routes plus SWR hooks for interactive data loading patterns already used in this codebase.
+
+## Reference Files
+
+- `@package.json`
+- `@app/app/layout.tsx`
+- `@lib/use-data.ts`
+- `@lib/supabase/client.ts`
+- `@lib/supabase/server.ts`

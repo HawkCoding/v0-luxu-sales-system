@@ -95,6 +95,45 @@ export interface Booking {
   updatedAt: string
 }
 
+export type SupplierKind = "train_operator" | "hotel_property" | "transfers"
+
+export const SUPPLIER_KIND_LABELS: Record<SupplierKind, string> = {
+  train_operator: "Train",
+  hotel_property: "Hotel",
+  transfers: "Transfers",
+}
+
+export interface SupplierPricingOption {
+  id: string
+  supplierId: string
+  name: string
+  singlePrice: number
+  doublePrice: number
+  familyPrice: number
+  currency: string
+  isPrimary: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface Supplier {
+  id: string
+  kind: SupplierKind
+  name: string
+  email: string | null
+  phone: string | null
+  website: string | null
+  location: string | null
+  notes: string | null
+  active: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SupplierDetail extends Supplier {
+  pricingOptions: SupplierPricingOption[]
+}
+
 // Legacy alias — kept so existing components that reference Job still compile
 export interface Job {
   id: string

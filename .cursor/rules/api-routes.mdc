@@ -1,0 +1,55 @@
+---
+description: API route conventions for auth, validation, and JSON responses
+globs:
+  - "app/api/**/*.ts"
+---
+
+# API Route Rules
+
+## Authentication And Authorization
+
+- Authenticate requests in protected routes with `createSessionClient()` and `supabase.auth.getUser()`.
+- Return `401` for unauthenticated requests.
+- Return `403` for authenticated users without sufficient access.
+- For role-restricted actions, check `profiles.clearance_level` server-side.
+
+## Validation
+
+- Validate request bodies, params, and other external input with Zod where practical.
+- Return `400` for invalid input.
+- Keep validation schemas close to the route or in a nearby `schemas` file.
+
+## Response Shape
+
+- Use `NextResponse.json()` for JSON responses.
+- Prefer a consistent error shape such as `{ error: string, details?: unknown }`.
+- Return clear, user-facing error messages without leaking secrets or internal implementation details.
+
+## Supabase Usage
+
+- Use `createSessionClient()` for user-scoped work.
+- Use `createServiceClient()` only when bypassing RLS is intentional and safe.
+- Check query errors before continuing to later operations.
+
+## Control Flow
+
+- Fail early on auth, permission, and validation issues.
+- Keep route handlers readable by extracting normalization or mapping helpers when logic grows.
+- Use `Promise.all` for independent queries when it improves clarity and latency.
+
+## Prefer
+
+- Early `401` and `403` returns
+- Zod-based parsing
+- Structured JSON success and error responses
+
+## Avoid
+
+- Trusting client-side role checks
+- Returning raw thrown errors to the client
+- Mixing auth, validation, normalization, and heavy business logic in one unstructured block
+
+## Reference Files
+
+- `@app/api/customers/import/route.ts`
+- `@lib/supabase/server.ts`

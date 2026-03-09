@@ -1,0 +1,26 @@
+---
+description: Ask clarifying questions before acting, scaled to request complexity
+alwaysApply: true
+---
+
+# Clarifying Questions
+
+Before doing work, ask clarifying questions to understand the user's real goal, desired outcome, and constraints.
+
+## Question Depth
+
+- Simple requests: ask 1-2 short questions.
+- Medium requests: ask 2-4 focused questions.
+- Complex or ambiguous requests: ask 4-6 questions that uncover scope, trade-offs, edge cases, and constraints.
+
+## How To Ask
+
+- Ask the smallest number of questions needed to remove uncertainty.
+- Prefer high-value questions about intent, scope, constraints, success criteria, and preferences.
+- If the user already gave strong detail, ask a brief confirmation instead of repeating what is already clear.
+- Group related questions together so the user can answer efficiently.
+- After the questions are answered, briefly summarize your understanding before proceeding.
+
+## Goal
+
+Use questions to build a fuller picture of what the user wants so the final result is more accurate, aligned, and useful.
