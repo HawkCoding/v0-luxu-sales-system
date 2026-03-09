@@ -91,7 +91,9 @@ export async function GET() {
       noOfSuites: b.no_of_suites,
       childAges: b.child_ages,
       routeId: b.route_id,
-      direction: (b.route as { name?: string } | null)?.name ?? null,
+      direction:
+        (b.route as { name?: string } | null)?.name ??
+        ((b.extracted_json as { historical_import?: { route?: string } } | null)?.historical_import?.route ?? null),
       rawText: b.raw_text,
       extractedJson: b.extracted_json,
       termsAccepted: b.terms_accepted,

@@ -28,6 +28,8 @@ export const permissions: Record<string, Role[]> = {
   "view:documents": ["admin", "manager", "consultant", "readonly"],
   "view:correspondence": ["admin", "manager", "consultant", "readonly"],
   "send:correspondence": ["admin", "manager", "consultant"],
+  "view:suppliers": ["admin", "manager", "consultant", "readonly"],
+  "edit:suppliers": ["admin", "manager"],
   "view:products": ["admin", "manager", "consultant", "readonly"],
   "edit:products": ["admin"],
   "view:templates": ["admin"],
@@ -38,7 +40,6 @@ export const permissions: Record<string, Role[]> = {
   "view:full_audit": ["manager"],
   "view:settings": ["admin", "manager"],
   "edit:settings": ["admin"],
-  "sync:suppliers": ["admin", "manager"],
   "manage:users": ["admin"],
 }
 

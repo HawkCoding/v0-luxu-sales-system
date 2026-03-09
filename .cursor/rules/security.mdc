@@ -1,0 +1,54 @@
+---
+description: Security guardrails for secrets, auth, authorization, and input validation
+alwaysApply: true
+---
+
+# Security Rules
+
+## Secrets
+
+- Never commit secrets, API keys, tokens, or `.env` files.
+- Never expose `SUPABASE_SERVICE_ROLE_KEY` to client code.
+- Keep service-role usage on the server only.
+
+## Authentication And Authorization
+
+- Protect sensitive routes and operations on the server.
+- Never rely on client-side role checks as the only access control.
+- Verify authenticated users with Supabase in server code before protected operations.
+- For restricted actions, check `profiles.clearance_level` or the relevant server-side authorization source.
+
+## Input Validation
+
+- Validate external input at API boundaries.
+- Prefer Zod for request validation and shape checking.
+- Reject invalid or suspicious input early.
+
+## Supabase And Data Access
+
+- Prefer RLS-aware access through `createSessionClient()` for user-scoped operations.
+- Use `createServiceClient()` only when bypassing RLS is intentional, necessary, and clearly server-only.
+- Avoid overly broad data access when a narrower query is enough.
+
+## Output And Error Safety
+
+- Do not leak internal stack traces, secrets, or infrastructure details in API responses.
+- Keep logs useful without exposing sensitive values.
+
+## Prefer
+
+- Server-side auth checks
+- Least-privilege access patterns
+- Explicitly validated inputs
+
+## Avoid
+
+- Browser-visible service credentials
+- Unprotected mutation routes
+- Trusting client-provided role or permission claims
+
+## Reference Files
+
+- `@lib/supabase/server.ts`
+- `@app/app/layout.tsx`
+- `@app/api/customers/import/route.ts`

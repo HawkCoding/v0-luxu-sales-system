@@ -1,6 +1,31 @@
 import { createServerClient } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
 
+const STALE_REFRESH_TOKEN_MESSAGES = [
+  "Invalid Refresh Token",
+  "Refresh Token Not Found",
+  "refresh_token_not_found",
+]
+
+function isStaleRefreshTokenError(error: unknown) {
+  if (!error) return false
+
+  const errorMessage =
+    typeof error === "object" && error !== null && "message" in error
+      ? String(error.message)
+      : String(error)
+
+  return STALE_REFRESH_TOKEN_MESSAGES.some((message) => errorMessage.includes(message))
+}
+
+function clearSupabaseCookies(request: NextRequest, response: NextResponse) {
+  request.cookies.getAll().forEach(({ name }) => {
+    if (name.startsWith("sb-")) {
+      response.cookies.delete(name)
+    }
+  })
+}
+
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
@@ -25,7 +50,28 @@ export async function proxy(request: NextRequest) {
 
   // Refresh expired Auth token — keeps user sessions alive.
   // Must not run any code between createServerClient and getUser that writes cookies.
-  await supabase.auth.getUser()
+  try {
+    const { data, error } = await supabase.auth.getUser()
+    if (request.nextUrl.pathname === "/login" && data.user) {
+      const redirectUrl = request.nextUrl.clone()
+      redirectUrl.pathname = "/app"
+      redirectUrl.search = ""
+
+      const redirectResponse = NextResponse.redirect(redirectUrl)
+      supabaseResponse.cookies.getAll().forEach((cookie) => {
+        redirectResponse.cookies.set(cookie)
+      })
+
+      return redirectResponse
+    }
+  } catch (error) {
+    if (isStaleRefreshTokenError(error)) {
+      clearSupabaseCookies(request, supabaseResponse)
+      return supabaseResponse
+    }
+
+    throw error
+  }
 
   return supabaseResponse
 }

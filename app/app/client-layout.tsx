@@ -18,6 +18,7 @@ import {
 import { useState, useEffect, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 import { useAllData } from "@/lib/use-data"
+import type { User } from "@/lib/auth-context"
 
 const navItems = [
   { label: "Dashboard", href: "/app", icon: LayoutDashboard, permission: "view:dashboard" },
@@ -25,7 +26,7 @@ const navItems = [
   { label: "Pipeline", href: "/app/pipeline", icon: Kanban, permission: "view:pipeline" },
   { label: "Bookings", href: "/app/bookings", icon: CalendarCheck, permission: "view:jobs" },
   { label: "Customers", href: "/app/customers", icon: Users, permission: "view:customers" },
-  { label: "Suppliers", href: "/app/suppliers", icon: Package, permission: "view:products" },
+  { label: "Suppliers", href: "/app/suppliers", icon: Package, permission: "view:suppliers" },
   { label: "Payments Rcvd", href: "/app/payments", icon: CreditCard, permission: "view:payments" },
   { label: "Documents", href: "/app/documents", icon: FolderOpen, permission: "view:documents" },
   { label: "Correspondence", href: "/app/correspondence", icon: Mail, permission: "view:correspondence" },
@@ -66,8 +67,8 @@ function AppShell({ children }: { children: ReactNode }) {
     }
   }, [user, role, setRole])
 
-  const handleLogout = () => {
-    logout()
+  const handleLogout = async () => {
+    await logout()
     router.push("/login")
   }
 
@@ -196,9 +197,9 @@ function AppShell({ children }: { children: ReactNode }) {
   )
 }
 
-export default function AppClientLayout({ children }: { children: ReactNode }) {
+export default function AppClientLayout({ children, initialUser }: { children: ReactNode; initialUser: User | null }) {
   return (
-    <AuthProvider>
+    <AuthProvider initialUser={initialUser}>
       <RoleProvider>
         <AppShell>{children}</AppShell>
       </RoleProvider>

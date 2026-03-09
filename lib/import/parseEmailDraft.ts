@@ -44,7 +44,7 @@ export function parseEmailDraft(text: string): ParsedDraft {
   
   // Extract email (high confidence if found)
   const emailMatch = text.match(/[\w.+-]+@[\w-]+\.[\w.-]+/)
-  const email = emailMatch?.[0] || ''
+  const email = emailMatch?.[0].replace(/[.,;:!?]+$/, "") || ''
   if (emailMatch) confidence['customer.email'] = 'high'
   
   // Extract phone (high confidence for SA patterns)
@@ -160,7 +160,7 @@ export function parseEmailDraft(text: string): ParsedDraft {
   
   // Extract suites
   let suites = 0
-  const suitesMatch = text.match(/(\d+)\s*suite/i)
+  const suitesMatch = text.match(/(\d+)\s+(?:[A-Za-z-]+\s+){0,3}suite/i)
   if (suitesMatch) {
     suites = parseInt(suitesMatch[1])
     confidence['guests.suites'] = 'high'

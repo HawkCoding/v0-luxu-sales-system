@@ -1,0 +1,57 @@
+---
+description: Next.js App Router patterns used throughout this project
+globs:
+  - "app/**/*.ts"
+  - "app/**/*.tsx"
+---
+
+# Next.js Patterns
+
+## Routing Model
+
+- Use the App Router only.
+- Follow Next.js file conventions such as `page.tsx`, `layout.tsx`, `route.ts`, `loading.tsx`, `error.tsx`, and `not-found.tsx`.
+- Do not introduce Pages Router patterns such as `pages/`, `getServerSideProps`, or `getStaticProps`.
+
+## Server And Client Components
+
+- Prefer Server Components by default.
+- Add `"use client"` only when the file needs hooks, event handlers, browser APIs, or client-only libraries.
+- Keep server-only logic out of Client Components.
+
+## Auth And Layouts
+
+- Follow the authenticated layout pattern already used in `@app/app/layout.tsx`.
+- Server layouts may call `createSessionClient()` and redirect unauthenticated users to `/login`.
+- Prefer route protection in server layouts and server code instead of relying on client redirects alone.
+
+## Data Fetching
+
+- For interactive app screens, prefer calling internal API routes and consuming them through SWR hooks.
+- Reuse patterns from `@lib/use-data.ts` before creating a new client data layer.
+- Keep fetchers simple and colocate reusable hooks in `lib/` or `hooks/` when they serve multiple screens.
+
+## Navigation And Assets
+
+- Use `next/link` for internal navigation.
+- Use Next.js-native primitives when appropriate.
+- Keep route segments and folders aligned with existing app structure.
+
+## Prefer
+
+- Server layout auth checks
+- SWR hooks for interactive pages
+- Client pages only when interactivity is required
+
+## Avoid
+
+- Adding `"use client"` to every page by default
+- Fetching Supabase directly from many unrelated Client Components when an API route already fits better
+- Introducing old Next.js router APIs
+
+## Reference Files
+
+- `@app/app/layout.tsx`
+- `@app/page.tsx`
+- `@app/login/page.tsx`
+- `@lib/use-data.ts`
