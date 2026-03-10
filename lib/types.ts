@@ -59,6 +59,7 @@ export interface Customer {
   phone: string | null
   country: string | null
   title?: string | null
+  notes?: string | null
   createdAt: string
   updatedAt?: string
 }
@@ -116,6 +117,83 @@ export interface SupplierPricingOption {
   updatedAt: string
 }
 
+export interface Location {
+  id: string
+  name: string
+  country: string
+  regionCode: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SupplierRoute {
+  id: string
+  packageId: string
+  name: string
+  originLocationId: string
+  destinationLocationId: string
+  active: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SupplierSuiteType {
+  id: string
+  packageId: string | null
+  name: string
+  active: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SupplierRateCard {
+  id: string
+  packageId: string
+  routeId: string | null
+  suiteTypeId: string
+  pricePerPerson: number
+  currency: string
+  validFrom: string
+  validTo: string | null
+  createdAt: string
+}
+
+export interface SupplierPackage {
+  id: string
+  supplierId: string
+  name: string
+  description: string | null
+  durationNights: number | null
+  singleSupplementPct: number
+  currency: string
+  active: boolean
+  createdAt: string
+  updatedAt: string
+  routes: SupplierRoute[]
+  suiteTypes: SupplierSuiteType[]
+  rateCards: SupplierRateCard[]
+}
+
+export interface SupplierSeasonalPrice {
+  id: string
+  periodId: string
+  optionId: string
+  singlePrice: number
+  doublePrice: number
+  familyPrice: number
+  createdAt: string
+}
+
+export interface SupplierSeasonalPeriod {
+  id: string
+  supplierId: string
+  label: string | null
+  validFrom: string
+  validTo: string
+  createdAt: string
+  prices: SupplierSeasonalPrice[]
+}
+
 export interface Supplier {
   id: string
   kind: SupplierKind
@@ -132,6 +210,9 @@ export interface Supplier {
 
 export interface SupplierDetail extends Supplier {
   pricingOptions: SupplierPricingOption[]
+  packages: SupplierPackage[]
+  seasonalPeriods: SupplierSeasonalPeriod[]
+  locations: Location[]
 }
 
 // Legacy alias — kept so existing components that reference Job still compile

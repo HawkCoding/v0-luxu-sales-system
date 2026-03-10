@@ -233,13 +233,24 @@ values
   ('00000000-0000-0000-0000-000000002006', 'Ivory Manor Boutique Hotel', 'hotel_property', 'reservations@ivorymanor.co.za', '+27121110000', 'https://www.ivorymanor.co.za', 'Pretoria', 'Luxury Pretoria stopover hotel.', true, '2025-08-10T08:05:00Z', '2025-08-10T08:05:00Z'),
   ('00000000-0000-0000-0000-000000002007', 'Zambezi Transfers', 'transfers', 'ops@zambezitransfers.com', '+263777100200', 'https://www.zambezitransfers.com', 'Victoria Falls', 'Airport transfer partner.', true, '2025-08-10T08:05:00Z', '2025-08-10T08:05:00Z');
 
-insert into public.packages (id, supplier_id, name, description, active, created_at, updated_at)
+insert into public.packages (
+  id,
+  supplier_id,
+  name,
+  description,
+  duration_nights,
+  single_supplement_pct,
+  currency,
+  active,
+  created_at,
+  updated_at
+)
 values
-  ('00000000-0000-0000-0000-000000003001', '00000000-0000-0000-0000-000000002001', 'Cape Town Classic', 'Three-night Rovos Rail journey between Pretoria and Cape Town.', true, '2025-08-10T08:10:00Z', '2025-08-10T08:10:00Z'),
-  ('00000000-0000-0000-0000-000000003002', '00000000-0000-0000-0000-000000002001', 'Victoria Falls Explorer', 'Four-night luxury rail journey to Victoria Falls.', true, '2025-08-10T08:10:00Z', '2025-08-10T08:10:00Z'),
-  ('00000000-0000-0000-0000-000000003003', '00000000-0000-0000-0000-000000002001', 'Durban Coastal Escape', 'Two-night Durban to Pretoria luxury rail journey.', true, '2025-08-10T08:10:00Z', '2025-08-10T08:10:00Z'),
-  ('00000000-0000-0000-0000-000000003004', '00000000-0000-0000-0000-000000002001', 'Namibia Desert Journey', 'Five-night luxury route between Pretoria and Swakopmund.', true, '2025-08-10T08:10:00Z', '2025-08-10T08:10:00Z'),
-  ('00000000-0000-0000-0000-000000003005', '00000000-0000-0000-0000-000000002001', 'East Africa Expedition', 'Cape Town to Dar es Salaam expedition.', true, '2025-08-10T08:10:00Z', '2025-08-10T08:10:00Z');
+  ('00000000-0000-0000-0000-000000003001', '00000000-0000-0000-0000-000000002001', 'Cape Town Classic', 'Three-night Rovos Rail journey between Pretoria and Cape Town.', 3, 50, 'ZAR', true, '2025-08-10T08:10:00Z', '2025-08-10T08:10:00Z'),
+  ('00000000-0000-0000-0000-000000003002', '00000000-0000-0000-0000-000000002001', 'Victoria Falls Explorer', 'Four-night luxury rail journey to Victoria Falls.', 4, 50, 'ZAR', true, '2025-08-10T08:10:00Z', '2025-08-10T08:10:00Z'),
+  ('00000000-0000-0000-0000-000000003003', '00000000-0000-0000-0000-000000002001', 'Durban Coastal Escape', 'Two-night Durban to Pretoria luxury rail journey.', 2, 50, 'ZAR', true, '2025-08-10T08:10:00Z', '2025-08-10T08:10:00Z'),
+  ('00000000-0000-0000-0000-000000003004', '00000000-0000-0000-0000-000000002001', 'Namibia Desert Journey', 'Eleven-night luxury route between Pretoria and Swakopmund.', 11, 50, 'ZAR', true, '2025-08-10T08:10:00Z', '2025-08-10T08:10:00Z'),
+  ('00000000-0000-0000-0000-000000003005', '00000000-0000-0000-0000-000000002001', 'East Africa Expedition', 'Sixteen-night Cape Town to Dar es Salaam expedition.', 16, 50, 'USD', true, '2025-08-10T08:10:00Z', '2025-08-10T08:10:00Z');
 
 insert into public.suite_types (id, name, package_id, active, created_at, updated_at)
 values
