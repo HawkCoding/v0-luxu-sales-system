@@ -71,6 +71,7 @@ export async function GET() {
       phone: c.phone,
       country: c.country,
       title: c.title,
+      notes: c.notes,
       createdAt: c.created_at,
       updatedAt: c.updated_at,
     })),
