@@ -3,13 +3,44 @@ import { z } from "zod"
 import { mapSupplier } from "@/lib/suppliers"
 import { allowedRoles, requireAuthenticatedUser } from "./helpers"
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const PHONE_PATTERN = /^[+\d\s()-]*$/
+const WEBSITE_PATTERN = /^\S+\.\S+$/
+
 const createSupplierSchema = z.object({
   kind: z.enum(["train_operator", "hotel_property", "transfers"]),
-  name: z.string().trim().min(1, "Supplier name is required").max(200),
-  email: z.string().trim().email().or(z.literal("")),
-  phone: z.string().trim().max(100),
-  website: z.string().trim().max(255),
-  location: z.string().trim().max(255),
+  name: z.string().trim().min(2, "Supplier name must be at least 2 characters").max(200),
+  email: z
+    .string()
+    .trim()
+    .max(255)
+    .refine((value) => value === "" || EMAIL_PATTERN.test(value), {
+      message: "Enter a valid email (e.g. name@example.com)",
+    }),
+  phone: z
+    .string()
+    .trim()
+    .max(100)
+    .refine((value) => value === "" || PHONE_PATTERN.test(value), {
+      message: "Phone can include digits, spaces, +, -, and parentheses only",
+    })
+    .refine((value) => value === "" || value.length >= 7, {
+      message: "Phone must be at least 7 characters",
+    }),
+  website: z
+    .string()
+    .trim()
+    .max(255)
+    .refine((value) => value === "" || WEBSITE_PATTERN.test(value), {
+      message: "Enter a valid website (e.g. example.com)",
+    }),
+  location: z
+    .string()
+    .trim()
+    .max(255)
+    .refine((value) => value === "" || value.length >= 2, {
+      message: "Location must be at least 2 characters",
+    }),
   notes: z.string().trim().max(5000),
 })
 
@@ -54,12 +85,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
-  let parsed: z.infer<typeof createSupplierSchema>
-  try {
-    parsed = createSupplierSchema.parse(await req.json())
-  } catch {
-    return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
+  const parsedResult = createSupplierSchema.safeParse(await req.json())
+  if (!parsedResult.success) {
+    return NextResponse.json(
+      {
+        error: "Invalid request payload",
+        details: parsedResult.error.flatten().fieldErrors,
+      },
+      { status: 400 },
+    )
   }
+  const parsed = parsedResult.data
 
   const { data: supplier, error } = await supabase
     .from("suppliers")

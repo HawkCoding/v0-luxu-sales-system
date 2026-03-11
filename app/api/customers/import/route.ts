@@ -128,8 +128,10 @@ export async function POST(req: Request) {
       )
       .select("id, email")
 
-    if (insertCustomersError || !insertedCustomers)
+    if (insertCustomersError || !insertedCustomers) {
+      console.error("customers insert error:", insertCustomersError)
       return NextResponse.json({ error: "Failed to import customers" }, { status: 500 })
+    }
 
     insertedCustomers.forEach((customer) => {
       customerIdsByEmail.set(customer.email.toLowerCase(), customer.id)
@@ -176,8 +178,10 @@ export async function POST(req: Request) {
     .insert(bookingRows.map((row) => row.insert))
     .select("id, extracted_json")
 
-  if (insertBookingsError || !insertedBookings)
+  if (insertBookingsError || !insertedBookings) {
+    console.error("bookings insert error:", insertBookingsError)
     return NextResponse.json({ error: "Failed to import historical bookings" }, { status: 500 })
+  }
 
   const bookingIdsByImportKey = new Map<string, string>()
   insertedBookings.forEach((booking) => {
@@ -207,8 +211,10 @@ export async function POST(req: Request) {
 
   if (suiteRows.length > 0) {
     const { error: insertSuitesError } = await supabase.from("booking_suites").insert(suiteRows)
-    if (insertSuitesError)
+    if (insertSuitesError) {
+      console.error("booking_suites insert error:", insertSuitesError)
       return NextResponse.json({ error: "Failed to import booking cabin details" }, { status: 500 })
+    }
   }
 
   const createdCustomers = customersToInsert.length

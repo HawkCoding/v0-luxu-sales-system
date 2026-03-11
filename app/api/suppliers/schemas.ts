@@ -1,5 +1,9 @@
 import { z } from "zod"
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const PHONE_PATTERN = /^[+\d\s()-]*$/
+const WEBSITE_PATTERN = /^\S+\.\S+$/
+
 export const dateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD")
@@ -68,12 +72,39 @@ export const packageSchema = z.object({
 })
 
 export const supplierSaveSchema = z.object({
-  name: z.string().trim().min(1, "Supplier name is required"),
+  name: z.string().trim().min(2, "Supplier name must be at least 2 characters").max(200),
   kind: z.enum(["train_operator", "hotel_property", "transfers"]),
-  email: z.string().trim().email().or(z.literal("")),
-  phone: z.string().trim().max(100),
-  website: z.string().trim().max(255),
-  location: z.string().trim().max(255),
+  email: z
+    .string()
+    .trim()
+    .max(255)
+    .refine((value) => value === "" || EMAIL_PATTERN.test(value), {
+      message: "Enter a valid email (e.g. name@example.com)",
+    }),
+  phone: z
+    .string()
+    .trim()
+    .max(100)
+    .refine((value) => value === "" || PHONE_PATTERN.test(value), {
+      message: "Phone can include digits, spaces, +, -, and parentheses only",
+    })
+    .refine((value) => value === "" || value.length >= 7, {
+      message: "Phone must be at least 7 characters",
+    }),
+  website: z
+    .string()
+    .trim()
+    .max(255)
+    .refine((value) => value === "" || WEBSITE_PATTERN.test(value), {
+      message: "Enter a valid website (e.g. example.com)",
+    }),
+  location: z
+    .string()
+    .trim()
+    .max(255)
+    .refine((value) => value === "" || value.length >= 2, {
+      message: "Location must be at least 2 characters",
+    }),
   notes: z.string().trim().max(5000),
   active: z.boolean(),
   pricingOptions: z.array(pricingOptionSchema).superRefine((options, ctx) => {

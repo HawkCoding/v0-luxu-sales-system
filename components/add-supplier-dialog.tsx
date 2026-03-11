@@ -40,6 +40,14 @@ interface CreateSupplierFormState {
   notes: string
 }
 
+type SupplierFormField = Exclude<keyof CreateSupplierFormState, "kind" | "notes">
+type SupplierFormErrors = Record<SupplierFormField, string | null>
+type SupplierFormTouched = Partial<Record<SupplierFormField, boolean>>
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const PHONE_PATTERN = /^[+\d\s()-]*$/
+const WEBSITE_PATTERN = /^\S+\.\S+$/
+
 function getInitialFormState(): CreateSupplierFormState {
   return {
     kind: "train_operator",
@@ -52,17 +60,73 @@ function getInitialFormState(): CreateSupplierFormState {
   }
 }
 
+function getInitialTouchedState(): SupplierFormTouched {
+  return {}
+}
+
+function validateSupplierForm(form: CreateSupplierFormState): SupplierFormErrors {
+  const name = form.name.trim()
+  const email = form.email.trim()
+  const phone = form.phone.trim()
+  const website = form.website.trim()
+  const location = form.location.trim()
+
+  return {
+    name:
+      name.length === 0
+        ? "Supplier name is required"
+        : name.length < 2
+          ? "Supplier name must be at least 2 characters"
+          : null,
+    email:
+      email.length > 0 && !EMAIL_PATTERN.test(email)
+        ? "Enter a valid email (e.g. name@example.com)"
+        : null,
+    phone:
+      phone.length > 0 && !PHONE_PATTERN.test(phone)
+        ? "Phone can include digits, spaces, +, -, and parentheses only"
+        : phone.length > 0 && phone.length < 7
+          ? "Phone must be at least 7 characters"
+          : null,
+    website:
+      website.length > 0 && !WEBSITE_PATTERN.test(website)
+        ? "Enter a valid website (e.g. example.com)"
+        : null,
+    location:
+      location.length > 0 && location.length < 2
+        ? "Location must be at least 2 characters"
+        : null,
+  }
+}
+
 export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps) {
   const router = useRouter()
   const { mutate } = useSWRConfig()
   const [isSaving, setIsSaving] = useState(false)
   const [form, setForm] = useState<CreateSupplierFormState>(getInitialFormState())
+  const [touched, setTouched] = useState<SupplierFormTouched>(getInitialTouchedState())
+  const errors = useMemo(() => validateSupplierForm(form), [form])
 
-  const canSubmit = useMemo(() => form.name.trim().length > 0, [form.name])
+  const canSubmit = useMemo(
+    () =>
+      errors.name === null &&
+      Object.entries(errors).every(
+        ([field, error]) => !error || !touched[field as SupplierFormField],
+      ),
+    [errors, touched],
+  )
+
+  const getFieldClassName = (field: SupplierFormField) =>
+    touched[field] && errors[field] ? "border-destructive focus-visible:ring-destructive" : undefined
 
   const resetForm = () => {
     setForm(getInitialFormState())
+    setTouched(getInitialTouchedState())
     setIsSaving(false)
+  }
+
+  const markFieldTouched = (field: SupplierFormField) => {
+    setTouched((current) => ({ ...current, [field]: true }))
   }
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -73,6 +137,21 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
   }
 
   const handleSubmit = async () => {
+    const validationErrors = validateSupplierForm(form)
+    const hasValidationErrors = Object.values(validationErrors).some((value) => value !== null)
+
+    if (hasValidationErrors) {
+      setTouched({
+        name: true,
+        email: true,
+        phone: true,
+        website: true,
+        location: true,
+      })
+      toast.error("Please fix the highlighted fields")
+      return
+    }
+
     if (!canSubmit) {
       toast.error("Supplier name is required")
       return
@@ -153,7 +232,12 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
                 setForm((current) => ({ ...current, name: event.target.value }))
               }
               placeholder="Enter supplier name"
+              className={getFieldClassName("name")}
+              onBlur={() => markFieldTouched("name")}
             />
+            {touched.name && errors.name ? (
+              <p className="text-xs text-destructive">{errors.name}</p>
+            ) : null}
           </div>
 
           <div className="space-y-2">
@@ -166,7 +250,12 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
                 setForm((current) => ({ ...current, email: event.target.value }))
               }
               placeholder="supplier@example.com"
+              className={getFieldClassName("email")}
+              onBlur={() => markFieldTouched("email")}
             />
+            {touched.email && errors.email ? (
+              <p className="text-xs text-destructive">{errors.email}</p>
+            ) : null}
           </div>
 
           <div className="space-y-2">
@@ -178,7 +267,12 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
                 setForm((current) => ({ ...current, phone: event.target.value }))
               }
               placeholder="+27 ..."
+              className={getFieldClassName("phone")}
+              onBlur={() => markFieldTouched("phone")}
             />
+            {touched.phone && errors.phone ? (
+              <p className="text-xs text-destructive">{errors.phone}</p>
+            ) : null}
           </div>
 
           <div className="space-y-2">
@@ -190,7 +284,12 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
                 setForm((current) => ({ ...current, website: event.target.value }))
               }
               placeholder="https://..."
+              className={getFieldClassName("website")}
+              onBlur={() => markFieldTouched("website")}
             />
+            {touched.website && errors.website ? (
+              <p className="text-xs text-destructive">{errors.website}</p>
+            ) : null}
           </div>
 
           <div className="space-y-2">
@@ -202,7 +301,12 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
                 setForm((current) => ({ ...current, location: event.target.value }))
               }
               placeholder="City or region"
+              className={getFieldClassName("location")}
+              onBlur={() => markFieldTouched("location")}
             />
+            {touched.location && errors.location ? (
+              <p className="text-xs text-destructive">{errors.location}</p>
+            ) : null}
           </div>
 
           <div className="space-y-2 md:col-span-2">
