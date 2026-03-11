@@ -46,6 +46,63 @@ export async function GET(
   )
 }
 
+export async function DELETE(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const auth = await requireAuthenticatedUser()
+  if ("error" in auth) {
+    return auth.error
+  }
+
+  const { supabase, user } = auth
+  const { id } = await params
+
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("clearance_level")
+    .eq("user_id", user.id)
+    .single()
+
+  if (profileError || !profile || profile.clearance_level !== "admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
+
+  const { count: bookingsCount, error: bookingsError } = await supabase
+    .from("bookings")
+    .select("id", { count: "exact", head: true })
+    .eq("hotel_supplier_id", id)
+
+  if (bookingsError) {
+    return NextResponse.json(
+      { error: "Failed to validate supplier deletion" },
+      { status: 500 },
+    )
+  }
+
+  if ((bookingsCount ?? 0) > 0) {
+    return NextResponse.json(
+      { error: "Cannot delete supplier with existing bookings" },
+      { status: 409 },
+    )
+  }
+
+  const { error: deleteError } = await supabase.from("suppliers").delete().eq("id", id)
+
+  if (deleteError) {
+    if (deleteError.code === "23503") {
+      return NextResponse.json(
+        { error: "Cannot delete supplier with existing bookings" },
+        { status: 409 },
+      )
+    }
+
+    return NextResponse.json({ error: "Failed to delete supplier" }, { status: 500 })
+  }
+
+  return new NextResponse(null, { status: 204 })
+}
+
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },

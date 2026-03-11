@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
 import { useSWRConfig } from "swr"
 import {
@@ -16,6 +17,17 @@ import {
   Trash2,
 } from "lucide-react"
 import { toast } from "sonner"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -952,13 +964,16 @@ export function SupplierDetailView({
   supplierId,
   presentation = "page",
 }: SupplierDetailViewProps) {
+  const router = useRouter()
   const { data, isLoading, mutate: mutateDetail } = useSupplierDetail(supplierId)
   const { data: allLocations = [] } = useLocations()
   const { mutate } = useSWRConfig()
   const { can } = useRole()
   const canEdit = can("edit:suppliers")
+  const canDelete = can("delete:suppliers")
   const [isEditing, setIsEditing] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [form, setForm] = useState<SupplierFormState | null>(null)
 
   const supplier = data && !("error" in data) ? data : null
@@ -1506,6 +1521,41 @@ export function SupplierDetailView({
     }
   }
 
+  const handleDelete = async () => {
+    setIsDeleting(true)
+    try {
+      const response = await fetch(`/api/suppliers/${supplierId}`, {
+        method: "DELETE",
+      })
+
+      if (!response.ok) {
+        let message = "Failed to delete supplier"
+        try {
+          const payload = (await response.json()) as { error?: string }
+          message = payload.error ?? message
+        } catch {
+          // No JSON payload to parse.
+        }
+
+        if (response.status === 409) {
+          toast.error("This supplier has existing bookings and cannot be deleted.")
+          return
+        }
+
+        toast.error(message)
+        return
+      }
+
+      await mutate("/api/suppliers")
+      toast.success("Supplier deleted successfully")
+      router.push("/app/suppliers")
+    } catch {
+      toast.error("Failed to delete supplier")
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
   if (isLoading) {
     return <SupplierDetailSkeleton presentation={presentation} />
   }
@@ -1559,11 +1609,41 @@ export function SupplierDetailView({
             </div>
           </div>
 
-        <div
-          className={`flex items-center gap-2${
-            presentation === "modal" ? " mr-10 sm:mr-12" : ""
-          }`}
-        >
+          <div
+            className={`flex items-center gap-2${
+              presentation === "modal" ? " mr-10 sm:mr-12" : ""
+            }`}
+          >
+            {canDelete && !isEditing && (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="destructive" disabled={isDeleting}>
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    {isDeleting ? "Deleting..." : "Delete supplier"}
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete supplier?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will permanently delete <strong>{supplier.name}</strong> and all
+                      related supplier records. This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={handleDelete}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      disabled={isDeleting}
+                    >
+                      {isDeleting ? "Deleting..." : "Delete supplier"}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+
             {canEdit && !isEditing && (
             <Button variant="secondary" onClick={() => setIsEditing(true)}>
                 <Pencil className="mr-2 h-4 w-4" />

@@ -31,6 +31,7 @@ export const permissions: Record<string, Role[]> = {
   "send:correspondence": ["admin", "manager", "consultant"],
   "view:suppliers": ["admin", "manager", "consultant", "readonly"],
   "edit:suppliers": ["admin", "manager"],
+  "delete:suppliers": ["admin"],
   "view:products": ["admin", "manager", "consultant", "readonly"],
   "edit:products": ["admin"],
   "view:templates": ["admin"],
