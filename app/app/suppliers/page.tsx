@@ -29,7 +29,7 @@ export default function SuppliersPage() {
   const canEdit = can("edit:suppliers")
 
   const filteredSuppliers = useMemo(() => {
-    if (!suppliers) return []
+    if (!Array.isArray(suppliers)) return []
 
     const normalizedSearch = search.trim().toLowerCase()
     if (!normalizedSearch) return suppliers

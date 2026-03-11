@@ -432,7 +432,7 @@ function PackageRateCardMatrix({
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="min-w-full text-sm">
                 <thead className="bg-secondary/20">
                   <tr className="border-b">
                     <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -441,7 +441,7 @@ function PackageRateCardMatrix({
                     {routeColumns.map((route) => (
                       <th
                         key={route?.id ?? "all-routes"}
-                        className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                        className="whitespace-nowrap px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
                       >
                         {route
                           ? `${getLocationName(
@@ -636,7 +636,7 @@ function RateCardMatrixEditor({
               </div>
 
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="min-w-full text-sm">
                   <thead className="bg-secondary/20">
                     <tr className="border-b">
                       <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -645,7 +645,7 @@ function RateCardMatrixEditor({
                       {routeColumns.map((route) => (
                         <th
                           key={route?.id ?? "all-routes"}
-                          className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                          className="whitespace-nowrap px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
                         >
                           {route
                             ? `${getLocationName(
