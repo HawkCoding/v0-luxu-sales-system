@@ -969,69 +969,6 @@ export function SupplierDetailView({
     }
   }, [supplier])
 
-  useEffect(() => {
-    if (!supplier) {
-      return
-    }
-
-    // #region agent log
-    fetch("http://127.0.0.1:7760/ingest/190e3c6f-5c67-4716-9b18-f74edd436915", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "e4c9c7",
-      },
-      body: JSON.stringify({
-        sessionId: "e4c9c7",
-        runId: "initial-repro",
-        hypothesisId: "H1",
-        location: "components/supplier-detail-view.tsx:688",
-        message: "Supplier detail view reached runtime",
-        data: {
-          supplierId,
-          packageCount: supplier.packages.length,
-          locationCount: supplier.locations.length,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {})
-    // #endregion
-  }, [supplier, supplierId])
-
-  useEffect(() => {
-    if (!supplier) {
-      return
-    }
-
-    const routeBadgeCount = supplier.packages.reduce((count, pkg) => count + pkg.routes.length, 0)
-    if (routeBadgeCount === 0) {
-      return
-    }
-
-    // #region agent log
-    fetch("http://127.0.0.1:7760/ingest/190e3c6f-5c67-4716-9b18-f74edd436915", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "e4c9c7",
-      },
-      body: JSON.stringify({
-        sessionId: "e4c9c7",
-        runId: "initial-repro",
-        hypothesisId: "H4",
-        location: "components/supplier-detail-view.tsx:711",
-        message: "Supplier routes ready to render",
-        data: {
-          supplierId,
-          packageCount: supplier.packages.length,
-          routeBadgeCount,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {})
-    // #endregion
-  }, [supplier, supplierId])
-
   const locations = allLocations.length > 0 ? allLocations : supplier?.locations ?? []
 
   const locationsById = useMemo(
