@@ -66,6 +66,73 @@ export async function queryExistingIds(
   return (data ?? []).map((row) => row.id)
 }
 
+interface SupplierDeletionDependencyCheckInput {
+  packageIds: string[]
+  routeIds: string[]
+  suiteTypeIds: string[]
+}
+
+export async function getSupplierDeletionBlocker(
+  supabase: SessionClient,
+  input: SupplierDeletionDependencyCheckInput,
+): Promise<string | null> {
+  const { packageIds, routeIds, suiteTypeIds } = input
+
+  if (packageIds.length > 0) {
+    const [{ count: bookingCount, error: bookingError }, { count: offersCount, error: offersError }] =
+      await Promise.all([
+        supabase
+          .from("bookings")
+          .select("id", { count: "exact", head: true })
+          .in("package_id", packageIds),
+        supabase
+          .from("hotel_offers")
+          .select("id", { count: "exact", head: true })
+          .in("package_id", packageIds),
+      ])
+
+    if (bookingError || offersError) {
+      throw new Error("Failed to validate package dependencies")
+    }
+
+    if ((bookingCount ?? 0) > 0 || (offersCount ?? 0) > 0) {
+      return "Cannot remove package records linked to existing bookings or offers."
+    }
+  }
+
+  if (routeIds.length > 0) {
+    const { count: routeBookingCount, error: routeBookingError } = await supabase
+      .from("bookings")
+      .select("id", { count: "exact", head: true })
+      .in("route_id", routeIds)
+
+    if (routeBookingError) {
+      throw new Error("Failed to validate route dependencies")
+    }
+
+    if ((routeBookingCount ?? 0) > 0) {
+      return "Cannot remove route records linked to existing bookings."
+    }
+  }
+
+  if (suiteTypeIds.length > 0) {
+    const { count: suiteTypeBookingCount, error: suiteTypeBookingError } = await supabase
+      .from("booking_suites")
+      .select("id", { count: "exact", head: true })
+      .in("suite_type_id", suiteTypeIds)
+
+    if (suiteTypeBookingError) {
+      throw new Error("Failed to validate suite type dependencies")
+    }
+
+    if ((suiteTypeBookingCount ?? 0) > 0) {
+      return "Cannot remove suite type records linked to existing bookings."
+    }
+  }
+
+  return null
+}
+
 export async function loadSupplierDetail(supabase: SessionClient, id: string) {
   const [
     { data: supplier, error: supplierError },
