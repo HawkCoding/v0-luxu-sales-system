@@ -1,7 +1,16 @@
 export type Role = "admin" | "manager" | "consultant" | "readonly"
 
 export type Purpose = "quote" | "availability" | "reservation"
-export type Source = "web_form" | "paste_import"
+export type Source =
+  | "web_form"
+  | "paste_import"
+  | "advertisement"
+  | "walk_in"
+  | "referral"
+  | "social_media"
+  | "phone_call"
+  | "email"
+  | "travel_agent"
 
 export type ConsultantAbbreviation = "LB" | "CDJ" | "DR" | "MVE" | "DL"
 

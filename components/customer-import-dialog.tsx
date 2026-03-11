@@ -5,12 +5,22 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { FileText, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { mutate } from "swr"
 
-type ImportSource = "web_form" | "paste_import"
+type ImportSource =
+  | "web_form"
+  | "paste_import"
+  | "advertisement"
+  | "walk_in"
+  | "referral"
+  | "social_media"
+  | "phone_call"
+  | "email"
+  | "travel_agent"
 
 interface EditableImportRow {
   id: string
@@ -64,7 +74,45 @@ const BOOKING_HEADERS = [
   "cabin_type",
 ] as const
 const REQUIRED_HEADERS = [...CUSTOMER_HEADERS, ...BOOKING_HEADERS]
-const VALID_SOURCES: ImportSource[] = ["web_form", "paste_import"]
+const VALID_SOURCES: ImportSource[] = [
+  "web_form",
+  "paste_import",
+  "advertisement",
+  "walk_in",
+  "referral",
+  "social_media",
+  "phone_call",
+  "email",
+  "travel_agent",
+]
+type FieldHintKey =
+  | "first_name"
+  | "last_name"
+  | "email"
+  | "booking_reference"
+  | "departure_date"
+  | "route"
+  | "consultant"
+  | "source"
+  | "adults"
+  | "children"
+  | "suites"
+  | "cabin_type"
+
+const FIELD_HINTS: Record<FieldHintKey, string> = {
+  first_name: "Required. Example: John",
+  last_name: "Required. Example: Smith",
+  email: "Valid email required. Example: john@example.com",
+  booking_reference: "Required. Example: BK-20250301-001",
+  departure_date: "Date in YYYY-MM-DD format. Example: 2025-06-15",
+  route: "Required. Example: Pretoria to Cape Town",
+  consultant: "Required. Example: JD",
+  source: `Must be one of: ${VALID_SOURCES.join(", ")}`,
+  adults: "Whole number, 0 or more. Example: 2",
+  children: "Whole number, 0 or more. Example: 1",
+  suites: "Whole number, 1 or more. Example: 1",
+  cabin_type: "Required. Example: Deluxe Suite",
+}
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -116,6 +164,13 @@ function normalizeImportSource(value: string): string {
   const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_")
   if (normalized === "web" || normalized === "webform") return "web_form"
   if (normalized === "paste" || normalized === "manual_import" || normalized === "csv_import" || normalized === "csv") return "paste_import"
+  if (normalized === "ad" || normalized === "ads" || normalized === "advert" || normalized === "advertising") return "advertisement"
+  if (normalized === "walkin" || normalized === "walk_in_client" || normalized === "walk_in_customer") return "walk_in"
+  if (normalized === "referal" || normalized === "word_of_mouth") return "referral"
+  if (normalized === "social" || normalized === "socials" || normalized === "socials_media") return "social_media"
+  if (normalized === "phone" || normalized === "call" || normalized === "telephone") return "phone_call"
+  if (normalized === "mail" || normalized === "email_enquiry" || normalized === "email_inquiry") return "email"
+  if (normalized === "agent" || normalized === "travelagency" || normalized === "travel_agency") return "travel_agent"
   return normalized
 }
 
@@ -141,6 +196,22 @@ function isRowValid(row: EditableImportRow): boolean {
 function newRowId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID()
   return `${Date.now()}-${Math.random()}`
+}
+
+interface ValidatedInputProps extends React.ComponentProps<typeof Input> {
+  isValid: boolean
+  hint?: string
+}
+
+function ValidatedInput({ isValid, hint, className, ...inputProps }: ValidatedInputProps) {
+  const input = <Input {...inputProps} className={cn(className, isValid ? "" : "border-destructive")} />
+  if (isValid || !hint) return input
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{input}</TooltipTrigger>
+      <TooltipContent side="top">{hint}</TooltipContent>
+    </Tooltip>
+  )
 }
 
 export function CustomerBulkImportPanel() {
@@ -478,24 +549,30 @@ export function CustomerBulkImportPanel() {
                         <Input value={row.title} onChange={(e) => updateRow(row.id, { title: e.target.value })} className="h-8 w-full" />
                       </TableCell>
                       <TableCell className="w-36">
-                        <Input
+                        <ValidatedInput
                           value={row.first_name}
                           onChange={(e) => updateRow(row.id, { first_name: e.target.value })}
-                          className={cn("h-8 w-full", row.first_name.trim() ? "" : "border-destructive")}
+                          isValid={row.first_name.trim().length > 0}
+                          hint={FIELD_HINTS.first_name}
+                          className="h-8 w-full"
                         />
                       </TableCell>
                       <TableCell className="w-36">
-                        <Input
+                        <ValidatedInput
                           value={row.last_name}
                           onChange={(e) => updateRow(row.id, { last_name: e.target.value })}
-                          className={cn("h-8 w-full", row.last_name.trim() ? "" : "border-destructive")}
+                          isValid={row.last_name.trim().length > 0}
+                          hint={FIELD_HINTS.last_name}
+                          className="h-8 w-full"
                         />
                       </TableCell>
                       <TableCell className="w-72">
-                        <Input
+                        <ValidatedInput
                           value={row.email}
                           onChange={(e) => updateRow(row.id, { email: e.target.value.toLowerCase() })}
-                          className={cn("h-8 w-full", isEmail(row.email) ? "" : "border-destructive")}
+                          isValid={isEmail(row.email)}
+                          hint={FIELD_HINTS.email}
+                          className="h-8 w-full"
                         />
                       </TableCell>
                       <TableCell className="w-40">
@@ -505,67 +582,85 @@ export function CustomerBulkImportPanel() {
                         <Input value={row.country} onChange={(e) => updateRow(row.id, { country: e.target.value })} className="h-8 w-full" />
                       </TableCell>
                       <TableCell className="w-32">
-                        <Input
+                        <ValidatedInput
                           value={row.booking_reference}
                           onChange={(e) => updateRow(row.id, { booking_reference: e.target.value })}
-                          className={cn("h-8 w-full", row.booking_reference.trim() ? "" : "border-destructive")}
+                          isValid={row.booking_reference.trim().length > 0}
+                          hint={FIELD_HINTS.booking_reference}
+                          className="h-8 w-full"
                         />
                       </TableCell>
                       <TableCell className="w-32">
-                        <Input
+                        <ValidatedInput
                           value={row.departure_date}
                           onChange={(e) => updateRow(row.id, { departure_date: e.target.value })}
                           placeholder="YYYY-MM-DD"
-                          className={cn("h-8 w-full", isIsoDate(row.departure_date) ? "" : "border-destructive")}
+                          isValid={isIsoDate(row.departure_date)}
+                          hint={FIELD_HINTS.departure_date}
+                          className="h-8 w-full"
                         />
                       </TableCell>
                       <TableCell className="w-64">
-                        <Input
+                        <ValidatedInput
                           value={row.route}
                           onChange={(e) => updateRow(row.id, { route: e.target.value })}
-                          className={cn("h-8 w-full", row.route.trim() ? "" : "border-destructive")}
+                          isValid={row.route.trim().length > 0}
+                          hint={FIELD_HINTS.route}
+                          className="h-8 w-full"
                         />
                       </TableCell>
                       <TableCell className="w-24">
-                        <Input
+                        <ValidatedInput
                           value={row.consultant}
                           onChange={(e) => updateRow(row.id, { consultant: e.target.value.toUpperCase() })}
-                          className={cn("h-8 w-full", row.consultant.trim() ? "" : "border-destructive")}
+                          isValid={row.consultant.trim().length > 0}
+                          hint={FIELD_HINTS.consultant}
+                          className="h-8 w-full"
                         />
                       </TableCell>
                       <TableCell className="w-28">
-                        <Input
+                        <ValidatedInput
                           value={row.source}
                           onChange={(e) => updateRow(row.id, { source: normalizeImportSource(e.target.value) })}
-                          className={cn("h-8 w-full", VALID_SOURCES.includes(row.source.trim() as ImportSource) ? "" : "border-destructive")}
+                          isValid={VALID_SOURCES.includes(row.source.trim() as ImportSource)}
+                          hint={FIELD_HINTS.source}
+                          className="h-8 w-full"
                         />
                       </TableCell>
                       <TableCell className="w-20">
-                        <Input
+                        <ValidatedInput
                           value={row.adults}
                           onChange={(e) => updateRow(row.id, { adults: e.target.value })}
-                          className={cn("h-8 w-full", isNonNegativeInteger(row.adults) ? "" : "border-destructive")}
+                          isValid={isNonNegativeInteger(row.adults)}
+                          hint={FIELD_HINTS.adults}
+                          className="h-8 w-full"
                         />
                       </TableCell>
                       <TableCell className="w-20">
-                        <Input
+                        <ValidatedInput
                           value={row.children}
                           onChange={(e) => updateRow(row.id, { children: e.target.value })}
-                          className={cn("h-8 w-full", isNonNegativeInteger(row.children) ? "" : "border-destructive")}
+                          isValid={isNonNegativeInteger(row.children)}
+                          hint={FIELD_HINTS.children}
+                          className="h-8 w-full"
                         />
                       </TableCell>
                       <TableCell className="w-20">
-                        <Input
+                        <ValidatedInput
                           value={row.suites}
                           onChange={(e) => updateRow(row.id, { suites: e.target.value })}
-                          className={cn("h-8 w-full", isPositiveInteger(row.suites) ? "" : "border-destructive")}
+                          isValid={isPositiveInteger(row.suites)}
+                          hint={FIELD_HINTS.suites}
+                          className="h-8 w-full"
                         />
                       </TableCell>
                       <TableCell className="w-40">
-                        <Input
+                        <ValidatedInput
                           value={row.cabin_type}
                           onChange={(e) => updateRow(row.id, { cabin_type: e.target.value })}
-                          className={cn("h-8 w-full", row.cabin_type.trim() ? "" : "border-destructive")}
+                          isValid={row.cabin_type.trim().length > 0}
+                          hint={FIELD_HINTS.cabin_type}
+                          className="h-8 w-full"
                         />
                       </TableCell>
                       <TableCell className="w-56 truncate text-xs text-muted-foreground" title={row.sourceLabel}>
