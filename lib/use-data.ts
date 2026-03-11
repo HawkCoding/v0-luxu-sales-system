@@ -1,7 +1,7 @@
 "use client"
 
 import useSWR from "swr"
-import type { Supplier, SupplierDetail } from "@/lib/types"
+import type { Booking, Customer, Location, Supplier, SupplierDetail } from "@/lib/types"
 
 const fetcher = (url: string) => fetch(url).then(r => r.json())
 
@@ -33,4 +33,26 @@ export function useSupplierDetail(id: string) {
     fetcher,
     { revalidateOnFocus: false },
   )
+}
+
+export function useCustomerDetail(id: string) {
+  return useSWR<
+    | {
+        customer: Customer
+        bookings: Array<
+          Pick<Booking, "id" | "bookingNumber" | "stage" | "consultant" | "departureDate" | "createdAt"> & {
+            direction: string | null
+          }
+        >
+      }
+    | { error: string }
+  >(id ? `/api/customers/${id}` : null, fetcher, {
+    revalidateOnFocus: false,
+  })
+}
+
+export function useLocations() {
+  return useSWR<Location[]>("/api/locations", fetcher, {
+    revalidateOnFocus: false,
+  })
 }

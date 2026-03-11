@@ -8,12 +8,16 @@ import {
   Mail,
   MapPin,
   Phone,
+  Plus,
   Search,
 } from "lucide-react"
+import { AddSupplierDialog } from "@/components/add-supplier-dialog"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { useRole } from "@/lib/role-context"
+import { cn } from "@/lib/utils"
 import { useSuppliers } from "@/lib/use-data"
 import { SUPPLIER_KIND_LABELS } from "@/lib/types"
 
@@ -21,6 +25,7 @@ export default function SuppliersPage() {
   const { data: suppliers, isLoading } = useSuppliers()
   const { can } = useRole()
   const [search, setSearch] = useState("")
+  const [addOpen, setAddOpen] = useState(false)
   const canEdit = can("edit:suppliers")
 
   const filteredSuppliers = useMemo(() => {
@@ -67,17 +72,25 @@ export default function SuppliersPage() {
 
   return (
     <div className="p-6 space-y-6 max-w-6xl">
-      <div className="space-y-2">
-        <h1 className="text-3xl font-semibold tracking-tight text-foreground">
-          Suppliers
-        </h1>
-        <p className="text-base text-muted-foreground">
-          Open a supplier to review pricing and company information.{" "}
-          {canEdit
-            ? "Managers and admins can edit supplier details and pricing."
-            : "Editing is restricted to managers and admins."}{" "}
-          {suppliers.length} suppliers loaded.
-        </p>
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-3xl font-semibold tracking-tight text-foreground">
+            Suppliers
+          </h1>
+          <p className="text-base text-muted-foreground mt-2">
+            Open a supplier to review pricing and company information.{" "}
+            {canEdit
+              ? "Managers and admins can edit supplier details and pricing."
+              : "Editing is restricted to managers and admins."}{" "}
+            {suppliers.length} suppliers loaded.
+          </p>
+        </div>
+        {canEdit && (
+          <Button size="default" className="flex-shrink-0" onClick={() => setAddOpen(true)}>
+            <Plus className="w-4 h-4 mr-2" />
+            Add Supplier
+          </Button>
+        )}
       </div>
 
       <div className="relative max-w-md">
@@ -109,7 +122,12 @@ export default function SuppliersPage() {
               <div className="grid gap-4 lg:grid-cols-2">
                 {group.map((supplier) => (
                   <Link key={supplier.id} href={`/app/suppliers/${supplier.id}`}>
-                    <Card className="h-full border-2 transition-colors hover:border-primary/40 hover:bg-secondary/20">
+                    <Card
+                      className={cn(
+                        "h-full border-2 transition-colors hover:border-primary/40 hover:bg-secondary/20",
+                        !supplier.active && "opacity-50 grayscale",
+                      )}
+                    >
                       <CardHeader className="pb-3">
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex items-start gap-3 min-w-0">
@@ -179,6 +197,8 @@ export default function SuppliersPage() {
           </Card>
         )}
       </div>
+
+      <AddSupplierDialog open={addOpen} onOpenChange={setAddOpen} />
     </div>
   )
 }
