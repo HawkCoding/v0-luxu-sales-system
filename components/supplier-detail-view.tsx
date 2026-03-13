@@ -1357,7 +1357,7 @@ export function SupplierDetailView({
   }
 
   const handleSave = async () => {
-    if (!form) return
+    if (!form || !supplier) return
 
     if (!form.name.trim()) {
       toast.error("Supplier name is required")
