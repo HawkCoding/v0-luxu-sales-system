@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { z } from "zod"
 import { mapSupplierDetail } from "@/lib/suppliers"
 import type { Database } from "@/lib/supabase/types"
 import {
@@ -15,6 +16,12 @@ import { supplierSaveSchema, type SupplierSaveInput } from "../schemas"
 
 type PackageRow = Database["public"]["Tables"]["packages"]["Row"]
 type RateCardRow = Database["public"]["Tables"]["rate_cards"]["Row"]
+const supplierPatchSchema = supplierSaveSchema.extend({
+  expectedUpdatedAt: z.string().trim().min(1),
+})
+type SupplierPatchInput = SupplierSaveInput & {
+  expectedUpdatedAt: string
+}
 
 export async function GET(
   _req: Request,
@@ -125,9 +132,9 @@ export async function PATCH(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
-  let parsed: SupplierSaveInput
+  let parsed: SupplierPatchInput
   try {
-    parsed = supplierSaveSchema.parse(await req.json())
+    parsed = supplierPatchSchema.parse(await req.json())
   } catch {
     return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
   }
@@ -135,6 +142,15 @@ export async function PATCH(
   const existingDetail = await loadSupplierDetail(supabase, id)
   if ("error" in existingDetail) {
     return existingDetail.error
+  }
+  if (existingDetail.supplier.updated_at !== parsed.expectedUpdatedAt) {
+    return NextResponse.json(
+      {
+        error:
+          "This supplier was updated by another user. Reload the page and apply your changes again.",
+      },
+      { status: 409 },
+    )
   }
 
   let normalizedPricingOptions: Array<{

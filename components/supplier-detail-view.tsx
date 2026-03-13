@@ -1494,6 +1494,7 @@ export function SupplierDetailView({
           location: form.location.trim(),
           notes: form.notes.trim(),
           active: form.active,
+          expectedUpdatedAt: supplier.updatedAt,
           pricingOptions: cleanedPricingOptions,
           packages: cleanedPackages,
           seasonalPeriods: cleanedSeasonalPeriods,
