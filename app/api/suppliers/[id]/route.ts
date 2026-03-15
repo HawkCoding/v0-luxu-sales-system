@@ -312,6 +312,47 @@ export async function PATCH(
   const existingSeasonalPriceIds = new Set(
     existingDetail.seasonalPrices.map((price) => price.id),
   )
+  const incomingPricingOptionIds = new Set(
+    normalizedPricingOptions.map((option) => option.id),
+  )
+  const incomingPackageIds = new Set(normalizedPackages.map((pkg) => pkg.id))
+  const incomingRouteIds = new Set(
+    normalizedPackages.flatMap((pkg) => pkg.routes.map((route) => route.id)),
+  )
+  const incomingSuiteTypeIds = new Set(
+    normalizedPackages.flatMap((pkg) => pkg.suiteTypes.map((suiteType) => suiteType.id)),
+  )
+  const incomingRateCardIds = new Set(
+    normalizedPackages.flatMap((pkg) => pkg.rateCards.map((rateCard) => rateCard.id)),
+  )
+  const incomingSeasonalPeriodIds = new Set(
+    normalizedSeasonalPeriods.map((period) => period.id),
+  )
+  const incomingSeasonalPriceIds = new Set(
+    normalizedSeasonalPeriods.flatMap((period) => period.prices.map((price) => price.id)),
+  )
+
+  const pricingOptionIdsToDelete = existingDetail.pricingOptions
+    .map((option) => option.id)
+    .filter((optionId) => !incomingPricingOptionIds.has(optionId))
+  const rateCardIdsToDelete = existingDetail.rateCards
+    .map((rateCard) => rateCard.id)
+    .filter((rateCardId) => !incomingRateCardIds.has(rateCardId))
+  const routeIdsToDelete = existingDetail.routes
+    .map((route) => route.id)
+    .filter((routeId) => !incomingRouteIds.has(routeId))
+  const suiteTypeIdsToDelete = existingDetail.suiteTypes
+    .map((suiteType) => suiteType.id)
+    .filter((suiteTypeId) => !incomingSuiteTypeIds.has(suiteTypeId))
+  const packageIdsToDelete = existingDetail.packages
+    .map((pkg) => pkg.id)
+    .filter((packageId) => !incomingPackageIds.has(packageId))
+  const seasonalPriceIdsToDelete = existingDetail.seasonalPrices
+    .map((price) => price.id)
+    .filter((priceId) => !incomingSeasonalPriceIds.has(priceId))
+  const seasonalPeriodIdsToDelete = existingDetail.seasonalPeriods
+    .map((period) => period.id)
+    .filter((periodId) => !incomingSeasonalPeriodIds.has(periodId))
 
   try {
     const [
@@ -392,6 +433,60 @@ export async function PATCH(
     )
   }
 
+  // Prevent partial writes when referenced route/package/suite records cannot be deleted.
+  if (
+    routeIdsToDelete.length > 0 ||
+    packageIdsToDelete.length > 0 ||
+    suiteTypeIdsToDelete.length > 0
+  ) {
+    const [routeReferenceResult, packageReferenceResult, suiteTypeReferenceResult] =
+      await Promise.all([
+        routeIdsToDelete.length > 0
+          ? supabase
+              .from("bookings")
+              .select("id", { count: "exact", head: true })
+              .in("route_id", routeIdsToDelete)
+          : Promise.resolve({ count: 0, error: null }),
+        packageIdsToDelete.length > 0
+          ? supabase
+              .from("bookings")
+              .select("id", { count: "exact", head: true })
+              .in("package_id", packageIdsToDelete)
+          : Promise.resolve({ count: 0, error: null }),
+        suiteTypeIdsToDelete.length > 0
+          ? supabase
+              .from("booking_suites")
+              .select("id", { count: "exact", head: true })
+              .in("suite_type_id", suiteTypeIdsToDelete)
+          : Promise.resolve({ count: 0, error: null }),
+      ])
+
+    if (
+      routeReferenceResult.error ||
+      packageReferenceResult.error ||
+      suiteTypeReferenceResult.error
+    ) {
+      return NextResponse.json(
+        { error: "Failed to validate supplier dependencies" },
+        { status: 500 },
+      )
+    }
+
+    if (
+      (routeReferenceResult.count ?? 0) > 0 ||
+      (packageReferenceResult.count ?? 0) > 0 ||
+      (suiteTypeReferenceResult.count ?? 0) > 0
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Cannot remove packages, routes, or suite types that are linked to existing bookings.",
+        },
+        { status: 409 },
+      )
+    }
+  }
+
   const { error: supplierUpdateError } = await supabase
     .from("suppliers")
     .update({
@@ -425,13 +520,6 @@ export async function PATCH(
       )
     }
   }
-
-  const incomingPricingOptionIds = new Set(
-    normalizedPricingOptions.map((option) => option.id),
-  )
-  const pricingOptionIdsToDelete = existingDetail.pricingOptions
-    .map((option) => option.id)
-    .filter((optionId) => !incomingPricingOptionIds.has(optionId))
 
   if (pricingOptionIdsToDelete.length > 0) {
     const { error: deleteError } = await supabase
@@ -502,24 +590,6 @@ export async function PATCH(
       )
     }
   }
-
-  const incomingPackageIds = new Set(normalizedPackages.map((pkg) => pkg.id))
-  const incomingRouteIds = new Set(routeRows.map((route) => route.id))
-  const incomingSuiteTypeIds = new Set(suiteTypeRows.map((suiteType) => suiteType.id))
-  const incomingRateCardIds = new Set(rateCardRows.map((rateCard) => rateCard.id))
-
-  const rateCardIdsToDelete = existingDetail.rateCards
-    .map((rateCard) => rateCard.id)
-    .filter((rateCardId) => !incomingRateCardIds.has(rateCardId))
-  const routeIdsToDelete = existingDetail.routes
-    .map((route) => route.id)
-    .filter((routeId) => !incomingRouteIds.has(routeId))
-  const suiteTypeIdsToDelete = existingDetail.suiteTypes
-    .map((suiteType) => suiteType.id)
-    .filter((suiteTypeId) => !incomingSuiteTypeIds.has(suiteTypeId))
-  const packageIdsToDelete = existingDetail.packages
-    .map((pkg) => pkg.id)
-    .filter((packageId) => !incomingPackageIds.has(packageId))
 
   if (rateCardIdsToDelete.length > 0) {
     const { error: deleteRateCardsError } = await supabase
@@ -604,20 +674,6 @@ export async function PATCH(
       )
     }
   }
-
-  const incomingSeasonalPeriodIds = new Set(
-    normalizedSeasonalPeriods.map((period) => period.id),
-  )
-  const incomingSeasonalPriceIds = new Set(
-    seasonalPriceRows.map((price) => price.id),
-  )
-
-  const seasonalPriceIdsToDelete = existingDetail.seasonalPrices
-    .map((price) => price.id)
-    .filter((priceId) => !incomingSeasonalPriceIds.has(priceId))
-  const seasonalPeriodIdsToDelete = existingDetail.seasonalPeriods
-    .map((period) => period.id)
-    .filter((periodId) => !incomingSeasonalPeriodIds.has(periodId))
 
   if (seasonalPriceIdsToDelete.length > 0) {
     const { error: deleteSeasonalPricesError } = await supabase
