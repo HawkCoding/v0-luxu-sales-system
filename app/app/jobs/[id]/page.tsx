@@ -6,6 +6,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { ContentTransition } from "@/components/ui/content-transition"
+import { Skeleton } from "@/components/ui/skeleton"
 import { PIPELINE_STAGES, type PipelineStage } from "@/lib/types"
 import { useRole } from "@/lib/role-context"
 import { ArrowLeft, ChevronRight, ChevronLeft as ChevronLeftIcon } from "lucide-react"
@@ -17,20 +19,78 @@ import { JobCorrespondenceTab } from "@/components/job-correspondence-tab"
 import { JobDocumentsTab } from "@/components/job-documents-tab"
 import { JobAuditTab } from "@/components/job-audit-tab"
 
+function JobDetailSkeleton() {
+  return (
+    <div className="p-6 space-y-6 max-w-5xl">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-3">
+          <Skeleton className="h-9 w-9 rounded-md" />
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Skeleton className="h-7 w-28" />
+              <Skeleton className="h-6 w-24 rounded-full" />
+              <Skeleton className="h-6 w-20 rounded-full" />
+            </div>
+            <Skeleton className="h-4 w-56" />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-9 w-20" />
+          <Skeleton className="h-9 w-20" />
+        </div>
+      </div>
+
+      <div className="flex items-center gap-1 overflow-x-auto pb-1">
+        {Array.from({ length: 6 }).map((_, index) => (
+          <Skeleton key={index} className="h-7 w-24 rounded-md" />
+        ))}
+      </div>
+
+      <Card>
+        <CardContent className="p-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <div key={index} className="space-y-2">
+                <Skeleton className="h-3 w-16" />
+                <Skeleton className="h-4 w-24" />
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="space-y-4">
+        <div className="flex gap-2 overflow-hidden rounded-md bg-secondary/50 p-1">
+          {Array.from({ length: 6 }).map((_, index) => (
+            <Skeleton key={index} className="h-8 w-24 rounded-sm" />
+          ))}
+        </div>
+        <Card>
+          <CardHeader className="pb-4">
+            <CardTitle>Loading details</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Skeleton className="h-6 w-48" />
+            <Skeleton className="h-40 w-full rounded-lg" />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Skeleton className="h-24 w-full rounded-lg" />
+              <Skeleton className="h-24 w-full rounded-lg" />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  )
+}
+
 export default function JobDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { data, isLoading, mutate } = useJobDetail(id)
   const { can } = useRole()
 
   if (isLoading || !data) {
-    return (
-      <div className="p-6">
-        <div className="animate-pulse space-y-4">
-          <div className="h-6 w-48 bg-secondary rounded" />
-          <div className="h-64 bg-secondary rounded-lg" />
-        </div>
-      </div>
-    )
+    return <JobDetailSkeleton />
   }
 
   if (data.error) {
@@ -57,7 +117,8 @@ export default function JobDetailPage() {
   }
 
   return (
-    <div className="p-6 space-y-6 max-w-5xl">
+    <ContentTransition show>
+      <div className="p-6 space-y-6 max-w-5xl">
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
@@ -148,7 +209,8 @@ export default function JobDetailPage() {
           <JobAuditTab auditLogs={auditLogs} />
         </TabsContent>
       </Tabs>
-    </div>
+      </div>
+    </ContentTransition>
   )
 }
 

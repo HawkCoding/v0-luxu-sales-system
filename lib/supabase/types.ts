@@ -7,10 +7,30 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
-  __InternalSupabase: {
-    PostgrestVersion: "14.1"
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
   }
   public: {
     Tables: {
@@ -459,27 +479,36 @@ export type Database = {
         Row: {
           active: boolean
           created_at: string
+          currency: string
           description: string | null
+          duration_nights: number | null
           id: string
           name: string
+          single_supplement_pct: number
           supplier_id: string
           updated_at: string
         }
         Insert: {
           active?: boolean
           created_at?: string
+          currency?: string
           description?: string | null
+          duration_nights?: number | null
           id?: string
           name: string
+          single_supplement_pct?: number
           supplier_id: string
           updated_at?: string
         }
         Update: {
           active?: boolean
           created_at?: string
+          currency?: string
           description?: string | null
+          duration_nights?: number | null
           id?: string
           name?: string
+          single_supplement_pct?: number
           supplier_id?: string
           updated_at?: string
         }
@@ -578,6 +607,7 @@ export type Database = {
           created_at: string
           email: string
           name: string
+          surname: string | null
           updated_at: string
           user_id: string
         }
@@ -586,6 +616,7 @@ export type Database = {
           created_at?: string
           email: string
           name: string
+          surname?: string | null
           updated_at?: string
           user_id: string
         }
@@ -594,6 +625,7 @@ export type Database = {
           created_at?: string
           email?: string
           name?: string
+          surname?: string | null
           updated_at?: string
           user_id?: string
         }
@@ -875,6 +907,133 @@ export type Database = {
           },
         ]
       }
+      supplier_pricing_options: {
+        Row: {
+          created_at: string
+          currency: string
+          double_price: number
+          family_price: number
+          id: string
+          is_primary: boolean
+          name: string
+          single_price: number
+          supplier_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          currency?: string
+          double_price: number
+          family_price: number
+          id?: string
+          is_primary?: boolean
+          name: string
+          single_price: number
+          supplier_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          currency?: string
+          double_price?: number
+          family_price?: number
+          id?: string
+          is_primary?: boolean
+          name?: string
+          single_price?: number
+          supplier_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_pricing_options_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      supplier_seasonal_periods: {
+        Row: {
+          created_at: string
+          id: string
+          label: string | null
+          supplier_id: string
+          valid_from: string
+          valid_to: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          label?: string | null
+          supplier_id: string
+          valid_from: string
+          valid_to: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          label?: string | null
+          supplier_id?: string
+          valid_from?: string
+          valid_to?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_seasonal_periods_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      supplier_seasonal_prices: {
+        Row: {
+          created_at: string
+          double_price: number
+          family_price: number
+          id: string
+          option_id: string
+          period_id: string
+          single_price: number
+        }
+        Insert: {
+          created_at?: string
+          double_price: number
+          family_price: number
+          id?: string
+          option_id: string
+          period_id: string
+          single_price: number
+        }
+        Update: {
+          created_at?: string
+          double_price?: number
+          family_price?: number
+          id?: string
+          option_id?: string
+          period_id?: string
+          single_price?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_seasonal_prices_option_id_fkey"
+            columns: ["option_id"]
+            isOneToOne: false
+            referencedRelation: "supplier_pricing_options"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_seasonal_prices_period_id_fkey"
+            columns: ["period_id"]
+            isOneToOne: false
+            referencedRelation: "supplier_seasonal_periods"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       suppliers: {
         Row: {
           active: boolean
@@ -882,6 +1041,7 @@ export type Database = {
           email: string | null
           id: string
           kind: Database["public"]["Enums"]["supplier_kind"]
+          location: string | null
           name: string
           notes: string | null
           phone: string | null
@@ -894,6 +1054,7 @@ export type Database = {
           email?: string | null
           id?: string
           kind: Database["public"]["Enums"]["supplier_kind"]
+          location?: string | null
           name: string
           notes?: string | null
           phone?: string | null
@@ -906,6 +1067,7 @@ export type Database = {
           email?: string | null
           id?: string
           kind?: Database["public"]["Enums"]["supplier_kind"]
+          location?: string | null
           name?: string
           notes?: string | null
           phone?: string | null
@@ -1032,8 +1194,17 @@ export type Database = {
         | "ready"
         | "sent"
         | "accepted"
-      source_kind: "web_form" | "paste_import"
-      supplier_kind: "train_operator" | "hotel_property"
+      source_kind:
+        | "web_form"
+        | "paste_import"
+        | "advertisement"
+        | "walk_in"
+        | "referral"
+        | "social_media"
+        | "phone_call"
+        | "email"
+        | "travel_agent"
+      supplier_kind: "train_operator" | "hotel_property" | "transfers"
       user_role: "admin" | "manager" | "consultant" | "readonly"
     }
     CompositeTypes: {
@@ -1160,6 +1331,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       booking_purpose: ["quote", "availability", "reservation"],
@@ -1192,9 +1366,20 @@ export const Constants = {
         "sent",
         "accepted",
       ],
-      source_kind: ["web_form", "paste_import"],
-      supplier_kind: ["train_operator", "hotel_property"],
+      source_kind: [
+        "web_form",
+        "paste_import",
+        "advertisement",
+        "walk_in",
+        "referral",
+        "social_media",
+        "phone_call",
+        "email",
+        "travel_agent",
+      ],
+      supplier_kind: ["train_operator", "hotel_property", "transfers"],
       user_role: ["admin", "manager", "consultant", "readonly"],
     },
   },
 } as const
+

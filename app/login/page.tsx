@@ -8,10 +8,28 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
+const loginPageClassName = "min-h-screen bg-background flex items-center justify-center p-4"
+
+function LoginLoadingState() {
+  return (
+    <div className="text-center space-y-3">
+      <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto animate-pulse">
+        <span className="text-xl font-bold text-primary">LT</span>
+      </div>
+      <p className="text-muted-foreground">Loading...</p>
+    </div>
+  )
+}
+
+function LoginShell({ children }: { children: React.ReactNode }) {
+  return <div className={loginPageClassName}>{children}</div>
+}
+
 function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { user, loading, loginWithMicrosoft, loginWithPassword, requestPasswordReset } = useAuth()
+  const [hydrated, setHydrated] = useState(false)
   const [password, setPassword] = useState("")
   const [email, setEmail] = useState("")
   const [error, setError] = useState("")
@@ -21,6 +39,10 @@ function LoginForm() {
   const [forgotEmail, setForgotEmail] = useState("")
   const [forgotSubmitting, setForgotSubmitting] = useState(false)
   const [forgotSent, setForgotSent] = useState(false)
+
+  useEffect(() => {
+    setHydrated(true)
+  }, [])
 
   useEffect(() => {
     if (!loading && user) {
@@ -100,21 +122,16 @@ function LoginForm() {
     }
   }
 
-  if (loading) {
+  if (loading || !hydrated) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center space-y-3">
-          <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto animate-pulse">
-            <span className="text-xl font-bold text-primary">LT</span>
-          </div>
-          <p className="text-muted-foreground">Loading...</p>
-        </div>
-      </div>
+      <LoginShell>
+        <LoginLoadingState />
+      </LoginShell>
     )
   }
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+    <LoginShell>
       <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="text-center pb-6">
           <div className="mx-auto w-16 h-16 rounded-full bg-primary flex items-center justify-center mb-4">
@@ -224,14 +241,14 @@ function LoginForm() {
           </div>
         </CardContent>
       </Card>
-    </div>
+    </LoginShell>
   )
 }
 
 export default function LoginPage() {
   return (
     <AuthProvider>
-      <Suspense>
+      <Suspense fallback={<LoginShell><LoginLoadingState /></LoginShell>}>
         <LoginForm />
       </Suspense>
     </AuthProvider>

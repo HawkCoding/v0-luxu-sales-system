@@ -1,0 +1,59 @@
+---
+description: TypeScript conventions for strict, readable application code
+globs:
+  - "**/*.ts"
+  - "**/*.tsx"
+---
+
+# TypeScript Rules
+
+## Core Preferences
+
+- Assume `strict: true` is active and write code that type-checks cleanly.
+- Prefer `const` over `let`; never use `var`.
+- Prefer explicit types when they improve clarity, especially on exported APIs.
+- Add explicit return types to exported functions.
+
+## Types
+
+- Prefer `interface` for object-shaped props and domain models that may be extended.
+- Use `type` for unions, mapped types, and utility compositions.
+- Prefer discriminated unions for variant state instead of many optional fields.
+- Avoid `any`. If absolutely necessary, use the narrowest possible escape hatch and explain it briefly.
+- Do not use `// @ts-ignore` unless the user explicitly asks for it.
+
+## Null And Undefined Safety
+
+- Use optional chaining and nullish coalescing where appropriate.
+- Narrow values before use instead of relying on unsafe assertions.
+- Avoid non-null assertions unless the surrounding code guarantees safety.
+
+## Functions And Data
+
+- Prefer small pure helpers when logic can be extracted cleanly.
+- Prefer arrays and object transforms over imperative mutation when readability is preserved.
+- Validate external input at boundaries with Zod instead of assuming runtime shape safety.
+
+## Project-Specific Notes
+
+- Import domain types from `@/lib/types` or `@/lib/supabase/types` when available instead of redefining them.
+- Keep frontend-facing shapes aligned with the camelCase models used in this app.
+- Keep database-facing shapes aligned with Supabase-generated types.
+
+## Prefer
+
+- `interface CustomerCardProps { ... }`
+- `export function normalizeBooking(...): BookingSummary { ... }`
+- `const stage = value ?? "open"`
+
+## Avoid
+
+- `type CustomerCardProps = { ... }` when extension is likely
+- `export function normalizeBooking(...) { ... }` for non-trivial exported functions
+- `const stage = value || "open"` when empty strings are valid
+
+## Reference Files
+
+- `@tsconfig.json`
+- `@lib/types.ts`
+- `@lib/supabase/types.ts`

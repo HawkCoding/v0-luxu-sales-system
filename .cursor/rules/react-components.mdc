@@ -1,0 +1,57 @@
+---
+description: React component structure and reuse patterns for app components
+globs:
+  - "components/**/*.tsx"
+---
+
+# React Component Rules
+
+## File And Export Conventions
+
+- Use kebab-case file names.
+- Prefer one primary component per file.
+- Prefer named exports for reusable components.
+- Keep component names descriptive and aligned with file intent.
+
+## Props And Composition
+
+- Define props with an `interface` named `ComponentNameProps` when the component accepts props.
+- Keep prop surfaces focused and readable.
+- Prefer composition over deep prop drilling where practical.
+- Extract shared logic into hooks or helpers when reused.
+
+## Reuse Existing UI
+
+- Reuse primitives from `@/components/ui` before building new low-level UI elements.
+- Keep feature components focused on business behavior, not reimplementing common UI controls.
+- Use shared utility helpers such as `cn()` when conditional class composition is needed.
+
+## Data And State
+
+- Handle loading, empty, and error states in data-driven components.
+- Keep heavy data fetching patterns centralized when they are reused across screens.
+- Avoid unnecessary client-only state when derived values are sufficient.
+
+## Structure
+
+- Keep render logic readable; extract repeated sections into smaller components.
+- Prefer small helpers over giant JSX blocks when a component becomes hard to scan.
+- Keep event handlers and derived values near the component that uses them unless shared.
+
+## Prefer
+
+- `interface CustomerImportDialogProps { ... }`
+- `export function CustomerImportDialog(...)`
+- Reusing `Button`, `Dialog`, `Card`, `Tabs`, and other existing UI primitives
+
+## Avoid
+
+- Rebuilding primitives already available in `components/ui`
+- Huge prop bags with many optional flags
+- Mixing unrelated concerns into one component file
+
+## Reference Files
+
+- `@components/ui/button.tsx`
+- `@components/customer-import-dialog.tsx`
+- `@components/job-quotes-tab.tsx`

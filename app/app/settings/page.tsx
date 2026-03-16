@@ -1,12 +1,11 @@
 "use client"
 
 import Link from "next/link"
-import { useState, useEffect } from "react"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
+import { useCallback, useEffect, useState } from "react"
+import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
-import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -15,196 +14,115 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { RefreshCw, CheckCircle2, AlertCircle, Loader2, KeyRound, Upload } from "lucide-react"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Separator } from "@/components/ui/separator"
 import { useRole } from "@/lib/role-context"
+import type { Role } from "@/lib/types"
+import { KeyRound, MoreHorizontal, ShieldCheck, Trash2, Upload, UserCheck, UserPlus, UserX } from "lucide-react"
 
-// ---------------------------------------------------------------------------
-// Sync result shape returned by the API
-// ---------------------------------------------------------------------------
-interface SyncCounts {
-  locations: number
-  suppliers: number
-  packages: number
-  routes: number
-  suiteTypes: number
-  rateCards: number
-}
-
-interface SyncResult {
-  ok: boolean
-  startedAt?: string
-  completedAt?: string
-  counts?: SyncCounts
-  warnings?: string[]
-  error?: string
-}
-
-// ---------------------------------------------------------------------------
-// Supplier Sync card (only rendered when user can sync:suppliers)
-// ---------------------------------------------------------------------------
-function SupplierSyncCard() {
-  const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<SyncResult | null>(null)
-  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null)
-
-  const runSync = async () => {
-    setLoading(true)
-    setResult(null)
-    try {
-      const res = await fetch("/api/suppliers/sync-pricing", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      })
-      const json = (await res.json()) as SyncResult
-      setResult(json)
-      if (json.ok && json.completedAt) {
-        setLastSyncAt(json.completedAt)
-      }
-    } catch (err) {
-      setResult({ ok: false, error: err instanceof Error ? err.message : "Network error" })
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium">Supplier Data</CardTitle>
-        <CardDescription className="text-xs">
-          Pull the latest pricing and schedules from SA-Rail (Rovos Rail &amp; The Blue
-          Train) into the supplier database.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="space-y-0.5">
-            <p className="text-sm font-medium">SA-Rail pricing sync</p>
-            {lastSyncAt ? (
-              <p className="text-xs text-muted-foreground">
-                Last synced: {new Date(lastSyncAt).toLocaleString()}
-              </p>
-            ) : (
-              <p className="text-xs text-muted-foreground">Never synced in this session</p>
-            )}
-          </div>
-          <Button
-            size="sm"
-            onClick={runSync}
-            disabled={loading}
-            className="gap-2 min-w-[140px]"
-          >
-            {loading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <RefreshCw className="w-4 h-4" />
-            )}
-            {loading ? "Syncing…" : "Sync pricing"}
-          </Button>
-        </div>
-
-        {/* Result banner */}
-        {result && (
-          <div
-            className={
-              result.ok
-                ? "rounded-md border border-green-200 bg-green-50 p-3 dark:border-green-800 dark:bg-green-950"
-                : "rounded-md border border-destructive/30 bg-destructive/10 p-3"
-            }
-          >
-            <div className="flex items-start gap-2">
-              {result.ok ? (
-                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
-              ) : (
-                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-              )}
-              <div className="space-y-1 text-xs">
-                {result.ok ? (
-                  <>
-                    <p className="font-medium text-green-800 dark:text-green-300">
-                      Sync completed successfully
-                    </p>
-                    {result.counts && (
-                      <ul className="grid grid-cols-2 gap-x-6 gap-y-0.5 text-green-700 dark:text-green-400 pt-0.5">
-                        <li>Locations: <strong>{result.counts.locations}</strong></li>
-                        <li>Suppliers: <strong>{result.counts.suppliers}</strong></li>
-                        <li>Packages: <strong>{result.counts.packages}</strong></li>
-                        <li>Routes: <strong>{result.counts.routes}</strong></li>
-                        <li>Suite types: <strong>{result.counts.suiteTypes}</strong></li>
-                        <li>Rate cards: <strong>{result.counts.rateCards}</strong></li>
-                      </ul>
-                    )}
-                    {result.warnings && result.warnings.length > 0 && (
-                      <div className="pt-1">
-                        <p className="font-medium text-amber-700 dark:text-amber-400">Warnings:</p>
-                        <ul className="list-disc pl-4 space-y-0.5 text-amber-700 dark:text-amber-400">
-                          {result.warnings.map((w, i) => (
-                            <li key={i}>{w}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <p className="font-medium text-destructive">
-                    Sync failed: {result.error}
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        <p className="text-xs text-muted-foreground">
-          Syncing will create or update suppliers, packages, routes, suite types and rate
-          cards. Existing bookings and quotes are not affected.
-        </p>
-      </CardContent>
-    </Card>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// User management (admin only)
-// ---------------------------------------------------------------------------
 interface AppUser {
   userId: string
   email: string
   name: string
-  clearanceLevel: string
+  clearanceLevel: Role
+  isActive: boolean
+  isCurrentUser: boolean
+}
+
+interface CreateUserForm {
+  name: string
+  surname: string
+  email: string
+  clearanceLevel: Role
+  password: string
+  confirmPassword: string
+}
+
+const ROLE_OPTIONS: Role[] = ["admin", "manager", "consultant", "readonly"]
+
+const EMPTY_CREATE_FORM: CreateUserForm = {
+  name: "",
+  surname: "",
+  email: "",
+  clearanceLevel: "consultant",
+  password: "",
+  confirmPassword: "",
+}
+
+function formatRoleLabel(role: Role) {
+  return role.charAt(0).toUpperCase() + role.slice(1)
 }
 
 function UserManagementCard() {
   const [users, setUsers] = useState<AppUser[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
   const [setPasswordFor, setSetPasswordFor] = useState<AppUser | null>(null)
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [submitError, setSubmitError] = useState("")
   const [submitting, setSubmitting] = useState(false)
 
-  useEffect(() => {
-    let cancelled = false
-    async function fetchUsers() {
-      try {
-        const res = await fetch("/api/users")
-        if (!res.ok) {
-          if (!cancelled) setError("Failed to load users")
-          return
-        }
-        const json = (await res.json()) as { users: AppUser[] }
-        if (!cancelled) setUsers(json.users ?? [])
-      } catch {
-        if (!cancelled) setError("Failed to load users")
-      } finally {
-        if (!cancelled) setLoading(false)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createForm, setCreateForm] = useState<CreateUserForm>(EMPTY_CREATE_FORM)
+  const [createError, setCreateError] = useState("")
+  const [creatingUser, setCreatingUser] = useState(false)
+
+  const [statusTarget, setStatusTarget] = useState<AppUser | null>(null)
+  const [roleTarget, setRoleTarget] = useState<AppUser | null>(null)
+  const [selectedRole, setSelectedRole] = useState<Role>("consultant")
+  const [roleError, setRoleError] = useState("")
+  const [deleteTarget, setDeleteTarget] = useState<AppUser | null>(null)
+  const [deleteConfirmationText, setDeleteConfirmationText] = useState("")
+  const [actionUserId, setActionUserId] = useState<string | null>(null)
+
+  const fetchUsers = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch("/api/users")
+      if (!res.ok) {
+        setError("Failed to load users")
+        return
       }
+      const json = (await res.json()) as { users?: AppUser[] }
+      setUsers(json.users ?? [])
+    } catch {
+      setError("Failed to load users")
+    } finally {
+      setLoading(false)
     }
-    fetchUsers()
-    return () => { cancelled = true }
   }, [])
+
+  useEffect(() => {
+    void fetchUsers()
+  }, [fetchUsers])
 
   const handleSetPassword = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -218,6 +136,7 @@ function UserManagementCard() {
       setSubmitError("Passwords do not match")
       return
     }
+
     setSubmitting(true)
     try {
       const res = await fetch(`/api/users/${setPasswordFor.userId}/password`, {
@@ -230,6 +149,7 @@ function UserManagementCard() {
         setSubmitError(data.error || "Failed to update password")
         return
       }
+      toast.success("Password updated")
       setSetPasswordFor(null)
       setNewPassword("")
       setConfirmPassword("")
@@ -238,55 +158,370 @@ function UserManagementCard() {
     }
   }
 
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setCreateError("")
+
+    if (!createForm.name.trim()) {
+      setCreateError("Name is required")
+      return
+    }
+    if (!createForm.email.trim()) {
+      setCreateError("Email is required")
+      return
+    }
+    if (createForm.password.length < 6) {
+      setCreateError("Password must be at least 6 characters")
+      return
+    }
+    if (createForm.password !== createForm.confirmPassword) {
+      setCreateError("Passwords do not match")
+      return
+    }
+
+    setCreatingUser(true)
+    try {
+      const res = await fetch("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: createForm.name.trim(),
+          surname: createForm.surname.trim() || undefined,
+          email: createForm.email.trim(),
+          clearanceLevel: createForm.clearanceLevel,
+          password: createForm.password,
+        }),
+      })
+
+      const data = (await res.json()) as { error?: string }
+      if (!res.ok) {
+        setCreateError(data.error || "Failed to create user")
+        return
+      }
+
+      toast.success("User created")
+      setCreateOpen(false)
+      setCreateForm(EMPTY_CREATE_FORM)
+      await fetchUsers()
+    } catch {
+      setCreateError("Failed to create user")
+    } finally {
+      setCreatingUser(false)
+    }
+  }
+
+  const handleConfirmStatusChange = async () => {
+    if (!statusTarget) return
+
+    const nextIsActive = !statusTarget.isActive
+    setActionUserId(statusTarget.userId)
+    try {
+      const res = await fetch(`/api/users/${statusTarget.userId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive: nextIsActive }),
+      })
+      const data = (await res.json()) as { error?: string }
+      if (!res.ok) {
+        toast.error(data.error || "Failed to update user status")
+        return
+      }
+      toast.success(nextIsActive ? "User reactivated" : "User deactivated")
+      setStatusTarget(null)
+      await fetchUsers()
+    } catch {
+      toast.error("Failed to update user status")
+    } finally {
+      setActionUserId(null)
+    }
+  }
+
+  const handleConfirmRoleChange = async () => {
+    if (!roleTarget) return
+
+    setRoleError("")
+    setActionUserId(roleTarget.userId)
+    try {
+      const res = await fetch(`/api/users/${roleTarget.userId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clearanceLevel: selectedRole }),
+      })
+      const data = (await res.json()) as { error?: string }
+      if (!res.ok) {
+        setRoleError(data.error || "Failed to update user role")
+        return
+      }
+      toast.success("User role updated")
+      setRoleTarget(null)
+      await fetchUsers()
+    } catch {
+      setRoleError("Failed to update user role")
+    } finally {
+      setActionUserId(null)
+    }
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return
+
+    setActionUserId(deleteTarget.userId)
+    try {
+      const res = await fetch(`/api/users/${deleteTarget.userId}`, {
+        method: "DELETE",
+      })
+      const data = (await res.json()) as { error?: string }
+      if (!res.ok) {
+        toast.error(data.error || "Failed to delete user")
+        return
+      }
+      toast.success("User permanently deleted")
+      setDeleteTarget(null)
+      await fetchUsers()
+    } catch {
+      toast.error("Failed to delete user")
+    } finally {
+      setActionUserId(null)
+    }
+  }
+
   return (
     <>
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">Users</CardTitle>
-          <CardDescription className="text-xs">
-            Set or reset passwords for app users. They will receive an email notification.
-          </CardDescription>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <CardTitle className="text-sm font-medium">Users</CardTitle>
+              <CardDescription className="text-xs mt-1">
+                Add users, manage roles, reset passwords, deactivate accounts, or permanently delete users.
+              </CardDescription>
+            </div>
+            <Button
+              size="sm"
+              className="gap-1.5"
+              onClick={() => {
+                setCreateForm(EMPTY_CREATE_FORM)
+                setCreateError("")
+                setCreateOpen(true)
+              }}
+            >
+              <UserPlus className="h-4 w-4" />
+              Add user
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {loading && <p className="text-sm text-muted-foreground">Loading users…</p>}
+          {loading && <p className="text-sm text-muted-foreground">Loading users...</p>}
           {error && <p className="text-sm text-destructive">{error}</p>}
           {!loading && !error && users.length === 0 && (
             <p className="text-sm text-muted-foreground">No users found.</p>
           )}
           {!loading && !error && users.length > 0 && (
             <ul className="space-y-2">
-              {users.map((u) => (
-                <li
-                  key={u.userId}
-                  className="flex items-center justify-between gap-4 rounded-md border px-3 py-2"
-                >
-                  <div>
-                    <p className="text-sm font-medium">{u.name || u.email}</p>
-                    <p className="text-xs text-muted-foreground">{u.email}</p>
-                    <Badge variant="secondary" className="mt-1 text-xs capitalize">
-                      {u.clearanceLevel}
-                    </Badge>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="gap-1.5"
-                    onClick={() => {
-                      setSetPasswordFor(u)
-                      setNewPassword("")
-                      setConfirmPassword("")
-                      setSubmitError("")
-                    }}
+              {users.map((u) => {
+                const isBusy = actionUserId === u.userId
+                return (
+                  <li
+                    key={u.userId}
+                    className={`flex items-center justify-between gap-4 rounded-md border px-3 py-2 ${u.isActive ? "" : "opacity-60"}`}
                   >
-                    <KeyRound className="w-4 h-4" />
-                    Set password
-                  </Button>
-                </li>
-              ))}
+                    <div>
+                      <p className="text-sm font-medium">{u.name || u.email}</p>
+                      <p className="text-xs text-muted-foreground">{u.email}</p>
+                      <div className="mt-1 flex items-center gap-1.5">
+                        <Badge variant="secondary" className="text-xs capitalize">
+                          {u.clearanceLevel}
+                        </Badge>
+                        {!u.isActive && (
+                          <Badge variant="destructive" className="text-xs">
+                            Inactive
+                          </Badge>
+                        )}
+                        {u.isCurrentUser && (
+                          <Badge variant="outline" className="text-xs">
+                            You
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" aria-label="User actions">
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onClick={() => {
+                            setSetPasswordFor(u)
+                            setNewPassword("")
+                            setConfirmPassword("")
+                            setSubmitError("")
+                          }}
+                          disabled={isBusy}
+                        >
+                          <KeyRound className="h-4 w-4" />
+                          Set password
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => setStatusTarget(u)}
+                          disabled={u.isCurrentUser || isBusy}
+                        >
+                          {u.isActive ? (
+                            <>
+                              <UserX className="h-4 w-4" />
+                              Deactivate
+                            </>
+                          ) : (
+                            <>
+                              <UserCheck className="h-4 w-4" />
+                              Reactivate
+                            </>
+                          )}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => {
+                            setRoleTarget(u)
+                            setSelectedRole(u.clearanceLevel)
+                            setRoleError("")
+                          }}
+                          disabled={u.isCurrentUser || isBusy}
+                        >
+                          <ShieldCheck className="h-4 w-4" />
+                          Change role
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onClick={() => {
+                            setDeleteTarget(u)
+                            setDeleteConfirmationText("")
+                          }}
+                          disabled={u.isCurrentUser || isBusy}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Delete permanently
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </li>
+                )
+              })}
             </ul>
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add user</DialogTitle>
+            <DialogDescription>
+              Create a new user with an initial password and role assignment.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleCreateUser} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="new-user-name">Name</Label>
+              <Input
+                id="new-user-name"
+                value={createForm.name}
+                onChange={(e) => setCreateForm((prev) => ({ ...prev, name: e.target.value }))}
+                placeholder="First name"
+                autoComplete="given-name"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="new-user-surname">Surname (optional)</Label>
+              <Input
+                id="new-user-surname"
+                value={createForm.surname}
+                onChange={(e) => setCreateForm((prev) => ({ ...prev, surname: e.target.value }))}
+                placeholder="Surname"
+                autoComplete="family-name"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="new-user-email">Email</Label>
+              <Input
+                id="new-user-email"
+                type="email"
+                value={createForm.email}
+                onChange={(e) => setCreateForm((prev) => ({ ...prev, email: e.target.value }))}
+                placeholder="user@example.com"
+                autoComplete="email"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="new-user-role">Role</Label>
+              <Select
+                value={createForm.clearanceLevel}
+                onValueChange={(value: Role) =>
+                  setCreateForm((prev) => ({ ...prev, clearanceLevel: value }))
+                }
+              >
+                <SelectTrigger id="new-user-role" className="w-full">
+                  <SelectValue placeholder="Select role" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ROLE_OPTIONS.map((role) => (
+                    <SelectItem key={role} value={role}>
+                      {formatRoleLabel(role)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="new-user-password">Password</Label>
+              <Input
+                id="new-user-password"
+                type="password"
+                value={createForm.password}
+                onChange={(e) => setCreateForm((prev) => ({ ...prev, password: e.target.value }))}
+                placeholder="Min 6 characters"
+                minLength={6}
+                autoComplete="new-password"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="new-user-confirm-password">Confirm password</Label>
+              <Input
+                id="new-user-confirm-password"
+                type="password"
+                value={createForm.confirmPassword}
+                onChange={(e) =>
+                  setCreateForm((prev) => ({ ...prev, confirmPassword: e.target.value }))
+                }
+                placeholder="Repeat password"
+                autoComplete="new-password"
+              />
+            </div>
+
+            {createError && <p className="text-sm text-destructive">{createError}</p>}
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setCreateOpen(false)}
+                disabled={creatingUser}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={creatingUser}>
+                {creatingUser ? "Creating..." : "Create user"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!setPasswordFor} onOpenChange={(open) => !open && setSetPasswordFor(null)}>
         <DialogContent>
@@ -321,33 +556,157 @@ function UserManagementCard() {
                 autoComplete="new-password"
               />
             </div>
-            {submitError && (
-              <p className="text-sm text-destructive">{submitError}</p>
-            )}
+            {submitError && <p className="text-sm text-destructive">{submitError}</p>}
             <DialogFooter>
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => setSetPasswordFor(null)}
+                disabled={submitting}
               >
                 Cancel
               </Button>
               <Button type="submit" disabled={submitting}>
-                {submitting ? "Updating…" : "Update password"}
+                {submitting ? "Updating..." : "Update password"}
               </Button>
             </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!statusTarget} onOpenChange={(open) => !open && setStatusTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {statusTarget?.isActive ? "Deactivate user?" : "Reactivate user?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {statusTarget?.isActive
+                ? `This will deactivate ${statusTarget?.name || statusTarget?.email}. They will no longer be able to sign in until reactivated.`
+                : `This will reactivate ${statusTarget?.name || statusTarget?.email} and allow sign-in again.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={actionUserId === statusTarget?.userId}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmStatusChange}
+              disabled={actionUserId === statusTarget?.userId}
+              className={statusTarget?.isActive ? "bg-destructive text-destructive-foreground hover:bg-destructive/90" : undefined}
+            >
+              {actionUserId === statusTarget?.userId
+                ? "Saving..."
+                : statusTarget?.isActive
+                  ? "Deactivate"
+                  : "Reactivate"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog
+        open={!!roleTarget}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRoleTarget(null)
+            setRoleError("")
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change role</DialogTitle>
+            <DialogDescription>
+              Update access for {roleTarget?.name || roleTarget?.email}. Current role:{" "}
+              {roleTarget ? formatRoleLabel(roleTarget.clearanceLevel) : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="user-role-select">Role</Label>
+            <Select value={selectedRole} onValueChange={(value: Role) => setSelectedRole(value)}>
+              <SelectTrigger id="user-role-select" className="w-full">
+                <SelectValue placeholder="Select role" />
+              </SelectTrigger>
+              <SelectContent>
+                {ROLE_OPTIONS.map((role) => (
+                  <SelectItem key={role} value={role}>
+                    {formatRoleLabel(role)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {roleError && <p className="text-sm text-destructive">{roleError}</p>}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setRoleTarget(null)}
+              disabled={actionUserId === roleTarget?.userId}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleConfirmRoleChange} disabled={actionUserId === roleTarget?.userId}>
+              {actionUserId === roleTarget?.userId ? "Saving..." : "Save role"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteTarget(null)
+            setDeleteConfirmationText("")
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete user permanently?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently remove {deleteTarget?.name || deleteTarget?.email}. This action
+              cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="delete-confirmation">
+              Type <span className="font-semibold">{deleteTarget?.email}</span> to confirm
+            </Label>
+            <Input
+              id="delete-confirmation"
+              value={deleteConfirmationText}
+              onChange={(e) => setDeleteConfirmationText(e.target.value)}
+              placeholder={deleteTarget?.email ?? ""}
+              autoComplete="off"
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={actionUserId === deleteTarget?.userId}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              disabled={
+                actionUserId === deleteTarget?.userId ||
+                deleteConfirmationText.trim().toLowerCase() !== deleteTarget?.email.toLowerCase()
+              }
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {actionUserId === deleteTarget?.userId ? "Deleting..." : "Delete permanently"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
 }
 
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
 export default function SettingsPage() {
   const { can } = useRole()
+  const canEditSettings = can("edit:settings")
 
   return (
     <div className="p-6 space-y-6 max-w-3xl">
@@ -382,35 +741,6 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">Banking Details</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Bank</label>
-              <Input defaultValue="First National Bank" className="mt-1" readOnly />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Account Name</label>
-              <Input defaultValue="Luxus Travel & Tours" className="mt-1" readOnly />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Account Number</label>
-              <Input defaultValue="62XXXXXXXX" className="mt-1" readOnly />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Branch Code</label>
-              <Input defaultValue="250655" className="mt-1" readOnly />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Supplier sync — only visible to admin and manager */}
-      {can("sync:suppliers") && <SupplierSyncCard />}
-
       {can("import:customers") && (
         <Card>
           <CardHeader className="pb-2">
@@ -430,27 +760,37 @@ export default function SettingsPage() {
         </Card>
       )}
 
-      {/* User management — admin only */}
       {can("manage:users") && <UserManagementCard />}
 
-      <Card>
+      <Card className={canEditSettings ? undefined : "opacity-70"}>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-medium">System</CardTitle>
+          {!canEditSettings && (
+            <CardDescription className="text-xs">
+              Limited system information is shown here for non-admin users.
+            </CardDescription>
+          )}
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Application Version</span>
-            <Badge variant="outline" className="text-xs">1.0.0-demo</Badge>
+            <Badge variant="outline" className="text-xs">
+              1.0.0-demo
+            </Badge>
           </div>
           <Separator />
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Data Mode</span>
-            <Badge variant="secondary" className="text-xs">In-Memory (Seeded)</Badge>
+            <Badge variant="secondary" className="text-xs">
+              In-Memory (Seeded)
+            </Badge>
           </div>
           <Separator />
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Email Provider</span>
-            <Badge variant="secondary" className="text-xs">Mock (90% success rate)</Badge>
+            <Badge variant="secondary" className="text-xs">
+              Mock (90% success rate)
+            </Badge>
           </div>
         </CardContent>
       </Card>

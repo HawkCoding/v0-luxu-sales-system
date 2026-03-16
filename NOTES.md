@@ -2,6 +2,18 @@
 
 ---
 
+## Deferred TODO: dependency freshness follow-up
+
+**Date:** 2026-03-11
+
+- Keep this deferred for now (stability-first decision): no immediate upgrades required.
+- Current core stack is already latest: `next@16.1.6`, `react@19.2.4`, `react-dom@19.2.4`.
+- Low-priority later updates: `@supabase/supabase-js` (`2.98.0` -> `2.99.1`), `@supabase/ssr` (`0.8.0` -> `0.9.0`), `swr` (`2.4.0` -> `2.4.1`), Tailwind/PostCSS patch/minor bumps.
+- Medium-priority later tooling pass: `typescript` (`5.7.3` -> `5.9.3`) and `@types/node` (`24` -> `25`), with type-fix follow-up as needed.
+- Schedule separately when ready (potential migration work): `zod@4`, `recharts@3`, `sonner@2`, `react-resizable-panels@4`, `@hookform/resolvers@5`, `@vercel/analytics@2`.
+
+---
+
 ## Future: Replace Supabase Auth with in-app user management
 
 **Date:** 2026-02-26  

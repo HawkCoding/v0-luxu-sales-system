@@ -216,6 +216,13 @@ export default function EnquiriesPage() {
             <SelectItem value="all">All Sources</SelectItem>
             <SelectItem value="web_form">Web Form</SelectItem>
             <SelectItem value="paste_import">Paste Import</SelectItem>
+            <SelectItem value="advertisement">Advertisement</SelectItem>
+            <SelectItem value="walk_in">Walk In</SelectItem>
+            <SelectItem value="referral">Referral</SelectItem>
+            <SelectItem value="social_media">Social Media</SelectItem>
+            <SelectItem value="phone_call">Phone Call</SelectItem>
+            <SelectItem value="email">Email</SelectItem>
+            <SelectItem value="travel_agent">Travel Agent</SelectItem>
           </SelectContent>
         </Select>
       </div>

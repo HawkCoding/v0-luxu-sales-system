@@ -1,0 +1,57 @@
+---
+description: UI styling conventions for Tailwind, Shadcn UI, and accessible interfaces
+globs:
+  - "**/*.tsx"
+---
+
+# UI Styling Rules
+
+## Styling Approach
+
+- Use Tailwind utility classes for styling.
+- Prefer existing design tokens and utility patterns already present in the project.
+- Use `cn()` from `@lib/utils.ts` for conditional class merging.
+- Prefer shared variant helpers such as `cva` when a component supports multiple style variants.
+
+## Design System Usage
+
+- Reuse components from `@/components/ui` before introducing new primitives.
+- Keep component styling consistent with the existing Shadcn-based system.
+- Follow the project's CSS variable tokens and semantic utility classes when available.
+
+## Responsive Design
+
+- Build mobile-first layouts.
+- Add breakpoint classes only where the layout actually changes.
+- Keep spacing, typography, and density consistent with nearby screens.
+
+## Accessibility
+
+- Prefer semantic HTML elements.
+- Ensure buttons, links, dialogs, inputs, and menus remain keyboard accessible.
+- Add accessible labels or `aria-*` attributes when the UI would otherwise be ambiguous.
+- Do not rely on color alone to communicate important state.
+
+## Icons And Interaction
+
+- Use `lucide-react` for icons unless an existing pattern already dictates something else.
+- Keep hover, focus, and disabled states visible and consistent.
+- Prefer readable UI over over-designed animation or one-off visual behavior.
+
+## Prefer
+
+- `className={cn(...)}`
+- Existing `Button`, `Card`, `Dialog`, `Tabs`, `Badge`, and `Input` components
+- Variant-driven styling for reusable components
+
+## Avoid
+
+- Inline style objects for normal UI work
+- CSS modules or one-off styling systems unless the user asks for them
+- Recreating design tokens locally when the project already has them
+
+## Reference Files
+
+- `@lib/utils.ts`
+- `@components/ui/button.tsx`
+- `@app/globals.css`
