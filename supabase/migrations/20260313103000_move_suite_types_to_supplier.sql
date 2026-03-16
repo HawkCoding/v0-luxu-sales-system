@@ -3,11 +3,23 @@
 alter table public.suite_types
   add column if not exists supplier_id uuid;
 
-update public.suite_types
-  set supplier_id = p.supplier_id
-  from public.packages p
-  where suite_types.package_id = p.id
-    and suite_types.supplier_id is null;
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'suite_types'
+      and column_name = 'package_id'
+  ) then
+    update public.suite_types
+      set supplier_id = p.supplier_id
+      from public.packages p
+      where suite_types.package_id = p.id
+        and suite_types.supplier_id is null;
+  end if;
+end
+$$;
 
 -- Rows seeded without a package_id: assign to the first train_operator supplier.
 update public.suite_types
