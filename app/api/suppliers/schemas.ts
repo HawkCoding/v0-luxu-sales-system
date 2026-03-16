@@ -8,32 +8,6 @@ export const dateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD")
 
-export const pricingOptionSchema = z.object({
-  id: z.string().uuid().optional(),
-  name: z.string().trim().min(1, "Pricing option name is required"),
-  singlePrice: z.number().finite().nonnegative(),
-  doublePrice: z.number().finite().nonnegative(),
-  familyPrice: z.number().finite().nonnegative(),
-  currency: z.string().trim().min(1).max(10),
-  isPrimary: z.boolean(),
-})
-
-export const seasonalPriceSchema = z.object({
-  id: z.string().uuid().optional(),
-  optionId: z.string().uuid(),
-  singlePrice: z.number().finite().nonnegative(),
-  doublePrice: z.number().finite().nonnegative(),
-  familyPrice: z.number().finite().nonnegative(),
-})
-
-export const seasonalPeriodSchema = z.object({
-  id: z.string().uuid().optional(),
-  label: z.string().trim().max(255).nullable(),
-  validFrom: dateSchema,
-  validTo: dateSchema,
-  prices: z.array(seasonalPriceSchema),
-})
-
 export const routeSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().trim().min(1, "Route name is required"),
@@ -67,7 +41,6 @@ export const packageSchema = z.object({
   currency: z.string().trim().min(1).max(10),
   active: z.boolean(),
   routes: z.array(routeSchema),
-  suiteTypes: z.array(suiteTypeSchema),
   rateCards: z.array(rateCardSchema),
 })
 
@@ -107,31 +80,82 @@ export const supplierSaveSchema = z.object({
     }),
   notes: z.string().trim().max(5000),
   active: z.boolean(),
-  pricingOptions: z.array(pricingOptionSchema).superRefine((options, ctx) => {
-    const primaryCount = options.filter((option) => option.isPrimary).length
-    if (primaryCount > 1) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Only one pricing option can be marked as primary.",
-      })
-    }
-
-    const seenNames = new Set<string>()
-    for (const option of options) {
-      const normalizedName = option.name.trim().toLowerCase()
-      if (!normalizedName) continue
-      if (seenNames.has(normalizedName)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Pricing option names must be unique per supplier.",
-        })
-        break
-      }
-      seenNames.add(normalizedName)
-    }
-  }),
+  suiteTypes: z.array(suiteTypeSchema),
   packages: z.array(packageSchema),
-  seasonalPeriods: z.array(seasonalPeriodSchema),
 })
 
 export type SupplierSaveInput = z.infer<typeof supplierSaveSchema>
+
+export const draftRouteSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().trim().max(200).default(""),
+  originLocationId: z.union([z.string().uuid(), z.literal("")]).default(""),
+  destinationLocationId: z.union([z.string().uuid(), z.literal("")]).default(""),
+  active: z.boolean().default(true),
+})
+
+export const draftSuiteTypeSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().trim().max(200).default(""),
+  active: z.boolean().default(true),
+})
+
+export const draftRateCardSchema = z.object({
+  id: z.string().uuid().optional(),
+  routeId: z.union([z.string().uuid(), z.null(), z.literal("")]).transform((value) =>
+    value === "" ? null : value,
+  ),
+  suiteTypeId: z.union([z.string().uuid(), z.literal("")]).default(""),
+  pricePerPerson: z.number().finite().nonnegative().default(0),
+  currency: z.string().trim().max(10).default("ZAR"),
+  validFrom: z.union([dateSchema, z.literal("")]).default(""),
+  validTo: z.union([dateSchema, z.literal(""), z.null()]).default(""),
+})
+
+export const draftPackageSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().trim().max(200).default(""),
+  description: z.string().trim().max(5000).nullable().default(null),
+  durationNights: z.number().int().nonnegative().nullable().default(null),
+  singleSupplementPct: z.number().finite().min(0).max(1000).default(50),
+  currency: z.string().trim().max(10).default("ZAR"),
+  active: z.boolean().default(true),
+  routes: z.array(draftRouteSchema).default([]),
+  rateCards: z.array(draftRateCardSchema).default([]),
+})
+
+export const supplierDraftSaveSchema = z.object({
+  name: z.string().trim().max(200).default(""),
+  kind: z.enum(["train_operator", "hotel_property", "transfers"]),
+  email: z
+    .string()
+    .trim()
+    .max(255)
+    .refine((value) => value === "" || EMAIL_PATTERN.test(value), {
+      message: "Enter a valid email (e.g. name@example.com)",
+    })
+    .default(""),
+  phone: z
+    .string()
+    .trim()
+    .max(100)
+    .refine((value) => value === "" || PHONE_PATTERN.test(value), {
+      message: "Phone can include digits, spaces, +, -, and parentheses only",
+    })
+    .default(""),
+  website: z
+    .string()
+    .trim()
+    .max(255)
+    .refine((value) => value === "" || WEBSITE_PATTERN.test(value), {
+      message: "Enter a valid website (e.g. example.com)",
+    })
+    .default(""),
+  location: z.string().trim().max(255).default(""),
+  notes: z.string().trim().max(5000).default(""),
+  active: z.boolean().default(true),
+  suiteTypes: z.array(draftSuiteTypeSchema).default([]),
+  packages: z.array(draftPackageSchema).default([]),
+})
+
+export type SupplierDraftSaveInput = z.infer<typeof supplierDraftSaveSchema>

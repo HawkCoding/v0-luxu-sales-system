@@ -2,12 +2,10 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useSWRConfig } from "swr"
 import {
   ArrowLeft,
-  CalendarDays,
-  CheckCircle2,
   Mail,
   MapPin,
   Pencil,
@@ -48,13 +46,15 @@ import { Textarea } from "@/components/ui/textarea"
 import { useRole } from "@/lib/role-context"
 import { useLocations, useSupplierDetail } from "@/lib/use-data"
 import {
+  getSupplierVocabulary,
   SUPPLIER_KIND_LABELS,
   type Location,
   type SupplierDetail,
   type SupplierKind,
   type SupplierPackage,
   type SupplierRateCard,
-  type SupplierSeasonalPeriod,
+  type SupplierSuiteType,
+  type SupplierVocabulary,
 } from "@/lib/types"
 
 type Presentation = "page" | "modal"
@@ -62,16 +62,6 @@ type Presentation = "page" | "modal"
 interface SupplierDetailViewProps {
   supplierId: string
   presentation?: Presentation
-}
-
-interface EditablePricingOption {
-  id: string
-  name: string
-  singlePrice: number
-  doublePrice: number
-  familyPrice: number
-  currency: string
-  isPrimary: boolean
 }
 
 interface EditableRoute {
@@ -107,24 +97,7 @@ interface EditablePackage {
   currency: string
   active: boolean
   routes: EditableRoute[]
-  suiteTypes: EditableSuiteType[]
   rateCards: EditableRateCard[]
-}
-
-interface EditableSeasonalPrice {
-  id: string
-  optionId: string
-  singlePrice: number
-  doublePrice: number
-  familyPrice: number
-}
-
-interface EditableSeasonalPeriod {
-  id: string
-  label: string
-  validFrom: string
-  validTo: string
-  prices: EditableSeasonalPrice[]
 }
 
 interface SupplierFormState {
@@ -136,10 +109,14 @@ interface SupplierFormState {
   location: string
   notes: string
   active: boolean
-  pricingOptions: EditablePricingOption[]
+  suiteTypes: EditableSuiteType[]
   packages: EditablePackage[]
-  seasonalPeriods: EditableSeasonalPeriod[]
 }
+
+const DRAFT_AUTOSAVE_DEBOUNCE_MS = 3000
+const DRAFT_AUTOSAVE_STATUS_RESET_MS = 2000
+const REMOVE_ICON_BUTTON_CLASS =
+  "border-muted-foreground/25 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30"
 
 interface SupplierDetailSkeletonProps {
   presentation?: Presentation
@@ -164,18 +141,6 @@ interface EditableRatePeriodGroup {
 
 function makeClientId(): string {
   return crypto.randomUUID()
-}
-
-function createEmptyPricingOption(): EditablePricingOption {
-  return {
-    id: makeClientId(),
-    name: "",
-    singlePrice: 0,
-    doublePrice: 0,
-    familyPrice: 0,
-    currency: "ZAR",
-    isPrimary: false,
-  }
 }
 
 function createEmptyRoute(locations: Location[]): EditableRoute {
@@ -209,28 +174,7 @@ function createEmptyPackage(): EditablePackage {
     currency: "ZAR",
     active: true,
     routes: [],
-    suiteTypes: [],
     rateCards: [],
-  }
-}
-
-function createEmptySeasonalPeriod(): EditableSeasonalPeriod {
-  return {
-    id: makeClientId(),
-    label: "",
-    validFrom: "",
-    validTo: "",
-    prices: [],
-  }
-}
-
-function createEmptySeasonalPrice(optionId: string): EditableSeasonalPrice {
-  return {
-    id: makeClientId(),
-    optionId,
-    singlePrice: 0,
-    doublePrice: 0,
-    familyPrice: 0,
   }
 }
 
@@ -244,18 +188,11 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
     location: supplier.location ?? "",
     notes: supplier.notes ?? "",
     active: supplier.active,
-    pricingOptions:
-      supplier.pricingOptions.length > 0
-        ? supplier.pricingOptions.map((option) => ({
-            id: option.id,
-            name: option.name,
-            singlePrice: option.singlePrice,
-            doublePrice: option.doublePrice,
-            familyPrice: option.familyPrice,
-            currency: option.currency,
-            isPrimary: option.isPrimary,
-          }))
-        : [createEmptyPricingOption()],
+    suiteTypes: supplier.suiteTypes.map((suiteType) => ({
+      id: suiteType.id,
+      name: suiteType.name,
+      active: suiteType.active,
+    })),
     packages: supplier.packages.map((pkg) => ({
       id: pkg.id,
       name: pkg.name,
@@ -271,11 +208,6 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
         destinationLocationId: route.destinationLocationId,
         active: route.active,
       })),
-      suiteTypes: pkg.suiteTypes.map((suiteType) => ({
-        id: suiteType.id,
-        name: suiteType.name,
-        active: suiteType.active,
-      })),
       rateCards: pkg.rateCards.map((rateCard) => ({
         id: rateCard.id,
         routeId: rateCard.routeId,
@@ -286,17 +218,47 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
         validTo: rateCard.validTo,
       })),
     })),
-    seasonalPeriods: supplier.seasonalPeriods.map((period) => ({
-      id: period.id,
-      label: period.label ?? "",
-      validFrom: period.validFrom,
-      validTo: period.validTo,
-      prices: period.prices.map((price) => ({
-        id: price.id,
-        optionId: price.optionId,
-        singlePrice: price.singlePrice,
-        doublePrice: price.doublePrice,
-        familyPrice: price.familyPrice,
+  }
+}
+
+function buildDraftPayload(form: SupplierFormState) {
+  return {
+    name: form.name.trim(),
+    kind: form.kind,
+    email: form.email.trim(),
+    phone: form.phone.trim(),
+    website: form.website.trim(),
+    location: form.location.trim(),
+    notes: form.notes.trim(),
+    active: form.active,
+    suiteTypes: form.suiteTypes.map((suiteType) => ({
+      id: suiteType.id,
+      name: suiteType.name.trim(),
+      active: suiteType.active,
+    })),
+    packages: form.packages.map((pkg) => ({
+      id: pkg.id,
+      name: pkg.name.trim(),
+      description: pkg.description.trim() || null,
+      durationNights: pkg.durationNights,
+      singleSupplementPct: pkg.singleSupplementPct,
+      currency: pkg.currency.trim().toUpperCase() || "ZAR",
+      active: pkg.active,
+      routes: pkg.routes.map((route) => ({
+        id: route.id,
+        name: route.name.trim(),
+        originLocationId: route.originLocationId,
+        destinationLocationId: route.destinationLocationId,
+        active: route.active,
+      })),
+      rateCards: pkg.rateCards.map((rateCard) => ({
+        id: rateCard.id,
+        routeId: rateCard.routeId,
+        suiteTypeId: rateCard.suiteTypeId,
+        pricePerPerson: rateCard.pricePerPerson,
+        currency: rateCard.currency.trim().toUpperCase() || pkg.currency.trim().toUpperCase() || "ZAR",
+        validFrom: rateCard.validFrom,
+        validTo: rateCard.validTo ?? "",
       })),
     })),
   }
@@ -387,6 +349,21 @@ function getLocationName(locationsById: Record<string, Location>, id: string) {
   return locationsById[id]?.name ?? "Unknown location"
 }
 
+function getRouteLabel(
+  route: { name: string; originLocationId: string; destinationLocationId: string },
+  locationsById: Record<string, Location>,
+  vocabulary: SupplierVocabulary,
+) {
+  if (!vocabulary.routeHasLocations) {
+    return route.name || `Unnamed ${vocabulary.route.toLowerCase()}`
+  }
+
+  return `${getLocationName(locationsById, route.originLocationId)} -> ${getLocationName(
+    locationsById,
+    route.destinationLocationId,
+  )}`
+}
+
 function InfoItem({
   label,
   value,
@@ -409,14 +386,28 @@ function InfoItem({
 
 function PackageRateCardMatrix({
   pkg,
+  suiteTypes,
   locationsById,
+  selectedRouteId,
+  vocabulary,
 }: {
   pkg: SupplierPackage
+  suiteTypes: SupplierSuiteType[]
   locationsById: Record<string, Location>
+  selectedRouteId?: string | null
+  vocabulary: SupplierVocabulary
 }) {
   const periodGroups = groupRateCardsByPeriod(pkg.rateCards)
 
-  if (periodGroups.length === 0 || pkg.suiteTypes.length === 0) {
+  if (pkg.routes.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+        {`No ${vocabulary.routePlural.toLowerCase()} have been configured for this ${vocabulary.package.toLowerCase()} yet.`}
+      </div>
+    )
+  }
+
+  if (periodGroups.length === 0 || suiteTypes.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
         No rate cards have been configured for this package yet.
@@ -427,8 +418,9 @@ function PackageRateCardMatrix({
   return (
     <div className="space-y-4">
       {periodGroups.map((period) => {
-        const hasAllRoutes = period.items.some((item) => item.routeId === null)
-        const routeColumns = hasAllRoutes ? [...pkg.routes, null] : pkg.routes
+        const routeColumns = selectedRouteId
+          ? pkg.routes.filter((route) => route.id === selectedRouteId)
+          : pkg.routes
 
         return (
           <div key={period.key} className="rounded-lg border overflow-hidden">
@@ -436,8 +428,11 @@ function PackageRateCardMatrix({
               <div>
                 <p className="text-sm font-medium text-foreground">{period.label}</p>
                 <p className="text-xs text-muted-foreground">
-                  {period.currency} per person sharing (single: +
-                  {pkg.singleSupplementPct.toFixed(0)}%)
+                  {vocabulary.showSingleSupplement
+                    ? `${period.currency} ${vocabulary.priceLabel} (single: +${pkg.singleSupplementPct.toFixed(
+                        0,
+                      )}%)`
+                    : `${period.currency} ${vocabulary.priceLabel}`}
                 </p>
               </div>
               <Badge variant="outline">{period.currency}</Badge>
@@ -448,40 +443,36 @@ function PackageRateCardMatrix({
                 <thead className="bg-secondary/20">
                   <tr className="border-b">
                     <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Suite Type
+                      {vocabulary.suiteType}
                     </th>
                     {routeColumns.map((route) => (
                       <th
-                        key={route?.id ?? "all-routes"}
+                        key={route.id}
                         className="whitespace-nowrap px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
                       >
-                        {route
-                          ? `${getLocationName(
-                              locationsById,
-                              route.originLocationId,
-                            )} -> ${getLocationName(
-                              locationsById,
-                              route.destinationLocationId,
-                            )}`
-                          : "All Routes"}
+                        {getRouteLabel(route, locationsById, vocabulary)}
                       </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {pkg.suiteTypes.map((suiteType) => (
+                  {suiteTypes.map((suiteType) => (
                     <tr key={suiteType.id} className="border-b last:border-0">
                       <td className="px-4 py-3 font-medium text-foreground">{suiteType.name}</td>
                       {routeColumns.map((route) => {
-                        const match = period.items.find(
-                          (item) =>
-                            item.suiteTypeId === suiteType.id &&
-                            item.routeId === (route?.id ?? null),
-                        )
+                        const match =
+                          period.items.find(
+                            (item) =>
+                              item.suiteTypeId === suiteType.id && item.routeId === route.id,
+                          ) ??
+                          period.items.find(
+                            (item) =>
+                              item.suiteTypeId === suiteType.id && item.routeId === null,
+                          )
 
                         return (
                           <td
-                            key={`${suiteType.id}-${route?.id ?? "all"}`}
+                            key={`${suiteType.id}-${route.id}`}
                             className="px-4 py-3 text-muted-foreground"
                           >
                             {match ? (
@@ -489,13 +480,15 @@ function PackageRateCardMatrix({
                                 <p className="font-medium text-foreground">
                                   {formatCurrency(match.pricePerPerson, match.currency)}
                                 </p>
-                                <p className="text-xs">
-                                  Single:{" "}
-                                  {formatCurrency(
-                                    match.pricePerPerson * (1 + pkg.singleSupplementPct / 100),
-                                    match.currency,
-                                  )}
-                                </p>
+                                {vocabulary.showSingleSupplement ? (
+                                  <p className="text-xs">
+                                    Single:{" "}
+                                    {formatCurrency(
+                                      match.pricePerPerson * (1 + pkg.singleSupplementPct / 100),
+                                      match.currency,
+                                    )}
+                                  </p>
+                                ) : null}
                               </div>
                             ) : (
                               "-"
@@ -517,8 +510,10 @@ function PackageRateCardMatrix({
 
 interface RateCardMatrixEditorProps {
   pkg: EditablePackage
+  suiteTypes: EditableSuiteType[]
   packageIndex: number
   locationsById: Record<string, Location>
+  vocabulary: SupplierVocabulary
   onAddPeriod: (packageIndex: number) => void
   onRemovePeriod: (packageIndex: number, periodKey: string) => void
   onUpdatePeriodField: (
@@ -543,8 +538,10 @@ interface RateCardMatrixEditorProps {
 
 function RateCardMatrixEditor({
   pkg,
+  suiteTypes,
   packageIndex,
   locationsById,
+  vocabulary,
   onAddPeriod,
   onRemovePeriod,
   onUpdatePeriodField,
@@ -553,10 +550,10 @@ function RateCardMatrixEditor({
 }: RateCardMatrixEditorProps) {
   const periodGroups = groupEditableRateCardsByPeriod(pkg.rateCards)
 
-  if (pkg.suiteTypes.length === 0) {
+  if (suiteTypes.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-        Add at least one suite type before configuring rate cards.
+        {`Add at least one ${vocabulary.suiteType.toLowerCase()} before configuring rate cards.`}
       </div>
     )
   }
@@ -638,11 +635,12 @@ function RateCardMatrixEditor({
                   <Button
                     type="button"
                     variant="outline"
-                    className="w-full"
+                    size="icon"
+                    className={REMOVE_ICON_BUTTON_CLASS}
+                    aria-label="Remove period"
                     onClick={() => onRemovePeriod(packageIndex, period.key)}
                   >
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    Remove period
+                    <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>
               </div>
@@ -652,7 +650,7 @@ function RateCardMatrixEditor({
                   <thead className="bg-secondary/20">
                     <tr className="border-b">
                       <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        Suite Type
+                        {vocabulary.suiteType}
                       </th>
                       {routeColumns.map((route) => (
                         <th
@@ -660,20 +658,14 @@ function RateCardMatrixEditor({
                           className="whitespace-nowrap px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
                         >
                           {route
-                            ? `${getLocationName(
-                                locationsById,
-                                route.originLocationId,
-                              )} -> ${getLocationName(
-                                locationsById,
-                                route.destinationLocationId,
-                              )}`
-                            : "All Routes"}
+                            ? getRouteLabel(route, locationsById, vocabulary)
+                            : `All ${vocabulary.routePlural}`}
                         </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {pkg.suiteTypes.map((suiteType) => (
+                    {suiteTypes.map((suiteType) => (
                       <tr key={suiteType.id} className="border-b last:border-0">
                         <td className="px-4 py-3 font-medium text-foreground">{suiteType.name}</td>
                         {routeColumns.map((route) => {
@@ -702,8 +694,10 @@ function RateCardMatrixEditor({
                                   />
                                   <Button
                                     type="button"
-                                    size="sm"
+                                    size="icon"
                                     variant="outline"
+                                    className={REMOVE_ICON_BUTTON_CLASS}
+                                    aria-label="Remove rate card"
                                     onClick={() =>
                                       onToggleCell(
                                         packageIndex,
@@ -756,17 +750,133 @@ function RateCardMatrixEditor({
   )
 }
 
+function PackageReadOnlyCard({
+  pkg,
+  suiteTypes,
+  locationsById,
+  vocabulary,
+}: {
+  pkg: SupplierPackage
+  suiteTypes: SupplierSuiteType[]
+  locationsById: Record<string, Location>
+  vocabulary: SupplierVocabulary
+}) {
+  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(pkg.routes[0]?.id ?? null)
+
+  useEffect(() => {
+    if (pkg.routes.length === 0) {
+      if (selectedRouteId !== null) {
+        setSelectedRouteId(null)
+      }
+      return
+    }
+
+    if (!selectedRouteId || !pkg.routes.some((route) => route.id === selectedRouteId)) {
+      setSelectedRouteId(pkg.routes[0].id)
+    }
+  }, [pkg.routes, selectedRouteId])
+
+  return (
+    <div className="rounded-lg border p-4 space-y-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-base font-semibold text-foreground">{pkg.name}</p>
+            {vocabulary.showDurationNights ? (
+              <Badge variant="secondary">
+                {pkg.durationNights ? `${pkg.durationNights} nights` : "Duration TBD"}
+              </Badge>
+            ) : null}
+            {vocabulary.showSingleSupplement ? (
+              <Badge variant="outline">Single supplement {pkg.singleSupplementPct}%</Badge>
+            ) : null}
+            <Badge variant="outline">{pkg.currency}</Badge>
+          </div>
+          {pkg.description && <p className="text-sm text-muted-foreground">{pkg.description}</p>}
+        </div>
+        <Badge variant={pkg.active ? "default" : "outline"}>
+          {pkg.active ? "Active" : "Inactive"}
+        </Badge>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {vocabulary.routePlural}
+          </p>
+          {pkg.routes.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {pkg.routes.map((route) => {
+                const routeLabel = getRouteLabel(route, locationsById, vocabulary)
+                const isSelected = selectedRouteId === route.id
+
+                return (
+                  <Button
+                    key={route.id}
+                    type="button"
+                    size="sm"
+                    variant={isSelected ? "default" : "outline"}
+                    className="h-7 rounded-full px-3 text-xs"
+                    onClick={() => setSelectedRouteId(route.id)}
+                  >
+                    {routeLabel}
+                  </Button>
+                )
+              })}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {`No ${vocabulary.routePlural.toLowerCase()} configured.`}
+            </p>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {vocabulary.suiteTypePlural}
+          </p>
+          {suiteTypes.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {suiteTypes.map((suiteType) => (
+                <Badge key={suiteType.id} variant="outline">
+                  {suiteType.name}
+                </Badge>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {`No ${vocabulary.suiteTypePlural.toLowerCase()} configured.`}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <PackageRateCardMatrix
+        pkg={pkg}
+        suiteTypes={suiteTypes}
+        locationsById={locationsById}
+        selectedRouteId={selectedRouteId}
+        vocabulary={vocabulary}
+      />
+    </div>
+  )
+}
+
 function SupplierPackagesReadOnly({
   packages,
+  suiteTypes,
   locationsById,
+  vocabulary,
 }: {
   packages: SupplierPackage[]
+  suiteTypes: SupplierSuiteType[]
   locationsById: Record<string, Location>
+  vocabulary: SupplierVocabulary
 }) {
   if (packages.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-        No packages have been configured for this supplier yet.
+        {`No ${vocabulary.packagePlural.toLowerCase()} have been configured for this supplier yet.`}
       </div>
     )
   }
@@ -774,152 +884,13 @@ function SupplierPackagesReadOnly({
   return (
     <div className="space-y-4">
       {packages.map((pkg) => (
-        <div key={pkg.id} className="rounded-lg border p-4 space-y-4">
-          <div className="flex items-start justify-between gap-3 flex-wrap">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 flex-wrap">
-                <p className="text-base font-semibold text-foreground">{pkg.name}</p>
-                <Badge variant="secondary">
-                  {pkg.durationNights ? `${pkg.durationNights} nights` : "Duration TBD"}
-                </Badge>
-                <Badge variant="outline">
-                  Single supplement {pkg.singleSupplementPct}%
-                </Badge>
-                <Badge variant="outline">{pkg.currency}</Badge>
-              </div>
-              {pkg.description && (
-                <p className="text-sm text-muted-foreground">{pkg.description}</p>
-              )}
-            </div>
-            <Badge variant={pkg.active ? "default" : "outline"}>
-              {pkg.active ? "Active" : "Inactive"}
-            </Badge>
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Routes
-              </p>
-              {pkg.routes.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {pkg.routes.map((route) => (
-                    <Badge key={route.id} variant="outline">
-                      {getLocationName(locationsById, route.originLocationId)}
-                      {" -> "}
-                      {getLocationName(locationsById, route.destinationLocationId)}
-                    </Badge>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">No routes configured.</p>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Suite Types
-              </p>
-              {pkg.suiteTypes.length > 0 ? (
-                <div className="flex flex-wrap gap-2">
-                  {pkg.suiteTypes.map((suiteType) => (
-                    <Badge key={suiteType.id} variant="outline">
-                      {suiteType.name}
-                    </Badge>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">No suite types configured.</p>
-              )}
-            </div>
-          </div>
-
-          <PackageRateCardMatrix pkg={pkg} locationsById={locationsById} />
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function SeasonalPricingReadOnly({
-  periods,
-  optionNameById,
-}: {
-  periods: SupplierSeasonalPeriod[]
-  optionNameById: Record<string, string>
-}) {
-  if (periods.length === 0) {
-    return (
-      <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-        No seasonal pricing periods have been configured for this supplier yet.
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-4">
-      {periods.map((period) => (
-        <div key={period.id} className="rounded-lg border p-4 space-y-3">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div>
-              <p className="text-sm font-semibold text-foreground">
-                {period.label || "Untitled period"}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {formatDateRange(period.validFrom, period.validTo)}
-              </p>
-            </div>
-            <Badge variant="outline">
-              <CalendarDays className="mr-1 h-3 w-3" />
-              Seasonal pricing
-            </Badge>
-          </div>
-
-          {period.prices.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-secondary/20">
-                  <tr className="border-b">
-                    <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Option
-                    </th>
-                    <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Single
-                    </th>
-                    <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Double
-                    </th>
-                    <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      Family
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {period.prices.map((price) => (
-                    <tr key={price.id} className="border-b last:border-0">
-                      <td className="px-4 py-3 font-medium text-foreground">
-                        {optionNameById[price.optionId] || "Unknown option"}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {price.singlePrice.toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {price.doublePrice.toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {price.familyPrice.toLocaleString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              No seasonal price overrides configured for this period.
-            </p>
-          )}
-        </div>
+        <PackageReadOnlyCard
+          key={pkg.id}
+          pkg={pkg}
+          suiteTypes={suiteTypes}
+          locationsById={locationsById}
+          vocabulary={vocabulary}
+        />
       ))}
     </div>
   )
@@ -945,7 +916,7 @@ export function SupplierDetailSkeleton({
         <Skeleton className="h-10 w-28" />
       </div>
 
-      {Array.from({ length: 4 }).map((_, index) => (
+      {Array.from({ length: 2 }).map((_, index) => (
         <Card key={index}>
           <CardHeader>
             <Skeleton className="h-6 w-40" />
@@ -975,33 +946,77 @@ export function SupplierDetailView({
   const [isSaving, setIsSaving] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [form, setForm] = useState<SupplierFormState | null>(null)
+  const [draftSaveStatus, setDraftSaveStatus] = useState<"idle" | "saving" | "saved" | "error">(
+    "idle",
+  )
+  const [pendingLocalDraft, setPendingLocalDraft] = useState<SupplierFormState | null>(null)
+  const baselineSnapshotRef = useRef<string | null>(null)
+  const draftAutosavedSnapshotRef = useRef<string | null>(null)
+  const draftAutosaveInFlightRef = useRef(false)
+  const draftStatusResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const supplier = data && !("error" in data) ? data : null
+  const isDraftSupplier = supplier?.status === "draft"
+  const localDraftStorageKey = `supplier-draft-${supplierId}`
 
   useEffect(() => {
     if (supplier) {
-      setForm(buildFormState(supplier))
+      const nextForm = buildFormState(supplier)
+      const snapshot = JSON.stringify(nextForm)
+
+      setForm(nextForm)
+      baselineSnapshotRef.current = snapshot
+      draftAutosavedSnapshotRef.current = snapshot
+
+      if (canEdit && supplier.status === "draft") {
+        setIsEditing(true)
+      }
+
+      if (supplier.status !== "draft") {
+        const raw = window.localStorage.getItem(localDraftStorageKey)
+        if (!raw) {
+          setPendingLocalDraft(null)
+          return
+        }
+
+        try {
+          const parsed = JSON.parse(raw) as SupplierFormState
+          if (
+            parsed &&
+            typeof parsed === "object" &&
+            Array.isArray(parsed.suiteTypes) &&
+            Array.isArray(parsed.packages)
+          ) {
+            setPendingLocalDraft(parsed)
+            return
+          }
+        } catch {
+          // Invalid local draft payload, clear stale storage.
+        }
+        window.localStorage.removeItem(localDraftStorageKey)
+      } else {
+        setPendingLocalDraft(null)
+      }
     }
-  }, [supplier])
+  }, [canEdit, localDraftStorageKey, supplier])
+
+  useEffect(() => {
+    return () => {
+      if (draftStatusResetTimeoutRef.current) {
+        clearTimeout(draftStatusResetTimeoutRef.current)
+      }
+    }
+  }, [])
 
   const locations = allLocations.length > 0 ? allLocations : supplier?.locations ?? []
 
   const locationsById = useMemo(
     () =>
-      (supplier?.locations ?? []).reduce<Record<string, Location>>((acc, location) => {
+      locations.reduce<Record<string, Location>>((acc, location) => {
         acc[location.id] = location
         return acc
       }, {}),
-    [supplier?.locations],
-  )
-
-  const optionNameById = useMemo(
-    () =>
-      (supplier?.pricingOptions ?? []).reduce<Record<string, string>>((acc, option) => {
-        acc[option.id] = option.name
-        return acc
-      }, {}),
-    [supplier?.pricingOptions],
+    [locations],
   )
 
   const updateField = <K extends keyof SupplierFormState>(
@@ -1011,60 +1026,42 @@ export function SupplierDetailView({
     setForm((current) => (current ? { ...current, [key]: value } : current))
   }
 
-  const updatePricingOptions = (
-    updater: (options: EditablePricingOption[]) => EditablePricingOption[],
+  const updateSuiteTypes = (
+    updater: (suiteTypes: EditableSuiteType[]) => EditableSuiteType[],
   ) => {
-    setForm((current) => {
-      if (!current) return current
-      const nextPricingOptions = updater(current.pricingOptions)
-      const validOptionIds = new Set(nextPricingOptions.map((option) => option.id))
-
-      return {
-        ...current,
-        pricingOptions: nextPricingOptions,
-        seasonalPeriods: current.seasonalPeriods.map((period) => ({
-          ...period,
-          prices: period.prices.filter((price) => validOptionIds.has(price.optionId)),
-        })),
-      }
-    })
+    setForm((current) =>
+      current ? { ...current, suiteTypes: updater(current.suiteTypes) } : current,
+    )
   }
 
-  const updatePricingOption = (
-    index: number,
-    key: keyof EditablePricingOption,
-    value: string | number | boolean,
+  const addSuiteType = () => {
+    updateSuiteTypes((suiteTypes) => [...suiteTypes, createEmptySuiteType()])
+  }
+
+  const updateSuiteType = (
+    suiteTypeIndex: number,
+    key: keyof EditableSuiteType,
+    value: string | boolean,
   ) => {
-    updatePricingOptions((options) =>
-      options.map((option, optionIndex) =>
-        optionIndex === index ? { ...option, [key]: value } : option,
+    updateSuiteTypes((suiteTypes) =>
+      suiteTypes.map((suiteType, index) =>
+        index === suiteTypeIndex ? { ...suiteType, [key]: value } : suiteType,
       ),
     )
   }
 
-  const markPrimaryOption = (index: number) => {
-    updatePricingOptions((options) =>
-      options.map((option, optionIndex) => ({
-        ...option,
-        isPrimary: optionIndex === index,
-      })),
-    )
-  }
-
-  const addPricingOption = () => {
-    updatePricingOptions((options) => [...options, createEmptyPricingOption()])
-  }
-
-  const removePricingOption = (index: number) => {
-    updatePricingOptions((options) => {
-      const nextOptions = options.filter((_option, optionIndex) => optionIndex !== index)
-      if (nextOptions.length === 0) {
-        return [createEmptyPricingOption()]
+  const removeSuiteType = (suiteTypeIndex: number) => {
+    setForm((current) => {
+      if (!current) return current
+      const suiteTypeId = current.suiteTypes[suiteTypeIndex]?.id
+      return {
+        ...current,
+        suiteTypes: current.suiteTypes.filter((_suiteType, index) => index !== suiteTypeIndex),
+        packages: current.packages.map((pkg) => ({
+          ...pkg,
+          rateCards: pkg.rateCards.filter((rateCard) => rateCard.suiteTypeId !== suiteTypeId),
+        })),
       }
-      if (!nextOptions.some((option) => option.isPrimary)) {
-        nextOptions[0] = { ...nextOptions[0], isPrimary: true }
-      }
-      return nextOptions
     })
   }
 
@@ -1125,42 +1122,14 @@ export function SupplierDetailView({
     })
   }
 
-  const addSuiteType = (packageIndex: number) => {
-    updatePackage(packageIndex, (pkg) => ({
-      ...pkg,
-      suiteTypes: [...pkg.suiteTypes, createEmptySuiteType()],
-    }))
-  }
-
-  const updateSuiteType = (
-    packageIndex: number,
-    suiteTypeIndex: number,
-    key: keyof EditableSuiteType,
-    value: string | boolean,
-  ) => {
-    updatePackage(packageIndex, (pkg) => ({
-      ...pkg,
-      suiteTypes: pkg.suiteTypes.map((suiteType, index) =>
-        index === suiteTypeIndex ? { ...suiteType, [key]: value } : suiteType,
-      ),
-    }))
-  }
-
-  const removeSuiteType = (packageIndex: number, suiteTypeIndex: number) => {
-    updatePackage(packageIndex, (pkg) => {
-      const suiteTypeId = pkg.suiteTypes[suiteTypeIndex]?.id
-      return {
-        ...pkg,
-        suiteTypes: pkg.suiteTypes.filter((_suiteType, index) => index !== suiteTypeIndex),
-        rateCards: pkg.rateCards.filter((rateCard) => rateCard.suiteTypeId !== suiteTypeId),
-      }
-    })
-  }
-
   const addRateCardPeriod = (packageIndex: number) => {
     updatePackage(packageIndex, (pkg) => {
-      if (pkg.suiteTypes.length === 0) {
-        toast.error("Add at least one suite type before creating a pricing period.")
+      const vocabulary = getSupplierVocabulary(form?.kind ?? "train_operator")
+      const availableSuiteTypes = form?.suiteTypes ?? []
+      if (availableSuiteTypes.length === 0) {
+        toast.error(
+          `Add at least one ${vocabulary.suiteType.toLowerCase()} before creating a pricing period.`,
+        )
         return pkg
       }
 
@@ -1168,7 +1137,7 @@ export function SupplierDetailView({
       const currency = pkg.currency.trim().toUpperCase() || "ZAR"
       const routes = pkg.routes.length > 0 ? pkg.routes : [{ id: null as string | null }]
 
-      const newRateCards = pkg.suiteTypes.flatMap((suiteType) =>
+      const newRateCards = availableSuiteTypes.flatMap((suiteType) =>
         routes.map((route) => ({
           id: makeClientId(),
           routeId: route.id,
@@ -1289,128 +1258,138 @@ export function SupplierDetailView({
     })
   }
 
-  const updateSeasonalPeriods = (
-    updater: (periods: EditableSeasonalPeriod[]) => EditableSeasonalPeriod[],
-  ) => {
-    setForm((current) =>
-      current ? { ...current, seasonalPeriods: updater(current.seasonalPeriods) } : current,
-    )
-  }
+  useEffect(() => {
+    if (!canEdit || !form || !isEditing || isSaving) return
 
-  const updateSeasonalPeriod = (
-    periodIndex: number,
-    updater: (period: EditableSeasonalPeriod) => EditableSeasonalPeriod,
-  ) => {
-    updateSeasonalPeriods((periods) =>
-      periods.map((period, index) => (index === periodIndex ? updater(period) : period)),
-    )
-  }
+    if (isDraftSupplier) {
+      const snapshot = JSON.stringify(form)
+      if (snapshot === draftAutosavedSnapshotRef.current || draftAutosaveInFlightRef.current) {
+        return
+      }
 
-  const addSeasonalPeriod = () => {
-    updateSeasonalPeriods((periods) => [...periods, createEmptySeasonalPeriod()])
-  }
+      const timeout = setTimeout(async () => {
+        draftAutosaveInFlightRef.current = true
+        setDraftSaveStatus("saving")
 
-  const removeSeasonalPeriod = (periodIndex: number) => {
-    updateSeasonalPeriods((periods) => periods.filter((_period, index) => index !== periodIndex))
-  }
+        try {
+          const response = await fetch(`/api/suppliers/${supplierId}?draft=true`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(buildDraftPayload(form)),
+          })
 
-  const addSeasonalPrice = (periodIndex: number) => {
-    if (!form) return
-    const optionId = form.pricingOptions[0]?.id
-    if (!optionId) {
-      toast.error("Add a pricing option before adding seasonal prices.")
-      return
+          if (!response.ok) {
+            setDraftSaveStatus("error")
+            return
+          }
+
+          draftAutosavedSnapshotRef.current = snapshot
+          setDraftSaveStatus("saved")
+          if (draftStatusResetTimeoutRef.current) {
+            clearTimeout(draftStatusResetTimeoutRef.current)
+          }
+          draftStatusResetTimeoutRef.current = setTimeout(() => {
+            setDraftSaveStatus("idle")
+          }, DRAFT_AUTOSAVE_STATUS_RESET_MS)
+          await mutate("/api/suppliers?includeDrafts=true")
+        } catch {
+          setDraftSaveStatus("error")
+        } finally {
+          draftAutosaveInFlightRef.current = false
+        }
+      }, DRAFT_AUTOSAVE_DEBOUNCE_MS)
+
+      return () => clearTimeout(timeout)
     }
 
-    updateSeasonalPeriod(periodIndex, (period) => ({
-      ...period,
-      prices: [...period.prices, createEmptySeasonalPrice(optionId)],
-    }))
+    const timeout = setTimeout(() => {
+      const snapshot = JSON.stringify(form)
+      if (snapshot === baselineSnapshotRef.current) {
+        window.localStorage.removeItem(localDraftStorageKey)
+        return
+      }
+      window.localStorage.setItem(localDraftStorageKey, snapshot)
+      setPendingLocalDraft(form)
+    }, DRAFT_AUTOSAVE_DEBOUNCE_MS)
+
+    return () => clearTimeout(timeout)
+  }, [canEdit, form, isDraftSupplier, isEditing, isSaving, localDraftStorageKey, mutate, supplierId])
+
+  const restoreLocalDraft = () => {
+    if (!pendingLocalDraft) return
+    setForm(pendingLocalDraft)
+    setIsEditing(true)
+    toast.success("Unsaved changes restored.")
   }
 
-  const updateSeasonalPrice = (
-    periodIndex: number,
-    priceIndex: number,
-    key: keyof EditableSeasonalPrice,
-    value: string | number,
-  ) => {
-    updateSeasonalPeriod(periodIndex, (period) => ({
-      ...period,
-      prices: period.prices.map((price, index) =>
-        index === priceIndex ? { ...price, [key]: value } : price,
-      ),
-    }))
-  }
-
-  const removeSeasonalPrice = (periodIndex: number, priceIndex: number) => {
-    updateSeasonalPeriod(periodIndex, (period) => ({
-      ...period,
-      prices: period.prices.filter((_price, index) => index !== priceIndex),
-    }))
+  const discardLocalDraft = () => {
+    window.localStorage.removeItem(localDraftStorageKey)
+    setPendingLocalDraft(null)
+    toast.success("Draft changes discarded.")
   }
 
   const cancelEdit = () => {
     if (supplier) {
       setForm(buildFormState(supplier))
     }
+    if (supplier?.status === "draft") {
+      setIsEditing(true)
+      return
+    }
     setIsEditing(false)
   }
 
   const handleSave = async () => {
     if (!form) return
+    const vocabulary = getSupplierVocabulary(form.kind)
 
     if (!form.name.trim()) {
       toast.error("Supplier name is required")
       return
     }
 
-    const namedPricingOptions = form.pricingOptions.filter(
-      (option) => option.name.trim().length > 0,
-    )
-    const hasExplicitPrimary = namedPricingOptions.some((option) => option.isPrimary)
-    const cleanedPricingOptions = namedPricingOptions.map((option, index) => ({
-      id: option.id,
-      name: option.name.trim(),
-      singlePrice: option.singlePrice,
-      doublePrice: option.doublePrice,
-      familyPrice: option.familyPrice,
-      currency: option.currency.trim().toUpperCase() || "ZAR",
-      isPrimary:
-        form.kind === "hotel_property"
-          ? hasExplicitPrimary
-            ? option.isPrimary
-            : index === 0
-          : false,
-    }))
+    const cleanedSuiteTypes = form.suiteTypes
+      .filter((suiteType) => suiteType.name.trim())
+      .map((suiteType) => ({
+        id: suiteType.id,
+        name: suiteType.name.trim(),
+        active: suiteType.active,
+      }))
+    const suiteTypeIds = new Set(cleanedSuiteTypes.map((suiteType) => suiteType.id))
 
     const meaningfulPackages = form.packages.filter(
       (pkg) =>
         pkg.name.trim() ||
         pkg.description.trim() ||
         pkg.routes.length > 0 ||
-        pkg.suiteTypes.length > 0 ||
         pkg.rateCards.length > 0,
     )
 
+    const hasRateCards = meaningfulPackages.some((pkg) => pkg.rateCards.length > 0)
+    if (hasRateCards && cleanedSuiteTypes.length === 0) {
+      toast.error(
+        `Add at least one supplier ${vocabulary.suiteType.toLowerCase()} before saving rate cards.`,
+      )
+      return
+    }
+
     for (const pkg of meaningfulPackages) {
       if (!pkg.name.trim()) {
-        toast.error("Every package needs a name before saving.")
+        toast.error(`Every ${vocabulary.package.toLowerCase()} needs a name before saving.`)
         return
       }
       for (const route of pkg.routes) {
-        if (!route.name.trim() || !route.originLocationId || !route.destinationLocationId) {
-          toast.error(`Complete all route fields for "${pkg.name}".`)
-          return
-        }
-      }
-      for (const suiteType of pkg.suiteTypes) {
-        if (!suiteType.name.trim()) {
-          toast.error(`Every suite type needs a name for "${pkg.name}".`)
+        const needsLocations = vocabulary.routeHasLocations
+        if (
+          !route.name.trim() ||
+          (needsLocations && (!route.originLocationId || !route.destinationLocationId))
+        ) {
+          toast.error(`Complete all ${vocabulary.route.toLowerCase()} fields for "${pkg.name}".`)
           return
         }
       }
       for (const rateCard of pkg.rateCards) {
-        if (!rateCard.suiteTypeId || !rateCard.validFrom) {
+        if (!rateCard.suiteTypeId || !rateCard.validFrom || !suiteTypeIds.has(rateCard.suiteTypeId)) {
           toast.error(`Complete all rate card fields for "${pkg.name}".`)
           return
         }
@@ -1432,11 +1411,6 @@ export function SupplierDetailView({
         destinationLocationId: route.destinationLocationId,
         active: route.active,
       })),
-      suiteTypes: pkg.suiteTypes.map((suiteType) => ({
-        id: suiteType.id,
-        name: suiteType.name.trim(),
-        active: suiteType.active,
-      })),
       rateCards: pkg.rateCards.map((rateCard) => ({
         id: rateCard.id,
         routeId: rateCard.routeId,
@@ -1445,38 +1419,6 @@ export function SupplierDetailView({
         currency: rateCard.currency.trim().toUpperCase() || pkg.currency.trim().toUpperCase() || "ZAR",
         validFrom: rateCard.validFrom,
         validTo: rateCard.validTo ?? "",
-      })),
-    }))
-
-    const meaningfulPeriods = form.seasonalPeriods.filter(
-      (period) =>
-        period.label.trim() || period.validFrom || period.validTo || period.prices.length > 0,
-    )
-
-    for (const period of meaningfulPeriods) {
-      if (!period.validFrom || !period.validTo) {
-        toast.error("Every seasonal period needs a start and end date.")
-        return
-      }
-      for (const price of period.prices) {
-        if (!price.optionId) {
-          toast.error("Select a pricing option for every seasonal price row.")
-          return
-        }
-      }
-    }
-
-    const cleanedSeasonalPeriods = meaningfulPeriods.map((period) => ({
-      id: period.id,
-      label: period.label.trim() || null,
-      validFrom: period.validFrom,
-      validTo: period.validTo,
-      prices: period.prices.map((price) => ({
-        id: price.id,
-        optionId: price.optionId,
-        singlePrice: price.singlePrice,
-        doublePrice: price.doublePrice,
-        familyPrice: price.familyPrice,
       })),
     }))
 
@@ -1494,9 +1436,8 @@ export function SupplierDetailView({
           location: form.location.trim(),
           notes: form.notes.trim(),
           active: form.active,
-          pricingOptions: cleanedPricingOptions,
+          suiteTypes: cleanedSuiteTypes,
           packages: cleanedPackages,
-          seasonalPeriods: cleanedSeasonalPeriods,
         }),
       })
 
@@ -1509,11 +1450,16 @@ export function SupplierDetailView({
 
       await Promise.all([
         mutateDetail(),
-        mutate("/api/suppliers"),
+        mutate("/api/suppliers?includeDrafts=true"),
         mutate("/api/locations"),
       ])
+      window.localStorage.removeItem(localDraftStorageKey)
+      setPendingLocalDraft(null)
+      setDraftSaveStatus("idle")
       setIsEditing(false)
-      toast.success("Supplier updated successfully")
+      toast.success(
+        isDraftSupplier ? "Supplier published successfully" : "Supplier updated successfully",
+      )
     } catch {
       toast.error("Failed to update supplier")
     } finally {
@@ -1546,7 +1492,7 @@ export function SupplierDetailView({
         return
       }
 
-      await mutate("/api/suppliers")
+      await mutate("/api/suppliers?includeDrafts=true")
       toast.success("Supplier deleted successfully")
       router.push("/app/suppliers")
     } catch {
@@ -1582,6 +1528,8 @@ export function SupplierDetailView({
     return null
   }
 
+  const activeVocabulary = getSupplierVocabulary(isEditing ? form.kind : supplier.kind)
+
   return (
     <ContentTransition show>
       <div className={getContainerClass(presentation)}>
@@ -1602,6 +1550,7 @@ export function SupplierDetailView({
                   {supplier.name}
                 </h1>
                 <Badge variant="secondary">{SUPPLIER_KIND_LABELS[supplier.kind]}</Badge>
+                {supplier.status === "draft" && <Badge variant="outline">Draft</Badge>}
                 <Badge variant={supplier.active ? "default" : "outline"}>
                   {supplier.active ? "Active" : "Inactive"}
                 </Badge>
@@ -1658,19 +1607,50 @@ export function SupplierDetailView({
                 </Button>
                 <Button onClick={handleSave} disabled={isSaving}>
                   <Save className="mr-2 h-4 w-4" />
-                  {isSaving ? "Saving..." : "Save changes"}
+                  {isSaving
+                    ? "Saving..."
+                    : supplier.status === "draft"
+                      ? "Save & Publish"
+                      : "Save changes"}
                 </Button>
               </>
             )}
           </div>
         </div>
 
+        {supplier.status === "draft" && (
+          <Card className="border-dashed">
+            <CardContent className="p-4 text-sm text-muted-foreground">
+              This supplier is in draft mode and is not available in booking or quote flows.
+              {draftSaveStatus === "saving" && " Saving draft..."}
+              {draftSaveStatus === "saved" && " Draft saved."}
+              {draftSaveStatus === "error" && " Draft save failed. Keep editing and try again."}
+            </CardContent>
+          </Card>
+        )}
+
+        {canEdit && supplier.status !== "draft" && pendingLocalDraft && !isEditing && (
+          <Card className="border-dashed">
+            <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm text-muted-foreground">
+              <p>You have unsaved edits from a previous session.</p>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={discardLocalDraft}>
+                  Discard
+                </Button>
+                <Button size="sm" onClick={restoreLocalDraft}>
+                  Restore draft
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {!canEdit && (
           <Card className="border-dashed">
             <CardContent className="p-4 text-sm text-muted-foreground">
               Supplier details are view-only for your role. Editing supplier fields,
-              packages, rate cards, and seasonal pricing is restricted to managers and
-              admins.
+              {` ${activeVocabulary.packagePlural.toLowerCase()}, ${activeVocabulary.routePlural.toLowerCase()}, ${activeVocabulary.suiteTypePlural.toLowerCase()}, and rate cards is restricted to managers`}
+              and admins.
             </CardContent>
           </Card>
         )}
@@ -1815,392 +1795,128 @@ export function SupplierDetailView({
         </Card>
 
         <Card>
-          <CardHeader className="pb-4">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <CardTitle>Pricing</CardTitle>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Manage supplier pricing options used for supplier-level pricing and
-                  seasonal overrides.
-                </p>
-              </div>
-              {isEditing && (
-                <Button variant="outline" size="sm" onClick={addPricingOption}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add pricing option
-                </Button>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {isEditing ? (
-              form.pricingOptions.map((option, index) => (
-                <div key={option.id} className="rounded-lg border p-4 space-y-4">
-                  <div className="flex items-center justify-between gap-3 flex-wrap">
-                    <div className="space-y-2 flex-1 min-w-[220px]">
-                      <Label htmlFor={`pricing-name-${index}`}>Option name</Label>
-                      <Input
-                        id={`pricing-name-${index}`}
-                        value={option.name}
-                        onChange={(event) =>
-                          updatePricingOption(index, "name", event.target.value)
-                        }
-                        placeholder="e.g. Deluxe suite"
-                      />
-                    </div>
-
-                    <div className="flex items-center gap-2 self-end">
-                      {form.kind === "hotel_property" && (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant={option.isPrimary ? "default" : "outline"}
-                          onClick={() => markPrimaryOption(index)}
-                        >
-                          <CheckCircle2 className="mr-2 h-4 w-4" />
-                          Primary
-                        </Button>
-                      )}
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => removePricingOption(index)}
-                      >
-                        <Trash2 className="mr-2 h-4 w-4" />
-                        Remove
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                    <div className="space-y-2">
-                      <Label htmlFor={`pricing-single-${index}`}>Single</Label>
-                      <Input
-                        id={`pricing-single-${index}`}
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={option.singlePrice}
-                        onChange={(event) =>
-                          updatePricingOption(index, "singlePrice", Number(event.target.value || 0))
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor={`pricing-double-${index}`}>Double</Label>
-                      <Input
-                        id={`pricing-double-${index}`}
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={option.doublePrice}
-                        onChange={(event) =>
-                          updatePricingOption(index, "doublePrice", Number(event.target.value || 0))
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor={`pricing-family-${index}`}>Family</Label>
-                      <Input
-                        id={`pricing-family-${index}`}
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={option.familyPrice}
-                        onChange={(event) =>
-                          updatePricingOption(index, "familyPrice", Number(event.target.value || 0))
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor={`pricing-currency-${index}`}>Currency</Label>
-                      <Input
-                        id={`pricing-currency-${index}`}
-                        maxLength={10}
-                        value={option.currency}
-                        onChange={(event) =>
-                          updatePricingOption(index, "currency", event.target.value.toUpperCase())
-                        }
-                      />
-                    </div>
-                  </div>
-                </div>
-              ))
-            ) : supplier.pricingOptions.length > 0 ? (
-              supplier.pricingOptions.map((option) => (
-                <div key={option.id} className="rounded-lg border p-4 space-y-3">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-sm font-semibold text-foreground">{option.name}</p>
-                    {supplier.kind === "hotel_property" && option.isPrimary && <Badge>Primary</Badge>}
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <InfoItem
-                      label="Single"
-                      value={formatCurrency(option.singlePrice, option.currency)}
-                    />
-                    <InfoItem
-                      label="Double"
-                      value={formatCurrency(option.doublePrice, option.currency)}
-                    />
-                    <InfoItem
-                      label="Family"
-                      value={formatCurrency(option.familyPrice, option.currency)}
-                    />
-                  </div>
-                </div>
-              ))
-            ) : (
-              <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                No pricing options have been configured for this supplier yet.
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
             <CardHeader className="pb-4">
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div>
-                  <CardTitle>Seasonal Pricing</CardTitle>
+                  <CardTitle>{activeVocabulary.sectionTitle}</CardTitle>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Configure supplier-level seasonal periods and override prices by
-                    pricing option.
-                  </p>
-                </div>
-                {isEditing && (
-                  <Button variant="outline" size="sm" onClick={addSeasonalPeriod}>
-                    <Plus className="mr-2 h-4 w-4" />
-                    Add seasonal period
-                  </Button>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {isEditing ? (
-                form.seasonalPeriods.length > 0 ? (
-                  form.seasonalPeriods.map((period, periodIndex) => (
-                    <div key={period.id} className="rounded-lg border p-4 space-y-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-semibold text-foreground">
-                          Seasonal period {periodIndex + 1}
-                        </p>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => removeSeasonalPeriod(periodIndex)}
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Remove period
-                        </Button>
-                      </div>
-
-                      <div className="grid gap-4 md:grid-cols-3">
-                        <div className="space-y-2">
-                          <Label>Label</Label>
-                          <Input
-                            value={period.label}
-                            onChange={(event) =>
-                              updateSeasonalPeriod(periodIndex, (current) => ({
-                                ...current,
-                                label: event.target.value,
-                              }))
-                            }
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Valid from</Label>
-                          <Input
-                            type="date"
-                            value={period.validFrom}
-                            onChange={(event) =>
-                              updateSeasonalPeriod(periodIndex, (current) => ({
-                                ...current,
-                                validFrom: event.target.value,
-                              }))
-                            }
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Valid to</Label>
-                          <Input
-                            type="date"
-                            value={period.validTo}
-                            onChange={(event) =>
-                              updateSeasonalPeriod(periodIndex, (current) => ({
-                                ...current,
-                                validTo: event.target.value,
-                              }))
-                            }
-                          />
-                        </div>
-                      </div>
-
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="text-sm font-semibold text-foreground">Seasonal prices</p>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => addSeasonalPrice(periodIndex)}
-                          >
-                            <Plus className="mr-2 h-4 w-4" />
-                            Add seasonal price
-                          </Button>
-                        </div>
-
-                        {period.prices.length > 0 ? (
-                          period.prices.map((price, priceIndex) => (
-                            <div
-                              key={price.id}
-                              className="grid gap-4 rounded-lg border p-3 md:grid-cols-2 xl:grid-cols-5"
-                            >
-                              <div className="space-y-2">
-                                <Label>Pricing option</Label>
-                                <Select
-                                  value={price.optionId || undefined}
-                                  onValueChange={(value) =>
-                                    updateSeasonalPrice(periodIndex, priceIndex, "optionId", value)
-                                  }
-                                >
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Select option" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {form.pricingOptions.map((option) => (
-                                      <SelectItem key={option.id} value={option.id}>
-                                        {option.name || "Unnamed option"}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              <div className="space-y-2">
-                                <Label>Single</Label>
-                                <Input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={price.singlePrice}
-                                  onChange={(event) =>
-                                    updateSeasonalPrice(
-                                      periodIndex,
-                                      priceIndex,
-                                      "singlePrice",
-                                      Number(event.target.value || 0),
-                                    )
-                                  }
-                                />
-                              </div>
-                              <div className="space-y-2">
-                                <Label>Double</Label>
-                                <Input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={price.doublePrice}
-                                  onChange={(event) =>
-                                    updateSeasonalPrice(
-                                      periodIndex,
-                                      priceIndex,
-                                      "doublePrice",
-                                      Number(event.target.value || 0),
-                                    )
-                                  }
-                                />
-                              </div>
-                              <div className="space-y-2">
-                                <Label>Family</Label>
-                                <Input
-                                  type="number"
-                                  min="0"
-                                  step="0.01"
-                                  value={price.familyPrice}
-                                  onChange={(event) =>
-                                    updateSeasonalPrice(
-                                      periodIndex,
-                                      priceIndex,
-                                      "familyPrice",
-                                      Number(event.target.value || 0),
-                                    )
-                                  }
-                                />
-                              </div>
-                              <div className="flex items-end">
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => removeSeasonalPrice(periodIndex, priceIndex)}
-                                >
-                                  <Trash2 className="mr-2 h-4 w-4" />
-                                  Remove
-                                </Button>
-                              </div>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                            No seasonal prices added yet.
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                    No seasonal periods added yet.
-                  </div>
-                )
-              ) : (
-                <SeasonalPricingReadOnly periods={supplier.seasonalPeriods} optionNameById={optionNameById} />
-              )}
-            </CardContent>
-          </Card>
-
-        <Card>
-            <CardHeader className="pb-4">
-              <div className="flex items-center justify-between gap-3 flex-wrap">
-                <div>
-                  <CardTitle>Packages, Routes and Rate Cards</CardTitle>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Manage the journeys this supplier operates, the routes they cover,
-                    suite types, and period-based rate cards.
+                    {activeVocabulary.sectionDescription}
                   </p>
                 </div>
                 {isEditing && (
                   <Button variant="outline" size="sm" onClick={addPackage}>
                     <Plus className="mr-2 h-4 w-4" />
-                    Add package
+                    {`Add ${activeVocabulary.package.toLowerCase()}`}
                   </Button>
                 )}
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="rounded-lg border p-4 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">
+                      {`Supplier ${activeVocabulary.suiteTypePlural.toLowerCase()}`}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {`Shared across all ${activeVocabulary.packagePlural.toLowerCase()} and used by rate cards.`}
+                    </p>
+                  </div>
+                  {isEditing && (
+                    <Button type="button" size="sm" variant="outline" onClick={addSuiteType}>
+                      <Plus className="mr-2 h-4 w-4" />
+                      {`Add ${activeVocabulary.suiteType.toLowerCase()}`}
+                    </Button>
+                  )}
+                </div>
+
+                {isEditing ? (
+                  form.suiteTypes.length > 0 ? (
+                    form.suiteTypes.map((suiteType, suiteTypeIndex) => (
+                      <div
+                        key={suiteType.id}
+                        className="grid gap-4 rounded-lg border p-3 md:grid-cols-[1fr_auto_auto]"
+                      >
+                        <div className="space-y-2">
+                          <Label>{`${activeVocabulary.suiteType} name`}</Label>
+                          <Input
+                            value={suiteType.name}
+                            onChange={(event) =>
+                              updateSuiteType(suiteTypeIndex, "name", event.target.value)
+                            }
+                          />
+                        </div>
+                        <div className="flex items-end gap-2">
+                          <Switch
+                            checked={suiteType.active}
+                            onCheckedChange={(checked) =>
+                              updateSuiteType(suiteTypeIndex, "active", checked)
+                            }
+                          />
+                          <span className="self-center text-sm text-muted-foreground">Active</span>
+                        </div>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="outline"
+                          className={`self-end ${REMOVE_ICON_BUTTON_CLASS}`}
+                          aria-label={`Remove ${activeVocabulary.suiteType.toLowerCase()}`}
+                          onClick={() => removeSuiteType(suiteTypeIndex)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                      {`No ${activeVocabulary.suiteTypePlural.toLowerCase()} added yet.`}
+                    </div>
+                  )
+                ) : supplier.suiteTypes.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {supplier.suiteTypes.map((suiteType) => (
+                      <Badge key={suiteType.id} variant="outline">
+                        {suiteType.name}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                    {`No ${activeVocabulary.suiteTypePlural.toLowerCase()} configured.`}
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-lg border-dashed border p-3 text-xs text-muted-foreground">
+                Note: legacy supplier pricing and seasonal pricing tables remain in the database for
+                now and are planned for cleanup later.
+              </div>
+
+              <Separator />
+
               {isEditing ? (
                 form.packages.length > 0 ? (
                   form.packages.map((pkg, packageIndex) => (
                     <div key={pkg.id} className="rounded-lg border p-4 space-y-5">
                       <div className="flex items-center justify-between gap-3 flex-wrap">
                         <p className="text-sm font-semibold text-foreground">
-                          Package {packageIndex + 1}
+                          {`${activeVocabulary.package} ${packageIndex + 1}`}
                         </p>
                         <Button
                           type="button"
-                          size="sm"
+                          size="icon"
                           variant="outline"
+                          className={REMOVE_ICON_BUTTON_CLASS}
+                          aria-label={`Remove ${activeVocabulary.package.toLowerCase()}`}
                           onClick={() => removePackage(packageIndex)}
                         >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Remove package
+                          <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
 
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                         <div className="space-y-2 xl:col-span-2">
-                          <Label>Package name</Label>
+                          <Label>{`${activeVocabulary.package} name`}</Label>
                           <Input
                             value={pkg.name}
                             onChange={(event) =>
@@ -2211,37 +1927,41 @@ export function SupplierDetailView({
                             }
                           />
                         </div>
-                        <div className="space-y-2">
-                          <Label>Duration (nights)</Label>
-                          <Input
-                            type="number"
-                            min="0"
-                            value={pkg.durationNights ?? ""}
-                            onChange={(event) =>
-                              updatePackage(packageIndex, (current) => ({
-                                ...current,
-                                durationNights: event.target.value
-                                  ? Number(event.target.value)
-                                  : null,
-                              }))
-                            }
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Single supplement %</Label>
-                          <Input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={pkg.singleSupplementPct}
-                            onChange={(event) =>
-                              updatePackage(packageIndex, (current) => ({
-                                ...current,
-                                singleSupplementPct: Number(event.target.value || 0),
-                              }))
-                            }
-                          />
-                        </div>
+                        {activeVocabulary.showDurationNights ? (
+                          <div className="space-y-2">
+                            <Label>Duration (nights)</Label>
+                            <Input
+                              type="number"
+                              min="0"
+                              value={pkg.durationNights ?? ""}
+                              onChange={(event) =>
+                                updatePackage(packageIndex, (current) => ({
+                                  ...current,
+                                  durationNights: event.target.value
+                                    ? Number(event.target.value)
+                                    : null,
+                                }))
+                              }
+                            />
+                          </div>
+                        ) : null}
+                        {activeVocabulary.showSingleSupplement ? (
+                          <div className="space-y-2">
+                            <Label>Single supplement %</Label>
+                            <Input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={pkg.singleSupplementPct}
+                              onChange={(event) =>
+                                updatePackage(packageIndex, (current) => ({
+                                  ...current,
+                                  singleSupplementPct: Number(event.target.value || 0),
+                                }))
+                              }
+                            />
+                          </div>
+                        ) : null}
                         <div className="space-y-2">
                           <Label>Currency</Label>
                           <Input
@@ -2259,7 +1979,7 @@ export function SupplierDetailView({
                           <div>
                             <p className="text-sm font-medium text-foreground">Active</p>
                             <p className="text-xs text-muted-foreground">
-                              Include this package in supplier listings.
+                              {`Include this ${activeVocabulary.package.toLowerCase()} in supplier listings.`}
                             </p>
                           </div>
                           <Switch
@@ -2292,7 +2012,9 @@ export function SupplierDetailView({
 
                       <div className="space-y-3">
                         <div className="flex items-center justify-between gap-3">
-                          <p className="text-sm font-semibold text-foreground">Routes</p>
+                          <p className="text-sm font-semibold text-foreground">
+                            {activeVocabulary.routePlural}
+                          </p>
                           <Button
                             type="button"
                             size="sm"
@@ -2300,7 +2022,7 @@ export function SupplierDetailView({
                             onClick={() => addRoute(packageIndex)}
                           >
                             <Plus className="mr-2 h-4 w-4" />
-                            Add route
+                            {`Add ${activeVocabulary.route.toLowerCase()}`}
                           </Button>
                         </div>
 
@@ -2308,10 +2030,18 @@ export function SupplierDetailView({
                           pkg.routes.map((route, routeIndex) => (
                             <div
                               key={route.id}
-                              className="grid gap-4 rounded-lg border p-3 md:grid-cols-2 xl:grid-cols-5"
+                              className={`grid min-w-0 gap-4 overflow-hidden rounded-lg border p-3 ${
+                                activeVocabulary.routeHasLocations
+                                  ? "md:grid-cols-2 xl:grid-cols-5"
+                                  : "md:grid-cols-[1fr_auto]"
+                              }`}
                             >
-                              <div className="space-y-2 xl:col-span-2">
-                                <Label>Route name</Label>
+                              <div
+                                className={`space-y-2 ${
+                                  activeVocabulary.routeHasLocations ? "xl:col-span-2" : ""
+                                }`}
+                              >
+                                <Label>{`${activeVocabulary.route} name`}</Label>
                                 <Input
                                   value={route.name}
                                   onChange={(event) =>
@@ -2319,52 +2049,56 @@ export function SupplierDetailView({
                                   }
                                 />
                               </div>
-                              <div className="space-y-2">
-                                <Label>Origin</Label>
-                                <Select
-                                  value={route.originLocationId || undefined}
-                                  onValueChange={(value) =>
-                                    updateRoute(packageIndex, routeIndex, "originLocationId", value)
-                                  }
-                                >
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Select location" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {locations.map((location) => (
-                                      <SelectItem key={location.id} value={location.id}>
-                                        {location.name}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              <div className="space-y-2">
-                                <Label>Destination</Label>
-                                <Select
-                                  value={route.destinationLocationId || undefined}
-                                  onValueChange={(value) =>
-                                    updateRoute(
-                                      packageIndex,
-                                      routeIndex,
-                                      "destinationLocationId",
-                                      value,
-                                    )
-                                  }
-                                >
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Select location" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {locations.map((location) => (
-                                      <SelectItem key={location.id} value={location.id}>
-                                        {location.name}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              <div className="flex items-end justify-between gap-3">
+                              {activeVocabulary.routeHasLocations ? (
+                                <>
+                                  <div className="min-w-0 space-y-2">
+                                    <Label>Origin</Label>
+                                    <Select
+                                      value={route.originLocationId || undefined}
+                                      onValueChange={(value) =>
+                                        updateRoute(packageIndex, routeIndex, "originLocationId", value)
+                                      }
+                                    >
+                                      <SelectTrigger className="max-w-full">
+                                        <SelectValue placeholder="Select location" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {locations.map((location) => (
+                                          <SelectItem key={location.id} value={location.id}>
+                                            {location.name}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <div className="min-w-0 space-y-2">
+                                    <Label>Destination</Label>
+                                    <Select
+                                      value={route.destinationLocationId || undefined}
+                                      onValueChange={(value) =>
+                                        updateRoute(
+                                          packageIndex,
+                                          routeIndex,
+                                          "destinationLocationId",
+                                          value,
+                                        )
+                                      }
+                                    >
+                                      <SelectTrigger className="max-w-full">
+                                        <SelectValue placeholder="Select location" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {locations.map((location) => (
+                                          <SelectItem key={location.id} value={location.id}>
+                                            {location.name}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                </>
+                              ) : null}
+                              <div className="flex items-end justify-end gap-3">
                                 <div className="flex items-center gap-2">
                                   <Switch
                                     checked={route.active}
@@ -2376,90 +2110,20 @@ export function SupplierDetailView({
                                 </div>
                                 <Button
                                   type="button"
-                                  size="sm"
+                                  size="icon"
                                   variant="outline"
+                                  className={REMOVE_ICON_BUTTON_CLASS}
+                                  aria-label={`Remove ${activeVocabulary.route.toLowerCase()}`}
                                   onClick={() => removeRoute(packageIndex, routeIndex)}
                                 >
-                                  <Trash2 className="mr-2 h-4 w-4" />
-                                  Remove
+                                  <Trash2 className="h-4 w-4" />
                                 </Button>
                               </div>
                             </div>
                           ))
                         ) : (
                           <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                            No routes added yet.
-                          </div>
-                        )}
-                      </div>
-
-                      <Separator />
-
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="text-sm font-semibold text-foreground">Suite types</p>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => addSuiteType(packageIndex)}
-                          >
-                            <Plus className="mr-2 h-4 w-4" />
-                            Add suite type
-                          </Button>
-                        </div>
-
-                        {pkg.suiteTypes.length > 0 ? (
-                          pkg.suiteTypes.map((suiteType, suiteTypeIndex) => (
-                            <div
-                              key={suiteType.id}
-                              className="grid gap-4 rounded-lg border p-3 md:grid-cols-[1fr_auto_auto]"
-                            >
-                              <div className="space-y-2">
-                                <Label>Suite type name</Label>
-                                <Input
-                                  value={suiteType.name}
-                                  onChange={(event) =>
-                                    updateSuiteType(
-                                      packageIndex,
-                                      suiteTypeIndex,
-                                      "name",
-                                      event.target.value,
-                                    )
-                                  }
-                                />
-                              </div>
-                              <div className="flex items-end gap-2">
-                                <Switch
-                                  checked={suiteType.active}
-                                  onCheckedChange={(checked) =>
-                                    updateSuiteType(
-                                      packageIndex,
-                                      suiteTypeIndex,
-                                      "active",
-                                      checked,
-                                    )
-                                  }
-                                />
-                                <span className="self-center text-sm text-muted-foreground">
-                                  Active
-                                </span>
-                              </div>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className="self-end"
-                                onClick={() => removeSuiteType(packageIndex, suiteTypeIndex)}
-                              >
-                                <Trash2 className="mr-2 h-4 w-4" />
-                                Remove
-                              </Button>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                            No suite types added yet.
+                            {`No ${activeVocabulary.routePlural.toLowerCase()} added yet.`}
                           </div>
                         )}
                       </div>
@@ -2468,8 +2132,10 @@ export function SupplierDetailView({
 
                       <RateCardMatrixEditor
                         pkg={pkg}
+                        suiteTypes={form.suiteTypes}
                         packageIndex={packageIndex}
                         locationsById={locationsById}
+                        vocabulary={activeVocabulary}
                         onAddPeriod={addRateCardPeriod}
                         onRemovePeriod={removeRateCardPeriod}
                         onUpdatePeriodField={updateRateCardPeriodField}
@@ -2480,11 +2146,16 @@ export function SupplierDetailView({
                   ))
                 ) : (
                   <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                    No packages added yet.
+                    {`No ${activeVocabulary.packagePlural.toLowerCase()} added yet.`}
                   </div>
                 )
               ) : (
-                <SupplierPackagesReadOnly packages={supplier.packages} locationsById={locationsById} />
+                <SupplierPackagesReadOnly
+                  packages={supplier.packages}
+                  suiteTypes={supplier.suiteTypes}
+                  locationsById={locationsById}
+                  vocabulary={activeVocabulary}
+                />
               )}
             </CardContent>
           </Card>

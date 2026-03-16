@@ -44,16 +44,18 @@ const createSupplierSchema = z.object({
   notes: z.string().trim().max(5000),
 })
 
-export async function GET() {
+export async function GET(req: Request) {
   const auth = await requireAuthenticatedUser()
   if ("error" in auth) {
     return auth.error
   }
 
   const { supabase } = auth
-  const { data: suppliers, error } = await supabase
-    .from("suppliers")
-    .select("*")
+  const includeDrafts = new URL(req.url).searchParams.get("includeDrafts") === "true"
+  const supplierQuery = includeDrafts
+    ? supabase.from("suppliers").select("*")
+    : supabase.from("suppliers").select("*").eq("active", true)
+  const { data: suppliers, error } = await supplierQuery
     .order("kind", { ascending: true })
     .order("name", { ascending: true })
 
@@ -107,7 +109,7 @@ export async function POST(req: Request) {
       website: parsed.website.trim() || null,
       location: parsed.location.trim() || null,
       notes: parsed.notes.trim() || null,
-      active: true,
+      active: false,
     })
     .select("*")
     .single()

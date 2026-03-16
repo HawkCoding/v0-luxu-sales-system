@@ -9,10 +9,23 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
 import { Search, Globe, Filter, X } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { CONSULTANTS, type ConsultantAbbreviation } from "@/lib/types"
 import { format } from "date-fns"
 import Link from "next/link"
+import { CustomerDetailView } from "@/components/customer-detail-view"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+
+function getCustomerIdFromPath(pathname: string): string | null {
+  const match = pathname.match(/^\/app\/customers\/([^/]+)\/?$/)
+  return match ? match[1] : null
+}
 
 export default function CustomersPage() {
   const { data, isLoading } = useAllData()
@@ -21,6 +34,29 @@ export default function CustomersPage() {
   const [supplierFilter, setSupplierFilter] = useState("all")
   const [createdDateFrom, setCreatedDateFrom] = useState<Date | undefined>(undefined)
   const [createdDateTo, setCreatedDateTo] = useState<Date | undefined>(undefined)
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null)
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setSelectedCustomerId(getCustomerIdFromPath(window.location.pathname))
+    }
+
+    window.addEventListener("popstate", handlePopState)
+    return () => window.removeEventListener("popstate", handlePopState)
+  }, [])
+
+  const openCustomerModal = (customerId: string) => {
+    setSelectedCustomerId(customerId)
+    const nextPath = `/app/customers/${customerId}`
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({}, "", nextPath)
+    }
+  }
+
+  const closeCustomerModal = () => {
+    if (!selectedCustomerId) return
+    window.history.back()
+  }
 
   if (isLoading || !data) {
     return <div className="p-6"><div className="animate-pulse space-y-3">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-14 bg-secondary rounded-lg" />)}</div></div>
@@ -215,7 +251,25 @@ export default function CustomersPage() {
         )}
         
         {filtered.map((c: any) => (
-          <Link key={c.id} href={`/app/customers/${c.id}`}>
+          <Link
+            key={c.id}
+            href={`/app/customers/${c.id}`}
+            onClick={(event) => {
+              if (
+                event.defaultPrevented ||
+                event.button !== 0 ||
+                event.metaKey ||
+                event.ctrlKey ||
+                event.shiftKey ||
+                event.altKey
+              ) {
+                return
+              }
+
+              event.preventDefault()
+              openCustomerModal(c.id)
+            }}
+          >
             <Card className="hover:shadow-sm transition-shadow cursor-pointer">
               <CardContent className="p-4">
                 <div className="flex items-center justify-between gap-4">
@@ -253,6 +307,20 @@ export default function CustomersPage() {
           </Link>
         ))}
       </div>
+
+      <Dialog open={Boolean(selectedCustomerId)} onOpenChange={(open) => !open && closeCustomerModal()}>
+        <DialogContent className="max-w-5xl p-0 sm:max-w-5xl">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Customer details</DialogTitle>
+            <DialogDescription>
+              View customer details, bookings, and notes.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedCustomerId ? (
+            <CustomerDetailView customerId={selectedCustomerId} presentation="modal" />
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -606,6 +606,7 @@ export type Database = {
           clearance_level: Database["public"]["Enums"]["user_role"]
           created_at: string
           email: string
+          is_active: boolean
           name: string
           surname: string | null
           updated_at: string
@@ -615,6 +616,7 @@ export type Database = {
           clearance_level?: Database["public"]["Enums"]["user_role"]
           created_at?: string
           email: string
+          is_active?: boolean
           name: string
           surname?: string | null
           updated_at?: string
@@ -624,6 +626,7 @@ export type Database = {
           clearance_level?: Database["public"]["Enums"]["user_role"]
           created_at?: string
           email?: string
+          is_active?: boolean
           name?: string
           surname?: string | null
           updated_at?: string
@@ -878,7 +881,7 @@ export type Database = {
           created_at: string
           id: string
           name: string
-          package_id: string | null
+          supplier_id: string
           updated_at: string
         }
         Insert: {
@@ -886,7 +889,7 @@ export type Database = {
           created_at?: string
           id?: string
           name: string
-          package_id?: string | null
+          supplier_id: string
           updated_at?: string
         }
         Update: {
@@ -894,15 +897,15 @@ export type Database = {
           created_at?: string
           id?: string
           name?: string
-          package_id?: string | null
+          supplier_id?: string
           updated_at?: string
         }
         Relationships: [
           {
-            foreignKeyName: "suite_types_package_id_fkey"
-            columns: ["package_id"]
+            foreignKeyName: "suite_types_supplier_id_fkey"
+            columns: ["supplier_id"]
             isOneToOne: false
-            referencedRelation: "packages"
+            referencedRelation: "suppliers"
             referencedColumns: ["id"]
           },
         ]
@@ -1045,6 +1048,7 @@ export type Database = {
           name: string
           notes: string | null
           phone: string | null
+          status: "draft" | "active"
           updated_at: string
           website: string | null
         }
@@ -1058,6 +1062,7 @@ export type Database = {
           name: string
           notes?: string | null
           phone?: string | null
+          status?: "draft" | "active"
           updated_at?: string
           website?: string | null
         }
@@ -1071,6 +1076,7 @@ export type Database = {
           name?: string
           notes?: string | null
           phone?: string | null
+          status?: "draft" | "active"
           updated_at?: string
           website?: string | null
         }

@@ -31,7 +31,7 @@ interface AddSupplierDialogProps {
 }
 
 interface CreateSupplierFormState {
-  kind: SupplierKind
+  kind: SupplierKind | ""
   name: string
   email: string
   phone: string
@@ -40,7 +40,7 @@ interface CreateSupplierFormState {
   notes: string
 }
 
-type SupplierFormField = Exclude<keyof CreateSupplierFormState, "kind" | "notes">
+type SupplierFormField = Exclude<keyof CreateSupplierFormState, "notes">
 type SupplierFormErrors = Record<SupplierFormField, string | null>
 type SupplierFormTouched = Partial<Record<SupplierFormField, boolean>>
 
@@ -50,7 +50,7 @@ const WEBSITE_PATTERN = /^\S+\.\S+$/
 
 function getInitialFormState(): CreateSupplierFormState {
   return {
-    kind: "train_operator",
+    kind: "",
     name: "",
     email: "",
     phone: "",
@@ -72,6 +72,7 @@ function validateSupplierForm(form: CreateSupplierFormState): SupplierFormErrors
   const location = form.location.trim()
 
   return {
+    kind: form.kind ? null : "Please choose a supplier category",
     name:
       name.length === 0
         ? "Supplier name is required"
@@ -109,6 +110,7 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
 
   const canSubmit = useMemo(
     () =>
+      errors.kind === null &&
       errors.name === null &&
       Object.entries(errors).every(
         ([field, error]) => !error || !touched[field as SupplierFormField],
@@ -142,6 +144,7 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
 
     if (hasValidationErrors) {
       setTouched({
+        kind: true,
         name: true,
         email: true,
         phone: true,
@@ -153,7 +156,12 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
     }
 
     if (!canSubmit) {
-      toast.error("Supplier name is required")
+      toast.error("Please complete the required fields")
+      return
+    }
+
+    if (!form.kind) {
+      toast.error("Please choose a supplier category")
       return
     }
 
@@ -179,7 +187,7 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
         return
       }
 
-      await mutate("/api/suppliers")
+      await mutate("/api/suppliers?includeDrafts=true")
       handleOpenChange(false)
       toast.success("Supplier created")
       router.push(`/app/suppliers/${payload.id}`)
@@ -205,13 +213,13 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
           <div className="space-y-2">
             <Label htmlFor="supplier-kind">Category</Label>
             <Select
-              value={form.kind}
+              value={form.kind || undefined}
               onValueChange={(value: SupplierKind) =>
                 setForm((current) => ({ ...current, kind: value }))
               }
             >
               <SelectTrigger id="supplier-kind">
-                <SelectValue />
+                <SelectValue placeholder="Select category" />
               </SelectTrigger>
               <SelectContent>
                 {Object.entries(SUPPLIER_KIND_LABELS).map(([kind, label]) => (
@@ -221,6 +229,9 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
                 ))}
               </SelectContent>
             </Select>
+            {touched.kind && errors.kind ? (
+              <p className="text-xs text-destructive">{errors.kind}</p>
+            ) : null}
           </div>
 
           <div className="space-y-2">

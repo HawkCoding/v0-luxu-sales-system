@@ -11,10 +11,27 @@ import {
   queryExistingIds,
   requireAuthenticatedUser,
 } from "../helpers"
-import { supplierSaveSchema, type SupplierSaveInput } from "../schemas"
+import {
+  supplierDraftSaveSchema,
+  supplierSaveSchema,
+  type SupplierDraftSaveInput,
+  type SupplierSaveInput,
+} from "../schemas"
 
 type PackageRow = Database["public"]["Tables"]["packages"]["Row"]
 type RateCardRow = Database["public"]["Tables"]["rate_cards"]["Row"]
+
+function isUuid(value: string | null | undefined): value is string {
+  if (!value) return false
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  )
+}
+
+function isDateString(value: string | null | undefined): value is string {
+  if (!value) return false
+  return /^\d{4}-\d{2}-\d{2}$/.test(value)
+}
 
 export async function GET(
   _req: Request,
@@ -34,13 +51,10 @@ export async function GET(
   return NextResponse.json(
     mapSupplierDetail(
       detail.supplier,
-      detail.pricingOptions,
       detail.packages,
       detail.routes,
       detail.suiteTypes,
       detail.rateCards,
-      detail.seasonalPeriods,
-      detail.seasonalPrices,
       detail.locations,
     ),
   )
@@ -114,6 +128,7 @@ export async function PATCH(
 
   const { supabase, user } = auth
   const { id } = await params
+  const isDraftSave = new URL(req.url).searchParams.get("draft") === "true"
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
@@ -125,9 +140,10 @@ export async function PATCH(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
-  let parsed: SupplierSaveInput
+  let parsed: SupplierSaveInput | SupplierDraftSaveInput
   try {
-    parsed = supplierSaveSchema.parse(await req.json())
+    const body = await req.json()
+    parsed = isDraftSave ? supplierDraftSaveSchema.parse(body) : supplierSaveSchema.parse(body)
   } catch {
     return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
   }
@@ -137,15 +153,11 @@ export async function PATCH(
     return existingDetail.error
   }
 
-  let normalizedPricingOptions: Array<{
+  let normalizedSuiteTypes: Array<{
     id: string
     supplier_id: string
     name: string
-    single_price: number
-    double_price: number
-    family_price: number
-    currency: string
-    is_primary: boolean
+    active: boolean
   }>
   let normalizedPackages: Array<
     PackageRow & {
@@ -157,47 +169,22 @@ export async function PATCH(
         destination_location_id: string
         active: boolean
       }>
-      suiteTypes: Array<{
-        id: string
-        package_id: string
-        name: string
-        active: boolean
-      }>
       rateCards: Array<RateCardRow>
     }
   >
-  let normalizedSeasonalPeriods: Array<{
-    id: string
-    supplier_id: string
-    label: string | null
-    valid_from: string
-    valid_to: string
-    prices: Array<{
-      id: string
-      period_id: string
-      option_id: string
-      single_price: number
-      double_price: number
-      family_price: number
-    }>
-  }>
 
   try {
-    const hasPrimarySelection = parsed.pricingOptions.some((option) => option.isPrimary)
-    normalizedPricingOptions = parsed.pricingOptions.map((option, index) => ({
-      id: option.id ?? makeUuid(),
+    normalizedSuiteTypes = parsed.suiteTypes.map((suiteType) => ({
+      id: suiteType.id ?? makeUuid(),
       supplier_id: id,
-      name: option.name.trim(),
-      single_price: option.singlePrice,
-      double_price: option.doublePrice,
-      family_price: option.familyPrice,
-      currency: option.currency.trim().toUpperCase() || "ZAR",
-      is_primary: hasPrimarySelection ? option.isPrimary : index === 0,
+      name: suiteType.name.trim(),
+      active: suiteType.active,
     }))
+    const suiteTypeIds = new Set(normalizedSuiteTypes.map((suiteType) => suiteType.id))
 
     normalizedPackages = parsed.packages.map((pkg) => {
       const packageId = pkg.id ?? makeUuid()
-      const normalizedRoutes = pkg.routes.map((route) => ({
+      const normalizedRouteCandidates = pkg.routes.map((route) => ({
         id: route.id ?? makeUuid(),
         package_id: packageId,
         name: route.name.trim(),
@@ -205,16 +192,17 @@ export async function PATCH(
         destination_location_id: route.destinationLocationId,
         active: route.active,
       }))
-      const normalizedSuiteTypes = pkg.suiteTypes.map((suiteType) => ({
-        id: suiteType.id ?? makeUuid(),
-        package_id: packageId,
-        name: suiteType.name.trim(),
-        active: suiteType.active,
-      }))
+      const normalizedRoutes = isDraftSave
+        ? normalizedRouteCandidates.filter(
+            (route) =>
+              route.name.length > 0 &&
+              isUuid(route.origin_location_id) &&
+              isUuid(route.destination_location_id),
+          )
+        : normalizedRouteCandidates
 
       const routeIds = new Set(normalizedRoutes.map((route) => route.id))
-      const suiteTypeIds = new Set(normalizedSuiteTypes.map((suiteType) => suiteType.id))
-      const normalizedRateCards = pkg.rateCards.map((rateCard) => ({
+      const normalizedRateCardCandidates = pkg.rateCards.map((rateCard) => ({
         id: rateCard.id ?? makeUuid(),
         package_id: packageId,
         route_id: rateCard.routeId,
@@ -228,8 +216,20 @@ export async function PATCH(
         valid_to: normalizeNullableDate(rateCard.validTo),
         created_at: new Date().toISOString(),
       }))
+      const normalizedRateCards = isDraftSave
+        ? normalizedRateCardCandidates.filter((rateCard) => {
+            if (!isUuid(rateCard.suite_type_id) || !isDateString(rateCard.valid_from)) {
+              return false
+            }
+            if (rateCard.route_id && !routeIds.has(rateCard.route_id)) {
+              return false
+            }
+            return suiteTypeIds.has(rateCard.suite_type_id)
+          })
+        : normalizedRateCardCandidates
 
       if (
+        !isDraftSave &&
         normalizedRateCards.some(
           (rateCard) => rateCard.route_id && !routeIds.has(rateCard.route_id),
         )
@@ -238,9 +238,10 @@ export async function PATCH(
       }
 
       if (
+        !isDraftSave &&
         normalizedRateCards.some((rateCard) => !suiteTypeIds.has(rateCard.suite_type_id))
       ) {
-        throw new Error("Each rate card must reference a suite type from the same package.")
+        throw new Error("Each rate card must reference a suite type from this supplier.")
       }
 
       return {
@@ -255,42 +256,7 @@ export async function PATCH(
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         routes: normalizedRoutes,
-        suiteTypes: normalizedSuiteTypes,
         rateCards: normalizedRateCards,
-      }
-    })
-
-    const pricingOptionIds = new Set(normalizedPricingOptions.map((option) => option.id))
-    normalizedSeasonalPeriods = parsed.seasonalPeriods.map((period) => {
-      const periodId = period.id ?? makeUuid()
-      const optionIdsForPeriod = new Set<string>()
-
-      const prices = period.prices.map((price) => {
-        if (!pricingOptionIds.has(price.optionId)) {
-          throw new Error("Seasonal pricing must reference a valid pricing option.")
-        }
-        if (optionIdsForPeriod.has(price.optionId)) {
-          throw new Error("Each pricing option can only appear once per seasonal period.")
-        }
-        optionIdsForPeriod.add(price.optionId)
-
-        return {
-          id: price.id ?? makeUuid(),
-          period_id: periodId,
-          option_id: price.optionId,
-          single_price: price.singlePrice,
-          double_price: price.doublePrice,
-          family_price: price.familyPrice,
-        }
-      })
-
-      return {
-        id: periodId,
-        supplier_id: id,
-        label: normalizeText(period.label ?? ""),
-        valid_from: period.validFrom,
-        valid_to: period.validTo,
-        prices,
       }
     })
   } catch (error) {
@@ -299,37 +265,18 @@ export async function PATCH(
     )
   }
 
-  const existingPricingOptionIds = new Set(
-    existingDetail.pricingOptions.map((option) => option.id),
-  )
   const existingPackageIds = new Set(existingDetail.packages.map((pkg) => pkg.id))
   const existingRouteIds = new Set(existingDetail.routes.map((route) => route.id))
   const existingSuiteTypeIds = new Set(existingDetail.suiteTypes.map((suiteType) => suiteType.id))
   const existingRateCardIds = new Set(existingDetail.rateCards.map((rateCard) => rateCard.id))
-  const existingSeasonalPeriodIds = new Set(
-    existingDetail.seasonalPeriods.map((period) => period.id),
-  )
-  const existingSeasonalPriceIds = new Set(
-    existingDetail.seasonalPrices.map((price) => price.id),
-  )
 
   try {
     const [
-      conflictingPricingOptionIds,
       conflictingPackageIds,
       conflictingRouteIds,
       conflictingSuiteTypeIds,
       conflictingRateCardIds,
-      conflictingSeasonalPeriodIds,
-      conflictingSeasonalPriceIds,
     ] = await Promise.all([
-      queryExistingIds(
-        supabase,
-        "supplier_pricing_options",
-        normalizedPricingOptions
-          .map((option) => option.id)
-          .filter((optionId) => !existingPricingOptionIds.has(optionId)),
-      ),
       queryExistingIds(
         supabase,
         "packages",
@@ -347,8 +294,8 @@ export async function PATCH(
       queryExistingIds(
         supabase,
         "suite_types",
-        normalizedPackages
-          .flatMap((pkg) => pkg.suiteTypes.map((suiteType) => suiteType.id))
+        normalizedSuiteTypes
+          .map((suiteType) => suiteType.id)
           .filter((suiteTypeId) => !existingSuiteTypeIds.has(suiteTypeId)),
       ),
       queryExistingIds(
@@ -358,30 +305,13 @@ export async function PATCH(
           .flatMap((pkg) => pkg.rateCards.map((rateCard) => rateCard.id))
           .filter((rateCardId) => !existingRateCardIds.has(rateCardId)),
       ),
-      queryExistingIds(
-        supabase,
-        "supplier_seasonal_periods",
-        normalizedSeasonalPeriods
-          .map((period) => period.id)
-          .filter((periodId) => !existingSeasonalPeriodIds.has(periodId)),
-      ),
-      queryExistingIds(
-        supabase,
-        "supplier_seasonal_prices",
-        normalizedSeasonalPeriods
-          .flatMap((period) => period.prices.map((price) => price.id))
-          .filter((priceId) => !existingSeasonalPriceIds.has(priceId)),
-      ),
     ])
 
     if (
-      conflictingPricingOptionIds.length > 0 ||
       conflictingPackageIds.length > 0 ||
       conflictingRouteIds.length > 0 ||
       conflictingSuiteTypeIds.length > 0 ||
-      conflictingRateCardIds.length > 0 ||
-      conflictingSeasonalPeriodIds.length > 0 ||
-      conflictingSeasonalPriceIds.length > 0
+      conflictingRateCardIds.length > 0
     ) {
       return buildErrorResponse("One or more supplier records could not be updated safely.")
     }
@@ -402,7 +332,7 @@ export async function PATCH(
       website: parsed.website || null,
       location: parsed.location || null,
       notes: parsed.notes || null,
-      active: parsed.active,
+      active: isDraftSave ? false : parsed.active,
     })
     .eq("id", id)
 
@@ -413,41 +343,7 @@ export async function PATCH(
     )
   }
 
-  if (normalizedPricingOptions.length > 0) {
-    const { error: pricingError } = await supabase
-      .from("supplier_pricing_options")
-      .upsert(normalizedPricingOptions, { onConflict: "id" })
-
-    if (pricingError) {
-      return NextResponse.json(
-        { error: "Failed to update supplier pricing" },
-        { status: 500 },
-      )
-    }
-  }
-
-  const incomingPricingOptionIds = new Set(
-    normalizedPricingOptions.map((option) => option.id),
-  )
-  const pricingOptionIdsToDelete = existingDetail.pricingOptions
-    .map((option) => option.id)
-    .filter((optionId) => !incomingPricingOptionIds.has(optionId))
-
-  if (pricingOptionIdsToDelete.length > 0) {
-    const { error: deleteError } = await supabase
-      .from("supplier_pricing_options")
-      .delete()
-      .in("id", pricingOptionIdsToDelete)
-
-    if (deleteError) {
-      return NextResponse.json(
-        { error: "Failed to remove old supplier pricing" },
-        { status: 500 },
-      )
-    }
-  }
-
-  const packageRows = normalizedPackages.map(({ routes, suiteTypes, rateCards, ...pkg }) => pkg)
+  const packageRows = normalizedPackages.map(({ routes, rateCards, ...pkg }) => pkg)
   if (packageRows.length > 0) {
     const { error: packageError } = await supabase
       .from("packages")
@@ -475,7 +371,11 @@ export async function PATCH(
     }
   }
 
-  const suiteTypeRows = normalizedPackages.flatMap((pkg) => pkg.suiteTypes)
+  const suiteTypeRows = normalizedSuiteTypes.map((suiteType) => ({
+    ...suiteType,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }))
   if (suiteTypeRows.length > 0) {
     const { error: suiteTypesError } = await supabase
       .from("suite_types")
@@ -503,9 +403,9 @@ export async function PATCH(
     }
   }
 
-  const incomingPackageIds = new Set(normalizedPackages.map((pkg) => pkg.id))
+  const incomingPackageIds = new Set(packageRows.map((pkg) => pkg.id))
   const incomingRouteIds = new Set(routeRows.map((route) => route.id))
-  const incomingSuiteTypeIds = new Set(suiteTypeRows.map((suiteType) => suiteType.id))
+  const incomingSuiteTypeIds = new Set(normalizedSuiteTypes.map((suiteType) => suiteType.id))
   const incomingRateCardIds = new Set(rateCardRows.map((rateCard) => rateCard.id))
 
   const rateCardIdsToDelete = existingDetail.rateCards
@@ -577,76 +477,6 @@ export async function PATCH(
     }
   }
 
-  const seasonalPeriodRows = normalizedSeasonalPeriods.map(({ prices, ...period }) => period)
-  if (seasonalPeriodRows.length > 0) {
-    const { error: seasonalPeriodsError } = await supabase
-      .from("supplier_seasonal_periods")
-      .upsert(seasonalPeriodRows, { onConflict: "id" })
-
-    if (seasonalPeriodsError) {
-      return NextResponse.json(
-        { error: "Failed to update supplier seasonal periods" },
-        { status: 500 },
-      )
-    }
-  }
-
-  const seasonalPriceRows = normalizedSeasonalPeriods.flatMap((period) => period.prices)
-  if (seasonalPriceRows.length > 0) {
-    const { error: seasonalPricesError } = await supabase
-      .from("supplier_seasonal_prices")
-      .upsert(seasonalPriceRows, { onConflict: "id" })
-
-    if (seasonalPricesError) {
-      return NextResponse.json(
-        { error: "Failed to update supplier seasonal pricing" },
-        { status: 500 },
-      )
-    }
-  }
-
-  const incomingSeasonalPeriodIds = new Set(
-    normalizedSeasonalPeriods.map((period) => period.id),
-  )
-  const incomingSeasonalPriceIds = new Set(
-    seasonalPriceRows.map((price) => price.id),
-  )
-
-  const seasonalPriceIdsToDelete = existingDetail.seasonalPrices
-    .map((price) => price.id)
-    .filter((priceId) => !incomingSeasonalPriceIds.has(priceId))
-  const seasonalPeriodIdsToDelete = existingDetail.seasonalPeriods
-    .map((period) => period.id)
-    .filter((periodId) => !incomingSeasonalPeriodIds.has(periodId))
-
-  if (seasonalPriceIdsToDelete.length > 0) {
-    const { error: deleteSeasonalPricesError } = await supabase
-      .from("supplier_seasonal_prices")
-      .delete()
-      .in("id", seasonalPriceIdsToDelete)
-
-    if (deleteSeasonalPricesError) {
-      return NextResponse.json(
-        { error: "Failed to remove old supplier seasonal pricing" },
-        { status: 500 },
-      )
-    }
-  }
-
-  if (seasonalPeriodIdsToDelete.length > 0) {
-    const { error: deleteSeasonalPeriodsError } = await supabase
-      .from("supplier_seasonal_periods")
-      .delete()
-      .in("id", seasonalPeriodIdsToDelete)
-
-    if (deleteSeasonalPeriodsError) {
-      return NextResponse.json(
-        { error: "Failed to remove old supplier seasonal periods" },
-        { status: 500 },
-      )
-    }
-  }
-
   const updatedDetail = await loadSupplierDetail(supabase, id)
   if ("error" in updatedDetail) {
     return updatedDetail.error
@@ -655,13 +485,10 @@ export async function PATCH(
   return NextResponse.json(
     mapSupplierDetail(
       updatedDetail.supplier,
-      updatedDetail.pricingOptions,
       updatedDetail.packages,
       updatedDetail.routes,
       updatedDetail.suiteTypes,
       updatedDetail.rateCards,
-      updatedDetail.seasonalPeriods,
-      updatedDetail.seasonalPrices,
       updatedDetail.locations,
     ),
   )

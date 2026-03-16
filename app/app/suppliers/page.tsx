@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   Building2,
   ChevronRight,
@@ -12,21 +12,59 @@ import {
   Search,
 } from "lucide-react"
 import { AddSupplierDialog } from "@/components/add-supplier-dialog"
+import { ManageLocationsDialog } from "@/components/manage-locations-dialog"
+import { SupplierDetailView } from "@/components/supplier-detail-view"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { useRole } from "@/lib/role-context"
 import { cn } from "@/lib/utils"
 import { useSuppliers } from "@/lib/use-data"
 import { SUPPLIER_KIND_LABELS } from "@/lib/types"
 
+function getSupplierIdFromPath(pathname: string): string | null {
+  const match = pathname.match(/^\/app\/suppliers\/([^/]+)\/?$/)
+  return match ? match[1] : null
+}
+
 export default function SuppliersPage() {
   const { data: suppliers, isLoading } = useSuppliers()
   const { can } = useRole()
   const [search, setSearch] = useState("")
   const [addOpen, setAddOpen] = useState(false)
+  const [locationsOpen, setLocationsOpen] = useState(false)
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null)
   const canEdit = can("edit:suppliers")
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setSelectedSupplierId(getSupplierIdFromPath(window.location.pathname))
+    }
+
+    window.addEventListener("popstate", handlePopState)
+    return () => window.removeEventListener("popstate", handlePopState)
+  }, [])
+
+  const openSupplierModal = (supplierId: string) => {
+    setSelectedSupplierId(supplierId)
+    const nextPath = `/app/suppliers/${supplierId}`
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({}, "", nextPath)
+    }
+  }
+
+  const closeSupplierModal = () => {
+    if (!selectedSupplierId) return
+    window.history.back()
+  }
 
   const filteredSuppliers = useMemo(() => {
     if (!Array.isArray(suppliers)) return []
@@ -86,10 +124,20 @@ export default function SuppliersPage() {
           </p>
         </div>
         {canEdit && (
-          <Button size="default" className="flex-shrink-0" onClick={() => setAddOpen(true)}>
-            <Plus className="w-4 h-4 mr-2" />
-            Add Supplier
-          </Button>
+          <div className="flex flex-shrink-0 flex-col items-end gap-2">
+            <Button size="default" onClick={() => setAddOpen(true)}>
+              <Plus className="w-4 h-4 mr-2" />
+              Add Supplier
+            </Button>
+            <Button
+              variant="outline"
+              className="border-muted-foreground/30 bg-muted/40 text-muted-foreground hover:bg-muted"
+              onClick={() => setLocationsOpen(true)}
+            >
+              <MapPin className="mr-2 h-4 w-4" />
+              Manage Locations
+            </Button>
+          </div>
         )}
       </div>
 
@@ -121,10 +169,29 @@ export default function SuppliersPage() {
 
               <div className="grid gap-4 lg:grid-cols-2">
                 {group.map((supplier) => (
-                  <Link key={supplier.id} href={`/app/suppliers/${supplier.id}`}>
+                  <Link
+                    key={supplier.id}
+                    href={`/app/suppliers/${supplier.id}`}
+                    onClick={(event) => {
+                      if (
+                        event.defaultPrevented ||
+                        event.button !== 0 ||
+                        event.metaKey ||
+                        event.ctrlKey ||
+                        event.shiftKey ||
+                        event.altKey
+                      ) {
+                        return
+                      }
+
+                      event.preventDefault()
+                      openSupplierModal(supplier.id)
+                    }}
+                  >
                     <Card
                       className={cn(
                         "h-full border-2 transition-colors hover:border-primary/40 hover:bg-secondary/20",
+                        supplier.status === "draft" && "border-dashed",
                         !supplier.active && "opacity-50 grayscale",
                       )}
                     >
@@ -139,6 +206,9 @@ export default function SuppliersPage() {
                                 {supplier.name}
                               </CardTitle>
                               <div className="mt-2 flex items-center gap-2 flex-wrap">
+                                {supplier.status === "draft" && (
+                                  <Badge variant="outline">Draft</Badge>
+                                )}
                                 <Badge
                                   variant={supplier.active ? "default" : "outline"}
                                 >
@@ -198,6 +268,21 @@ export default function SuppliersPage() {
         )}
       </div>
 
+      <Dialog open={Boolean(selectedSupplierId)} onOpenChange={(open) => !open && closeSupplierModal()}>
+        <DialogContent className="max-w-5xl p-0 sm:max-w-5xl">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Supplier details</DialogTitle>
+            <DialogDescription>
+              View and edit supplier information and pricing.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedSupplierId ? (
+            <SupplierDetailView supplierId={selectedSupplierId} presentation="modal" />
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <ManageLocationsDialog open={locationsOpen} onOpenChange={setLocationsOpen} />
       <AddSupplierDialog open={addOpen} onOpenChange={setAddOpen} />
     </div>
   )

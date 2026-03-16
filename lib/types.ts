@@ -106,6 +106,7 @@ export interface Booking {
 }
 
 export type SupplierKind = "train_operator" | "hotel_property" | "transfers"
+export type SupplierStatus = "draft" | "active"
 
 export const SUPPLIER_KIND_LABELS: Record<SupplierKind, string> = {
   train_operator: "Train",
@@ -113,6 +114,62 @@ export const SUPPLIER_KIND_LABELS: Record<SupplierKind, string> = {
   transfers: "Transfers",
 }
 
+export interface SupplierVocabulary {
+  suiteType: string
+  suiteTypePlural: string
+  package: string
+  packagePlural: string
+  route: string
+  routePlural: string
+  sectionTitle: string
+  sectionDescription: string
+  priceLabel: string
+  routeHasLocations: boolean
+  showSingleSupplement: boolean
+  showDurationNights: boolean
+}
+
+const JOURNEY_SUPPLIER_VOCABULARY: SupplierVocabulary = {
+  suiteType: "Suite Type",
+  suiteTypePlural: "Suite Types",
+  package: "Package",
+  packagePlural: "Packages",
+  route: "Route",
+  routePlural: "Routes",
+  sectionTitle: "Packages, Routes and Rate Cards",
+  sectionDescription:
+    "Manage the journeys this supplier operates, the routes they cover, suite types, and period-based rate cards.",
+  priceLabel: "per person sharing",
+  routeHasLocations: true,
+  showSingleSupplement: true,
+  showDurationNights: true,
+}
+
+export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
+  train_operator: JOURNEY_SUPPLIER_VOCABULARY,
+  hotel_property: {
+    suiteType: "Room Type",
+    suiteTypePlural: "Room Types",
+    package: "Season",
+    packagePlural: "Seasons",
+    route: "Meal Plan",
+    routePlural: "Meal Plans",
+    sectionTitle: "Room Types, Seasons and Rates",
+    sectionDescription:
+      "Manage room types, seasonal groupings, meal plans, and period-based rate cards.",
+    priceLabel: "per room per night",
+    routeHasLocations: false,
+    showSingleSupplement: false,
+    showDurationNights: false,
+  },
+  transfers: JOURNEY_SUPPLIER_VOCABULARY,
+}
+
+export function getSupplierVocabulary(kind: SupplierKind): SupplierVocabulary {
+  return SUPPLIER_VOCABULARY[kind]
+}
+
+/** @deprecated Planned for DB/API cleanup after UI removal. */
 export interface SupplierPricingOption {
   id: string
   supplierId: string
@@ -148,7 +205,7 @@ export interface SupplierRoute {
 
 export interface SupplierSuiteType {
   id: string
-  packageId: string | null
+  supplierId: string
   name: string
   active: boolean
   createdAt: string
@@ -179,10 +236,10 @@ export interface SupplierPackage {
   createdAt: string
   updatedAt: string
   routes: SupplierRoute[]
-  suiteTypes: SupplierSuiteType[]
   rateCards: SupplierRateCard[]
 }
 
+/** @deprecated Planned for DB/API cleanup after UI removal. */
 export interface SupplierSeasonalPrice {
   id: string
   periodId: string
@@ -193,6 +250,7 @@ export interface SupplierSeasonalPrice {
   createdAt: string
 }
 
+/** @deprecated Planned for DB/API cleanup after UI removal. */
 export interface SupplierSeasonalPeriod {
   id: string
   supplierId: string
@@ -206,6 +264,7 @@ export interface SupplierSeasonalPeriod {
 export interface Supplier {
   id: string
   kind: SupplierKind
+  status: SupplierStatus
   name: string
   email: string | null
   phone: string | null
@@ -218,9 +277,8 @@ export interface Supplier {
 }
 
 export interface SupplierDetail extends Supplier {
-  pricingOptions: SupplierPricingOption[]
+  suiteTypes: SupplierSuiteType[]
   packages: SupplierPackage[]
-  seasonalPeriods: SupplierSeasonalPeriod[]
   locations: Location[]
 }
 

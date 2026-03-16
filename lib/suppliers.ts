@@ -28,6 +28,7 @@ export function mapSupplier(row: SupplierRow): Supplier {
   return {
     id: row.id,
     kind: row.kind,
+    status: row.status,
     name: row.name,
     email: row.email,
     phone: row.phone,
@@ -84,7 +85,7 @@ export function mapSupplierRoute(row: RouteRow): SupplierRoute {
 export function mapSupplierSuiteType(row: SuiteTypeRow): SupplierSuiteType {
   return {
     id: row.id,
-    packageId: row.package_id,
+    supplierId: row.supplier_id,
     name: row.name,
     active: row.active,
     createdAt: row.created_at,
@@ -109,7 +110,6 @@ export function mapSupplierRateCard(row: RateCardRow): SupplierRateCard {
 export function mapSupplierPackage(
   row: PackageRow,
   routes: RouteRow[],
-  suiteTypes: SuiteTypeRow[],
   rateCards: RateCardRow[],
 ): SupplierPackage {
   return {
@@ -124,7 +124,6 @@ export function mapSupplierPackage(
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     routes: routes.map(mapSupplierRoute),
-    suiteTypes: suiteTypes.map(mapSupplierSuiteType),
     rateCards: rateCards.map(mapSupplierRateCard),
   }
 }
@@ -160,30 +159,20 @@ export function mapSupplierSeasonalPeriod(
 
 export function mapSupplierDetail(
   supplier: SupplierRow,
-  pricingOptions: SupplierPricingOptionRow[],
   packages: PackageRow[],
   routes: RouteRow[],
   suiteTypes: SuiteTypeRow[],
   rateCards: RateCardRow[],
-  seasonalPeriods: SupplierSeasonalPeriodRow[],
-  seasonalPrices: SupplierSeasonalPriceRow[],
   locations: LocationRow[],
 ): SupplierDetail {
   return {
     ...mapSupplier(supplier),
-    pricingOptions: pricingOptions.map(mapSupplierPricingOption),
+    suiteTypes: suiteTypes.map(mapSupplierSuiteType),
     packages: packages.map((pkg) =>
       mapSupplierPackage(
         pkg,
         routes.filter((route) => route.package_id === pkg.id),
-        suiteTypes.filter((suiteType) => suiteType.package_id === pkg.id),
         rateCards.filter((rateCard) => rateCard.package_id === pkg.id),
-      ),
-    ),
-    seasonalPeriods: seasonalPeriods.map((period) =>
-      mapSupplierSeasonalPeriod(
-        period,
-        seasonalPrices.filter((price) => price.period_id === period.id),
       ),
     ),
     locations: locations.map(mapLocation),

@@ -41,6 +41,12 @@ export function useTemplates() {
 }
 
 export function useSuppliers() {
+  return useSWR<Supplier[]>("/api/suppliers?includeDrafts=true", fetcher, {
+    revalidateOnFocus: false,
+  })
+}
+
+export function useActiveSuppliers() {
   return useSWR<Supplier[]>("/api/suppliers", fetcher, {
     revalidateOnFocus: false,
   })
