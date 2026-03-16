@@ -1,0 +1,54 @@
+---
+description: Supabase client, server, RLS, and typing patterns for this project
+---
+
+# Supabase Rules
+
+## Choose The Right Client
+
+- In Client Components, use `getSupabase()` from `@lib/supabase/client.ts`.
+- In Server Components and authenticated API routes, use `createSessionClient()` from `@lib/supabase/server.ts`.
+- Use `createServiceClient()` only in trusted server-side code that intentionally bypasses RLS.
+- Never expose the service-role client or key to the browser.
+
+## Typing
+
+- Type Supabase work with `Database` from `@/lib/supabase/types`.
+- Reuse generated table and row types instead of inventing parallel shapes when the database shape is the source of truth.
+- When schema changes are made, update generated types with `pnpm run db:types`.
+
+## Querying
+
+- Prefer explicit column lists in `.select()` calls over `select("*")` when practical.
+- Check Supabase `error` results before assuming `data` is valid.
+- Keep user-scoped reads and writes behind RLS-aware clients.
+- Keep admin-only or system-level operations clearly separated when using the service client.
+
+## Auth
+
+- Use `supabase.auth.getUser()` for authenticated user checks in server code.
+- Verify authorization server-side, not only in the UI.
+
+## Project-Specific Guidance
+
+- Browser access is already wrapped in a singleton helper.
+- Server auth and service-role helpers already exist; reuse them rather than re-creating Supabase bootstrapping in each file.
+- Keep database column names database-shaped in Supabase queries, then map to frontend-friendly shapes when needed.
+
+## Prefer
+
+- `const supabase = await createSessionClient()`
+- `const supabase = getSupabase()`
+- `const { data, error } = await supabase.from("profiles").select("name, surname").single()`
+
+## Avoid
+
+- Calling `createBrowserClient` directly in feature files
+- Using `createServiceClient()` for routine user-scoped requests
+- Ignoring returned Supabase errors
+
+## Reference Files
+
+- `@lib/supabase/client.ts`
+- `@lib/supabase/server.ts`
+- `@lib/supabase/types.ts`

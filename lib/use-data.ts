@@ -1,8 +1,28 @@
 "use client"
 
 import useSWR from "swr"
+import type { Booking, Customer, Location, Supplier, SupplierDetail } from "@/lib/types"
 
-const fetcher = (url: string) => fetch(url).then(r => r.json())
+type ApiError = Error & { status?: number }
+
+const fetcher = async (url: string) => {
+  const response = await fetch(url)
+  const contentType = response.headers.get("content-type") ?? ""
+  const isJson = contentType.includes("application/json")
+  const body = isJson ? await response.json() : null
+
+  if (!response.ok) {
+    const error = new Error(
+      typeof body === "object" && body !== null && "error" in body
+        ? String(body.error)
+        : response.statusText || "Request failed"
+    ) as ApiError
+    error.status = response.status
+    throw error
+  }
+
+  return body
+}
 
 export function useAllData() {
   return useSWR("/api/data", fetcher, { revalidateOnFocus: false })
@@ -18,4 +38,46 @@ export function useJobDetail(id: string) {
 
 export function useTemplates() {
   return useSWR("/api/templates", fetcher, { revalidateOnFocus: false })
+}
+
+export function useSuppliers() {
+  return useSWR<Supplier[]>("/api/suppliers?includeDrafts=true", fetcher, {
+    revalidateOnFocus: false,
+  })
+}
+
+export function useActiveSuppliers() {
+  return useSWR<Supplier[]>("/api/suppliers", fetcher, {
+    revalidateOnFocus: false,
+  })
+}
+
+export function useSupplierDetail(id: string) {
+  return useSWR<SupplierDetail | { error: string }>(
+    id ? `/api/suppliers/${id}` : null,
+    fetcher,
+    { revalidateOnFocus: false },
+  )
+}
+
+export function useCustomerDetail(id: string) {
+  return useSWR<
+    | {
+        customer: Customer
+        bookings: Array<
+          Pick<Booking, "id" | "bookingNumber" | "stage" | "consultant" | "departureDate" | "createdAt"> & {
+            direction: string | null
+          }
+        >
+      }
+    | { error: string }
+  >(id ? `/api/customers/${id}` : null, fetcher, {
+    revalidateOnFocus: false,
+  })
+}
+
+export function useLocations() {
+  return useSWR<Location[]>("/api/locations", fetcher, {
+    revalidateOnFocus: false,
+  })
 }

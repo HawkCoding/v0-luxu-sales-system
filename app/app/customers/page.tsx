@@ -9,20 +9,54 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
 import { Search, Globe, Filter, X } from "lucide-react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { CONSULTANTS, type ConsultantAbbreviation } from "@/lib/types"
 import { format } from "date-fns"
-import { CustomerImportDialogTrigger } from "@/components/customer-import-dialog"
-import { useRole } from "@/lib/role-context"
+import Link from "next/link"
+import { CustomerDetailView } from "@/components/customer-detail-view"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+
+function getCustomerIdFromPath(pathname: string): string | null {
+  const match = pathname.match(/^\/app\/customers\/([^/]+)\/?$/)
+  return match ? match[1] : null
+}
 
 export default function CustomersPage() {
   const { data, isLoading } = useAllData()
-  const { can } = useRole()
   const [search, setSearch] = useState("")
   const [consultantFilter, setConsultantFilter] = useState<"all" | ConsultantAbbreviation>("all")
   const [supplierFilter, setSupplierFilter] = useState("all")
   const [createdDateFrom, setCreatedDateFrom] = useState<Date | undefined>(undefined)
   const [createdDateTo, setCreatedDateTo] = useState<Date | undefined>(undefined)
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null)
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setSelectedCustomerId(getCustomerIdFromPath(window.location.pathname))
+    }
+
+    window.addEventListener("popstate", handlePopState)
+    return () => window.removeEventListener("popstate", handlePopState)
+  }, [])
+
+  const openCustomerModal = (customerId: string) => {
+    setSelectedCustomerId(customerId)
+    const nextPath = `/app/customers/${customerId}`
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({}, "", nextPath)
+    }
+  }
+
+  const closeCustomerModal = () => {
+    if (!selectedCustomerId) return
+    window.history.back()
+  }
 
   if (isLoading || !data) {
     return <div className="p-6"><div className="animate-pulse space-y-3">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-14 bg-secondary rounded-lg" />)}</div></div>
@@ -93,7 +127,6 @@ export default function CustomersPage() {
             {filtered.length} of {customers.length} customers
           </p>
         </div>
-        {can("import:customers") && <CustomerImportDialogTrigger />}
       </div>
 
       {/* Filter Bar */}
@@ -106,7 +139,7 @@ export default function CustomersPage() {
                 Filters
               </div>
               {hasActiveFilters && (
-                <Button variant="ghost" size="sm" onClick={clearFilters} className="h-8 text-xs">
+                <Button variant="default" size="sm" onClick={clearFilters} className="h-8 text-xs">
                   <X className="w-3.5 h-3.5 mr-1.5" />
                   Clear filters
                 </Button>
@@ -218,42 +251,76 @@ export default function CustomersPage() {
         )}
         
         {filtered.map((c: any) => (
-          <Card key={c.id} className="hover:shadow-sm transition-shadow">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center flex-shrink-0">
-                    <span className="text-xs font-semibold text-foreground" style={{ fontFamily: "var(--font-inter)" }}>
-                      {c.firstName[0]}{c.lastName[0]}
-                    </span>
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <p className="text-sm font-medium text-foreground">{c.firstName} {c.lastName}</p>
-                      {c.consultants.length > 0 && (
-                        <div className="flex items-center gap-1">
-                          {c.consultants.map((cons: string) => (
-                            <Badge key={cons} variant="default" className="text-[10px] h-4 px-1.5 font-bold">
-                              {cons}
-                            </Badge>
-                          ))}
-                        </div>
-                      )}
+          <Link
+            key={c.id}
+            href={`/app/customers/${c.id}`}
+            onClick={(event) => {
+              if (
+                event.defaultPrevented ||
+                event.button !== 0 ||
+                event.metaKey ||
+                event.ctrlKey ||
+                event.shiftKey ||
+                event.altKey
+              ) {
+                return
+              }
+
+              event.preventDefault()
+              openCustomerModal(c.id)
+            }}
+          >
+            <Card className="hover:shadow-sm transition-shadow cursor-pointer">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center flex-shrink-0">
+                      <span className="text-xs font-semibold text-foreground" style={{ fontFamily: "var(--font-inter)" }}>
+                        {c.firstName[0]}{c.lastName[0]}
+                      </span>
                     </div>
-                    <p className="text-xs text-muted-foreground truncate">{c.email} • {c.phone}</p>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <p className="text-sm font-medium text-foreground">{c.firstName} {c.lastName}</p>
+                        {c.consultants.length > 0 && (
+                          <div className="flex items-center gap-1">
+                            {c.consultants.map((cons: string) => (
+                              <Badge key={cons} variant="default" className="text-[10px] h-4 px-1.5 font-bold">
+                                {cons}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground truncate">{c.email} • {c.phone}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <Badge variant="outline" className="text-[10px] gap-1">
+                      <Globe className="w-2.5 h-2.5" /> {c.country}
+                    </Badge>
+                    <Badge variant="secondary" className="text-[10px]">{c.jobCount} booking{c.jobCount !== 1 ? "s" : ""}</Badge>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <Badge variant="outline" className="text-[10px] gap-1">
-                    <Globe className="w-2.5 h-2.5" /> {c.country}
-                  </Badge>
-                  <Badge variant="secondary" className="text-[10px]">{c.jobCount} jobs</Badge>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </Link>
         ))}
       </div>
+
+      <Dialog open={Boolean(selectedCustomerId)} onOpenChange={(open) => !open && closeCustomerModal()}>
+        <DialogContent className="max-w-5xl p-0 sm:max-w-5xl">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Customer details</DialogTitle>
+            <DialogDescription>
+              View customer details, bookings, and notes.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedCustomerId ? (
+            <CustomerDetailView customerId={selectedCustomerId} presentation="modal" />
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

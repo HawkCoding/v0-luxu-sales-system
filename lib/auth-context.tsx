@@ -16,27 +16,27 @@ interface AuthContextValue {
   loginWithMicrosoft: () => Promise<boolean>
   loginWithPassword: (email: string, password: string) => Promise<boolean>
   requestPasswordReset: (email: string) => Promise<{ ok: boolean; error?: string }>
-  login: (name: string, password: string) => Promise<boolean>
   logout: () => void
 }
 
-// Internal email mapping — must match what you create in Supabase Auth dashboard.
-// Create these users at: Supabase Dashboard → Authentication → Users → Add User
-// Email: carmen@luxustravel.co.za  Password: <the user's PIN>
-const NAME_TO_EMAIL: Record<string, string> = {
-  Carmen: "carmen@luxustravel.co.za",
-  Leonie: "leonie@luxustravel.co.za",
-  Dirk: "dirk@luxustravel.co.za",
-  Monade: "monade@luxustravel.co.za",
-  Douwlien: "douwlien@luxustravel.co.za",
-}
+const AUTH_INIT_TIMEOUT_MS = 4000
+const AUTH_INIT_TIMEOUT_MESSAGE = "Timed out initializing auth session"
+const STALE_REFRESH_TOKEN_MESSAGES = [
+  "Invalid Refresh Token",
+  "Refresh Token Not Found",
+  "refresh_token_not_found",
+]
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null)
-  const [loading, setLoading] = useState(true)
-  const devAuthEnabled = process.env.NEXT_PUBLIC_DEV_AUTH === "true"
+interface AuthProviderProps {
+  children: ReactNode
+  initialUser?: User | null
+}
+
+export function AuthProvider({ children, initialUser = null }: AuthProviderProps) {
+  const [user, setUser] = useState<User | null>(initialUser)
+  const [loading, setLoading] = useState(initialUser === null)
 
   const loadProfile = useCallback(async (userId: string, fallbackEmail: string) => {
     const supabase = getSupabase()
@@ -61,45 +61,142 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const isStaleRefreshTokenError = useCallback((error: unknown) => {
+    if (!error) return false
+
+    const errorMessage =
+      typeof error === "object" && error !== null && "message" in error
+        ? String(error.message)
+        : String(error)
+
+    return STALE_REFRESH_TOKEN_MESSAGES.some((message) =>
+      errorMessage.includes(message)
+    )
+  }, [])
+
+  const clearLocalSession = useCallback(async () => {
+    const supabase = getSupabase()
+    await supabase.auth.signOut({ scope: "local" }).catch(() => {})
+    setUser(null)
+  }, [])
+
   useEffect(() => {
     let mounted = true
-    const supabase = getSupabase()
+    let subscription: { unsubscribe: () => void } | undefined
 
-    // Check existing session on mount
-    const init = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (mounted && session?.user) {
-        await loadProfile(session.user.id, session.user.email ?? "")
+    try {
+      const supabase = getSupabase()
+      const getSessionWithTimeout = async () => {
+        let timeoutId: number | undefined
+        try {
+          return await Promise.race([
+            supabase.auth.getSession(),
+            new Promise<never>((_, reject) => {
+              timeoutId = window.setTimeout(() => {
+                reject(new Error(AUTH_INIT_TIMEOUT_MESSAGE))
+              }, AUTH_INIT_TIMEOUT_MS)
+            }),
+          ])
+        } finally {
+          if (timeoutId !== undefined) {
+            window.clearTimeout(timeoutId)
+          }
+        }
       }
-      if (mounted) setLoading(false)
-    }
-    init()
 
-    // Subscribe to auth state changes (login / logout / token refresh)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (!mounted) return
-      if (session?.user) {
-        await loadProfile(session.user.id, session.user.email ?? "")
+      // Check existing session on mount. Retry once on Supabase lock conflict (concurrent getSession calls).
+      const LOCK_STEAL_MSG = "Lock broken by another request with the 'steal' option."
+      const init = async () => {
+        try {
+          let result = await getSessionWithTimeout()
+          const errMsg = result.error?.message ?? null
+          if (errMsg === LOCK_STEAL_MSG && mounted) {
+            await new Promise((r) => setTimeout(r, 80))
+            if (!mounted) return
+            result = await getSessionWithTimeout()
+          }
+
+          if (result.error && isStaleRefreshTokenError(result.error)) {
+            await clearLocalSession()
+            return
+          }
+
+          const { data: { session }, error } = result
+          if (mounted && session?.user) {
+            await loadProfile(session.user.id, session.user.email ?? "")
+          }
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error)
+          if (msg === LOCK_STEAL_MSG && mounted) {
+            await new Promise((r) => setTimeout(r, 80))
+            if (!mounted) return
+            try {
+              const { data: { session }, error: retryErr } = await getSessionWithTimeout()
+              if (retryErr && isStaleRefreshTokenError(retryErr)) {
+                await clearLocalSession()
+                return
+              }
+              if (!retryErr && mounted && session?.user) await loadProfile(session.user.id, session.user.email ?? "")
+            } catch {
+              if (mounted) setUser(null)
+            }
+          } else if (msg === AUTH_INIT_TIMEOUT_MESSAGE && mounted) {
+            try {
+              const { data: { user }, error: userError } = await supabase.auth.getUser()
+              if (userError) {
+                setUser(null)
+              } else if (user) {
+                await loadProfile(user.id, user.email ?? "")
+              } else {
+                setUser(null)
+              }
+            } catch {
+              setUser(null)
+            }
+          } else if (isStaleRefreshTokenError(error)) {
+            await clearLocalSession()
+          } else {
+            console.error("Failed to initialize auth session", error)
+            if (mounted) setUser(null)
+          }
+        } finally {
+          if (mounted) setLoading(false)
+        }
+      }
+      if (initialUser === null) {
+        void init()
       } else {
-        setUser(null)
+        setLoading(false)
       }
-    })
+
+      // Subscribe to auth state changes (login / logout / token refresh)
+      const authState = supabase.auth.onAuthStateChange(async (_event, session) => {
+        if (!mounted) return
+        try {
+          if (session?.user) {
+            await loadProfile(session.user.id, session.user.email ?? "")
+          } else {
+            setUser(null)
+          }
+        } catch (error) {
+          console.error("Failed to update auth state", error)
+          setUser(null)
+        } finally {
+          if (mounted) setLoading(false)
+        }
+      })
+      subscription = authState.data.subscription
+    } catch (error) {
+      console.error("Failed to set up auth", error)
+      setUser(null)
+      setLoading(false)
+    }
 
     return () => {
       mounted = false
-      subscription.unsubscribe()
+      subscription?.unsubscribe()
     }
-  }, [loadProfile])
-
-  const login = async (name: string, password: string): Promise<boolean> => {
-    if (!devAuthEnabled) return false
-    const supabase = getSupabase()
-    const email = NAME_TO_EMAIL[name]
-    if (!email) return false
-
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    return !error
-  }
+  }, [clearLocalSession, initialUser, isStaleRefreshTokenError, loadProfile])
 
   const loginWithMicrosoft = async (): Promise<boolean> => {
     const supabase = getSupabase()
@@ -135,12 +232,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     const supabase = getSupabase()
-    await supabase.auth.signOut()
+    try {
+      await fetch("/api/logout", { method: "POST" })
+    } catch {
+      // Ignore server logout errors and still clear the local client state below.
+    }
+    await supabase.auth.signOut().catch(() => {})
     setUser(null)
+    setLoading(false)
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, loginWithMicrosoft, loginWithPassword, requestPasswordReset, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, loginWithMicrosoft, loginWithPassword, requestPasswordReset, logout }}>
       {children}
     </AuthContext.Provider>
   )

@@ -1,0 +1,54 @@
+---
+description: Consistent error-handling patterns across routes, hooks, and UI flows
+---
+
+# Error Handling Rules
+
+## General Principles
+
+- Fail clearly and as early as possible.
+- Do not swallow errors silently.
+- Prefer actionable user-facing messages and structured developer-facing handling.
+
+## API Routes
+
+- Return the correct status code for auth, validation, and server failures.
+- Use structured JSON errors such as `{ error: string, details?: unknown }`.
+- Wrap non-trivial server logic in `try/catch` where thrown errors are possible.
+- Avoid leaking secrets, raw stack traces, or internal infrastructure details to clients.
+
+## Supabase And Async Work
+
+- Always check Supabase `error` results before using returned `data`.
+- Handle `fetch` and async failures explicitly in client flows.
+- Use `Promise.all` carefully; ensure each failure path is still understandable.
+
+## UI Handling
+
+- Always account for loading, empty, success, and error states in data-driven UIs.
+- Surface user-facing failures with existing toast patterns or inline feedback where appropriate.
+- Prefer inline validation messages for forms and toasts for operation-level failures.
+
+## Forms And Validation
+
+- Use Zod and `react-hook-form` patterns where validation is needed.
+- Validate at the API boundary even if the client already validates.
+- Keep validation messages specific enough for users to recover.
+
+## Prefer
+
+- Early returns on known failure states
+- Distinct handling for `401`, `403`, `400`, and `500`
+- Clear fallback UI in components that depend on remote data
+
+## Avoid
+
+- Empty `catch` blocks
+- Ignoring rejected promises in user-facing flows
+- Generic `"Something went wrong"` messaging when a better message is available
+
+## Reference Files
+
+- `@app/api/customers/import/route.ts`
+- `@lib/use-data.ts`
+- `@hooks/use-toast.ts`

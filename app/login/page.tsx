@@ -7,15 +7,29 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
-const USERS = ["Carmen", "Leonie", "Dirk", "Monade", "Douwlien"]
+const loginPageClassName = "min-h-screen bg-background flex items-center justify-center p-4"
+
+function LoginLoadingState() {
+  return (
+    <div className="text-center space-y-3">
+      <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto animate-pulse">
+        <span className="text-xl font-bold text-primary">LT</span>
+      </div>
+      <p className="text-muted-foreground">Loading...</p>
+    </div>
+  )
+}
+
+function LoginShell({ children }: { children: React.ReactNode }) {
+  return <div className={loginPageClassName}>{children}</div>
+}
 
 function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { user, loading, login, loginWithMicrosoft, loginWithPassword, requestPasswordReset } = useAuth()
-  const [selectedName, setSelectedName] = useState("")
+  const { user, loading, loginWithMicrosoft, loginWithPassword, requestPasswordReset } = useAuth()
+  const [hydrated, setHydrated] = useState(false)
   const [password, setPassword] = useState("")
   const [email, setEmail] = useState("")
   const [error, setError] = useState("")
@@ -25,7 +39,10 @@ function LoginForm() {
   const [forgotEmail, setForgotEmail] = useState("")
   const [forgotSubmitting, setForgotSubmitting] = useState(false)
   const [forgotSent, setForgotSent] = useState(false)
-  const devAuthEnabled = process.env.NEXT_PUBLIC_DEV_AUTH === "true"
+
+  useEffect(() => {
+    setHydrated(true)
+  }, [])
 
   useEffect(() => {
     if (!loading && user) {
@@ -46,33 +63,6 @@ function LoginForm() {
     }
     setError("Sign in failed. Please try again.")
   }, [searchParams])
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setError("")
-
-    if (!selectedName) {
-      setError("Please select your name")
-      return
-    }
-    if (!password) {
-      setError("Please enter your password")
-      return
-    }
-
-    setSubmitting(true)
-    try {
-      const success = await login(selectedName, password)
-      if (success) {
-        router.push("/app")
-      } else {
-        setError("Invalid credentials. Make sure your account has been created in Supabase.")
-        setPassword("")
-      }
-    } finally {
-      setSubmitting(false)
-    }
-  }
 
   const handleMicrosoftLogin = async () => {
     setError("")
@@ -132,21 +122,16 @@ function LoginForm() {
     }
   }
 
-  if (loading) {
+  if (loading || !hydrated) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center space-y-3">
-          <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto animate-pulse">
-            <span className="text-xl font-bold text-primary">LT</span>
-          </div>
-          <p className="text-muted-foreground">Loading...</p>
-        </div>
-      </div>
+      <LoginShell>
+        <LoginLoadingState />
+      </LoginShell>
     )
   }
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+    <LoginShell>
       <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="text-center pb-6">
           <div className="mx-auto w-16 h-16 rounded-full bg-primary flex items-center justify-center mb-4">
@@ -245,41 +230,6 @@ function LoginForm() {
                 >
                   {oauthSubmitting ? "Redirecting…" : "Sign in with Microsoft"}
                 </Button>
-
-                {devAuthEnabled && (
-                  <form onSubmit={handleLogin} className="space-y-5 border-t pt-5">
-                    <p className="text-xs text-muted-foreground font-medium">Developer login</p>
-                    <div className="space-y-2">
-                      <Label htmlFor="name" className="text-base">Developer Name</Label>
-                      <Select value={selectedName} onValueChange={setSelectedName}>
-                        <SelectTrigger id="name" className="h-11 text-base">
-                          <SelectValue placeholder="Select your name" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {USERS.map((name) => (
-                            <SelectItem key={name} value={name} className="text-base">
-                              {name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="dev-password" className="text-base">Developer Password</Label>
-                      <Input
-                        id="dev-password"
-                        type="password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        placeholder="Enter your password"
-                        className="h-11 text-base"
-                      />
-                    </div>
-                    <Button type="submit" variant="outline" className="w-full h-11 text-base font-medium" disabled={submitting}>
-                      {submitting ? "Signing in…" : "Dev Sign In"}
-                    </Button>
-                  </form>
-                )}
               </>
             )}
 
@@ -291,14 +241,14 @@ function LoginForm() {
           </div>
         </CardContent>
       </Card>
-    </div>
+    </LoginShell>
   )
 }
 
 export default function LoginPage() {
   return (
     <AuthProvider>
-      <Suspense>
+      <Suspense fallback={<LoginShell><LoginLoadingState /></LoginShell>}>
         <LoginForm />
       </Suspense>
     </AuthProvider>

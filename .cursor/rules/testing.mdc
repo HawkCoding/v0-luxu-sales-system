@@ -1,0 +1,55 @@
+---
+description: Testing conventions for Vitest-based unit and component tests
+globs:
+  - "**/*.test.ts"
+  - "**/*.test.tsx"
+  - "**/*.spec.ts"
+  - "**/*.spec.tsx"
+---
+
+# Testing Rules
+
+## Test Stack
+
+- Use Vitest for tests in this project.
+- Keep tests aligned with the existing `pnpm test`, `pnpm test:ci`, and `pnpm test:coverage` scripts.
+
+## File Placement And Naming
+
+- Prefer `*.test.ts` and `*.test.tsx` naming.
+- Prefer colocated tests near the code they verify unless there is a strong reason to centralize them.
+- Match describe blocks to the unit under test.
+
+## What To Cover
+
+- Cover both success and failure paths.
+- Test validation behavior, permissions, and edge cases for route and data logic.
+- Prefer focused tests for helpers, hooks, and route behavior over brittle implementation-detail tests.
+
+## Mocking
+
+- Use `vi.mock()` for module mocking when needed.
+- Mock Supabase and network boundaries in unit tests rather than hitting real services.
+- Keep mocks narrow and easy to understand.
+
+## Style
+
+- Write clear `describe` and `it` names that explain behavior.
+- Prefer one behavioral assertion group per test.
+- Keep setup explicit so future readers can quickly see what matters.
+
+## Prefer
+
+- Small deterministic unit tests
+- Explicit mocks for external services
+- Separate tests for authorized, unauthorized, invalid, and success flows
+
+## Avoid
+
+- Tests that depend on live Supabase or unstable external state by default
+- Vague test names
+- Over-mocking internal implementation details that make refactors painful
+
+## Reference Files
+
+- `@package.json`

@@ -1,0 +1,161 @@
+import { z } from "zod"
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const PHONE_PATTERN = /^[+\d\s()-]*$/
+const WEBSITE_PATTERN = /^\S+\.\S+$/
+
+export const dateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD")
+
+export const routeSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().trim().min(1, "Route name is required"),
+  originLocationId: z.string().uuid(),
+  destinationLocationId: z.string().uuid(),
+  active: z.boolean(),
+})
+
+export const suiteTypeSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().trim().min(1, "Suite type name is required"),
+  active: z.boolean(),
+})
+
+export const rateCardSchema = z.object({
+  id: z.string().uuid().optional(),
+  routeId: z.string().uuid().nullable(),
+  suiteTypeId: z.string().uuid(),
+  pricePerPerson: z.number().finite().nonnegative(),
+  currency: z.string().trim().min(1).max(10),
+  validFrom: dateSchema,
+  validTo: z.union([dateSchema, z.literal(""), z.null()]),
+})
+
+export const packageSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().trim().min(1, "Package name is required"),
+  description: z.string().trim().max(5000).nullable(),
+  durationNights: z.number().int().nonnegative().nullable(),
+  singleSupplementPct: z.number().finite().min(0).max(1000),
+  currency: z.string().trim().min(1).max(10),
+  active: z.boolean(),
+  routes: z.array(routeSchema),
+  rateCards: z.array(rateCardSchema),
+})
+
+export const supplierSaveSchema = z.object({
+  name: z.string().trim().min(2, "Supplier name must be at least 2 characters").max(200),
+  kind: z.enum(["train_operator", "hotel_property", "transfers"]),
+  email: z
+    .string()
+    .trim()
+    .max(255)
+    .refine((value) => value === "" || EMAIL_PATTERN.test(value), {
+      message: "Enter a valid email (e.g. name@example.com)",
+    }),
+  phone: z
+    .string()
+    .trim()
+    .max(100)
+    .refine((value) => value === "" || PHONE_PATTERN.test(value), {
+      message: "Phone can include digits, spaces, +, -, and parentheses only",
+    })
+    .refine((value) => value === "" || value.length >= 7, {
+      message: "Phone must be at least 7 characters",
+    }),
+  website: z
+    .string()
+    .trim()
+    .max(255)
+    .refine((value) => value === "" || WEBSITE_PATTERN.test(value), {
+      message: "Enter a valid website (e.g. example.com)",
+    }),
+  location: z
+    .string()
+    .trim()
+    .max(255)
+    .refine((value) => value === "" || value.length >= 2, {
+      message: "Location must be at least 2 characters",
+    }),
+  notes: z.string().trim().max(5000),
+  active: z.boolean(),
+  suiteTypes: z.array(suiteTypeSchema),
+  packages: z.array(packageSchema),
+})
+
+export type SupplierSaveInput = z.infer<typeof supplierSaveSchema>
+
+export const draftRouteSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().trim().max(200).default(""),
+  originLocationId: z.union([z.string().uuid(), z.literal("")]).default(""),
+  destinationLocationId: z.union([z.string().uuid(), z.literal("")]).default(""),
+  active: z.boolean().default(true),
+})
+
+export const draftSuiteTypeSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().trim().max(200).default(""),
+  active: z.boolean().default(true),
+})
+
+export const draftRateCardSchema = z.object({
+  id: z.string().uuid().optional(),
+  routeId: z.union([z.string().uuid(), z.null(), z.literal("")]).transform((value) =>
+    value === "" ? null : value,
+  ),
+  suiteTypeId: z.union([z.string().uuid(), z.literal("")]).default(""),
+  pricePerPerson: z.number().finite().nonnegative().default(0),
+  currency: z.string().trim().max(10).default("ZAR"),
+  validFrom: z.union([dateSchema, z.literal("")]).default(""),
+  validTo: z.union([dateSchema, z.literal(""), z.null()]).default(""),
+})
+
+export const draftPackageSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().trim().max(200).default(""),
+  description: z.string().trim().max(5000).nullable().default(null),
+  durationNights: z.number().int().nonnegative().nullable().default(null),
+  singleSupplementPct: z.number().finite().min(0).max(1000).default(50),
+  currency: z.string().trim().max(10).default("ZAR"),
+  active: z.boolean().default(true),
+  routes: z.array(draftRouteSchema).default([]),
+  rateCards: z.array(draftRateCardSchema).default([]),
+})
+
+export const supplierDraftSaveSchema = z.object({
+  name: z.string().trim().max(200).default(""),
+  kind: z.enum(["train_operator", "hotel_property", "transfers"]),
+  email: z
+    .string()
+    .trim()
+    .max(255)
+    .refine((value) => value === "" || EMAIL_PATTERN.test(value), {
+      message: "Enter a valid email (e.g. name@example.com)",
+    })
+    .default(""),
+  phone: z
+    .string()
+    .trim()
+    .max(100)
+    .refine((value) => value === "" || PHONE_PATTERN.test(value), {
+      message: "Phone can include digits, spaces, +, -, and parentheses only",
+    })
+    .default(""),
+  website: z
+    .string()
+    .trim()
+    .max(255)
+    .refine((value) => value === "" || WEBSITE_PATTERN.test(value), {
+      message: "Enter a valid website (e.g. example.com)",
+    })
+    .default(""),
+  location: z.string().trim().max(255).default(""),
+  notes: z.string().trim().max(5000).default(""),
+  active: z.boolean().default(true),
+  suiteTypes: z.array(draftSuiteTypeSchema).default([]),
+  packages: z.array(draftPackageSchema).default([]),
+})
+
+export type SupplierDraftSaveInput = z.infer<typeof supplierDraftSaveSchema>
