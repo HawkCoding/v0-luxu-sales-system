@@ -21,6 +21,30 @@ import {
 type PackageRow = Database["public"]["Tables"]["packages"]["Row"]
 type RateCardRow = Database["public"]["Tables"]["rate_cards"]["Row"]
 
+type NormalizedRateCard = Pick<
+  RateCardRow,
+  | "id"
+  | "package_id"
+  | "route_id"
+  | "suite_type_id"
+  | "price_per_person"
+  | "currency"
+  | "valid_from"
+  | "valid_to"
+  | "created_at"
+>
+
+function logSupplierMutationError(
+  operation: string,
+  supplierId: string,
+  error: unknown,
+) {
+  console.error(`Supplier mutation failed during ${operation}`, {
+    supplierId,
+    error,
+  })
+}
+
 function isUuid(value: string | null | undefined): value is string {
   if (!value) return false
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -31,6 +55,20 @@ function isUuid(value: string | null | undefined): value is string {
 function isDateString(value: string | null | undefined): value is string {
   if (!value) return false
   return /^\d{4}-\d{2}-\d{2}$/.test(value)
+}
+
+function getRateCardBusinessKey(rateCard: {
+  package_id: string
+  suite_type_id: string
+  route_id: string | null
+  valid_from: string
+}) {
+  return [
+    rateCard.package_id,
+    rateCard.suite_type_id,
+    rateCard.route_id ?? "__null__",
+    rateCard.valid_from,
+  ].join("|")
 }
 
 export async function GET(
@@ -174,6 +212,11 @@ export async function PATCH(
   >
 
   try {
+    const existingRateCardByBusinessKey = new Map(
+      existingDetail.rateCards.map((rateCard) => [getRateCardBusinessKey(rateCard), rateCard]),
+    )
+    const incomingRateCardKeys = new Set<string>()
+
     normalizedSuiteTypes = parsed.suiteTypes.map((suiteType) => ({
       id: suiteType.id ?? makeUuid(),
       supplier_id: id,
@@ -228,9 +271,37 @@ export async function PATCH(
           })
         : normalizedRateCardCandidates
 
+      const mergedRateCards: NormalizedRateCard[] = normalizedRateCards.map((rateCard) => {
+        const businessKey = getRateCardBusinessKey({
+          package_id: rateCard.package_id,
+          suite_type_id: rateCard.suite_type_id,
+          route_id: rateCard.route_id ?? null,
+          valid_from: rateCard.valid_from,
+        })
+
+        if (incomingRateCardKeys.has(businessKey)) {
+          throw new Error(
+            "Duplicate rate cards are not allowed for the same package, suite type, route, and start date.",
+          )
+        }
+        incomingRateCardKeys.add(businessKey)
+
+        const existingRateCard = existingRateCardByBusinessKey.get(businessKey)
+        if (!existingRateCard) {
+          return rateCard
+        }
+
+        // Reuse existing row id for business-key matches so save operations update instead of conflicting inserts.
+        return {
+          ...rateCard,
+          id: existingRateCard.id,
+          created_at: existingRateCard.created_at,
+        }
+      })
+
       if (
         !isDraftSave &&
-        normalizedRateCards.some(
+        mergedRateCards.some(
           (rateCard) => rateCard.route_id && !routeIds.has(rateCard.route_id),
         )
       ) {
@@ -239,7 +310,7 @@ export async function PATCH(
 
       if (
         !isDraftSave &&
-        normalizedRateCards.some((rateCard) => !suiteTypeIds.has(rateCard.suite_type_id))
+        mergedRateCards.some((rateCard) => !suiteTypeIds.has(rateCard.suite_type_id))
       ) {
         throw new Error("Each rate card must reference a suite type from this supplier.")
       }
@@ -256,7 +327,7 @@ export async function PATCH(
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         routes: normalizedRoutes,
-        rateCards: normalizedRateCards,
+        rateCards: mergedRateCards,
       }
     })
   } catch (error) {
@@ -316,6 +387,9 @@ export async function PATCH(
       return buildErrorResponse("One or more supplier records could not be updated safely.")
     }
   } catch {
+    logSupplierMutationError("validation-id-lookup", id, {
+      message: "Failed to validate supplier updates",
+    })
     return NextResponse.json(
       { error: "Failed to validate supplier updates" },
       { status: 500 },
@@ -337,6 +411,7 @@ export async function PATCH(
     .eq("id", id)
 
   if (supplierUpdateError) {
+    logSupplierMutationError("supplier-update", id, supplierUpdateError)
     return NextResponse.json(
       { error: "Failed to update supplier" },
       { status: 500 },
@@ -350,6 +425,7 @@ export async function PATCH(
       .upsert(packageRows, { onConflict: "id" })
 
     if (packageError) {
+      logSupplierMutationError("packages-upsert", id, packageError)
       return NextResponse.json(
         { error: "Failed to update supplier packages" },
         { status: 500 },
@@ -364,6 +440,7 @@ export async function PATCH(
       .upsert(routeRows, { onConflict: "id" })
 
     if (routesError) {
+      logSupplierMutationError("routes-upsert", id, routesError)
       return NextResponse.json(
         { error: "Failed to update supplier routes" },
         { status: 500 },
@@ -382,6 +459,7 @@ export async function PATCH(
       .upsert(suiteTypeRows, { onConflict: "id" })
 
     if (suiteTypesError) {
+      logSupplierMutationError("suite-types-upsert", id, suiteTypesError)
       return NextResponse.json(
         { error: "Failed to update supplier suite types" },
         { status: 500 },
@@ -396,6 +474,16 @@ export async function PATCH(
       .upsert(rateCardRows, { onConflict: "id" })
 
     if (rateCardsError) {
+      logSupplierMutationError("rate-cards-upsert", id, rateCardsError)
+      if (rateCardsError.code === "23505") {
+        return NextResponse.json(
+          {
+            error:
+              "A duplicate rate card exists for the same package, suite type, route, and start date. Update the existing one instead.",
+          },
+          { status: 409 },
+        )
+      }
       return NextResponse.json(
         { error: "Failed to update supplier rate cards" },
         { status: 500 },
@@ -428,6 +516,7 @@ export async function PATCH(
       .in("id", rateCardIdsToDelete)
 
     if (deleteRateCardsError) {
+      logSupplierMutationError("rate-cards-delete", id, deleteRateCardsError)
       return NextResponse.json(
         { error: "Failed to remove old supplier rate cards" },
         { status: 500 },
@@ -442,6 +531,7 @@ export async function PATCH(
       .in("id", routeIdsToDelete)
 
     if (deleteRoutesError) {
+      logSupplierMutationError("routes-delete", id, deleteRoutesError)
       return NextResponse.json(
         { error: "Failed to remove old supplier routes" },
         { status: 500 },
@@ -456,6 +546,7 @@ export async function PATCH(
       .in("id", suiteTypeIdsToDelete)
 
     if (deleteSuiteTypesError) {
+      logSupplierMutationError("suite-types-delete", id, deleteSuiteTypesError)
       return NextResponse.json(
         { error: "Failed to remove old supplier suite types" },
         { status: 500 },
@@ -470,6 +561,7 @@ export async function PATCH(
       .in("id", packageIdsToDelete)
 
     if (deletePackagesError) {
+      logSupplierMutationError("packages-delete", id, deletePackagesError)
       return NextResponse.json(
         { error: "Failed to remove old supplier packages" },
         { status: 500 },
