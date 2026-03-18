@@ -34,6 +34,64 @@ type NormalizedRateCard = Pick<
   | "created_at"
 >
 
+interface RateCardConflictDetails {
+  packageId: string
+  suiteTypeId: string
+  routeId: string | null
+  validFrom: string
+}
+
+interface RateCardDateRangeDetails {
+  validFrom: string
+  validTo: string | null
+}
+
+interface RateCardOverlapConflictDetails {
+  packageId: string
+  suiteTypeId: string
+  routeId: string | null
+  firstRange: RateCardDateRangeDetails
+  secondRange: RateCardDateRangeDetails
+}
+
+interface RateCardIdCollisionDetails {
+  duplicateId: string
+}
+
+class DuplicateRateCardConflictError extends Error {
+  details: RateCardConflictDetails
+
+  constructor(details: RateCardConflictDetails) {
+    super(
+      "Duplicate rate cards are not allowed for the same package, suite type, route, and start date.",
+    )
+    this.name = "DuplicateRateCardConflictError"
+    this.details = details
+  }
+}
+
+class OverlappingRateCardConflictError extends Error {
+  details: RateCardOverlapConflictDetails
+
+  constructor(details: RateCardOverlapConflictDetails) {
+    super(
+      "Overlapping rate card periods are not allowed for the same package, suite type, and route.",
+    )
+    this.name = "OverlappingRateCardConflictError"
+    this.details = details
+  }
+}
+
+class RateCardIdCollisionError extends Error {
+  details: RateCardIdCollisionDetails
+
+  constructor(details: RateCardIdCollisionDetails) {
+    super("Internal rate card ID collision detected. Please retry saving.")
+    this.name = "RateCardIdCollisionError"
+    this.details = details
+  }
+}
+
 function logSupplierMutationError(
   operation: string,
   supplierId: string,
@@ -69,6 +127,72 @@ function getRateCardBusinessKey(rateCard: {
     rateCard.route_id ?? "__null__",
     rateCard.valid_from,
   ].join("|")
+}
+
+function areRateCardDateRangesOverlapping(
+  firstRange: RateCardDateRangeDetails,
+  secondRange: RateCardDateRangeDetails,
+) {
+  const firstStartsBeforeSecondEnds =
+    !secondRange.validTo || firstRange.validFrom < secondRange.validTo
+  const secondStartsBeforeFirstEnds =
+    !firstRange.validTo || secondRange.validFrom < firstRange.validTo
+  return firstStartsBeforeSecondEnds && secondStartsBeforeFirstEnds
+}
+
+function checkRateCardOverlaps(rateCards: NormalizedRateCard[]) {
+  const groupedRateCards = new Map<string, NormalizedRateCard[]>()
+
+  for (const rateCard of rateCards) {
+    const groupKey = [
+      rateCard.package_id,
+      rateCard.suite_type_id,
+      rateCard.route_id ?? "__null__",
+    ].join("|")
+    const nextGroup = groupedRateCards.get(groupKey) ?? []
+    nextGroup.push(rateCard)
+    groupedRateCards.set(groupKey, nextGroup)
+  }
+
+  for (const groupedCardSet of groupedRateCards.values()) {
+    const sortedRateCards = [...groupedCardSet].sort((a, b) =>
+      a.valid_from.localeCompare(b.valid_from),
+    )
+
+    for (let index = 0; index < sortedRateCards.length; index += 1) {
+      const firstCard = sortedRateCards[index]
+      for (let compareIndex = index + 1; compareIndex < sortedRateCards.length; compareIndex += 1) {
+        const secondCard = sortedRateCards[compareIndex]
+        const overlapDetected = areRateCardDateRangesOverlapping(
+          {
+            validFrom: firstCard.valid_from,
+            validTo: firstCard.valid_to,
+          },
+          {
+            validFrom: secondCard.valid_from,
+            validTo: secondCard.valid_to,
+          },
+        )
+        if (!overlapDetected) {
+          continue
+        }
+
+        throw new OverlappingRateCardConflictError({
+          packageId: firstCard.package_id,
+          suiteTypeId: firstCard.suite_type_id,
+          routeId: firstCard.route_id ?? null,
+          firstRange: {
+            validFrom: firstCard.valid_from,
+            validTo: firstCard.valid_to,
+          },
+          secondRange: {
+            validFrom: secondCard.valid_from,
+            validTo: secondCard.valid_to,
+          },
+        })
+      }
+    }
+  }
 }
 
 export async function GET(
@@ -120,23 +244,98 @@ export async function DELETE(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
-  const { count: bookingsCount, error: bookingsError } = await supabase
+  const { count: directBookingCount, error: directBookingError } = await supabase
     .from("bookings")
     .select("id", { count: "exact", head: true })
     .eq("hotel_supplier_id", id)
+    .neq("stage", "closed")
+    .neq("stage", "lost")
 
-  if (bookingsError) {
+  if (directBookingError) {
     return NextResponse.json(
       { error: "Failed to validate supplier deletion" },
       { status: 500 },
     )
   }
 
-  if ((bookingsCount ?? 0) > 0) {
+  if ((directBookingCount ?? 0) > 0) {
     return NextResponse.json(
-      { error: "Cannot delete supplier with existing bookings" },
+      { error: "Cannot delete supplier with active bookings" },
       { status: 409 },
     )
+  }
+
+  const { data: packageRows, error: packageError } = await supabase
+    .from("packages")
+    .select("id")
+    .eq("supplier_id", id)
+
+  if (packageError) {
+    return NextResponse.json(
+      { error: "Failed to validate supplier deletion" },
+      { status: 500 },
+    )
+  }
+
+  const packageIds = (packageRows ?? []).map((row) => row.id)
+
+  if (packageIds.length > 0) {
+    const { count: packageBookingCount, error: packageBookingError } = await supabase
+      .from("bookings")
+      .select("id", { count: "exact", head: true })
+      .in("package_id", packageIds)
+      .neq("stage", "closed")
+      .neq("stage", "lost")
+
+    if (packageBookingError) {
+      return NextResponse.json(
+        { error: "Failed to validate supplier deletion" },
+        { status: 500 },
+      )
+    }
+
+    if ((packageBookingCount ?? 0) > 0) {
+      return NextResponse.json(
+        { error: "Cannot delete supplier with active bookings" },
+        { status: 409 },
+      )
+    }
+
+    const { data: routeRows, error: routeError } = await supabase
+      .from("routes")
+      .select("id")
+      .in("package_id", packageIds)
+
+    if (routeError) {
+      return NextResponse.json(
+        { error: "Failed to validate supplier deletion" },
+        { status: 500 },
+      )
+    }
+
+    const routeIds = (routeRows ?? []).map((row) => row.id)
+    if (routeIds.length > 0) {
+      const { count: routeBookingCount, error: routeBookingError } = await supabase
+        .from("bookings")
+        .select("id", { count: "exact", head: true })
+        .in("route_id", routeIds)
+        .neq("stage", "closed")
+        .neq("stage", "lost")
+
+      if (routeBookingError) {
+        return NextResponse.json(
+          { error: "Failed to validate supplier deletion" },
+          { status: 500 },
+        )
+      }
+
+      if ((routeBookingCount ?? 0) > 0) {
+        return NextResponse.json(
+          { error: "Cannot delete supplier with active bookings" },
+          { status: 409 },
+        )
+      }
+    }
   }
 
   const { error: deleteError } = await supabase.from("suppliers").delete().eq("id", id)
@@ -144,7 +343,10 @@ export async function DELETE(
   if (deleteError) {
     if (deleteError.code === "23503") {
       return NextResponse.json(
-        { error: "Cannot delete supplier with existing bookings" },
+        {
+          error:
+            "Cannot delete supplier: related records still exist. Resolve active references and try again.",
+        },
         { status: 409 },
       )
     }
@@ -216,6 +418,11 @@ export async function PATCH(
       existingDetail.rateCards.map((rateCard) => [getRateCardBusinessKey(rateCard), rateCard]),
     )
     const incomingRateCardKeys = new Set<string>()
+    const clientProvidedRateCardIds = new Set<string>(
+      parsed.packages.flatMap((pkg) =>
+        pkg.rateCards.flatMap((rateCard) => (rateCard.id ? [rateCard.id] : [])),
+      ),
+    )
 
     normalizedSuiteTypes = parsed.suiteTypes.map((suiteType) => ({
       id: suiteType.id ?? makeUuid(),
@@ -280,14 +487,24 @@ export async function PATCH(
         })
 
         if (incomingRateCardKeys.has(businessKey)) {
-          throw new Error(
-            "Duplicate rate cards are not allowed for the same package, suite type, route, and start date.",
-          )
+          throw new DuplicateRateCardConflictError({
+            packageId: rateCard.package_id,
+            suiteTypeId: rateCard.suite_type_id,
+            routeId: rateCard.route_id ?? null,
+            validFrom: rateCard.valid_from,
+          })
         }
         incomingRateCardKeys.add(businessKey)
 
         const existingRateCard = existingRateCardByBusinessKey.get(businessKey)
         if (!existingRateCard) {
+          return rateCard
+        }
+
+        if (
+          clientProvidedRateCardIds.has(existingRateCard.id) &&
+          rateCard.id !== existingRateCard.id
+        ) {
           return rateCard
         }
 
@@ -330,7 +547,44 @@ export async function PATCH(
         rateCards: mergedRateCards,
       }
     })
+    const mergedRateCards = normalizedPackages.flatMap((pkg) => pkg.rateCards)
+    const seenRateCardIds = new Set<string>()
+    for (const rateCard of mergedRateCards) {
+      if (seenRateCardIds.has(rateCard.id)) {
+        throw new RateCardIdCollisionError({ duplicateId: rateCard.id })
+      }
+      seenRateCardIds.add(rateCard.id)
+    }
+    checkRateCardOverlaps(mergedRateCards)
   } catch (error) {
+    if (error instanceof DuplicateRateCardConflictError) {
+      return NextResponse.json(
+        {
+          error: error.message,
+          details: error.details,
+        },
+        { status: 409 },
+      )
+    }
+    if (error instanceof OverlappingRateCardConflictError) {
+      return NextResponse.json(
+        {
+          error: error.message,
+          details: error.details,
+        },
+        { status: 409 },
+      )
+    }
+    if (error instanceof RateCardIdCollisionError) {
+      return NextResponse.json(
+        {
+          error: error.message,
+          details: error.details,
+        },
+        { status: 409 },
+      )
+    }
+
     return buildErrorResponse(
       error instanceof Error ? error.message : "Invalid supplier package structure",
     )
@@ -480,6 +734,15 @@ export async function PATCH(
           {
             error:
               "A duplicate rate card exists for the same package, suite type, route, and start date. Update the existing one instead.",
+          },
+          { status: 409 },
+        )
+      }
+      if (rateCardsError.code === "23P01") {
+        return NextResponse.json(
+          {
+            error:
+              "Overlapping rate card periods are not allowed for the same package, suite type, and route.",
           },
           { status: 409 },
         )
