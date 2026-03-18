@@ -594,6 +594,30 @@ export async function PATCH(
   const existingRouteIds = new Set(existingDetail.routes.map((route) => route.id))
   const existingSuiteTypeIds = new Set(existingDetail.suiteTypes.map((suiteType) => suiteType.id))
   const existingRateCardIds = new Set(existingDetail.rateCards.map((rateCard) => rateCard.id))
+  const packageRows = normalizedPackages.map(({ routes, rateCards, ...pkg }) => pkg)
+  const routeRows = normalizedPackages.flatMap((pkg) => pkg.routes)
+  const suiteTypeRows = normalizedSuiteTypes.map((suiteType) => ({
+    ...suiteType,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }))
+  const rateCardRows = normalizedPackages.flatMap((pkg) => pkg.rateCards)
+  const incomingPackageIds = new Set(packageRows.map((pkg) => pkg.id))
+  const incomingRouteIds = new Set(routeRows.map((route) => route.id))
+  const incomingSuiteTypeIds = new Set(normalizedSuiteTypes.map((suiteType) => suiteType.id))
+  const incomingRateCardIds = new Set(rateCardRows.map((rateCard) => rateCard.id))
+  const rateCardIdsToDelete = existingDetail.rateCards
+    .map((rateCard) => rateCard.id)
+    .filter((rateCardId) => !incomingRateCardIds.has(rateCardId))
+  const routeIdsToDelete = existingDetail.routes
+    .map((route) => route.id)
+    .filter((routeId) => !incomingRouteIds.has(routeId))
+  const suiteTypeIdsToDelete = existingDetail.suiteTypes
+    .map((suiteType) => suiteType.id)
+    .filter((suiteTypeId) => !incomingSuiteTypeIds.has(suiteTypeId))
+  const packageIdsToDelete = existingDetail.packages
+    .map((pkg) => pkg.id)
+    .filter((packageId) => !incomingPackageIds.has(packageId))
 
   try {
     const [
@@ -650,6 +674,95 @@ export async function PATCH(
     )
   }
 
+  try {
+    if (packageIdsToDelete.length > 0) {
+      const [
+        { count: packageBookingRefs, error: packageBookingRefError },
+        { count: packageOfferRefs, error: packageOfferRefError },
+      ] = await Promise.all([
+        supabase
+          .from("bookings")
+          .select("id", { count: "exact", head: true })
+          .in("package_id", packageIdsToDelete),
+        supabase
+          .from("hotel_offers")
+          .select("id", { count: "exact", head: true })
+          .in("package_id", packageIdsToDelete),
+      ])
+
+      if (packageBookingRefError || packageOfferRefError) {
+        logSupplierMutationError("package-delete-dependency-check", id, {
+          packageBookingRefError,
+          packageOfferRefError,
+        })
+        return NextResponse.json(
+          { error: "Failed to validate package dependencies before save" },
+          { status: 500 },
+        )
+      }
+
+      if ((packageBookingRefs ?? 0) > 0 || (packageOfferRefs ?? 0) > 0) {
+        return NextResponse.json(
+          {
+            error:
+              "Cannot remove package records that are still linked to bookings or supplier offers.",
+          },
+          { status: 409 },
+        )
+      }
+    }
+
+    if (routeIdsToDelete.length > 0) {
+      const { count: routeBookingRefs, error: routeBookingRefError } = await supabase
+        .from("bookings")
+        .select("id", { count: "exact", head: true })
+        .in("route_id", routeIdsToDelete)
+
+      if (routeBookingRefError) {
+        logSupplierMutationError("route-delete-dependency-check", id, routeBookingRefError)
+        return NextResponse.json(
+          { error: "Failed to validate route dependencies before save" },
+          { status: 500 },
+        )
+      }
+
+      if ((routeBookingRefs ?? 0) > 0) {
+        return NextResponse.json(
+          { error: "Cannot remove routes that are still linked to bookings." },
+          { status: 409 },
+        )
+      }
+    }
+
+    if (suiteTypeIdsToDelete.length > 0) {
+      const { count: suiteTypeBookingRefs, error: suiteTypeBookingRefError } = await supabase
+        .from("booking_suites")
+        .select("id", { count: "exact", head: true })
+        .in("suite_type_id", suiteTypeIdsToDelete)
+
+      if (suiteTypeBookingRefError) {
+        logSupplierMutationError("suite-type-delete-dependency-check", id, suiteTypeBookingRefError)
+        return NextResponse.json(
+          { error: "Failed to validate suite type dependencies before save" },
+          { status: 500 },
+        )
+      }
+
+      if ((suiteTypeBookingRefs ?? 0) > 0) {
+        return NextResponse.json(
+          { error: "Cannot remove suite types that are still linked to booking suites." },
+          { status: 409 },
+        )
+      }
+    }
+  } catch (error) {
+    logSupplierMutationError("delete-dependency-check", id, error)
+    return NextResponse.json(
+      { error: "Failed to validate supplier dependencies before save" },
+      { status: 500 },
+    )
+  }
+
   const { error: supplierUpdateError } = await supabase
     .from("suppliers")
     .update({
@@ -672,7 +785,6 @@ export async function PATCH(
     )
   }
 
-  const packageRows = normalizedPackages.map(({ routes, rateCards, ...pkg }) => pkg)
   if (packageRows.length > 0) {
     const { error: packageError } = await supabase
       .from("packages")
@@ -687,7 +799,6 @@ export async function PATCH(
     }
   }
 
-  const routeRows = normalizedPackages.flatMap((pkg) => pkg.routes)
   if (routeRows.length > 0) {
     const { error: routesError } = await supabase
       .from("routes")
@@ -702,11 +813,6 @@ export async function PATCH(
     }
   }
 
-  const suiteTypeRows = normalizedSuiteTypes.map((suiteType) => ({
-    ...suiteType,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  }))
   if (suiteTypeRows.length > 0) {
     const { error: suiteTypesError } = await supabase
       .from("suite_types")
@@ -721,7 +827,6 @@ export async function PATCH(
     }
   }
 
-  const rateCardRows = normalizedPackages.flatMap((pkg) => pkg.rateCards)
   if (rateCardRows.length > 0) {
     const { error: rateCardsError } = await supabase
       .from("rate_cards")
@@ -753,24 +858,6 @@ export async function PATCH(
       )
     }
   }
-
-  const incomingPackageIds = new Set(packageRows.map((pkg) => pkg.id))
-  const incomingRouteIds = new Set(routeRows.map((route) => route.id))
-  const incomingSuiteTypeIds = new Set(normalizedSuiteTypes.map((suiteType) => suiteType.id))
-  const incomingRateCardIds = new Set(rateCardRows.map((rateCard) => rateCard.id))
-
-  const rateCardIdsToDelete = existingDetail.rateCards
-    .map((rateCard) => rateCard.id)
-    .filter((rateCardId) => !incomingRateCardIds.has(rateCardId))
-  const routeIdsToDelete = existingDetail.routes
-    .map((route) => route.id)
-    .filter((routeId) => !incomingRouteIds.has(routeId))
-  const suiteTypeIdsToDelete = existingDetail.suiteTypes
-    .map((suiteType) => suiteType.id)
-    .filter((suiteTypeId) => !incomingSuiteTypeIds.has(suiteTypeId))
-  const packageIdsToDelete = existingDetail.packages
-    .map((pkg) => pkg.id)
-    .filter((packageId) => !incomingPackageIds.has(packageId))
 
   if (rateCardIdsToDelete.length > 0) {
     const { error: deleteRateCardsError } = await supabase
