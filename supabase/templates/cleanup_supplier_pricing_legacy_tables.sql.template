@@ -1,0 +1,38 @@
+-- Template: legacy supplier pricing cleanup
+-- Purpose:
+--   Remove supplier-level pricing/seasonal tables after confirming they are no longer used.
+--
+-- Tables targeted:
+--   - public.supplier_seasonal_prices
+--   - public.supplier_seasonal_periods
+--   - public.supplier_pricing_options
+--
+-- Usage:
+--   1) Copy this file to supabase/migrations/<timestamp>_cleanup_supplier_pricing_legacy_tables.sql
+--   2) Keep the pre-checks in place and verify row counts are acceptable.
+--   3) If data should be preserved, export first.
+--   4) Apply migration.
+
+begin;
+
+-- Optional pre-checks (run and review output before dropping):
+-- select count(*) as pricing_options_count from public.supplier_pricing_options;
+-- select count(*) as seasonal_periods_count from public.supplier_seasonal_periods;
+-- select count(*) as seasonal_prices_count from public.supplier_seasonal_prices;
+
+-- Optional backup examples:
+-- create table public.supplier_pricing_options_backup as
+-- select * from public.supplier_pricing_options;
+-- create table public.supplier_seasonal_periods_backup as
+-- select * from public.supplier_seasonal_periods;
+-- create table public.supplier_seasonal_prices_backup as
+-- select * from public.supplier_seasonal_prices;
+
+-- Drop in dependency order.
+drop table if exists public.supplier_seasonal_prices;
+drop table if exists public.supplier_seasonal_periods;
+drop table if exists public.supplier_pricing_options;
+
+notify pgrst, 'reload schema';
+
+commit;

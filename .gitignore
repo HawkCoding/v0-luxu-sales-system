@@ -9,3 +9,13 @@ node_modules/
 .env*.local
 .DS_Store
 .vercel
+
+# Build artifacts
+tsconfig.tsbuildinfo
+
+# Temporary files
+tmp-*.sql
+
+# Cursor IDE
+.cursor/debug-*.log
+.cursor/plans/
