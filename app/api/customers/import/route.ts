@@ -7,10 +7,6 @@ const allowedRoles = new Set(["admin", "manager"])
 
 type NormalizedImportRow = z.infer<typeof importRowSchema>
 
-function routeKey(value: string): string {
-  return value.trim().toLowerCase().replace(/\s+/g, " ")
-}
-
 function customerSignature(row: Pick<NormalizedImportRow, "title" | "first_name" | "last_name" | "email" | "phone" | "country">): string {
   return JSON.stringify({
     title: row.title ?? null,
@@ -55,30 +51,18 @@ export async function POST(req: Request) {
     email: row.email.trim().toLowerCase(),
     phone: row.phone?.trim() || null,
     country: row.country?.trim() || null,
-    booking_reference: row.booking_reference.trim(),
-    departure_date: row.departure_date.trim(),
-    route: row.route.trim(),
-    consultant: row.consultant.trim().toUpperCase(),
-    source: row.source,
-    adults: row.adults,
-    children: row.children,
-    suites: row.suites,
-    cabin_type: row.cabin_type.trim(),
   }))
 
   const uniqueEmails = Array.from(new Set(normalizedRows.map((row) => row.email)))
-  const [{ data: existingRows, error: existingError }, { data: routeRows, error: routeError }] = await Promise.all([
-    supabase.from("customers").select("id, email").in("email", uniqueEmails),
-    supabase.from("routes").select("id, name"),
-  ])
+  const { data: existingRows, error: existingError } = await supabase
+    .from("customers")
+    .select("id, email")
+    .in("email", uniqueEmails)
 
   if (existingError)
     return NextResponse.json({ error: "Failed to check existing customers" }, { status: 500 })
-  if (routeError)
-    return NextResponse.json({ error: "Failed to load train routes" }, { status: 500 })
 
   const customerIdsByEmail = new Map((existingRows ?? []).map((row) => [row.email.toLowerCase(), row.id]))
-  const routesByName = new Map((routeRows ?? []).map((row) => [routeKey(row.name), row.id]))
   const customerRowsByEmail = new Map<string, typeof normalizedRows[number]>()
   const conflictingCustomerRows = new Set<string>()
 
@@ -102,15 +86,49 @@ export async function POST(req: Request) {
       entity_id: "bulk_import_historical_bookings",
       action: "bulk_imported_customers_and_history",
       meta_json: {
-        mode: parsed.mode ?? "unknown",
+        mode: "supplier_csv",
         requested_rows: normalizedRows.length,
         created_customers: createdCustomers,
         matched_customers: matchedCustomers,
         imported_bookings: importedBookings,
         conflicting_customer_rows: conflictingCustomerRows.size,
         invalid_rows: 0,
+        supplier_id: parsed.supplierId ?? null,
+        route_id: parsed.routeId ?? null,
       },
     })
+  }
+
+  if (parsed.routeId) {
+    const { data: route, error: routeError } = await supabase
+      .from("routes")
+      .select("id, package_id")
+      .eq("id", parsed.routeId)
+      .maybeSingle()
+
+    if (routeError) {
+      return NextResponse.json({ error: "Failed to validate selected route" }, { status: 500 })
+    }
+
+    if (!route) {
+      return NextResponse.json({ error: "Selected route was not found" }, { status: 400 })
+    }
+
+    if (parsed.supplierId && route.package_id) {
+      const { data: pkg, error: packageError } = await supabase
+        .from("packages")
+        .select("supplier_id")
+        .eq("id", route.package_id)
+        .maybeSingle()
+
+      if (packageError) {
+        return NextResponse.json({ error: "Failed to validate selected supplier route" }, { status: 500 })
+      }
+
+      if (!pkg || pkg.supplier_id !== parsed.supplierId) {
+        return NextResponse.json({ error: "Selected route does not belong to selected supplier" }, { status: 400 })
+      }
+    }
   }
 
   if (customersToInsert.length > 0) {
@@ -138,36 +156,25 @@ export async function POST(req: Request) {
     })
   }
 
-  const bookingRows = normalizedRows.map((row, index) => {
+  const bookingRows = normalizedRows.map((row) => {
     const customerId = customerIdsByEmail.get(row.email)
     if (!customerId) throw new Error(`Missing customer for ${row.email}`)
 
-    const importKey = `${row.email}:${row.booking_reference}:${row.departure_date}:${index}`
     return {
-      importKey,
-      suites: row.suites,
-      cabinType: row.cabin_type,
-      insert: {
-        customer_id: customerId,
-        owner_user_id: user.id,
-        purpose: "reservation" as const,
-        source: row.source,
-        stage: "closed" as const,
-        consultant: row.consultant,
-        departure_date: row.departure_date,
-        no_of_adults: row.adults,
-        no_of_children: row.children,
-        no_of_suites: row.suites,
-        route_id: routesByName.get(routeKey(row.route)) ?? null,
-        terms_accepted: false,
-        extracted_json: {
-          historical_import: {
-            import_key: importKey,
-            booking_reference: row.booking_reference,
-            route: row.route,
-            cabin_type: row.cabin_type,
-            imported_via: "customer_csv",
-          },
+      customer_id: customerId,
+      owner_user_id: user.id,
+      purpose: "reservation" as const,
+      stage: "closed" as const,
+      route_id: parsed.routeId ?? null,
+      terms_accepted: false,
+      extracted_json: {
+        historical_import: {
+          imported_via: "supplier_csv",
+          imported_at: new Date().toISOString(),
+          supplier_id: parsed.supplierId ?? null,
+          route_id: parsed.routeId ?? null,
+          source_label: "blank",
+          source_value: null,
         },
       },
     }
@@ -175,46 +182,12 @@ export async function POST(req: Request) {
 
   const { data: insertedBookings, error: insertBookingsError } = await supabase
     .from("bookings")
-    .insert(bookingRows.map((row) => row.insert))
-    .select("id, extracted_json")
+    .insert(bookingRows)
+    .select("id")
 
   if (insertBookingsError || !insertedBookings) {
     console.error("bookings insert error:", insertBookingsError)
     return NextResponse.json({ error: "Failed to import historical bookings" }, { status: 500 })
-  }
-
-  const bookingIdsByImportKey = new Map<string, string>()
-  insertedBookings.forEach((booking) => {
-    const extractedJson = booking.extracted_json
-    if (
-      extractedJson &&
-      typeof extractedJson === "object" &&
-      "historical_import" in extractedJson &&
-      extractedJson.historical_import &&
-      typeof extractedJson.historical_import === "object" &&
-      "import_key" in extractedJson.historical_import
-    ) {
-      bookingIdsByImportKey.set(String(extractedJson.historical_import.import_key), booking.id)
-    }
-  })
-
-  const suiteRows = bookingRows.flatMap((row) => {
-    const bookingId = bookingIdsByImportKey.get(row.importKey)
-    if (!bookingId) return []
-
-    return Array.from({ length: row.suites }, (_, suiteIndex) => ({
-      booking_id: bookingId,
-      suite_number: suiteIndex + 1,
-      suite_type_name: row.cabinType,
-    }))
-  })
-
-  if (suiteRows.length > 0) {
-    const { error: insertSuitesError } = await supabase.from("booking_suites").insert(suiteRows)
-    if (insertSuitesError) {
-      console.error("booking_suites insert error:", insertSuitesError)
-      return NextResponse.json({ error: "Failed to import booking cabin details" }, { status: 500 })
-    }
   }
 
   const createdCustomers = customersToInsert.length
