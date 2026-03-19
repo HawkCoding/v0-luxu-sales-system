@@ -913,6 +913,59 @@ export type Database = {
           },
         ]
       }
+      supplier_email_labels: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          sort_order: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          sort_order?: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          sort_order?: number
+        }
+        Relationships: []
+      }
+      supplier_emails: {
+        Row: {
+          created_at: string
+          email: string
+          id: string
+          label: string
+          supplier_id: string
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          id?: string
+          label?: string
+          supplier_id: string
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          id?: string
+          label?: string
+          supplier_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_emails_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       supplier_pricing_options: {
         Row: {
           created_at: string
@@ -1052,7 +1105,7 @@ export type Database = {
           notes: string | null
           phone: string | null
           slug: string
-          status: "draft" | "active" | "inactive"
+          status: string
           updated_at: string
           website: string | null
         }
@@ -1067,7 +1120,7 @@ export type Database = {
           notes?: string | null
           phone?: string | null
           slug: string
-          status?: "draft" | "active" | "inactive"
+          status?: string
           updated_at?: string
           website?: string | null
         }
@@ -1082,7 +1135,7 @@ export type Database = {
           notes?: string | null
           phone?: string | null
           slug?: string
-          status?: "draft" | "active" | "inactive"
+          status?: string
           updated_at?: string
           website?: string | null
         }

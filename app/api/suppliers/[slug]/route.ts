@@ -4,6 +4,7 @@ import type { Database } from "@/lib/supabase/types"
 import {
   allowedRoles,
   buildErrorResponse,
+  checkDeletionDependencies,
   loadSupplierDetail,
   makeUuid,
   normalizeNullableDate,
@@ -20,6 +21,7 @@ import {
 
 type PackageRow = Database["public"]["Tables"]["packages"]["Row"]
 type RateCardRow = Database["public"]["Tables"]["rate_cards"]["Row"]
+type SupplierEmailRow = Database["public"]["Tables"]["supplier_emails"]["Row"]
 
 type NormalizedRateCard = Pick<
   RateCardRow,
@@ -216,6 +218,7 @@ export async function GET(
       detail.packages,
       detail.routes,
       detail.suiteTypes,
+      detail.emails,
       detail.rateCards,
       detail.locations,
     ),
@@ -399,6 +402,9 @@ export async function PATCH(
     return existingDetail.error
   }
   const supplierId = existingDetail.supplier.id
+  let normalizedEmails: Array<
+    Pick<SupplierEmailRow, "id" | "supplier_id" | "email" | "label">
+  > = []
 
   let normalizedSuiteTypes: Array<{
     id: string
@@ -421,6 +427,38 @@ export async function PATCH(
   >
 
   try {
+    const parsedEmailRows = parsed.emails
+      .map((entry) => ({
+        id: entry.id ?? makeUuid(),
+        supplier_id: supplierId,
+        email: entry.email.trim(),
+        label: entry.label.trim() || "General",
+      }))
+      .filter((entry) => entry.email.length > 0)
+
+    const fallbackEmail = parsed.email.trim()
+    const emailCandidates =
+      parsedEmailRows.length > 0 || fallbackEmail.length === 0
+        ? parsedEmailRows
+        : [
+            {
+              id: makeUuid(),
+              supplier_id: supplierId,
+              email: fallbackEmail,
+              label: "General",
+            },
+          ]
+
+    const seenLowercaseEmails = new Set<string>()
+    normalizedEmails = emailCandidates.filter((entry) => {
+      const normalizedKey = entry.email.toLowerCase()
+      if (seenLowercaseEmails.has(normalizedKey)) {
+        return false
+      }
+      seenLowercaseEmails.add(normalizedKey)
+      return true
+    })
+
     const existingRateCardByBusinessKey = new Map(
       existingDetail.rateCards.map((rateCard) => [getRateCardBusinessKey(rateCard), rateCard]),
     )
@@ -597,9 +635,23 @@ export async function PATCH(
     )
   }
 
+  // --- Optimistic concurrency check ---
+  const expectedUpdatedAt = (parsed as Record<string, unknown>).expectedUpdatedAt
+  if (typeof expectedUpdatedAt === "string" && expectedUpdatedAt !== existingDetail.supplier.updated_at) {
+    return NextResponse.json(
+      {
+        error:
+          "This supplier was modified by another user since you started editing. Please refresh and try again.",
+      },
+      { status: 409 },
+    )
+  }
+
+  // --- Dependency guard: block deletes of items still referenced by bookings ---
   const existingPackageIds = new Set(existingDetail.packages.map((pkg) => pkg.id))
   const existingRouteIds = new Set(existingDetail.routes.map((route) => route.id))
   const existingSuiteTypeIds = new Set(existingDetail.suiteTypes.map((suiteType) => suiteType.id))
+  const existingEmailIds = new Set(existingDetail.emails.map((entry) => entry.id))
   const existingRateCardIds = new Set(existingDetail.rateCards.map((rateCard) => rateCard.id))
 
   try {
@@ -607,6 +659,7 @@ export async function PATCH(
       conflictingPackageIds,
       conflictingRouteIds,
       conflictingSuiteTypeIds,
+      conflictingEmailIds,
       conflictingRateCardIds,
     ] = await Promise.all([
       queryExistingIds(
@@ -632,6 +685,13 @@ export async function PATCH(
       ),
       queryExistingIds(
         supabase,
+        "supplier_emails",
+        normalizedEmails
+          .map((entry) => entry.id)
+          .filter((entryId) => !existingEmailIds.has(entryId)),
+      ),
+      queryExistingIds(
+        supabase,
         "rate_cards",
         normalizedPackages
           .flatMap((pkg) => pkg.rateCards.map((rateCard) => rateCard.id))
@@ -643,6 +703,7 @@ export async function PATCH(
       conflictingPackageIds.length > 0 ||
       conflictingRouteIds.length > 0 ||
       conflictingSuiteTypeIds.length > 0 ||
+      conflictingEmailIds.length > 0 ||
       conflictingRateCardIds.length > 0
     ) {
       return buildErrorResponse("One or more supplier records could not be updated safely.")
@@ -662,7 +723,7 @@ export async function PATCH(
     .update({
       name: parsed.name,
       kind: parsed.kind,
-      email: parsed.email || null,
+      email: normalizedEmails[0]?.email ?? null,
       phone: parsed.phone || null,
       website: parsed.website || null,
       location: parsed.location || null,
@@ -677,6 +738,20 @@ export async function PATCH(
       { error: "Failed to update supplier" },
       { status: 500 },
     )
+  }
+
+  if (normalizedEmails.length > 0) {
+    const { error: supplierEmailsUpsertError } = await supabase
+      .from("supplier_emails")
+      .upsert(normalizedEmails, { onConflict: "id" })
+
+    if (supplierEmailsUpsertError) {
+      logSupplierMutationError("supplier-emails-upsert", supplierId, supplierEmailsUpsertError)
+      return NextResponse.json(
+        { error: "Failed to update supplier emails" },
+        { status: 500 },
+      )
+    }
   }
 
   const packageRows = normalizedPackages.map(({ routes, rateCards, ...pkg }) => pkg)
@@ -764,6 +839,7 @@ export async function PATCH(
   const incomingPackageIds = new Set(packageRows.map((pkg) => pkg.id))
   const incomingRouteIds = new Set(routeRows.map((route) => route.id))
   const incomingSuiteTypeIds = new Set(normalizedSuiteTypes.map((suiteType) => suiteType.id))
+  const incomingEmailIds = new Set(normalizedEmails.map((entry) => entry.id))
   const incomingRateCardIds = new Set(rateCardRows.map((rateCard) => rateCard.id))
 
   const rateCardIdsToDelete = existingDetail.rateCards
@@ -775,9 +851,31 @@ export async function PATCH(
   const suiteTypeIdsToDelete = existingDetail.suiteTypes
     .map((suiteType) => suiteType.id)
     .filter((suiteTypeId) => !incomingSuiteTypeIds.has(suiteTypeId))
+  const emailIdsToDelete = existingDetail.emails
+    .map((entry) => entry.id)
+    .filter((entryId) => !incomingEmailIds.has(entryId))
   const packageIdsToDelete = existingDetail.packages
     .map((pkg) => pkg.id)
     .filter((packageId) => !incomingPackageIds.has(packageId))
+
+  if (packageIdsToDelete.length > 0 || routeIdsToDelete.length > 0 || suiteTypeIdsToDelete.length > 0) {
+    const dependencyChecks = await checkDeletionDependencies(
+      supabase,
+      packageIdsToDelete,
+      routeIdsToDelete,
+      suiteTypeIdsToDelete,
+    )
+
+    if (dependencyChecks.length > 0) {
+      return NextResponse.json(
+        {
+          error: "Cannot remove items that are still referenced by active bookings or offers.",
+          details: dependencyChecks,
+        },
+        { status: 409 },
+      )
+    }
+  }
 
   if (rateCardIdsToDelete.length > 0) {
     const { error: deleteRateCardsError } = await supabase
@@ -789,6 +887,21 @@ export async function PATCH(
       logSupplierMutationError("rate-cards-delete", supplierId, deleteRateCardsError)
       return NextResponse.json(
         { error: "Failed to remove old supplier rate cards" },
+        { status: 500 },
+      )
+    }
+  }
+
+  if (emailIdsToDelete.length > 0) {
+    const { error: deleteEmailsError } = await supabase
+      .from("supplier_emails")
+      .delete()
+      .in("id", emailIdsToDelete)
+
+    if (deleteEmailsError) {
+      logSupplierMutationError("supplier-emails-delete", supplierId, deleteEmailsError)
+      return NextResponse.json(
+        { error: "Failed to remove old supplier emails" },
         { status: 500 },
       )
     }
@@ -850,6 +963,7 @@ export async function PATCH(
       updatedDetail.packages,
       updatedDetail.routes,
       updatedDetail.suiteTypes,
+      updatedDetail.emails,
       updatedDetail.rateCards,
       updatedDetail.locations,
     ),
