@@ -67,7 +67,7 @@ export function CustomerDetailView({
     }, {})
   }, [])
 
-  if (isLoading || !data || hasLoadError) {
+  if (isLoading || !data || hasLoadError || "error" in data) {
     return (
       <div className={contentClassName}>
         <div className="space-y-3">
