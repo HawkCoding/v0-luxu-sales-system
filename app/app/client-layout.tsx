@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname } from "next/navigation"
 import { RoleProvider, useRole } from "@/lib/role-context"
 import { AuthProvider, useAuth } from "@/lib/auth-context"
 import { cn } from "@/lib/utils"
@@ -41,7 +41,6 @@ const navItems = [
 
 function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname()
-  const router = useRouter()
   const { user, loading: authLoading, logout } = useAuth()
   const { role, setRole, can } = useRole()
   const { data } = useAllData()
@@ -57,9 +56,9 @@ function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (mounted && !authLoading && !user) {
-      router.push("/login")
+      window.location.replace("/login")
     }
-  }, [mounted, authLoading, user, router])
+  }, [mounted, authLoading, user])
 
   useEffect(() => {
     if (user && role !== user.role) {
@@ -69,7 +68,7 @@ function AppShell({ children }: { children: ReactNode }) {
 
   const handleLogout = async () => {
     await logout()
-    router.push("/login")
+    window.location.replace("/login")
   }
 
   if (!mounted || authLoading || !user) {

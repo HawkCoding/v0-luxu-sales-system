@@ -45,6 +45,11 @@ function LoginForm() {
   }, [])
 
   useEffect(() => {
+    const saved = localStorage.getItem("lastLoginEmail")
+    if (saved) setEmail(saved)
+  }, [])
+
+  useEffect(() => {
     if (!loading && user) {
       router.push("/app")
     }
@@ -80,7 +85,8 @@ function LoginForm() {
   const handleEmailPasswordLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
-    if (!email.trim()) {
+    const normalizedEmail = email.trim().toLowerCase()
+    if (!normalizedEmail) {
       setError("Please enter your email")
       return
     }
@@ -90,8 +96,9 @@ function LoginForm() {
     }
     setSubmitting(true)
     try {
-      const success = await loginWithPassword(email.trim(), password)
+      const success = await loginWithPassword(normalizedEmail, password)
       if (success) {
+        localStorage.setItem("lastLoginEmail", normalizedEmail)
         router.push("/app")
       } else {
         setError("Invalid email or password. Check your credentials or use Forgot password.")

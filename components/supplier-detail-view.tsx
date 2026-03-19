@@ -911,6 +911,20 @@ function RateCardMatrixEditor({
   periodFieldErrors,
 }: RateCardMatrixEditorProps) {
   const periodGroups = groupEditableRateCardsByPeriod(pkg.rateCards)
+  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(pkg.routes[0]?.id ?? null)
+
+  useEffect(() => {
+    if (pkg.routes.length === 0) {
+      if (selectedRouteId !== null) {
+        setSelectedRouteId(null)
+      }
+      return
+    }
+
+    if (!selectedRouteId || !pkg.routes.some((route) => route.id === selectedRouteId)) {
+      setSelectedRouteId(pkg.routes[0].id)
+    }
+  }, [pkg.routes, selectedRouteId])
 
   if (suiteTypes.length === 0) {
     return (
@@ -935,15 +949,45 @@ function RateCardMatrixEditor({
         </Button>
       </div>
 
+      {pkg.routes.length > 1 ? (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {vocabulary.routePlural}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {pkg.routes.map((route) => {
+              const routeLabel = getRouteLabel(route, locationsById, vocabulary)
+              const isSelected = selectedRouteId === route.id
+
+              return (
+                <Button
+                  key={route.id}
+                  type="button"
+                  size="sm"
+                  variant={isSelected ? "default" : "outline"}
+                  className="h-7 rounded-full px-3 text-xs"
+                  onClick={() => setSelectedRouteId(route.id)}
+                >
+                  {routeLabel}
+                </Button>
+              )
+            })}
+          </div>
+        </div>
+      ) : null}
+
       {periodGroups.length > 0 ? (
         periodGroups.map((period) => {
-          const hasAllRoutes = period.items.some((item) => item.routeId === null)
+          const hasNullRouteItems = period.items.some((item) => item.routeId === null)
           const routeColumns =
             pkg.routes.length === 0
               ? [null]
-              : hasAllRoutes
-                ? [...pkg.routes, null]
-                : pkg.routes
+              : selectedRouteId
+                ? [
+                    ...pkg.routes.filter((route) => route.id === selectedRouteId),
+                    ...(hasNullRouteItems ? [null] : []),
+                  ]
+                : [...pkg.routes, ...(hasNullRouteItems ? [null] : [])]
 
           return (
             <div key={period.key} className="rounded-lg border overflow-hidden">
@@ -1026,12 +1070,12 @@ function RateCardMatrixEditor({
                       </th>
                       {routeColumns.map((route) => (
                         <th
-                          key={route?.id ?? "all-routes"}
+                          key={route?.id ?? "no-route"}
                           className="whitespace-nowrap px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
                         >
                           {route
                             ? getRouteLabel(route, locationsById, vocabulary)
-                            : `All ${vocabulary.routePlural}`}
+                            : `No ${vocabulary.route.toLowerCase()}`}
                         </th>
                       ))}
                     </tr>
@@ -1048,7 +1092,7 @@ function RateCardMatrixEditor({
                           )
 
                           return (
-                            <td key={`${suiteType.id}-${routeId ?? "all"}`} className="px-4 py-3">
+                            <td key={`${suiteType.id}-${routeId ?? "no-route"}`} className="px-4 py-3">
                               {match ? (
                                 <div className="flex items-center gap-2">
                                   <NumericInput
@@ -1166,56 +1210,35 @@ function PackageReadOnlyCard({
         </Badge>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {vocabulary.routePlural}
-          </p>
-          {pkg.routes.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              {pkg.routes.map((route) => {
-                const routeLabel = getRouteLabel(route, locationsById, vocabulary)
-                const isSelected = selectedRouteId === route.id
+      <div className="space-y-2">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {vocabulary.routePlural}
+        </p>
+        {pkg.routes.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {pkg.routes.map((route) => {
+              const routeLabel = getRouteLabel(route, locationsById, vocabulary)
+              const isSelected = selectedRouteId === route.id
 
-                return (
-                  <Button
-                    key={route.id}
-                    type="button"
-                    size="sm"
-                    variant={isSelected ? "default" : "outline"}
-                    className="h-7 rounded-full px-3 text-xs"
-                    onClick={() => setSelectedRouteId(route.id)}
-                  >
-                    {routeLabel}
-                  </Button>
-                )
-              })}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              {`No ${vocabulary.routePlural.toLowerCase()} configured.`}
-            </p>
-          )}
-        </div>
-
-        <div className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            {vocabulary.suiteTypePlural}
+              return (
+                <Button
+                  key={route.id}
+                  type="button"
+                  size="sm"
+                  variant={isSelected ? "default" : "outline"}
+                  className="h-7 rounded-full px-3 text-xs"
+                  onClick={() => setSelectedRouteId(route.id)}
+                >
+                  {routeLabel}
+                </Button>
+              )
+            })}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            {`No ${vocabulary.routePlural.toLowerCase()} configured.`}
           </p>
-          {suiteTypes.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              {suiteTypes.map((suiteType) => (
-                <Badge key={suiteType.id} variant="outline">
-                  {suiteType.name}
-                </Badge>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              {`No ${vocabulary.suiteTypePlural.toLowerCase()} configured.`}
-            </p>
-          )}
-        </div>
+        )}
       </div>
 
       <PackageRateCardMatrix
