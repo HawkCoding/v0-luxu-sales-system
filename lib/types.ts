@@ -239,14 +239,6 @@ export interface SupplierPackage {
   rateCards: SupplierRateCard[]
 }
 
-export interface SupplierEmail {
-  id: string
-  supplierId: string
-  email: string
-  label: string
-  createdAt: string
-}
-
 /** @deprecated Planned for DB/API cleanup after UI removal. */
 export interface SupplierSeasonalPrice {
   id: string
@@ -286,7 +278,6 @@ export interface Supplier {
 }
 
 export interface SupplierDetail extends Supplier {
-  emails: SupplierEmail[]
   suiteTypes: SupplierSuiteType[]
   packages: SupplierPackage[]
   locations: Location[]

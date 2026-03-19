@@ -4,7 +4,6 @@ import type { Database } from "@/lib/supabase/types"
 import {
   allowedRoles,
   buildErrorResponse,
-  checkDeletionDependencies,
   loadSupplierDetail,
   makeUuid,
   normalizeNullableDate,
@@ -21,7 +20,6 @@ import {
 
 type PackageRow = Database["public"]["Tables"]["packages"]["Row"]
 type RateCardRow = Database["public"]["Tables"]["rate_cards"]["Row"]
-type SupplierEmailRow = Database["public"]["Tables"]["supplier_emails"]["Row"]
 
 type NormalizedRateCard = Pick<
   RateCardRow,
@@ -218,7 +216,6 @@ export async function GET(
       detail.packages,
       detail.routes,
       detail.suiteTypes,
-      detail.emails,
       detail.rateCards,
       detail.locations,
     ),
@@ -370,39 +367,9 @@ export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ slug: string }> },
 ) {
-  const patchRequestStartedAt = performance.now()
-  const phaseDurations = {
-    authAndRoleMs: 0,
-    payloadParseMs: 0,
-    loadExistingMs: 0,
-    normalizeValidateMs: 0,
-    idValidationMs: 0,
-    dbWritesMs: 0,
-    loadUpdatedMs: 0,
-  }
-  const withPatchTimingHeaders = (response: NextResponse): NextResponse => {
-    const totalMs = performance.now() - patchRequestStartedAt
-    response.headers.set(
-      "Server-Timing",
-      [
-        `auth;dur=${phaseDurations.authAndRoleMs.toFixed(1)}`,
-        `parse;dur=${phaseDurations.payloadParseMs.toFixed(1)}`,
-        `loadExisting;dur=${phaseDurations.loadExistingMs.toFixed(1)}`,
-        `normalize;dur=${phaseDurations.normalizeValidateMs.toFixed(1)}`,
-        `idValidation;dur=${phaseDurations.idValidationMs.toFixed(1)}`,
-        `dbWrites;dur=${phaseDurations.dbWritesMs.toFixed(1)}`,
-        `loadUpdated;dur=${phaseDurations.loadUpdatedMs.toFixed(1)}`,
-        `total;dur=${totalMs.toFixed(1)}`,
-      ].join(", "),
-    )
-    return response
-  }
-
-  const authAndRoleStartedAt = performance.now()
   const auth = await requireAuthenticatedUser()
   if ("error" in auth) {
-    phaseDurations.authAndRoleMs = performance.now() - authAndRoleStartedAt
-    return withPatchTimingHeaders(auth.error!)
+    return auth.error
   }
 
   const { supabase, user } = auth
@@ -416,35 +383,22 @@ export async function PATCH(
     .single()
 
   if (profileError || !profile || !allowedRoles.has(profile.clearance_level)) {
-    phaseDurations.authAndRoleMs = performance.now() - authAndRoleStartedAt
-    return withPatchTimingHeaders(NextResponse.json({ error: "Forbidden" }, { status: 403 }))
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
-  phaseDurations.authAndRoleMs = performance.now() - authAndRoleStartedAt
 
   let parsed: SupplierSaveInput | SupplierDraftSaveInput
-  const payloadParseStartedAt = performance.now()
   try {
     const body = await req.json()
     parsed = isDraftSave ? supplierDraftSaveSchema.parse(body) : supplierSaveSchema.parse(body)
   } catch {
-    phaseDurations.payloadParseMs = performance.now() - payloadParseStartedAt
-    return withPatchTimingHeaders(
-      NextResponse.json({ error: "Invalid request payload" }, { status: 400 }),
-    )
+    return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
   }
-  phaseDurations.payloadParseMs = performance.now() - payloadParseStartedAt
 
-  const loadExistingStartedAt = performance.now()
   const existingDetail = await loadSupplierDetail(supabase, slug)
   if ("error" in existingDetail) {
-    phaseDurations.loadExistingMs = performance.now() - loadExistingStartedAt
-    return withPatchTimingHeaders(existingDetail.error!)
+    return existingDetail.error
   }
-  phaseDurations.loadExistingMs = performance.now() - loadExistingStartedAt
   const supplierId = existingDetail.supplier.id
-  let normalizedEmails: Array<
-    Pick<SupplierEmailRow, "id" | "supplier_id" | "email" | "label">
-  > = []
 
   let normalizedSuiteTypes: Array<{
     id: string
@@ -466,40 +420,7 @@ export async function PATCH(
     }
   >
 
-  const normalizeValidateStartedAt = performance.now()
   try {
-    const parsedEmailRows = parsed.emails
-      .map((entry) => ({
-        id: entry.id ?? makeUuid(),
-        supplier_id: supplierId,
-        email: entry.email.trim(),
-        label: entry.label.trim() || "General",
-      }))
-      .filter((entry) => entry.email.length > 0)
-
-    const fallbackEmail = parsed.email.trim()
-    const emailCandidates =
-      parsedEmailRows.length > 0 || fallbackEmail.length === 0
-        ? parsedEmailRows
-        : [
-            {
-              id: makeUuid(),
-              supplier_id: supplierId,
-              email: fallbackEmail,
-              label: "General",
-            },
-          ]
-
-    const seenLowercaseEmails = new Set<string>()
-    normalizedEmails = emailCandidates.filter((entry) => {
-      const normalizedKey = entry.email.toLowerCase()
-      if (seenLowercaseEmails.has(normalizedKey)) {
-        return false
-      }
-      seenLowercaseEmails.add(normalizedKey)
-      return true
-    })
-
     const existingRateCardByBusinessKey = new Map(
       existingDetail.rateCards.map((rateCard) => [getRateCardBusinessKey(rateCard), rateCard]),
     )
@@ -642,78 +563,50 @@ export async function PATCH(
       seenRateCardIds.add(rateCard.id)
     }
     checkRateCardOverlaps(mergedRateCards)
-    phaseDurations.normalizeValidateMs = performance.now() - normalizeValidateStartedAt
   } catch (error) {
-    phaseDurations.normalizeValidateMs = performance.now() - normalizeValidateStartedAt
     if (error instanceof DuplicateRateCardConflictError) {
-      return withPatchTimingHeaders(
-        NextResponse.json(
-          {
-            error: error.message,
-            details: error.details,
-          },
-          { status: 409 },
-        ),
+      return NextResponse.json(
+        {
+          error: error.message,
+          details: error.details,
+        },
+        { status: 409 },
       )
     }
     if (error instanceof OverlappingRateCardConflictError) {
-      return withPatchTimingHeaders(
-        NextResponse.json(
-          {
-            error: error.message,
-            details: error.details,
-          },
-          { status: 409 },
-        ),
+      return NextResponse.json(
+        {
+          error: error.message,
+          details: error.details,
+        },
+        { status: 409 },
       )
     }
     if (error instanceof RateCardIdCollisionError) {
-      return withPatchTimingHeaders(
-        NextResponse.json(
-          {
-            error: error.message,
-            details: error.details,
-          },
-          { status: 409 },
-        ),
+      return NextResponse.json(
+        {
+          error: error.message,
+          details: error.details,
+        },
+        { status: 409 },
       )
     }
 
-    return withPatchTimingHeaders(
-      buildErrorResponse(
-        error instanceof Error ? error.message : "Invalid supplier package structure",
-      ),
+    return buildErrorResponse(
+      error instanceof Error ? error.message : "Invalid supplier package structure",
     )
   }
 
-  // --- Optimistic concurrency check ---
-  const expectedUpdatedAt = (parsed as Record<string, unknown>).expectedUpdatedAt
-  if (typeof expectedUpdatedAt === "string" && expectedUpdatedAt !== existingDetail.supplier.updated_at) {
-    return withPatchTimingHeaders(
-      NextResponse.json(
-        {
-          error:
-            "This supplier was modified by another user since you started editing. Please refresh and try again.",
-        },
-        { status: 409 },
-      ),
-    )
-  }
-
-  // --- Dependency guard: block deletes of items still referenced by bookings ---
   const existingPackageIds = new Set(existingDetail.packages.map((pkg) => pkg.id))
   const existingRouteIds = new Set(existingDetail.routes.map((route) => route.id))
   const existingSuiteTypeIds = new Set(existingDetail.suiteTypes.map((suiteType) => suiteType.id))
-  const existingEmailIds = new Set(existingDetail.emails.map((entry) => entry.id))
   const existingRateCardIds = new Set(existingDetail.rateCards.map((rateCard) => rateCard.id))
 
-  const idValidationStartedAt = performance.now()
   try {
     const [
       conflictingPackageIds,
       conflictingRouteIds,
       conflictingSuiteTypeIds,
-      conflictingEmailIds,
       conflictingRateCardIds,
     ] = await Promise.all([
       queryExistingIds(
@@ -739,13 +632,6 @@ export async function PATCH(
       ),
       queryExistingIds(
         supabase,
-        "supplier_emails",
-        normalizedEmails
-          .map((entry) => entry.id)
-          .filter((entryId) => !existingEmailIds.has(entryId)),
-      ),
-      queryExistingIds(
-        supabase,
         "rate_cards",
         normalizedPackages
           .flatMap((pkg) => pkg.rateCards.map((rateCard) => rateCard.id))
@@ -757,32 +643,18 @@ export async function PATCH(
       conflictingPackageIds.length > 0 ||
       conflictingRouteIds.length > 0 ||
       conflictingSuiteTypeIds.length > 0 ||
-      conflictingEmailIds.length > 0 ||
       conflictingRateCardIds.length > 0
     ) {
-      phaseDurations.idValidationMs = performance.now() - idValidationStartedAt
-      return withPatchTimingHeaders(
-        buildErrorResponse("One or more supplier records could not be updated safely."),
-      )
+      return buildErrorResponse("One or more supplier records could not be updated safely.")
     }
-    phaseDurations.idValidationMs = performance.now() - idValidationStartedAt
   } catch {
     logSupplierMutationError("validation-id-lookup", supplierId, {
       message: "Failed to validate supplier updates",
     })
-    phaseDurations.idValidationMs = performance.now() - idValidationStartedAt
-    return withPatchTimingHeaders(
-      NextResponse.json(
-        { error: "Failed to validate supplier updates" },
-        { status: 500 },
-      ),
+    return NextResponse.json(
+      { error: "Failed to validate supplier updates" },
+      { status: 500 },
     )
-  }
-
-  const dbWritesStartedAt = performance.now()
-  const withDbTimingHeaders = (response: NextResponse): NextResponse => {
-    phaseDurations.dbWritesMs = performance.now() - dbWritesStartedAt
-    return withPatchTimingHeaders(response)
   }
 
   const { error: supplierUpdateError } = await supabase
@@ -790,7 +662,7 @@ export async function PATCH(
     .update({
       name: parsed.name,
       kind: parsed.kind,
-      email: normalizedEmails[0]?.email ?? null,
+      email: parsed.email || null,
       phone: parsed.phone || null,
       website: parsed.website || null,
       location: parsed.location || null,
@@ -801,23 +673,10 @@ export async function PATCH(
 
   if (supplierUpdateError) {
     logSupplierMutationError("supplier-update", supplierId, supplierUpdateError)
-    return withDbTimingHeaders(NextResponse.json({ error: "Failed to update supplier" }, { status: 500 }))
-  }
-
-  if (normalizedEmails.length > 0) {
-    const { error: supplierEmailsUpsertError } = await supabase
-      .from("supplier_emails")
-      .upsert(normalizedEmails, { onConflict: "id" })
-
-    if (supplierEmailsUpsertError) {
-      logSupplierMutationError("supplier-emails-upsert", supplierId, supplierEmailsUpsertError)
-      return withDbTimingHeaders(
-        NextResponse.json(
-          { error: "Failed to update supplier emails" },
-          { status: 500 },
-        ),
-      )
-    }
+    return NextResponse.json(
+      { error: "Failed to update supplier" },
+      { status: 500 },
+    )
   }
 
   const packageRows = normalizedPackages.map(({ routes, rateCards, ...pkg }) => pkg)
@@ -828,11 +687,9 @@ export async function PATCH(
 
     if (packageError) {
       logSupplierMutationError("packages-upsert", supplierId, packageError)
-      return withDbTimingHeaders(
-        NextResponse.json(
-          { error: "Failed to update supplier packages" },
-          { status: 500 },
-        ),
+      return NextResponse.json(
+        { error: "Failed to update supplier packages" },
+        { status: 500 },
       )
     }
   }
@@ -845,11 +702,9 @@ export async function PATCH(
 
     if (routesError) {
       logSupplierMutationError("routes-upsert", supplierId, routesError)
-      return withDbTimingHeaders(
-        NextResponse.json(
-          { error: "Failed to update supplier routes" },
-          { status: 500 },
-        ),
+      return NextResponse.json(
+        { error: "Failed to update supplier routes" },
+        { status: 500 },
       )
     }
   }
@@ -866,11 +721,9 @@ export async function PATCH(
 
     if (suiteTypesError) {
       logSupplierMutationError("suite-types-upsert", supplierId, suiteTypesError)
-      return withDbTimingHeaders(
-        NextResponse.json(
-          { error: "Failed to update supplier suite types" },
-          { status: 500 },
-        ),
+      return NextResponse.json(
+        { error: "Failed to update supplier suite types" },
+        { status: 500 },
       )
     }
   }
@@ -884,32 +737,26 @@ export async function PATCH(
     if (rateCardsError) {
       logSupplierMutationError("rate-cards-upsert", supplierId, rateCardsError)
       if (rateCardsError.code === "23505") {
-        return withDbTimingHeaders(
-          NextResponse.json(
-            {
-              error:
-                "A duplicate rate card exists for the same package, suite type, route, and start date. Update the existing one instead.",
-            },
-            { status: 409 },
-          ),
+        return NextResponse.json(
+          {
+            error:
+              "A duplicate rate card exists for the same package, suite type, route, and start date. Update the existing one instead.",
+          },
+          { status: 409 },
         )
       }
       if (rateCardsError.code === "23P01") {
-        return withDbTimingHeaders(
-          NextResponse.json(
-            {
-              error:
-                "Overlapping rate card periods are not allowed for the same package, suite type, and route.",
-            },
-            { status: 409 },
-          ),
+        return NextResponse.json(
+          {
+            error:
+              "Overlapping rate card periods are not allowed for the same package, suite type, and route.",
+          },
+          { status: 409 },
         )
       }
-      return withDbTimingHeaders(
-        NextResponse.json(
-          { error: "Failed to update supplier rate cards" },
-          { status: 500 },
-        ),
+      return NextResponse.json(
+        { error: "Failed to update supplier rate cards" },
+        { status: 500 },
       )
     }
   }
@@ -917,7 +764,6 @@ export async function PATCH(
   const incomingPackageIds = new Set(packageRows.map((pkg) => pkg.id))
   const incomingRouteIds = new Set(routeRows.map((route) => route.id))
   const incomingSuiteTypeIds = new Set(normalizedSuiteTypes.map((suiteType) => suiteType.id))
-  const incomingEmailIds = new Set(normalizedEmails.map((entry) => entry.id))
   const incomingRateCardIds = new Set(rateCardRows.map((rateCard) => rateCard.id))
 
   const rateCardIdsToDelete = existingDetail.rateCards
@@ -929,33 +775,9 @@ export async function PATCH(
   const suiteTypeIdsToDelete = existingDetail.suiteTypes
     .map((suiteType) => suiteType.id)
     .filter((suiteTypeId) => !incomingSuiteTypeIds.has(suiteTypeId))
-  const emailIdsToDelete = existingDetail.emails
-    .map((entry) => entry.id)
-    .filter((entryId) => !incomingEmailIds.has(entryId))
   const packageIdsToDelete = existingDetail.packages
     .map((pkg) => pkg.id)
     .filter((packageId) => !incomingPackageIds.has(packageId))
-
-  if (packageIdsToDelete.length > 0 || routeIdsToDelete.length > 0 || suiteTypeIdsToDelete.length > 0) {
-    const dependencyChecks = await checkDeletionDependencies(
-      supabase,
-      packageIdsToDelete,
-      routeIdsToDelete,
-      suiteTypeIdsToDelete,
-    )
-
-    if (dependencyChecks.length > 0) {
-      return withDbTimingHeaders(
-        NextResponse.json(
-          {
-            error: "Cannot remove items that are still referenced by active bookings or offers.",
-            details: dependencyChecks,
-          },
-          { status: 409 },
-        ),
-      )
-    }
-  }
 
   if (rateCardIdsToDelete.length > 0) {
     const { error: deleteRateCardsError } = await supabase
@@ -965,28 +787,9 @@ export async function PATCH(
 
     if (deleteRateCardsError) {
       logSupplierMutationError("rate-cards-delete", supplierId, deleteRateCardsError)
-      return withDbTimingHeaders(
-        NextResponse.json(
-          { error: "Failed to remove old supplier rate cards" },
-          { status: 500 },
-        ),
-      )
-    }
-  }
-
-  if (emailIdsToDelete.length > 0) {
-    const { error: deleteEmailsError } = await supabase
-      .from("supplier_emails")
-      .delete()
-      .in("id", emailIdsToDelete)
-
-    if (deleteEmailsError) {
-      logSupplierMutationError("supplier-emails-delete", supplierId, deleteEmailsError)
-      return withDbTimingHeaders(
-        NextResponse.json(
-          { error: "Failed to remove old supplier emails" },
-          { status: 500 },
-        ),
+      return NextResponse.json(
+        { error: "Failed to remove old supplier rate cards" },
+        { status: 500 },
       )
     }
   }
@@ -999,11 +802,9 @@ export async function PATCH(
 
     if (deleteRoutesError) {
       logSupplierMutationError("routes-delete", supplierId, deleteRoutesError)
-      return withDbTimingHeaders(
-        NextResponse.json(
-          { error: "Failed to remove old supplier routes" },
-          { status: 500 },
-        ),
+      return NextResponse.json(
+        { error: "Failed to remove old supplier routes" },
+        { status: 500 },
       )
     }
   }
@@ -1016,11 +817,9 @@ export async function PATCH(
 
     if (deleteSuiteTypesError) {
       logSupplierMutationError("suite-types-delete", supplierId, deleteSuiteTypesError)
-      return withDbTimingHeaders(
-        NextResponse.json(
-          { error: "Failed to remove old supplier suite types" },
-          { status: 500 },
-        ),
+      return NextResponse.json(
+        { error: "Failed to remove old supplier suite types" },
+        { status: 500 },
       )
     }
   }
@@ -1033,35 +832,26 @@ export async function PATCH(
 
     if (deletePackagesError) {
       logSupplierMutationError("packages-delete", supplierId, deletePackagesError)
-      return withDbTimingHeaders(
-        NextResponse.json(
-          { error: "Failed to remove old supplier packages" },
-          { status: 500 },
-        ),
+      return NextResponse.json(
+        { error: "Failed to remove old supplier packages" },
+        { status: 500 },
       )
     }
   }
 
-  phaseDurations.dbWritesMs = performance.now() - dbWritesStartedAt
-  const loadUpdatedStartedAt = performance.now()
   const updatedDetail = await loadSupplierDetail(supabase, slug)
   if ("error" in updatedDetail) {
-    phaseDurations.loadUpdatedMs = performance.now() - loadUpdatedStartedAt
-    return withPatchTimingHeaders(updatedDetail.error!)
+    return updatedDetail.error
   }
-  phaseDurations.loadUpdatedMs = performance.now() - loadUpdatedStartedAt
 
-  return withPatchTimingHeaders(
-    NextResponse.json(
-      mapSupplierDetail(
-        updatedDetail.supplier,
-        updatedDetail.packages,
-        updatedDetail.routes,
-        updatedDetail.suiteTypes,
-        updatedDetail.emails,
-        updatedDetail.rateCards,
-        updatedDetail.locations,
-      ),
+  return NextResponse.json(
+    mapSupplierDetail(
+      updatedDetail.supplier,
+      updatedDetail.packages,
+      updatedDetail.routes,
+      updatedDetail.suiteTypes,
+      updatedDetail.rateCards,
+      updatedDetail.locations,
     ),
   )
 }

@@ -12,7 +12,6 @@ export type RefTableName =
   | "packages"
   | "rate_cards"
   | "routes"
-  | "supplier_emails"
   | "suite_types"
 
 export async function requireAuthenticatedUser() {
@@ -80,76 +79,6 @@ export async function queryExistingIds(
   return (data ?? []).map((row) => row.id)
 }
 
-interface DeletionDependency {
-  table: string
-  ids: string[]
-  referencedBy: string
-}
-
-export async function checkDeletionDependencies(
-  supabase: SessionClient,
-  packageIds: string[],
-  routeIds: string[],
-  suiteTypeIds: string[],
-): Promise<DeletionDependency[]> {
-  const conflicts: DeletionDependency[] = []
-
-  if (packageIds.length > 0) {
-    const [bookingCheck, offerCheck] = await Promise.all([
-      supabase
-        .from("bookings")
-        .select("package_id", { count: "exact", head: false })
-        .in("package_id", packageIds)
-        .neq("stage", "closed")
-        .neq("stage", "lost"),
-      supabase
-        .from("hotel_offers")
-        .select("package_id", { count: "exact", head: false })
-        .in("package_id", packageIds),
-    ])
-
-    const bookingPkgIds = Array.from(new Set((bookingCheck.data ?? []).map((r) => r.package_id)))
-    if (bookingPkgIds.length > 0) {
-      conflicts.push({ table: "packages", ids: bookingPkgIds.filter(Boolean) as string[], referencedBy: "bookings" })
-    }
-
-    const offerPkgIds = Array.from(new Set((offerCheck.data ?? []).map((r) => r.package_id)))
-    if (offerPkgIds.length > 0) {
-      conflicts.push({ table: "packages", ids: offerPkgIds.filter(Boolean) as string[], referencedBy: "hotel_offers" })
-    }
-  }
-
-  if (routeIds.length > 0) {
-    const bookingCheck = await supabase
-      .from("bookings")
-      .select("route_id", { count: "exact", head: false })
-      .in("route_id", routeIds)
-      .neq("stage", "closed")
-      .neq("stage", "lost")
-
-    const bookingRouteIds = Array.from(new Set((bookingCheck.data ?? []).map((r) => r.route_id)))
-    if (bookingRouteIds.length > 0) {
-      conflicts.push({ table: "routes", ids: bookingRouteIds.filter(Boolean) as string[], referencedBy: "bookings" })
-    }
-  }
-
-  if (suiteTypeIds.length > 0) {
-    const bookingSuiteCheck = await supabase
-      .from("booking_suites")
-      .select("suite_type_id", { count: "exact", head: false })
-      .in("suite_type_id", suiteTypeIds)
-
-    const referencedSuiteTypeIds = Array.from(
-      new Set((bookingSuiteCheck.data ?? []).map((r) => r.suite_type_id)),
-    )
-    if (referencedSuiteTypeIds.length > 0) {
-      conflicts.push({ table: "suite_types", ids: referencedSuiteTypeIds.filter(Boolean) as string[], referencedBy: "booking_suites" })
-    }
-  }
-
-  return conflicts
-}
-
 export async function loadSupplierDetail(supabase: SessionClient, slug: string) {
   const slugLookup = await supabase
     .from("suppliers")
@@ -189,7 +118,6 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
   const [
     { data: packages, error: packagesError },
     { data: suiteTypes, error: suiteTypesError },
-    { data: emails, error: emailsError },
   ] = await Promise.all([
     supabase
       .from("packages")
@@ -201,12 +129,6 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
       .select("*")
       .eq("supplier_id", supplierId)
       .order("name", { ascending: true }),
-    supabase
-      .from("supplier_emails")
-      .select("*")
-      .eq("supplier_id", supplierId)
-      .order("label", { ascending: true })
-      .order("email", { ascending: true }),
   ])
 
   if (packagesError) {
@@ -228,20 +150,6 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     return {
       error: NextResponse.json(
         { error: "Failed to load supplier suite types" },
-        { status: 500 },
-      ),
-    }
-  }
-
-  if (emailsError) {
-    console.error("Failed to load supplier emails", {
-      supplierId,
-      supplierSlug: slug,
-      error: emailsError,
-    })
-    return {
-      error: NextResponse.json(
-        { error: "Failed to load supplier emails" },
         { status: 500 },
       ),
     }
@@ -329,7 +237,6 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     packages: packages ?? [],
     routes: routes ?? [],
     suiteTypes: suiteTypes ?? [],
-    emails: emails ?? [],
     rateCards: rateCards ?? [],
     locations: locations ?? [],
   }
