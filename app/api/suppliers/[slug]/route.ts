@@ -402,7 +402,7 @@ export async function PATCH(
   const auth = await requireAuthenticatedUser()
   if ("error" in auth) {
     phaseDurations.authAndRoleMs = performance.now() - authAndRoleStartedAt
-    return withPatchTimingHeaders(auth.error)
+    return withPatchTimingHeaders(auth.error!)
   }
 
   const { supabase, user } = auth
@@ -438,7 +438,7 @@ export async function PATCH(
   const existingDetail = await loadSupplierDetail(supabase, slug)
   if ("error" in existingDetail) {
     phaseDurations.loadExistingMs = performance.now() - loadExistingStartedAt
-    return withPatchTimingHeaders(existingDetail.error)
+    return withPatchTimingHeaders(existingDetail.error!)
   }
   phaseDurations.loadExistingMs = performance.now() - loadExistingStartedAt
   const supplierId = existingDetail.supplier.id
@@ -1047,7 +1047,7 @@ export async function PATCH(
   const updatedDetail = await loadSupplierDetail(supabase, slug)
   if ("error" in updatedDetail) {
     phaseDurations.loadUpdatedMs = performance.now() - loadUpdatedStartedAt
-    return withPatchTimingHeaders(updatedDetail.error)
+    return withPatchTimingHeaders(updatedDetail.error!)
   }
   phaseDurations.loadUpdatedMs = performance.now() - loadUpdatedStartedAt
 
