@@ -47,8 +47,8 @@ const PAYMENT_COLORS: Record<string, string> = {
 }
 
 export default function PipelinePage() {
-  const { data: jobs, isLoading: loadingJobs, mutate: mutateJobs } = usePipeline()
-  const { data, isLoading: loadingAll, mutate: mutateAll } = useAllData()
+  const { data: jobs, isLoading: loadingJobs, error: jobsError, mutate: mutateJobs } = usePipeline()
+  const { data, isLoading: loadingAll, error: allDataError, mutate: mutateAll } = useAllData()
   const { can } = useRole()
   const { user } = useAuth()
   const [draggedJob, setDraggedJob] = useState<string | null>(null)
@@ -272,8 +272,41 @@ export default function PipelinePage() {
     setParsedDraft(null)
   }
 
-  if (loadingJobs || loadingAll || !jobs || !data) {
+  if (loadingJobs || loadingAll) {
     return <div className="p-6"><div className="animate-pulse space-y-4">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-24 bg-secondary rounded-lg" />)}</div></div>
+  }
+
+  if (jobsError || allDataError) {
+    return (
+      <div className="p-6">
+        <Card className="border-dashed">
+          <CardContent className="p-12">
+            <div className="space-y-2 text-center">
+              <Clipboard className="mx-auto h-12 w-12 text-muted-foreground/40" />
+              <p className="text-base font-medium text-foreground">Failed to load pipeline</p>
+              <p className="text-sm text-muted-foreground">
+                Something went wrong while loading pipeline data. Try again.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2"
+                onClick={() => {
+                  void mutateJobs()
+                  void mutateAll()
+                }}
+              >
+                Retry
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  if (!jobs || !data) {
+    return null
   }
 
   // Filter jobs by consultant before grouping
@@ -414,7 +447,7 @@ export default function PipelinePage() {
 
           <div className="space-y-3">
             {filtered.map((b: any) => (
-              <Link key={b.id} href={`/app/jobs/${b.id}`}>
+              <Link key={b.id} href={`/app/bookings/${b.id}`}>
                 <Card className="hover:shadow-md transition-shadow cursor-pointer">
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between gap-4">
@@ -516,7 +549,7 @@ export default function PipelinePage() {
           <p className="text-sm text-muted-foreground">Enquiries imported from pasted emails and text</p>
           <div className="space-y-3">
             {draftEnquiries.map((b: any) => (
-              <Link key={b.id} href={`/app/jobs/${b.id}`}>
+              <Link key={b.id} href={`/app/bookings/${b.id}`}>
                 <Card className="hover:shadow-md transition-shadow cursor-pointer">
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between gap-4">
@@ -609,7 +642,7 @@ function PipelineCard({
     >
       <CardContent className="p-3">
         <div className="flex items-start justify-between gap-1 mb-1">
-          <Link href={`/app/jobs/${job.id}`} className="text-xs font-bold text-foreground hover:text-primary transition-colors">
+          <Link href={`/app/bookings/${job.id}`} className="text-xs font-bold text-foreground hover:text-primary transition-colors">
             {job.bookingNumber}
           </Link>
           <div className="flex items-center gap-1.5">

@@ -70,7 +70,7 @@ export default function QuotesPage() {
         {filtered.map((q: any) => {
           const badge = STATUS_BADGE[q.status] || { variant: "outline" as const, label: q.status }
           return (
-            <Link key={q.id} href={`/app/jobs/${q.jobId}`}>
+            <Link key={q.id} href={`/app/bookings/${q.jobId}`}>
               <Card className="hover:shadow-sm transition-shadow cursor-pointer">
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between gap-4">

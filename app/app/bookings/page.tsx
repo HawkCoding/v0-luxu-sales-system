@@ -15,7 +15,7 @@ import { Calendar } from "@/components/ui/calendar"
 import { format } from "date-fns"
 
 export default function BookingsPage() {
-  const { data, isLoading } = useAllData()
+  const { data, isLoading, error, mutate } = useAllData()
   const [search, setSearch] = useState("")
   const [supplierFilter, setSupplierFilter] = useState("all")
   const [paymentStatusFilter, setPaymentStatusFilter] = useState("all")
@@ -25,7 +25,7 @@ export default function BookingsPage() {
   const [departureDateFrom, setDepartureDateFrom] = useState<Date | undefined>(undefined)
   const [departureDateTo, setDepartureDateTo] = useState<Date | undefined>(undefined)
 
-  if (isLoading || !data) {
+  if (isLoading) {
     return (
       <div className="p-6">
         <div className="animate-pulse space-y-3">
@@ -35,6 +35,31 @@ export default function BookingsPage() {
         </div>
       </div>
     )
+  }
+
+  if (error) {
+    return (
+      <div className="p-6">
+        <Card className="border-dashed">
+          <CardContent className="p-12">
+            <div className="text-center space-y-2">
+              <CalendarCheck className="w-12 h-12 text-muted-foreground/40 mx-auto" />
+              <p className="text-base font-medium text-foreground">Failed to load bookings</p>
+              <p className="text-sm text-muted-foreground">
+                Something went wrong while loading bookings. Try again.
+              </p>
+              <Button variant="outline" size="sm" className="mt-2" onClick={() => mutate()}>
+                Retry
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  if (!data) {
+    return null
   }
 
   // Confirmed bookings: stages where payment has been received
@@ -310,7 +335,7 @@ export default function BookingsPage() {
       {/* Bookings List */}
       <div className="space-y-3">
         {filtered.map((booking: any) => (
-          <Link key={booking.id} href={`/app/jobs/${booking.id}`}>
+          <Link key={booking.id} href={`/app/bookings/${booking.id}`}>
             <Card className="hover:shadow-lg transition-all cursor-pointer border-2 hover:border-primary/50">
               <CardContent className="p-5">
                 <div className="flex items-start justify-between gap-4">

@@ -245,7 +245,7 @@ export default function EnquiriesPage() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 mb-1">
-                        <Link href={`/app/jobs/${e.jobId}`} className="text-base font-semibold text-foreground hover:text-primary transition-colors">
+                        <Link href={`/app/bookings/${e.jobId}`} className="text-base font-semibold text-foreground hover:text-primary transition-colors">
                           {e.jobNumber}
                         </Link>
                         {e.consultant && (

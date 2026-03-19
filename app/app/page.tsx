@@ -42,7 +42,7 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        <StatCard icon={Briefcase} label="Open Jobs" value={openJobs} href="/app/jobs" />
+        <StatCard icon={Briefcase} label="Open Jobs" value={openJobs} href="/app/bookings" />
         <StatCard icon={FileText} label="Quoted" value={quotedJobs} href="/app/pipeline" />
         <StatCard icon={CreditCard} label="Deposits Paid" value={depositsPaid} href="/app/payments" />
         <StatCard icon={CreditCard} label="Full Payment" value={fullPayments} href="/app/payments" />
@@ -71,7 +71,7 @@ export default function DashboardPage() {
             {recentJobs.map((booking: { id: string; bookingNumber: string; customerId: string; stage: string; createdAt: string }) => {
               const customer = data.customers.find((c: { id: string }) => c.id === booking.customerId)
               return (
-                <Link key={booking.id} href={`/app/jobs/${booking.id}`} className="flex items-center justify-between py-4 border-b border-stroke last:border-0 hover:bg-bg-raised -mx-4 px-4 rounded transition-colors group">
+                <Link key={booking.id} href={`/app/bookings/${booking.id}`} className="flex items-center justify-between py-4 border-b border-stroke last:border-0 hover:bg-bg-raised -mx-4 px-4 rounded transition-colors group">
                   <div>
                     <p className="font-medium text-text-heading group-hover:text-accent-link transition-colors">{booking.bookingNumber}</p>
                     <p className="text-text-muted mt-1">{customer?.firstName} {customer?.lastName}</p>
@@ -105,7 +105,7 @@ export default function DashboardPage() {
               return (
                 <Link
                   key={cor.id}
-                  href={`/app/jobs/${cor.bookingId}`}
+                  href={`/app/bookings/${cor.bookingId}`}
                   className="flex items-center justify-between py-4 border-b border-stroke last:border-0 hover:bg-bg-raised -mx-4 px-4 rounded transition-colors group"
                 >
                   <div className="space-y-1 flex-1 min-w-0">

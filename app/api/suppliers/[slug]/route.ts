@@ -197,15 +197,15 @@ function checkRateCardOverlaps(rateCards: NormalizedRateCard[]) {
 
 export async function GET(
   _req: Request,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: { params: Promise<{ slug: string }> },
 ) {
   const auth = await requireAuthenticatedUser()
   if ("error" in auth) {
     return auth.error
   }
 
-  const { id } = await params
-  const detail = await loadSupplierDetail(auth.supabase, id)
+  const { slug } = await params
+  const detail = await loadSupplierDetail(auth.supabase, slug)
   if ("error" in detail) {
     return detail.error
   }
@@ -224,7 +224,7 @@ export async function GET(
 
 export async function DELETE(
   _req: Request,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: { params: Promise<{ slug: string }> },
 ) {
   const auth = await requireAuthenticatedUser()
   if ("error" in auth) {
@@ -232,7 +232,7 @@ export async function DELETE(
   }
 
   const { supabase, user } = auth
-  const { id } = await params
+  const { slug } = await params
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
@@ -244,10 +244,16 @@ export async function DELETE(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
+  const detail = await loadSupplierDetail(supabase, slug)
+  if ("error" in detail) {
+    return detail.error
+  }
+  const supplierId = detail.supplier.id
+
   const { count: directBookingCount, error: directBookingError } = await supabase
     .from("bookings")
     .select("id", { count: "exact", head: true })
-    .eq("hotel_supplier_id", id)
+    .eq("hotel_supplier_id", supplierId)
     .neq("stage", "closed")
     .neq("stage", "lost")
 
@@ -268,7 +274,7 @@ export async function DELETE(
   const { data: packageRows, error: packageError } = await supabase
     .from("packages")
     .select("id")
-    .eq("supplier_id", id)
+    .eq("supplier_id", supplierId)
 
   if (packageError) {
     return NextResponse.json(
@@ -338,7 +344,7 @@ export async function DELETE(
     }
   }
 
-  const { error: deleteError } = await supabase.from("suppliers").delete().eq("id", id)
+  const { error: deleteError } = await supabase.from("suppliers").delete().eq("id", supplierId)
 
   if (deleteError) {
     if (deleteError.code === "23503") {
@@ -359,7 +365,7 @@ export async function DELETE(
 
 export async function PATCH(
   req: Request,
-  { params }: { params: Promise<{ id: string }> },
+  { params }: { params: Promise<{ slug: string }> },
 ) {
   const auth = await requireAuthenticatedUser()
   if ("error" in auth) {
@@ -367,7 +373,7 @@ export async function PATCH(
   }
 
   const { supabase, user } = auth
-  const { id } = await params
+  const { slug } = await params
   const isDraftSave = new URL(req.url).searchParams.get("draft") === "true"
 
   const { data: profile, error: profileError } = await supabase
@@ -388,10 +394,11 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
   }
 
-  const existingDetail = await loadSupplierDetail(supabase, id)
+  const existingDetail = await loadSupplierDetail(supabase, slug)
   if ("error" in existingDetail) {
     return existingDetail.error
   }
+  const supplierId = existingDetail.supplier.id
 
   let normalizedSuiteTypes: Array<{
     id: string
@@ -426,7 +433,7 @@ export async function PATCH(
 
     normalizedSuiteTypes = parsed.suiteTypes.map((suiteType) => ({
       id: suiteType.id ?? makeUuid(),
-      supplier_id: id,
+      supplier_id: supplierId,
       name: suiteType.name.trim(),
       active: suiteType.active,
     }))
@@ -534,7 +541,7 @@ export async function PATCH(
 
       return {
         id: packageId,
-        supplier_id: id,
+        supplier_id: supplierId,
         name: pkg.name.trim(),
         description: normalizeText(pkg.description ?? ""),
         duration_nights: pkg.durationNights,
@@ -641,7 +648,7 @@ export async function PATCH(
       return buildErrorResponse("One or more supplier records could not be updated safely.")
     }
   } catch {
-    logSupplierMutationError("validation-id-lookup", id, {
+    logSupplierMutationError("validation-id-lookup", supplierId, {
       message: "Failed to validate supplier updates",
     })
     return NextResponse.json(
@@ -662,10 +669,10 @@ export async function PATCH(
       notes: parsed.notes || null,
       active: isDraftSave ? false : parsed.active,
     })
-    .eq("id", id)
+    .eq("id", supplierId)
 
   if (supplierUpdateError) {
-    logSupplierMutationError("supplier-update", id, supplierUpdateError)
+    logSupplierMutationError("supplier-update", supplierId, supplierUpdateError)
     return NextResponse.json(
       { error: "Failed to update supplier" },
       { status: 500 },
@@ -679,7 +686,7 @@ export async function PATCH(
       .upsert(packageRows, { onConflict: "id" })
 
     if (packageError) {
-      logSupplierMutationError("packages-upsert", id, packageError)
+      logSupplierMutationError("packages-upsert", supplierId, packageError)
       return NextResponse.json(
         { error: "Failed to update supplier packages" },
         { status: 500 },
@@ -694,7 +701,7 @@ export async function PATCH(
       .upsert(routeRows, { onConflict: "id" })
 
     if (routesError) {
-      logSupplierMutationError("routes-upsert", id, routesError)
+      logSupplierMutationError("routes-upsert", supplierId, routesError)
       return NextResponse.json(
         { error: "Failed to update supplier routes" },
         { status: 500 },
@@ -713,7 +720,7 @@ export async function PATCH(
       .upsert(suiteTypeRows, { onConflict: "id" })
 
     if (suiteTypesError) {
-      logSupplierMutationError("suite-types-upsert", id, suiteTypesError)
+      logSupplierMutationError("suite-types-upsert", supplierId, suiteTypesError)
       return NextResponse.json(
         { error: "Failed to update supplier suite types" },
         { status: 500 },
@@ -728,7 +735,7 @@ export async function PATCH(
       .upsert(rateCardRows, { onConflict: "id" })
 
     if (rateCardsError) {
-      logSupplierMutationError("rate-cards-upsert", id, rateCardsError)
+      logSupplierMutationError("rate-cards-upsert", supplierId, rateCardsError)
       if (rateCardsError.code === "23505") {
         return NextResponse.json(
           {
@@ -779,7 +786,7 @@ export async function PATCH(
       .in("id", rateCardIdsToDelete)
 
     if (deleteRateCardsError) {
-      logSupplierMutationError("rate-cards-delete", id, deleteRateCardsError)
+      logSupplierMutationError("rate-cards-delete", supplierId, deleteRateCardsError)
       return NextResponse.json(
         { error: "Failed to remove old supplier rate cards" },
         { status: 500 },
@@ -794,7 +801,7 @@ export async function PATCH(
       .in("id", routeIdsToDelete)
 
     if (deleteRoutesError) {
-      logSupplierMutationError("routes-delete", id, deleteRoutesError)
+      logSupplierMutationError("routes-delete", supplierId, deleteRoutesError)
       return NextResponse.json(
         { error: "Failed to remove old supplier routes" },
         { status: 500 },
@@ -809,7 +816,7 @@ export async function PATCH(
       .in("id", suiteTypeIdsToDelete)
 
     if (deleteSuiteTypesError) {
-      logSupplierMutationError("suite-types-delete", id, deleteSuiteTypesError)
+      logSupplierMutationError("suite-types-delete", supplierId, deleteSuiteTypesError)
       return NextResponse.json(
         { error: "Failed to remove old supplier suite types" },
         { status: 500 },
@@ -824,7 +831,7 @@ export async function PATCH(
       .in("id", packageIdsToDelete)
 
     if (deletePackagesError) {
-      logSupplierMutationError("packages-delete", id, deletePackagesError)
+      logSupplierMutationError("packages-delete", supplierId, deletePackagesError)
       return NextResponse.json(
         { error: "Failed to remove old supplier packages" },
         { status: 500 },
@@ -832,7 +839,7 @@ export async function PATCH(
     }
   }
 
-  const updatedDetail = await loadSupplierDetail(supabase, id)
+  const updatedDetail = await loadSupplierDetail(supabase, slug)
   if ("error" in updatedDetail) {
     return updatedDetail.error
   }

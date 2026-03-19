@@ -1,11 +1,49 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { mapSupplier } from "@/lib/suppliers"
-import { allowedRoles, requireAuthenticatedUser } from "./helpers"
+import { allowedRoles, requireAuthenticatedUser, type SessionClient } from "./helpers"
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const PHONE_PATTERN = /^[+\d\s()-]*$/
 const WEBSITE_PATTERN = /^\S+\.\S+$/
+
+function buildSupplierSlugBase(name: string): string {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+
+  return slug || "supplier"
+}
+
+async function resolveUniqueSupplierSlug(
+  supabase: SessionClient,
+  supplierName: string,
+): Promise<string> {
+  const slugBase = buildSupplierSlugBase(supplierName)
+
+  const { data: slugRows, error } = await supabase
+    .from("suppliers")
+    .select("slug")
+    .or(`slug.eq.${slugBase},slug.like.${slugBase}-%`)
+
+  if (error) {
+    throw new Error("Failed to validate supplier slug uniqueness")
+  }
+
+  const usedSlugs = new Set((slugRows ?? []).map((row) => row.slug))
+  if (!usedSlugs.has(slugBase)) {
+    return slugBase
+  }
+
+  let suffix = 2
+  while (usedSlugs.has(`${slugBase}-${suffix}`)) {
+    suffix += 1
+  }
+
+  return `${slugBase}-${suffix}`
+}
 
 const createSupplierSchema = z.object({
   kind: z.enum(["train_operator", "hotel_property", "transfers"]),
@@ -98,12 +136,21 @@ export async function POST(req: Request) {
     )
   }
   const parsed = parsedResult.data
+  const supplierName = parsed.name.trim()
+
+  let slug: string
+  try {
+    slug = await resolveUniqueSupplierSlug(supabase, supplierName)
+  } catch {
+    return NextResponse.json({ error: "Failed to create supplier" }, { status: 500 })
+  }
 
   const { data: supplier, error } = await supabase
     .from("suppliers")
     .insert({
       kind: parsed.kind,
-      name: parsed.name.trim(),
+      name: supplierName,
+      slug,
       email: parsed.email.trim() || null,
       phone: parsed.phone.trim() || null,
       website: parsed.website.trim() || null,

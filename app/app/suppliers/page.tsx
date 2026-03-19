@@ -30,39 +30,39 @@ import { cn } from "@/lib/utils"
 import { useSuppliers } from "@/lib/use-data"
 import { SUPPLIER_KIND_LABELS } from "@/lib/types"
 
-function getSupplierIdFromPath(pathname: string): string | null {
+function getSupplierSlugFromPath(pathname: string): string | null {
   const match = pathname.match(/^\/app\/suppliers\/([^/]+)\/?$/)
   return match ? match[1] : null
 }
 
 export default function SuppliersPage() {
-  const { data: suppliers, isLoading } = useSuppliers()
+  const { data: suppliers, isLoading, error, mutate } = useSuppliers()
   const { can } = useRole()
   const [search, setSearch] = useState("")
   const [addOpen, setAddOpen] = useState(false)
   const [locationsOpen, setLocationsOpen] = useState(false)
-  const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null)
+  const [selectedSupplierSlug, setSelectedSupplierSlug] = useState<string | null>(null)
   const canEdit = can("edit:suppliers")
 
   useEffect(() => {
     const handlePopState = () => {
-      setSelectedSupplierId(getSupplierIdFromPath(window.location.pathname))
+      setSelectedSupplierSlug(getSupplierSlugFromPath(window.location.pathname))
     }
 
     window.addEventListener("popstate", handlePopState)
     return () => window.removeEventListener("popstate", handlePopState)
   }, [])
 
-  const openSupplierModal = (supplierId: string) => {
-    setSelectedSupplierId(supplierId)
-    const nextPath = `/app/suppliers/${supplierId}`
+  const openSupplierModal = (supplierSlug: string) => {
+    setSelectedSupplierSlug(supplierSlug)
+    const nextPath = `/app/suppliers/${supplierSlug}`
     if (window.location.pathname !== nextPath) {
       window.history.pushState({}, "", nextPath)
     }
   }
 
   const closeSupplierModal = () => {
-    if (!selectedSupplierId) return
+    if (!selectedSupplierSlug) return
     window.history.back()
   }
 
@@ -96,7 +96,7 @@ export default function SuppliersPage() {
     [filteredSuppliers],
   )
 
-  if (isLoading || !suppliers) {
+  if (isLoading) {
     return (
       <div className="p-6">
         <div className="animate-pulse space-y-3">
@@ -106,6 +106,36 @@ export default function SuppliersPage() {
         </div>
       </div>
     )
+  }
+
+  if (error) {
+    return (
+      <div className="p-6">
+        <Card className="border-dashed">
+          <CardContent className="p-12">
+            <div className="space-y-2 text-center">
+              <Building2 className="mx-auto h-12 w-12 text-muted-foreground/40" />
+              <p className="text-base font-medium text-foreground">Failed to load suppliers</p>
+              <p className="text-sm text-muted-foreground">
+                Something went wrong while loading suppliers. Try again.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2"
+                onClick={() => mutate()}
+              >
+                Retry
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  if (!suppliers) {
+    return null
   }
 
   return (
@@ -171,7 +201,7 @@ export default function SuppliersPage() {
                 {group.map((supplier) => (
                   <Link
                     key={supplier.id}
-                    href={`/app/suppliers/${supplier.id}`}
+                    href={`/app/suppliers/${supplier.slug}`}
                     onClick={(event) => {
                       if (
                         event.defaultPrevented ||
@@ -185,14 +215,14 @@ export default function SuppliersPage() {
                       }
 
                       event.preventDefault()
-                      openSupplierModal(supplier.id)
+                      openSupplierModal(supplier.slug)
                     }}
                   >
                     <Card
                       className={cn(
                         "h-full border-2 transition-colors hover:border-primary/40 hover:bg-secondary/20",
                         supplier.status === "draft" && "border-dashed",
-                        !supplier.active && "opacity-50 grayscale",
+                        supplier.status !== "active" && "opacity-50 grayscale",
                       )}
                     >
                       <CardHeader className="pb-3">
@@ -206,14 +236,15 @@ export default function SuppliersPage() {
                                 {supplier.name}
                               </CardTitle>
                               <div className="mt-2 flex items-center gap-2 flex-wrap">
-                                {supplier.status === "draft" && (
+                                {supplier.status === "draft" ? (
                                   <Badge variant="outline">Draft</Badge>
+                                ) : (
+                                  <Badge
+                                    variant={supplier.status === "active" ? "default" : "outline"}
+                                  >
+                                    {supplier.status === "active" ? "Active" : "Inactive"}
+                                  </Badge>
                                 )}
-                                <Badge
-                                  variant={supplier.active ? "default" : "outline"}
-                                >
-                                  {supplier.active ? "Active" : "Inactive"}
-                                </Badge>
                                 {supplier.location && (
                                   <Badge variant="secondary">{supplier.location}</Badge>
                                 )}
@@ -268,7 +299,7 @@ export default function SuppliersPage() {
         )}
       </div>
 
-      <Dialog open={Boolean(selectedSupplierId)} onOpenChange={(open) => !open && closeSupplierModal()}>
+      <Dialog open={Boolean(selectedSupplierSlug)} onOpenChange={(open) => !open && closeSupplierModal()}>
         <DialogContent className="max-w-5xl p-0 sm:max-w-5xl">
           <DialogHeader className="sr-only">
             <DialogTitle>Supplier details</DialogTitle>
@@ -276,8 +307,15 @@ export default function SuppliersPage() {
               View and edit supplier information and pricing.
             </DialogDescription>
           </DialogHeader>
-          {selectedSupplierId ? (
-            <SupplierDetailView supplierId={selectedSupplierId} presentation="modal" />
+          {selectedSupplierSlug ? (
+            <SupplierDetailView
+              supplierSlug={selectedSupplierSlug}
+              presentation="modal"
+              onDeleted={() => {
+                setSelectedSupplierSlug(null)
+                window.history.replaceState({}, "", "/app/suppliers")
+              }}
+            />
           ) : null}
         </DialogContent>
       </Dialog>

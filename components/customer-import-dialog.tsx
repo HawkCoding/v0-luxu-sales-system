@@ -117,7 +117,11 @@ export function CustomerBulkImportPanel() {
   const [isProcessing, setIsProcessing] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const { data: supplierDetail } = useSupplierDetail(selectedSupplierId ?? "")
+  const selectedSupplierSlug = useMemo(
+    () => suppliers.find((supplier) => supplier.id === selectedSupplierId)?.slug ?? "",
+    [selectedSupplierId, suppliers],
+  )
+  const { data: supplierDetail } = useSupplierDetail(selectedSupplierSlug)
 
   const routeOptions = useMemo(() => {
     if (!supplierDetail || "error" in supplierDetail) return []

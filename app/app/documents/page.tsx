@@ -228,7 +228,7 @@ export default function DocumentsPage() {
         )}
         
         {filtered.map((d: any) => (
-          <Link key={d.id} href={`/app/jobs/${d.jobId}`}>
+          <Link key={d.id} href={`/app/bookings/${d.jobId}`}>
             <Card className="hover:shadow-sm transition-shadow cursor-pointer">
               <CardContent className="p-4 flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3 min-w-0 flex-1">

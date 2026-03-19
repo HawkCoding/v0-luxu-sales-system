@@ -47,6 +47,22 @@ export function buildErrorResponse(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status })
 }
 
+function isUuid(value: string | null | undefined): value is string {
+  if (!value) return false
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  )
+}
+
+function isNoRowsError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: string }).code === "PGRST116"
+  )
+}
+
 export async function queryExistingIds(
   supabase: SessionClient,
   table: RefTableName,
@@ -63,36 +79,60 @@ export async function queryExistingIds(
   return (data ?? []).map((row) => row.id)
 }
 
-export async function loadSupplierDetail(supabase: SessionClient, id: string) {
-  const [
-    { data: supplier, error: supplierError },
-    { data: packages, error: packagesError },
-    { data: suiteTypes, error: suiteTypesError },
-  ] = await Promise.all([
-    supabase.from("suppliers").select("*").eq("id", id).single(),
-    supabase
-      .from("packages")
-      .select("*")
-      .eq("supplier_id", id)
-      .order("name", { ascending: true }),
-    supabase
-      .from("suite_types")
-      .select("*")
-      .eq("supplier_id", id)
-      .order("name", { ascending: true }),
-  ])
+export async function loadSupplierDetail(supabase: SessionClient, slug: string) {
+  const slugLookup = await supabase
+    .from("suppliers")
+    .select("*")
+    .eq("slug", slug)
+    .single()
 
-  if (supplierError || !supplier) {
-    if (supplierError) {
-      console.error("Failed to load supplier", { supplierId: id, error: supplierError })
+  if (slugLookup.error && !isNoRowsError(slugLookup.error)) {
+    console.error("Failed to load supplier by slug", { supplierSlug: slug, error: slugLookup.error })
+    return {
+      error: NextResponse.json({ error: "Failed to load supplier" }, { status: 500 }),
     }
+  }
+
+  let supplier = slugLookup.data
+  if (!supplier && isUuid(slug)) {
+    const idLookup = await supabase.from("suppliers").select("*").eq("id", slug).single()
+    if (idLookup.error && !isNoRowsError(idLookup.error)) {
+      console.error("Failed to load supplier by legacy id", {
+        supplierId: slug,
+        error: idLookup.error,
+      })
+      return {
+        error: NextResponse.json({ error: "Failed to load supplier" }, { status: 500 }),
+      }
+    }
+    supplier = idLookup.data
+  }
+
+  if (!supplier) {
     return {
       error: NextResponse.json({ error: "Supplier not found" }, { status: 404 }),
     }
   }
 
+  const supplierId = supplier.id
+  const [
+    { data: packages, error: packagesError },
+    { data: suiteTypes, error: suiteTypesError },
+  ] = await Promise.all([
+    supabase
+      .from("packages")
+      .select("*")
+      .eq("supplier_id", supplierId)
+      .order("name", { ascending: true }),
+    supabase
+      .from("suite_types")
+      .select("*")
+      .eq("supplier_id", supplierId)
+      .order("name", { ascending: true }),
+  ])
+
   if (packagesError) {
-    console.error("Failed to load supplier packages", { supplierId: id, error: packagesError })
+    console.error("Failed to load supplier packages", { supplierId, supplierSlug: slug, error: packagesError })
     return {
       error: NextResponse.json(
         { error: "Failed to load supplier packages" },
@@ -103,7 +143,8 @@ export async function loadSupplierDetail(supabase: SessionClient, id: string) {
 
   if (suiteTypesError) {
     console.error("Failed to load supplier suite types", {
-      supplierId: id,
+      supplierId,
+      supplierSlug: slug,
       error: suiteTypesError,
     })
     return {
@@ -138,10 +179,14 @@ export async function loadSupplierDetail(supabase: SessionClient, id: string) {
 
   if (routesError || rateCardsError) {
     if (routesError) {
-      console.error("Failed to load supplier routes", { supplierId: id, error: routesError })
+      console.error("Failed to load supplier routes", { supplierId, supplierSlug: slug, error: routesError })
     }
     if (rateCardsError) {
-      console.error("Failed to load supplier rate cards", { supplierId: id, error: rateCardsError })
+      console.error("Failed to load supplier rate cards", {
+        supplierId,
+        supplierSlug: slug,
+        error: rateCardsError,
+      })
     }
     return {
       error: NextResponse.json(
@@ -175,7 +220,8 @@ export async function loadSupplierDetail(supabase: SessionClient, id: string) {
 
   if (locationsError) {
     console.error("Failed to load supplier route locations", {
-      supplierId: id,
+      supplierId,
+      supplierSlug: slug,
       error: locationsError,
     })
     return {

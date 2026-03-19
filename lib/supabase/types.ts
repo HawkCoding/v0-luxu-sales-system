@@ -1051,7 +1051,8 @@ export type Database = {
           name: string
           notes: string | null
           phone: string | null
-          status: "draft" | "active"
+          slug: string
+          status: "draft" | "active" | "inactive"
           updated_at: string
           website: string | null
         }
@@ -1065,7 +1066,8 @@ export type Database = {
           name: string
           notes?: string | null
           phone?: string | null
-          status?: "draft" | "active"
+          slug: string
+          status?: "draft" | "active" | "inactive"
           updated_at?: string
           website?: string | null
         }
@@ -1079,7 +1081,8 @@ export type Database = {
           name?: string
           notes?: string | null
           phone?: string | null
-          status?: "draft" | "active"
+          slug?: string
+          status?: "draft" | "active" | "inactive"
           updated_at?: string
           website?: string | null
         }

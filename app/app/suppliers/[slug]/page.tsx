@@ -4,7 +4,7 @@ import { useParams } from "next/navigation"
 import { SupplierDetailView } from "@/components/supplier-detail-view"
 
 export default function SupplierDetailPage() {
-  const { id } = useParams<{ id: string }>()
+  const { slug } = useParams<{ slug: string }>()
 
-  return <SupplierDetailView supplierId={id} presentation="page" />
+  return <SupplierDetailView supplierSlug={slug} presentation="page" />
 }

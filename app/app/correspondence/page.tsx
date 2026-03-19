@@ -70,7 +70,7 @@ export default function CorrespondencePage() {
           const config = STATUS_CONFIG[c.status] || STATUS_CONFIG.sent
           const Icon = config.icon
           return (
-            <Link key={c.id} href={`/app/jobs/${c.jobId}`}>
+            <Link key={c.id} href={`/app/bookings/${c.jobId}`}>
               <Card className="hover:shadow-sm transition-shadow cursor-pointer">
                 <CardContent className="p-4">
                   <div className="flex items-start gap-3">

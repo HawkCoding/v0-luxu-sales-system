@@ -32,6 +32,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ContentTransition } from "@/components/ui/content-transition"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { NumericInput } from "@/components/ui/numeric-input"
 import {
   Select,
   SelectContent,
@@ -60,8 +61,9 @@ import {
 type Presentation = "page" | "modal"
 
 interface SupplierDetailViewProps {
-  supplierId: string
+  supplierSlug: string
   presentation?: Presentation
+  onDeleted?: () => void
 }
 
 interface EditableRoute {
@@ -1049,17 +1051,12 @@ function RateCardMatrixEditor({
                             <td key={`${suiteType.id}-${routeId ?? "all"}`} className="px-4 py-3">
                               {match ? (
                                 <div className="flex items-center gap-2">
-                                  <Input
-                                    type="number"
+                                  <NumericInput
                                     min="0"
                                     step="0.01"
                                     value={match.pricePerPerson}
-                                    onChange={(event) =>
-                                      onUpdateCellPrice(
-                                        packageIndex,
-                                        match.id,
-                                        Number(event.target.value || 0),
-                                      )
+                                    onValueChange={(value) =>
+                                      onUpdateCellPrice(packageIndex, match.id, value ?? 0)
                                     }
                                   />
                                   <Button
@@ -1302,11 +1299,12 @@ export function SupplierDetailSkeleton({
 }
 
 export function SupplierDetailView({
-  supplierId,
+  supplierSlug,
   presentation = "page",
+  onDeleted,
 }: SupplierDetailViewProps) {
   const router = useRouter()
-  const { data, isLoading, mutate: mutateDetail } = useSupplierDetail(supplierId)
+  const { data, isLoading, error, mutate: mutateDetail } = useSupplierDetail(supplierSlug)
   const { data: allLocations = [] } = useLocations()
   const { mutate } = useSWRConfig()
   const { can } = useRole()
@@ -1327,9 +1325,17 @@ export function SupplierDetailView({
   const draftAutosaveInFlightRef = useRef(false)
   const draftStatusResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  const hasLoadError = Boolean(error)
   const supplier = data && !("error" in data) ? data : null
   const isDraftSupplier = supplier?.status === "draft"
-  const localDraftStorageKey = `supplier-draft-${supplierId}`
+  const localDraftStorageKey = `supplier-draft-${supplierSlug}`
+
+  useEffect(() => {
+    if (!hasLoadError) {
+      return
+    }
+    router.replace("/app/suppliers")
+  }, [hasLoadError, router])
 
   useEffect(() => {
     if (supplier) {
@@ -1762,7 +1768,7 @@ export function SupplierDetailView({
           }
 
           lastDraftConflictSnapshotRef.current = null
-          const response = await fetch(`/api/suppliers/${supplierId}?draft=true`, {
+          const response = await fetch(`/api/suppliers/${supplierSlug}?draft=true`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(buildDraftPayload(form)),
@@ -1803,7 +1809,7 @@ export function SupplierDetailView({
     }, DRAFT_AUTOSAVE_DEBOUNCE_MS)
 
     return () => clearTimeout(timeout)
-  }, [canEdit, form, isDraftSupplier, isEditing, isSaving, localDraftStorageKey, mutate, supplierId])
+  }, [canEdit, form, isDraftSupplier, isEditing, isSaving, localDraftStorageKey, mutate, supplierSlug])
 
   const restoreLocalDraft = () => {
     if (!pendingLocalDraft) return
@@ -1925,7 +1931,7 @@ export function SupplierDetailView({
 
     setIsSaving(true)
     try {
-      const response = await fetch(`/api/suppliers/${supplierId}`, {
+      const response = await fetch(`/api/suppliers/${supplierSlug}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1993,7 +1999,7 @@ export function SupplierDetailView({
   const handleDelete = async () => {
     setIsDeleting(true)
     try {
-      const response = await fetch(`/api/suppliers/${supplierId}`, {
+      const response = await fetch(`/api/suppliers/${supplierSlug}`, {
         method: "DELETE",
       })
 
@@ -2017,7 +2023,11 @@ export function SupplierDetailView({
 
       await mutate("/api/suppliers?includeDrafts=true")
       toast.success("Supplier deleted successfully")
-      router.push("/app/suppliers")
+      if (onDeleted) {
+        onDeleted()
+      } else {
+        router.push("/app/suppliers")
+      }
     } catch {
       toast.error("Failed to delete supplier")
     } finally {
@@ -2025,26 +2035,8 @@ export function SupplierDetailView({
     }
   }
 
-  if (isLoading) {
+  if (isLoading || hasLoadError) {
     return <SupplierDetailSkeleton presentation={presentation} />
-  }
-
-  if (data && "error" in data) {
-    return (
-      <Card>
-        <CardContent className="p-8 text-center space-y-3">
-          <p className="text-base font-medium text-foreground">Supplier not found</p>
-          <p className="text-sm text-muted-foreground">
-            The supplier could not be loaded or no longer exists.
-          </p>
-          <div>
-            <Button asChild variant="outline" size="sm">
-              <Link href="/app/suppliers">Back to suppliers</Link>
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    )
   }
 
   if (!supplier || !form) {
@@ -2074,9 +2066,11 @@ export function SupplierDetailView({
                 </h1>
                 <Badge variant="secondary">{SUPPLIER_KIND_LABELS[supplier.kind]}</Badge>
                 {supplier.status === "draft" && <Badge variant="outline">Draft</Badge>}
-                <Badge variant={supplier.active ? "default" : "outline"}>
-                  {supplier.active ? "Active" : "Inactive"}
-                </Badge>
+                {supplier.status !== "draft" && (
+                  <Badge variant={supplier.status === "active" ? "default" : "outline"}>
+                    {supplier.status === "active" ? "Active" : "Inactive"}
+                  </Badge>
+                )}
               </div>
             </div>
           </div>
@@ -2288,7 +2282,13 @@ export function SupplierDetailView({
                   />
                   <InfoItem
                     label="Status"
-                    value={supplier.active ? "Active" : "Inactive"}
+                    value={
+                      supplier.status === "draft"
+                        ? "Draft"
+                        : supplier.status === "active"
+                          ? "Active"
+                          : "Inactive"
+                    }
                   />
                 </div>
 
@@ -2453,16 +2453,14 @@ export function SupplierDetailView({
                         {activeVocabulary.showDurationNights ? (
                           <div className="space-y-2">
                             <Label>Duration (nights)</Label>
-                            <Input
-                              type="number"
+                            <NumericInput
                               min="0"
-                              value={pkg.durationNights ?? ""}
-                              onChange={(event) =>
+                              nullable
+                              value={pkg.durationNights}
+                              onValueChange={(value) =>
                                 updatePackage(packageIndex, (current) => ({
                                   ...current,
-                                  durationNights: event.target.value
-                                    ? Number(event.target.value)
-                                    : null,
+                                  durationNights: value,
                                 }))
                               }
                             />
@@ -2471,15 +2469,14 @@ export function SupplierDetailView({
                         {activeVocabulary.showSingleSupplement ? (
                           <div className="space-y-2">
                             <Label>Single supplement %</Label>
-                            <Input
-                              type="number"
+                            <NumericInput
                               min="0"
                               step="0.01"
                               value={pkg.singleSupplementPct}
-                              onChange={(event) =>
+                              onValueChange={(value) =>
                                 updatePackage(packageIndex, (current) => ({
                                   ...current,
-                                  singleSupplementPct: Number(event.target.value || 0),
+                                  singleSupplementPct: value ?? 0,
                                 }))
                               }
                             />

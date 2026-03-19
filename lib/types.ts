@@ -106,7 +106,7 @@ export interface Booking {
 }
 
 export type SupplierKind = "train_operator" | "hotel_property" | "transfers"
-export type SupplierStatus = "draft" | "active"
+export type SupplierStatus = "draft" | "active" | "inactive"
 
 export const SUPPLIER_KIND_LABELS: Record<SupplierKind, string> = {
   train_operator: "Train",
@@ -263,6 +263,7 @@ export interface SupplierSeasonalPeriod {
 
 export interface Supplier {
   id: string
+  slug: string
   kind: SupplierKind
   status: SupplierStatus
   name: string
