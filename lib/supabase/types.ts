@@ -292,6 +292,7 @@ export type Database = {
           first_name: string
           id: string
           last_name: string
+          notes: string | null
           phone: string | null
           title: string | null
           updated_at: string
@@ -303,6 +304,7 @@ export type Database = {
           first_name: string
           id?: string
           last_name: string
+          notes?: string | null
           phone?: string | null
           title?: string | null
           updated_at?: string
@@ -314,6 +316,7 @@ export type Database = {
           first_name?: string
           id?: string
           last_name?: string
+          notes?: string | null
           phone?: string | null
           title?: string | null
           updated_at?: string
@@ -1048,7 +1051,8 @@ export type Database = {
           name: string
           notes: string | null
           phone: string | null
-          status: "draft" | "active"
+          slug: string
+          status: "draft" | "active" | "inactive"
           updated_at: string
           website: string | null
         }
@@ -1062,7 +1066,8 @@ export type Database = {
           name: string
           notes?: string | null
           phone?: string | null
-          status?: "draft" | "active"
+          slug: string
+          status?: "draft" | "active" | "inactive"
           updated_at?: string
           website?: string | null
         }
@@ -1076,7 +1081,8 @@ export type Database = {
           name?: string
           notes?: string | null
           phone?: string | null
-          status?: "draft" | "active"
+          slug?: string
+          status?: "draft" | "active" | "inactive"
           updated_at?: string
           website?: string | null
         }

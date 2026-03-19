@@ -1,3 +1,3 @@
-title,first_name,last_name,email,phone,country,booking_reference,departure_date,route,consultant,source,adults,children,suites,cabin_type
-Mr,John,Smith,john.smith@example.com,+27 82 123 4567,South Africa,HIST-001,2025-11-14,Pretoria to Cape Town,LB,paste_import,2,0,1,De Luxe Suite
-,,,,,,HIST-002,2024-07-02,Cape Town to Pretoria,LB,web_form,2,1,2,Royal Suite
+title,first_name,last_name,email,phone,country
+Mr,John,Smith,john.smith@example.com,+27 82 123 4567,South Africa
+Mrs,Jane,Doe,jane.doe@example.com,+27 83 456 7890,Namibia

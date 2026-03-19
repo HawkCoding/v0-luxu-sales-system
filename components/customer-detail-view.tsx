@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
 import { useSWRConfig } from "swr"
 import { ArrowLeft, CalendarDays, Globe, Mail, Pencil, Phone, Save } from "lucide-react"
@@ -27,7 +28,8 @@ export function CustomerDetailView({
   customerId,
   presentation = "page",
 }: CustomerDetailViewProps) {
-  const { data, isLoading, mutate } = useCustomerDetail(customerId)
+  const router = useRouter()
+  const { data, isLoading, error, mutate } = useCustomerDetail(customerId)
   const { mutate: mutateGlobal } = useSWRConfig()
   const { can } = useRole()
   const canEditCustomers = can("edit:customers")
@@ -36,6 +38,7 @@ export function CustomerDetailView({
   const [notesDraft, setNotesDraft] = useState("")
   const [isEditing, setIsEditing] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const hasLoadError = Boolean(error)
 
   useEffect(() => {
     if (data && "customer" in data) {
@@ -44,6 +47,13 @@ export function CustomerDetailView({
       setNotesDraft(data.customer.notes ?? "")
     }
   }, [data])
+
+  useEffect(() => {
+    if (!hasLoadError) {
+      return
+    }
+    router.replace("/app/customers")
+  }, [hasLoadError, router])
 
   const contentClassName =
     presentation === "modal"
@@ -57,7 +67,7 @@ export function CustomerDetailView({
     }, {})
   }, [])
 
-  if (isLoading || !data) {
+  if (isLoading || !data || hasLoadError || "error" in data) {
     return (
       <div className={contentClassName}>
         <div className="space-y-3">
@@ -70,18 +80,6 @@ export function CustomerDetailView({
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-10 w-full" />
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
-
-  if ("error" in data) {
-    return (
-      <div className={contentClassName}>
-        <Card className="border-destructive/30">
-          <CardContent className="p-6 text-sm text-destructive">
-            {data.error || "Unable to load customer details."}
           </CardContent>
         </Card>
       </div>
@@ -258,7 +256,7 @@ export function CustomerDetailView({
             <p className="text-sm text-muted-foreground">No bookings found for this customer.</p>
           )}
           {bookings.map((booking) => (
-            <Link key={booking.id} href={`/app/jobs/${booking.id}`}>
+            <Link key={booking.id} href={`/app/bookings/${booking.id}`}>
               <div className="rounded-lg border p-3 hover:bg-accent transition-colors">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">

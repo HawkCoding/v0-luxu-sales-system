@@ -102,7 +102,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
         onOpenChange(false)
         
         if (openAfterSave && data.jobId) {
-          router.push(`/app/jobs/${data.jobId}`)
+          router.push(`/app/bookings/${data.jobId}`)
         } else {
           window.location.reload()
         }

@@ -4,23 +4,16 @@ import { useCallback, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { FileText, X } from "lucide-react"
+import { useActiveSuppliers, useSupplierDetail } from "@/lib/use-data"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { mutate } from "swr"
 
-type ImportSource =
-  | "web_form"
-  | "paste_import"
-  | "advertisement"
-  | "walk_in"
-  | "referral"
-  | "social_media"
-  | "phone_call"
-  | "email"
-  | "travel_agent"
+const SUPPLIER_NONE_VALUE = "__none_supplier__"
+const ROUTE_NONE_VALUE = "__none_route__"
 
 interface EditableImportRow {
   id: string
@@ -31,16 +24,6 @@ interface EditableImportRow {
   email: string
   phone: string
   country: string
-  booking_reference: string
-  departure_date: string
-  route: string
-  consultant: string
-  source: string
-  adults: string
-  children: string
-  suites: string
-  cabin_type: string
-  isContinuation: boolean
   sourceLabel: string
 }
 
@@ -52,66 +35,20 @@ interface ImportResult {
   skippedInvalid: number
 }
 
-interface CustomerSeed {
-  title: string
-  first_name: string
-  last_name: string
-  email: string
-  phone: string
-  country: string
-}
-
-const CUSTOMER_HEADERS = ["title", "first_name", "last_name", "email", "phone", "country"] as const
-const BOOKING_HEADERS = [
-  "booking_reference",
-  "departure_date",
-  "route",
-  "consultant",
-  "source",
-  "adults",
-  "children",
-  "suites",
-  "cabin_type",
-] as const
-const REQUIRED_HEADERS = [...CUSTOMER_HEADERS, ...BOOKING_HEADERS]
-const VALID_SOURCES: ImportSource[] = [
-  "web_form",
-  "paste_import",
-  "advertisement",
-  "walk_in",
-  "referral",
-  "social_media",
-  "phone_call",
-  "email",
-  "travel_agent",
-]
-type FieldHintKey =
-  | "first_name"
-  | "last_name"
-  | "email"
-  | "booking_reference"
-  | "departure_date"
-  | "route"
-  | "consultant"
-  | "source"
-  | "adults"
-  | "children"
-  | "suites"
-  | "cabin_type"
-
-const FIELD_HINTS: Record<FieldHintKey, string> = {
-  first_name: "Required. Example: John",
-  last_name: "Required. Example: Smith",
-  email: "Valid email required. Example: john@example.com",
-  booking_reference: "Required. Example: BK-20250301-001",
-  departure_date: "Date in YYYY-MM-DD format. Example: 2025-06-15",
-  route: "Required. Example: Pretoria to Cape Town",
-  consultant: "Required. Example: JD",
-  source: `Must be one of: ${VALID_SOURCES.join(", ")}`,
-  adults: "Whole number, 0 or more. Example: 2",
-  children: "Whole number, 0 or more. Example: 1",
-  suites: "Whole number, 1 or more. Example: 1",
-  cabin_type: "Required. Example: Deluxe Suite",
+const REQUIRED_HEADERS = ["first_name", "last_name", "email"] as const
+const HEADER_ALIASES: Record<string, "title" | "first_name" | "last_name" | "email" | "phone" | "country"> = {
+  title: "title",
+  name: "first_name",
+  first_name: "first_name",
+  firstname: "first_name",
+  surname: "last_name",
+  last_name: "last_name",
+  lastname: "last_name",
+  email: "email",
+  email_email: "email",
+  contact_number: "phone",
+  phone: "phone",
+  country: "country",
 }
 
 function formatBytes(bytes: number): string {
@@ -148,30 +85,12 @@ function isEmail(value: string): boolean {
   return /^[\w.+-]+@[\w-]+\.[\w.-]+$/.test(value.trim())
 }
 
-function isIsoDate(value: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value.trim())
-}
-
-function isNonNegativeInteger(value: string): boolean {
-  return /^\d+$/.test(value.trim())
-}
-
-function isPositiveInteger(value: string): boolean {
-  return /^[1-9]\d*$/.test(value.trim())
-}
-
-function normalizeImportSource(value: string): string {
-  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "_")
-  if (normalized === "web" || normalized === "webform") return "web_form"
-  if (normalized === "paste" || normalized === "manual_import" || normalized === "csv_import" || normalized === "csv") return "paste_import"
-  if (normalized === "ad" || normalized === "ads" || normalized === "advert" || normalized === "advertising") return "advertisement"
-  if (normalized === "walkin" || normalized === "walk_in_client" || normalized === "walk_in_customer") return "walk_in"
-  if (normalized === "referal" || normalized === "word_of_mouth") return "referral"
-  if (normalized === "social" || normalized === "socials" || normalized === "socials_media") return "social_media"
-  if (normalized === "phone" || normalized === "call" || normalized === "telephone") return "phone_call"
-  if (normalized === "mail" || normalized === "email_enquiry" || normalized === "email_inquiry") return "email"
-  if (normalized === "agent" || normalized === "travelagency" || normalized === "travel_agency") return "travel_agent"
-  return normalized
+function normalizeHeader(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
 }
 
 function getUniqueCustomerCount(rows: EditableImportRow[]): number {
@@ -179,18 +98,7 @@ function getUniqueCustomerCount(rows: EditableImportRow[]): number {
 }
 
 function isRowValid(row: EditableImportRow): boolean {
-  const hasCustomer = row.first_name.trim().length > 0 && row.last_name.trim().length > 0 && isEmail(row.email)
-  const hasBooking =
-    row.booking_reference.trim().length > 0 &&
-    isIsoDate(row.departure_date) &&
-    row.route.trim().length > 0 &&
-    row.consultant.trim().length > 0 &&
-    VALID_SOURCES.includes(row.source.trim() as ImportSource) &&
-    isNonNegativeInteger(row.adults) &&
-    isNonNegativeInteger(row.children) &&
-    isPositiveInteger(row.suites) &&
-    row.cabin_type.trim().length > 0
-  return hasCustomer && hasBooking
+  return row.first_name.trim().length > 0 && row.last_name.trim().length > 0 && isEmail(row.email)
 }
 
 function newRowId(): string {
@@ -198,30 +106,42 @@ function newRowId(): string {
   return `${Date.now()}-${Math.random()}`
 }
 
-interface ValidatedInputProps extends React.ComponentProps<typeof Input> {
-  isValid: boolean
-  hint?: string
-}
-
-function ValidatedInput({ isValid, hint, className, ...inputProps }: ValidatedInputProps) {
-  const input = <Input {...inputProps} className={cn(className, isValid ? "" : "border-destructive")} />
-  if (isValid || !hint) return input
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{input}</TooltipTrigger>
-      <TooltipContent side="top">{hint}</TooltipContent>
-    </Tooltip>
-  )
-}
-
 export function CustomerBulkImportPanel() {
+  const { data: suppliers = [] } = useActiveSuppliers()
   const [files, setFiles] = useState<File[]>([])
   const [rows, setRows] = useState<EditableImportRow[]>([])
   const [result, setResult] = useState<ImportResult | null>(null)
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null)
+  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null)
   const [isDragOver, setIsDragOver] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const selectedSupplierSlug = useMemo(
+    () => suppliers.find((supplier) => supplier.id === selectedSupplierId)?.slug ?? "",
+    [selectedSupplierId, suppliers],
+  )
+  const { data: supplierDetail } = useSupplierDetail(selectedSupplierSlug)
+
+  const routeOptions = useMemo(() => {
+    if (!supplierDetail || "error" in supplierDetail) return []
+    return supplierDetail.packages.flatMap((pkg) =>
+      pkg.routes.map((route) => ({
+        id: route.id,
+        label: `${route.name} (${pkg.name})`,
+      })),
+    )
+  }, [supplierDetail])
+
+  const handleSupplierChange = (value: string) => {
+    const nextSupplierId = value === SUPPLIER_NONE_VALUE ? null : value
+    setSelectedSupplierId(nextSupplierId)
+    setSelectedRouteId(null)
+  }
+
+  const handleRouteChange = (value: string) => {
+    setSelectedRouteId(value === ROUTE_NONE_VALUE ? null : value)
+  }
 
   const handleFiles = useCallback((incoming: FileList | null) => {
     if (!incoming || incoming.length === 0) return
@@ -255,6 +175,8 @@ export function CustomerBulkImportPanel() {
     setFiles([])
     setRows([])
     setResult(null)
+    setSelectedSupplierId(null)
+    setSelectedRouteId(null)
   }
 
   const parseCsvFile = async (file: File): Promise<EditableImportRow[]> => {
@@ -265,48 +187,30 @@ export function CustomerBulkImportPanel() {
       .filter(Boolean)
     if (lines.length < 2) return []
 
-    const headers = parseCsvLine(lines[0]).map((header) => header.trim().toLowerCase())
-    const missingHeaders = REQUIRED_HEADERS.filter((header) => !headers.includes(header))
+    const rawHeaders = parseCsvLine(lines[0]).map((header) => normalizeHeader(header))
+    const mappedHeaders = rawHeaders.map((header) => HEADER_ALIASES[header] ?? null)
+    const missingHeaders = REQUIRED_HEADERS.filter((header) => !mappedHeaders.includes(header))
     if (missingHeaders.length > 0) {
       throw new Error(`CSV headers must include ${missingHeaders.join(", ")}`)
     }
 
-    const headerIndex = new Map(headers.map((header, index) => [header, index]))
-    const getValue = (values: string[], header: string) => values[headerIndex.get(header) ?? -1] ?? ""
-    let currentCustomer: CustomerSeed | null = null
-
+    const headerIndex = new Map<string, number>()
+    mappedHeaders.forEach((header, index) => {
+      if (header) headerIndex.set(header, index)
+    })
+    const getValue = (values: string[], header: keyof EditableImportRow) =>
+      values[headerIndex.get(header) ?? -1]?.trim() ?? ""
     return lines.slice(1).map((line, index) => {
       const values = parseCsvLine(line)
-      const nextCustomer: CustomerSeed = {
+      return {
+        id: newRowId(),
+        selected: true,
         title: getValue(values, "title"),
         first_name: getValue(values, "first_name"),
         last_name: getValue(values, "last_name"),
         email: getValue(values, "email").toLowerCase(),
         phone: getValue(values, "phone"),
         country: getValue(values, "country"),
-      }
-      const hasCustomerValues = Object.values(nextCustomer).some((value) => value.trim().length > 0)
-      if (hasCustomerValues) {
-        currentCustomer = nextCustomer
-      }
-      if (!currentCustomer) {
-        throw new Error(`Row ${index + 2} must start with customer details before booking-only continuation rows.`)
-      }
-
-      return {
-        id: newRowId(),
-        selected: true,
-        ...currentCustomer,
-        booking_reference: getValue(values, "booking_reference"),
-        departure_date: getValue(values, "departure_date"),
-        route: getValue(values, "route"),
-        consultant: getValue(values, "consultant"),
-        source: normalizeImportSource(getValue(values, "source")),
-        adults: getValue(values, "adults"),
-        children: getValue(values, "children"),
-        suites: getValue(values, "suites"),
-        cabin_type: getValue(values, "cabin_type"),
-        isContinuation: !hasCustomerValues,
         sourceLabel: `${file.name} row ${index + 2}`,
       }
     })
@@ -367,7 +271,8 @@ export function CustomerBulkImportPanel() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mode: "csv",
+          supplierId: selectedSupplierId,
+          routeId: selectedRouteId,
           rows: selectedValidRows.map((row) => ({
             title: row.title.trim() || null,
             first_name: row.first_name.trim(),
@@ -375,15 +280,6 @@ export function CustomerBulkImportPanel() {
             email: row.email.trim().toLowerCase(),
             phone: row.phone.trim() || null,
             country: row.country.trim() || null,
-            booking_reference: row.booking_reference.trim(),
-            departure_date: row.departure_date.trim(),
-            route: row.route.trim(),
-            consultant: row.consultant.trim(),
-            source: row.source.trim(),
-            adults: Number(row.adults.trim()),
-            children: Number(row.children.trim()),
-            suites: Number(row.suites.trim()),
-            cabin_type: row.cabin_type.trim(),
           })),
         }),
       })
@@ -423,16 +319,55 @@ export function CustomerBulkImportPanel() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold text-foreground">Bulk Import Customers And Historical Bookings</h2>
+        <h2 className="text-lg font-semibold text-foreground">Supplier Leads Bulk Import</h2>
         <p className="text-sm text-muted-foreground">
-          Upload one CSV file with customer details and past train bookings, review the rows, then import them in bulk.
+          Upload one CSV file with customer details from supplier exports, review the rows, then import historical booking records.
         </p>
       </div>
 
       <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
-        Use one row per booking. The first row for a customer should include the customer details, and any following booking rows for the same
-        customer can leave the customer columns blank. Required booking columns are booking reference, departure date, route, consultant,
-        source, adults, children, suites, and cabin type.
+        Required CSV fields are first name, surname/last name, and email. Supported headers include template headers and supplier headers like
+        Title, Name, Surname, Contact Number, Email (Email), Country.
+      </div>
+
+      <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 md:grid-cols-2">
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-muted-foreground">Supplier (optional)</p>
+          <Select value={selectedSupplierId ?? SUPPLIER_NONE_VALUE} onValueChange={handleSupplierChange}>
+            <SelectTrigger>
+              <SelectValue placeholder="Select supplier" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={SUPPLIER_NONE_VALUE}>No supplier selected</SelectItem>
+              {suppliers.map((supplier) => (
+                <SelectItem key={supplier.id} value={supplier.id}>
+                  {supplier.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1">
+          <p className="text-xs font-medium text-muted-foreground">Route (optional)</p>
+          <Select
+            value={selectedRouteId ?? ROUTE_NONE_VALUE}
+            onValueChange={handleRouteChange}
+            disabled={!selectedSupplierId}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder={selectedSupplierId ? "Select route" : "Select supplier first"} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ROUTE_NONE_VALUE}>No route selected</SelectItem>
+              {routeOptions.map((route) => (
+                <SelectItem key={route.id} value={route.id}>
+                  {route.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <div
@@ -507,26 +442,16 @@ export function CustomerBulkImportPanel() {
           </div>
 
           <div className="max-h-[45vh] overflow-y-auto rounded-md border">
-            <Table className="min-w-[1740px] table-fixed">
+            <Table className="min-w-[980px] table-fixed">
               <TableHeader className="sticky top-0 z-10 bg-background">
                 <TableRow>
                   <TableHead className="w-10">Use</TableHead>
-                  <TableHead className="w-24">Row Type</TableHead>
                   <TableHead className="w-24">Title</TableHead>
                   <TableHead className="w-36">First</TableHead>
                   <TableHead className="w-36">Last</TableHead>
                   <TableHead className="w-72">Email</TableHead>
                   <TableHead className="w-40">Phone</TableHead>
                   <TableHead className="w-32">Country</TableHead>
-                  <TableHead className="w-32">Booking Ref</TableHead>
-                  <TableHead className="w-32">Departure</TableHead>
-                  <TableHead className="w-64">Route</TableHead>
-                  <TableHead className="w-24">Consultant</TableHead>
-                  <TableHead className="w-28">Source</TableHead>
-                  <TableHead className="w-20">Adults</TableHead>
-                  <TableHead className="w-20">Children</TableHead>
-                  <TableHead className="w-20">Suites</TableHead>
-                  <TableHead className="w-40">Cabin Type</TableHead>
                   <TableHead className="w-56">Source</TableHead>
                   <TableHead className="w-24">Actions</TableHead>
                 </TableRow>
@@ -542,37 +467,28 @@ export function CustomerBulkImportPanel() {
                           onCheckedChange={(checked) => updateRow(row.id, { selected: checked === true })}
                         />
                       </TableCell>
-                      <TableCell className="w-24 text-xs text-muted-foreground">
-                        {row.isContinuation ? "Booking only" : "Customer start"}
-                      </TableCell>
                       <TableCell className="w-24">
                         <Input value={row.title} onChange={(e) => updateRow(row.id, { title: e.target.value })} className="h-8 w-full" />
                       </TableCell>
                       <TableCell className="w-36">
-                        <ValidatedInput
+                        <Input
                           value={row.first_name}
                           onChange={(e) => updateRow(row.id, { first_name: e.target.value })}
-                          isValid={row.first_name.trim().length > 0}
-                          hint={FIELD_HINTS.first_name}
-                          className="h-8 w-full"
+                          className={cn("h-8 w-full", row.first_name.trim().length > 0 ? "" : "border-destructive")}
                         />
                       </TableCell>
                       <TableCell className="w-36">
-                        <ValidatedInput
+                        <Input
                           value={row.last_name}
                           onChange={(e) => updateRow(row.id, { last_name: e.target.value })}
-                          isValid={row.last_name.trim().length > 0}
-                          hint={FIELD_HINTS.last_name}
-                          className="h-8 w-full"
+                          className={cn("h-8 w-full", row.last_name.trim().length > 0 ? "" : "border-destructive")}
                         />
                       </TableCell>
                       <TableCell className="w-72">
-                        <ValidatedInput
+                        <Input
                           value={row.email}
                           onChange={(e) => updateRow(row.id, { email: e.target.value.toLowerCase() })}
-                          isValid={isEmail(row.email)}
-                          hint={FIELD_HINTS.email}
-                          className="h-8 w-full"
+                          className={cn("h-8 w-full", isEmail(row.email) ? "" : "border-destructive")}
                         />
                       </TableCell>
                       <TableCell className="w-40">
@@ -580,88 +496,6 @@ export function CustomerBulkImportPanel() {
                       </TableCell>
                       <TableCell className="w-32">
                         <Input value={row.country} onChange={(e) => updateRow(row.id, { country: e.target.value })} className="h-8 w-full" />
-                      </TableCell>
-                      <TableCell className="w-32">
-                        <ValidatedInput
-                          value={row.booking_reference}
-                          onChange={(e) => updateRow(row.id, { booking_reference: e.target.value })}
-                          isValid={row.booking_reference.trim().length > 0}
-                          hint={FIELD_HINTS.booking_reference}
-                          className="h-8 w-full"
-                        />
-                      </TableCell>
-                      <TableCell className="w-32">
-                        <ValidatedInput
-                          value={row.departure_date}
-                          onChange={(e) => updateRow(row.id, { departure_date: e.target.value })}
-                          placeholder="YYYY-MM-DD"
-                          isValid={isIsoDate(row.departure_date)}
-                          hint={FIELD_HINTS.departure_date}
-                          className="h-8 w-full"
-                        />
-                      </TableCell>
-                      <TableCell className="w-64">
-                        <ValidatedInput
-                          value={row.route}
-                          onChange={(e) => updateRow(row.id, { route: e.target.value })}
-                          isValid={row.route.trim().length > 0}
-                          hint={FIELD_HINTS.route}
-                          className="h-8 w-full"
-                        />
-                      </TableCell>
-                      <TableCell className="w-24">
-                        <ValidatedInput
-                          value={row.consultant}
-                          onChange={(e) => updateRow(row.id, { consultant: e.target.value.toUpperCase() })}
-                          isValid={row.consultant.trim().length > 0}
-                          hint={FIELD_HINTS.consultant}
-                          className="h-8 w-full"
-                        />
-                      </TableCell>
-                      <TableCell className="w-28">
-                        <ValidatedInput
-                          value={row.source}
-                          onChange={(e) => updateRow(row.id, { source: normalizeImportSource(e.target.value) })}
-                          isValid={VALID_SOURCES.includes(row.source.trim() as ImportSource)}
-                          hint={FIELD_HINTS.source}
-                          className="h-8 w-full"
-                        />
-                      </TableCell>
-                      <TableCell className="w-20">
-                        <ValidatedInput
-                          value={row.adults}
-                          onChange={(e) => updateRow(row.id, { adults: e.target.value })}
-                          isValid={isNonNegativeInteger(row.adults)}
-                          hint={FIELD_HINTS.adults}
-                          className="h-8 w-full"
-                        />
-                      </TableCell>
-                      <TableCell className="w-20">
-                        <ValidatedInput
-                          value={row.children}
-                          onChange={(e) => updateRow(row.id, { children: e.target.value })}
-                          isValid={isNonNegativeInteger(row.children)}
-                          hint={FIELD_HINTS.children}
-                          className="h-8 w-full"
-                        />
-                      </TableCell>
-                      <TableCell className="w-20">
-                        <ValidatedInput
-                          value={row.suites}
-                          onChange={(e) => updateRow(row.id, { suites: e.target.value })}
-                          isValid={isPositiveInteger(row.suites)}
-                          hint={FIELD_HINTS.suites}
-                          className="h-8 w-full"
-                        />
-                      </TableCell>
-                      <TableCell className="w-40">
-                        <ValidatedInput
-                          value={row.cabin_type}
-                          onChange={(e) => updateRow(row.id, { cabin_type: e.target.value })}
-                          isValid={row.cabin_type.trim().length > 0}
-                          hint={FIELD_HINTS.cabin_type}
-                          className="h-8 w-full"
-                        />
                       </TableCell>
                       <TableCell className="w-56 truncate text-xs text-muted-foreground" title={row.sourceLabel}>
                         {row.sourceLabel}

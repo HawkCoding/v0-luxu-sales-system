@@ -272,7 +272,7 @@ export default function PaymentsPage() {
                       {isAllocated ? (
                         <div className="space-y-1">
                           <Link 
-                            href={`/app/jobs/${p.jobId}`}
+                            href={`/app/bookings/${p.jobId}`}
                             className="flex items-center gap-2 text-sm text-primary hover:text-primary/80 transition-colors group"
                           >
                             <LinkIcon className="w-3.5 h-3.5" />

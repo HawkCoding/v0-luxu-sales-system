@@ -185,6 +185,12 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/* Anti-FOUC: body is hidden by an inline <style> in the root layout.
+   This unlayered rule restores visibility once this stylesheet loads. */
+body {
+  visibility: visible;
+}
+
 @layer base {
   * {
     @apply border-stroke outline-ring/50;

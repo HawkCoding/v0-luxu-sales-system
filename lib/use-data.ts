@@ -52,9 +52,9 @@ export function useActiveSuppliers() {
   })
 }
 
-export function useSupplierDetail(id: string) {
+export function useSupplierDetail(slug: string) {
   return useSWR<SupplierDetail | { error: string }>(
-    id ? `/api/suppliers/${id}` : null,
+    slug ? `/api/suppliers/${slug}` : null,
     fetcher,
     { revalidateOnFocus: false },
   )

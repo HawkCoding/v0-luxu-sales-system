@@ -35,6 +35,13 @@ description: Supabase client, server, RLS, and typing patterns for this project
 - Server auth and service-role helpers already exist; reuse them rather than re-creating Supabase bootstrapping in each file.
 - Keep database column names database-shaped in Supabase queries, then map to frontend-friendly shapes when needed.
 
+## Migrations
+
+- After creating or modifying any file under `supabase/migrations/`, apply it to the local dev database by running `pnpm db:reset`.
+- After a successful reset, regenerate types with `pnpm run db:types` so `lib/supabase/types.ts` stays current.
+- Never apply migrations to the remote/hosted Supabase project unless explicitly asked.
+- Keep migration files idempotent where possible (use `IF NOT EXISTS`, `DROP ... IF EXISTS`, etc.).
+
 ## Prefer
 
 - `const supabase = await createSessionClient()`

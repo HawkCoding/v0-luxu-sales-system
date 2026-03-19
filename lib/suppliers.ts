@@ -24,11 +24,19 @@ type SupplierSeasonalPriceRow =
   Database["public"]["Tables"]["supplier_seasonal_prices"]["Row"]
 type SuiteTypeRow = Database["public"]["Tables"]["suite_types"]["Row"]
 
+function normalizeSupplierStatus(value: string): Supplier["status"] {
+  if (value === "draft" || value === "active" || value === "inactive") {
+    return value
+  }
+  return "inactive"
+}
+
 export function mapSupplier(row: SupplierRow): Supplier {
   return {
     id: row.id,
+    slug: row.slug,
     kind: row.kind,
-    status: row.status,
+    status: normalizeSupplierStatus(row.status),
     name: row.name,
     email: row.email,
     phone: row.phone,

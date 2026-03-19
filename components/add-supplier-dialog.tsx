@@ -190,7 +190,7 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
       await mutate("/api/suppliers?includeDrafts=true")
       handleOpenChange(false)
       toast.success("Supplier created")
-      router.push(`/app/suppliers/${payload.id}`)
+      router.push(`/app/suppliers/${payload.slug}`)
     } catch {
       toast.error("Failed to create supplier")
     } finally {

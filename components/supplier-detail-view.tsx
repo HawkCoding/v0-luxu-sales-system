@@ -32,6 +32,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ContentTransition } from "@/components/ui/content-transition"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { NumericInput } from "@/components/ui/numeric-input"
 import {
   Select,
   SelectContent,
@@ -60,8 +61,9 @@ import {
 type Presentation = "page" | "modal"
 
 interface SupplierDetailViewProps {
-  supplierId: string
+  supplierSlug: string
   presentation?: Presentation
+  onDeleted?: () => void
 }
 
 interface EditableRoute {
@@ -117,6 +119,7 @@ const DRAFT_AUTOSAVE_DEBOUNCE_MS = 3000
 const DRAFT_AUTOSAVE_STATUS_RESET_MS = 2000
 const REMOVE_ICON_BUTTON_CLASS =
   "border-muted-foreground/25 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30"
+const EMPTY_PERIOD_FIELD_ERRORS = new Set<string>()
 
 interface SupplierDetailSkeletonProps {
   presentation?: Presentation
@@ -137,6 +140,34 @@ interface EditableRatePeriodGroup {
   validFrom: string
   validTo: string | null
   items: EditableRateCard[]
+}
+
+interface RateCardConflict {
+  packageId: string
+  packageName: string
+  suiteTypeId: string
+  suiteTypeName: string
+  routeId: string | null
+  routeName: string
+  validFrom: string
+}
+
+interface RateCardDateRange {
+  validFrom: string
+  validTo: string | null
+}
+
+interface RateCardOverlapConflict {
+  packageId: string
+  packageName: string
+  suiteTypeId: string
+  suiteTypeName: string
+  routeId: string | null
+  routeName: string
+  firstPeriodKey: string
+  secondPeriodKey: string
+  firstRange: RateCardDateRange
+  secondRange: RateCardDateRange
 }
 
 function makeClientId(): string {
@@ -288,6 +319,335 @@ function getRatePeriodKey(
   currency: string,
 ): string {
   return `${validFrom}|${validTo ?? ""}|${currency}`
+}
+
+function isIsoDateString(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value)
+}
+
+function toUtcDate(value: string): Date | null {
+  if (!isIsoDateString(value)) {
+    return null
+  }
+  const parsed = new Date(`${value}T00:00:00Z`)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+function formatUtcDate(date: Date): string {
+  return date.toISOString().slice(0, 10)
+}
+
+function addIsoDays(value: string, days: number): string | null {
+  const parsed = toUtcDate(value)
+  if (!parsed) {
+    return null
+  }
+  parsed.setUTCDate(parsed.getUTCDate() + days)
+  return formatUtcDate(parsed)
+}
+
+function updateRateCardPeriodDateValues(
+  rateCards: EditableRateCard[],
+  periodKey: string,
+  updates: Partial<Pick<EditableRateCard, "validFrom" | "validTo">>,
+): EditableRateCard[] {
+  return rateCards.map((rateCard) =>
+    getRatePeriodKey(rateCard.validFrom, rateCard.validTo, rateCard.currency) === periodKey
+      ? { ...rateCard, ...updates }
+      : rateCard,
+  )
+}
+
+function getSortedEditableRateCardPeriods(rateCards: EditableRateCard[]): EditableRatePeriodGroup[] {
+  return [...groupEditableRateCardsByPeriod(rateCards)].sort(
+    (first, second) => first.validFrom.localeCompare(second.validFrom) || first.key.localeCompare(second.key),
+  )
+}
+
+function applyBidirectionalPeriodDateLinking(
+  rateCards: EditableRateCard[],
+  sourcePeriodKey: string,
+  sourceField: "validFrom" | "validTo",
+): EditableRateCard[] {
+  const periods = getSortedEditableRateCardPeriods(rateCards)
+  const periodIndex = periods.findIndex((period) => period.key === sourcePeriodKey)
+  if (periodIndex < 0) {
+    return rateCards
+  }
+
+  let nextRateCards = rateCards
+  const currentPeriod = periods[periodIndex]
+  const previousPeriod = periodIndex > 0 ? periods[periodIndex - 1] : null
+  const nextPeriod = periodIndex < periods.length - 1 ? periods[periodIndex + 1] : null
+
+  if (sourceField === "validFrom" && previousPeriod) {
+    const linkedPreviousValidTo = addIsoDays(currentPeriod.validFrom, -1)
+    if (linkedPreviousValidTo) {
+      nextRateCards = updateRateCardPeriodDateValues(nextRateCards, previousPeriod.key, {
+        validTo: linkedPreviousValidTo,
+      })
+    }
+  }
+
+  if (sourceField === "validTo" && nextPeriod) {
+    if (currentPeriod.validTo) {
+      const linkedNextValidFrom = addIsoDays(currentPeriod.validTo, 1)
+      if (linkedNextValidFrom) {
+        nextRateCards = updateRateCardPeriodDateValues(nextRateCards, nextPeriod.key, {
+          validFrom: linkedNextValidFrom,
+        })
+      }
+    } else {
+      const linkedCurrentValidTo = addIsoDays(nextPeriod.validFrom, -1)
+      if (linkedCurrentValidTo) {
+        nextRateCards = updateRateCardPeriodDateValues(nextRateCards, currentPeriod.key, {
+          validTo: linkedCurrentValidTo,
+        })
+      }
+    }
+  }
+
+  return nextRateCards
+}
+
+function getNextRateCardPeriodStart(pkg: EditablePackage): {
+  nextValidFrom: string
+  previousPeriodKey: string | null
+} {
+  const periods = getSortedEditableRateCardPeriods(pkg.rateCards)
+  const today = new Date().toISOString().slice(0, 10)
+  const previousPeriod = periods.at(-1)
+  if (!previousPeriod) {
+    return {
+      nextValidFrom: today,
+      previousPeriodKey: null,
+    }
+  }
+
+  const anchor = previousPeriod.validTo ?? previousPeriod.validFrom
+  const nextValidFrom = addIsoDays(anchor, 1) ?? today
+  return {
+    nextValidFrom,
+    previousPeriodKey: previousPeriod.key,
+  }
+}
+
+function buildRateCardBusinessKey(rateCard: {
+  suiteTypeId: string
+  routeId: string | null
+  validFrom: string
+}) {
+  return [rateCard.suiteTypeId, rateCard.routeId ?? "__null__", rateCard.validFrom].join("|")
+}
+
+function findPackageRateCardConflicts(
+  pkg: EditablePackage,
+  suiteTypes: EditableSuiteType[],
+): RateCardConflict[] {
+  const suiteTypeNames = new Map(suiteTypes.map((suiteType) => [suiteType.id, suiteType.name.trim()]))
+  const routeNames = new Map(pkg.routes.map((route) => [route.id, route.name.trim()]))
+  const seen = new Set<string>()
+  const conflicts: RateCardConflict[] = []
+
+  for (const rateCard of pkg.rateCards) {
+    const validFrom = rateCard.validFrom.trim()
+    if (!rateCard.suiteTypeId || !validFrom) {
+      continue
+    }
+
+    const businessKey = buildRateCardBusinessKey({
+      suiteTypeId: rateCard.suiteTypeId,
+      routeId: rateCard.routeId,
+      validFrom,
+    })
+
+    if (!seen.has(businessKey)) {
+      seen.add(businessKey)
+      continue
+    }
+
+    conflicts.push({
+      packageId: pkg.id,
+      packageName: pkg.name.trim() || "Unnamed package",
+      suiteTypeId: rateCard.suiteTypeId,
+      suiteTypeName: suiteTypeNames.get(rateCard.suiteTypeId) || "Unknown suite type",
+      routeId: rateCard.routeId,
+      routeName:
+        rateCard.routeId === null
+          ? "All routes"
+          : routeNames.get(rateCard.routeId) || "Unknown route",
+      validFrom,
+    })
+  }
+
+  return conflicts
+}
+
+function findFirstRateCardConflict(
+  packages: EditablePackage[],
+  suiteTypes: EditableSuiteType[],
+): RateCardConflict | null {
+  for (const pkg of packages) {
+    const conflict = findPackageRateCardConflicts(pkg, suiteTypes)[0]
+    if (conflict) {
+      return conflict
+    }
+  }
+
+  return null
+}
+
+function buildRateCardConflictMessage(
+  conflict: RateCardConflict,
+  vocabulary: SupplierVocabulary,
+): string {
+  return `Duplicate rate card in "${conflict.packageName}" for ${vocabulary.suiteType.toLowerCase()} "${conflict.suiteTypeName}", ${vocabulary.route.toLowerCase()} "${conflict.routeName}", start date ${conflict.validFrom}. Keep only one row for that combination.`
+}
+
+function detectRateCardDateOverlap(
+  firstRange: RateCardDateRange,
+  secondRange: RateCardDateRange,
+): boolean {
+  const firstStart = firstRange.validFrom.trim()
+  const secondStart = secondRange.validFrom.trim()
+  if (!firstStart || !secondStart) {
+    return false
+  }
+
+  const firstEnd = firstRange.validTo?.trim() || null
+  const secondEnd = secondRange.validTo?.trim() || null
+  const firstStartsBeforeSecondEnds = !secondEnd || firstStart < secondEnd
+  const secondStartsBeforeFirstEnds = !firstEnd || secondStart < firstEnd
+  return firstStartsBeforeSecondEnds && secondStartsBeforeFirstEnds
+}
+
+function findPackageRateCardOverlapConflicts(
+  pkg: EditablePackage,
+  suiteTypes: EditableSuiteType[],
+): RateCardOverlapConflict[] {
+  const suiteTypeNames = new Map(suiteTypes.map((suiteType) => [suiteType.id, suiteType.name.trim()]))
+  const routeNames = new Map(pkg.routes.map((route) => [route.id, route.name.trim()]))
+  const groupedCards = new Map<
+    string,
+    Array<{
+      suiteTypeId: string
+      routeId: string | null
+      periodKey: string
+      validFrom: string
+      validTo: string | null
+    }>
+  >()
+
+  for (const rateCard of pkg.rateCards) {
+    const validFrom = rateCard.validFrom.trim()
+    if (!rateCard.suiteTypeId || !validFrom) {
+      continue
+    }
+
+    const key = [rateCard.suiteTypeId, rateCard.routeId ?? "__null__"].join("|")
+    const next = groupedCards.get(key) ?? []
+    next.push({
+      suiteTypeId: rateCard.suiteTypeId,
+      routeId: rateCard.routeId,
+      periodKey: getRatePeriodKey(
+        validFrom,
+        rateCard.validTo?.trim() || null,
+        rateCard.currency,
+      ),
+      validFrom,
+      validTo: rateCard.validTo?.trim() || null,
+    })
+    groupedCards.set(key, next)
+  }
+
+  const overlaps: RateCardOverlapConflict[] = []
+  for (const cards of groupedCards.values()) {
+    const sortedCards = [...cards].sort((a, b) => a.validFrom.localeCompare(b.validFrom))
+
+    for (let index = 0; index < sortedCards.length; index += 1) {
+      const first = sortedCards[index]
+      for (let compareIndex = index + 1; compareIndex < sortedCards.length; compareIndex += 1) {
+        const second = sortedCards[compareIndex]
+        if (
+          !detectRateCardDateOverlap(
+            { validFrom: first.validFrom, validTo: first.validTo },
+            { validFrom: second.validFrom, validTo: second.validTo },
+          )
+        ) {
+          continue
+        }
+
+        overlaps.push({
+          packageId: pkg.id,
+          packageName: pkg.name.trim() || "Unnamed package",
+          suiteTypeId: first.suiteTypeId,
+          suiteTypeName: suiteTypeNames.get(first.suiteTypeId) || "Unknown suite type",
+          routeId: first.routeId,
+          routeName:
+            first.routeId === null ? "All routes" : routeNames.get(first.routeId) || "Unknown route",
+          firstPeriodKey: first.periodKey,
+          secondPeriodKey: second.periodKey,
+          firstRange: {
+            validFrom: first.validFrom,
+            validTo: first.validTo,
+          },
+          secondRange: {
+            validFrom: second.validFrom,
+            validTo: second.validTo,
+          },
+        })
+      }
+    }
+  }
+
+  return overlaps
+}
+
+function findFirstRateCardOverlapConflict(
+  packages: EditablePackage[],
+  suiteTypes: EditableSuiteType[],
+): RateCardOverlapConflict | null {
+  for (const pkg of packages) {
+    const conflict = findPackageRateCardOverlapConflicts(pkg, suiteTypes)[0]
+    if (conflict) {
+      return conflict
+    }
+  }
+
+  return null
+}
+
+function buildRateCardDateRangeLabel(range: RateCardDateRange): string {
+  return `${range.validFrom} to ${range.validTo ?? "open ended"}`
+}
+
+function buildRateCardOverlapConflictMessage(
+  conflict: RateCardOverlapConflict,
+  vocabulary: SupplierVocabulary,
+): string {
+  return `Overlapping rate card periods in "${conflict.packageName}" for ${vocabulary.suiteType.toLowerCase()} "${conflict.suiteTypeName}", ${vocabulary.route.toLowerCase()} "${conflict.routeName}": ${buildRateCardDateRangeLabel(conflict.firstRange)} overlaps ${buildRateCardDateRangeLabel(conflict.secondRange)}. Adjust dates so periods do not overlap.`
+}
+
+function buildRateCardOverlapWarningMessage(
+  conflict: RateCardOverlapConflict,
+  vocabulary: SupplierVocabulary,
+): string {
+  return `${buildRateCardOverlapConflictMessage(conflict, vocabulary)} You can continue editing, but Save is blocked until this is fixed.`
+}
+
+function getRateCardOverlapFieldErrorKeys(
+  pkg: EditablePackage,
+  suiteTypes: EditableSuiteType[],
+): Set<string> {
+  const fieldErrors = new Set<string>()
+  const conflicts = findPackageRateCardOverlapConflicts(pkg, suiteTypes)
+  for (const conflict of conflicts) {
+    fieldErrors.add(`${conflict.firstPeriodKey}|validFrom`)
+    fieldErrors.add(`${conflict.firstPeriodKey}|validTo`)
+    fieldErrors.add(`${conflict.secondPeriodKey}|validFrom`)
+    fieldErrors.add(`${conflict.secondPeriodKey}|validTo`)
+  }
+  return fieldErrors
 }
 
 function groupRateCardsByPeriod(rateCards: SupplierRateCard[]): RatePeriodGroup[] {
@@ -534,6 +894,7 @@ interface RateCardMatrixEditorProps {
     routeId: string | null,
     enabled: boolean,
   ) => void
+  periodFieldErrors: Set<string>
 }
 
 function RateCardMatrixEditor({
@@ -547,6 +908,7 @@ function RateCardMatrixEditor({
   onUpdatePeriodField,
   onUpdateCellPrice,
   onToggleCell,
+  periodFieldErrors,
 }: RateCardMatrixEditorProps) {
   const periodGroups = groupEditableRateCardsByPeriod(pkg.rateCards)
 
@@ -591,6 +953,11 @@ function RateCardMatrixEditor({
                   <Input
                     type="date"
                     value={period.validFrom}
+                    className={
+                      periodFieldErrors.has(`${period.key}|validFrom`)
+                        ? "border-destructive focus-visible:ring-destructive/35"
+                        : undefined
+                    }
                     onChange={(event) =>
                       onUpdatePeriodField(
                         packageIndex,
@@ -606,6 +973,11 @@ function RateCardMatrixEditor({
                   <Input
                     type="date"
                     value={period.validTo ?? ""}
+                    className={
+                      periodFieldErrors.has(`${period.key}|validTo`)
+                        ? "border-destructive focus-visible:ring-destructive/35"
+                        : undefined
+                    }
                     onChange={(event) =>
                       onUpdatePeriodField(
                         packageIndex,
@@ -679,17 +1051,12 @@ function RateCardMatrixEditor({
                             <td key={`${suiteType.id}-${routeId ?? "all"}`} className="px-4 py-3">
                               {match ? (
                                 <div className="flex items-center gap-2">
-                                  <Input
-                                    type="number"
+                                  <NumericInput
                                     min="0"
                                     step="0.01"
                                     value={match.pricePerPerson}
-                                    onChange={(event) =>
-                                      onUpdateCellPrice(
-                                        packageIndex,
-                                        match.id,
-                                        Number(event.target.value || 0),
-                                      )
+                                    onValueChange={(value) =>
+                                      onUpdateCellPrice(packageIndex, match.id, value ?? 0)
                                     }
                                   />
                                   <Button
@@ -932,11 +1299,12 @@ export function SupplierDetailSkeleton({
 }
 
 export function SupplierDetailView({
-  supplierId,
+  supplierSlug,
   presentation = "page",
+  onDeleted,
 }: SupplierDetailViewProps) {
   const router = useRouter()
-  const { data, isLoading, mutate: mutateDetail } = useSupplierDetail(supplierId)
+  const { data, isLoading, error, mutate: mutateDetail } = useSupplierDetail(supplierSlug)
   const { data: allLocations = [] } = useLocations()
   const { mutate } = useSWRConfig()
   const { can } = useRole()
@@ -952,12 +1320,22 @@ export function SupplierDetailView({
   const [pendingLocalDraft, setPendingLocalDraft] = useState<SupplierFormState | null>(null)
   const baselineSnapshotRef = useRef<string | null>(null)
   const draftAutosavedSnapshotRef = useRef<string | null>(null)
+  const lastDraftConflictSnapshotRef = useRef<string | null>(null)
+  const lastOverlapWarningRef = useRef<string | null>(null)
   const draftAutosaveInFlightRef = useRef(false)
   const draftStatusResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  const hasLoadError = Boolean(error)
   const supplier = data && !("error" in data) ? data : null
   const isDraftSupplier = supplier?.status === "draft"
-  const localDraftStorageKey = `supplier-draft-${supplierId}`
+  const localDraftStorageKey = `supplier-draft-${supplierSlug}`
+
+  useEffect(() => {
+    if (!hasLoadError) {
+      return
+    }
+    router.replace("/app/suppliers")
+  }, [hasLoadError, router])
 
   useEffect(() => {
     if (supplier) {
@@ -1080,6 +1458,44 @@ export function SupplierDetailView({
     )
   }
 
+  const overlapFieldErrorsByPackage = useMemo(() => {
+    if (!form) {
+      return new Map<number, Set<string>>()
+    }
+    return new Map(
+      form.packages.map((pkg, packageIndex) => [
+        packageIndex,
+        getRateCardOverlapFieldErrorKeys(pkg, form.suiteTypes),
+      ]),
+    )
+  }, [form])
+
+  const warnForOverlapIfNeeded = (
+    pkg: EditablePackage,
+    suiteTypes: EditableSuiteType[],
+    vocabulary: SupplierVocabulary,
+  ) => {
+    const overlapConflict = findPackageRateCardOverlapConflicts(pkg, suiteTypes)[0]
+    if (!overlapConflict) {
+      lastOverlapWarningRef.current = null
+      return
+    }
+
+    const warningKey = [
+      overlapConflict.packageId,
+      overlapConflict.suiteTypeId,
+      overlapConflict.routeId ?? "__null__",
+      overlapConflict.firstPeriodKey,
+      overlapConflict.secondPeriodKey,
+    ].join("|")
+
+    if (lastOverlapWarningRef.current === warningKey) {
+      return
+    }
+    lastOverlapWarningRef.current = warningKey
+    toast.warning(buildRateCardOverlapWarningMessage(overlapConflict, vocabulary))
+  }
+
   const addPackage = () => {
     updatePackages((packages) => [...packages, createEmptyPackage()])
   }
@@ -1112,12 +1528,24 @@ export function SupplierDetailView({
   const removeRoute = (packageIndex: number, routeIndex: number) => {
     updatePackage(packageIndex, (pkg) => {
       const routeId = pkg.routes[routeIndex]?.id
-      return {
+      const nextPackage = {
         ...pkg,
         routes: pkg.routes.filter((_route, index) => index !== routeIndex),
         rateCards: pkg.rateCards.map((rateCard) =>
           rateCard.routeId === routeId ? { ...rateCard, routeId: null } : rateCard,
         ),
+      }
+      const conflict = findPackageRateCardConflicts(nextPackage, form?.suiteTypes ?? [])[0]
+      if (conflict) {
+        const vocabulary = getSupplierVocabulary(form?.kind ?? "train_operator")
+        toast.error(
+          `Removing this ${vocabulary.route.toLowerCase()} would create duplicate rate cards. Adjust start dates first.`,
+        )
+        return pkg
+      }
+
+      return {
+        ...nextPackage,
       }
     })
   }
@@ -1133,9 +1561,16 @@ export function SupplierDetailView({
         return pkg
       }
 
-      const today = new Date().toISOString().slice(0, 10)
       const currency = pkg.currency.trim().toUpperCase() || "ZAR"
       const routes = pkg.routes.length > 0 ? pkg.routes : [{ id: null as string | null }]
+      const { nextValidFrom, previousPeriodKey } = getNextRateCardPeriodStart(pkg)
+      const linkedPreviousValidTo = addIsoDays(nextValidFrom, -1)
+      const baseRateCards =
+        previousPeriodKey && linkedPreviousValidTo
+          ? updateRateCardPeriodDateValues(pkg.rateCards, previousPeriodKey, {
+              validTo: linkedPreviousValidTo,
+            })
+          : pkg.rateCards
 
       const newRateCards = availableSuiteTypes.flatMap((suiteType) =>
         routes.map((route) => ({
@@ -1144,14 +1579,26 @@ export function SupplierDetailView({
           suiteTypeId: suiteType.id,
           pricePerPerson: 0,
           currency,
-          validFrom: today,
+          validFrom: nextValidFrom,
           validTo: null,
         })),
       )
 
-      return {
+      const nextPackage = {
         ...pkg,
-        rateCards: [...pkg.rateCards, ...newRateCards],
+        rateCards: [...baseRateCards, ...newRateCards],
+      }
+      const conflict = findPackageRateCardConflicts(nextPackage, availableSuiteTypes)[0]
+      if (conflict) {
+        toast.error(
+          "This pricing period duplicates an existing suite type/route/start-date combination. Choose a different start date.",
+        )
+        return pkg
+      }
+      warnForOverlapIfNeeded(nextPackage, availableSuiteTypes, vocabulary)
+
+      return {
+        ...nextPackage,
       }
     })
   }
@@ -1163,30 +1610,68 @@ export function SupplierDetailView({
     value: string | null,
   ) => {
     updatePackage(packageIndex, (pkg) => {
-      const nextRateCards = pkg.rateCards.map((rateCard) => {
+      let nextPeriodKey = periodKey
+      let nextRateCards = pkg.rateCards.map((rateCard) => {
         if (getRatePeriodKey(rateCard.validFrom, rateCard.validTo, rateCard.currency) !== periodKey) {
           return rateCard
         }
 
         if (key === "currency") {
-          return {
+          const nextRateCard = {
             ...rateCard,
             currency: (value ?? "").trim().toUpperCase() || pkg.currency.trim().toUpperCase() || "ZAR",
           }
+          nextPeriodKey = getRatePeriodKey(
+            nextRateCard.validFrom,
+            nextRateCard.validTo,
+            nextRateCard.currency,
+          )
+          return nextRateCard
         }
 
         if (key === "validFrom") {
-          return {
+          const nextRateCard = {
             ...rateCard,
             validFrom: value ?? "",
           }
+          nextPeriodKey = getRatePeriodKey(
+            nextRateCard.validFrom,
+            nextRateCard.validTo,
+            nextRateCard.currency,
+          )
+          return nextRateCard
         }
 
-        return {
+        const nextRateCard = {
           ...rateCard,
           validTo: value,
         }
+        nextPeriodKey = getRatePeriodKey(
+          nextRateCard.validFrom,
+          nextRateCard.validTo,
+          nextRateCard.currency,
+        )
+        return nextRateCard
       })
+
+      if (key === "validFrom" || key === "validTo") {
+        nextRateCards = applyBidirectionalPeriodDateLinking(nextRateCards, nextPeriodKey, key)
+      }
+
+      if (key === "validFrom" || key === "validTo") {
+        const nextPackage = { ...pkg, rateCards: nextRateCards }
+        const availableSuiteTypes = form?.suiteTypes ?? []
+        const conflict = findPackageRateCardConflicts(nextPackage, availableSuiteTypes)[0]
+        if (conflict) {
+          toast.error(
+            "That start date duplicates an existing suite type/route/start-date combination.",
+          )
+          return pkg
+        }
+
+        const vocabulary = getSupplierVocabulary(form?.kind ?? "train_operator")
+        warnForOverlapIfNeeded(nextPackage, availableSuiteTypes, vocabulary)
+      }
 
       return {
         ...pkg,
@@ -1272,7 +1757,18 @@ export function SupplierDetailView({
         setDraftSaveStatus("saving")
 
         try {
-          const response = await fetch(`/api/suppliers/${supplierId}?draft=true`, {
+          const draftConflict = findFirstRateCardConflict(form.packages, form.suiteTypes)
+          if (draftConflict) {
+            setDraftSaveStatus("error")
+            if (lastDraftConflictSnapshotRef.current !== snapshot) {
+              toast.error(buildRateCardConflictMessage(draftConflict, getSupplierVocabulary(form.kind)))
+              lastDraftConflictSnapshotRef.current = snapshot
+            }
+            return
+          }
+
+          lastDraftConflictSnapshotRef.current = null
+          const response = await fetch(`/api/suppliers/${supplierSlug}?draft=true`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(buildDraftPayload(form)),
@@ -1313,7 +1809,7 @@ export function SupplierDetailView({
     }, DRAFT_AUTOSAVE_DEBOUNCE_MS)
 
     return () => clearTimeout(timeout)
-  }, [canEdit, form, isDraftSupplier, isEditing, isSaving, localDraftStorageKey, mutate, supplierId])
+  }, [canEdit, form, isDraftSupplier, isEditing, isSaving, localDraftStorageKey, mutate, supplierSlug])
 
   const restoreLocalDraft = () => {
     if (!pendingLocalDraft) return
@@ -1396,6 +1892,17 @@ export function SupplierDetailView({
       }
     }
 
+    const rateCardConflict = findFirstRateCardConflict(meaningfulPackages, form.suiteTypes)
+    if (rateCardConflict) {
+      toast.error(buildRateCardConflictMessage(rateCardConflict, vocabulary))
+      return
+    }
+    const overlapConflict = findFirstRateCardOverlapConflict(meaningfulPackages, form.suiteTypes)
+    if (overlapConflict) {
+      toast.error(buildRateCardOverlapConflictMessage(overlapConflict, vocabulary))
+      return
+    }
+
     const cleanedPackages = meaningfulPackages.map((pkg) => ({
       id: pkg.id,
       name: pkg.name.trim(),
@@ -1424,7 +1931,7 @@ export function SupplierDetailView({
 
     setIsSaving(true)
     try {
-      const response = await fetch(`/api/suppliers/${supplierId}`, {
+      const response = await fetch(`/api/suppliers/${supplierSlug}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1444,6 +1951,28 @@ export function SupplierDetailView({
       const payload = await response.json()
 
       if (!response.ok) {
+        const conflictDetails = payload?.details as
+          | {
+              packageId?: string
+              suiteTypeId?: string
+              routeId?: string | null
+              validFrom?: string
+            }
+          | undefined
+        if (
+          response.status === 409 &&
+          conflictDetails?.packageId &&
+          conflictDetails?.suiteTypeId &&
+          conflictDetails?.validFrom
+        ) {
+          const conflictPackage =
+            meaningfulPackages.find((pkg) => pkg.id === conflictDetails.packageId) ?? meaningfulPackages[0]
+          const conflict = findPackageRateCardConflicts(conflictPackage, form.suiteTypes)[0]
+          if (conflict) {
+            toast.error(buildRateCardConflictMessage(conflict, vocabulary))
+            return
+          }
+        }
         toast.error(payload.error ?? "Failed to update supplier")
         return
       }
@@ -1470,7 +1999,7 @@ export function SupplierDetailView({
   const handleDelete = async () => {
     setIsDeleting(true)
     try {
-      const response = await fetch(`/api/suppliers/${supplierId}`, {
+      const response = await fetch(`/api/suppliers/${supplierSlug}`, {
         method: "DELETE",
       })
 
@@ -1484,7 +2013,7 @@ export function SupplierDetailView({
         }
 
         if (response.status === 409) {
-          toast.error("This supplier has existing bookings and cannot be deleted.")
+          toast.error(message)
           return
         }
 
@@ -1494,7 +2023,11 @@ export function SupplierDetailView({
 
       await mutate("/api/suppliers?includeDrafts=true")
       toast.success("Supplier deleted successfully")
-      router.push("/app/suppliers")
+      if (onDeleted) {
+        onDeleted()
+      } else {
+        router.push("/app/suppliers")
+      }
     } catch {
       toast.error("Failed to delete supplier")
     } finally {
@@ -1502,26 +2035,8 @@ export function SupplierDetailView({
     }
   }
 
-  if (isLoading) {
+  if (isLoading || hasLoadError) {
     return <SupplierDetailSkeleton presentation={presentation} />
-  }
-
-  if (data && "error" in data) {
-    return (
-      <Card>
-        <CardContent className="p-8 text-center space-y-3">
-          <p className="text-base font-medium text-foreground">Supplier not found</p>
-          <p className="text-sm text-muted-foreground">
-            The supplier could not be loaded or no longer exists.
-          </p>
-          <div>
-            <Button asChild variant="outline" size="sm">
-              <Link href="/app/suppliers">Back to suppliers</Link>
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-    )
   }
 
   if (!supplier || !form) {
@@ -1551,9 +2066,11 @@ export function SupplierDetailView({
                 </h1>
                 <Badge variant="secondary">{SUPPLIER_KIND_LABELS[supplier.kind]}</Badge>
                 {supplier.status === "draft" && <Badge variant="outline">Draft</Badge>}
-                <Badge variant={supplier.active ? "default" : "outline"}>
-                  {supplier.active ? "Active" : "Inactive"}
-                </Badge>
+                {supplier.status !== "draft" && (
+                  <Badge variant={supplier.status === "active" ? "default" : "outline"}>
+                    {supplier.status === "active" ? "Active" : "Inactive"}
+                  </Badge>
+                )}
               </div>
             </div>
           </div>
@@ -1765,7 +2282,13 @@ export function SupplierDetailView({
                   />
                   <InfoItem
                     label="Status"
-                    value={supplier.active ? "Active" : "Inactive"}
+                    value={
+                      supplier.status === "draft"
+                        ? "Draft"
+                        : supplier.status === "active"
+                          ? "Active"
+                          : "Inactive"
+                    }
                   />
                 </div>
 
@@ -1930,16 +2453,14 @@ export function SupplierDetailView({
                         {activeVocabulary.showDurationNights ? (
                           <div className="space-y-2">
                             <Label>Duration (nights)</Label>
-                            <Input
-                              type="number"
+                            <NumericInput
                               min="0"
-                              value={pkg.durationNights ?? ""}
-                              onChange={(event) =>
+                              nullable
+                              value={pkg.durationNights}
+                              onValueChange={(value) =>
                                 updatePackage(packageIndex, (current) => ({
                                   ...current,
-                                  durationNights: event.target.value
-                                    ? Number(event.target.value)
-                                    : null,
+                                  durationNights: value,
                                 }))
                               }
                             />
@@ -1948,15 +2469,14 @@ export function SupplierDetailView({
                         {activeVocabulary.showSingleSupplement ? (
                           <div className="space-y-2">
                             <Label>Single supplement %</Label>
-                            <Input
-                              type="number"
+                            <NumericInput
                               min="0"
                               step="0.01"
                               value={pkg.singleSupplementPct}
-                              onChange={(event) =>
+                              onValueChange={(value) =>
                                 updatePackage(packageIndex, (current) => ({
                                   ...current,
-                                  singleSupplementPct: Number(event.target.value || 0),
+                                  singleSupplementPct: value ?? 0,
                                 }))
                               }
                             />
@@ -2141,6 +2661,9 @@ export function SupplierDetailView({
                         onUpdatePeriodField={updateRateCardPeriodField}
                         onUpdateCellPrice={updateRateCardPrice}
                         onToggleCell={toggleRateCardCell}
+                        periodFieldErrors={
+                          overlapFieldErrorsByPackage.get(packageIndex) ?? EMPTY_PERIOD_FIELD_ERRORS
+                        }
                       />
                     </div>
                   ))

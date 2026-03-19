@@ -1,7 +1,8 @@
 "use client"
 
 import { useJobDetail } from "@/lib/use-data"
-import { useParams } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
+import { useEffect } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -85,21 +86,21 @@ function JobDetailSkeleton() {
 }
 
 export default function JobDetailPage() {
+  const router = useRouter()
   const { id } = useParams<{ id: string }>()
-  const { data, isLoading, mutate } = useJobDetail(id)
+  const { data, isLoading, error, mutate } = useJobDetail(id)
   const { can } = useRole()
+  const hasLoadError = Boolean(error)
 
-  if (isLoading || !data) {
+  useEffect(() => {
+    if (!hasLoadError) {
+      return
+    }
+    router.replace("/app/bookings")
+  }, [hasLoadError, router])
+
+  if (isLoading || !data || hasLoadError) {
     return <JobDetailSkeleton />
-  }
-
-  if (data.error) {
-    return (
-      <div className="p-6 text-center">
-        <p className="text-muted-foreground">Job not found</p>
-        <Link href="/app/jobs" className="text-sm text-brand-gold hover:underline mt-2 inline-block">Back to Jobs</Link>
-      </div>
-    )
   }
 
   const { job, customer, enquiry, itineraries, quotes, payments, documents, correspondence, auditLogs } = data
@@ -122,7 +123,7 @@ export default function JobDetailPage() {
       {/* Header */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
-          <Link href="/app/jobs">
+          <Link href="/app/bookings">
             <Button variant="ghost" size="sm"><ArrowLeft className="w-4 h-4" /></Button>
           </Link>
           <div>
