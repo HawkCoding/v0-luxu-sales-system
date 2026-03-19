@@ -44,7 +44,13 @@ import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  createEmptySupplierEmail,
+  SupplierEmailEditor,
+  type EditableSupplierEmail,
+} from "@/components/supplier-email-editor"
 import { useRole } from "@/lib/role-context"
+import { shortenUrl } from "@/lib/url"
 import { useLocations, useSupplierDetail } from "@/lib/use-data"
 import {
   getSupplierVocabulary,
@@ -105,7 +111,7 @@ interface EditablePackage {
 interface SupplierFormState {
   name: string
   kind: SupplierKind
-  email: string
+  emails: EditableSupplierEmail[]
   phone: string
   website: string
   location: string
@@ -115,8 +121,15 @@ interface SupplierFormState {
   packages: EditablePackage[]
 }
 
+declare global {
+  interface Window {
+    __DISABLE_DRAFT_AUTOSAVE?: boolean
+  }
+}
+
 const DRAFT_AUTOSAVE_DEBOUNCE_MS = 3000
 const DRAFT_AUTOSAVE_STATUS_RESET_MS = 2000
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const REMOVE_ICON_BUTTON_CLASS =
   "border-muted-foreground/25 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30"
 const EMPTY_PERIOD_FIELD_ERRORS = new Set<string>()
@@ -210,10 +223,21 @@ function createEmptyPackage(): EditablePackage {
 }
 
 function buildFormState(supplier: SupplierDetail): SupplierFormState {
+  const detailEmails =
+    supplier.emails.length > 0
+      ? supplier.emails.map((entry) => ({
+          id: entry.id,
+          email: entry.email,
+          label: entry.label,
+        }))
+      : supplier.email
+        ? [{ id: makeClientId(), email: supplier.email, label: "General" }]
+        : [createEmptySupplierEmail()]
+
   return {
     name: supplier.name,
     kind: supplier.kind,
-    email: supplier.email ?? "",
+    emails: detailEmails,
     phone: supplier.phone ?? "",
     website: supplier.website ?? "",
     location: supplier.location ?? "",
@@ -256,7 +280,12 @@ function buildDraftPayload(form: SupplierFormState) {
   return {
     name: form.name.trim(),
     kind: form.kind,
-    email: form.email.trim(),
+    email: "",
+    emails: form.emails.map((entry) => ({
+      id: entry.id,
+      email: entry.email.trim(),
+      label: entry.label.trim() || "General",
+    })),
     phone: form.phone.trim(),
     website: form.website.trim(),
     location: form.location.trim(),
@@ -1351,6 +1380,7 @@ export function SupplierDetailView({
   const hasLoadError = Boolean(error)
   const supplier = data && !("error" in data) ? data : null
   const isDraftSupplier = supplier?.status === "draft"
+  const supplierUpdatedAt = supplier?.updatedAt
   const localDraftStorageKey = `supplier-draft-${supplierSlug}`
 
   useEffect(() => {
@@ -1382,13 +1412,24 @@ export function SupplierDetailView({
 
         try {
           const parsed = JSON.parse(raw) as SupplierFormState
+          const parsedEmails = Array.isArray((parsed as { emails?: unknown }).emails)
+            ? parsed.emails
+            : []
           if (
             parsed &&
             typeof parsed === "object" &&
             Array.isArray(parsed.suiteTypes) &&
             Array.isArray(parsed.packages)
           ) {
-            setPendingLocalDraft(parsed)
+            setPendingLocalDraft({
+              ...parsed,
+              emails:
+                parsedEmails.length > 0
+                  ? parsedEmails
+                  : supplier.email
+                    ? [{ id: makeClientId(), email: supplier.email, label: "General" }]
+                    : [createEmptySupplierEmail()],
+            })
             return
           }
         } catch {
@@ -1768,8 +1809,12 @@ export function SupplierDetailView({
 
   useEffect(() => {
     if (!canEdit || !form || !isEditing || isSaving) return
+    const disableDraftAutosaveFromQuery =
+      new URLSearchParams(window.location.search).get("disableDraftAutosave") === "true"
+    const draftAutosaveDisabled =
+      window.__DISABLE_DRAFT_AUTOSAVE === true || disableDraftAutosaveFromQuery
 
-    if (isDraftSupplier) {
+    if (isDraftSupplier && !draftAutosaveDisabled) {
       const snapshot = JSON.stringify(form)
       if (snapshot === draftAutosavedSnapshotRef.current || draftAutosaveInFlightRef.current) {
         return
@@ -1791,11 +1836,22 @@ export function SupplierDetailView({
           }
 
           lastDraftConflictSnapshotRef.current = null
+          const autosaveRequestStartedAt = performance.now()
           const response = await fetch(`/api/suppliers/${supplierSlug}?draft=true`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(buildDraftPayload(form)),
+            body: JSON.stringify({ ...buildDraftPayload(form), expectedUpdatedAt: supplierUpdatedAt }),
           })
+          const autosaveRoundTripMs = performance.now() - autosaveRequestStartedAt
+          console.info(
+            "[supplier-draft-autosave]",
+            JSON.stringify({
+              supplierSlug,
+              status: response.status,
+              roundTripMs: Number(autosaveRoundTripMs.toFixed(1)),
+              serverTiming: response.headers.get("server-timing"),
+            }),
+          )
 
           if (!response.ok) {
             setDraftSaveStatus("error")
@@ -1811,6 +1867,7 @@ export function SupplierDetailView({
             setDraftSaveStatus("idle")
           }, DRAFT_AUTOSAVE_STATUS_RESET_MS)
           await mutate("/api/suppliers?includeDrafts=true")
+          await mutateDetail()
         } catch {
           setDraftSaveStatus("error")
         } finally {
@@ -1832,7 +1889,18 @@ export function SupplierDetailView({
     }, DRAFT_AUTOSAVE_DEBOUNCE_MS)
 
     return () => clearTimeout(timeout)
-  }, [canEdit, form, isDraftSupplier, isEditing, isSaving, localDraftStorageKey, mutate, supplierSlug])
+  }, [
+    canEdit,
+    form,
+    isDraftSupplier,
+    isEditing,
+    isSaving,
+    localDraftStorageKey,
+    mutate,
+    mutateDetail,
+    supplierSlug,
+    supplierUpdatedAt,
+  ])
 
   const restoreLocalDraft = () => {
     if (!pendingLocalDraft) return
@@ -1864,6 +1932,34 @@ export function SupplierDetailView({
 
     if (!form.name.trim()) {
       toast.error("Supplier name is required")
+      return
+    }
+
+    const cleanedEmails = form.emails
+      .map((entry) => ({
+        id: entry.id,
+        email: entry.email.trim(),
+        label: entry.label.trim() || "General",
+      }))
+      .filter((entry) => entry.email.length > 0)
+
+    const invalidEmail = cleanedEmails.find((entry) => !EMAIL_PATTERN.test(entry.email))
+    if (invalidEmail) {
+      toast.error(`Invalid email address: ${invalidEmail.email}`)
+      return
+    }
+
+    const seenEmailValues = new Set<string>()
+    const duplicateEmail = cleanedEmails.find((entry) => {
+      const normalized = entry.email.toLowerCase()
+      if (seenEmailValues.has(normalized)) {
+        return true
+      }
+      seenEmailValues.add(normalized)
+      return false
+    })
+    if (duplicateEmail) {
+      toast.error(`Duplicate supplier email detected: ${duplicateEmail.email}`)
       return
     }
 
@@ -1954,13 +2050,15 @@ export function SupplierDetailView({
 
     setIsSaving(true)
     try {
+      const saveRequestStartedAt = performance.now()
       const response = await fetch(`/api/suppliers/${supplierSlug}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: form.name.trim(),
           kind: form.kind,
-          email: form.email.trim(),
+          email: "",
+          emails: cleanedEmails,
           phone: form.phone.trim(),
           website: form.website.trim(),
           location: form.location.trim(),
@@ -1968,8 +2066,19 @@ export function SupplierDetailView({
           active: form.active,
           suiteTypes: cleanedSuiteTypes,
           packages: cleanedPackages,
+          expectedUpdatedAt: supplier?.updatedAt,
         }),
       })
+      const saveRoundTripMs = performance.now() - saveRequestStartedAt
+      console.info(
+        "[supplier-save]",
+        JSON.stringify({
+          supplierSlug,
+          status: response.status,
+          roundTripMs: Number(saveRoundTripMs.toFixed(1)),
+          serverTiming: response.headers.get("server-timing"),
+        }),
+      )
 
       const payload = await response.json()
 
@@ -2067,6 +2176,12 @@ export function SupplierDetailView({
   }
 
   const activeVocabulary = getSupplierVocabulary(isEditing ? form.kind : supplier.kind)
+  const supplierEmailsForDisplay =
+    supplier.emails.length > 0
+      ? supplier.emails
+      : supplier.email
+        ? [{ id: "legacy-email", supplierId: supplier.id, email: supplier.email, label: "General", createdAt: supplier.createdAt }]
+        : []
 
   return (
     <ContentTransition show>
@@ -2232,16 +2347,6 @@ export function SupplierDetailView({
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="supplier-email">Email</Label>
-                    <Input
-                      id="supplier-email"
-                      type="email"
-                      value={form.email}
-                      onChange={(event) => updateField("email", event.target.value)}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
                     <Label htmlFor="supplier-phone">Phone</Label>
                     <Input
                       id="supplier-phone"
@@ -2256,6 +2361,7 @@ export function SupplierDetailView({
                       id="supplier-website"
                       value={form.website}
                       onChange={(event) => updateField("website", event.target.value)}
+                      onBlur={(event) => updateField("website", shortenUrl(event.target.value))}
                     />
                   </div>
 
@@ -2268,6 +2374,12 @@ export function SupplierDetailView({
                     />
                   </div>
                 </div>
+
+                <SupplierEmailEditor
+                  emails={form.emails}
+                  onChange={(emails) => updateField("emails", emails)}
+                  idPrefix="supplier-detail"
+                />
 
                 <div className="space-y-2">
                   <Label htmlFor="supplier-notes">Notes</Label>
@@ -2295,7 +2407,6 @@ export function SupplierDetailView({
             ) : (
               <>
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  <InfoItem label="Email" value={supplier.email} />
                   <InfoItem label="Phone" value={supplier.phone} />
                   <InfoItem label="Website" value={supplier.website} />
                   <InfoItem label="Location" value={supplier.location} />
@@ -2318,9 +2429,29 @@ export function SupplierDetailView({
                 <Separator />
 
                 <div className="grid gap-4 sm:grid-cols-3">
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Mail className="h-4 w-4" />
-                    <span>{supplier.email || "No email on file"}</span>
+                  <div className="space-y-2 text-sm text-muted-foreground sm:col-span-3">
+                    <div className="flex items-center gap-2">
+                      <Mail className="h-4 w-4" />
+                      <span>Supplier emails</span>
+                    </div>
+                    {supplierEmailsForDisplay.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {supplierEmailsForDisplay.map((entry) => (
+                          <a
+                            key={entry.id}
+                            href={`mailto:${entry.email}`}
+                            className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs text-foreground hover:bg-secondary/40"
+                          >
+                            <Badge variant="outline" className="rounded-full">
+                              {entry.label}
+                            </Badge>
+                            <span>{entry.email}</span>
+                          </a>
+                        ))}
+                      </div>
+                    ) : (
+                      <span>No email on file</span>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Phone className="h-4 w-4" />
