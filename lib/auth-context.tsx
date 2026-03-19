@@ -237,7 +237,7 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
     } catch {
       // Ignore server logout errors and still clear the local client state below.
     }
-    await supabase.auth.signOut().catch(() => {})
+    await supabase.auth.signOut({ scope: "local" }).catch(() => {})
     setUser(null)
     setLoading(false)
   }
