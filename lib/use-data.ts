@@ -5,6 +5,12 @@ import type { Booking, Customer, Location, Supplier, SupplierDetail } from "@/li
 
 type ApiError = Error & { status?: number }
 
+export interface SupplierEmailLabel {
+  id: string
+  name: string
+  sortOrder: number
+}
+
 const fetcher = async (url: string) => {
   const response = await fetch(url)
   const contentType = response.headers.get("content-type") ?? ""
@@ -78,6 +84,12 @@ export function useCustomerDetail(id: string) {
 
 export function useLocations() {
   return useSWR<Location[]>("/api/locations", fetcher, {
+    revalidateOnFocus: false,
+  })
+}
+
+export function useSupplierEmailLabels() {
+  return useSWR<SupplierEmailLabel[]>("/api/supplier-email-labels", fetcher, {
     revalidateOnFocus: false,
   })
 }
