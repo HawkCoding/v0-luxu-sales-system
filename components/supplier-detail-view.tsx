@@ -978,12 +978,16 @@ function RateCardMatrixEditor({
 
       {periodGroups.length > 0 ? (
         periodGroups.map((period) => {
+          const hasNullRouteItems = period.items.some((item) => item.routeId === null)
           const routeColumns =
             pkg.routes.length === 0
               ? [null]
               : selectedRouteId
-                ? pkg.routes.filter((route) => route.id === selectedRouteId)
-                : pkg.routes
+                ? [
+                    ...pkg.routes.filter((route) => route.id === selectedRouteId),
+                    ...(hasNullRouteItems ? [null] : []),
+                  ]
+                : [...pkg.routes, ...(hasNullRouteItems ? [null] : [])]
 
           return (
             <div key={period.key} className="rounded-lg border overflow-hidden">
