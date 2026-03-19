@@ -121,6 +121,12 @@ interface SupplierFormState {
   packages: EditablePackage[]
 }
 
+declare global {
+  interface Window {
+    __DISABLE_DRAFT_AUTOSAVE?: boolean
+  }
+}
+
 const DRAFT_AUTOSAVE_DEBOUNCE_MS = 3000
 const DRAFT_AUTOSAVE_STATUS_RESET_MS = 2000
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -1802,8 +1808,12 @@ export function SupplierDetailView({
 
   useEffect(() => {
     if (!canEdit || !form || !isEditing || isSaving) return
+    const disableDraftAutosaveFromQuery =
+      new URLSearchParams(window.location.search).get("disableDraftAutosave") === "true"
+    const draftAutosaveDisabled =
+      window.__DISABLE_DRAFT_AUTOSAVE === true || disableDraftAutosaveFromQuery
 
-    if (isDraftSupplier) {
+    if (isDraftSupplier && !draftAutosaveDisabled) {
       const snapshot = JSON.stringify(form)
       if (snapshot === draftAutosavedSnapshotRef.current || draftAutosaveInFlightRef.current) {
         return
@@ -1825,11 +1835,22 @@ export function SupplierDetailView({
           }
 
           lastDraftConflictSnapshotRef.current = null
+          const autosaveRequestStartedAt = performance.now()
           const response = await fetch(`/api/suppliers/${supplierSlug}?draft=true`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ ...buildDraftPayload(form), expectedUpdatedAt: supplier?.updatedAt }),
           })
+          const autosaveRoundTripMs = performance.now() - autosaveRequestStartedAt
+          console.info(
+            "[supplier-draft-autosave]",
+            JSON.stringify({
+              supplierSlug,
+              status: response.status,
+              roundTripMs: Number(autosaveRoundTripMs.toFixed(1)),
+              serverTiming: response.headers.get("server-timing"),
+            }),
+          )
 
           if (!response.ok) {
             setDraftSaveStatus("error")
@@ -1845,6 +1866,7 @@ export function SupplierDetailView({
             setDraftSaveStatus("idle")
           }, DRAFT_AUTOSAVE_STATUS_RESET_MS)
           await mutate("/api/suppliers?includeDrafts=true")
+          await mutateDetail()
         } catch {
           setDraftSaveStatus("error")
         } finally {
@@ -1866,7 +1888,7 @@ export function SupplierDetailView({
     }, DRAFT_AUTOSAVE_DEBOUNCE_MS)
 
     return () => clearTimeout(timeout)
-  }, [canEdit, form, isDraftSupplier, isEditing, isSaving, localDraftStorageKey, mutate, supplierSlug])
+  }, [canEdit, form, isDraftSupplier, isEditing, isSaving, localDraftStorageKey, mutate, mutateDetail, supplierSlug])
 
   const restoreLocalDraft = () => {
     if (!pendingLocalDraft) return
@@ -2016,6 +2038,7 @@ export function SupplierDetailView({
 
     setIsSaving(true)
     try {
+      const saveRequestStartedAt = performance.now()
       const response = await fetch(`/api/suppliers/${supplierSlug}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -2034,6 +2057,16 @@ export function SupplierDetailView({
           expectedUpdatedAt: supplier?.updatedAt,
         }),
       })
+      const saveRoundTripMs = performance.now() - saveRequestStartedAt
+      console.info(
+        "[supplier-save]",
+        JSON.stringify({
+          supplierSlug,
+          status: response.status,
+          roundTripMs: Number(saveRoundTripMs.toFixed(1)),
+          serverTiming: response.headers.get("server-timing"),
+        }),
+      )
 
       const payload = await response.json()
 

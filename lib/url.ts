@@ -7,7 +7,7 @@ export function shortenUrl(raw: string): string {
   try {
     const normalizedInput = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
     const parsedUrl = new URL(normalizedInput)
-    return `${parsedUrl.origin}/`
+    return parsedUrl.href
   } catch {
     return trimmed
   }
