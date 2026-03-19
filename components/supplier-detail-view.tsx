@@ -1380,6 +1380,7 @@ export function SupplierDetailView({
   const hasLoadError = Boolean(error)
   const supplier = data && !("error" in data) ? data : null
   const isDraftSupplier = supplier?.status === "draft"
+  const supplierUpdatedAt = supplier?.updatedAt
   const localDraftStorageKey = `supplier-draft-${supplierSlug}`
 
   useEffect(() => {
@@ -1839,7 +1840,7 @@ export function SupplierDetailView({
           const response = await fetch(`/api/suppliers/${supplierSlug}?draft=true`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ...buildDraftPayload(form), expectedUpdatedAt: supplier?.updatedAt }),
+            body: JSON.stringify({ ...buildDraftPayload(form), expectedUpdatedAt: supplierUpdatedAt }),
           })
           const autosaveRoundTripMs = performance.now() - autosaveRequestStartedAt
           console.info(
@@ -1888,7 +1889,18 @@ export function SupplierDetailView({
     }, DRAFT_AUTOSAVE_DEBOUNCE_MS)
 
     return () => clearTimeout(timeout)
-  }, [canEdit, form, isDraftSupplier, isEditing, isSaving, localDraftStorageKey, mutate, mutateDetail, supplierSlug])
+  }, [
+    canEdit,
+    form,
+    isDraftSupplier,
+    isEditing,
+    isSaving,
+    localDraftStorageKey,
+    mutate,
+    mutateDetail,
+    supplierSlug,
+    supplierUpdatedAt,
+  ])
 
   const restoreLocalDraft = () => {
     if (!pendingLocalDraft) return
