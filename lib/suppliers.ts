@@ -3,7 +3,6 @@ import type {
   Location,
   Supplier,
   SupplierDetail,
-  SupplierEmail,
   SupplierPackage,
   SupplierPricingOption,
   SupplierRateCard,
@@ -23,7 +22,6 @@ type SupplierSeasonalPeriodRow =
   Database["public"]["Tables"]["supplier_seasonal_periods"]["Row"]
 type SupplierSeasonalPriceRow =
   Database["public"]["Tables"]["supplier_seasonal_prices"]["Row"]
-type SupplierEmailRow = Database["public"]["Tables"]["supplier_emails"]["Row"]
 type SuiteTypeRow = Database["public"]["Tables"]["suite_types"]["Row"]
 
 function normalizeSupplierStatus(value: string): Supplier["status"] {
@@ -167,28 +165,16 @@ export function mapSupplierSeasonalPeriod(
   }
 }
 
-export function mapSupplierEmail(row: SupplierEmailRow): SupplierEmail {
-  return {
-    id: row.id,
-    supplierId: row.supplier_id,
-    email: row.email,
-    label: row.label,
-    createdAt: row.created_at,
-  }
-}
-
 export function mapSupplierDetail(
   supplier: SupplierRow,
   packages: PackageRow[],
   routes: RouteRow[],
   suiteTypes: SuiteTypeRow[],
-  emails: SupplierEmailRow[],
   rateCards: RateCardRow[],
   locations: LocationRow[],
 ): SupplierDetail {
   return {
     ...mapSupplier(supplier),
-    emails: emails.map(mapSupplierEmail),
     suiteTypes: suiteTypes.map(mapSupplierSuiteType),
     packages: packages.map((pkg) =>
       mapSupplierPackage(

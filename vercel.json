@@ -3,5 +3,10 @@
   "framework": "nextjs",
   "installCommand": "pnpm install --frozen-lockfile",
   "buildCommand": "pnpm build",
-  "devCommand": "pnpm dev"
+  "devCommand": "pnpm dev",
+  "build": {
+    "env": {
+      "NEXT_PUBLIC_DEV_AUTH": "false"
+    }
+  }
 }

@@ -22,13 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  createEmptySupplierEmail,
-  SupplierEmailEditor,
-  type EditableSupplierEmail,
-} from "@/components/supplier-email-editor"
 import { Textarea } from "@/components/ui/textarea"
-import { shortenUrl } from "@/lib/url"
 import { SUPPLIER_KIND_LABELS, type SupplierKind } from "@/lib/types"
 
 interface AddSupplierDialogProps {
@@ -39,15 +33,15 @@ interface AddSupplierDialogProps {
 interface CreateSupplierFormState {
   kind: SupplierKind | ""
   name: string
-  emails: EditableSupplierEmail[]
+  email: string
   phone: string
   website: string
   location: string
   notes: string
 }
 
-type SupplierFormField = Exclude<keyof CreateSupplierFormState, "notes" | "emails">
-type SupplierFormErrors = Record<SupplierFormField | "emails", string | null>
+type SupplierFormField = Exclude<keyof CreateSupplierFormState, "notes">
+type SupplierFormErrors = Record<SupplierFormField, string | null>
 type SupplierFormTouched = Partial<Record<SupplierFormField, boolean>>
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -58,7 +52,7 @@ function getInitialFormState(): CreateSupplierFormState {
   return {
     kind: "",
     name: "",
-    emails: [createEmptySupplierEmail()],
+    email: "",
     phone: "",
     website: "",
     location: "",
@@ -72,20 +66,10 @@ function getInitialTouchedState(): SupplierFormTouched {
 
 function validateSupplierForm(form: CreateSupplierFormState): SupplierFormErrors {
   const name = form.name.trim()
+  const email = form.email.trim()
   const phone = form.phone.trim()
   const website = form.website.trim()
   const location = form.location.trim()
-  const cleanedEmails = form.emails
-    .map((entry) => entry.email.trim())
-    .filter((entry) => entry.length > 0)
-  const invalidEmail = cleanedEmails.find((entry) => !EMAIL_PATTERN.test(entry))
-  const seen = new Set<string>()
-  const duplicateEmail = cleanedEmails.find((entry) => {
-    const normalized = entry.toLowerCase()
-    if (seen.has(normalized)) return true
-    seen.add(normalized)
-    return false
-  })
 
   return {
     kind: form.kind ? null : "Please choose a supplier category",
@@ -95,10 +79,9 @@ function validateSupplierForm(form: CreateSupplierFormState): SupplierFormErrors
         : name.length < 2
           ? "Supplier name must be at least 2 characters"
           : null,
-    emails: invalidEmail
-      ? `Invalid email: ${invalidEmail}`
-      : duplicateEmail
-        ? `Duplicate email: ${duplicateEmail}`
+    email:
+      email.length > 0 && !EMAIL_PATTERN.test(email)
+        ? "Enter a valid email (e.g. name@example.com)"
         : null,
     phone:
       phone.length > 0 && !PHONE_PATTERN.test(phone)
@@ -129,8 +112,7 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
     () =>
       errors.kind === null &&
       errors.name === null &&
-      errors.emails === null &&
-      Object.entries(errors).filter(([field]) => field !== "emails").every(
+      Object.entries(errors).every(
         ([field, error]) => !error || !touched[field as SupplierFormField],
       ),
     [errors, touched],
@@ -164,6 +146,7 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
       setTouched({
         kind: true,
         name: true,
+        email: true,
         phone: true,
         website: true,
         location: true,
@@ -190,14 +173,7 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
         body: JSON.stringify({
           kind: form.kind,
           name: form.name,
-          email: "",
-          emails: form.emails
-            .map((entry) => ({
-              id: entry.id,
-              email: entry.email.trim(),
-              label: entry.label.trim() || "General",
-            }))
-            .filter((entry) => entry.email.length > 0),
+          email: form.email,
           phone: form.phone,
           website: form.website,
           location: form.location,
@@ -276,6 +252,24 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
           </div>
 
           <div className="space-y-2">
+            <Label htmlFor="supplier-email">Email</Label>
+            <Input
+              id="supplier-email"
+              type="email"
+              value={form.email}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, email: event.target.value }))
+              }
+              placeholder="supplier@example.com"
+              className={getFieldClassName("email")}
+              onBlur={() => markFieldTouched("email")}
+            />
+            {touched.email && errors.email ? (
+              <p className="text-xs text-destructive">{errors.email}</p>
+            ) : null}
+          </div>
+
+          <div className="space-y-2">
             <Label htmlFor="supplier-phone">Phone</Label>
             <Input
               id="supplier-phone"
@@ -302,13 +296,7 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
               }
               placeholder="https://..."
               className={getFieldClassName("website")}
-              onBlur={(event) => {
-                setForm((current) => ({
-                  ...current,
-                  website: shortenUrl(event.target.value),
-                }))
-                markFieldTouched("website")
-              }}
+              onBlur={() => markFieldTouched("website")}
             />
             {touched.website && errors.website ? (
               <p className="text-xs text-destructive">{errors.website}</p>
@@ -330,15 +318,6 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
             {touched.location && errors.location ? (
               <p className="text-xs text-destructive">{errors.location}</p>
             ) : null}
-          </div>
-
-          <div className="space-y-2 md:col-span-2">
-            <SupplierEmailEditor
-              emails={form.emails}
-              onChange={(emails) => setForm((current) => ({ ...current, emails }))}
-              idPrefix="add-supplier"
-            />
-            {errors.emails ? <p className="text-xs text-destructive">{errors.emails}</p> : null}
           </div>
 
           <div className="space-y-2 md:col-span-2">

@@ -33,7 +33,7 @@ This command:
 - starts the local Supabase stack with Docker
 - reads the local Supabase URL and keys from `supabase status -o env`
 - launches the shared `pnpm dev` wrapper with those runtime values
-- keeps any optional secrets from `.env.local`, such as `RESEND_API_KEY` and `RESEND_FROM_EMAIL`
+- keeps any optional secrets from `.env.local`, such as `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, and `NEXT_PUBLIC_DEV_AUTH`
 - automatically clears a stale `.next/dev/lock` before Next.js boots again
 
 When using `pnpm local:start`, do not rely on hosted `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, or `SUPABASE_SERVICE_ROLE_KEY` values in `.env.local`. The command provides local versions automatically for that session.

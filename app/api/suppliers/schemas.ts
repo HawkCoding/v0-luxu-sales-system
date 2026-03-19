@@ -44,31 +44,6 @@ export const packageSchema = z.object({
   rateCards: z.array(rateCardSchema),
 })
 
-export const supplierEmailSchema = z.object({
-  id: z.string().uuid().optional(),
-  email: z
-    .string()
-    .trim()
-    .max(255)
-    .refine((value) => EMAIL_PATTERN.test(value), {
-      message: "Enter a valid email (e.g. name@example.com)",
-    }),
-  label: z.string().trim().min(1, "Label is required").max(100),
-})
-
-export const draftSupplierEmailSchema = z.object({
-  id: z.string().uuid().optional(),
-  email: z
-    .string()
-    .trim()
-    .max(255)
-    .refine((value) => value === "" || EMAIL_PATTERN.test(value), {
-      message: "Enter a valid email (e.g. name@example.com)",
-    })
-    .default(""),
-  label: z.string().trim().max(100).default("General"),
-})
-
 export const supplierSaveSchema = z.object({
   name: z.string().trim().min(2, "Supplier name must be at least 2 characters").max(200),
   kind: z.enum(["train_operator", "hotel_property", "transfers"]),
@@ -105,10 +80,8 @@ export const supplierSaveSchema = z.object({
     }),
   notes: z.string().trim().max(5000),
   active: z.boolean(),
-  emails: z.array(supplierEmailSchema).default([]),
   suiteTypes: z.array(suiteTypeSchema),
   packages: z.array(packageSchema),
-  expectedUpdatedAt: z.string().optional(),
 })
 
 export type SupplierSaveInput = z.infer<typeof supplierSaveSchema>
@@ -181,10 +154,8 @@ export const supplierDraftSaveSchema = z.object({
   location: z.string().trim().max(255).default(""),
   notes: z.string().trim().max(5000).default(""),
   active: z.boolean().default(true),
-  emails: z.array(draftSupplierEmailSchema).default([]),
   suiteTypes: z.array(draftSuiteTypeSchema).default([]),
   packages: z.array(draftPackageSchema).default([]),
-  expectedUpdatedAt: z.string().optional(),
 })
 
 export type SupplierDraftSaveInput = z.infer<typeof supplierDraftSaveSchema>
