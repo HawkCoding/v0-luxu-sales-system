@@ -12,6 +12,7 @@ node_modules/
 
 # Build artifacts
 tsconfig.tsbuildinfo
+next-env.d.ts
 
 # Temporary files
 tmp-*.sql
