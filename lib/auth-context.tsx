@@ -231,15 +231,12 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
   }
 
   const logout = async () => {
-    const supabase = getSupabase()
-    try {
-      await fetch("/api/logout", { method: "POST" })
-    } catch {
-      // Ignore server logout errors and still clear the local client state below.
-    }
-    await supabase.auth.signOut({ scope: "local" }).catch(() => {})
     setUser(null)
     setLoading(false)
+    const supabase = getSupabase()
+    // Best-effort server-side revocation should not block UI logout.
+    fetch("/api/logout", { method: "POST" }).catch(() => {})
+    supabase.auth.signOut({ scope: "local" }).catch(() => {})
   }
 
   return (
