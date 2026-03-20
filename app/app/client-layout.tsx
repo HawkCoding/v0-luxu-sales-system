@@ -67,11 +67,8 @@ function AppShell({ children }: { children: ReactNode }) {
   }, [user, role, setRole])
 
   const handleLogout = async () => {
-    try {
-      await logout()
-    } finally {
-      window.location.replace("/login")
-    }
+    await logout()
+    window.location.replace("/login")
   }
 
   if (!mounted || authLoading || !user) {

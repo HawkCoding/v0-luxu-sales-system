@@ -103,3 +103,9 @@ export function useLocations() {
 export function useSupplierEmailLabels() {
   return useSWR<SupplierEmailLabel[]>("/api/supplier-email-labels", fetcher, swrOptions)
 }
+
+export function useSupplierEmailLabels() {
+  return useSWR<SupplierEmailLabel[]>("/api/supplier-email-labels", fetcher, {
+    revalidateOnFocus: false,
+  })
+}
