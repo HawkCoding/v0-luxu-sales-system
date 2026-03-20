@@ -24,7 +24,11 @@ export async function POST() {
     }
   )
 
-  await supabase.auth.signOut()
+  try {
+    await supabase.auth.signOut()
+  } catch (error) {
+    console.error("Failed to revoke server session during logout", error)
+  }
 
   return response
 }
