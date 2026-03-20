@@ -237,10 +237,6 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
     await supabase.auth.signOut({ scope: "local" }).catch(() => {})
     setUser(null)
     setLoading(false)
-    const supabase = getSupabase()
-    // Best-effort server-side revocation should not block UI logout.
-    fetch("/api/logout", { method: "POST" }).catch(() => {})
-    supabase.auth.signOut({ scope: "local" }).catch(() => {})
   }
 
   return (
