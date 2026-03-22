@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Search, Mail, AlertCircle, Clock } from "lucide-react"
 import Link from "next/link"
 import { useState } from "react"
+import { formatDisplayDateTime } from "@/lib/date-format"
 
 const STATUS_CONFIG: Record<string, { icon: typeof Mail; color: string }> = {
   sent: { icon: Mail, color: "text-payment-green" },
@@ -88,7 +89,7 @@ export default function CorrespondencePage() {
                       </div>
                       <p className="text-xs text-muted-foreground mt-0.5 truncate">
                         {c.jobNumber} &middot; {c.customerName}
-                        {c.sentAt ? ` | Sent: ${new Date(c.sentAt).toLocaleString()}` : c.scheduledAt ? ` | Scheduled: ${new Date(c.scheduledAt).toLocaleString()}` : ""}
+                        {c.sentAt ? ` | Sent: ${formatDisplayDateTime(c.sentAt)}` : c.scheduledAt ? ` | Scheduled: ${formatDisplayDateTime(c.scheduledAt)}` : ""}
                       </p>
                     </div>
                   </div>

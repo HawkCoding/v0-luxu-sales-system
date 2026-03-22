@@ -11,7 +11,7 @@ import { Calendar } from "@/components/ui/calendar"
 import { Search, Globe, Filter, X } from "lucide-react"
 import { useEffect, useState } from "react"
 import { CONSULTANTS, type ConsultantAbbreviation } from "@/lib/types"
-import { format } from "date-fns"
+import { formatDisplayDate } from "@/lib/date-format"
 import Link from "next/link"
 import { CustomerDetailView } from "@/components/customer-detail-view"
 import {
@@ -199,7 +199,7 @@ export default function CustomersPage() {
                   <Popover>
                     <PopoverTrigger asChild>
                       <Button variant="outline" size="sm" className="h-9 text-xs flex-1 justify-start">
-                        {createdDateFrom ? format(createdDateFrom, "dd/MM/yy") : "From"}
+                        {createdDateFrom ? formatDisplayDate(createdDateFrom) : "From"}
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0" align="start">
@@ -215,7 +215,7 @@ export default function CustomersPage() {
                   <Popover>
                     <PopoverTrigger asChild>
                       <Button variant="outline" size="sm" className="h-9 text-xs flex-1 justify-start">
-                        {createdDateTo ? format(createdDateTo, "dd/MM/yy") : "To"}
+                        {createdDateTo ? formatDisplayDate(createdDateTo) : "To"}
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0" align="start">

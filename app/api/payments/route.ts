@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { createSessionClient } from "@/lib/supabase/server"
+import { formatDisplayDateTime } from "@/lib/date-format"
 
 export async function POST(req: Request) {
   const body = await req.json()
@@ -37,6 +38,7 @@ export async function POST(req: Request) {
     bookingId: payment.booking_id,
     amount: payment.amount,
     receivedAt: payment.received_at,
+    receivedAtDisplay: formatDisplayDateTime(payment.received_at),
     method: payment.method,
     reference: payment.reference,
     notes: payment.notes,

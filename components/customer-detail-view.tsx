@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useRole } from "@/lib/role-context"
 import { PIPELINE_STAGES } from "@/lib/types"
 import { useCustomerDetail } from "@/lib/use-data"
+import { formatDisplayDate } from "@/lib/date-format"
 
 type Presentation = "page" | "modal"
 
@@ -158,7 +159,7 @@ export function CustomerDetailView({
                 {customer.title && <Badge variant="outline">{customer.title}</Badge>}
                 <span className="inline-flex items-center gap-1">
                   <CalendarDays className="w-3 h-3" />
-                  Customer since {new Date(customer.createdAt).toLocaleDateString("en-ZA")}
+                  Customer since {formatDisplayDate(customer.createdAt)}
                 </span>
               </div>
             </div>
@@ -272,9 +273,7 @@ export function CustomerDetailView({
                   </div>
                   <div className="text-right text-xs text-muted-foreground flex-shrink-0">
                     <p>
-                      {booking.departureDate
-                        ? new Date(booking.departureDate).toLocaleDateString("en-ZA")
-                        : "No departure date"}
+                      {booking.departureDate ? formatDisplayDate(booking.departureDate) : "No departure date"}
                     </p>
                     <p className="mt-1">{booking.consultant ?? "Unassigned"}</p>
                   </div>

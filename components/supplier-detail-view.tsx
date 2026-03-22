@@ -52,6 +52,7 @@ import {
 import { useRole } from "@/lib/role-context"
 import { shortenUrl } from "@/lib/url"
 import { useLocations, useSupplierDetail } from "@/lib/use-data"
+import { formatDisplayDate } from "@/lib/date-format"
 import {
   getSupplierVocabulary,
   SUPPLIER_KIND_LABELS,
@@ -337,8 +338,8 @@ function formatCurrency(amount: number, currency: string) {
 }
 
 function formatDateRange(validFrom: string, validTo: string | null) {
-  const from = validFrom ? new Date(validFrom).toLocaleDateString() : "Open"
-  const to = validTo ? new Date(validTo).toLocaleDateString() : "Open ended"
+  const from = validFrom ? formatDisplayDate(validFrom) : "Open"
+  const to = validTo ? formatDisplayDate(validTo) : "Open ended"
   return `${from} - ${to}`
 }
 
@@ -2412,7 +2413,7 @@ export function SupplierDetailView({
                   <InfoItem label="Location" value={supplier.location} />
                   <InfoItem
                     label="Last updated"
-                    value={new Date(supplier.updatedAt).toLocaleDateString()}
+                    value={formatDisplayDate(supplier.updatedAt)}
                   />
                   <InfoItem
                     label="Status"

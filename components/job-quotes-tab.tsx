@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import type { Quote, Itinerary } from "@/lib/types"
 import { useRole } from "@/lib/role-context"
+import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 
 const STATUS_BADGE: Record<string, { variant: "default" | "secondary" | "outline" | "destructive"; label: string }> = {
   draft: { variant: "secondary", label: "Draft" },
@@ -37,7 +38,7 @@ export function JobQuotesTab({ quotes, jobId, itineraries, mutate }: { quotes: Q
                   <Badge variant={badge.variant} className="text-[10px]">{badge.label}</Badge>
                   {hasIncomplete && <Badge variant="destructive" className="text-[10px]">Missing pricing</Badge>}
                 </div>
-                <span className="text-xs text-muted-foreground">Valid until {new Date(q.validityUntil).toLocaleDateString()}</span>
+                <span className="text-xs text-muted-foreground">Valid until {formatDisplayDate(q.validityUntil)}</span>
               </div>
             </CardHeader>
             <CardContent>
@@ -87,7 +88,7 @@ export function JobQuotesTab({ quotes, jobId, itineraries, mutate }: { quotes: Q
                 </div>
               )}
               {q.lastSentAt && (
-                <p className="text-[10px] text-muted-foreground mt-2">Last sent: {new Date(q.lastSentAt).toLocaleString()}</p>
+                <p className="text-[10px] text-muted-foreground mt-2">Last sent: {formatDisplayDateTime(q.lastSentAt)}</p>
               )}
             </CardContent>
           </Card>
