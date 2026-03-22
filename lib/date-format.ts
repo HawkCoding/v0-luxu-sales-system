@@ -43,12 +43,14 @@ export function formatDisplayDateTime(value: string | Date | null | undefined): 
   return `${datePortion} ${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`
 }
 
-export function formatDisplayDateOrNull(value: string | Date | null | undefined): string | null {
-  const formatted = formatDisplayDate(value)
-  return formatted || null
-}
+const LONG_MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+]
 
-export function formatDisplayDateTimeOrNull(value: string | Date | null | undefined): string | null {
-  const formatted = formatDisplayDateTime(value)
-  return formatted || null
+export function formatDisplayDateLong(value: string | Date | null | undefined): string {
+  const parsed = parseDateInput(value)
+  if (!parsed) return ""
+
+  return `${parsed.getDate()} ${LONG_MONTH_NAMES[parsed.getMonth()]} ${parsed.getFullYear()}`
 }

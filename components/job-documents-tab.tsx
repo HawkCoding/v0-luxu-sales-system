@@ -8,7 +8,7 @@ import { FileText, FileOutput } from "lucide-react"
 import { generateVoucherHTML, downloadVoucherPDF } from "@/lib/generate-voucher"
 import { CONSULTANTS } from "@/lib/types"
 import { toast } from "sonner"
-import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
+import { formatDisplayDateLong, formatDisplayDateTime } from "@/lib/date-format"
 
 interface JobDocumentsTabProps {
   documents: DocRecord[]
@@ -36,7 +36,7 @@ export function JobDocumentsTab({ documents, job, enquiry, customer }: JobDocume
       consultantName: consultant?.name || "Unknown",
       supplierName: "Rovos Rail",
       route: enquiry.direction,
-      departure: formatDisplayDate(enquiry.departureDate),
+      departure: formatDisplayDateLong(enquiry.departureDate),
       arrival: "",
       suiteType: enquiry.suiteTypes[0] || "Suite",
       numberOfGuests: enquiry.noOfAdults + enquiry.noOfChildren,

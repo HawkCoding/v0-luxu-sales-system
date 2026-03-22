@@ -1843,17 +1843,6 @@ export function SupplierDetailView({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ ...buildDraftPayload(form), expectedUpdatedAt: supplierUpdatedAt }),
           })
-          const autosaveRoundTripMs = performance.now() - autosaveRequestStartedAt
-          console.info(
-            "[supplier-draft-autosave]",
-            JSON.stringify({
-              supplierSlug,
-              status: response.status,
-              roundTripMs: Number(autosaveRoundTripMs.toFixed(1)),
-              serverTiming: response.headers.get("server-timing"),
-            }),
-          )
-
           if (!response.ok) {
             setDraftSaveStatus("error")
             return
@@ -2070,17 +2059,6 @@ export function SupplierDetailView({
           expectedUpdatedAt: supplier?.updatedAt,
         }),
       })
-      const saveRoundTripMs = performance.now() - saveRequestStartedAt
-      console.info(
-        "[supplier-save]",
-        JSON.stringify({
-          supplierSlug,
-          status: response.status,
-          roundTripMs: Number(saveRoundTripMs.toFixed(1)),
-          serverTiming: response.headers.get("server-timing"),
-        }),
-      )
-
       const payload = await response.json()
 
       if (!response.ok) {
