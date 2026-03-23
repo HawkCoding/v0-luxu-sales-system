@@ -12,7 +12,7 @@ import { FileText, Search, Filter, X } from "lucide-react"
 import Link from "next/link"
 import { useState } from "react"
 import { CONSULTANTS, type ConsultantAbbreviation } from "@/lib/types"
-import { format } from "date-fns"
+import { formatDisplayDate } from "@/lib/date-format"
 
 export default function DocumentsPage() {
   const { data, isLoading } = useAllData()
@@ -176,7 +176,7 @@ export default function DocumentsPage() {
                   <Popover>
                     <PopoverTrigger asChild>
                       <Button variant="outline" size="sm" className="h-9 text-xs flex-1 justify-start">
-                        {generatedDateFrom ? format(generatedDateFrom, "dd/MM/yy") : "From"}
+                        {generatedDateFrom ? formatDisplayDate(generatedDateFrom) : "From"}
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0" align="start">
@@ -192,7 +192,7 @@ export default function DocumentsPage() {
                   <Popover>
                     <PopoverTrigger asChild>
                       <Button variant="outline" size="sm" className="h-9 text-xs flex-1 justify-start">
-                        {generatedDateTo ? format(generatedDateTo, "dd/MM/yy") : "To"}
+                        {generatedDateTo ? formatDisplayDate(generatedDateTo) : "To"}
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0" align="start">
@@ -256,11 +256,7 @@ export default function DocumentsPage() {
                   </div>
                 </div>
                 <span className="text-xs text-muted-foreground flex-shrink-0">
-                  {new Date(d.generatedAt).toLocaleDateString("en-ZA", { 
-                    day: "numeric", 
-                    month: "short", 
-                    year: "numeric" 
-                  })}
+                  {formatDisplayDate(d.generatedAt)}
                 </span>
               </CardContent>
             </Card>

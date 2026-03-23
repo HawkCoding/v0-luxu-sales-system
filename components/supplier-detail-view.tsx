@@ -30,6 +30,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ContentTransition } from "@/components/ui/content-transition"
+import { DatePicker } from "@/components/ui/date-picker"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { NumericInput } from "@/components/ui/numeric-input"
@@ -52,6 +53,7 @@ import {
 import { useRole } from "@/lib/role-context"
 import { shortenUrl } from "@/lib/url"
 import { useLocations, useSupplierDetail } from "@/lib/use-data"
+import { formatDisplayDate } from "@/lib/date-format"
 import {
   getSupplierVocabulary,
   SUPPLIER_KIND_LABELS,
@@ -337,8 +339,8 @@ function formatCurrency(amount: number, currency: string) {
 }
 
 function formatDateRange(validFrom: string, validTo: string | null) {
-  const from = validFrom ? new Date(validFrom).toLocaleDateString() : "Open"
-  const to = validTo ? new Date(validTo).toLocaleDateString() : "Open ended"
+  const from = validFrom ? formatDisplayDate(validFrom) : "Open"
+  const to = validTo ? formatDisplayDate(validTo) : "Open ended"
   return `${from} - ${to}`
 }
 
@@ -1023,43 +1025,51 @@ function RateCardMatrixEditor({
               <div className="grid gap-3 border-b bg-secondary/30 px-4 py-3 md:grid-cols-4">
                 <div className="space-y-2">
                   <Label>Valid from</Label>
-                  <Input
-                    type="date"
+                  <DatePicker
                     value={period.validFrom}
-                    className={
+                    buttonClassName={
                       periodFieldErrors.has(`${period.key}|validFrom`)
                         ? "border-destructive focus-visible:ring-destructive/35"
                         : undefined
                     }
-                    onChange={(event) =>
+                    onChange={(value) =>
                       onUpdatePeriodField(
                         packageIndex,
                         period.key,
                         "validFrom",
-                        event.target.value,
+                        value ?? "",
                       )
                     }
                   />
                 </div>
                 <div className="space-y-2">
                   <Label>Valid to</Label>
-                  <Input
-                    type="date"
-                    value={period.validTo ?? ""}
-                    className={
-                      periodFieldErrors.has(`${period.key}|validTo`)
-                        ? "border-destructive focus-visible:ring-destructive/35"
-                        : undefined
-                    }
-                    onChange={(event) =>
-                      onUpdatePeriodField(
-                        packageIndex,
-                        period.key,
-                        "validTo",
-                        event.target.value || null,
-                      )
-                    }
-                  />
+                  <div className="relative">
+                    {!period.validTo?.trim() ? (
+                      <Badge
+                        variant="outline"
+                        className="absolute top-0 right-1 z-10 -translate-y-1/2 bg-background px-1.5 py-0 text-[10px] font-medium uppercase tracking-wide"
+                      >
+                        ONGOING
+                      </Badge>
+                    ) : null}
+                    <DatePicker
+                      value={period.validTo ?? ""}
+                      buttonClassName={
+                        periodFieldErrors.has(`${period.key}|validTo`)
+                          ? "border-destructive focus-visible:ring-destructive/35"
+                          : undefined
+                      }
+                      onChange={(value) =>
+                        onUpdatePeriodField(
+                          packageIndex,
+                          period.key,
+                          "validTo",
+                          value || null,
+                        )
+                      }
+                    />
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label>Currency</Label>
@@ -1842,17 +1852,6 @@ export function SupplierDetailView({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ ...buildDraftPayload(form), expectedUpdatedAt: supplierUpdatedAt }),
           })
-          const autosaveRoundTripMs = performance.now() - autosaveRequestStartedAt
-          console.info(
-            "[supplier-draft-autosave]",
-            JSON.stringify({
-              supplierSlug,
-              status: response.status,
-              roundTripMs: Number(autosaveRoundTripMs.toFixed(1)),
-              serverTiming: response.headers.get("server-timing"),
-            }),
-          )
-
           if (!response.ok) {
             setDraftSaveStatus("error")
             return
@@ -2069,17 +2068,6 @@ export function SupplierDetailView({
           expectedUpdatedAt: supplier?.updatedAt,
         }),
       })
-      const saveRoundTripMs = performance.now() - saveRequestStartedAt
-      console.info(
-        "[supplier-save]",
-        JSON.stringify({
-          supplierSlug,
-          status: response.status,
-          roundTripMs: Number(saveRoundTripMs.toFixed(1)),
-          serverTiming: response.headers.get("server-timing"),
-        }),
-      )
-
       const payload = await response.json()
 
       if (!response.ok) {
@@ -2412,7 +2400,7 @@ export function SupplierDetailView({
                   <InfoItem label="Location" value={supplier.location} />
                   <InfoItem
                     label="Last updated"
-                    value={new Date(supplier.updatedAt).toLocaleDateString()}
+                    value={formatDisplayDate(supplier.updatedAt)}
                   />
                   <InfoItem
                     label="Status"
@@ -2562,11 +2550,6 @@ export function SupplierDetailView({
                     {`No ${activeVocabulary.suiteTypePlural.toLowerCase()} configured.`}
                   </div>
                 )}
-              </div>
-
-              <div className="rounded-lg border-dashed border p-3 text-xs text-muted-foreground">
-                Note: legacy supplier pricing and seasonal pricing tables remain in the database for
-                now and are planned for cleanup later.
               </div>
 
               <Separator />

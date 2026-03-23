@@ -16,6 +16,7 @@ import { useAuth } from "@/lib/auth-context"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { toast } from "sonner"
 import { downloadAuditLog } from "@/lib/export-audit"
+import { formatDisplayDate } from "@/lib/date-format"
 
 export default function EnquiriesPage() {
   const { data, isLoading, mutate } = useAllData()
@@ -260,7 +261,7 @@ export default function EnquiriesPage() {
                       <div className="flex items-center gap-4 text-xs text-muted-foreground">
                         <span>{e.direction}</span>
                         <span>•</span>
-                        <span>{new Date(e.departureDate).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" })}</span>
+                        <span>{formatDisplayDate(e.departureDate)}</span>
                         <span>•</span>
                         <span>{e.noOfAdults} adults, {e.noOfChildren} children</span>
                       </div>
@@ -282,7 +283,7 @@ export default function EnquiriesPage() {
                         </p>
                       )}
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        Created {new Date(e.createdAt).toLocaleDateString()}
+                        Created {formatDisplayDate(e.createdAt)}
                       </p>
                     </div>
                     <Button

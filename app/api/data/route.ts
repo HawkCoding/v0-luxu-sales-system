@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { createSessionClient } from "@/lib/supabase/server"
+import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 
 export async function GET() {
   const supabase = await createSessionClient()
@@ -42,14 +43,18 @@ export async function GET() {
     itineraryId: q.itinerary_id,
     status: q.status,
     validityUntil: q.validity_until,
+    validityUntilDisplay: formatDisplayDate(q.validity_until),
     subtotal: q.subtotal,
     vat: q.vat,
     total: q.total,
     lastSentAt: q.last_sent_at,
+    lastSentAtDisplay: formatDisplayDateTime(q.last_sent_at),
     overridePin: q.override_pin,
     overrideReason: q.override_reason,
     createdAt: q.created_at,
     updatedAt: q.updated_at,
+    createdAtDisplay: formatDisplayDateTime(q.created_at),
+    updatedAtDisplay: formatDisplayDateTime(q.updated_at),
     lineItems: (quoteLineItems ?? [])
       .filter((li) => li.quote_id === q.id)
       .map((li) => ({
@@ -74,6 +79,8 @@ export async function GET() {
       notes: c.notes,
       createdAt: c.created_at,
       updatedAt: c.updated_at,
+      createdAtDisplay: formatDisplayDateTime(c.created_at),
+      updatedAtDisplay: formatDisplayDateTime(c.updated_at),
     })),
 
     bookings: (bookings ?? []).map((b) => ({
@@ -86,6 +93,7 @@ export async function GET() {
       consultant: b.consultant,
       ownerUserId: b.owner_user_id,
       departureDate: b.departure_date,
+      departureDateDisplay: formatDisplayDate(b.departure_date),
       durationNights: b.duration_nights,
       noOfAdults: b.no_of_adults,
       noOfChildren: b.no_of_children,
@@ -107,6 +115,8 @@ export async function GET() {
       hotelSupplierId: b.hotel_supplier_id,
       createdAt: b.created_at,
       updatedAt: b.updated_at,
+      createdAtDisplay: formatDisplayDateTime(b.created_at),
+      updatedAtDisplay: formatDisplayDateTime(b.updated_at),
     })),
 
     bookingSuites: (bookingSuites ?? []).map((s) => ({
@@ -122,10 +132,12 @@ export async function GET() {
       bookingId: p.booking_id,
       amount: p.amount,
       receivedAt: p.received_at,
+      receivedAtDisplay: formatDisplayDateTime(p.received_at),
       method: p.method,
       reference: p.reference,
       notes: p.notes,
       createdAt: p.created_at,
+      createdAtDisplay: formatDisplayDateTime(p.created_at),
     })),
 
     quotes: quotesWithLines,
@@ -136,8 +148,11 @@ export async function GET() {
       name: i.name,
       notes: i.notes,
       acceptedAt: i.accepted_at,
+      acceptedAtDisplay: formatDisplayDateTime(i.accepted_at),
       createdAt: i.created_at,
       updatedAt: i.updated_at,
+      createdAtDisplay: formatDisplayDateTime(i.created_at),
+      updatedAtDisplay: formatDisplayDateTime(i.updated_at),
     })),
 
     documents: (documents ?? []).map((d) => ({
@@ -147,6 +162,7 @@ export async function GET() {
       status: d.status,
       storagePath: d.storage_path,
       createdAt: d.created_at,
+      createdAtDisplay: formatDisplayDateTime(d.created_at),
     })),
 
     correspondences: (correspondences ?? []).map((c) => ({
@@ -157,9 +173,12 @@ export async function GET() {
       bodyHtml: c.body_html,
       status: c.status,
       sentAt: c.sent_at,
+      sentAtDisplay: formatDisplayDateTime(c.sent_at),
       scheduledAt: c.scheduled_at,
+      scheduledAtDisplay: formatDisplayDateTime(c.scheduled_at),
       error: c.error,
       createdAt: c.created_at,
+      createdAtDisplay: formatDisplayDateTime(c.created_at),
     })),
 
     auditLogs: (auditLogs ?? []).map((a) => ({
@@ -173,6 +192,7 @@ export async function GET() {
       afterJson: a.after_json ? JSON.stringify(a.after_json) : undefined,
       metaJson: a.meta_json ? JSON.stringify(a.meta_json) : undefined,
       createdAt: a.created_at,
+      createdAtDisplay: formatDisplayDateTime(a.created_at),
     })),
 
     pipelineHistory: (pipelineHistory ?? []).map((h) => ({
@@ -182,6 +202,7 @@ export async function GET() {
       toStage: h.to_stage,
       movedBy: h.moved_by,
       movedAt: h.moved_at,
+      movedAtDisplay: formatDisplayDateTime(h.moved_at),
     })),
 
     templates: (templates ?? []).map((t) => ({
