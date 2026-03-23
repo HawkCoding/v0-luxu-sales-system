@@ -1,7 +1,6 @@
 "use client"
 
 import { useAllData } from "@/lib/use-data"
-import { formatDisplayDate } from "@/lib/date-format"
 import { PIPELINE_STAGES } from "@/lib/types"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -79,7 +78,7 @@ export default function DashboardPage() {
                   </div>
                   <div className="text-right">
                     <Badge variant="outline" className="text-sm">{booking.stage.replace(/_/g, " ")}</Badge>
-                    <p className="text-sm text-text-muted mt-1">{formatDisplayDate(booking.createdAt)}</p>
+                    <p className="text-sm text-text-muted mt-1">{new Date(booking.createdAt).toLocaleDateString()}</p>
                   </div>
                 </Link>
               )
@@ -119,7 +118,7 @@ export default function DashboardPage() {
                   </div>
                   <div className="text-right flex-shrink-0 ml-4">
                     <Badge variant="outline" className="text-sm font-medium">
-                      {cor.scheduledAt ? formatDisplayDate(cor.scheduledAt) : "-"}
+                      {cor.scheduledAt ? new Date(cor.scheduledAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : "-"}
                     </Badge>
                   </div>
                 </Link>

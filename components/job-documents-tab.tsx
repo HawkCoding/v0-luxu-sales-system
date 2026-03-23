@@ -8,7 +8,6 @@ import { FileText, FileOutput } from "lucide-react"
 import { generateVoucherHTML, downloadVoucherPDF } from "@/lib/generate-voucher"
 import { CONSULTANTS } from "@/lib/types"
 import { toast } from "sonner"
-import { formatDisplayDateLong, formatDisplayDateTime } from "@/lib/date-format"
 
 interface JobDocumentsTabProps {
   documents: DocRecord[]
@@ -36,7 +35,7 @@ export function JobDocumentsTab({ documents, job, enquiry, customer }: JobDocume
       consultantName: consultant?.name || "Unknown",
       supplierName: "Rovos Rail",
       route: enquiry.direction,
-      departure: formatDisplayDateLong(enquiry.departureDate),
+      departure: new Date(enquiry.departureDate).toLocaleDateString("en-ZA", { day: "numeric", month: "long", year: "numeric" }),
       arrival: "",
       suiteType: enquiry.suiteTypes[0] || "Suite",
       numberOfGuests: enquiry.noOfAdults + enquiry.noOfChildren,
@@ -87,7 +86,7 @@ export function JobDocumentsTab({ documents, job, enquiry, customer }: JobDocume
               </div>
               <div>
                 <p className="text-sm font-medium text-foreground">{d.kind.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Generated: {formatDisplayDateTime(d.generatedAt)}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Generated: {new Date(d.generatedAt).toLocaleString()}</p>
               </div>
             </div>
             <Badge variant="outline" className="text-[10px]">PDF</Badge>

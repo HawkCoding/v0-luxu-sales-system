@@ -16,7 +16,7 @@ interface AuthContextValue {
   loginWithMicrosoft: () => Promise<boolean>
   loginWithPassword: (email: string, password: string) => Promise<boolean>
   requestPasswordReset: (email: string) => Promise<{ ok: boolean; error?: string }>
-  logout: () => Promise<void>
+  logout: () => void
 }
 
 const AUTH_INIT_TIMEOUT_MS = 4000
@@ -231,12 +231,15 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
   }
 
   const logout = async () => {
+    const supabase = getSupabase()
+    try {
+      await fetch("/api/logout", { method: "POST" })
+    } catch {
+      // Ignore server logout errors and still clear the local client state below.
+    }
+    await supabase.auth.signOut({ scope: "local" }).catch(() => {})
     setUser(null)
     setLoading(false)
-    const supabase = getSupabase()
-    // Best-effort server-side revocation should not block UI logout.
-    fetch("/api/logout", { method: "POST" }).catch(() => {})
-    supabase.auth.signOut({ scope: "local" }).catch(() => {})
   }
 
   return (

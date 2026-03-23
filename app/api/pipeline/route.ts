@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 import { createSessionClient } from "@/lib/supabase/server"
-import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 
 export async function GET() {
   const supabase = await createSessionClient()
@@ -47,14 +46,11 @@ export async function GET() {
         : "Unknown",
       direction: (booking.route as { name?: string } | null)?.name ?? "",
       departureDate: booking.departure_date ?? "",
-      departureDateDisplay: formatDisplayDate(booking.departure_date),
       paymentColor,
       totalPaid,
       quoteTotal,
       createdAt: booking.created_at,
       updatedAt: booking.updated_at,
-      createdAtDisplay: formatDisplayDateTime(booking.created_at),
-      updatedAtDisplay: formatDisplayDateTime(booking.updated_at),
     }
   })
 

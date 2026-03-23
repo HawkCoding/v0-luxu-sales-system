@@ -1,5 +1,4 @@
 import type { Database } from "@/lib/supabase/types"
-import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import type {
   Location,
   Supplier,
@@ -49,8 +48,6 @@ export function mapSupplier(row: SupplierRow): Supplier {
     active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    createdAtDisplay: formatDisplayDateTime(row.created_at),
-    updatedAtDisplay: formatDisplayDateTime(row.updated_at),
   }
 }
 
@@ -68,8 +65,6 @@ export function mapSupplierPricingOption(
     isPrimary: row.is_primary,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    createdAtDisplay: formatDisplayDateTime(row.created_at),
-    updatedAtDisplay: formatDisplayDateTime(row.updated_at),
   }
 }
 
@@ -81,8 +76,6 @@ export function mapLocation(row: LocationRow): Location {
     regionCode: row.region_code,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    createdAtDisplay: formatDisplayDateTime(row.created_at),
-    updatedAtDisplay: formatDisplayDateTime(row.updated_at),
   }
 }
 
@@ -96,8 +89,6 @@ export function mapSupplierRoute(row: RouteRow): SupplierRoute {
     active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    createdAtDisplay: formatDisplayDateTime(row.created_at),
-    updatedAtDisplay: formatDisplayDateTime(row.updated_at),
   }
 }
 
@@ -109,8 +100,6 @@ export function mapSupplierSuiteType(row: SuiteTypeRow): SupplierSuiteType {
     active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    createdAtDisplay: formatDisplayDateTime(row.created_at),
-    updatedAtDisplay: formatDisplayDateTime(row.updated_at),
   }
 }
 
@@ -125,9 +114,6 @@ export function mapSupplierRateCard(row: RateCardRow): SupplierRateCard {
     validFrom: row.valid_from,
     validTo: row.valid_to,
     createdAt: row.created_at,
-    validFromDisplay: formatDisplayDate(row.valid_from),
-    validToDisplay: formatDisplayDate(row.valid_to),
-    createdAtDisplay: formatDisplayDateTime(row.created_at),
   }
 }
 
@@ -147,8 +133,6 @@ export function mapSupplierPackage(
     active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    createdAtDisplay: formatDisplayDateTime(row.created_at),
-    updatedAtDisplay: formatDisplayDateTime(row.updated_at),
     routes: routes.map(mapSupplierRoute),
     rateCards: rateCards.map(mapSupplierRateCard),
   }
@@ -165,7 +149,6 @@ export function mapSupplierSeasonalPrice(
     doublePrice: row.double_price,
     familyPrice: row.family_price,
     createdAt: row.created_at,
-    createdAtDisplay: formatDisplayDateTime(row.created_at),
   }
 }
 
@@ -180,9 +163,6 @@ export function mapSupplierSeasonalPeriod(
     validFrom: row.valid_from,
     validTo: row.valid_to,
     createdAt: row.created_at,
-    validFromDisplay: formatDisplayDate(row.valid_from),
-    validToDisplay: formatDisplayDate(row.valid_to),
-    createdAtDisplay: formatDisplayDateTime(row.created_at),
     prices: prices.map(mapSupplierSeasonalPrice),
   }
 }
@@ -194,7 +174,6 @@ export function mapSupplierEmail(row: SupplierEmailRow): SupplierEmail {
     email: row.email,
     label: row.label,
     createdAt: row.created_at,
-    createdAtDisplay: formatDisplayDateTime(row.created_at),
   }
 }
 

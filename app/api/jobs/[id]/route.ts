@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 import { createSessionClient } from "@/lib/supabase/server"
-import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import type { PipelineStage } from "@/lib/types"
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -51,8 +50,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     consultant: booking.consultant,
     createdAt: booking.created_at,
     updatedAt: booking.updated_at,
-    createdAtDisplay: formatDisplayDateTime(booking.created_at),
-    updatedAtDisplay: formatDisplayDateTime(booking.updated_at),
   }
 
   // Map customer
@@ -66,7 +63,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         country: customer.country,
         title: customer.title,
         createdAt: customer.created_at,
-        createdAtDisplay: formatDisplayDateTime(customer.created_at),
       }
     : null
 
@@ -90,7 +86,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     country: customer?.country ?? "",
     direction: (booking.route as { name?: string } | null)?.name ?? "",
     departureDate: booking.departure_date ?? "",
-    departureDateDisplay: formatDisplayDate(booking.departure_date),
     noOfSuites: booking.no_of_suites,
     noOfAdults: booking.no_of_adults,
     noOfChildren: booking.no_of_children,
@@ -103,14 +98,12 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     promotionCode: booking.promotion_code ?? undefined,
     termsAccepted: booking.terms_accepted,
     createdAt: booking.created_at,
-    createdAtDisplay: formatDisplayDateTime(booking.created_at),
     travellers: adultTravellers.map((t) => ({
       prefix: t.prefix ?? "",
       name: t.first_name,
       surname: t.last_name,
       idPassport: t.id_passport ?? "",
       dateOfBirth: t.date_of_birth ?? "",
-      dateOfBirthDisplay: formatDisplayDate(t.date_of_birth),
     })),
     childTravellers: childTravellers.map((t) => ({
       prefix: t.prefix ?? "",
@@ -118,7 +111,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       surname: t.last_name,
       idPassport: t.id_passport ?? "",
       dateOfBirth: t.date_of_birth ?? "",
-      dateOfBirthDisplay: formatDisplayDate(t.date_of_birth),
     })),
   }
 
@@ -129,7 +121,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     name: i.name,
     notes: i.notes ?? "",
     acceptedAt: i.accepted_at ?? undefined,
-    acceptedAtDisplay: formatDisplayDateTime(i.accepted_at),
   }))
 
   // Map quotes with embedded line items
@@ -139,12 +130,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     jobId: q.booking_id,
     status: q.status,
     validityUntil: q.validity_until ?? "",
-    validityUntilDisplay: formatDisplayDate(q.validity_until),
     subtotal: q.subtotal,
     vat: q.vat,
     total: q.total,
     lastSentAt: q.last_sent_at ?? undefined,
-    lastSentAtDisplay: formatDisplayDateTime(q.last_sent_at),
     overridePin: q.override_pin ?? undefined,
     overrideReason: q.override_reason ?? undefined,
     lineItems: (quoteLineItemsData ?? [])
@@ -163,7 +152,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     jobId: p.booking_id,
     amount: p.amount,
     receivedAt: p.received_at,
-    receivedAtDisplay: formatDisplayDateTime(p.received_at),
     method: p.method ?? "",
     reference: p.reference ?? "",
     notes: p.notes ?? "",
@@ -177,7 +165,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     status: d.status,
     storagePath: d.storage_path,
     generatedAt: d.created_at,
-    generatedAtDisplay: formatDisplayDateTime(d.created_at),
     urlOrBlobRef: d.storage_path ?? "",
   }))
 
@@ -190,9 +177,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     bodyHtml: c.body_html ?? "",
     status: c.status,
     sentAt: c.sent_at ?? undefined,
-    sentAtDisplay: formatDisplayDateTime(c.sent_at),
     scheduledAt: c.scheduled_at ?? undefined,
-    scheduledAtDisplay: formatDisplayDateTime(c.scheduled_at),
     error: c.error ?? undefined,
   }))
 
@@ -207,7 +192,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     afterJson: a.after_json ? JSON.stringify(a.after_json) : undefined,
     metaJson: a.meta_json ? JSON.stringify(a.meta_json) : undefined,
     createdAt: a.created_at,
-    createdAtDisplay: formatDisplayDateTime(a.created_at),
   }))
 
   return NextResponse.json({
@@ -280,6 +264,5 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     stage: updated.stage,
     consultant: updated.consultant,
     updatedAt: updated.updated_at,
-    updatedAtDisplay: formatDisplayDateTime(updated.updated_at),
   })
 }

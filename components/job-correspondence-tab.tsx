@@ -10,7 +10,6 @@ import type { Correspondence } from "@/lib/types"
 import { useRole } from "@/lib/role-context"
 import { useState } from "react"
 import { Send, Mail, AlertCircle, Clock } from "lucide-react"
-import { formatDisplayDateTime } from "@/lib/date-format"
 
 const STATUS_CONFIG: Record<string, { icon: typeof Mail; color: string }> = {
   sent: { icon: Mail, color: "text-payment-green" },
@@ -98,7 +97,7 @@ export function JobCorrespondenceTab({ correspondence, jobId, mutate }: { corres
                         </Badge>
                       </div>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        {c.sentAt ? `Sent: ${formatDisplayDateTime(c.sentAt)}` : c.scheduledAt ? `Scheduled: ${formatDisplayDateTime(c.scheduledAt)}` : ""}
+                        {c.sentAt ? `Sent: ${new Date(c.sentAt).toLocaleString()}` : c.scheduledAt ? `Scheduled: ${new Date(c.scheduledAt).toLocaleString()}` : ""}
                       </p>
                       {c.error && <p className="text-xs text-destructive mt-1">{c.error}</p>}
                     </div>

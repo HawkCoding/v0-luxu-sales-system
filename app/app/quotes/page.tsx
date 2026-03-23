@@ -8,7 +8,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Search } from "lucide-react"
 import Link from "next/link"
 import { useState } from "react"
-import { formatDisplayDate } from "@/lib/date-format"
 
 const STATUS_BADGE: Record<string, { variant: "default" | "secondary" | "outline" | "destructive"; label: string }> = {
   draft: { variant: "secondary", label: "Draft" },
@@ -86,7 +85,7 @@ export default function QuotesPage() {
                     </div>
                     <div className="text-right flex-shrink-0">
                       <p className="text-sm font-semibold text-foreground">R {q.total.toLocaleString()}</p>
-                      <p className="text-[10px] text-muted-foreground">Valid: {formatDisplayDate(q.validityUntil)}</p>
+                      <p className="text-[10px] text-muted-foreground">Valid: {new Date(q.validityUntil).toLocaleDateString()}</p>
                     </div>
                   </div>
                 </CardContent>

@@ -30,53 +30,39 @@ const fetcher = async (url: string) => {
   return body
 }
 
-const swrOptions = {
-  revalidateOnFocus: false,
-  onErrorRetry: (
-    error: ApiError,
-    _key: string,
-    _config: unknown,
-    revalidate: (options?: { retryCount?: number }) => void,
-    context: { retryCount: number },
-  ) => {
-    if (error.status === 401) return
-    if (context.retryCount >= 3) return
-
-    setTimeout(() => {
-      revalidate({ retryCount: context.retryCount + 1 })
-    }, 3000)
-  },
-}
-
 export function useAllData() {
-  return useSWR("/api/data", fetcher, swrOptions)
+  return useSWR("/api/data", fetcher, { revalidateOnFocus: false })
 }
 
 export function usePipeline() {
-  return useSWR("/api/pipeline", fetcher, swrOptions)
+  return useSWR("/api/pipeline", fetcher, { revalidateOnFocus: false })
 }
 
 export function useJobDetail(id: string) {
-  return useSWR(id ? `/api/jobs/${id}` : null, fetcher, swrOptions)
+  return useSWR(id ? `/api/jobs/${id}` : null, fetcher, { revalidateOnFocus: false })
 }
 
 export function useTemplates() {
-  return useSWR("/api/templates", fetcher, swrOptions)
+  return useSWR("/api/templates", fetcher, { revalidateOnFocus: false })
 }
 
 export function useSuppliers() {
-  return useSWR<Supplier[]>("/api/suppliers?includeDrafts=true", fetcher, swrOptions)
+  return useSWR<Supplier[]>("/api/suppliers?includeDrafts=true", fetcher, {
+    revalidateOnFocus: false,
+  })
 }
 
 export function useActiveSuppliers() {
-  return useSWR<Supplier[]>("/api/suppliers", fetcher, swrOptions)
+  return useSWR<Supplier[]>("/api/suppliers", fetcher, {
+    revalidateOnFocus: false,
+  })
 }
 
 export function useSupplierDetail(slug: string) {
   return useSWR<SupplierDetail | { error: string }>(
     slug ? `/api/suppliers/${slug}` : null,
     fetcher,
-    swrOptions,
+    { revalidateOnFocus: false },
   )
 }
 
@@ -92,14 +78,18 @@ export function useCustomerDetail(id: string) {
       }
     | { error: string }
   >(id ? `/api/customers/${id}` : null, fetcher, {
-    ...swrOptions,
+    revalidateOnFocus: false,
   })
 }
 
 export function useLocations() {
-  return useSWR<Location[]>("/api/locations", fetcher, swrOptions)
+  return useSWR<Location[]>("/api/locations", fetcher, {
+    revalidateOnFocus: false,
+  })
 }
 
 export function useSupplierEmailLabels() {
-  return useSWR<SupplierEmailLabel[]>("/api/supplier-email-labels", fetcher, swrOptions)
+  return useSWR<SupplierEmailLabel[]>("/api/supplier-email-labels", fetcher, {
+    revalidateOnFocus: false,
+  })
 }
