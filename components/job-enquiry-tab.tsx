@@ -3,6 +3,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import type { Enquiry, Itinerary, Traveller } from "@/lib/types"
+import { formatDisplayDate } from "@/lib/date-format"
 
 export function JobEnquiryTab({ enquiry, itineraries }: { enquiry: Enquiry | null; itineraries: Itinerary[] }) {
   if (!enquiry) {
@@ -35,7 +36,7 @@ export function JobEnquiryTab({ enquiry, itineraries }: { enquiry: Enquiry | nul
         <CardContent>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             <Field label="Direction" value={enquiry.direction} />
-            <Field label="Departure Date" value={new Date(enquiry.departureDate).toLocaleDateString("en-ZA", { day: "numeric", month: "long", year: "numeric" })} />
+            <Field label="Departure Date" value={formatDisplayDate(enquiry.departureDate)} />
             <Field label="Purpose" value={enquiry.purpose} />
             <Field label="No. of Suites" value={String(enquiry.noOfSuites)} />
             <Field label="Adults" value={String(enquiry.noOfAdults)} />

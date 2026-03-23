@@ -3,6 +3,7 @@
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import type { AuditLog } from "@/lib/types"
+import { formatDisplayDateTime } from "@/lib/date-format"
 
 export function JobAuditTab({ auditLogs }: { auditLogs: AuditLog[] }) {
   if (auditLogs.length === 0) {
@@ -35,7 +36,7 @@ export function JobAuditTab({ auditLogs }: { auditLogs: AuditLog[] }) {
                 )}
               </div>
               <span className="text-[10px] text-muted-foreground flex-shrink-0 whitespace-nowrap">
-                {new Date(a.createdAt).toLocaleString()}
+                {formatDisplayDateTime(a.createdAt)}
               </span>
             </div>
           </CardContent>

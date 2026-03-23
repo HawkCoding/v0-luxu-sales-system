@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Search } from "lucide-react"
 import { useState } from "react"
 import { useRole } from "@/lib/role-context"
+import { formatDisplayDateTime } from "@/lib/date-format"
 
 export default function AuditPage() {
   const { data, isLoading } = useAllData()
@@ -64,7 +65,7 @@ export default function AuditPage() {
                   )}
                 </div>
                 <span className="text-[10px] text-muted-foreground flex-shrink-0 whitespace-nowrap">
-                  {new Date(a.createdAt).toLocaleString()}
+                  {formatDisplayDateTime(a.createdAt)}
                 </span>
               </div>
             </CardContent>

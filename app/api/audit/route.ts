@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { createSessionClient } from "@/lib/supabase/server"
+import { formatDisplayDateTime } from "@/lib/date-format"
 
 export async function POST(req: Request) {
   const body = await req.json()
@@ -28,5 +29,6 @@ export async function POST(req: Request) {
     entityId: data.entity_id,
     action: data.action,
     createdAt: data.created_at,
+    createdAtDisplay: formatDisplayDateTime(data.created_at),
   })
 }

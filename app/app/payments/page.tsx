@@ -14,6 +14,7 @@ import Link from "next/link"
 import { useState } from "react"
 import { toast } from "sonner"
 import { useAuth } from "@/lib/auth-context"
+import { formatDisplayDate } from "@/lib/date-format"
 
 export default function PaymentsPage() {
   const { data, isLoading, mutate } = useAllData()
@@ -295,7 +296,7 @@ export default function PaymentsPage() {
                         </p>
                       )}
                       <p className="text-xs text-muted-foreground mt-2">
-                        Received: {new Date(p.receivedAt).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" })}
+                        Received: {formatDisplayDate(p.receivedAt)}
                       </p>
                     </div>
                   </div>
