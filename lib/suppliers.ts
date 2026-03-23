@@ -6,11 +6,8 @@ import type {
   SupplierDetail,
   SupplierEmail,
   SupplierPackage,
-  SupplierPricingOption,
   SupplierRateCard,
   SupplierRoute,
-  SupplierSeasonalPeriod,
-  SupplierSeasonalPrice,
   SupplierSuiteType,
 } from "@/lib/types"
 
@@ -19,11 +16,6 @@ type PackageRow = Database["public"]["Tables"]["packages"]["Row"]
 type RateCardRow = Database["public"]["Tables"]["rate_cards"]["Row"]
 type RouteRow = Database["public"]["Tables"]["routes"]["Row"]
 type SupplierRow = Database["public"]["Tables"]["suppliers"]["Row"]
-type SupplierPricingOptionRow = Database["public"]["Tables"]["supplier_pricing_options"]["Row"]
-type SupplierSeasonalPeriodRow =
-  Database["public"]["Tables"]["supplier_seasonal_periods"]["Row"]
-type SupplierSeasonalPriceRow =
-  Database["public"]["Tables"]["supplier_seasonal_prices"]["Row"]
 type SupplierEmailRow = Database["public"]["Tables"]["supplier_emails"]["Row"]
 type SuiteTypeRow = Database["public"]["Tables"]["suite_types"]["Row"]
 
@@ -47,25 +39,6 @@ export function mapSupplier(row: SupplierRow): Supplier {
     location: row.location,
     notes: row.notes,
     active: row.active,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    createdAtDisplay: formatDisplayDateTime(row.created_at),
-    updatedAtDisplay: formatDisplayDateTime(row.updated_at),
-  }
-}
-
-export function mapSupplierPricingOption(
-  row: SupplierPricingOptionRow,
-): SupplierPricingOption {
-  return {
-    id: row.id,
-    supplierId: row.supplier_id,
-    name: row.name,
-    singlePrice: row.single_price,
-    doublePrice: row.double_price,
-    familyPrice: row.family_price,
-    currency: row.currency,
-    isPrimary: row.is_primary,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     createdAtDisplay: formatDisplayDateTime(row.created_at),
@@ -151,39 +124,6 @@ export function mapSupplierPackage(
     updatedAtDisplay: formatDisplayDateTime(row.updated_at),
     routes: routes.map(mapSupplierRoute),
     rateCards: rateCards.map(mapSupplierRateCard),
-  }
-}
-
-export function mapSupplierSeasonalPrice(
-  row: SupplierSeasonalPriceRow,
-): SupplierSeasonalPrice {
-  return {
-    id: row.id,
-    periodId: row.period_id,
-    optionId: row.option_id,
-    singlePrice: row.single_price,
-    doublePrice: row.double_price,
-    familyPrice: row.family_price,
-    createdAt: row.created_at,
-    createdAtDisplay: formatDisplayDateTime(row.created_at),
-  }
-}
-
-export function mapSupplierSeasonalPeriod(
-  row: SupplierSeasonalPeriodRow,
-  prices: SupplierSeasonalPriceRow[],
-): SupplierSeasonalPeriod {
-  return {
-    id: row.id,
-    supplierId: row.supplier_id,
-    label: row.label,
-    validFrom: row.valid_from,
-    validTo: row.valid_to,
-    createdAt: row.created_at,
-    validFromDisplay: formatDisplayDate(row.valid_from),
-    validToDisplay: formatDisplayDate(row.valid_to),
-    createdAtDisplay: formatDisplayDateTime(row.created_at),
-    prices: prices.map(mapSupplierSeasonalPrice),
   }
 }
 

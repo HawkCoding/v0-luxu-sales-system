@@ -6,16 +6,29 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
 } from 'lucide-react'
+import { enZA } from 'date-fns/locale'
 import { DayButton, DayPicker, getDefaultClassNames } from 'react-day-picker'
 
 import { cn } from '@/lib/utils'
 import { Button, buttonVariants } from '@/components/ui/button'
 
+/** Years before/after the current calendar year that the picker may navigate. */
+export const CALENDAR_YEAR_SPAN = 50
+
+export function getCalendarNavMonthBounds(
+  referenceYear = new Date().getFullYear(),
+): { startMonth: Date; endMonth: Date } {
+  return {
+    startMonth: new Date(referenceYear - CALENDAR_YEAR_SPAN, 0, 1),
+    endMonth: new Date(referenceYear + CALENDAR_YEAR_SPAN, 11, 31),
+  }
+}
+
 function Calendar({
   className,
   classNames,
   showOutsideDays = true,
-  captionLayout = 'label',
+  captionLayout = 'dropdown',
   buttonVariant = 'ghost',
   formatters,
   components,
@@ -24,10 +37,15 @@ function Calendar({
   buttonVariant?: React.ComponentProps<typeof Button>['variant']
 }) {
   const defaultClassNames = getDefaultClassNames()
+  const { startMonth: defaultStartMonth, endMonth: defaultEndMonth } =
+    getCalendarNavMonthBounds()
 
   return (
     <DayPicker
       showOutsideDays={showOutsideDays}
+      locale={props.locale ?? enZA}
+      startMonth={props.startMonth ?? defaultStartMonth}
+      endMonth={props.endMonth ?? defaultEndMonth}
       className={cn(
         'bg-background group/calendar p-3 [--cell-size:--spacing(8)] [[data-slot=card-content]_&]:bg-transparent [[data-slot=popover-content]_&]:bg-transparent',
         String.raw`rtl:**:[.rdp-button\_next>svg]:rotate-180`,
@@ -87,7 +105,7 @@ function Calendar({
         table: 'w-full border-collapse',
         weekdays: cn('flex', defaultClassNames.weekdays),
         weekday: cn(
-          'text-muted-foreground rounded-md flex-1 font-normal text-[0.8rem] select-none',
+          'text-muted-foreground rounded-md flex-1 font-medium text-[0.8rem] select-none',
           defaultClassNames.weekday,
         ),
         week: cn('flex w-full mt-2', defaultClassNames.week),
@@ -110,7 +128,7 @@ function Calendar({
         range_middle: cn('rounded-none', defaultClassNames.range_middle),
         range_end: cn('rounded-r-md bg-accent', defaultClassNames.range_end),
         today: cn(
-          'bg-accent text-accent-foreground rounded-md data-[selected=true]:rounded-none',
+          'rounded-md ring-1 ring-primary/35 ring-inset data-[selected=true]:ring-0',
           defaultClassNames.today,
         ),
         outside: cn(
@@ -202,6 +220,7 @@ function CalendarDayButton({
       data-range-middle={modifiers.range_middle}
       className={cn(
         'data-[selected-single=true]:bg-primary data-[selected-single=true]:text-primary-foreground data-[range-middle=true]:bg-accent data-[range-middle=true]:text-accent-foreground data-[range-start=true]:bg-primary data-[range-start=true]:text-primary-foreground data-[range-end=true]:bg-primary data-[range-end=true]:text-primary-foreground group-data-[focused=true]/day:border-ring group-data-[focused=true]/day:ring-ring/50 dark:hover:text-accent-foreground flex aspect-square size-auto w-full min-w-(--cell-size) flex-col gap-1 leading-none font-normal group-data-[focused=true]/day:relative group-data-[focused=true]/day:z-10 group-data-[focused=true]/day:ring-[3px] data-[range-end=true]:rounded-md data-[range-end=true]:rounded-r-md data-[range-middle=true]:rounded-none data-[range-start=true]:rounded-md data-[range-start=true]:rounded-l-md [&>span]:text-xs [&>span]:opacity-70',
+        'data-[selected-single=true]:shadow-sm',
         defaultClassNames.day,
         className,
       )}

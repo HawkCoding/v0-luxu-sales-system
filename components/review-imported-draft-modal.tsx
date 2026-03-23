@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { DatePicker } from "@/components/ui/date-picker"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -269,11 +270,10 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                         <Badge variant="outline" className="text-[10px] h-4">Check</Badge>
                       )}
                     </Label>
-                    <Input
-                      type="date"
+                    <DatePicker
                       value={draft.trip.departureDate}
-                      onChange={(e) => updateDraft('trip.departureDate', e.target.value)}
-                      className={!draft.trip.departureDate ? 'border-destructive' : ''}
+                      onChange={(value) => updateDraft('trip.departureDate', value ?? '')}
+                      buttonClassName={!draft.trip.departureDate ? 'border-destructive' : ''}
                     />
                   </div>
                 </CardContent>

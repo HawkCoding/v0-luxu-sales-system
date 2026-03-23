@@ -30,6 +30,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ContentTransition } from "@/components/ui/content-transition"
+import { DatePicker } from "@/components/ui/date-picker"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { NumericInput } from "@/components/ui/numeric-input"
@@ -1024,43 +1025,51 @@ function RateCardMatrixEditor({
               <div className="grid gap-3 border-b bg-secondary/30 px-4 py-3 md:grid-cols-4">
                 <div className="space-y-2">
                   <Label>Valid from</Label>
-                  <Input
-                    type="date"
+                  <DatePicker
                     value={period.validFrom}
-                    className={
+                    buttonClassName={
                       periodFieldErrors.has(`${period.key}|validFrom`)
                         ? "border-destructive focus-visible:ring-destructive/35"
                         : undefined
                     }
-                    onChange={(event) =>
+                    onChange={(value) =>
                       onUpdatePeriodField(
                         packageIndex,
                         period.key,
                         "validFrom",
-                        event.target.value,
+                        value ?? "",
                       )
                     }
                   />
                 </div>
                 <div className="space-y-2">
                   <Label>Valid to</Label>
-                  <Input
-                    type="date"
-                    value={period.validTo ?? ""}
-                    className={
-                      periodFieldErrors.has(`${period.key}|validTo`)
-                        ? "border-destructive focus-visible:ring-destructive/35"
-                        : undefined
-                    }
-                    onChange={(event) =>
-                      onUpdatePeriodField(
-                        packageIndex,
-                        period.key,
-                        "validTo",
-                        event.target.value || null,
-                      )
-                    }
-                  />
+                  <div className="relative">
+                    {!period.validTo?.trim() ? (
+                      <Badge
+                        variant="outline"
+                        className="absolute top-0 right-1 z-10 -translate-y-1/2 bg-background px-1.5 py-0 text-[10px] font-medium uppercase tracking-wide"
+                      >
+                        ONGOING
+                      </Badge>
+                    ) : null}
+                    <DatePicker
+                      value={period.validTo ?? ""}
+                      buttonClassName={
+                        periodFieldErrors.has(`${period.key}|validTo`)
+                          ? "border-destructive focus-visible:ring-destructive/35"
+                          : undefined
+                      }
+                      onChange={(value) =>
+                        onUpdatePeriodField(
+                          packageIndex,
+                          period.key,
+                          "validTo",
+                          value || null,
+                        )
+                      }
+                    />
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label>Currency</Label>
@@ -2541,11 +2550,6 @@ export function SupplierDetailView({
                     {`No ${activeVocabulary.suiteTypePlural.toLowerCase()} configured.`}
                   </div>
                 )}
-              </div>
-
-              <div className="rounded-lg border-dashed border p-3 text-xs text-muted-foreground">
-                Note: legacy supplier pricing and seasonal pricing tables remain in the database for
-                now and are planned for cleanup later.
               </div>
 
               <Separator />

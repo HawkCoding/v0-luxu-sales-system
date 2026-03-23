@@ -174,22 +174,6 @@ export function getSupplierVocabulary(kind: SupplierKind): SupplierVocabulary {
   return SUPPLIER_VOCABULARY[kind]
 }
 
-/** @deprecated Planned for DB/API cleanup after UI removal. */
-export interface SupplierPricingOption {
-  id: string
-  supplierId: string
-  name: string
-  singlePrice: number
-  doublePrice: number
-  familyPrice: number
-  currency: string
-  isPrimary: boolean
-  createdAt: string
-  createdAtDisplay?: string
-  updatedAt: string
-  updatedAtDisplay?: string
-}
-
 export interface Location {
   id: string
   name: string
@@ -264,32 +248,6 @@ export interface SupplierEmail {
   label: string
   createdAt: string
   createdAtDisplay?: string
-}
-
-/** @deprecated Planned for DB/API cleanup after UI removal. */
-export interface SupplierSeasonalPrice {
-  id: string
-  periodId: string
-  optionId: string
-  singlePrice: number
-  doublePrice: number
-  familyPrice: number
-  createdAt: string
-  createdAtDisplay?: string
-}
-
-/** @deprecated Planned for DB/API cleanup after UI removal. */
-export interface SupplierSeasonalPeriod {
-  id: string
-  supplierId: string
-  label: string | null
-  validFrom: string
-  validFromDisplay?: string
-  validTo: string
-  validToDisplay?: string
-  createdAt: string
-  createdAtDisplay?: string
-  prices: SupplierSeasonalPrice[]
 }
 
 export interface Supplier {
