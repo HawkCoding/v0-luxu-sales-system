@@ -12,7 +12,7 @@ import { useState } from "react"
 import { CONSULTANTS, type ConsultantAbbreviation } from "@/lib/types"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
-import { formatDisplayDate } from "@/lib/date-format"
+import { format } from "date-fns"
 
 export default function BookingsPage() {
   const { data, isLoading, error, mutate } = useAllData()
@@ -235,9 +235,9 @@ export default function BookingsPage() {
                     <CalendarCheck className="mr-2 h-4 w-4" />
                     {createdDateFrom || createdDateTo ? (
                       <span className="text-xs">
-                        {createdDateFrom && formatDisplayDate(createdDateFrom)}
+                        {createdDateFrom && format(createdDateFrom, "dd/MM/yy")}
                         {createdDateFrom && createdDateTo && " - "}
-                        {createdDateTo && formatDisplayDate(createdDateTo)}
+                        {createdDateTo && format(createdDateTo, "dd/MM/yy")}
                       </span>
                     ) : (
                       <span className="text-muted-foreground">Created Date</span>
@@ -275,9 +275,9 @@ export default function BookingsPage() {
                     <CalendarCheck className="mr-2 h-4 w-4" />
                     {departureDateFrom || departureDateTo ? (
                       <span className="text-xs">
-                        {departureDateFrom && formatDisplayDate(departureDateFrom)}
+                        {departureDateFrom && format(departureDateFrom, "dd/MM/yy")}
                         {departureDateFrom && departureDateTo && " - "}
-                        {departureDateTo && formatDisplayDate(departureDateTo)}
+                        {departureDateTo && format(departureDateTo, "dd/MM/yy")}
                       </span>
                     ) : (
                       <span className="text-muted-foreground">Departure Date</span>
@@ -378,7 +378,11 @@ export default function BookingsPage() {
                             <span>•</span>
                             <span>
                               Departs:{" "}
-                              {formatDisplayDate(booking.departureDate)}
+                              {new Date(booking.departureDate).toLocaleDateString("en-ZA", {
+                                day: "numeric",
+                                month: "short",
+                                year: "numeric",
+                              })}
                             </span>
                           </>
                         )}
@@ -393,7 +397,7 @@ export default function BookingsPage() {
                       of R {booking.totalQuote.toLocaleString()}
                     </p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Created {formatDisplayDate(booking.createdAt)}
+                      Created {new Date(booking.createdAt).toLocaleDateString()}
                     </p>
                   </div>
                 </div>

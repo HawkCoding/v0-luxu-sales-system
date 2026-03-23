@@ -1,7 +1,6 @@
 "use client"
 
 import { usePipeline, useAllData } from "@/lib/use-data"
-import { formatDisplayDate } from "@/lib/date-format"
 import { PIPELINE_STAGES, KANBAN_STAGES, CONSULTANTS, type PipelineStage, type ConsultantAbbreviation } from "@/lib/types"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -460,13 +459,13 @@ export default function PipelinePage() {
                             <span className="text-sm text-muted-foreground">{b.customerName}</span>
                           </div>
                           <p className="text-sm text-muted-foreground truncate mt-1">
-                            {b.direction}{b.departureDate ? ` | Dep: ${formatDisplayDate(b.departureDate)}` : ""}
+                            {b.direction}{b.departureDate ? ` | Dep: ${new Date(b.departureDate).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" })}` : ""}
                           </p>
                         </div>
                       </div>
                       <div className="text-right flex-shrink-0">
                         <Badge variant="outline" className="text-xs">{b.stage.replace(/_/g, " ")}</Badge>
-                        <p className="text-xs text-muted-foreground mt-1">{formatDisplayDate(b.updatedAt)}</p>
+                        <p className="text-xs text-muted-foreground mt-1">{new Date(b.updatedAt).toLocaleDateString()}</p>
                       </div>
                     </div>
                   </CardContent>
@@ -562,13 +561,13 @@ export default function PipelinePage() {
                             <Badge variant="secondary" className="text-xs">{b.purpose}</Badge>
                           </div>
                           <p className="text-sm text-muted-foreground truncate mt-1">
-                            {b.name} {b.surname} &middot; {b.direction} &middot; {b.departureDate ? formatDisplayDate(b.departureDate) : ""}
+                            {b.name} {b.surname} &middot; {b.direction} &middot; {b.departureDate ? new Date(b.departureDate).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" }) : ""}
                           </p>
                         </div>
                       </div>
                       <div className="text-right flex-shrink-0">
                         <Badge variant="outline" className="text-xs">{b.stage?.replace(/_/g, " ")}</Badge>
-                        <p className="text-xs text-muted-foreground mt-1">{formatDisplayDate(b.createdAt)}</p>
+                        <p className="text-xs text-muted-foreground mt-1">{new Date(b.createdAt).toLocaleDateString()}</p>
                       </div>
                     </div>
                   </CardContent>
@@ -660,7 +659,7 @@ function PipelineCard({
         )}
         {job.departureDate && (
           <p className="text-[11px] text-muted-foreground mt-0.5">
-            Dep: {formatDisplayDate(job.departureDate)}
+            Dep: {new Date(job.departureDate).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" })}
           </p>
         )}
         <button

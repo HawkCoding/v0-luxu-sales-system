@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 import { createSessionClient } from "@/lib/supabase/server"
-import { formatDisplayDate } from "@/lib/date-format"
 
 export async function POST(req: Request) {
   const body = await req.json()
@@ -47,7 +46,6 @@ export async function POST(req: Request) {
     itineraryId: quote.itinerary_id,
     status: quote.status,
     validityUntil: quote.validity_until,
-    validityUntilDisplay: formatDisplayDate(quote.validity_until),
     subtotal: quote.subtotal,
     vat: quote.vat,
     total: quote.total,

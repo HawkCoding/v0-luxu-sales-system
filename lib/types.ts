@@ -70,9 +70,7 @@ export interface Customer {
   title?: string | null
   notes?: string | null
   createdAt: string
-  createdAtDisplay?: string
   updatedAt?: string
-  updatedAtDisplay?: string
 }
 
 // Booking is the primary entity — replaces the old Job + Enquiry combination.
@@ -86,7 +84,6 @@ export interface Booking {
   consultant: string | null
   ownerUserId: string | null
   departureDate: string | null
-  departureDateDisplay?: string
   durationNights: number | null
   noOfAdults: number
   noOfChildren: number
@@ -105,9 +102,7 @@ export interface Booking {
   hotelPhase: string
   hotelSupplierId: string | null
   createdAt: string
-  createdAtDisplay?: string
   updatedAt: string
-  updatedAtDisplay?: string
 }
 
 export type SupplierKind = "train_operator" | "hotel_property" | "transfers"
@@ -185,9 +180,7 @@ export interface SupplierPricingOption {
   currency: string
   isPrimary: boolean
   createdAt: string
-  createdAtDisplay?: string
   updatedAt: string
-  updatedAtDisplay?: string
 }
 
 export interface Location {
@@ -196,9 +189,7 @@ export interface Location {
   country: string
   regionCode: string | null
   createdAt: string
-  createdAtDisplay?: string
   updatedAt: string
-  updatedAtDisplay?: string
 }
 
 export interface SupplierRoute {
@@ -209,9 +200,7 @@ export interface SupplierRoute {
   destinationLocationId: string
   active: boolean
   createdAt: string
-  createdAtDisplay?: string
   updatedAt: string
-  updatedAtDisplay?: string
 }
 
 export interface SupplierSuiteType {
@@ -220,9 +209,7 @@ export interface SupplierSuiteType {
   name: string
   active: boolean
   createdAt: string
-  createdAtDisplay?: string
   updatedAt: string
-  updatedAtDisplay?: string
 }
 
 export interface SupplierRateCard {
@@ -233,11 +220,8 @@ export interface SupplierRateCard {
   pricePerPerson: number
   currency: string
   validFrom: string
-  validFromDisplay?: string
   validTo: string | null
-  validToDisplay?: string
   createdAt: string
-  createdAtDisplay?: string
 }
 
 export interface SupplierPackage {
@@ -250,9 +234,7 @@ export interface SupplierPackage {
   currency: string
   active: boolean
   createdAt: string
-  createdAtDisplay?: string
   updatedAt: string
-  updatedAtDisplay?: string
   routes: SupplierRoute[]
   rateCards: SupplierRateCard[]
 }
@@ -263,7 +245,6 @@ export interface SupplierEmail {
   email: string
   label: string
   createdAt: string
-  createdAtDisplay?: string
 }
 
 /** @deprecated Planned for DB/API cleanup after UI removal. */
@@ -275,7 +256,6 @@ export interface SupplierSeasonalPrice {
   doublePrice: number
   familyPrice: number
   createdAt: string
-  createdAtDisplay?: string
 }
 
 /** @deprecated Planned for DB/API cleanup after UI removal. */
@@ -284,11 +264,8 @@ export interface SupplierSeasonalPeriod {
   supplierId: string
   label: string | null
   validFrom: string
-  validFromDisplay?: string
   validTo: string
-  validToDisplay?: string
   createdAt: string
-  createdAtDisplay?: string
   prices: SupplierSeasonalPrice[]
 }
 
@@ -305,9 +282,7 @@ export interface Supplier {
   notes: string | null
   active: boolean
   createdAt: string
-  createdAtDisplay?: string
   updatedAt: string
-  updatedAtDisplay?: string
 }
 
 export interface SupplierDetail extends Supplier {
@@ -328,9 +303,7 @@ export interface Job {
   source: Source
   stage: PipelineStage
   createdAt: string
-  createdAtDisplay?: string
   updatedAt: string
-  updatedAtDisplay?: string
 }
 
 export interface Enquiry {
@@ -349,7 +322,6 @@ export interface Enquiry {
   country: string
   direction: string
   departureDate: string
-  departureDateDisplay?: string
   noOfSuites: number
   noOfAdults: number
   noOfChildren: number
@@ -366,7 +338,6 @@ export interface Enquiry {
   promotionCode?: string
   termsAccepted: boolean
   createdAt: string
-  createdAtDisplay?: string
 }
 
 export interface Traveller {
@@ -375,7 +346,6 @@ export interface Traveller {
   surname: string
   idPassport: string
   dateOfBirth: string
-  dateOfBirthDisplay?: string
 }
 
 export interface Itinerary {
@@ -384,7 +354,6 @@ export interface Itinerary {
   name: string
   notes: string
   acceptedAt?: string
-  acceptedAtDisplay?: string
 }
 
 export type QuoteStatus = "draft" | "pricing_incomplete" | "ready" | "sent" | "accepted"
@@ -402,13 +371,11 @@ export interface Quote {
   jobId: string
   status: QuoteStatus
   validityUntil: string
-  validityUntilDisplay?: string
   lineItems: QuoteLineItem[]
   subtotal: number
   vat: number
   total: number
   lastSentAt?: string
-  lastSentAtDisplay?: string
   overridePin?: string
   overrideReason?: string
 }
@@ -418,7 +385,6 @@ export interface Payment {
   jobId: string
   amount: number
   receivedAt: string
-  receivedAtDisplay?: string
   method: string
   reference: string
   notes: string
@@ -431,7 +397,6 @@ export interface DocRecord {
   jobId: string
   kind: DocumentKind
   generatedAt: string
-  generatedAtDisplay?: string
   urlOrBlobRef: string
 }
 
@@ -452,9 +417,7 @@ export interface Correspondence {
   bodyHtml: string
   status: "sent" | "failed" | "scheduled"
   sentAt?: string
-  sentAtDisplay?: string
   scheduledAt?: string
-  scheduledAtDisplay?: string
   error?: string
 }
 
@@ -468,7 +431,6 @@ export interface AuditLog {
   afterJson?: string
   metaJson?: string
   createdAt: string
-  createdAtDisplay?: string
 }
 
 export interface RateCard {
@@ -485,5 +447,4 @@ export interface PipelineHistory {
   toStage: PipelineStage
   movedBy: string
   movedAt: string
-  movedAtDisplay?: string
 }

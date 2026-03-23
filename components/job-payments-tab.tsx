@@ -10,7 +10,6 @@ import type { Payment } from "@/lib/types"
 import { useRole } from "@/lib/role-context"
 import { useState } from "react"
 import { Plus } from "lucide-react"
-import { formatDisplayDate } from "@/lib/date-format"
 
 export function JobPaymentsTab({ payments, jobId, mutate }: { payments: Payment[]; jobId: string; mutate: () => void }) {
   const { can } = useRole()
@@ -107,7 +106,7 @@ export function JobPaymentsTab({ payments, jobId, mutate }: { payments: Payment[
                   <p className="text-xs text-muted-foreground mt-0.5">Ref: {p.reference} {p.notes ? `| ${p.notes}` : ""}</p>
                 </div>
                 <span className="text-xs text-muted-foreground flex-shrink-0">
-                  {formatDisplayDate(p.receivedAt)}
+                  {new Date(p.receivedAt).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" })}
                 </span>
               </CardContent>
             </Card>

@@ -52,7 +52,6 @@ import {
 import { useRole } from "@/lib/role-context"
 import { shortenUrl } from "@/lib/url"
 import { useLocations, useSupplierDetail } from "@/lib/use-data"
-import { formatDisplayDate } from "@/lib/date-format"
 import {
   getSupplierVocabulary,
   SUPPLIER_KIND_LABELS,
@@ -338,8 +337,8 @@ function formatCurrency(amount: number, currency: string) {
 }
 
 function formatDateRange(validFrom: string, validTo: string | null) {
-  const from = validFrom ? formatDisplayDate(validFrom) : "Open"
-  const to = validTo ? formatDisplayDate(validTo) : "Open ended"
+  const from = validFrom ? new Date(validFrom).toLocaleDateString() : "Open"
+  const to = validTo ? new Date(validTo).toLocaleDateString() : "Open ended"
   return `${from} - ${to}`
 }
 
@@ -1843,6 +1842,17 @@ export function SupplierDetailView({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ ...buildDraftPayload(form), expectedUpdatedAt: supplierUpdatedAt }),
           })
+          const autosaveRoundTripMs = performance.now() - autosaveRequestStartedAt
+          console.info(
+            "[supplier-draft-autosave]",
+            JSON.stringify({
+              supplierSlug,
+              status: response.status,
+              roundTripMs: Number(autosaveRoundTripMs.toFixed(1)),
+              serverTiming: response.headers.get("server-timing"),
+            }),
+          )
+
           if (!response.ok) {
             setDraftSaveStatus("error")
             return
@@ -2059,6 +2069,17 @@ export function SupplierDetailView({
           expectedUpdatedAt: supplier?.updatedAt,
         }),
       })
+      const saveRoundTripMs = performance.now() - saveRequestStartedAt
+      console.info(
+        "[supplier-save]",
+        JSON.stringify({
+          supplierSlug,
+          status: response.status,
+          roundTripMs: Number(saveRoundTripMs.toFixed(1)),
+          serverTiming: response.headers.get("server-timing"),
+        }),
+      )
+
       const payload = await response.json()
 
       if (!response.ok) {
@@ -2391,7 +2412,7 @@ export function SupplierDetailView({
                   <InfoItem label="Location" value={supplier.location} />
                   <InfoItem
                     label="Last updated"
-                    value={formatDisplayDate(supplier.updatedAt)}
+                    value={new Date(supplier.updatedAt).toLocaleDateString()}
                   />
                   <InfoItem
                     label="Status"
