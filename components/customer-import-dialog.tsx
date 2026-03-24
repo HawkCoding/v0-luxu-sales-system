@@ -76,6 +76,11 @@ interface RetryableChunk {
   error: string
 }
 
+interface ImportRunConfig {
+  supplierId: string | null
+  routeId: string | null
+}
+
 const REQUIRED_HEADERS = ["first_name", "last_name", "email"] as const
 const HEADER_ALIASES: Record<string, "title" | "first_name" | "last_name" | "email" | "phone" | "country"> = {
   title: "title",
@@ -234,6 +239,7 @@ export function CustomerBulkImportPanel() {
   const [pendingRowsForImport, setPendingRowsForImport] = useState<EditableImportRow[] | null>(null)
   const [pendingConflicts, setPendingConflicts] = useState<ImportConflictGroup[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
+  const importRunConfigRef = useRef<ImportRunConfig | null>(null)
 
   const selectedSupplierSlug = useMemo(
     () => suppliers.find((supplier) => supplier.id === selectedSupplierId)?.slug ?? "",
@@ -280,6 +286,7 @@ export function CustomerBulkImportPanel() {
     setResult(null)
     setChunkStatuses([])
     setRetryableChunks([])
+    importRunConfigRef.current = null
     setFiles([incoming[0]])
   }, [])
 
@@ -315,6 +322,7 @@ export function CustomerBulkImportPanel() {
     setConflictModalOpen(false)
     setPendingRowsForImport(null)
     setPendingConflicts([])
+    importRunConfigRef.current = null
   }
 
   const parseCsvFile = async (file: File): Promise<EditableImportRow[]> => {
@@ -359,6 +367,7 @@ export function CustomerBulkImportPanel() {
     setResult(null)
     setChunkStatuses([])
     setRetryableChunks([])
+    importRunConfigRef.current = null
     try {
       const nextRows = await parseCsvFile(files[0])
       if (nextRows.length === 0) {
@@ -392,13 +401,16 @@ export function CustomerBulkImportPanel() {
     )
   }
 
-  const postChunk = async (chunkRowsData: EditableImportRow[]): Promise<ChunkImportResult> => {
+  const postChunk = async (
+    chunkRowsData: EditableImportRow[],
+    runConfig: ImportRunConfig,
+  ): Promise<ChunkImportResult> => {
     const response = await fetch("/api/customers/import", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        supplierId: selectedSupplierId,
-        routeId: selectedRouteId,
+        supplierId: runConfig.supplierId,
+        routeId: runConfig.routeId,
         rows: toImportPayloadRows(chunkRowsData),
       }),
     })
@@ -419,6 +431,12 @@ export function CustomerBulkImportPanel() {
     conflictEmailsFromPrescan: string[],
     invalidSkipped: number,
   ) => {
+    const runConfig: ImportRunConfig = {
+      supplierId: selectedSupplierId,
+      routeId: selectedRouteId,
+    }
+    importRunConfigRef.current = runConfig
+
     setIsSubmitting(true)
     setResult(null)
     setRetryableChunks([])
@@ -454,7 +472,7 @@ export function CustomerBulkImportPanel() {
             const invalidInChunk = chunk.some((row) => !isRowValid(row))
             if (invalidInChunk) throw new Error("Chunk contains invalid rows. Please review extracted data and retry.")
 
-            const next = await postChunk(chunk)
+            const next = await postChunk(chunk, runConfig)
             createdCustomers += next.createdCustomers
             matchedCustomers += next.matchedCustomers
             importedBookings += next.importedBookings
@@ -493,7 +511,8 @@ export function CustomerBulkImportPanel() {
 
       setResult(nextResult)
       setRetryableChunks(failed)
-      if (importedBookings > 0) await mutate("/api/data")
+      if (failed.length === 0) importRunConfigRef.current = null
+      if (importedBookings > 0 || createdCustomers > 0) await mutate("/api/data")
 
       if (failed.length > 0) {
         toast.error("Import partially complete", {
@@ -519,6 +538,14 @@ export function CustomerBulkImportPanel() {
 
   const handleRetryFailedChunks = async () => {
     if (retryableChunks.length === 0 || !result) return
+    const runConfig = importRunConfigRef.current
+    if (!runConfig) {
+      toast.error("Retry context unavailable", {
+        description: "Please start the import again to retry failed chunks safely.",
+      })
+      return
+    }
+
     setIsSubmitting(true)
     await yieldForLoadingPaint()
     try {
@@ -535,7 +562,7 @@ export function CustomerBulkImportPanel() {
         while (!success && attempts <= AUTO_RETRY_ATTEMPTS) {
           updateChunkStatus(failedChunk.chunkNumber, { state: attempts > 0 ? "retrying" : "processing", error: undefined })
           try {
-            const next = await postChunk(failedChunk.rows)
+            const next = await postChunk(failedChunk.rows, runConfig)
             createdDelta += next.createdCustomers
             matchedDelta += next.matchedCustomers
             importedDelta += next.importedBookings
@@ -559,7 +586,8 @@ export function CustomerBulkImportPanel() {
       }
 
       setRetryableChunks(remainingFailed)
-      if (importedDelta > 0) await mutate("/api/data")
+      if (remainingFailed.length === 0) importRunConfigRef.current = null
+      if (importedDelta > 0 || createdDelta > 0) await mutate("/api/data")
 
       setResult((current) => {
         if (!current) return current
