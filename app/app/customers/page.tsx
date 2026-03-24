@@ -13,6 +13,7 @@ import { useEffect, useState } from "react"
 import { CONSULTANTS, type ConsultantAbbreviation } from "@/lib/types"
 import { formatDisplayDate } from "@/lib/date-format"
 import Link from "next/link"
+import { useSearchParams } from "next/navigation"
 import { CustomerDetailView } from "@/components/customer-detail-view"
 import {
   Dialog,
@@ -29,6 +30,7 @@ function getCustomerIdFromPath(pathname: string): string | null {
 
 export default function CustomersPage() {
   const { data, isLoading } = useAllData()
+  const searchParams = useSearchParams()
   const [search, setSearch] = useState("")
   const [consultantFilter, setConsultantFilter] = useState<"all" | ConsultantAbbreviation>("all")
   const [supplierFilter, setSupplierFilter] = useState("all")
@@ -44,6 +46,11 @@ export default function CustomersPage() {
     window.addEventListener("popstate", handlePopState)
     return () => window.removeEventListener("popstate", handlePopState)
   }, [])
+
+  useEffect(() => {
+    const searchFromQuery = searchParams.get("search")?.trim() ?? ""
+    if (searchFromQuery.length > 0) setSearch(searchFromQuery)
+  }, [searchParams])
 
   const openCustomerModal = (customerId: string) => {
     setSelectedCustomerId(customerId)
