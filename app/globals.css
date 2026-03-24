@@ -239,3 +239,38 @@ body {
     color: var(--luxu-text-body);
   }
 }
+
+/* Bulk import review table: one scrollport so sticky columns match; GPU layer for smooth scroll */
+@layer utilities {
+  .import-review-scroll {
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+    will-change: transform;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .import-review-scroll::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .import-review-scroll::-webkit-scrollbar-track {
+    background: transparent;
+    border-radius: 4px;
+  }
+
+  .import-review-scroll::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 4px;
+  }
+
+  .import-review-scroll::-webkit-scrollbar-thumb:hover {
+    background: var(--input);
+  }
+
+  .import-review-scroll::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
