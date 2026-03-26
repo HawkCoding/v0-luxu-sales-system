@@ -1852,6 +1852,7 @@ export function SupplierDetailView({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ ...buildDraftPayload(form), expectedUpdatedAt: supplierUpdatedAt }),
           })
+
           if (!response.ok) {
             setDraftSaveStatus("error")
             return
@@ -2068,6 +2069,7 @@ export function SupplierDetailView({
           expectedUpdatedAt: supplier?.updatedAt,
         }),
       })
+
       const payload = await response.json()
 
       if (!response.ok) {
