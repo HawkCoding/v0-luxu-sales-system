@@ -1,0 +1,69 @@
+---
+description: >-
+  Execute the /pr command — commit pending changes (if any), push the current branch,
+  create a GitHub PR targeting develop with an AI-generated title and body from the diff,
+  then open the PR in the browser. Invoke when the user types /pr or asks to open a PR this way.
+alwaysApply: false
+---
+
+# /pr — Pull request workflow
+
+When the user runs **`/pr`** or asks to follow this PR flow, execute the steps below in order. Do not skip safety checks.
+
+## Preconditions
+
+- **GitHub CLI** (`gh`) must be installed and authenticated (`gh auth status`).
+- **Remote** is `origin`; **base branch** is always **`develop`** (not `main`).
+- If `origin/develop` is missing locally, run `git fetch origin develop` first.
+
+## 1. Commit pending changes
+
+1. Run `git status`.
+2. If there are **no** unstaged or staged changes, go to step 2.
+3. If there are changes:
+   - Run `git diff` and `git diff --staged` to understand the full change set.
+   - **Do not** commit secrets: reject or exclude `.env`, `.env.local`, keys, tokens, or credential files. If such files appear in the diff, stop and tell the user to remove them from the commit.
+   - Write an imperative commit message (short subject; optional body explaining *why*). Avoid vague messages like "fix" or "updates".
+   - Stage and commit: `git add -A` (or stage only safe paths if something must be excluded), then `git commit -m "..."`.
+   - **Never** use `--no-verify`, `git push --force`, `git reset --hard`, or amend commits that are already on the remote.
+
+## 2. Push the branch
+
+- Run `git push -u origin HEAD` so the current branch exists on `origin`.
+
+## 3. Generate PR title and body
+
+1. Fetch comparison base if needed: `git fetch origin develop`.
+2. Collect context:
+   - `git log origin/develop..HEAD --oneline`
+   - `git diff origin/develop...HEAD --stat`
+   - Optionally scan key hunks in `git diff origin/develop...HEAD` for accurate wording.
+3. Write:
+   - **Title**: One line, concise, what the PR delivers (not a branch name).
+   - **Body** (Markdown):
+     - **Summary**: bullet list of user-visible or architectural changes.
+     - **Test plan**: short checklist (e.g. manual steps, `pnpm lint` / `pnpm test` if relevant to the change).
+
+## 4. Create the PR
+
+- Target branch: **`develop`** only.
+- Use GitHub CLI:
+
+```bash
+gh pr create --base develop --title "<title>" --body-file <path-to-body-file>
+```
+
+- For multiline bodies, write the body to a temporary file (e.g. `.git/pr-body.md` or a temp path), then use `--body-file`. On Unix shells you may use a heredoc instead; on Windows PowerShell, `--body-file` is the reliable option.
+- If a PR for this branch already exists, use `gh pr view --web` or report the existing URL instead of creating a duplicate.
+
+## 5. Open in browser and confirm
+
+- Run `gh pr view --web` **or** pass `--web` to `gh pr create` if supported by your `gh` version.
+- Paste the PR URL in the chat so the user can copy it.
+
+## Out of scope (refuse or hand off)
+
+- Changing the default branch on GitHub.
+- Force-pushing or rewriting published history.
+- Merging or approving the PR automatically.
+- Targeting any base branch other than **`develop`**.

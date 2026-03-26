@@ -87,6 +87,8 @@ export function useCustomerDetail(id: string) {
         bookings: Array<
           Pick<Booking, "id" | "bookingNumber" | "stage" | "consultant" | "departureDate" | "createdAt"> & {
             direction: string | null
+            supplierName: string | null
+            packageName: string | null
           }
         >
       }
