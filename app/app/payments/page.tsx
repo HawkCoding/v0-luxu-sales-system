@@ -3,6 +3,7 @@
 import { useAllData } from "@/lib/use-data"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { DatePicker } from "@/components/ui/date-picker"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog"
@@ -14,6 +15,7 @@ import Link from "next/link"
 import { useState } from "react"
 import { toast } from "sonner"
 import { useAuth } from "@/lib/auth-context"
+import { formatDisplayDate } from "@/lib/date-format"
 
 export default function PaymentsPage() {
   const { data, isLoading, mutate } = useAllData()
@@ -185,11 +187,10 @@ export default function PaymentsPage() {
                   </div>
                   <div>
                     <Label htmlFor="receivedAt" className="text-sm font-medium">Date Received *</Label>
-                    <Input
+                    <DatePicker
                       id="receivedAt"
-                      type="date"
                       value={form.receivedAt}
-                      onChange={(e) => setForm(f => ({ ...f, receivedAt: e.target.value }))}
+                      onChange={(value) => setForm(f => ({ ...f, receivedAt: value ?? "" }))}
                       className="mt-1"
                     />
                   </div>
@@ -295,7 +296,7 @@ export default function PaymentsPage() {
                         </p>
                       )}
                       <p className="text-xs text-muted-foreground mt-2">
-                        Received: {new Date(p.receivedAt).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" })}
+                        Received: {formatDisplayDate(p.receivedAt)}
                       </p>
                     </div>
                   </div>

@@ -7,19 +7,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { LoadingState } from "@/components/ui/loading-state"
+import { Spinner } from "@/components/ui/spinner"
 
 const loginPageClassName = "min-h-screen bg-background flex items-center justify-center p-4"
-
-function LoginLoadingState() {
-  return (
-    <div className="text-center space-y-3">
-      <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto animate-pulse">
-        <span className="text-xl font-bold text-primary">LT</span>
-      </div>
-      <p className="text-muted-foreground">Loading...</p>
-    </div>
-  )
-}
 
 function LoginShell({ children }: { children: React.ReactNode }) {
   return <div className={loginPageClassName}>{children}</div>
@@ -39,9 +30,15 @@ function LoginForm() {
   const [forgotEmail, setForgotEmail] = useState("")
   const [forgotSubmitting, setForgotSubmitting] = useState(false)
   const [forgotSent, setForgotSent] = useState(false)
+  const [slowLoad, setSlowLoad] = useState(false)
 
   useEffect(() => {
     setHydrated(true)
+  }, [])
+
+  useEffect(() => {
+    const t = setTimeout(() => setSlowLoad(true), 9000)
+    return () => clearTimeout(t)
   }, [])
 
   useEffect(() => {
@@ -132,7 +129,14 @@ function LoginForm() {
   if (loading || !hydrated) {
     return (
       <LoginShell>
-        <LoginLoadingState />
+        <div className="flex flex-col items-center">
+          <LoadingState variant="page" message="Loading..." />
+          {slowLoad && (
+            <p className="mt-3 text-center text-sm text-muted-foreground">
+              Having trouble connecting. Please check your network.
+            </p>
+          )}
+        </div>
       </LoginShell>
     )
   }
@@ -169,7 +173,14 @@ function LoginForm() {
                     />
                     <div className="flex gap-2">
                       <Button type="submit" className="flex-1 h-11" disabled={forgotSubmitting}>
-                        {forgotSubmitting ? "Sending…" : "Send reset link"}
+                        {forgotSubmitting ? (
+                          <>
+                            <Spinner className="size-4" aria-hidden="true" />
+                            Sending…
+                          </>
+                        ) : (
+                          "Send reset link"
+                        )}
                       </Button>
                       <Button type="button" variant="outline" className="h-11" onClick={() => { setForgotMode(false); setError(""); setForgotSent(false) }}>
                         Back
@@ -215,7 +226,14 @@ function LoginForm() {
                     />
                   </div>
                   <Button type="submit" className="w-full h-11 text-base font-medium" disabled={submitting}>
-                    {submitting ? "Signing in…" : "Sign in with email"}
+                    {submitting ? (
+                      <>
+                        <Spinner className="size-4" aria-hidden="true" />
+                        Signing in…
+                      </>
+                    ) : (
+                      "Sign in with email"
+                    )}
                   </Button>
                 </form>
 
@@ -235,7 +253,14 @@ function LoginForm() {
                   disabled={oauthSubmitting}
                   onClick={handleMicrosoftLogin}
                 >
-                  {oauthSubmitting ? "Redirecting…" : "Sign in with Microsoft"}
+                  {oauthSubmitting ? (
+                    <>
+                      <Spinner className="size-4" aria-hidden="true" />
+                      Redirecting…
+                    </>
+                  ) : (
+                    "Sign in with Microsoft"
+                  )}
                 </Button>
               </>
             )}
@@ -255,7 +280,7 @@ function LoginForm() {
 export default function LoginPage() {
   return (
     <AuthProvider>
-      <Suspense fallback={<LoginShell><LoginLoadingState /></LoginShell>}>
+      <Suspense fallback={<LoginShell><LoadingState variant="page" message="Loading..." /></LoginShell>}>
         <LoginForm />
       </Suspense>
     </AuthProvider>

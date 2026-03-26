@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
+import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 
 const allowedRoles = new Set(["admin", "manager"])
 
@@ -30,7 +31,9 @@ export async function GET(
       supabase.from("customers").select("*").eq("id", id).single(),
       supabase
         .from("bookings")
-        .select("id, booking_number, stage, consultant, departure_date, created_at, route:routes(name), extracted_json")
+        .select(
+          "id, booking_number, stage, consultant, departure_date, created_at, route:routes(name), package:packages(name, supplier:suppliers(id, name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(id, name), extracted_json",
+        )
         .eq("customer_id", id)
         .order("created_at", { ascending: false }),
     ])
@@ -55,19 +58,32 @@ export async function GET(
       notes: customer.notes,
       createdAt: customer.created_at,
       updatedAt: customer.updated_at,
+      createdAtDisplay: formatDisplayDateTime(customer.created_at),
+      updatedAtDisplay: formatDisplayDateTime(customer.updated_at),
     },
-    bookings: (bookings ?? []).map((booking) => ({
-      id: booking.id,
-      bookingNumber: booking.booking_number,
-      stage: booking.stage,
-      consultant: booking.consultant,
-      departureDate: booking.departure_date,
-      direction:
-        (booking.route as { name?: string } | null)?.name ??
-        ((booking.extracted_json as { historical_import?: { route?: string } } | null)
-          ?.historical_import?.route ?? null),
-      createdAt: booking.created_at,
-    })),
+    bookings: (bookings ?? []).map((booking) => {
+      const packageInfo = booking.package as
+        | { name?: string | null; supplier?: { id?: string; name?: string | null } | null }
+        | null
+      const hotelSupplier = booking.hotel_supplier as { id?: string; name?: string | null } | null
+
+      return {
+        id: booking.id,
+        bookingNumber: booking.booking_number,
+        stage: booking.stage,
+        consultant: booking.consultant,
+        departureDate: booking.departure_date,
+        departureDateDisplay: formatDisplayDate(booking.departure_date),
+        direction:
+          (booking.route as { name?: string } | null)?.name ??
+          ((booking.extracted_json as { historical_import?: { route?: string } } | null)
+            ?.historical_import?.route ?? null),
+        supplierName: packageInfo?.supplier?.name ?? hotelSupplier?.name ?? null,
+        packageName: packageInfo?.name ?? null,
+        createdAt: booking.created_at,
+        createdAtDisplay: formatDisplayDateTime(booking.created_at),
+      }
+    }),
   })
 }
 
@@ -128,5 +144,6 @@ export async function PATCH(
     email: updated.email,
     phone: updated.phone,
     updatedAt: updated.updated_at,
+    updatedAtDisplay: formatDisplayDateTime(updated.updated_at),
   })
 }

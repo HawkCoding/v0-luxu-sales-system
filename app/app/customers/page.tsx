@@ -11,8 +11,9 @@ import { Calendar } from "@/components/ui/calendar"
 import { Search, Globe, Filter, X } from "lucide-react"
 import { useEffect, useState } from "react"
 import { CONSULTANTS, type ConsultantAbbreviation } from "@/lib/types"
-import { format } from "date-fns"
+import { formatDisplayDate } from "@/lib/date-format"
 import Link from "next/link"
+import { useSearchParams } from "next/navigation"
 import { CustomerDetailView } from "@/components/customer-detail-view"
 import {
   Dialog,
@@ -29,6 +30,7 @@ function getCustomerIdFromPath(pathname: string): string | null {
 
 export default function CustomersPage() {
   const { data, isLoading } = useAllData()
+  const searchParams = useSearchParams()
   const [search, setSearch] = useState("")
   const [consultantFilter, setConsultantFilter] = useState<"all" | ConsultantAbbreviation>("all")
   const [supplierFilter, setSupplierFilter] = useState("all")
@@ -44,6 +46,11 @@ export default function CustomersPage() {
     window.addEventListener("popstate", handlePopState)
     return () => window.removeEventListener("popstate", handlePopState)
   }, [])
+
+  useEffect(() => {
+    const searchFromQuery = searchParams.get("search")?.trim() ?? ""
+    if (searchFromQuery.length > 0) setSearch(searchFromQuery)
+  }, [searchParams])
 
   const openCustomerModal = (customerId: string) => {
     setSelectedCustomerId(customerId)
@@ -199,7 +206,7 @@ export default function CustomersPage() {
                   <Popover>
                     <PopoverTrigger asChild>
                       <Button variant="outline" size="sm" className="h-9 text-xs flex-1 justify-start">
-                        {createdDateFrom ? format(createdDateFrom, "dd/MM/yy") : "From"}
+                        {createdDateFrom ? formatDisplayDate(createdDateFrom) : "From"}
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0" align="start">
@@ -215,7 +222,7 @@ export default function CustomersPage() {
                   <Popover>
                     <PopoverTrigger asChild>
                       <Button variant="outline" size="sm" className="h-9 text-xs flex-1 justify-start">
-                        {createdDateTo ? format(createdDateTo, "dd/MM/yy") : "To"}
+                        {createdDateTo ? formatDisplayDate(createdDateTo) : "To"}
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0" align="start">
