@@ -4,6 +4,7 @@ const nullableShortString = z.string().trim().max(255).nullable().optional()
 const nullableUuid = z.string().uuid().nullable().optional()
 
 export const importRowSchema = z.object({
+  source_row_id: z.string().trim().min(1).max(128).optional(),
   title: z.string().trim().max(50).nullable().optional(),
   first_name: z.string().trim().min(1).max(100),
   last_name: z.string().trim().min(1).max(100),
