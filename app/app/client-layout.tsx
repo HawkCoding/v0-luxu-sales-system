@@ -17,6 +17,7 @@ import {
 } from "lucide-react"
 import { useState, useEffect, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
+import { ConnectionErrorBanner } from "@/components/connection-error-banner"
 import { useAllData } from "@/lib/use-data"
 import type { User } from "@/lib/auth-context"
 
@@ -43,15 +44,21 @@ function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname()
   const { user, loading: authLoading, logout } = useAuth()
   const { role, setRole, can } = useRole()
-  const { data } = useAllData()
+  const { data, error: dataError } = useAllData()
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
+  const [slowLoad, setSlowLoad] = useState(false)
 
   const enquiriesCount = data?.bookings?.filter((b: any) => b.stage === "enquiry").length || 0
 
   useEffect(() => {
     setMounted(true)
+  }, [])
+
+  useEffect(() => {
+    const t = setTimeout(() => setSlowLoad(true), 9000)
+    return () => clearTimeout(t)
   }, [])
 
   useEffect(() => {
@@ -76,11 +83,16 @@ function AppShell({ children }: { children: ReactNode }) {
       <div
         className="flex h-screen items-center justify-center overflow-hidden bg-app-canvas"
       >
-        <div className="text-center space-y-3">
-          <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto animate-pulse">
+        <div className="space-y-3 text-center">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 animate-pulse">
             <span className="text-xl font-bold text-primary">LT</span>
           </div>
           <p className="text-muted-foreground">Loading...</p>
+          {slowLoad && (
+            <p className="text-xs text-muted-foreground">
+              The service is taking longer than expected. Please check your connection.
+            </p>
+          )}
         </div>
       </div>
     )
@@ -189,6 +201,7 @@ function AppShell({ children }: { children: ReactNode }) {
           </div>
         </header>
         <main className="flex-1 overflow-auto">
+          {dataError && dataError.status !== 401 && <ConnectionErrorBanner />}
           {children}
         </main>
       </div>

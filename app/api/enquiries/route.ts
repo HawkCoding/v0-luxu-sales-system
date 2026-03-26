@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server"
+import { detectCountryInText, loadCountryAliasMap, normalizeCountry } from "@/lib/countries"
+import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
 import { createServiceClient } from "@/lib/supabase/server"
 
 export async function POST(req: Request) {
@@ -9,6 +11,22 @@ export async function POST(req: Request) {
   const supabase = createServiceClient()
 
   const normalizedEmail = body.email?.toLowerCase().trim()
+  const normalizedCustomerFirstName =
+    typeof body.name === "string" ? normalizeFirstName(body.name) : body.name
+  const normalizedCustomerLastName =
+    typeof body.surname === "string" ? normalizeLastName(body.surname) : body.surname
+  const countryAliasMap = await loadCountryAliasMap(supabase)
+
+  const submittedCountry = typeof body.country === "string" ? body.country : null
+  const submittedRawText = typeof body.rawText === "string" ? body.rawText : null
+  const detectedCountryFromText =
+    (!submittedCountry || submittedCountry.toLowerCase() === "other") && submittedRawText
+      ? detectCountryInText(submittedRawText, countryAliasMap)
+      : null
+  const normalizedCountry = normalizeCountry(
+    detectedCountryFromText ?? submittedCountry,
+    countryAliasMap,
+  )
 
   // --- 1. Upsert customer (match on email) ---
   const { data: existingCustomer } = await supabase
@@ -25,10 +43,10 @@ export async function POST(req: Request) {
     await supabase
       .from("customers")
       .update({
-        first_name: body.name,
-        last_name: body.surname,
+        first_name: normalizedCustomerFirstName,
+        last_name: normalizedCustomerLastName,
         phone: body.contactNumber || null,
-        country: body.country || null,
+        country: normalizedCountry,
         title: body.title || null,
         updated_at: new Date().toISOString(),
       })
@@ -37,11 +55,11 @@ export async function POST(req: Request) {
     const { data: newCustomer, error: customerError } = await supabase
       .from("customers")
       .insert({
-        first_name: body.name,
-        last_name: body.surname,
+        first_name: normalizedCustomerFirstName,
+        last_name: normalizedCustomerLastName,
         email: normalizedEmail,
         phone: body.contactNumber || null,
-        country: body.country || null,
+        country: normalizedCountry,
         title: body.title || null,
       })
       .select("id")
@@ -113,8 +131,8 @@ export async function POST(req: Request) {
   adultTravellers.forEach((t: any, idx: number) => {
     travellerRows.push({
       booking_id: booking.id,
-      first_name: t.name,
-      last_name: t.surname,
+      first_name: typeof t.name === "string" ? normalizeFirstName(t.name) : t.name,
+      last_name: typeof t.surname === "string" ? normalizeLastName(t.surname) : t.surname,
       prefix: t.prefix || null,
       id_passport: t.idPassport || null,
       date_of_birth: t.dateOfBirth || null,
@@ -125,8 +143,8 @@ export async function POST(req: Request) {
   childTravellers.forEach((t: any, idx: number) => {
     travellerRows.push({
       booking_id: booking.id,
-      first_name: t.name,
-      last_name: t.surname,
+      first_name: typeof t.name === "string" ? normalizeFirstName(t.name) : t.name,
+      last_name: typeof t.surname === "string" ? normalizeLastName(t.surname) : t.surname,
       prefix: t.prefix || null,
       id_passport: t.idPassport || null,
       date_of_birth: t.dateOfBirth || null,
