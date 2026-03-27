@@ -88,6 +88,36 @@ function buildImportErrorResponse({
   )
 }
 
+interface BookingImportRow {
+  sourceRowId: string | null
+  customerId: string
+}
+
+function collectHistoricalImportSourceRowIds(
+  bookingRows: Array<{ extracted_json: unknown }>,
+): Set<string> {
+  const sourceRowIds = new Set<string>()
+
+  for (const booking of bookingRows) {
+    const extractedJson = booking.extracted_json
+    if (!extractedJson || typeof extractedJson !== "object") {
+      continue
+    }
+
+    const historicalImport = (extractedJson as { historical_import?: unknown }).historical_import
+    if (!historicalImport || typeof historicalImport !== "object") {
+      continue
+    }
+
+    const sourceRowId = (historicalImport as { source_row_id?: unknown }).source_row_id
+    if (typeof sourceRowId === "string" && sourceRowId.length > 0) {
+      sourceRowIds.add(sourceRowId)
+    }
+  }
+
+  return sourceRowIds
+}
+
 function customerSignature(row: Pick<NormalizedImportRow, "title" | "first_name" | "last_name" | "email" | "phone" | "country">): string {
   return JSON.stringify({
     title: row.title ?? null,
@@ -140,6 +170,7 @@ export async function POST(req: Request) {
   }
 
   const normalizedRows = parsed.rows.map((row) => ({
+    source_row_id: row.source_row_id?.trim() || null,
     title: row.title || null,
     first_name: normalizeFirstName(row.first_name),
     last_name: normalizeLastName(row.last_name),
@@ -409,19 +440,93 @@ export async function POST(req: Request) {
     }
   }
 
-  let bookingRows
-  let skippedDuplicates = 0
+  let bookingImportRows: BookingImportRow[]
   try {
-    bookingRows = normalizedRows.flatMap((row) => {
+    bookingImportRows = normalizedRows.map((row) => {
       const customerId = customerIdsByEmail.get(row.email)
       if (!customerId) throw new Error(`Missing customer for ${row.email}`)
-      if (parsed.routeId && customerIdsWithHistoricalRouteBookings.has(customerId)) {
+      return {
+        sourceRowId: row.source_row_id,
+        customerId,
+      }
+    })
+  } catch (error) {
+    return buildImportErrorResponse({
+      traceId,
+      phase: "build_booking_rows",
+      error: "Failed to prepare booking rows for import",
+      status: 500,
+      cause: error,
+      context: {
+        normalizedRowCount: normalizedRows.length,
+      },
+    })
+  }
+
+  const existingSourceRowIds = new Set<string>()
+  const rowsWithSourceIds = bookingImportRows.filter(
+    (row): row is BookingImportRow & { sourceRowId: string } => row.sourceRowId !== null,
+  )
+  if (rowsWithSourceIds.length > 0) {
+    const customerIds = Array.from(new Set(rowsWithSourceIds.map((row) => row.customerId)))
+    const { data: existingBookingRows, error: existingBookingsError } = await supabase
+      .from("bookings")
+      .select("extracted_json")
+      .eq("owner_user_id", user.id)
+      .in("customer_id", customerIds)
+      .contains("extracted_json", { historical_import: { imported_via: "supplier_csv" } })
+
+    if (existingBookingsError) {
+      return buildImportErrorResponse({
+        traceId,
+        phase: "check_existing_bookings",
+        error: "Failed to validate existing historical imports",
+        status: 500,
+        cause: existingBookingsError,
+        context: {
+          customerCount: customerIds.length,
+          sourceRowCandidateCount: rowsWithSourceIds.length,
+        },
+      })
+    }
+
+    const collected = collectHistoricalImportSourceRowIds(existingBookingRows ?? [])
+    collected.forEach((sourceRowId) => existingSourceRowIds.add(sourceRowId))
+  }
+
+  let bookingRows: Array<{
+    customer_id: string
+    owner_user_id: string
+    purpose: "reservation"
+    stage: "closed"
+    route_id: string | null
+    terms_accepted: boolean
+    extracted_json: {
+      historical_import: {
+        imported_via: "supplier_csv"
+        imported_at: string
+        supplier_id: string | null
+        route_id: string | null
+        source_row_id: string | null
+        source_label: "blank"
+        source_value: null
+      }
+    }
+  }>
+  let skippedDuplicates = 0
+  try {
+    bookingRows = bookingImportRows.flatMap((row) => {
+      if (row.sourceRowId && existingSourceRowIds.has(row.sourceRowId)) {
+        skippedDuplicates += 1
+        return []
+      }
+      if (parsed.routeId && customerIdsWithHistoricalRouteBookings.has(row.customerId)) {
         skippedDuplicates += 1
         return []
       }
 
       return [{
-        customer_id: customerId,
+        customer_id: row.customerId,
         owner_user_id: user.id,
         purpose: "reservation" as const,
         stage: "closed" as const,
@@ -433,6 +538,7 @@ export async function POST(req: Request) {
             imported_at: new Date().toISOString(),
             supplier_id: parsed.supplierId ?? null,
             route_id: parsed.routeId ?? null,
+            source_row_id: row.sourceRowId,
             source_label: "blank",
             source_value: null,
           },
