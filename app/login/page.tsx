@@ -30,9 +30,15 @@ function LoginForm() {
   const [forgotEmail, setForgotEmail] = useState("")
   const [forgotSubmitting, setForgotSubmitting] = useState(false)
   const [forgotSent, setForgotSent] = useState(false)
+  const [slowLoad, setSlowLoad] = useState(false)
 
   useEffect(() => {
     setHydrated(true)
+  }, [])
+
+  useEffect(() => {
+    const t = setTimeout(() => setSlowLoad(true), 9000)
+    return () => clearTimeout(t)
   }, [])
 
   useEffect(() => {
@@ -123,7 +129,14 @@ function LoginForm() {
   if (loading || !hydrated) {
     return (
       <LoginShell>
-        <LoadingState variant="page" message="Loading..." />
+        <div className="flex flex-col items-center">
+          <LoadingState variant="page" message="Loading..." />
+          {slowLoad && (
+            <p className="mt-3 text-center text-sm text-muted-foreground">
+              Having trouble connecting. Please check your network.
+            </p>
+          )}
+        </div>
       </LoginShell>
     )
   }

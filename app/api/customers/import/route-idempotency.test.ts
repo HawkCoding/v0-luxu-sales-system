@@ -69,6 +69,26 @@ function createMockSupabase(state: MockState) {
         }
       }
 
+      if (table === "countries") {
+        return {
+          select: async () => ({
+            data: [
+              { id: "country-za", name: "South Africa", iso_alpha2: "ZA", iso_alpha3: "ZAF" },
+            ],
+            error: null,
+          }),
+        }
+      }
+
+      if (table === "country_aliases") {
+        return {
+          select: async () => ({
+            data: [],
+            error: null,
+          }),
+        }
+      }
+
       if (table === "bookings") {
         return {
           select: () => ({

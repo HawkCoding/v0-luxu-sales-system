@@ -1,7 +1,8 @@
 "use client"
 
 import Link from "next/link"
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { flushSync } from "react-dom"
 import { AlertCircle, CheckCircle2, FileText, X } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -46,6 +47,8 @@ interface ImportResult {
   createdCustomers: number
   matchedCustomers: number
   importedBookings: number
+  skippedDuplicates: number
+  enrichedProfiles: number
   conflictEmails: string[]
   skippedInvalid: number
   failedChunks: number
@@ -67,7 +70,19 @@ interface ChunkImportResult {
   createdCustomers: number
   matchedCustomers: number
   importedBookings: number
+  skippedDuplicates: number
+  enrichedProfiles: number
   duplicates: string[]
+}
+
+interface ImportApiErrorPayload {
+  error?: string
+  phase?: string
+  traceId?: string
+  details?: {
+    message?: string
+    code?: string
+  } | null
 }
 
 interface RetryableChunk {
@@ -79,6 +94,21 @@ interface RetryableChunk {
 interface ImportRunConfig {
   supplierId: string | null
   routeId: string | null
+}
+
+interface PreImportCheckSummary {
+  checkedCustomers: number
+  existingCustomers: number
+  newCustomers: number
+  potentialDuplicateCustomers: number
+  error?: string
+}
+
+interface PreImportCheckResponse {
+  existing?: Array<{
+    email?: string
+    hasRouteBooking?: boolean
+  }>
 }
 
 const REQUIRED_HEADERS = ["first_name", "last_name", "email"] as const
@@ -224,6 +254,30 @@ function toFriendlyChunkError(error: unknown): string {
   return "Unable to upload this chunk. Please check your network connection or retry at a later time."
 }
 
+function parseImportApiErrorPayload(payload: unknown): ImportApiErrorPayload {
+  if (!payload || typeof payload !== "object") return {}
+  const candidate = payload as ImportApiErrorPayload
+  return {
+    error: typeof candidate.error === "string" ? candidate.error : undefined,
+    phase: typeof candidate.phase === "string" ? candidate.phase : undefined,
+    traceId: typeof candidate.traceId === "string" ? candidate.traceId : undefined,
+    details: candidate.details ?? null,
+  }
+}
+
+function formatImportApiError(payload: ImportApiErrorPayload): string {
+  const baseMessage =
+    payload.error?.trim() ||
+    payload.details?.message?.trim() ||
+    "Unable to upload this chunk. Please check your network connection or retry at a later time."
+
+  const suffixParts: string[] = []
+  if (payload.phase) suffixParts.push(`phase: ${payload.phase}`)
+  if (payload.traceId) suffixParts.push(`trace: ${payload.traceId}`)
+
+  return suffixParts.length > 0 ? `${baseMessage} (${suffixParts.join(", ")})` : baseMessage
+}
+
 export function CustomerBulkImportPanel() {
   const { data: suppliers = [] } = useActiveSuppliers()
   const [files, setFiles] = useState<File[]>([])
@@ -234,13 +288,18 @@ export function CustomerBulkImportPanel() {
   const [isDragOver, setIsDragOver] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isPreparingConflicts, setIsPreparingConflicts] = useState(false)
+  const [conflictPrepMessage, setConflictPrepMessage] = useState("")
   const [chunkStatuses, setChunkStatuses] = useState<ChunkStatus[]>([])
   const [retryableChunks, setRetryableChunks] = useState<RetryableChunk[]>([])
   const [conflictModalOpen, setConflictModalOpen] = useState(false)
   const [pendingRowsForImport, setPendingRowsForImport] = useState<EditableImportRow[] | null>(null)
   const [pendingConflicts, setPendingConflicts] = useState<ImportConflictGroup[]>([])
+  const [isCheckingExistingCustomers, setIsCheckingExistingCustomers] = useState(false)
+  const [preImportCheckSummary, setPreImportCheckSummary] = useState<PreImportCheckSummary | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const importRunConfigRef = useRef<ImportRunConfig | null>(null)
+  const frozenPreImportCheckRef = useRef<PreImportCheckSummary | null>(null)
 
   const selectedSupplierSlug = useMemo(
     () => suppliers.find((supplier) => supplier.id === selectedSupplierId)?.slug ?? "",
@@ -265,12 +324,19 @@ export function CustomerBulkImportPanel() {
     () => new Set(selectedConflictGroups.map((group) => group.email)),
     [selectedConflictGroups],
   )
+  const selectedValidUniqueEmailCount = useMemo(
+    () => getUniqueCustomerCount(selectedValidRows),
+    [selectedValidRows],
+  )
 
   const completedChunks = useMemo(
     () => chunkStatuses.filter((chunk) => chunk.state === "success" || chunk.state === "failed").length,
     [chunkStatuses],
   )
   const progressValue = chunkStatuses.length > 0 ? Math.round((completedChunks / chunkStatuses.length) * 100) : 0
+  const displayPreImportCheckSummary =
+    (isSubmitting || result) ? (frozenPreImportCheckRef.current ?? preImportCheckSummary) : preImportCheckSummary
+  const preImportSummaryIsFrozen = (isSubmitting || Boolean(result)) && Boolean(displayPreImportCheckSummary)
 
   const handleSupplierChange = (value: string) => {
     const nextSupplierId = value === SUPPLIER_NONE_VALUE ? null : value
@@ -318,13 +384,101 @@ export function CustomerBulkImportPanel() {
     setResult(null)
     setSelectedSupplierId(null)
     setSelectedRouteId(null)
+    setIsPreparingConflicts(false)
+    setConflictPrepMessage("")
     setChunkStatuses([])
     setRetryableChunks([])
     setConflictModalOpen(false)
     setPendingRowsForImport(null)
     setPendingConflicts([])
+    setIsCheckingExistingCustomers(false)
+    setPreImportCheckSummary(null)
     importRunConfigRef.current = null
+    frozenPreImportCheckRef.current = null
   }
+
+  useEffect(() => {
+    if (isSubmitting || isPreparingConflicts) {
+      setIsCheckingExistingCustomers(false)
+      return
+    }
+
+    if (selectedValidRows.length === 0) {
+      setPreImportCheckSummary(null)
+      setIsCheckingExistingCustomers(false)
+      return
+    }
+
+    let cancelled = false
+    const controller = new AbortController()
+    const timer = setTimeout(async () => {
+      setIsCheckingExistingCustomers(true)
+      try {
+        const response = await fetch("/api/customers/import/check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            emails: Array.from(new Set(selectedValidRows.map((row) => normalizeEmail(row.email)))),
+            routeId: selectedRouteId,
+          }),
+        })
+
+        let payload: PreImportCheckResponse | null = null
+        try {
+          payload = (await response.json()) as PreImportCheckResponse
+        } catch {
+          payload = null
+        }
+
+        if (!response.ok) {
+          const fallbackMessage = "Could not check existing customers before import."
+          if (!cancelled) {
+            setPreImportCheckSummary({
+              checkedCustomers: selectedValidUniqueEmailCount,
+              existingCustomers: 0,
+              newCustomers: selectedValidUniqueEmailCount,
+              potentialDuplicateCustomers: 0,
+              error: fallbackMessage,
+            })
+          }
+          return
+        }
+
+        const existingRows = Array.isArray(payload?.existing) ? payload.existing : []
+        const existingCustomers = existingRows.length
+        const potentialDuplicateCustomers = existingRows.filter((row) => row.hasRouteBooking === true).length
+        const newCustomers = Math.max(0, selectedValidUniqueEmailCount - existingCustomers)
+
+        if (!cancelled) {
+          setPreImportCheckSummary({
+            checkedCustomers: selectedValidUniqueEmailCount,
+            existingCustomers,
+            newCustomers,
+            potentialDuplicateCustomers,
+          })
+        }
+      } catch (error) {
+        if (!cancelled && !(error instanceof DOMException && error.name === "AbortError")) {
+          setPreImportCheckSummary({
+            checkedCustomers: selectedValidUniqueEmailCount,
+            existingCustomers: 0,
+            newCustomers: selectedValidUniqueEmailCount,
+            potentialDuplicateCustomers: 0,
+            error: "Could not check existing customers before import.",
+          })
+        }
+      } finally {
+        if (!cancelled) setIsCheckingExistingCustomers(false)
+      }
+    }, 350)
+
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+      controller.abort()
+    }
+  }, [isPreparingConflicts, isSubmitting, selectedRouteId, selectedValidRows, selectedValidUniqueEmailCount])
 
   const parseCsvFile = async (file: File): Promise<EditableImportRow[]> => {
     const text = await file.text()
@@ -416,14 +570,40 @@ export function CustomerBulkImportPanel() {
       }),
     })
 
-    const payload = await response.json()
-    if (!response.ok) throw new Error(payload?.error ?? "Import failed")
+    let payload: unknown = null
+    try {
+      payload = await response.json()
+    } catch {
+      payload = null
+    }
+
+    const parsedPayload = parseImportApiErrorPayload(payload)
+    if (!response.ok) throw new Error(formatImportApiError(parsedPayload))
 
     return {
-      createdCustomers: payload.createdCustomers ?? 0,
-      matchedCustomers: payload.matchedCustomers ?? 0,
-      importedBookings: payload.importedBookings ?? 0,
-      duplicates: Array.isArray(payload.duplicates) ? payload.duplicates : [],
+      createdCustomers:
+        typeof (payload as { createdCustomers?: unknown })?.createdCustomers === "number"
+          ? (payload as { createdCustomers: number }).createdCustomers
+          : 0,
+      matchedCustomers:
+        typeof (payload as { matchedCustomers?: unknown })?.matchedCustomers === "number"
+          ? (payload as { matchedCustomers: number }).matchedCustomers
+          : 0,
+      importedBookings:
+        typeof (payload as { importedBookings?: unknown })?.importedBookings === "number"
+          ? (payload as { importedBookings: number }).importedBookings
+          : 0,
+      skippedDuplicates:
+        typeof (payload as { skippedDuplicates?: unknown })?.skippedDuplicates === "number"
+          ? (payload as { skippedDuplicates: number }).skippedDuplicates
+          : 0,
+      enrichedProfiles:
+        typeof (payload as { enrichedProfiles?: unknown })?.enrichedProfiles === "number"
+          ? (payload as { enrichedProfiles: number }).enrichedProfiles
+          : 0,
+      duplicates: Array.isArray((payload as { duplicates?: unknown })?.duplicates)
+        ? ((payload as { duplicates: string[] }).duplicates ?? [])
+        : [],
     }
   }
 
@@ -432,6 +612,7 @@ export function CustomerBulkImportPanel() {
     conflictEmailsFromPrescan: string[],
     invalidSkipped: number,
   ) => {
+    frozenPreImportCheckRef.current = preImportCheckSummary
     const runConfig: ImportRunConfig = {
       supplierId: selectedSupplierId,
       routeId: selectedRouteId,
@@ -455,6 +636,8 @@ export function CustomerBulkImportPanel() {
       let createdCustomers = 0
       let matchedCustomers = 0
       let importedBookings = 0
+      let skippedDuplicates = 0
+      let enrichedProfiles = 0
       const serverConflictEmails = new Set<string>()
       const failed: RetryableChunk[] = []
       const chunkErrors: Array<{ chunkNumber: number; message: string }> = []
@@ -477,6 +660,8 @@ export function CustomerBulkImportPanel() {
             createdCustomers += next.createdCustomers
             matchedCustomers += next.matchedCustomers
             importedBookings += next.importedBookings
+            skippedDuplicates += next.skippedDuplicates
+            enrichedProfiles += next.enrichedProfiles
             next.duplicates.forEach((email) => serverConflictEmails.add(email))
             updateChunkStatus(chunkNumber, { state: "success" })
             success = true
@@ -502,6 +687,8 @@ export function CustomerBulkImportPanel() {
         createdCustomers,
         matchedCustomers,
         importedBookings,
+        skippedDuplicates,
+        enrichedProfiles,
         conflictEmails,
         skippedInvalid: invalidSkipped,
         failedChunks: failed.length,
@@ -523,13 +710,16 @@ export function CustomerBulkImportPanel() {
         toast.success("Customer and booking import complete", {
           description:
             `${createdCustomers} customers created, ` +
-            `${matchedCustomers} matched, ` +
-            `${importedBookings} historical bookings imported. ` +
+            `${matchedCustomers} duplicate customer${matchedCustomers === 1 ? "" : "s"}, ` +
+            `${importedBookings} historical bookings imported, ` +
+            `${skippedDuplicates} duplicate booking${skippedDuplicates === 1 ? "" : "s"} from customers skipped. ` +
             `${conflictEmails.length} duplicate emails were resolved.`,
         })
       } else {
         toast.success("Customer and booking import complete", {
-          description: `${createdCustomers} customers created, ${matchedCustomers} matched, ${importedBookings} historical bookings imported.`,
+          description:
+            `${createdCustomers} customers created, ${matchedCustomers} duplicate customer${matchedCustomers === 1 ? "" : "s"}, ${importedBookings} historical bookings imported, ` +
+            `${skippedDuplicates} duplicate booking${skippedDuplicates === 1 ? "" : "s"} from customers skipped.`,
         })
       }
     } finally {
@@ -553,6 +743,8 @@ export function CustomerBulkImportPanel() {
       let createdDelta = 0
       let matchedDelta = 0
       let importedDelta = 0
+      let skippedDuplicatesDelta = 0
+      let enrichedProfilesDelta = 0
       const remainingFailed: RetryableChunk[] = []
       const retryErrors: Array<{ chunkNumber: number; message: string }> = []
 
@@ -567,6 +759,8 @@ export function CustomerBulkImportPanel() {
             createdDelta += next.createdCustomers
             matchedDelta += next.matchedCustomers
             importedDelta += next.importedBookings
+            skippedDuplicatesDelta += next.skippedDuplicates
+            enrichedProfilesDelta += next.enrichedProfiles
             updateChunkStatus(failedChunk.chunkNumber, { state: "success", error: undefined })
             success = true
           } catch (error) {
@@ -601,6 +795,8 @@ export function CustomerBulkImportPanel() {
           createdCustomers: current.createdCustomers + createdDelta,
           matchedCustomers: current.matchedCustomers + matchedDelta,
           importedBookings: current.importedBookings + importedDelta,
+          skippedDuplicates: current.skippedDuplicates + skippedDuplicatesDelta,
+          enrichedProfiles: current.enrichedProfiles + enrichedProfilesDelta,
           failedChunks: remainingFailed.length,
           successfulChunks: current.totalChunks - remainingFailed.length,
           chunkErrors: mergedErrors,
@@ -631,13 +827,36 @@ export function CustomerBulkImportPanel() {
     }
 
     if (selectedConflictGroups.length > 0) {
+      flushSync(() => {
+        setConflictPrepMessage("Preparing conflict resolution...")
+        setIsPreparingConflicts(true)
+      })
+      await yieldForLoadingPaint()
       setPendingRowsForImport(selectedValidRows)
       setPendingConflicts(selectedConflictGroups)
+
+      flushSync(() => {
+        setConflictPrepMessage("Ready - opening conflict resolution...")
+      })
+      await sleep(500)
+
       setConflictModalOpen(true)
+      setIsPreparingConflicts(false)
+      setConflictPrepMessage("")
       return
     }
 
     await runChunkImport(selectedValidRows, [], selectedInvalidCount)
+  }
+
+  const handleConflictModalOpenChange = (open: boolean) => {
+    setConflictModalOpen(open)
+    if (!open) {
+      setIsPreparingConflicts(false)
+      setConflictPrepMessage("")
+      setPendingRowsForImport(null)
+      setPendingConflicts([])
+    }
   }
 
   const handleConfirmConflictResolution = async (selections: Record<string, string>) => {
@@ -679,11 +898,15 @@ export function CustomerBulkImportPanel() {
 
   return (
     <div className="relative space-y-4">
-      {(isProcessing || isSubmitting) && (
+      {(isProcessing || isSubmitting || isPreparingConflicts) && (
         <LoadingState
           variant="overlay"
           message={
-            isProcessing ? "Extracting rows from CSV..." : "Importing customers and bookings..."
+            isPreparingConflicts
+              ? conflictPrepMessage
+              : isProcessing
+                ? "Extracting rows from CSV..."
+                : "Importing customers and bookings..."
           }
           progress={isSubmitting ? progressValue : undefined}
         />
@@ -785,7 +1008,12 @@ export function CustomerBulkImportPanel() {
         <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium">{files.length} file(s) selected</p>
-            <Button variant="ghost" size="sm" onClick={handleClear}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleClear}
+              disabled={isProcessing || isSubmitting || isPreparingConflicts}
+            >
               <X className="mr-1 h-4 w-4" />
               Clear
             </Button>
@@ -932,6 +1160,32 @@ export function CustomerBulkImportPanel() {
         </div>
       )}
 
+      {displayPreImportCheckSummary ? (
+        <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+          <p className="text-sm font-medium">Pre-import customer match check</p>
+          {preImportSummaryIsFrozen ? (
+            <p className="text-xs text-muted-foreground">Captured before import started.</p>
+          ) : null}
+          <p className="text-xs text-muted-foreground">
+            Checked customers: {displayPreImportCheckSummary.checkedCustomers} | New customers: {displayPreImportCheckSummary.newCustomers} |
+            Existing customers: {displayPreImportCheckSummary.existingCustomers}
+          </p>
+          {selectedRouteId && displayPreImportCheckSummary.potentialDuplicateCustomers > 0 ? (
+            <Alert className="border-amber-500/30 bg-amber-500/10">
+              <AlertCircle className="h-4 w-4 text-amber-600" />
+              <AlertTitle>Potential duplicate route bookings found</AlertTitle>
+              <AlertDescription>
+                {displayPreImportCheckSummary.potentialDuplicateCustomers} existing customer
+                {displayPreImportCheckSummary.potentialDuplicateCustomers === 1 ? "" : "s"} already have a historical supplier import
+                for this route. Those rows will be skipped during import.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          {displayPreImportCheckSummary.error ? <p className="text-xs text-destructive">{displayPreImportCheckSummary.error}</p> : null}
+          {isCheckingExistingCustomers ? <p className="text-xs text-muted-foreground">Checking existing customers...</p> : null}
+        </div>
+      ) : null}
+
       {chunkStatuses.length > 0 ? (
         <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
           <div className="flex items-center justify-between">
@@ -969,8 +1223,9 @@ export function CustomerBulkImportPanel() {
             {result.failedChunks > 0 ? "Import partially complete" : "Import complete"}
           </p>
           <p className="text-xs text-muted-foreground">
-            Customers created: {result.createdCustomers} | Customers matched: {result.matchedCustomers} | Historical bookings imported:{" "}
-            {result.importedBookings} | Invalid skipped: {result.skippedInvalid}
+            Customers created: {result.createdCustomers} | Duplicate Customers: {result.matchedCustomers} | Historical bookings imported:{" "}
+            {result.importedBookings} | Duplicate bookings from customers: {result.skippedDuplicates} | Profiles enriched:{" "}
+            {result.enrichedProfiles} | Invalid skipped: {result.skippedInvalid}
           </p>
           <p className="text-xs text-muted-foreground">
             Chunks succeeded: {result.successfulChunks}/{result.totalChunks}
@@ -995,14 +1250,19 @@ export function CustomerBulkImportPanel() {
             <div className="space-y-1 rounded border border-destructive/20 bg-destructive/5 p-2">
               {result.chunkErrors.map((error) => (
                 <p key={error.chunkNumber} className="text-xs text-destructive">
-                  Chunk {error.chunkNumber}: Unable to upload. Please check your network connection or retry at a later time.
+                  Chunk {error.chunkNumber}: {error.message}
                 </p>
               ))}
             </div>
           ) : null}
 
           {retryableChunks.length > 0 ? (
-            <Button size="sm" variant="outline" disabled={isSubmitting} onClick={handleRetryFailedChunks}>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={isSubmitting || isPreparingConflicts}
+              onClick={handleRetryFailedChunks}
+            >
               Retry failed chunks
             </Button>
           ) : null}
@@ -1010,7 +1270,12 @@ export function CustomerBulkImportPanel() {
       ) : null}
 
       <div className="flex items-center justify-end gap-2">
-        <Button variant="outline" size="sm" disabled={files.length === 0 || isProcessing || isSubmitting} onClick={handlePrepareRows}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={files.length === 0 || isProcessing || isSubmitting || isPreparingConflicts}
+          onClick={handlePrepareRows}
+        >
           {isProcessing ? (
             <>
               <Spinner className="size-4" aria-hidden="true" />
@@ -1020,14 +1285,18 @@ export function CustomerBulkImportPanel() {
             "Extract Rows"
           )}
         </Button>
-        <Button size="sm" disabled={selectedValidRows.length === 0 || isSubmitting || isProcessing} onClick={handleImport}>
-          {isSubmitting ? (
+        <Button
+          size="sm"
+          disabled={selectedValidRows.length === 0 || isSubmitting || isProcessing || isPreparingConflicts}
+          onClick={handleImport}
+        >
+          {isSubmitting || isPreparingConflicts ? (
             <>
               <Spinner className="size-4" aria-hidden="true" />
-              Importing customers and bookings…
+              {isPreparingConflicts ? "Preparing conflict resolution..." : "Importing customers and bookings..."}
             </>
           ) : (
-            "Import Customers And Bookings"
+            "Import Customers"
           )}
         </Button>
       </div>
@@ -1035,7 +1304,7 @@ export function CustomerBulkImportPanel() {
       <ImportConflictResolutionModal
         open={conflictModalOpen}
         conflicts={pendingConflicts}
-        onOpenChange={setConflictModalOpen}
+        onOpenChange={handleConflictModalOpenChange}
         onConfirm={handleConfirmConflictResolution}
       />
     </div>

@@ -284,6 +284,59 @@ export type Database = {
           },
         ]
       }
+      countries: {
+        Row: {
+          created_at: string
+          id: string
+          iso_alpha2: string | null
+          iso_alpha3: string | null
+          name: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          iso_alpha2?: string | null
+          iso_alpha3?: string | null
+          name: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          iso_alpha2?: string | null
+          iso_alpha3?: string | null
+          name?: string
+        }
+        Relationships: []
+      }
+      country_aliases: {
+        Row: {
+          alias: string
+          country_id: string
+          created_at: string
+          id: string
+        }
+        Insert: {
+          alias: string
+          country_id: string
+          created_at?: string
+          id?: string
+        }
+        Update: {
+          alias?: string
+          country_id?: string
+          created_at?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "country_aliases_country_id_fkey"
+            columns: ["country_id"]
+            isOneToOne: false
+            referencedRelation: "countries"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customers: {
         Row: {
           country: string | null

@@ -80,7 +80,7 @@ export default function EnquiriesPage() {
           surname: nameMatch?.[2] || "Unknown",
           contactNumber: phoneMatch?.[0] || "",
           email: emailMatch?.[0] || "",
-          country: "Other",
+          country: null,
           direction: "Pretoria to Cape Town",
           departureDate: "2026-06-01",
           noOfSuites: 1,

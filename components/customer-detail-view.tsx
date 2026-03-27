@@ -9,6 +9,7 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { CustomerActivitySummary } from "@/components/customer-activity-summary"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -247,6 +248,8 @@ export function CustomerDetailView({
           </div>
         </CardContent>
       </Card>
+
+      <CustomerActivitySummary bookings={bookings} />
 
       <Card>
         <CardHeader>
