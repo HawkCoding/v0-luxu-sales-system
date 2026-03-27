@@ -779,6 +779,58 @@ export async function PATCH(
     )
   }
 
+  const packageRows = normalizedPackages.map(({ routes, rateCards, ...pkg }) => pkg)
+  const routeRows = normalizedPackages.flatMap((pkg) => pkg.routes)
+  const suiteTypeRows = normalizedSuiteTypes.map((suiteType) => ({
+    ...suiteType,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }))
+  const rateCardRows = normalizedPackages.flatMap((pkg) => pkg.rateCards)
+
+  const incomingPackageIds = new Set(packageRows.map((pkg) => pkg.id))
+  const incomingRouteIds = new Set(routeRows.map((route) => route.id))
+  const incomingSuiteTypeIds = new Set(normalizedSuiteTypes.map((suiteType) => suiteType.id))
+  const incomingEmailIds = new Set(normalizedEmails.map((entry) => entry.id))
+  const incomingRateCardIds = new Set(rateCardRows.map((rateCard) => rateCard.id))
+
+  const rateCardIdsToDelete = existingDetail.rateCards
+    .map((rateCard) => rateCard.id)
+    .filter((rateCardId) => !incomingRateCardIds.has(rateCardId))
+  const routeIdsToDelete = existingDetail.routes
+    .map((route) => route.id)
+    .filter((routeId) => !incomingRouteIds.has(routeId))
+  const suiteTypeIdsToDelete = existingDetail.suiteTypes
+    .map((suiteType) => suiteType.id)
+    .filter((suiteTypeId) => !incomingSuiteTypeIds.has(suiteTypeId))
+  const emailIdsToDelete = existingDetail.emails
+    .map((entry) => entry.id)
+    .filter((entryId) => !incomingEmailIds.has(entryId))
+  const packageIdsToDelete = existingDetail.packages
+    .map((pkg) => pkg.id)
+    .filter((packageId) => !incomingPackageIds.has(packageId))
+
+  if (packageIdsToDelete.length > 0 || routeIdsToDelete.length > 0 || suiteTypeIdsToDelete.length > 0) {
+    const dependencyChecks = await checkDeletionDependencies(
+      supabase,
+      packageIdsToDelete,
+      routeIdsToDelete,
+      suiteTypeIdsToDelete,
+    )
+
+    if (dependencyChecks.length > 0) {
+      return withPatchTimingHeaders(
+        NextResponse.json(
+          {
+            error: "Cannot remove items that are still referenced by active bookings or offers.",
+            details: dependencyChecks,
+          },
+          { status: 409 },
+        ),
+      )
+    }
+  }
+
   const dbWritesStartedAt = performance.now()
   const withDbTimingHeaders = (response: NextResponse): NextResponse => {
     phaseDurations.dbWritesMs = performance.now() - dbWritesStartedAt
@@ -820,7 +872,6 @@ export async function PATCH(
     }
   }
 
-  const packageRows = normalizedPackages.map(({ routes, rateCards, ...pkg }) => pkg)
   if (packageRows.length > 0) {
     const { error: packageError } = await supabase
       .from("packages")
@@ -837,7 +888,6 @@ export async function PATCH(
     }
   }
 
-  const routeRows = normalizedPackages.flatMap((pkg) => pkg.routes)
   if (routeRows.length > 0) {
     const { error: routesError } = await supabase
       .from("routes")
@@ -854,11 +904,6 @@ export async function PATCH(
     }
   }
 
-  const suiteTypeRows = normalizedSuiteTypes.map((suiteType) => ({
-    ...suiteType,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  }))
   if (suiteTypeRows.length > 0) {
     const { error: suiteTypesError } = await supabase
       .from("suite_types")
@@ -875,7 +920,6 @@ export async function PATCH(
     }
   }
 
-  const rateCardRows = normalizedPackages.flatMap((pkg) => pkg.rateCards)
   if (rateCardRows.length > 0) {
     const { error: rateCardsError } = await supabase
       .from("rate_cards")
@@ -909,49 +953,6 @@ export async function PATCH(
         NextResponse.json(
           { error: "Failed to update supplier rate cards" },
           { status: 500 },
-        ),
-      )
-    }
-  }
-
-  const incomingPackageIds = new Set(packageRows.map((pkg) => pkg.id))
-  const incomingRouteIds = new Set(routeRows.map((route) => route.id))
-  const incomingSuiteTypeIds = new Set(normalizedSuiteTypes.map((suiteType) => suiteType.id))
-  const incomingEmailIds = new Set(normalizedEmails.map((entry) => entry.id))
-  const incomingRateCardIds = new Set(rateCardRows.map((rateCard) => rateCard.id))
-
-  const rateCardIdsToDelete = existingDetail.rateCards
-    .map((rateCard) => rateCard.id)
-    .filter((rateCardId) => !incomingRateCardIds.has(rateCardId))
-  const routeIdsToDelete = existingDetail.routes
-    .map((route) => route.id)
-    .filter((routeId) => !incomingRouteIds.has(routeId))
-  const suiteTypeIdsToDelete = existingDetail.suiteTypes
-    .map((suiteType) => suiteType.id)
-    .filter((suiteTypeId) => !incomingSuiteTypeIds.has(suiteTypeId))
-  const emailIdsToDelete = existingDetail.emails
-    .map((entry) => entry.id)
-    .filter((entryId) => !incomingEmailIds.has(entryId))
-  const packageIdsToDelete = existingDetail.packages
-    .map((pkg) => pkg.id)
-    .filter((packageId) => !incomingPackageIds.has(packageId))
-
-  if (packageIdsToDelete.length > 0 || routeIdsToDelete.length > 0 || suiteTypeIdsToDelete.length > 0) {
-    const dependencyChecks = await checkDeletionDependencies(
-      supabase,
-      packageIdsToDelete,
-      routeIdsToDelete,
-      suiteTypeIdsToDelete,
-    )
-
-    if (dependencyChecks.length > 0) {
-      return withDbTimingHeaders(
-        NextResponse.json(
-          {
-            error: "Cannot remove items that are still referenced by active bookings or offers.",
-            details: dependencyChecks,
-          },
-          { status: 409 },
         ),
       )
     }
