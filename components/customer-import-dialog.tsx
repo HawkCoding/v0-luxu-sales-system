@@ -239,6 +239,7 @@ function yieldForLoadingPaint(): Promise<void> {
 
 function toImportPayloadRows(rows: EditableImportRow[]) {
   return rows.map((row) => ({
+    source_row_id: row.id,
     title: row.title.trim() || null,
     first_name: row.first_name.trim(),
     last_name: row.last_name.trim(),

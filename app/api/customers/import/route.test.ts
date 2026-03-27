@@ -5,6 +5,7 @@ import { importRowSchema, payloadSchema } from "./schemas"
 describe("customer import schemas", () => {
   it("accepts a valid supplier lead row", () => {
     const parsed = importRowSchema.parse({
+      source_row_id: "row-1",
       title: "Mr",
       first_name: "John",
       last_name: "Smith",
@@ -14,6 +15,7 @@ describe("customer import schemas", () => {
     })
 
     expect(parsed).toEqual({
+      source_row_id: "row-1",
       title: "Mr",
       first_name: "John",
       last_name: "Smith",
@@ -107,5 +109,16 @@ describe("customer import schemas", () => {
 
     expect(parsed.supplierId).toBeNull()
     expect(parsed.routeId).toBeNull()
+  })
+
+  it("accepts optional source row id for idempotent retries", () => {
+    const parsed = importRowSchema.parse({
+      source_row_id: "import-row-42",
+      first_name: "Jane",
+      last_name: "Doe",
+      email: "jane@example.com",
+    })
+
+    expect(parsed.source_row_id).toBe("import-row-42")
   })
 })
