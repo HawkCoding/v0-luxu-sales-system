@@ -7,6 +7,36 @@ const allowedRoles = new Set(["admin", "manager"])
 
 type NormalizedImportRow = z.infer<typeof importRowSchema>
 
+interface BookingImportRow {
+  sourceRowId: string | null
+  customerId: string
+}
+
+function collectHistoricalImportSourceRowIds(
+  bookingRows: Array<{ extracted_json: unknown }>,
+): Set<string> {
+  const sourceRowIds = new Set<string>()
+
+  for (const booking of bookingRows) {
+    const extractedJson = booking.extracted_json
+    if (!extractedJson || typeof extractedJson !== "object") {
+      continue
+    }
+
+    const historicalImport = (extractedJson as { historical_import?: unknown }).historical_import
+    if (!historicalImport || typeof historicalImport !== "object") {
+      continue
+    }
+
+    const sourceRowId = (historicalImport as { source_row_id?: unknown }).source_row_id
+    if (typeof sourceRowId === "string" && sourceRowId.length > 0) {
+      sourceRowIds.add(sourceRowId)
+    }
+  }
+
+  return sourceRowIds
+}
+
 function customerSignature(row: Pick<NormalizedImportRow, "title" | "first_name" | "last_name" | "email" | "phone" | "country">): string {
   return JSON.stringify({
     title: row.title ?? null,
@@ -45,6 +75,7 @@ export async function POST(req: Request) {
   }
 
   const normalizedRows = parsed.rows.map((row) => ({
+    source_row_id: row.source_row_id?.trim() || null,
     title: row.title || null,
     first_name: row.first_name.trim(),
     last_name: row.last_name.trim(),
@@ -156,12 +187,41 @@ export async function POST(req: Request) {
     })
   }
 
-  const bookingRows = normalizedRows.map((row) => {
+  const bookingImportRows: BookingImportRow[] = normalizedRows.map((row) => {
     const customerId = customerIdsByEmail.get(row.email)
     if (!customerId) throw new Error(`Missing customer for ${row.email}`)
-
     return {
-      customer_id: customerId,
+      sourceRowId: row.source_row_id,
+      customerId,
+    }
+  })
+
+  const existingSourceRowIds = new Set<string>()
+  const rowsWithSourceIds = bookingImportRows.filter(
+    (row): row is BookingImportRow & { sourceRowId: string } => row.sourceRowId !== null,
+  )
+  if (rowsWithSourceIds.length > 0) {
+    const customerIds = Array.from(new Set(rowsWithSourceIds.map((row) => row.customerId)))
+    const { data: existingBookingRows, error: existingBookingsError } = await supabase
+      .from("bookings")
+      .select("extracted_json")
+      .eq("owner_user_id", user.id)
+      .in("customer_id", customerIds)
+      .contains("extracted_json", { historical_import: { imported_via: "supplier_csv" } })
+
+    if (existingBookingsError) {
+      console.error("bookings precheck error:", existingBookingsError)
+      return NextResponse.json({ error: "Failed to validate existing historical imports" }, { status: 500 })
+    }
+
+    const collected = collectHistoricalImportSourceRowIds(existingBookingRows ?? [])
+    collected.forEach((sourceRowId) => existingSourceRowIds.add(sourceRowId))
+  }
+
+  const bookingRows = bookingImportRows
+    .filter((row) => !row.sourceRowId || !existingSourceRowIds.has(row.sourceRowId))
+    .map((row) => ({
+      customer_id: row.customerId,
       owner_user_id: user.id,
       purpose: "reservation" as const,
       stage: "closed" as const,
@@ -173,31 +233,35 @@ export async function POST(req: Request) {
           imported_at: new Date().toISOString(),
           supplier_id: parsed.supplierId ?? null,
           route_id: parsed.routeId ?? null,
+          source_row_id: row.sourceRowId,
           source_label: "blank",
           source_value: null,
         },
       },
+    }))
+
+  let importedBookings = 0
+  if (bookingRows.length > 0) {
+    const { data: insertedBookings, error: insertBookingsError } = await supabase
+      .from("bookings")
+      .insert(bookingRows)
+      .select("id")
+
+    if (insertBookingsError || !insertedBookings) {
+      console.error("bookings insert error:", insertBookingsError)
+      return NextResponse.json({ error: "Failed to import historical bookings" }, { status: 500 })
     }
-  })
-
-  const { data: insertedBookings, error: insertBookingsError } = await supabase
-    .from("bookings")
-    .insert(bookingRows)
-    .select("id")
-
-  if (insertBookingsError || !insertedBookings) {
-    console.error("bookings insert error:", insertBookingsError)
-    return NextResponse.json({ error: "Failed to import historical bookings" }, { status: 500 })
+    importedBookings = insertedBookings.length
   }
 
   const createdCustomers = customersToInsert.length
   const matchedCustomers = uniqueEmails.length - createdCustomers
-  await writeImportAudit(createdCustomers, matchedCustomers, insertedBookings.length)
+  await writeImportAudit(createdCustomers, matchedCustomers, importedBookings)
 
   return NextResponse.json({
     createdCustomers,
     matchedCustomers,
-    importedBookings: insertedBookings.length,
+    importedBookings,
     duplicates: Array.from(conflictingCustomerRows),
     invalidRows: 0,
   })
