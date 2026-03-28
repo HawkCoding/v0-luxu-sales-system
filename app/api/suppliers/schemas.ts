@@ -71,7 +71,7 @@ export const draftSupplierEmailSchema = z.object({
 
 export const supplierSaveSchema = z.object({
   name: z.string().trim().min(2, "Supplier name must be at least 2 characters").max(200),
-  kind: z.enum(["train_operator", "hotel_property", "transfers"]),
+  kind: z.enum(["train_operator", "hotel_property", "transfers", "tour_operator", "airline"]),
   email: z
     .string()
     .trim()
@@ -153,7 +153,7 @@ export const draftPackageSchema = z.object({
 
 export const supplierDraftSaveSchema = z.object({
   name: z.string().trim().max(200).default(""),
-  kind: z.enum(["train_operator", "hotel_property", "transfers"]),
+  kind: z.enum(["train_operator", "hotel_property", "transfers", "tour_operator", "airline"]),
   email: z
     .string()
     .trim()

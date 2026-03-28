@@ -110,13 +110,20 @@ export interface Booking {
   updatedAtDisplay?: string
 }
 
-export type SupplierKind = "train_operator" | "hotel_property" | "transfers"
+export type SupplierKind =
+  | "train_operator"
+  | "hotel_property"
+  | "transfers"
+  | "tour_operator"
+  | "airline"
 export type SupplierStatus = "draft" | "active" | "inactive"
 
 export const SUPPLIER_KIND_LABELS: Record<SupplierKind, string> = {
   train_operator: "Train",
   hotel_property: "Hotel",
   transfers: "Transfers",
+  tour_operator: "Tours",
+  airline: "Airlines",
 }
 
 export interface SupplierVocabulary {
@@ -168,6 +175,8 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     showDurationNights: false,
   },
   transfers: JOURNEY_SUPPLIER_VOCABULARY,
+  tour_operator: JOURNEY_SUPPLIER_VOCABULARY,
+  airline: JOURNEY_SUPPLIER_VOCABULARY,
 }
 
 export function getSupplierVocabulary(kind: SupplierKind): SupplierVocabulary {

@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSWRConfig } from "swr"
 import {
   ArrowLeft,
@@ -29,9 +29,10 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { BufferedInput } from "@/components/ui/buffered-input"
+import { BufferedTextarea } from "@/components/ui/buffered-textarea"
 import { ContentTransition } from "@/components/ui/content-transition"
 import { DatePicker } from "@/components/ui/date-picker"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { NumericInput } from "@/components/ui/numeric-input"
 import {
@@ -44,13 +45,16 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
-import { Textarea } from "@/components/ui/textarea"
 import {
   createEmptySupplierEmail,
   SupplierEmailEditor,
   type EditableSupplierEmail,
 } from "@/components/supplier-email-editor"
 import { useRole } from "@/lib/role-context"
+import {
+  getOverlapValidationSignature,
+  shouldHydrateFormFromServer,
+} from "@/lib/supplier-editor-utils"
 import { shortenUrl } from "@/lib/url"
 import { useLocations, useSupplierDetail } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
@@ -900,7 +904,8 @@ function PackageRateCardMatrix({
 }
 
 interface RateCardMatrixEditorProps {
-  pkg: EditablePackage
+  routes: EditableRoute[]
+  rateCards: EditableRateCard[]
   suiteTypes: EditableSuiteType[]
   packageIndex: number
   locationsById: Record<string, Location>
@@ -928,8 +933,9 @@ interface RateCardMatrixEditorProps {
   periodFieldErrors: Set<string>
 }
 
-function RateCardMatrixEditor({
-  pkg,
+const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
+  routes,
+  rateCards,
   suiteTypes,
   packageIndex,
   locationsById,
@@ -941,21 +947,24 @@ function RateCardMatrixEditor({
   onToggleCell,
   periodFieldErrors,
 }: RateCardMatrixEditorProps) {
-  const periodGroups = groupEditableRateCardsByPeriod(pkg.rateCards)
-  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(pkg.routes[0]?.id ?? null)
+  const periodGroups = useMemo(
+    () => groupEditableRateCardsByPeriod(rateCards),
+    [rateCards],
+  )
+  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(routes[0]?.id ?? null)
 
   useEffect(() => {
-    if (pkg.routes.length === 0) {
+    if (routes.length === 0) {
       if (selectedRouteId !== null) {
         setSelectedRouteId(null)
       }
       return
     }
 
-    if (!selectedRouteId || !pkg.routes.some((route) => route.id === selectedRouteId)) {
-      setSelectedRouteId(pkg.routes[0].id)
+    if (!selectedRouteId || !routes.some((route) => route.id === selectedRouteId)) {
+      setSelectedRouteId(routes[0].id)
     }
-  }, [pkg.routes, selectedRouteId])
+  }, [routes, selectedRouteId])
 
   if (suiteTypes.length === 0) {
     return (
@@ -980,13 +989,13 @@ function RateCardMatrixEditor({
         </Button>
       </div>
 
-      {pkg.routes.length > 1 ? (
+      {routes.length > 1 ? (
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             {vocabulary.routePlural}
           </p>
           <div className="flex flex-wrap gap-2">
-            {pkg.routes.map((route) => {
+            {routes.map((route) => {
               const routeLabel = getRouteLabel(route, locationsById, vocabulary)
               const isSelected = selectedRouteId === route.id
 
@@ -1011,14 +1020,14 @@ function RateCardMatrixEditor({
         periodGroups.map((period) => {
           const hasNullRouteItems = period.items.some((item) => item.routeId === null)
           const routeColumns =
-            pkg.routes.length === 0
+            routes.length === 0
               ? [null]
               : selectedRouteId
                 ? [
-                    ...pkg.routes.filter((route) => route.id === selectedRouteId),
+                    ...routes.filter((route) => route.id === selectedRouteId),
                     ...(hasNullRouteItems ? [null] : []),
                   ]
-                : [...pkg.routes, ...(hasNullRouteItems ? [null] : [])]
+                : [...routes, ...(hasNullRouteItems ? [null] : [])]
 
           return (
             <div key={period.key} className="rounded-lg border overflow-hidden">
@@ -1073,15 +1082,15 @@ function RateCardMatrixEditor({
                 </div>
                 <div className="space-y-2">
                   <Label>Currency</Label>
-                  <Input
+                  <BufferedInput
                     maxLength={10}
                     value={period.currency}
-                    onChange={(event) =>
+                    onValueChange={(value) =>
                       onUpdatePeriodField(
                         packageIndex,
                         period.key,
                         "currency",
-                        event.target.value.toUpperCase(),
+                        value.toUpperCase(),
                       )
                     }
                   />
@@ -1198,7 +1207,7 @@ function RateCardMatrixEditor({
       )}
     </div>
   )
-}
+})
 
 function PackageReadOnlyCard({
   pkg,
@@ -1325,6 +1334,375 @@ function SupplierPackagesReadOnly({
   )
 }
 
+interface SuiteTypeEditorRowProps {
+  suiteType: EditableSuiteType
+  suiteTypeIndex: number
+  vocabulary: SupplierVocabulary
+  onUpdateSuiteType: (
+    suiteTypeIndex: number,
+    key: keyof EditableSuiteType,
+    value: string | boolean,
+  ) => void
+  onRemoveSuiteType: (suiteTypeIndex: number) => void
+}
+
+const SuiteTypeEditorRow = memo(function SuiteTypeEditorRow({
+  suiteType,
+  suiteTypeIndex,
+  vocabulary,
+  onUpdateSuiteType,
+  onRemoveSuiteType,
+}: SuiteTypeEditorRowProps) {
+  return (
+    <div className="grid gap-4 rounded-lg border p-3 md:grid-cols-[1fr_auto_auto]">
+      <div className="space-y-2">
+        <Label>{`${vocabulary.suiteType} name`}</Label>
+        <BufferedInput
+          value={suiteType.name}
+          onValueChange={(value) => onUpdateSuiteType(suiteTypeIndex, "name", value)}
+        />
+      </div>
+      <div className="flex items-end gap-2">
+        <Switch
+          checked={suiteType.active}
+          onCheckedChange={(checked) => onUpdateSuiteType(suiteTypeIndex, "active", checked)}
+        />
+        <span className="self-center text-sm text-muted-foreground">Active</span>
+      </div>
+      <Button
+        type="button"
+        size="icon"
+        variant="outline"
+        className={`self-end ${REMOVE_ICON_BUTTON_CLASS}`}
+        aria-label={`Remove ${vocabulary.suiteType.toLowerCase()}`}
+        onClick={() => onRemoveSuiteType(suiteTypeIndex)}
+      >
+        <Trash2 className="h-4 w-4" />
+      </Button>
+    </div>
+  )
+})
+
+interface RouteEditorRowProps {
+  route: EditableRoute
+  routeIndex: number
+  packageIndex: number
+  vocabulary: SupplierVocabulary
+  locations: Location[]
+  onUpdateRoute: (
+    packageIndex: number,
+    routeIndex: number,
+    key: keyof EditableRoute,
+    value: string | boolean,
+  ) => void
+  onRemoveRoute: (packageIndex: number, routeIndex: number) => void
+}
+
+const RouteEditorRow = memo(function RouteEditorRow({
+  route,
+  routeIndex,
+  packageIndex,
+  vocabulary,
+  locations,
+  onUpdateRoute,
+  onRemoveRoute,
+}: RouteEditorRowProps) {
+  return (
+    <div
+      className={`grid min-w-0 gap-4 overflow-hidden rounded-lg border p-3 ${
+        vocabulary.routeHasLocations ? "md:grid-cols-2 xl:grid-cols-5" : "md:grid-cols-[1fr_auto]"
+      }`}
+    >
+      <div className={`space-y-2 ${vocabulary.routeHasLocations ? "xl:col-span-2" : ""}`}>
+        <Label>{`${vocabulary.route} name`}</Label>
+        <BufferedInput
+          value={route.name}
+          onValueChange={(value) => onUpdateRoute(packageIndex, routeIndex, "name", value)}
+        />
+      </div>
+      {vocabulary.routeHasLocations ? (
+        <>
+          <div className="min-w-0 space-y-2">
+            <Label>Origin</Label>
+            <Select
+              value={route.originLocationId || undefined}
+              onValueChange={(value) =>
+                onUpdateRoute(packageIndex, routeIndex, "originLocationId", value)
+              }
+            >
+              <SelectTrigger className="max-w-full">
+                <SelectValue placeholder="Select location" />
+              </SelectTrigger>
+              <SelectContent>
+                {locations.map((location) => (
+                  <SelectItem key={location.id} value={location.id}>
+                    {location.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="min-w-0 space-y-2">
+            <Label>Destination</Label>
+            <Select
+              value={route.destinationLocationId || undefined}
+              onValueChange={(value) =>
+                onUpdateRoute(packageIndex, routeIndex, "destinationLocationId", value)
+              }
+            >
+              <SelectTrigger className="max-w-full">
+                <SelectValue placeholder="Select location" />
+              </SelectTrigger>
+              <SelectContent>
+                {locations.map((location) => (
+                  <SelectItem key={location.id} value={location.id}>
+                    {location.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </>
+      ) : null}
+      <div className="flex items-end justify-end gap-3">
+        <div className="flex items-center gap-2">
+          <Switch
+            checked={route.active}
+            onCheckedChange={(checked) => onUpdateRoute(packageIndex, routeIndex, "active", checked)}
+          />
+          <span className="text-sm text-muted-foreground">Active</span>
+        </div>
+        <Button
+          type="button"
+          size="icon"
+          variant="outline"
+          className={REMOVE_ICON_BUTTON_CLASS}
+          aria-label={`Remove ${vocabulary.route.toLowerCase()}`}
+          onClick={() => onRemoveRoute(packageIndex, routeIndex)}
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  )
+})
+
+interface PackageEditorProps {
+  pkg: EditablePackage
+  packageIndex: number
+  suiteTypes: EditableSuiteType[]
+  locations: Location[]
+  locationsById: Record<string, Location>
+  vocabulary: SupplierVocabulary
+  periodFieldErrors: Set<string>
+  onRemovePackage: (packageIndex: number) => void
+  onUpdatePackage: (
+    packageIndex: number,
+    updater: (pkg: EditablePackage) => EditablePackage,
+  ) => void
+  onAddRoute: (packageIndex: number) => void
+  onUpdateRoute: (
+    packageIndex: number,
+    routeIndex: number,
+    key: keyof EditableRoute,
+    value: string | boolean,
+  ) => void
+  onRemoveRoute: (packageIndex: number, routeIndex: number) => void
+  onAddRateCardPeriod: (packageIndex: number) => void
+  onRemoveRateCardPeriod: (packageIndex: number, periodKey: string) => void
+  onUpdateRateCardPeriodField: (
+    packageIndex: number,
+    periodKey: string,
+    key: "validFrom" | "validTo" | "currency",
+    value: string | null,
+  ) => void
+  onUpdateRateCardPrice: (packageIndex: number, rateCardId: string, value: number) => void
+  onToggleRateCardCell: (
+    packageIndex: number,
+    periodKey: string,
+    suiteTypeId: string,
+    routeId: string | null,
+    enabled: boolean,
+  ) => void
+}
+
+const PackageEditor = memo(function PackageEditor({
+  pkg,
+  packageIndex,
+  suiteTypes,
+  locations,
+  locationsById,
+  vocabulary,
+  periodFieldErrors,
+  onRemovePackage,
+  onUpdatePackage,
+  onAddRoute,
+  onUpdateRoute,
+  onRemoveRoute,
+  onAddRateCardPeriod,
+  onRemoveRateCardPeriod,
+  onUpdateRateCardPeriodField,
+  onUpdateRateCardPrice,
+  onToggleRateCardCell,
+}: PackageEditorProps) {
+  return (
+    <div className="rounded-lg border p-4 space-y-5">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-sm font-semibold text-foreground">{`${vocabulary.package} ${packageIndex + 1}`}</p>
+        <Button
+          type="button"
+          size="icon"
+          variant="outline"
+          className={REMOVE_ICON_BUTTON_CLASS}
+          aria-label={`Remove ${vocabulary.package.toLowerCase()}`}
+          onClick={() => onRemovePackage(packageIndex)}
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="space-y-2 xl:col-span-2">
+          <Label>{`${vocabulary.package} name`}</Label>
+          <BufferedInput
+            value={pkg.name}
+            onValueChange={(value) =>
+              onUpdatePackage(packageIndex, (current) => ({
+                ...current,
+                name: value,
+              }))
+            }
+          />
+        </div>
+        {vocabulary.showDurationNights ? (
+          <div className="space-y-2">
+            <Label>Duration (nights)</Label>
+            <NumericInput
+              min="0"
+              nullable
+              value={pkg.durationNights}
+              onValueChange={(value) =>
+                onUpdatePackage(packageIndex, (current) => ({
+                  ...current,
+                  durationNights: value,
+                }))
+              }
+            />
+          </div>
+        ) : null}
+        {vocabulary.showSingleSupplement ? (
+          <div className="space-y-2">
+            <Label>Single supplement %</Label>
+            <NumericInput
+              min="0"
+              step="0.01"
+              value={pkg.singleSupplementPct}
+              onValueChange={(value) =>
+                onUpdatePackage(packageIndex, (current) => ({
+                  ...current,
+                  singleSupplementPct: value ?? 0,
+                }))
+              }
+            />
+          </div>
+        ) : null}
+        <div className="space-y-2">
+          <Label>Currency</Label>
+          <BufferedInput
+            maxLength={10}
+            value={pkg.currency}
+            onValueChange={(value) =>
+              onUpdatePackage(packageIndex, (current) => ({
+                ...current,
+                currency: value.toUpperCase(),
+              }))
+            }
+          />
+        </div>
+        <div className="flex items-center justify-between rounded-lg border px-3 py-2">
+          <div>
+            <p className="text-sm font-medium text-foreground">Active</p>
+            <p className="text-xs text-muted-foreground">
+              {`Include this ${vocabulary.package.toLowerCase()} in supplier listings.`}
+            </p>
+          </div>
+          <Switch
+            checked={pkg.active}
+            onCheckedChange={(checked) =>
+              onUpdatePackage(packageIndex, (current) => ({
+                ...current,
+                active: checked,
+              }))
+            }
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label>Description</Label>
+        <BufferedTextarea
+          rows={3}
+          value={pkg.description}
+          onValueChange={(value) =>
+            onUpdatePackage(packageIndex, (current) => ({
+              ...current,
+              description: value,
+            }))
+          }
+        />
+      </div>
+
+      <Separator />
+
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm font-semibold text-foreground">{vocabulary.routePlural}</p>
+          <Button type="button" size="sm" variant="outline" onClick={() => onAddRoute(packageIndex)}>
+            <Plus className="mr-2 h-4 w-4" />
+            {`Add ${vocabulary.route.toLowerCase()}`}
+          </Button>
+        </div>
+
+        {pkg.routes.length > 0 ? (
+          pkg.routes.map((route, routeIndex) => (
+            <RouteEditorRow
+              key={route.id}
+              route={route}
+              routeIndex={routeIndex}
+              packageIndex={packageIndex}
+              vocabulary={vocabulary}
+              locations={locations}
+              onUpdateRoute={onUpdateRoute}
+              onRemoveRoute={onRemoveRoute}
+            />
+          ))
+        ) : (
+          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+            {`No ${vocabulary.routePlural.toLowerCase()} added yet.`}
+          </div>
+        )}
+      </div>
+
+      <Separator />
+
+      <RateCardMatrixEditor
+        routes={pkg.routes}
+        rateCards={pkg.rateCards}
+        suiteTypes={suiteTypes}
+        packageIndex={packageIndex}
+        locationsById={locationsById}
+        vocabulary={vocabulary}
+        onAddPeriod={onAddRateCardPeriod}
+        onRemovePeriod={onRemoveRateCardPeriod}
+        onUpdatePeriodField={onUpdateRateCardPeriodField}
+        onUpdateCellPrice={onUpdateRateCardPrice}
+        onToggleCell={onToggleRateCardCell}
+        periodFieldErrors={periodFieldErrors}
+      />
+    </div>
+  )
+})
+
 export function SupplierDetailSkeleton({
   presentation = "page",
 }: SupplierDetailSkeletonProps) {
@@ -1382,16 +1760,24 @@ export function SupplierDetailView({
   const [pendingLocalDraft, setPendingLocalDraft] = useState<SupplierFormState | null>(null)
   const baselineSnapshotRef = useRef<string | null>(null)
   const draftAutosavedSnapshotRef = useRef<string | null>(null)
+  const hydratedSupplierIdentityRef = useRef<string | null>(null)
+  const expectedUpdatedAtRef = useRef<string | null>(null)
   const lastDraftConflictSnapshotRef = useRef<string | null>(null)
   const lastOverlapWarningRef = useRef<string | null>(null)
   const draftAutosaveInFlightRef = useRef(false)
   const draftStatusResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const overlapFieldErrorsCacheRef = useRef<{
+    signature: string
+    errors: Map<number, Set<string>>
+  } | null>(null)
+  const formRef = useRef(form)
 
   const hasLoadError = Boolean(error)
   const supplier = data && !("error" in data) ? data : null
   const isDraftSupplier = supplier?.status === "draft"
   const supplierUpdatedAt = supplier?.updatedAt
   const localDraftStorageKey = `supplier-draft-${supplierSlug}`
+  formRef.current = form
 
   useEffect(() => {
     if (!hasLoadError) {
@@ -1404,10 +1790,22 @@ export function SupplierDetailView({
     if (supplier) {
       const nextForm = buildFormState(supplier)
       const snapshot = JSON.stringify(nextForm)
+      const supplierIdentity = `${supplier.id}:${supplier.updatedAt}`
+      const shouldHydrateFromServer = shouldHydrateFormFromServer({
+        hasLocalForm: form !== null,
+        isEditing,
+        supplierStatus: supplier.status,
+        supplierIdentityChanged: hydratedSupplierIdentityRef.current !== supplierIdentity,
+      })
 
-      setForm(nextForm)
-      baselineSnapshotRef.current = snapshot
-      draftAutosavedSnapshotRef.current = snapshot
+      if (shouldHydrateFromServer) {
+        setForm(nextForm)
+        baselineSnapshotRef.current = snapshot
+        draftAutosavedSnapshotRef.current = snapshot
+        overlapFieldErrorsCacheRef.current = null
+      }
+      expectedUpdatedAtRef.current = supplier.updatedAt
+      hydratedSupplierIdentityRef.current = supplierIdentity
 
       if (canEdit && supplier.status === "draft") {
         setIsEditing(true)
@@ -1475,34 +1873,42 @@ export function SupplierDetailView({
     key: K,
     value: SupplierFormState[K],
   ) => {
-    setForm((current) => (current ? { ...current, [key]: value } : current))
+    startTransition(() => {
+      setForm((current) => (current ? { ...current, [key]: value } : current))
+    })
   }
 
-  const updateSuiteTypes = (
-    updater: (suiteTypes: EditableSuiteType[]) => EditableSuiteType[],
-  ) => {
-    setForm((current) =>
-      current ? { ...current, suiteTypes: updater(current.suiteTypes) } : current,
-    )
-  }
+  const updateSuiteTypes = useCallback(
+    (updater: (suiteTypes: EditableSuiteType[]) => EditableSuiteType[]) => {
+      startTransition(() => {
+        setForm((current) =>
+          current ? { ...current, suiteTypes: updater(current.suiteTypes) } : current,
+        )
+      })
+    },
+    [],
+  )
 
-  const addSuiteType = () => {
+  const addSuiteType = useCallback(() => {
     updateSuiteTypes((suiteTypes) => [...suiteTypes, createEmptySuiteType()])
-  }
+  }, [updateSuiteTypes])
 
-  const updateSuiteType = (
-    suiteTypeIndex: number,
-    key: keyof EditableSuiteType,
-    value: string | boolean,
-  ) => {
-    updateSuiteTypes((suiteTypes) =>
-      suiteTypes.map((suiteType, index) =>
-        index === suiteTypeIndex ? { ...suiteType, [key]: value } : suiteType,
-      ),
-    )
-  }
+  const updateSuiteType = useCallback(
+    (
+      suiteTypeIndex: number,
+      key: keyof EditableSuiteType,
+      value: string | boolean,
+    ) => {
+      updateSuiteTypes((suiteTypes) =>
+        suiteTypes.map((suiteType, index) =>
+          index === suiteTypeIndex ? { ...suiteType, [key]: value } : suiteType,
+        ),
+      )
+    },
+    [updateSuiteTypes],
+  )
 
-  const removeSuiteType = (suiteTypeIndex: number) => {
+  const removeSuiteType = useCallback((suiteTypeIndex: number) => {
     setForm((current) => {
       if (!current) return current
       const suiteTypeId = current.suiteTypes[suiteTypeIndex]?.id
@@ -1515,307 +1921,359 @@ export function SupplierDetailView({
         })),
       }
     })
-  }
+  }, [])
 
-  const updatePackages = (updater: (packages: EditablePackage[]) => EditablePackage[]) => {
-    setForm((current) =>
-      current ? { ...current, packages: updater(current.packages) } : current,
-    )
-  }
+  const updatePackages = useCallback(
+    (updater: (packages: EditablePackage[]) => EditablePackage[]) => {
+      startTransition(() => {
+        setForm((current) =>
+          current ? { ...current, packages: updater(current.packages) } : current,
+        )
+      })
+    },
+    [],
+  )
 
-  const updatePackage = (
-    packageIndex: number,
-    updater: (pkg: EditablePackage) => EditablePackage,
-  ) => {
-    updatePackages((packages) =>
-      packages.map((pkg, index) => (index === packageIndex ? updater(pkg) : pkg)),
-    )
-  }
+  const updatePackage = useCallback(
+    (
+      packageIndex: number,
+      updater: (pkg: EditablePackage) => EditablePackage,
+    ) => {
+      updatePackages((packages) =>
+        packages.map((pkg, index) => (index === packageIndex ? updater(pkg) : pkg)),
+      )
+    },
+    [updatePackages],
+  )
 
   const overlapFieldErrorsByPackage = useMemo(() => {
     if (!form) {
       return new Map<number, Set<string>>()
     }
-    return new Map(
+    const signature = getOverlapValidationSignature(form)
+    const cached = overlapFieldErrorsCacheRef.current
+    if (cached && cached.signature === signature) {
+      return cached.errors
+    }
+    const errors = new Map(
       form.packages.map((pkg, packageIndex) => [
         packageIndex,
         getRateCardOverlapFieldErrorKeys(pkg, form.suiteTypes),
       ]),
     )
+    overlapFieldErrorsCacheRef.current = { signature, errors }
+    return errors
   }, [form])
 
-  const warnForOverlapIfNeeded = (
-    pkg: EditablePackage,
-    suiteTypes: EditableSuiteType[],
-    vocabulary: SupplierVocabulary,
-  ) => {
-    const overlapConflict = findPackageRateCardOverlapConflicts(pkg, suiteTypes)[0]
-    if (!overlapConflict) {
-      lastOverlapWarningRef.current = null
-      return
-    }
+  const warnForOverlapIfNeeded = useCallback(
+    (
+      pkg: EditablePackage,
+      suiteTypes: EditableSuiteType[],
+      vocabulary: SupplierVocabulary,
+    ) => {
+      const overlapConflict = findPackageRateCardOverlapConflicts(pkg, suiteTypes)[0]
+      if (!overlapConflict) {
+        lastOverlapWarningRef.current = null
+        return
+      }
 
-    const warningKey = [
-      overlapConflict.packageId,
-      overlapConflict.suiteTypeId,
-      overlapConflict.routeId ?? "__null__",
-      overlapConflict.firstPeriodKey,
-      overlapConflict.secondPeriodKey,
-    ].join("|")
+      const warningKey = [
+        overlapConflict.packageId,
+        overlapConflict.suiteTypeId,
+        overlapConflict.routeId ?? "__null__",
+        overlapConflict.firstPeriodKey,
+        overlapConflict.secondPeriodKey,
+      ].join("|")
 
-    if (lastOverlapWarningRef.current === warningKey) {
-      return
-    }
-    lastOverlapWarningRef.current = warningKey
-    toast.warning(buildRateCardOverlapWarningMessage(overlapConflict, vocabulary))
-  }
+      if (lastOverlapWarningRef.current === warningKey) {
+        return
+      }
+      lastOverlapWarningRef.current = warningKey
+      toast.warning(buildRateCardOverlapWarningMessage(overlapConflict, vocabulary))
+    },
+    [],
+  )
 
-  const addPackage = () => {
+  const addPackage = useCallback(() => {
     updatePackages((packages) => [...packages, createEmptyPackage()])
-  }
+  }, [updatePackages])
 
-  const removePackage = (packageIndex: number) => {
-    updatePackages((packages) => packages.filter((_pkg, index) => index !== packageIndex))
-  }
+  const removePackage = useCallback(
+    (packageIndex: number) => {
+      updatePackages((packages) => packages.filter((_pkg, index) => index !== packageIndex))
+    },
+    [updatePackages],
+  )
 
-  const addRoute = (packageIndex: number) => {
-    updatePackage(packageIndex, (pkg) => ({
-      ...pkg,
-      routes: [...pkg.routes, createEmptyRoute(locations)],
-    }))
-  }
-
-  const updateRoute = (
-    packageIndex: number,
-    routeIndex: number,
-    key: keyof EditableRoute,
-    value: string | boolean,
-  ) => {
-    updatePackage(packageIndex, (pkg) => ({
-      ...pkg,
-      routes: pkg.routes.map((route, index) =>
-        index === routeIndex ? { ...route, [key]: value } : route,
-      ),
-    }))
-  }
-
-  const removeRoute = (packageIndex: number, routeIndex: number) => {
-    updatePackage(packageIndex, (pkg) => {
-      const routeId = pkg.routes[routeIndex]?.id
-      const nextPackage = {
+  const addRoute = useCallback(
+    (packageIndex: number) => {
+      updatePackage(packageIndex, (pkg) => ({
         ...pkg,
-        routes: pkg.routes.filter((_route, index) => index !== routeIndex),
-        rateCards: pkg.rateCards.map((rateCard) =>
-          rateCard.routeId === routeId ? { ...rateCard, routeId: null } : rateCard,
+        routes: [...pkg.routes, createEmptyRoute(locations)],
+      }))
+    },
+    [locations, updatePackage],
+  )
+
+  const updateRoute = useCallback(
+    (
+      packageIndex: number,
+      routeIndex: number,
+      key: keyof EditableRoute,
+      value: string | boolean,
+    ) => {
+      updatePackage(packageIndex, (pkg) => ({
+        ...pkg,
+        routes: pkg.routes.map((route, index) =>
+          index === routeIndex ? { ...route, [key]: value } : route,
         ),
-      }
-      const conflict = findPackageRateCardConflicts(nextPackage, form?.suiteTypes ?? [])[0]
-      if (conflict) {
-        const vocabulary = getSupplierVocabulary(form?.kind ?? "train_operator")
-        toast.error(
-          `Removing this ${vocabulary.route.toLowerCase()} would create duplicate rate cards. Adjust start dates first.`,
-        )
-        return pkg
-      }
+      }))
+    },
+    [updatePackage],
+  )
 
-      return {
-        ...nextPackage,
-      }
-    })
-  }
-
-  const addRateCardPeriod = (packageIndex: number) => {
-    updatePackage(packageIndex, (pkg) => {
-      const vocabulary = getSupplierVocabulary(form?.kind ?? "train_operator")
-      const availableSuiteTypes = form?.suiteTypes ?? []
-      if (availableSuiteTypes.length === 0) {
-        toast.error(
-          `Add at least one ${vocabulary.suiteType.toLowerCase()} before creating a pricing period.`,
-        )
-        return pkg
-      }
-
-      const currency = pkg.currency.trim().toUpperCase() || "ZAR"
-      const routes = pkg.routes.length > 0 ? pkg.routes : [{ id: null as string | null }]
-      const { nextValidFrom, previousPeriodKey } = getNextRateCardPeriodStart(pkg)
-      const linkedPreviousValidTo = addIsoDays(nextValidFrom, -1)
-      const baseRateCards =
-        previousPeriodKey && linkedPreviousValidTo
-          ? updateRateCardPeriodDateValues(pkg.rateCards, previousPeriodKey, {
-              validTo: linkedPreviousValidTo,
-            })
-          : pkg.rateCards
-
-      const newRateCards = availableSuiteTypes.flatMap((suiteType) =>
-        routes.map((route) => ({
-          id: makeClientId(),
-          routeId: route.id,
-          suiteTypeId: suiteType.id,
-          pricePerPerson: 0,
-          currency,
-          validFrom: nextValidFrom,
-          validTo: null,
-        })),
-      )
-
-      const nextPackage = {
-        ...pkg,
-        rateCards: [...baseRateCards, ...newRateCards],
-      }
-      const conflict = findPackageRateCardConflicts(nextPackage, availableSuiteTypes)[0]
-      if (conflict) {
-        toast.error(
-          "This pricing period duplicates an existing suite type/route/start-date combination. Choose a different start date.",
-        )
-        return pkg
-      }
-      warnForOverlapIfNeeded(nextPackage, availableSuiteTypes, vocabulary)
-
-      return {
-        ...nextPackage,
-      }
-    })
-  }
-
-  const updateRateCardPeriodField = (
-    packageIndex: number,
-    periodKey: string,
-    key: "validFrom" | "validTo" | "currency",
-    value: string | null,
-  ) => {
-    updatePackage(packageIndex, (pkg) => {
-      let nextPeriodKey = periodKey
-      let nextRateCards = pkg.rateCards.map((rateCard) => {
-        if (getRatePeriodKey(rateCard.validFrom, rateCard.validTo, rateCard.currency) !== periodKey) {
-          return rateCard
+  const removeRoute = useCallback(
+    (packageIndex: number, routeIndex: number) => {
+      const currentForm = formRef.current
+      updatePackage(packageIndex, (pkg) => {
+        const routeId = pkg.routes[routeIndex]?.id
+        const nextPackage = {
+          ...pkg,
+          routes: pkg.routes.filter((_route, index) => index !== routeIndex),
+          rateCards: pkg.rateCards.map((rateCard) =>
+            rateCard.routeId === routeId ? { ...rateCard, routeId: null } : rateCard,
+          ),
         }
-
-        if (key === "currency") {
-          const nextRateCard = {
-            ...rateCard,
-            currency: (value ?? "").trim().toUpperCase() || pkg.currency.trim().toUpperCase() || "ZAR",
-          }
-          nextPeriodKey = getRatePeriodKey(
-            nextRateCard.validFrom,
-            nextRateCard.validTo,
-            nextRateCard.currency,
-          )
-          return nextRateCard
-        }
-
-        if (key === "validFrom") {
-          const nextRateCard = {
-            ...rateCard,
-            validFrom: value ?? "",
-          }
-          nextPeriodKey = getRatePeriodKey(
-            nextRateCard.validFrom,
-            nextRateCard.validTo,
-            nextRateCard.currency,
-          )
-          return nextRateCard
-        }
-
-        const nextRateCard = {
-          ...rateCard,
-          validTo: value,
-        }
-        nextPeriodKey = getRatePeriodKey(
-          nextRateCard.validFrom,
-          nextRateCard.validTo,
-          nextRateCard.currency,
-        )
-        return nextRateCard
-      })
-
-      if (key === "validFrom" || key === "validTo") {
-        nextRateCards = applyBidirectionalPeriodDateLinking(nextRateCards, nextPeriodKey, key)
-      }
-
-      if (key === "validFrom" || key === "validTo") {
-        const nextPackage = { ...pkg, rateCards: nextRateCards }
-        const availableSuiteTypes = form?.suiteTypes ?? []
-        const conflict = findPackageRateCardConflicts(nextPackage, availableSuiteTypes)[0]
+        const conflict = findPackageRateCardConflicts(nextPackage, currentForm?.suiteTypes ?? [])[0]
         if (conflict) {
+          const vocabulary = getSupplierVocabulary(currentForm?.kind ?? "train_operator")
           toast.error(
-            "That start date duplicates an existing suite type/route/start-date combination.",
+            `Removing this ${vocabulary.route.toLowerCase()} would create duplicate rate cards. Adjust start dates first.`,
           )
           return pkg
         }
 
-        const vocabulary = getSupplierVocabulary(form?.kind ?? "train_operator")
+        return {
+          ...nextPackage,
+        }
+      })
+    },
+    [updatePackage],
+  )
+
+  const addRateCardPeriod = useCallback(
+    (packageIndex: number) => {
+      const currentForm = formRef.current
+      updatePackage(packageIndex, (pkg) => {
+        const vocabulary = getSupplierVocabulary(currentForm?.kind ?? "train_operator")
+        const availableSuiteTypes = currentForm?.suiteTypes ?? []
+        if (availableSuiteTypes.length === 0) {
+          toast.error(
+            `Add at least one ${vocabulary.suiteType.toLowerCase()} before creating a pricing period.`,
+          )
+          return pkg
+        }
+
+        const currency = pkg.currency.trim().toUpperCase() || "ZAR"
+        const routes = pkg.routes.length > 0 ? pkg.routes : [{ id: null as string | null }]
+        const { nextValidFrom, previousPeriodKey } = getNextRateCardPeriodStart(pkg)
+        const linkedPreviousValidTo = addIsoDays(nextValidFrom, -1)
+        const baseRateCards =
+          previousPeriodKey && linkedPreviousValidTo
+            ? updateRateCardPeriodDateValues(pkg.rateCards, previousPeriodKey, {
+                validTo: linkedPreviousValidTo,
+              })
+            : pkg.rateCards
+
+        const newRateCards = availableSuiteTypes.flatMap((suiteType) =>
+          routes.map((route) => ({
+            id: makeClientId(),
+            routeId: route.id,
+            suiteTypeId: suiteType.id,
+            pricePerPerson: 0,
+            currency,
+            validFrom: nextValidFrom,
+            validTo: null,
+          })),
+        )
+
+        const nextPackage = {
+          ...pkg,
+          rateCards: [...baseRateCards, ...newRateCards],
+        }
+        const conflict = findPackageRateCardConflicts(nextPackage, availableSuiteTypes)[0]
+        if (conflict) {
+          toast.error(
+            "This pricing period duplicates an existing suite type/route/start-date combination. Choose a different start date.",
+          )
+          return pkg
+        }
         warnForOverlapIfNeeded(nextPackage, availableSuiteTypes, vocabulary)
-      }
 
-      return {
-        ...pkg,
-        rateCards: nextRateCards,
-      }
-    })
-  }
+        return {
+          ...nextPackage,
+        }
+      })
+    },
+    [updatePackage, warnForOverlapIfNeeded],
+  )
 
-  const removeRateCardPeriod = (packageIndex: number, periodKey: string) => {
-    updatePackage(packageIndex, (pkg) => ({
-      ...pkg,
-      rateCards: pkg.rateCards.filter(
-        (rateCard) =>
-          getRatePeriodKey(rateCard.validFrom, rateCard.validTo, rateCard.currency) !== periodKey,
-      ),
-    }))
-  }
+  const updateRateCardPeriodField = useCallback(
+    (
+      packageIndex: number,
+      periodKey: string,
+      key: "validFrom" | "validTo" | "currency",
+      value: string | null,
+    ) => {
+      const currentForm = formRef.current
+      updatePackage(packageIndex, (pkg) => {
+        let nextPeriodKey = periodKey
+        let nextRateCards = pkg.rateCards.map((rateCard) => {
+          if (
+            getRatePeriodKey(rateCard.validFrom, rateCard.validTo, rateCard.currency) !== periodKey
+          ) {
+            return rateCard
+          }
 
-  const updateRateCardPrice = (packageIndex: number, rateCardId: string, value: number) => {
-    updatePackage(packageIndex, (pkg) => ({
-      ...pkg,
-      rateCards: pkg.rateCards.map((rateCard) =>
-        rateCard.id === rateCardId ? { ...rateCard, pricePerPerson: value } : rateCard,
-      ),
-    }))
-  }
+          if (key === "currency") {
+            const nextRateCard = {
+              ...rateCard,
+              currency: (value ?? "").trim().toUpperCase() || pkg.currency.trim().toUpperCase() || "ZAR",
+            }
+            nextPeriodKey = getRatePeriodKey(
+              nextRateCard.validFrom,
+              nextRateCard.validTo,
+              nextRateCard.currency,
+            )
+            return nextRateCard
+          }
 
-  const toggleRateCardCell = (
-    packageIndex: number,
-    periodKey: string,
-    suiteTypeId: string,
-    routeId: string | null,
-    enabled: boolean,
-  ) => {
-    updatePackage(packageIndex, (pkg) => {
-      const period = groupEditableRateCardsByPeriod(pkg.rateCards).find(
-        (candidate) => candidate.key === periodKey,
-      )
-      if (!period) return pkg
+          if (key === "validFrom") {
+            const nextRateCard = {
+              ...rateCard,
+              validFrom: value ?? "",
+            }
+            nextPeriodKey = getRatePeriodKey(
+              nextRateCard.validFrom,
+              nextRateCard.validTo,
+              nextRateCard.currency,
+            )
+            return nextRateCard
+          }
 
-      const existingCard = period.items.find(
-        (item) => item.suiteTypeId === suiteTypeId && item.routeId === routeId,
-      )
+          const nextRateCard = {
+            ...rateCard,
+            validTo: value,
+          }
+          nextPeriodKey = getRatePeriodKey(
+            nextRateCard.validFrom,
+            nextRateCard.validTo,
+            nextRateCard.currency,
+          )
+          return nextRateCard
+        })
 
-      if (enabled) {
-        if (existingCard) return pkg
+        if (key === "validFrom" || key === "validTo") {
+          nextRateCards = applyBidirectionalPeriodDateLinking(nextRateCards, nextPeriodKey, key)
+        }
+
+        if (key === "validFrom" || key === "validTo") {
+          const nextPackage = { ...pkg, rateCards: nextRateCards }
+          const availableSuiteTypes = currentForm?.suiteTypes ?? []
+          const conflict = findPackageRateCardConflicts(nextPackage, availableSuiteTypes)[0]
+          if (conflict) {
+            toast.error(
+              "That start date duplicates an existing suite type/route/start-date combination.",
+            )
+            return pkg
+          }
+
+          const vocabulary = getSupplierVocabulary(currentForm?.kind ?? "train_operator")
+          warnForOverlapIfNeeded(nextPackage, availableSuiteTypes, vocabulary)
+        }
+
         return {
           ...pkg,
-          rateCards: [
-            ...pkg.rateCards,
-            {
-              id: makeClientId(),
-              routeId,
-              suiteTypeId,
-              pricePerPerson: 0,
-              currency: period.currency,
-              validFrom: period.validFrom,
-              validTo: period.validTo,
-            },
-          ],
+          rateCards: nextRateCards,
         }
-      }
+      })
+    },
+    [updatePackage, warnForOverlapIfNeeded],
+  )
 
-      if (!existingCard) return pkg
-      return {
+  const removeRateCardPeriod = useCallback(
+    (packageIndex: number, periodKey: string) => {
+      updatePackage(packageIndex, (pkg) => ({
         ...pkg,
-        rateCards: pkg.rateCards.filter((rateCard) => rateCard.id !== existingCard.id),
-      }
-    })
-  }
+        rateCards: pkg.rateCards.filter(
+          (rateCard) =>
+            getRatePeriodKey(rateCard.validFrom, rateCard.validTo, rateCard.currency) !== periodKey,
+        ),
+      }))
+    },
+    [updatePackage],
+  )
+
+  const updateRateCardPrice = useCallback(
+    (packageIndex: number, rateCardId: string, value: number) => {
+      startTransition(() => {
+        updatePackage(packageIndex, (pkg) => ({
+          ...pkg,
+          rateCards: pkg.rateCards.map((rateCard) =>
+            rateCard.id === rateCardId ? { ...rateCard, pricePerPerson: value } : rateCard,
+          ),
+        }))
+      })
+    },
+    [updatePackage],
+  )
+
+  const toggleRateCardCell = useCallback(
+    (
+      packageIndex: number,
+      periodKey: string,
+      suiteTypeId: string,
+      routeId: string | null,
+      enabled: boolean,
+    ) => {
+      updatePackage(packageIndex, (pkg) => {
+        const period = groupEditableRateCardsByPeriod(pkg.rateCards).find(
+          (candidate) => candidate.key === periodKey,
+        )
+        if (!period) return pkg
+
+        const existingCard = period.items.find(
+          (item) => item.suiteTypeId === suiteTypeId && item.routeId === routeId,
+        )
+
+        if (enabled) {
+          if (existingCard) return pkg
+          return {
+            ...pkg,
+            rateCards: [
+              ...pkg.rateCards,
+              {
+                id: makeClientId(),
+                routeId,
+                suiteTypeId,
+                pricePerPerson: 0,
+                currency: period.currency,
+                validFrom: period.validFrom,
+                validTo: period.validTo,
+              },
+            ],
+          }
+        }
+
+        if (!existingCard) return pkg
+        return {
+          ...pkg,
+          rateCards: pkg.rateCards.filter((rateCard) => rateCard.id !== existingCard.id),
+        }
+      })
+    },
+    [updatePackage],
+  )
 
   useEffect(() => {
     if (!canEdit || !form || !isEditing || isSaving) return
@@ -1850,11 +2308,21 @@ export function SupplierDetailView({
           const response = await fetch(`/api/suppliers/${supplierSlug}?draft=true`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ...buildDraftPayload(form), expectedUpdatedAt: supplierUpdatedAt }),
+            body: JSON.stringify({
+              ...buildDraftPayload(form),
+              expectedUpdatedAt: expectedUpdatedAtRef.current ?? supplierUpdatedAt,
+            }),
           })
           if (!response.ok) {
             setDraftSaveStatus("error")
             return
+          }
+          const payload = (await response.json()) as { updatedAt?: string }
+          if (typeof payload.updatedAt === "string") {
+            expectedUpdatedAtRef.current = payload.updatedAt
+            if (supplier?.id) {
+              hydratedSupplierIdentityRef.current = `${supplier.id}:${payload.updatedAt}`
+            }
           }
 
           draftAutosavedSnapshotRef.current = snapshot
@@ -1866,7 +2334,6 @@ export function SupplierDetailView({
             setDraftSaveStatus("idle")
           }, DRAFT_AUTOSAVE_STATUS_RESET_MS)
           await mutate("/api/suppliers?includeDrafts=true")
-          await mutateDetail()
         } catch {
           setDraftSaveStatus("error")
         } finally {
@@ -2065,7 +2532,8 @@ export function SupplierDetailView({
           active: form.active,
           suiteTypes: cleanedSuiteTypes,
           packages: cleanedPackages,
-          expectedUpdatedAt: supplier?.updatedAt,
+          expectedUpdatedAt:
+            expectedUpdatedAtRef.current ?? supplier?.updatedAt,
         }),
       })
       const payload = await response.json()
@@ -2095,6 +2563,9 @@ export function SupplierDetailView({
         }
         toast.error(payload.error ?? "Failed to update supplier")
         return
+      }
+      if (typeof payload?.updatedAt === "string") {
+        expectedUpdatedAtRef.current = payload.updatedAt
       }
 
       await Promise.all([
@@ -2308,10 +2779,10 @@ export function SupplierDetailView({
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="supplier-name">Supplier name</Label>
-                    <Input
+                    <BufferedInput
                       id="supplier-name"
                       value={form.name}
-                      onChange={(event) => updateField("name", event.target.value)}
+                      onValueChange={(value) => updateField("name", value)}
                     />
                   </div>
 
@@ -2336,29 +2807,29 @@ export function SupplierDetailView({
 
                   <div className="space-y-2">
                     <Label htmlFor="supplier-phone">Phone</Label>
-                    <Input
+                    <BufferedInput
                       id="supplier-phone"
                       value={form.phone}
-                      onChange={(event) => updateField("phone", event.target.value)}
+                      onValueChange={(value) => updateField("phone", value)}
                     />
                   </div>
 
                   <div className="space-y-2">
                     <Label htmlFor="supplier-website">Website</Label>
-                    <Input
+                    <BufferedInput
                       id="supplier-website"
                       value={form.website}
-                      onChange={(event) => updateField("website", event.target.value)}
+                      onValueChange={(value) => updateField("website", value)}
                       onBlur={(event) => updateField("website", shortenUrl(event.target.value))}
                     />
                   </div>
 
                   <div className="space-y-2">
                     <Label htmlFor="supplier-location">Location</Label>
-                    <Input
+                    <BufferedInput
                       id="supplier-location"
                       value={form.location}
-                      onChange={(event) => updateField("location", event.target.value)}
+                      onValueChange={(value) => updateField("location", value)}
                     />
                   </div>
                 </div>
@@ -2371,10 +2842,10 @@ export function SupplierDetailView({
 
                 <div className="space-y-2">
                   <Label htmlFor="supplier-notes">Notes</Label>
-                  <Textarea
+                  <BufferedTextarea
                     id="supplier-notes"
                     value={form.notes}
-                    onChange={(event) => updateField("notes", event.target.value)}
+                    onValueChange={(value) => updateField("notes", value)}
                     rows={4}
                   />
                 </div>
@@ -2498,39 +2969,14 @@ export function SupplierDetailView({
                 {isEditing ? (
                   form.suiteTypes.length > 0 ? (
                     form.suiteTypes.map((suiteType, suiteTypeIndex) => (
-                      <div
+                      <SuiteTypeEditorRow
                         key={suiteType.id}
-                        className="grid gap-4 rounded-lg border p-3 md:grid-cols-[1fr_auto_auto]"
-                      >
-                        <div className="space-y-2">
-                          <Label>{`${activeVocabulary.suiteType} name`}</Label>
-                          <Input
-                            value={suiteType.name}
-                            onChange={(event) =>
-                              updateSuiteType(suiteTypeIndex, "name", event.target.value)
-                            }
-                          />
-                        </div>
-                        <div className="flex items-end gap-2">
-                          <Switch
-                            checked={suiteType.active}
-                            onCheckedChange={(checked) =>
-                              updateSuiteType(suiteTypeIndex, "active", checked)
-                            }
-                          />
-                          <span className="self-center text-sm text-muted-foreground">Active</span>
-                        </div>
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="outline"
-                          className={`self-end ${REMOVE_ICON_BUTTON_CLASS}`}
-                          aria-label={`Remove ${activeVocabulary.suiteType.toLowerCase()}`}
-                          onClick={() => removeSuiteType(suiteTypeIndex)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
+                        suiteType={suiteType}
+                        suiteTypeIndex={suiteTypeIndex}
+                        vocabulary={activeVocabulary}
+                        onUpdateSuiteType={updateSuiteType}
+                        onRemoveSuiteType={removeSuiteType}
+                      />
                     ))
                   ) : (
                     <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
@@ -2557,252 +3003,28 @@ export function SupplierDetailView({
               {isEditing ? (
                 form.packages.length > 0 ? (
                   form.packages.map((pkg, packageIndex) => (
-                    <div key={pkg.id} className="rounded-lg border p-4 space-y-5">
-                      <div className="flex items-center justify-between gap-3 flex-wrap">
-                        <p className="text-sm font-semibold text-foreground">
-                          {`${activeVocabulary.package} ${packageIndex + 1}`}
-                        </p>
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="outline"
-                          className={REMOVE_ICON_BUTTON_CLASS}
-                          aria-label={`Remove ${activeVocabulary.package.toLowerCase()}`}
-                          onClick={() => removePackage(packageIndex)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-
-                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                        <div className="space-y-2 xl:col-span-2">
-                          <Label>{`${activeVocabulary.package} name`}</Label>
-                          <Input
-                            value={pkg.name}
-                            onChange={(event) =>
-                              updatePackage(packageIndex, (current) => ({
-                                ...current,
-                                name: event.target.value,
-                              }))
-                            }
-                          />
-                        </div>
-                        {activeVocabulary.showDurationNights ? (
-                          <div className="space-y-2">
-                            <Label>Duration (nights)</Label>
-                            <NumericInput
-                              min="0"
-                              nullable
-                              value={pkg.durationNights}
-                              onValueChange={(value) =>
-                                updatePackage(packageIndex, (current) => ({
-                                  ...current,
-                                  durationNights: value,
-                                }))
-                              }
-                            />
-                          </div>
-                        ) : null}
-                        {activeVocabulary.showSingleSupplement ? (
-                          <div className="space-y-2">
-                            <Label>Single supplement %</Label>
-                            <NumericInput
-                              min="0"
-                              step="0.01"
-                              value={pkg.singleSupplementPct}
-                              onValueChange={(value) =>
-                                updatePackage(packageIndex, (current) => ({
-                                  ...current,
-                                  singleSupplementPct: value ?? 0,
-                                }))
-                              }
-                            />
-                          </div>
-                        ) : null}
-                        <div className="space-y-2">
-                          <Label>Currency</Label>
-                          <Input
-                            maxLength={10}
-                            value={pkg.currency}
-                            onChange={(event) =>
-                              updatePackage(packageIndex, (current) => ({
-                                ...current,
-                                currency: event.target.value.toUpperCase(),
-                              }))
-                            }
-                          />
-                        </div>
-                        <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-                          <div>
-                            <p className="text-sm font-medium text-foreground">Active</p>
-                            <p className="text-xs text-muted-foreground">
-                              {`Include this ${activeVocabulary.package.toLowerCase()} in supplier listings.`}
-                            </p>
-                          </div>
-                          <Switch
-                            checked={pkg.active}
-                            onCheckedChange={(checked) =>
-                              updatePackage(packageIndex, (current) => ({
-                                ...current,
-                                active: checked,
-                              }))
-                            }
-                          />
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label>Description</Label>
-                        <Textarea
-                          rows={3}
-                          value={pkg.description}
-                          onChange={(event) =>
-                            updatePackage(packageIndex, (current) => ({
-                              ...current,
-                              description: event.target.value,
-                            }))
-                          }
-                        />
-                      </div>
-
-                      <Separator />
-
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="text-sm font-semibold text-foreground">
-                            {activeVocabulary.routePlural}
-                          </p>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            onClick={() => addRoute(packageIndex)}
-                          >
-                            <Plus className="mr-2 h-4 w-4" />
-                            {`Add ${activeVocabulary.route.toLowerCase()}`}
-                          </Button>
-                        </div>
-
-                        {pkg.routes.length > 0 ? (
-                          pkg.routes.map((route, routeIndex) => (
-                            <div
-                              key={route.id}
-                              className={`grid min-w-0 gap-4 overflow-hidden rounded-lg border p-3 ${
-                                activeVocabulary.routeHasLocations
-                                  ? "md:grid-cols-2 xl:grid-cols-5"
-                                  : "md:grid-cols-[1fr_auto]"
-                              }`}
-                            >
-                              <div
-                                className={`space-y-2 ${
-                                  activeVocabulary.routeHasLocations ? "xl:col-span-2" : ""
-                                }`}
-                              >
-                                <Label>{`${activeVocabulary.route} name`}</Label>
-                                <Input
-                                  value={route.name}
-                                  onChange={(event) =>
-                                    updateRoute(packageIndex, routeIndex, "name", event.target.value)
-                                  }
-                                />
-                              </div>
-                              {activeVocabulary.routeHasLocations ? (
-                                <>
-                                  <div className="min-w-0 space-y-2">
-                                    <Label>Origin</Label>
-                                    <Select
-                                      value={route.originLocationId || undefined}
-                                      onValueChange={(value) =>
-                                        updateRoute(packageIndex, routeIndex, "originLocationId", value)
-                                      }
-                                    >
-                                      <SelectTrigger className="max-w-full">
-                                        <SelectValue placeholder="Select location" />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        {locations.map((location) => (
-                                          <SelectItem key={location.id} value={location.id}>
-                                            {location.name}
-                                          </SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                  </div>
-                                  <div className="min-w-0 space-y-2">
-                                    <Label>Destination</Label>
-                                    <Select
-                                      value={route.destinationLocationId || undefined}
-                                      onValueChange={(value) =>
-                                        updateRoute(
-                                          packageIndex,
-                                          routeIndex,
-                                          "destinationLocationId",
-                                          value,
-                                        )
-                                      }
-                                    >
-                                      <SelectTrigger className="max-w-full">
-                                        <SelectValue placeholder="Select location" />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        {locations.map((location) => (
-                                          <SelectItem key={location.id} value={location.id}>
-                                            {location.name}
-                                          </SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                  </div>
-                                </>
-                              ) : null}
-                              <div className="flex items-end justify-end gap-3">
-                                <div className="flex items-center gap-2">
-                                  <Switch
-                                    checked={route.active}
-                                    onCheckedChange={(checked) =>
-                                      updateRoute(packageIndex, routeIndex, "active", checked)
-                                    }
-                                  />
-                                  <span className="text-sm text-muted-foreground">Active</span>
-                                </div>
-                                <Button
-                                  type="button"
-                                  size="icon"
-                                  variant="outline"
-                                  className={REMOVE_ICON_BUTTON_CLASS}
-                                  aria-label={`Remove ${activeVocabulary.route.toLowerCase()}`}
-                                  onClick={() => removeRoute(packageIndex, routeIndex)}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </div>
-                            </div>
-                          ))
-                        ) : (
-                          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                            {`No ${activeVocabulary.routePlural.toLowerCase()} added yet.`}
-                          </div>
-                        )}
-                      </div>
-
-                      <Separator />
-
-                      <RateCardMatrixEditor
-                        pkg={pkg}
-                        suiteTypes={form.suiteTypes}
-                        packageIndex={packageIndex}
-                        locationsById={locationsById}
-                        vocabulary={activeVocabulary}
-                        onAddPeriod={addRateCardPeriod}
-                        onRemovePeriod={removeRateCardPeriod}
-                        onUpdatePeriodField={updateRateCardPeriodField}
-                        onUpdateCellPrice={updateRateCardPrice}
-                        onToggleCell={toggleRateCardCell}
-                        periodFieldErrors={
-                          overlapFieldErrorsByPackage.get(packageIndex) ?? EMPTY_PERIOD_FIELD_ERRORS
-                        }
-                      />
-                    </div>
+                    <PackageEditor
+                      key={pkg.id}
+                      pkg={pkg}
+                      packageIndex={packageIndex}
+                      suiteTypes={form.suiteTypes}
+                      locations={locations}
+                      locationsById={locationsById}
+                      vocabulary={activeVocabulary}
+                      periodFieldErrors={
+                        overlapFieldErrorsByPackage.get(packageIndex) ?? EMPTY_PERIOD_FIELD_ERRORS
+                      }
+                      onRemovePackage={removePackage}
+                      onUpdatePackage={updatePackage}
+                      onAddRoute={addRoute}
+                      onUpdateRoute={updateRoute}
+                      onRemoveRoute={removeRoute}
+                      onAddRateCardPeriod={addRateCardPeriod}
+                      onRemoveRateCardPeriod={removeRateCardPeriod}
+                      onUpdateRateCardPeriodField={updateRateCardPeriodField}
+                      onUpdateRateCardPrice={updateRateCardPrice}
+                      onToggleRateCardCell={toggleRateCardCell}
+                    />
                   ))
                 ) : (
                   <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">

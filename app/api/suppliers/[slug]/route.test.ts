@@ -24,6 +24,7 @@ vi.mock("../helpers", () => ({
 }))
 
 import { PATCH } from "./route"
+import { DELETE, GET } from "./route"
 
 const USER_ID = "00000000-0000-0000-0000-000000000001"
 const SUPPLIER_ID = "00000000-0000-0000-0000-000000000010"
@@ -137,5 +138,535 @@ describe("PATCH /api/suppliers/[slug]", () => {
     )
     expect(helperMocks.supabaseFrom).toHaveBeenCalledTimes(1)
     expect(helperMocks.supabaseFrom).toHaveBeenCalledWith("profiles")
+  })
+})
+
+describe("GET /api/suppliers/[slug]", () => {
+  beforeEach(() => {
+    helperMocks.requireAuthenticatedUser.mockReset()
+    helperMocks.loadSupplierDetail.mockReset()
+  })
+
+  it("returns 401 when unauthenticated", async () => {
+    helperMocks.requireAuthenticatedUser.mockResolvedValue({
+      error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    })
+
+    const response = await GET(new Request("http://localhost/api/suppliers/test"), {
+      params: Promise.resolve({ slug: "test" }),
+    })
+    expect(response.status).toBe(401)
+  })
+
+  it("returns propagated not found when supplier is missing", async () => {
+    helperMocks.requireAuthenticatedUser.mockResolvedValue({
+      supabase: { from: vi.fn() },
+      user: { id: USER_ID },
+    })
+    helperMocks.loadSupplierDetail.mockResolvedValue({
+      error: NextResponse.json({ error: "Supplier not found" }, { status: 404 }),
+    })
+
+    const response = await GET(new Request("http://localhost/api/suppliers/missing"), {
+      params: Promise.resolve({ slug: "missing" }),
+    })
+    expect(response.status).toBe(404)
+  })
+
+  it("returns supplier detail payload", async () => {
+    helperMocks.requireAuthenticatedUser.mockResolvedValue({
+      supabase: { from: vi.fn() },
+      user: { id: USER_ID },
+    })
+    helperMocks.loadSupplierDetail.mockResolvedValue({
+      supplier: {
+        id: SUPPLIER_ID,
+        slug: "test-supplier",
+        kind: "hotel_property",
+        status: "active",
+        name: "Test Supplier",
+        email: null,
+        phone: null,
+        website: null,
+        location: null,
+        notes: null,
+        active: true,
+        created_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-02T00:00:00.000Z",
+      },
+      packages: [],
+      routes: [],
+      suiteTypes: [],
+      emails: [],
+      rateCards: [],
+      locations: [],
+    })
+
+    const response = await GET(new Request("http://localhost/api/suppliers/test-supplier"), {
+      params: Promise.resolve({ slug: "test-supplier" }),
+    })
+    const payload = await response.json()
+    expect(response.status).toBe(200)
+    expect(payload).toMatchObject({
+      id: SUPPLIER_ID,
+      slug: "test-supplier",
+      name: "Test Supplier",
+    })
+  })
+})
+
+describe("DELETE /api/suppliers/[slug]", () => {
+  beforeEach(() => {
+    helperMocks.supabaseFrom.mockReset()
+    helperMocks.requireAuthenticatedUser.mockReset()
+    helperMocks.loadSupplierDetail.mockReset()
+  })
+
+  it("returns 401 when unauthenticated", async () => {
+    helperMocks.requireAuthenticatedUser.mockResolvedValue({
+      error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    })
+    const response = await DELETE(new Request("http://localhost/api/suppliers/test"), {
+      params: Promise.resolve({ slug: "test" }),
+    })
+    expect(response.status).toBe(401)
+  })
+
+  it("returns 403 when user is not admin", async () => {
+    helperMocks.supabaseFrom.mockImplementation((table: string) => {
+      if (table !== "profiles") throw new Error(`Unexpected table ${table}`)
+      return {
+        select: () => ({
+          eq: () => ({
+            single: async () => ({ data: { clearance_level: "manager" }, error: null }),
+          }),
+        }),
+      }
+    })
+    helperMocks.requireAuthenticatedUser.mockResolvedValue({
+      supabase: { from: helperMocks.supabaseFrom },
+      user: { id: USER_ID },
+    })
+
+    const response = await DELETE(new Request("http://localhost/api/suppliers/test"), {
+      params: Promise.resolve({ slug: "test" }),
+    })
+    expect(response.status).toBe(403)
+  })
+
+  it("returns 409 when active bookings reference supplier", async () => {
+    helperMocks.supabaseFrom.mockImplementation((table: string) => {
+      if (table === "profiles") {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { clearance_level: "admin" }, error: null }),
+            }),
+          }),
+        }
+      }
+      if (table === "bookings") {
+        return {
+          select: () => ({
+            eq: () => ({
+              neq: () => ({
+                neq: async () => ({ count: 1, error: null }),
+              }),
+            }),
+          }),
+        }
+      }
+      throw new Error(`Unexpected table ${table}`)
+    })
+    helperMocks.requireAuthenticatedUser.mockResolvedValue({
+      supabase: { from: helperMocks.supabaseFrom },
+      user: { id: USER_ID },
+    })
+    helperMocks.loadSupplierDetail.mockResolvedValue({
+      supplier: { id: SUPPLIER_ID },
+      packages: [],
+      routes: [],
+      suiteTypes: [],
+      emails: [],
+      rateCards: [],
+      locations: [],
+    })
+
+    const response = await DELETE(new Request("http://localhost/api/suppliers/test"), {
+      params: Promise.resolve({ slug: "test" }),
+    })
+    expect(response.status).toBe(409)
+    await expect(response.json()).resolves.toEqual({
+      error: "Cannot delete supplier with active bookings",
+    })
+  })
+
+  it("returns 204 on successful delete", async () => {
+    const deleteEqMock = vi.fn(async () => ({ error: null }))
+    helperMocks.supabaseFrom.mockImplementation((table: string) => {
+      if (table === "profiles") {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { clearance_level: "admin" }, error: null }),
+            }),
+          }),
+        }
+      }
+      if (table === "bookings") {
+        return {
+          select: () => ({
+            eq: () => ({
+              neq: () => ({
+                neq: async () => ({ count: 0, error: null }),
+              }),
+            }),
+            in: () => ({
+              neq: () => ({
+                neq: async () => ({ count: 0, error: null }),
+              }),
+            }),
+          }),
+        }
+      }
+      if (table === "packages") {
+        return {
+          select: () => ({
+            eq: async () => ({ data: [], error: null }),
+          }),
+        }
+      }
+      if (table === "suppliers") {
+        return {
+          delete: () => ({
+            eq: deleteEqMock,
+          }),
+        }
+      }
+      throw new Error(`Unexpected table ${table}`)
+    })
+    helperMocks.requireAuthenticatedUser.mockResolvedValue({
+      supabase: { from: helperMocks.supabaseFrom },
+      user: { id: USER_ID },
+    })
+    helperMocks.loadSupplierDetail.mockResolvedValue({
+      supplier: { id: SUPPLIER_ID },
+      packages: [],
+      routes: [],
+      suiteTypes: [],
+      emails: [],
+      rateCards: [],
+      locations: [],
+    })
+
+    const response = await DELETE(new Request("http://localhost/api/suppliers/test"), {
+      params: Promise.resolve({ slug: "test" }),
+    })
+    expect(response.status).toBe(204)
+    expect(deleteEqMock).toHaveBeenCalledWith("id", SUPPLIER_ID)
+  })
+})
+
+describe("PATCH /api/suppliers/[slug] additional scenarios", () => {
+  beforeEach(() => {
+    helperMocks.supabaseFrom.mockReset()
+    helperMocks.requireAuthenticatedUser.mockReset()
+    helperMocks.loadSupplierDetail.mockReset()
+    helperMocks.queryExistingIds.mockReset()
+    helperMocks.checkDeletionDependencies.mockReset()
+    helperMocks.makeUuid.mockReset()
+  })
+
+  it("returns 401 when unauthenticated", async () => {
+    helperMocks.requireAuthenticatedUser.mockResolvedValue({
+      error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    })
+    const response = await PATCH(new Request("http://localhost/api/suppliers/test"), {
+      params: Promise.resolve({ slug: "test" }),
+    })
+    expect(response.status).toBe(401)
+  })
+
+  it("returns 403 when profile role is not allowed", async () => {
+    helperMocks.supabaseFrom.mockImplementation((table: string) => {
+      if (table !== "profiles") throw new Error(`Unexpected table ${table}`)
+      return {
+        select: () => ({
+          eq: () => ({
+            single: async () => ({ data: { clearance_level: "consultant" }, error: null }),
+          }),
+        }),
+      }
+    })
+    helperMocks.requireAuthenticatedUser.mockResolvedValue({
+      supabase: { from: helperMocks.supabaseFrom },
+      user: { id: USER_ID },
+    })
+
+    const response = await PATCH(
+      new Request("http://localhost/api/suppliers/test", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "hotel_property" }),
+      }),
+      { params: Promise.resolve({ slug: "test" }) },
+    )
+    expect(response.status).toBe(403)
+  })
+
+  it("returns 400 for invalid request payload", async () => {
+    helperMocks.supabaseFrom.mockImplementation((table: string) => {
+      if (table !== "profiles") throw new Error(`Unexpected table ${table}`)
+      return {
+        select: () => ({
+          eq: () => ({
+            single: async () => ({ data: { clearance_level: "manager" }, error: null }),
+          }),
+        }),
+      }
+    })
+    helperMocks.requireAuthenticatedUser.mockResolvedValue({
+      supabase: { from: helperMocks.supabaseFrom },
+      user: { id: USER_ID },
+    })
+
+    const response = await PATCH(
+      new Request("http://localhost/api/suppliers/test", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: "not-json",
+      }),
+      { params: Promise.resolve({ slug: "test" }) },
+    )
+    expect(response.status).toBe(400)
+  })
+
+  it("returns 409 on optimistic concurrency mismatch", async () => {
+    helperMocks.supabaseFrom.mockImplementation((table: string) => {
+      if (table !== "profiles") throw new Error(`Unexpected table ${table}`)
+      return {
+        select: () => ({
+          eq: () => ({
+            single: async () => ({ data: { clearance_level: "manager" }, error: null }),
+          }),
+        }),
+      }
+    })
+    helperMocks.requireAuthenticatedUser.mockResolvedValue({
+      supabase: { from: helperMocks.supabaseFrom },
+      user: { id: USER_ID },
+    })
+    helperMocks.loadSupplierDetail.mockResolvedValue({
+      supplier: {
+        id: SUPPLIER_ID,
+        updated_at: "2026-03-23T08:00:00.000Z",
+      },
+      packages: [],
+      routes: [],
+      suiteTypes: [],
+      emails: [],
+      rateCards: [],
+      locations: [],
+    })
+
+    const response = await PATCH(
+      new Request("http://localhost/api/suppliers/test", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Supplier Updated",
+          kind: "hotel_property",
+          email: "",
+          phone: "",
+          website: "",
+          location: "",
+          notes: "",
+          active: true,
+          emails: [],
+          suiteTypes: [],
+          packages: [],
+          expectedUpdatedAt: "2026-03-23T08:00:01.000Z",
+        }),
+      }),
+      { params: Promise.resolve({ slug: "test" }) },
+    )
+    expect(response.status).toBe(409)
+  })
+
+  it("returns 409 for overlapping rate cards", async () => {
+    helperMocks.supabaseFrom.mockImplementation((table: string) => {
+      if (table !== "profiles") throw new Error(`Unexpected table ${table}`)
+      return {
+        select: () => ({
+          eq: () => ({
+            single: async () => ({ data: { clearance_level: "manager" }, error: null }),
+          }),
+        }),
+      }
+    })
+    helperMocks.requireAuthenticatedUser.mockResolvedValue({
+      supabase: { from: helperMocks.supabaseFrom },
+      user: { id: USER_ID },
+    })
+    helperMocks.loadSupplierDetail.mockResolvedValue({
+      supplier: {
+        id: SUPPLIER_ID,
+        updated_at: "2026-03-23T08:00:00.000Z",
+      },
+      packages: [],
+      routes: [],
+      suiteTypes: [],
+      emails: [],
+      rateCards: [],
+      locations: [],
+    })
+    helperMocks.makeUuid
+      .mockReturnValueOnce(PACKAGE_NEW)
+      .mockReturnValueOnce(ROUTE_OLD)
+      .mockReturnValueOnce(RATE_CARD_OLD)
+      .mockReturnValueOnce("00000000-0000-0000-0000-000000000052")
+
+    const response = await PATCH(
+      new Request("http://localhost/api/suppliers/test", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Supplier Updated",
+          kind: "hotel_property",
+          email: "",
+          phone: "",
+          website: "",
+          location: "",
+          notes: "",
+          active: true,
+          emails: [],
+          suiteTypes: [{ id: SUITE_TYPE_NEW, name: "Suite", active: true }],
+          packages: [
+            {
+              id: PACKAGE_NEW,
+              name: "Package 1",
+              description: null,
+              durationNights: null,
+              singleSupplementPct: 0,
+              currency: "ZAR",
+              active: true,
+              routes: [
+                {
+                  id: ROUTE_OLD,
+                  name: "R1",
+                  originLocationId: "00000000-0000-0000-0000-000000000061",
+                  destinationLocationId: "00000000-0000-0000-0000-000000000062",
+                  active: true,
+                },
+              ],
+              rateCards: [
+                {
+                  id: RATE_CARD_OLD,
+                  routeId: ROUTE_OLD,
+                  suiteTypeId: SUITE_TYPE_NEW,
+                  pricePerPerson: 100,
+                  currency: "ZAR",
+                  validFrom: "2026-01-01",
+                  validTo: null,
+                },
+                {
+                  routeId: ROUTE_OLD,
+                  suiteTypeId: SUITE_TYPE_NEW,
+                  pricePerPerson: 120,
+                  currency: "ZAR",
+                  validFrom: "2026-06-01",
+                  validTo: null,
+                },
+              ],
+            },
+          ],
+        }),
+      }),
+      { params: Promise.resolve({ slug: "test" }) },
+    )
+    expect(response.status).toBe(409)
+    await expect(response.json()).resolves.toMatchObject({
+      error:
+        "Overlapping rate card periods are not allowed for the same package, suite type, and route.",
+    })
+  })
+
+  it("draft save forces supplier active=false and returns updated detail", async () => {
+    const supplierUpdateEq = vi.fn(async () => ({ error: null }))
+    helperMocks.supabaseFrom.mockImplementation((table: string) => {
+      if (table === "profiles") {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { clearance_level: "manager" }, error: null }),
+            }),
+          }),
+        }
+      }
+      if (table === "suppliers") {
+        return {
+          update: vi.fn(() => ({
+            eq: supplierUpdateEq,
+          })),
+        }
+      }
+      throw new Error(`Unexpected table ${table}`)
+    })
+    helperMocks.requireAuthenticatedUser.mockResolvedValue({
+      supabase: { from: helperMocks.supabaseFrom },
+      user: { id: USER_ID },
+    })
+    helperMocks.queryExistingIds.mockResolvedValue([])
+    helperMocks.checkDeletionDependencies.mockResolvedValue([])
+    helperMocks.loadSupplierDetail
+      .mockResolvedValueOnce({
+        supplier: {
+          id: SUPPLIER_ID,
+          updated_at: "2026-03-23T08:00:00.000Z",
+        },
+        packages: [],
+        routes: [],
+        suiteTypes: [],
+        emails: [],
+        rateCards: [],
+        locations: [],
+      })
+      .mockResolvedValueOnce({
+        supplier: {
+          id: SUPPLIER_ID,
+          slug: "test-supplier",
+          kind: "hotel_property",
+          status: "draft",
+          name: "",
+          email: null,
+          phone: null,
+          website: null,
+          location: null,
+          notes: null,
+          active: false,
+          created_at: "2026-01-01T00:00:00.000Z",
+          updated_at: "2026-01-02T00:00:00.000Z",
+        },
+        packages: [],
+        routes: [],
+        suiteTypes: [],
+        emails: [],
+        rateCards: [],
+        locations: [],
+      })
+
+    const response = await PATCH(
+      new Request("http://localhost/api/suppliers/test?draft=true", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "hotel_property" }),
+      }),
+      { params: Promise.resolve({ slug: "test" }) },
+    )
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(supplierUpdateEq).toHaveBeenCalledWith("id", SUPPLIER_ID)
+    expect(payload).toMatchObject({ id: SUPPLIER_ID, active: false, status: "draft" })
   })
 })
