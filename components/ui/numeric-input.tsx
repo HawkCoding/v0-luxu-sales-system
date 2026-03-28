@@ -18,6 +18,7 @@ export function NumericInput({
   nullable = false,
   onFocus,
   onBlur,
+  onWheel,
   ...props
 }: NumericInputProps) {
   const [displayValue, setDisplayValue] = useState(value === null ? "" : String(value))
@@ -70,6 +71,13 @@ export function NumericInput({
         }
 
         onBlur?.(event)
+      }}
+      onWheel={(event) => {
+        if (event.currentTarget === document.activeElement) {
+          event.currentTarget.blur()
+        }
+
+        onWheel?.(event)
       }}
       {...props}
     />

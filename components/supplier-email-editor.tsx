@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { Check, ChevronsUpDown, Plus, Trash2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { BufferedInput } from "@/components/ui/buffered-input"
 import {
   Command,
   CommandEmpty,
@@ -11,7 +12,6 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useRole } from "@/lib/role-context"
@@ -64,6 +64,7 @@ export function SupplierEmailEditor({ emails, onChange, idPrefix }: SupplierEmai
   const { data: persistedLabelOptions, mutate: mutateLabelOptions } = useSupplierEmailLabels()
   const [openLabelRowId, setOpenLabelRowId] = useState<string | null>(null)
   const [labelSearchValue, setLabelSearchValue] = useState("")
+  const [activeLabelValue, setActiveLabelValue] = useState("")
   const [isCreatingLabel, setIsCreatingLabel] = useState(false)
   const [deletingLabelIds, setDeletingLabelIds] = useState<Set<string>>(new Set())
 
@@ -103,6 +104,14 @@ export function SupplierEmailEditor({ emails, onChange, idPrefix }: SupplierEmai
 
   const addEmail = () => {
     onChange([...emails, createEmptySupplierEmail()])
+  }
+
+  const getActiveLabelValue = (label: string) => {
+    const normalizedLabel = label.trim() || "General"
+    const matchingOption = labelOptions.find(
+      (option) => option.name.toLowerCase() === normalizedLabel.toLowerCase(),
+    )
+    return matchingOption?.name ?? normalizedLabel
   }
 
   const removeEmail = (emailIndex: number) => {
@@ -279,11 +288,13 @@ export function SupplierEmailEditor({ emails, onChange, idPrefix }: SupplierEmai
                     onOpenChange={(isOpen) => {
                       if (isOpen) {
                         setOpenLabelRowId(entry.id)
-                        setLabelSearchValue(entry.label)
+                        setLabelSearchValue("")
+                        setActiveLabelValue(getActiveLabelValue(entry.label))
                         return
                       }
                       setOpenLabelRowId(null)
                       setLabelSearchValue("")
+                      setActiveLabelValue("")
                     }}
                   >
                     <PopoverTrigger asChild>
@@ -302,7 +313,7 @@ export function SupplierEmailEditor({ emails, onChange, idPrefix }: SupplierEmai
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent align="start" className="w-[220px] p-0">
-                      <Command>
+                      <Command value={activeLabelValue} onValueChange={setActiveLabelValue}>
                         <CommandInput
                           value={labelSearchValue}
                           onValueChange={setLabelSearchValue}
@@ -378,11 +389,11 @@ export function SupplierEmailEditor({ emails, onChange, idPrefix }: SupplierEmai
                   <Label htmlFor={`${idPrefix}-email-${entry.id}`} className="md:sr-only">
                     Email address
                   </Label>
-                  <Input
+                  <BufferedInput
                     id={`${idPrefix}-email-${entry.id}`}
                     type="email"
                     value={entry.email}
-                    onChange={(event) => updateEmailValue(index, event.target.value)}
+                    onValueChange={(value) => updateEmailValue(index, value)}
                     placeholder="supplier@example.com"
                   />
                 </div>

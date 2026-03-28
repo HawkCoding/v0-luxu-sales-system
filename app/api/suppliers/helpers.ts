@@ -71,13 +71,21 @@ export async function queryExistingIds(
 ): Promise<string[]> {
   if (ids.length === 0) return []
 
-  const { data, error } = await supabase.from(table).select("id").in("id", ids)
+  // Chunk ID lookups to avoid oversized query URLs for large IN clauses.
+  const CHUNK_SIZE = 100
+  const matchedIds: string[] = []
 
-  if (error) {
-    throw new Error(`Failed to validate ids for ${table}`)
+  for (let index = 0; index < ids.length; index += CHUNK_SIZE) {
+    const idChunk = ids.slice(index, index + CHUNK_SIZE)
+    const { data, error } = await supabase.from(table).select("id").in("id", idChunk)
+
+    if (error) {
+      throw new Error(`Failed to validate ids for ${table}`)
+    }
+
+    matchedIds.push(...(data ?? []).map((row) => row.id))
   }
-
-  return (data ?? []).map((row) => row.id)
+  return matchedIds
 }
 
 interface DeletionDependency {

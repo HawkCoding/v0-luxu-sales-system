@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react"
+import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react"
 import { getSupabase } from "@/lib/supabase/client"
 import type { Role } from "./types"
 
@@ -35,8 +35,10 @@ interface AuthProviderProps {
 }
 
 export function AuthProvider({ children, initialUser = null }: AuthProviderProps) {
-  const [user, setUser] = useState<User | null>(initialUser)
-  const [loading, setLoading] = useState(initialUser === null)
+  const initialUserRef = useRef<User | null>(initialUser)
+  const [user, setUser] = useState<User | null>(initialUserRef.current)
+  const [loading, setLoading] = useState(initialUserRef.current === null)
+  const authHandlerInFlightRef = useRef(false)
 
   const loadProfile = useCallback(async (userId: string, fallbackEmail: string) => {
     const supabase = getSupabase()
@@ -54,7 +56,6 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
         role: profile.clearance_level as Role,
       })
     } else {
-      // Profile not found — derive name from email prefix, default to consultant
       const emailName = fallbackEmail.split("@")[0]
       const displayName = emailName.charAt(0).toUpperCase() + emailName.slice(1)
       setUser({ name: displayName, email: fallbackEmail, role: "consultant" })
@@ -163,7 +164,7 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
           if (mounted) setLoading(false)
         }
       }
-      if (initialUser === null) {
+      if (initialUserRef.current === null) {
         void init()
       } else {
         setLoading(false)
@@ -172,6 +173,8 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
       // Subscribe to auth state changes (login / logout / token refresh)
       const authState = supabase.auth.onAuthStateChange(async (_event, session) => {
         if (!mounted) return
+        if (authHandlerInFlightRef.current) return
+        authHandlerInFlightRef.current = true
         try {
           if (session?.user) {
             await loadProfile(session.user.id, session.user.email ?? "")
@@ -182,6 +185,7 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
           console.error("Failed to update auth state", error)
           setUser(null)
         } finally {
+          authHandlerInFlightRef.current = false
           if (mounted) setLoading(false)
         }
       })
@@ -196,7 +200,8 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
       mounted = false
       subscription?.unsubscribe()
     }
-  }, [clearLocalSession, initialUser, isStaleRefreshTokenError, loadProfile])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- callbacks are stable (useCallback with [] deps); auth setup must run exactly once
+  }, [])
 
   const loginWithMicrosoft = async (): Promise<boolean> => {
     const supabase = getSupabase()

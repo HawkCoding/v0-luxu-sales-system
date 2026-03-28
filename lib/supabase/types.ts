@@ -1322,7 +1322,7 @@ export type Database = {
         | "phone_call"
         | "email"
         | "travel_agent"
-      supplier_kind: "train_operator" | "hotel_property" | "transfers"
+      supplier_kind: "train_operator" | "hotel_property" | "transfers" | "tour_operator" | "airline"
       user_role: "admin" | "manager" | "consultant" | "readonly"
     }
     CompositeTypes: {

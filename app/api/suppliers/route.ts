@@ -47,7 +47,7 @@ async function resolveUniqueSupplierSlug(
 }
 
 const createSupplierSchema = z.object({
-  kind: z.enum(["train_operator", "hotel_property", "transfers"]),
+  kind: z.enum(["train_operator", "hotel_property", "transfers", "tour_operator", "airline"]),
   name: z.string().trim().min(2, "Supplier name must be at least 2 characters").max(200),
   email: z
     .string()
