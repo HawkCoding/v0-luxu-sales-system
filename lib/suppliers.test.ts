@@ -115,8 +115,8 @@ describe("mapSupplier", () => {
       createdAt: supplierRow.created_at,
       updatedAt: supplierRow.updated_at,
     })
-    expect(result.createdAtDisplay.length).toBeGreaterThan(0)
-    expect(result.updatedAtDisplay.length).toBeGreaterThan(0)
+    expect(result.createdAtDisplay).toBeTruthy()
+    expect(result.updatedAtDisplay).toBeTruthy()
   })
 
   it("normalizes unknown status to inactive", () => {
@@ -185,8 +185,8 @@ describe("individual row mappers", () => {
       validFrom: rateCardRow.valid_from,
       validTo: null,
     })
-    expect(result.validFromDisplay.length).toBeGreaterThan(0)
-    expect(result.createdAtDisplay.length).toBeGreaterThan(0)
+    expect(result.validFromDisplay).toBeTruthy()
+    expect(result.createdAtDisplay).toBeTruthy()
   })
 })
 

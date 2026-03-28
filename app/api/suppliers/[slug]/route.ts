@@ -203,13 +203,13 @@ export async function GET(
 ) {
   const auth = await requireAuthenticatedUser()
   if ("error" in auth) {
-    return auth.error
+    return auth.error!
   }
 
   const { slug } = await params
   const detail = await loadSupplierDetail(auth.supabase, slug)
   if ("error" in detail) {
-    return detail.error
+    return detail.error!
   }
 
   return NextResponse.json(
@@ -231,7 +231,7 @@ export async function DELETE(
 ) {
   const auth = await requireAuthenticatedUser()
   if ("error" in auth) {
-    return auth.error
+    return auth.error!
   }
 
   const { supabase, user } = auth
@@ -249,7 +249,7 @@ export async function DELETE(
 
   const detail = await loadSupplierDetail(supabase, slug)
   if ("error" in detail) {
-    return detail.error
+    return detail.error!
   }
   const supplierId = detail.supplier.id
 

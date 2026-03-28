@@ -102,7 +102,7 @@ const createSupplierSchema = z.object({
 export async function GET(req: Request) {
   const auth = await requireAuthenticatedUser()
   if ("error" in auth) {
-    return auth.error
+    return auth.error!
   }
 
   const { supabase } = auth
@@ -127,7 +127,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const auth = await requireAuthenticatedUser()
   if ("error" in auth) {
-    return auth.error
+    return auth.error!
   }
 
   const { supabase, user } = auth
