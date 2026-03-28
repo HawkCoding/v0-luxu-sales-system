@@ -1878,33 +1878,37 @@ export function SupplierDetailView({
     })
   }
 
-  const updateSuiteTypes = (
-    updater: (suiteTypes: EditableSuiteType[]) => EditableSuiteType[],
-  ) => {
-    startTransition(() => {
-      setForm((current) =>
-        current ? { ...current, suiteTypes: updater(current.suiteTypes) } : current,
-      )
-    })
-  }
+  const updateSuiteTypes = useCallback(
+    (updater: (suiteTypes: EditableSuiteType[]) => EditableSuiteType[]) => {
+      startTransition(() => {
+        setForm((current) =>
+          current ? { ...current, suiteTypes: updater(current.suiteTypes) } : current,
+        )
+      })
+    },
+    [],
+  )
 
-  const addSuiteType = () => {
+  const addSuiteType = useCallback(() => {
     updateSuiteTypes((suiteTypes) => [...suiteTypes, createEmptySuiteType()])
-  }
+  }, [updateSuiteTypes])
 
-  const updateSuiteType = (
-    suiteTypeIndex: number,
-    key: keyof EditableSuiteType,
-    value: string | boolean,
-  ) => {
-    updateSuiteTypes((suiteTypes) =>
-      suiteTypes.map((suiteType, index) =>
-        index === suiteTypeIndex ? { ...suiteType, [key]: value } : suiteType,
-      ),
-    )
-  }
+  const updateSuiteType = useCallback(
+    (
+      suiteTypeIndex: number,
+      key: keyof EditableSuiteType,
+      value: string | boolean,
+    ) => {
+      updateSuiteTypes((suiteTypes) =>
+        suiteTypes.map((suiteType, index) =>
+          index === suiteTypeIndex ? { ...suiteType, [key]: value } : suiteType,
+        ),
+      )
+    },
+    [updateSuiteTypes],
+  )
 
-  const removeSuiteType = (suiteTypeIndex: number) => {
+  const removeSuiteType = useCallback((suiteTypeIndex: number) => {
     setForm((current) => {
       if (!current) return current
       const suiteTypeId = current.suiteTypes[suiteTypeIndex]?.id
@@ -1917,7 +1921,7 @@ export function SupplierDetailView({
         })),
       }
     })
-  }
+  }, [])
 
   const updatePackages = useCallback(
     (updater: (packages: EditablePackage[]) => EditablePackage[]) => {
@@ -1990,59 +1994,72 @@ export function SupplierDetailView({
     [],
   )
 
-  const addPackage = () => {
+  const addPackage = useCallback(() => {
     updatePackages((packages) => [...packages, createEmptyPackage()])
-  }
+  }, [updatePackages])
 
-  const removePackage = (packageIndex: number) => {
-    updatePackages((packages) => packages.filter((_pkg, index) => index !== packageIndex))
-  }
+  const removePackage = useCallback(
+    (packageIndex: number) => {
+      updatePackages((packages) => packages.filter((_pkg, index) => index !== packageIndex))
+    },
+    [updatePackages],
+  )
 
-  const addRoute = (packageIndex: number) => {
-    updatePackage(packageIndex, (pkg) => ({
-      ...pkg,
-      routes: [...pkg.routes, createEmptyRoute(locations)],
-    }))
-  }
-
-  const updateRoute = (
-    packageIndex: number,
-    routeIndex: number,
-    key: keyof EditableRoute,
-    value: string | boolean,
-  ) => {
-    updatePackage(packageIndex, (pkg) => ({
-      ...pkg,
-      routes: pkg.routes.map((route, index) =>
-        index === routeIndex ? { ...route, [key]: value } : route,
-      ),
-    }))
-  }
-
-  const removeRoute = (packageIndex: number, routeIndex: number) => {
-    updatePackage(packageIndex, (pkg) => {
-      const routeId = pkg.routes[routeIndex]?.id
-      const nextPackage = {
+  const addRoute = useCallback(
+    (packageIndex: number) => {
+      updatePackage(packageIndex, (pkg) => ({
         ...pkg,
-        routes: pkg.routes.filter((_route, index) => index !== routeIndex),
-        rateCards: pkg.rateCards.map((rateCard) =>
-          rateCard.routeId === routeId ? { ...rateCard, routeId: null } : rateCard,
-        ),
-      }
-      const conflict = findPackageRateCardConflicts(nextPackage, form?.suiteTypes ?? [])[0]
-      if (conflict) {
-        const vocabulary = getSupplierVocabulary(form?.kind ?? "train_operator")
-        toast.error(
-          `Removing this ${vocabulary.route.toLowerCase()} would create duplicate rate cards. Adjust start dates first.`,
-        )
-        return pkg
-      }
+        routes: [...pkg.routes, createEmptyRoute(locations)],
+      }))
+    },
+    [locations, updatePackage],
+  )
 
-      return {
-        ...nextPackage,
-      }
-    })
-  }
+  const updateRoute = useCallback(
+    (
+      packageIndex: number,
+      routeIndex: number,
+      key: keyof EditableRoute,
+      value: string | boolean,
+    ) => {
+      updatePackage(packageIndex, (pkg) => ({
+        ...pkg,
+        routes: pkg.routes.map((route, index) =>
+          index === routeIndex ? { ...route, [key]: value } : route,
+        ),
+      }))
+    },
+    [updatePackage],
+  )
+
+  const removeRoute = useCallback(
+    (packageIndex: number, routeIndex: number) => {
+      const currentForm = formRef.current
+      updatePackage(packageIndex, (pkg) => {
+        const routeId = pkg.routes[routeIndex]?.id
+        const nextPackage = {
+          ...pkg,
+          routes: pkg.routes.filter((_route, index) => index !== routeIndex),
+          rateCards: pkg.rateCards.map((rateCard) =>
+            rateCard.routeId === routeId ? { ...rateCard, routeId: null } : rateCard,
+          ),
+        }
+        const conflict = findPackageRateCardConflicts(nextPackage, currentForm?.suiteTypes ?? [])[0]
+        if (conflict) {
+          const vocabulary = getSupplierVocabulary(currentForm?.kind ?? "train_operator")
+          toast.error(
+            `Removing this ${vocabulary.route.toLowerCase()} would create duplicate rate cards. Adjust start dates first.`,
+          )
+          return pkg
+        }
+
+        return {
+          ...nextPackage,
+        }
+      })
+    },
+    [updatePackage],
+  )
 
   const addRateCardPeriod = useCallback(
     (packageIndex: number) => {
@@ -2303,6 +2320,9 @@ export function SupplierDetailView({
           const payload = (await response.json()) as { updatedAt?: string }
           if (typeof payload.updatedAt === "string") {
             expectedUpdatedAtRef.current = payload.updatedAt
+            if (supplier?.id) {
+              hydratedSupplierIdentityRef.current = `${supplier.id}:${payload.updatedAt}`
+            }
           }
 
           draftAutosavedSnapshotRef.current = snapshot
