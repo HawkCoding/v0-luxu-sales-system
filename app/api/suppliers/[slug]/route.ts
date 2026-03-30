@@ -5,6 +5,7 @@ import {
   allowedRoles,
   buildErrorResponse,
   checkDeletionDependencies,
+  deleteInChunks,
   loadSupplierDetail,
   makeUuid,
   normalizeNullableDate,
@@ -863,25 +864,6 @@ export async function PATCH(
     return withPatchTimingHeaders(response)
   }
 
-  const { error: supplierUpdateError } = await supabase
-    .from("suppliers")
-    .update({
-      name: parsed.name,
-      kind: parsed.kind,
-      email: normalizedEmails[0]?.email ?? null,
-      phone: parsed.phone || null,
-      website: parsed.website || null,
-      location: parsed.location || null,
-      notes: parsed.notes || null,
-      active: isDraftSave ? false : parsed.active,
-    })
-    .eq("id", supplierId)
-
-  if (supplierUpdateError) {
-    logSupplierMutationError("supplier-update", supplierId, supplierUpdateError)
-    return withDbTimingHeaders(NextResponse.json({ error: "Failed to update supplier" }, { status: 500 }))
-  }
-
   if (normalizedEmails.length > 0) {
     const { error: supplierEmailsUpsertError } = await supabase
       .from("supplier_emails")
@@ -999,10 +981,11 @@ export async function PATCH(
   }
 
   if (rateCardIdsToDelete.length > 0) {
-    const { error: deleteRateCardsError } = await supabase
-      .from("rate_cards")
-      .delete()
-      .in("id", rateCardIdsToDelete)
+    const { error: deleteRateCardsError } = await deleteInChunks(
+      supabase,
+      "rate_cards",
+      rateCardIdsToDelete,
+    )
 
     if (deleteRateCardsError) {
       logSupplierMutationError("rate-cards-delete", supplierId, deleteRateCardsError)
@@ -1016,10 +999,11 @@ export async function PATCH(
   }
 
   if (emailIdsToDelete.length > 0) {
-    const { error: deleteEmailsError } = await supabase
-      .from("supplier_emails")
-      .delete()
-      .in("id", emailIdsToDelete)
+    const { error: deleteEmailsError } = await deleteInChunks(
+      supabase,
+      "supplier_emails",
+      emailIdsToDelete,
+    )
 
     if (deleteEmailsError) {
       logSupplierMutationError("supplier-emails-delete", supplierId, deleteEmailsError)
@@ -1033,10 +1017,11 @@ export async function PATCH(
   }
 
   if (routeIdsToDelete.length > 0) {
-    const { error: deleteRoutesError } = await supabase
-      .from("routes")
-      .delete()
-      .in("id", routeIdsToDelete)
+    const { error: deleteRoutesError } = await deleteInChunks(
+      supabase,
+      "routes",
+      routeIdsToDelete,
+    )
 
     if (deleteRoutesError) {
       logSupplierMutationError("routes-delete", supplierId, deleteRoutesError)
@@ -1050,10 +1035,11 @@ export async function PATCH(
   }
 
   if (suiteTypeIdsToDelete.length > 0) {
-    const { error: deleteSuiteTypesError } = await supabase
-      .from("suite_types")
-      .delete()
-      .in("id", suiteTypeIdsToDelete)
+    const { error: deleteSuiteTypesError } = await deleteInChunks(
+      supabase,
+      "suite_types",
+      suiteTypeIdsToDelete,
+    )
 
     if (deleteSuiteTypesError) {
       logSupplierMutationError("suite-types-delete", supplierId, deleteSuiteTypesError)
@@ -1067,10 +1053,11 @@ export async function PATCH(
   }
 
   if (packageIdsToDelete.length > 0) {
-    const { error: deletePackagesError } = await supabase
-      .from("packages")
-      .delete()
-      .in("id", packageIdsToDelete)
+    const { error: deletePackagesError } = await deleteInChunks(
+      supabase,
+      "packages",
+      packageIdsToDelete,
+    )
 
     if (deletePackagesError) {
       logSupplierMutationError("packages-delete", supplierId, deletePackagesError)
@@ -1081,6 +1068,25 @@ export async function PATCH(
         ),
       )
     }
+  }
+
+  const { error: supplierUpdateError } = await supabase
+    .from("suppliers")
+    .update({
+      name: parsed.name,
+      kind: parsed.kind,
+      email: normalizedEmails[0]?.email ?? null,
+      phone: parsed.phone || null,
+      website: parsed.website || null,
+      location: parsed.location || null,
+      notes: parsed.notes || null,
+      active: isDraftSave ? false : parsed.active,
+    })
+    .eq("id", supplierId)
+
+  if (supplierUpdateError) {
+    logSupplierMutationError("supplier-update", supplierId, supplierUpdateError)
+    return withDbTimingHeaders(NextResponse.json({ error: "Failed to update supplier" }, { status: 500 }))
   }
 
   phaseDurations.dbWritesMs = performance.now() - dbWritesStartedAt

@@ -88,6 +88,27 @@ export async function queryExistingIds(
   return matchedIds
 }
 
+export async function deleteInChunks(
+  supabase: SessionClient,
+  table: RefTableName,
+  ids: string[],
+): Promise<{ error: { message: string; code?: string } | null }> {
+  if (ids.length === 0) return { error: null }
+
+  // Chunk ID deletes to avoid oversized query URLs for large IN clauses.
+  const CHUNK_SIZE = 100
+
+  for (let index = 0; index < ids.length; index += CHUNK_SIZE) {
+    const idChunk = ids.slice(index, index + CHUNK_SIZE)
+    const { error } = await supabase.from(table).delete().in("id", idChunk)
+    if (error) {
+      return { error }
+    }
+  }
+
+  return { error: null }
+}
+
 interface DeletionDependency {
   table: string
   ids: string[]

@@ -2,7 +2,9 @@
 
 import { Toaster as Sonner, ToasterProps } from 'sonner'
 
-const LIGHT_TOAST_STYLE = {
+type ToastCssVariables = React.CSSProperties & Record<`--${string}`, string>
+
+const LIGHT_TOAST_STYLE: ToastCssVariables = {
   '--normal-bg': '#ffffff',
   '--normal-text': '#09090b',
   '--normal-border': '#e4e4e7',
@@ -18,7 +20,7 @@ const LIGHT_TOAST_STYLE = {
   '--error-bg': 'hsl(359, 100%, 97%)',
   '--error-border': 'hsl(359, 100%, 94%)',
   '--error-text': 'hsl(360, 100%, 45%)',
-} satisfies React.CSSProperties
+}
 
 const Toaster = ({ ...props }: ToasterProps) => {
   return (

@@ -6,6 +6,7 @@ const helperMocks = vi.hoisted(() => ({
   loadSupplierDetail: vi.fn(),
   queryExistingIds: vi.fn(),
   checkDeletionDependencies: vi.fn(),
+  deleteInChunks: vi.fn(),
   makeUuid: vi.fn(),
   supabaseFrom: vi.fn(),
 }))
@@ -15,6 +16,7 @@ vi.mock("../helpers", () => ({
   buildErrorResponse: (message: string, status = 400) =>
     NextResponse.json({ error: message }, { status }),
   checkDeletionDependencies: helperMocks.checkDeletionDependencies,
+  deleteInChunks: helperMocks.deleteInChunks,
   loadSupplierDetail: helperMocks.loadSupplierDetail,
   makeUuid: helperMocks.makeUuid,
   normalizeNullableDate: (value: string | null) => (value && value.trim() ? value : null),
@@ -33,6 +35,9 @@ const SUITE_TYPE_NEW = "00000000-0000-0000-0000-000000000012"
 const PACKAGE_OLD = "00000000-0000-0000-0000-000000000021"
 const PACKAGE_NEW = "00000000-0000-0000-0000-000000000022"
 const ROUTE_OLD = "00000000-0000-0000-0000-000000000031"
+const ROUTE_NEW = "00000000-0000-0000-0000-000000000032"
+const LOCATION_A = "00000000-0000-0000-0000-000000000061"
+const LOCATION_B = "00000000-0000-0000-0000-000000000062"
 const EMAIL_OLD = "00000000-0000-0000-0000-000000000041"
 const EMAIL_NEW = "00000000-0000-0000-0000-000000000042"
 const RATE_CARD_OLD = "00000000-0000-0000-0000-000000000051"
@@ -44,6 +49,7 @@ describe("PATCH /api/suppliers/[slug]", () => {
     helperMocks.loadSupplierDetail.mockReset()
     helperMocks.queryExistingIds.mockReset()
     helperMocks.checkDeletionDependencies.mockReset()
+    helperMocks.deleteInChunks.mockReset()
     helperMocks.makeUuid.mockReset()
 
     helperMocks.supabaseFrom.mockImplementation((table: string) => {
@@ -89,6 +95,7 @@ describe("PATCH /api/suppliers/[slug]", () => {
     helperMocks.checkDeletionDependencies.mockResolvedValue([
       { table: "packages", ids: [PACKAGE_OLD], referencedBy: "bookings" },
     ])
+    helperMocks.deleteInChunks.mockResolvedValue({ error: null })
   })
 
   it("returns 409 without mutating when deletion dependencies conflict", async () => {
@@ -374,7 +381,9 @@ describe("PATCH /api/suppliers/[slug] additional scenarios", () => {
     helperMocks.loadSupplierDetail.mockReset()
     helperMocks.queryExistingIds.mockReset()
     helperMocks.checkDeletionDependencies.mockReset()
+    helperMocks.deleteInChunks.mockReset()
     helperMocks.makeUuid.mockReset()
+    helperMocks.deleteInChunks.mockResolvedValue({ error: null })
   })
 
   it("returns 401 when unauthenticated", async () => {
@@ -593,6 +602,118 @@ describe("PATCH /api/suppliers/[slug] additional scenarios", () => {
     await expect(response.json()).resolves.toMatchObject({
       error:
         "Overlapping rate card periods are not allowed for the same package, suite type, and route.",
+    })
+  })
+
+  it("returns 409 when routes upsert hits duplicate name per package (ux_routes_name_package)", async () => {
+    helperMocks.supabaseFrom.mockImplementation((table: string) => {
+      if (table === "profiles") {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { clearance_level: "manager" }, error: null }),
+            }),
+          }),
+        }
+      }
+      if (table === "suppliers") {
+        return {
+          update: vi.fn(() => ({
+            eq: vi.fn(async () => ({ error: null })),
+          })),
+        }
+      }
+      if (table === "packages") {
+        return {
+          upsert: vi.fn(async () => ({ error: null })),
+        }
+      }
+      if (table === "routes") {
+        return {
+          upsert: vi.fn(async () => ({
+            error: {
+              code: "23505",
+              details: null,
+              hint: null,
+              message: 'duplicate key value violates unique constraint "ux_routes_name_package"',
+            },
+          })),
+        }
+      }
+      throw new Error(`Unexpected table ${table}`)
+    })
+    helperMocks.requireAuthenticatedUser.mockResolvedValue({
+      supabase: { from: helperMocks.supabaseFrom },
+      user: { id: USER_ID },
+    })
+    helperMocks.queryExistingIds.mockResolvedValue([])
+    helperMocks.checkDeletionDependencies.mockResolvedValue([])
+    helperMocks.loadSupplierDetail.mockResolvedValue({
+      supplier: {
+        id: SUPPLIER_ID,
+        updated_at: "2026-03-23T08:00:00.000Z",
+      },
+      packages: [{ id: PACKAGE_OLD }],
+      routes: [{ id: ROUTE_OLD }],
+      suiteTypes: [],
+      emails: [],
+      rateCards: [],
+      locations: [],
+    })
+
+    const response = await PATCH(
+      new Request("http://localhost/api/suppliers/test", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Supplier Updated",
+          kind: "train_operator",
+          email: "",
+          phone: "",
+          website: "",
+          location: "",
+          notes: "",
+          active: true,
+          emails: [],
+          suiteTypes: [],
+          packages: [
+            {
+              id: PACKAGE_OLD,
+              name: "Package 1",
+              description: null,
+              durationNights: null,
+              singleSupplementPct: 0,
+              currency: "ZAR",
+              active: true,
+              routes: [
+                {
+                  id: ROUTE_OLD,
+                  name: "Same name",
+                  originLocationId: LOCATION_A,
+                  destinationLocationId: LOCATION_B,
+                  active: true,
+                },
+                {
+                  id: ROUTE_NEW,
+                  name: "Same name",
+                  originLocationId: LOCATION_A,
+                  destinationLocationId: LOCATION_B,
+                  active: true,
+                },
+              ],
+              rateCards: [],
+            },
+          ],
+          expectedUpdatedAt: "2026-03-23T08:00:00.000Z",
+        }),
+      }),
+      { params: Promise.resolve({ slug: "test" }) },
+    )
+
+    expect(response.status).toBe(409)
+    await expect(response.json()).resolves.toMatchObject({
+      error:
+        "A route with this name already exists in the same package. Use a different route name.",
     })
   })
 

@@ -2691,6 +2691,10 @@ export function SupplierDetailView({
         const typedPayload = payload as {
           error?: string
           details?: unknown
+          currentUpdatedAt?: string
+        }
+        if (typeof typedPayload.currentUpdatedAt === "string") {
+          expectedUpdatedAtRef.current = typedPayload.currentUpdatedAt
         }
         const conflictDetails = typedPayload?.details as
           | {
