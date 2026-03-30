@@ -220,13 +220,13 @@ function AppShell({ children }: { children: ReactNode }) {
               <Sun
                 className={cn(
                   "relative z-10 w-3.5 h-3.5 transition-colors",
-                  isDarkMode ? "text-accent-hover" : "text-text-muted",
+                  isDarkMode ? "text-text-muted" : "text-accent-hover",
                 )}
               />
               <Moon
                 className={cn(
                   "relative z-10 w-3.5 h-3.5 transition-colors",
-                  isDarkMode ? "text-text-muted" : "text-accent-hover",
+                  isDarkMode ? "text-accent-hover" : "text-text-muted",
                 )}
               />
             </Button>

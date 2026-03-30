@@ -2154,85 +2154,84 @@ export function SupplierDetailView({
 
   const removeRoute = useCallback(
     (packageIndex: number, routeIndex: number) => {
-      const currentForm = formRef.current
-      if (!currentForm) return
-      const pkg = currentForm.packages[packageIndex]
-      if (!pkg) return
+      updatePackage(packageIndex, (pkg) => {
+        const currentForm = formRef.current
+        if (!currentForm) return pkg
 
-      const routeId = pkg.routes[routeIndex]?.id
-      const nextPackage = {
-        ...pkg,
-        routes: pkg.routes.filter((_route, index) => index !== routeIndex),
-        rateCards: pkg.rateCards.map((rateCard) =>
-          rateCard.routeId === routeId ? { ...rateCard, routeId: null } : rateCard,
-        ),
-      }
+        const routeId = pkg.routes[routeIndex]?.id
+        const nextPackage = {
+          ...pkg,
+          routes: pkg.routes.filter((_route, index) => index !== routeIndex),
+          rateCards: pkg.rateCards.map((rateCard) =>
+            rateCard.routeId === routeId ? { ...rateCard, routeId: null } : rateCard,
+          ),
+        }
 
-      const conflict = findPackageRateCardConflicts(nextPackage, currentForm.suiteTypes)[0]
-      if (conflict) {
-        const vocabulary = getSupplierVocabulary(currentForm.kind)
-        toast.error(buildRateCardConflictMessage(conflict, vocabulary), { id: "rate-card-conflict" })
-        return
-      }
+        const conflict = findPackageRateCardConflicts(nextPackage, currentForm.suiteTypes)[0]
+        if (conflict) {
+          const vocabulary = getSupplierVocabulary(currentForm.kind)
+          toast.error(buildRateCardConflictMessage(conflict, vocabulary), { id: "rate-card-conflict" })
+          return pkg
+        }
 
-      updatePackage(packageIndex, () => nextPackage)
+        return nextPackage
+      })
     },
     [updatePackage],
   )
 
   const addRateCardPeriod = useCallback(
     (packageIndex: number) => {
-      const currentForm = formRef.current
-      if (!currentForm) return
+      updatePackage(packageIndex, (pkg) => {
+        const currentForm = formRef.current
+        if (!currentForm) return pkg
 
-      const vocabulary = getSupplierVocabulary(currentForm.kind)
-      const availableSuiteTypes = currentForm.suiteTypes
-      if (availableSuiteTypes.length === 0) {
-        toast.error(
-          `Add at least one ${vocabulary.suiteType.toLowerCase()} before creating a pricing period.`,
-          { id: "rate-card-no-suite-type" },
+        const vocabulary = getSupplierVocabulary(currentForm.kind)
+        const availableSuiteTypes = currentForm.suiteTypes
+        if (availableSuiteTypes.length === 0) {
+          toast.error(
+            `Add at least one ${vocabulary.suiteType.toLowerCase()} before creating a pricing period.`,
+            { id: "rate-card-no-suite-type" },
+          )
+          return pkg
+        }
+
+        const currency = pkg.currency.trim().toUpperCase() || "ZAR"
+        const routes = pkg.routes.length > 0 ? pkg.routes : [{ id: null as string | null }]
+        const { nextValidFrom, previousPeriodKey } = getNextRateCardPeriodStart(pkg)
+        const linkedPreviousValidTo = addIsoDays(nextValidFrom, -1)
+        const baseRateCards =
+          previousPeriodKey && linkedPreviousValidTo
+            ? updateRateCardPeriodDateValues(pkg.rateCards, previousPeriodKey, {
+                validTo: linkedPreviousValidTo,
+              })
+            : pkg.rateCards
+
+        const newRateCards = availableSuiteTypes.flatMap((suiteType) =>
+          routes.map((route) => ({
+            id: makeClientId(),
+            routeId: route.id,
+            suiteTypeId: suiteType.id,
+            pricePerPerson: 0,
+            currency,
+            validFrom: nextValidFrom,
+            validTo: null,
+          })),
         )
-        return
-      }
 
-      const pkg = currentForm.packages[packageIndex]
-      if (!pkg) return
+        const nextPackage = { ...pkg, rateCards: [...baseRateCards, ...newRateCards] }
+        const conflict = findPackageRateCardConflicts(nextPackage, availableSuiteTypes)[0]
+        if (conflict) {
+          toast.error(
+            "This pricing period duplicates an existing suite type/route/start-date combination. Choose a different start date.",
+            { id: "rate-card-conflict" },
+          )
+          return pkg
+        }
 
-      const currency = pkg.currency.trim().toUpperCase() || "ZAR"
-      const routes = pkg.routes.length > 0 ? pkg.routes : [{ id: null as string | null }]
-      const { nextValidFrom, previousPeriodKey } = getNextRateCardPeriodStart(pkg)
-      const linkedPreviousValidTo = addIsoDays(nextValidFrom, -1)
-      const baseRateCards =
-        previousPeriodKey && linkedPreviousValidTo
-          ? updateRateCardPeriodDateValues(pkg.rateCards, previousPeriodKey, {
-              validTo: linkedPreviousValidTo,
-            })
-          : pkg.rateCards
-
-      const newRateCards = availableSuiteTypes.flatMap((suiteType) =>
-        routes.map((route) => ({
-          id: makeClientId(),
-          routeId: route.id,
-          suiteTypeId: suiteType.id,
-          pricePerPerson: 0,
-          currency,
-          validFrom: nextValidFrom,
-          validTo: null,
-        })),
-      )
-
-      const nextPackage = { ...pkg, rateCards: [...baseRateCards, ...newRateCards] }
-      const conflict = findPackageRateCardConflicts(nextPackage, availableSuiteTypes)[0]
-      if (conflict) {
-        toast.error(
-          "This pricing period duplicates an existing suite type/route/start-date combination. Choose a different start date.",
-          { id: "rate-card-conflict" },
-        )
-        return
-      }
-
-      warnForOverlapIfNeeded(nextPackage, availableSuiteTypes, vocabulary)
-      updatePackage(packageIndex, () => nextPackage)
+        warnForOverlapIfNeeded(nextPackage, availableSuiteTypes, vocabulary)
+        return nextPackage
+      })
     },
     [updatePackage, warnForOverlapIfNeeded],
   )
@@ -2244,74 +2243,74 @@ export function SupplierDetailView({
       key: "validFrom" | "validTo" | "currency",
       value: string | null,
     ) => {
-      const currentForm = formRef.current
-      if (!currentForm) return
-      const pkg = currentForm.packages[packageIndex]
-      if (!pkg) return
+      updatePackage(packageIndex, (pkg) => {
+        const currentForm = formRef.current
+        if (!currentForm) return pkg
 
-      let nextPeriodKey = periodKey
-      let nextRateCards = pkg.rateCards.map((rateCard) => {
-        if (
-          getRatePeriodKey(rateCard.validFrom, rateCard.validTo, rateCard.currency) !== periodKey
-        ) {
-          return rateCard
-        }
-
-        if (key === "currency") {
-          const nextRateCard = {
-            ...rateCard,
-            currency: (value ?? "").trim().toUpperCase() || pkg.currency.trim().toUpperCase() || "ZAR",
+        let nextPeriodKey = periodKey
+        let nextRateCards = pkg.rateCards.map((rateCard) => {
+          if (
+            getRatePeriodKey(rateCard.validFrom, rateCard.validTo, rateCard.currency) !== periodKey
+          ) {
+            return rateCard
           }
+
+          if (key === "currency") {
+            const nextRateCard = {
+              ...rateCard,
+              currency:
+                (value ?? "").trim().toUpperCase() || pkg.currency.trim().toUpperCase() || "ZAR",
+            }
+            nextPeriodKey = getRatePeriodKey(
+              nextRateCard.validFrom,
+              nextRateCard.validTo,
+              nextRateCard.currency,
+            )
+            return nextRateCard
+          }
+
+          if (key === "validFrom") {
+            const nextRateCard = { ...rateCard, validFrom: value ?? "" }
+            nextPeriodKey = getRatePeriodKey(
+              nextRateCard.validFrom,
+              nextRateCard.validTo,
+              nextRateCard.currency,
+            )
+            return nextRateCard
+          }
+
+          const nextRateCard = { ...rateCard, validTo: value }
           nextPeriodKey = getRatePeriodKey(
             nextRateCard.validFrom,
             nextRateCard.validTo,
             nextRateCard.currency,
           )
           return nextRateCard
+        })
+
+        if (key === "validFrom" || key === "validTo") {
+          nextRateCards = applyBidirectionalPeriodDateLinking(nextRateCards, nextPeriodKey, key)
         }
 
-        if (key === "validFrom") {
-          const nextRateCard = { ...rateCard, validFrom: value ?? "" }
-          nextPeriodKey = getRatePeriodKey(
-            nextRateCard.validFrom,
-            nextRateCard.validTo,
-            nextRateCard.currency,
-          )
-          return nextRateCard
-        }
-
-        const nextRateCard = { ...rateCard, validTo: value }
-        nextPeriodKey = getRatePeriodKey(
-          nextRateCard.validFrom,
-          nextRateCard.validTo,
-          nextRateCard.currency,
-        )
-        return nextRateCard
-      })
-
-      if (key === "validFrom" || key === "validTo") {
-        nextRateCards = applyBidirectionalPeriodDateLinking(nextRateCards, nextPeriodKey, key)
-      }
-
-      if (key === "validFrom" || key === "validTo") {
         const nextPackage = { ...pkg, rateCards: nextRateCards }
-        const availableSuiteTypes = currentForm.suiteTypes
-        const conflict = findPackageRateCardConflicts(nextPackage, availableSuiteTypes)[0]
-        if (conflict) {
-          toast.error(
-            "That start date duplicates an existing suite type/route/start-date combination.",
-            { id: "rate-card-date-conflict" },
-          )
-          return
+        if (key === "validFrom" || key === "validTo") {
+          const availableSuiteTypes = currentForm.suiteTypes
+          const conflict = findPackageRateCardConflicts(nextPackage, availableSuiteTypes)[0]
+          if (conflict) {
+            toast.error(
+              "That start date duplicates an existing suite type/route/start-date combination.",
+              { id: "rate-card-date-conflict" },
+            )
+            return pkg
+          }
+
+          const vocabulary = getSupplierVocabulary(currentForm.kind)
+          warnForInvertedDateRangeIfNeeded(nextPackage)
+          warnForOverlapIfNeeded(nextPackage, availableSuiteTypes, vocabulary)
         }
 
-        const vocabulary = getSupplierVocabulary(currentForm.kind)
-        warnForInvertedDateRangeIfNeeded(nextPackage)
-        warnForOverlapIfNeeded(nextPackage, availableSuiteTypes, vocabulary)
-      }
-
-      const finalRateCards = nextRateCards
-      updatePackage(packageIndex, () => ({ ...pkg, rateCards: finalRateCards }))
+        return nextPackage
+      })
     },
     [updatePackage, warnForInvertedDateRangeIfNeeded, warnForOverlapIfNeeded],
   )
