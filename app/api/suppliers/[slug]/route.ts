@@ -524,6 +524,12 @@ export async function PATCH(
     const existingRateCardByBusinessKey = new Map(
       existingDetail.rateCards.map((rateCard) => [getRateCardBusinessKey(rateCard), rateCard]),
     )
+    const existingRouteIdsByPackageId = new Map<string, Set<string>>()
+    for (const route of existingDetail.routes) {
+      const routeIds = existingRouteIdsByPackageId.get(route.package_id) ?? new Set<string>()
+      routeIds.add(route.id)
+      existingRouteIdsByPackageId.set(route.package_id, routeIds)
+    }
     const incomingRateCardKeys = new Set<string>()
     const clientProvidedRateCardIds = new Set<string>(
       parsed.packages.flatMap((pkg) =>
@@ -585,7 +591,7 @@ export async function PATCH(
           })
         : normalizedRateCardCandidates
 
-      const mergedRateCards: NormalizedRateCard[] = normalizedRateCards.map((rateCard) => {
+      let mergedRateCards: NormalizedRateCard[] = normalizedRateCards.map((rateCard) => {
         const businessKey = getRateCardBusinessKey({
           package_id: rateCard.package_id,
           suite_type_id: rateCard.suite_type_id,
@@ -622,6 +628,29 @@ export async function PATCH(
           created_at: existingRateCard.created_at,
         }
       })
+
+      if (!isDraftSave) {
+        const removedRouteIds = new Set(
+          Array.from(existingRouteIdsByPackageId.get(packageId) ?? []).filter(
+            (routeId) => !routeIds.has(routeId),
+          ),
+        )
+        const hasInvalidRouteReference = mergedRateCards.some((rateCard) => {
+          if (!rateCard.route_id || routeIds.has(rateCard.route_id)) {
+            return false
+          }
+          return !removedRouteIds.has(rateCard.route_id)
+        })
+
+        if (hasInvalidRouteReference) {
+          throw new Error("Each rate card must reference a route from the same package.")
+        }
+
+        // If a route was removed in this save, treat lingering rate cards for that route as deletions.
+        mergedRateCards = mergedRateCards.filter(
+          (rateCard) => !rateCard.route_id || !removedRouteIds.has(rateCard.route_id),
+        )
+      }
 
       if (
         !isDraftSave &&
@@ -820,13 +849,22 @@ export async function PATCH(
   const incomingSuiteTypeIds = new Set(normalizedSuiteTypes.map((suiteType) => suiteType.id))
   const incomingEmailIds = new Set(normalizedEmails.map((entry) => entry.id))
   const incomingRateCardIds = new Set(rateCardRows.map((rateCard) => rateCard.id))
-
-  const rateCardIdsToDelete = existingDetail.rateCards
-    .map((rateCard) => rateCard.id)
-    .filter((rateCardId) => !incomingRateCardIds.has(rateCardId))
   const routeIdsToDelete = existingDetail.routes
     .map((route) => route.id)
     .filter((routeId) => !incomingRouteIds.has(routeId))
+  const routeIdsToDeleteSet = new Set(routeIdsToDelete)
+
+  const rateCardIdsToDelete = Array.from(
+    new Set(
+      existingDetail.rateCards
+        .filter(
+          (rateCard) =>
+            !incomingRateCardIds.has(rateCard.id) ||
+            (rateCard.route_id ? routeIdsToDeleteSet.has(rateCard.route_id) : false),
+        )
+        .map((rateCard) => rateCard.id),
+    ),
+  )
   const suiteTypeIdsToDelete = existingDetail.suiteTypes
     .map((suiteType) => suiteType.id)
     .filter((suiteTypeId) => !incomingSuiteTypeIds.has(suiteTypeId))

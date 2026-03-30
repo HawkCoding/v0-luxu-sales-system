@@ -605,6 +605,268 @@ describe("PATCH /api/suppliers/[slug] additional scenarios", () => {
     })
   })
 
+  it("cascades route deletion to linked rate cards", async () => {
+    const supplierUpdateEq = vi.fn(async () => ({ error: null }))
+    helperMocks.supabaseFrom.mockImplementation((table: string) => {
+      if (table === "profiles") {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { clearance_level: "manager" }, error: null }),
+            }),
+          }),
+        }
+      }
+      if (table === "packages") {
+        return {
+          upsert: vi.fn(async () => ({ error: null })),
+        }
+      }
+      if (table === "suite_types") {
+        return {
+          upsert: vi.fn(async () => ({ error: null })),
+        }
+      }
+      if (table === "suppliers") {
+        return {
+          update: vi.fn(() => ({
+            eq: supplierUpdateEq,
+          })),
+        }
+      }
+      throw new Error(`Unexpected table ${table}`)
+    })
+    helperMocks.requireAuthenticatedUser.mockResolvedValue({
+      supabase: { from: helperMocks.supabaseFrom },
+      user: { id: USER_ID },
+    })
+    helperMocks.queryExistingIds.mockResolvedValue([])
+    helperMocks.checkDeletionDependencies.mockResolvedValue([])
+    helperMocks.loadSupplierDetail
+      .mockResolvedValueOnce({
+        supplier: {
+          id: SUPPLIER_ID,
+          updated_at: "2026-03-23T08:00:00.000Z",
+        },
+        packages: [{ id: PACKAGE_OLD }],
+        routes: [{ id: ROUTE_OLD, package_id: PACKAGE_OLD }],
+        suiteTypes: [{ id: SUITE_TYPE_OLD }],
+        emails: [],
+        rateCards: [
+          {
+            id: RATE_CARD_OLD,
+            package_id: PACKAGE_OLD,
+            route_id: ROUTE_OLD,
+            suite_type_id: SUITE_TYPE_OLD,
+            valid_from: "2026-01-01",
+            valid_to: null,
+            created_at: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+        locations: [],
+      })
+      .mockResolvedValueOnce({
+        supplier: {
+          id: SUPPLIER_ID,
+          slug: "test-supplier",
+          kind: "hotel_property",
+          status: "active",
+          name: "Supplier Updated",
+          email: null,
+          phone: null,
+          website: null,
+          location: null,
+          notes: null,
+          active: true,
+          created_at: "2026-01-01T00:00:00.000Z",
+          updated_at: "2026-01-02T00:00:00.000Z",
+        },
+        packages: [],
+        routes: [],
+        suiteTypes: [],
+        emails: [],
+        rateCards: [],
+        locations: [],
+      })
+
+    const response = await PATCH(
+      new Request("http://localhost/api/suppliers/test", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Supplier Updated",
+          kind: "hotel_property",
+          email: "",
+          phone: "",
+          website: "",
+          location: "",
+          notes: "",
+          active: true,
+          emails: [],
+          suiteTypes: [{ id: SUITE_TYPE_OLD, name: "Suite", active: true }],
+          packages: [
+            {
+              id: PACKAGE_OLD,
+              name: "Package 1",
+              description: null,
+              durationNights: null,
+              singleSupplementPct: 0,
+              currency: "ZAR",
+              active: true,
+              routes: [],
+              rateCards: [],
+            },
+          ],
+          expectedUpdatedAt: "2026-03-23T08:00:00.000Z",
+        }),
+      }),
+      { params: Promise.resolve({ slug: "test" }) },
+    )
+
+    expect(response.status).toBe(200)
+    expect(helperMocks.deleteInChunks).toHaveBeenCalledWith(expect.anything(), "rate_cards", [
+      RATE_CARD_OLD,
+    ])
+    expect(helperMocks.deleteInChunks).toHaveBeenCalledWith(expect.anything(), "routes", [ROUTE_OLD])
+    expect(supplierUpdateEq).toHaveBeenCalledWith("id", SUPPLIER_ID)
+  })
+
+  it("treats stale route-linked rate cards as deletions when route is removed", async () => {
+    const supplierUpdateEq = vi.fn(async () => ({ error: null }))
+    helperMocks.supabaseFrom.mockImplementation((table: string) => {
+      if (table === "profiles") {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { clearance_level: "manager" }, error: null }),
+            }),
+          }),
+        }
+      }
+      if (table === "packages") {
+        return {
+          upsert: vi.fn(async () => ({ error: null })),
+        }
+      }
+      if (table === "suite_types") {
+        return {
+          upsert: vi.fn(async () => ({ error: null })),
+        }
+      }
+      if (table === "suppliers") {
+        return {
+          update: vi.fn(() => ({
+            eq: supplierUpdateEq,
+          })),
+        }
+      }
+      throw new Error(`Unexpected table ${table}`)
+    })
+    helperMocks.requireAuthenticatedUser.mockResolvedValue({
+      supabase: { from: helperMocks.supabaseFrom },
+      user: { id: USER_ID },
+    })
+    helperMocks.queryExistingIds.mockResolvedValue([])
+    helperMocks.checkDeletionDependencies.mockResolvedValue([])
+    helperMocks.loadSupplierDetail
+      .mockResolvedValueOnce({
+        supplier: {
+          id: SUPPLIER_ID,
+          updated_at: "2026-03-23T08:00:00.000Z",
+        },
+        packages: [{ id: PACKAGE_OLD }],
+        routes: [{ id: ROUTE_OLD, package_id: PACKAGE_OLD }],
+        suiteTypes: [{ id: SUITE_TYPE_OLD }],
+        emails: [],
+        rateCards: [
+          {
+            id: RATE_CARD_OLD,
+            package_id: PACKAGE_OLD,
+            route_id: ROUTE_OLD,
+            suite_type_id: SUITE_TYPE_OLD,
+            valid_from: "2026-01-01",
+            valid_to: null,
+            created_at: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+        locations: [],
+      })
+      .mockResolvedValueOnce({
+        supplier: {
+          id: SUPPLIER_ID,
+          slug: "test-supplier",
+          kind: "hotel_property",
+          status: "active",
+          name: "Supplier Updated",
+          email: null,
+          phone: null,
+          website: null,
+          location: null,
+          notes: null,
+          active: true,
+          created_at: "2026-01-01T00:00:00.000Z",
+          updated_at: "2026-01-02T00:00:00.000Z",
+        },
+        packages: [],
+        routes: [],
+        suiteTypes: [],
+        emails: [],
+        rateCards: [],
+        locations: [],
+      })
+
+    const response = await PATCH(
+      new Request("http://localhost/api/suppliers/test", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Supplier Updated",
+          kind: "hotel_property",
+          email: "",
+          phone: "",
+          website: "",
+          location: "",
+          notes: "",
+          active: true,
+          emails: [],
+          suiteTypes: [{ id: SUITE_TYPE_OLD, name: "Suite", active: true }],
+          packages: [
+            {
+              id: PACKAGE_OLD,
+              name: "Package 1",
+              description: null,
+              durationNights: null,
+              singleSupplementPct: 0,
+              currency: "ZAR",
+              active: true,
+              routes: [],
+              rateCards: [
+                {
+                  id: RATE_CARD_OLD,
+                  routeId: ROUTE_OLD,
+                  suiteTypeId: SUITE_TYPE_OLD,
+                  pricePerPerson: 100,
+                  currency: "ZAR",
+                  validFrom: "2026-01-01",
+                  validTo: null,
+                },
+              ],
+            },
+          ],
+          expectedUpdatedAt: "2026-03-23T08:00:00.000Z",
+        }),
+      }),
+      { params: Promise.resolve({ slug: "test" }) },
+    )
+
+    expect(response.status).toBe(200)
+    expect(helperMocks.deleteInChunks).toHaveBeenCalledWith(expect.anything(), "rate_cards", [
+      RATE_CARD_OLD,
+    ])
+    expect(helperMocks.deleteInChunks).toHaveBeenCalledWith(expect.anything(), "routes", [ROUTE_OLD])
+    expect(supplierUpdateEq).toHaveBeenCalledWith("id", SUPPLIER_ID)
+  })
+
   it("returns 409 when routes upsert hits duplicate name per package (ux_routes_name_package)", async () => {
     helperMocks.supabaseFrom.mockImplementation((table: string) => {
       if (table === "profiles") {

@@ -558,6 +558,21 @@ function buildRateCardConflictMessage(
   return `Duplicate rate card in "${conflict.packageName}" for ${vocabulary.suiteType.toLowerCase()} "${conflict.suiteTypeName}", ${vocabulary.route.toLowerCase()} "${conflict.routeName}", start date ${conflict.validFrom}. Keep only one row for that combination.`
 }
 
+function buildRouteDeletionConfirmationMessage({
+  packageName,
+  routeName,
+  linkedRateCardCount,
+  vocabulary,
+}: {
+  packageName: string
+  routeName: string
+  linkedRateCardCount: number
+  vocabulary: SupplierVocabulary
+}): string {
+  const rateCardLabel = linkedRateCardCount === 1 ? "pricing row" : "pricing rows"
+  return `Delete ${vocabulary.route.toLowerCase()} "${routeName}" in "${packageName}"? This will also permanently delete ${linkedRateCardCount} linked ${rateCardLabel}.`
+}
+
 function detectRateCardDateOverlap(
   firstRange: RateCardDateRange,
   secondRange: RateCardDateRange,
@@ -2158,13 +2173,30 @@ export function SupplierDetailView({
         const currentForm = formRef.current
         if (!currentForm) return pkg
 
-        const routeId = pkg.routes[routeIndex]?.id
+        const route = pkg.routes[routeIndex]
+        if (!route) return pkg
+
+        const routeId = route.id
+        const linkedRateCardCount = pkg.rateCards.filter((rateCard) => rateCard.routeId === routeId).length
+        if (linkedRateCardCount > 0) {
+          const vocabulary = getSupplierVocabulary(currentForm.kind)
+          const packageName = pkg.name.trim() || "Unnamed package"
+          const routeName = route.name.trim() || "Unnamed route"
+          const shouldDeleteRoute = window.confirm(
+            buildRouteDeletionConfirmationMessage({
+              packageName,
+              routeName,
+              linkedRateCardCount,
+              vocabulary,
+            }),
+          )
+          if (!shouldDeleteRoute) return pkg
+        }
+
         const nextPackage = {
           ...pkg,
           routes: pkg.routes.filter((_route, index) => index !== routeIndex),
-          rateCards: pkg.rateCards.map((rateCard) =>
-            rateCard.routeId === routeId ? { ...rateCard, routeId: null } : rateCard,
-          ),
+          rateCards: pkg.rateCards.filter((rateCard) => rateCard.routeId !== routeId),
         }
 
         const conflict = findPackageRateCardConflicts(nextPackage, currentForm.suiteTypes)[0]

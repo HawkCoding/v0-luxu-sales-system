@@ -75,6 +75,20 @@ export interface Customer {
   updatedAtDisplay?: string
 }
 
+export interface CustomerLinkedAccount {
+  id: string
+  customerId: string
+  linkedCustomerId: string | null
+  linkedCustomerName: string | null
+  relationship: string | null
+  firstName: string | null
+  lastName: string | null
+  email: string | null
+  phone: string | null
+  isMirror: boolean
+  createdAt: string
+}
+
 // Booking is the primary entity — replaces the old Job + Enquiry combination.
 export interface Booking {
   id: string

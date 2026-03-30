@@ -22,6 +22,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination"
+
+const PAGE_SIZE = 100
 
 function getCustomerIdFromPath(pathname: string): string | null {
   const match = pathname.match(/^\/app\/customers\/([^/]+)\/?$/)
@@ -36,6 +47,7 @@ export default function CustomersPage() {
   const [supplierFilter, setSupplierFilter] = useState("all")
   const [createdDateFrom, setCreatedDateFrom] = useState<Date | undefined>(undefined)
   const [createdDateTo, setCreatedDateTo] = useState<Date | undefined>(undefined)
+  const [page, setPage] = useState(1)
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -52,25 +64,9 @@ export default function CustomersPage() {
     if (searchFromQuery.length > 0) setSearch(searchFromQuery)
   }, [searchParams])
 
-  const openCustomerModal = (customerId: string) => {
-    setSelectedCustomerId(customerId)
-    const nextPath = `/app/customers/${customerId}`
-    if (window.location.pathname !== nextPath) {
-      window.history.pushState({}, "", nextPath)
-    }
-  }
-
-  const closeCustomerModal = () => {
-    if (!selectedCustomerId) return
-    window.history.back()
-  }
-
-  if (isLoading || !data) {
-    return <div className="p-6"><div className="animate-pulse space-y-3">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-14 bg-secondary rounded-lg" />)}</div></div>
-  }
-
-  const customers = data.customers.map((c: any) => {
-    const customerBookings = data.bookings.filter((b: any) => b.customerId === c.id)
+  const bookings = data?.bookings ?? []
+  const customers = (data?.customers ?? []).map((c: any) => {
+    const customerBookings = bookings.filter((b: any) => b.customerId === c.id)
     const jobCount = customerBookings.length
 
     const consultants = [...new Set(customerBookings.map((b: any) => b.consultant).filter(Boolean))]
@@ -99,20 +95,73 @@ export default function CustomersPage() {
     // Search filter (name, email, phone)
     const matchSearch = !search || [c.firstName, c.lastName, c.email, c.phone, c.country]
       .some((f: string) => f?.toLowerCase().includes(search.toLowerCase()))
-    
+
     // Consultant filter
     const matchConsultant = consultantFilter === "all" || c.consultants.includes(consultantFilter)
-    
+
     // Supplier filter
     const matchSupplier = supplierFilter === "all" || c.suppliers.includes(supplierFilter)
-    
+
     // Created date range filter
     const createdDate = new Date(c.createdAt)
     const matchCreatedDateFrom = !createdDateFrom || createdDate >= createdDateFrom
     const matchCreatedDateTo = !createdDateTo || createdDate <= createdDateTo
-    
+
     return matchSearch && matchConsultant && matchSupplier && matchCreatedDateFrom && matchCreatedDateTo
   })
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const currentPage = Math.min(page, totalPages)
+  const startIndex = (currentPage - 1) * PAGE_SIZE
+  const endIndex = startIndex + PAGE_SIZE
+  const paginatedCustomers = filtered.slice(startIndex, endIndex)
+  const pageStartDisplay = filtered.length === 0 ? 0 : startIndex + 1
+  const pageEndDisplay = filtered.length === 0 ? 0 : Math.min(endIndex, filtered.length)
+  const pageWindowStart = Math.max(2, currentPage - 1)
+  const pageWindowEnd = Math.min(totalPages - 1, currentPage + 1)
+
+  const visibleMiddlePages =
+    pageWindowStart <= pageWindowEnd
+      ? Array.from(
+          { length: pageWindowEnd - pageWindowStart + 1 },
+          (_, index) => pageWindowStart + index,
+        )
+      : []
+  const showLeftEllipsis = pageWindowStart > 2
+  const showRightEllipsis = pageWindowEnd < totalPages - 1
+
+  useEffect(() => {
+    setPage(1)
+  }, [search, consultantFilter, supplierFilter, createdDateFrom, createdDateTo])
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages)
+    }
+  }, [page, totalPages])
+
+  const openCustomerModal = (customerId: string) => {
+    setSelectedCustomerId(customerId)
+    const nextPath = `/app/customers/${customerId}`
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({}, "", nextPath)
+    }
+  }
+
+  const closeCustomerModal = () => {
+    if (!selectedCustomerId) return
+    window.history.back()
+  }
+
+  if (isLoading || !data) {
+    return <div className="p-6"><div className="animate-pulse space-y-3">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-14 bg-secondary rounded-lg" />)}</div></div>
+  }
+
+  const handlePageChange = (nextPage: number) => {
+    if (nextPage < 1 || nextPage > totalPages || nextPage === currentPage) return
+    setPage(nextPage)
+    window.scrollTo({ top: 0, behavior: "smooth" })
+  }
 
   const hasActiveFilters = search || consultantFilter !== "all" || supplierFilter !== "all" || 
     createdDateFrom || createdDateTo
@@ -131,7 +180,8 @@ export default function CustomersPage() {
         <div>
           <h1 className="text-3xl font-semibold text-foreground tracking-tight">Customers</h1>
           <p className="text-base text-muted-foreground mt-2">
-            {filtered.length} of {customers.length} customers
+            Showing {pageStartDisplay}-{pageEndDisplay} of {filtered.length} customers (Page{" "}
+            {currentPage} of {totalPages})
           </p>
         </div>
       </div>
@@ -257,7 +307,7 @@ export default function CustomersPage() {
           </Card>
         )}
         
-        {filtered.map((c: any) => (
+        {paginatedCustomers.map((c: any) => (
           <Link
             key={c.id}
             href={`/app/customers/${c.id}`}
@@ -314,6 +364,91 @@ export default function CustomersPage() {
           </Link>
         ))}
       </div>
+
+      {totalPages > 1 && (
+        <Pagination>
+          <PaginationContent>
+            <PaginationItem>
+              <PaginationPrevious
+                href="#"
+                aria-disabled={currentPage === 1}
+                className={currentPage === 1 ? "pointer-events-none opacity-50" : undefined}
+                onClick={(event) => {
+                  event.preventDefault()
+                  handlePageChange(currentPage - 1)
+                }}
+              />
+            </PaginationItem>
+
+            <PaginationItem>
+              <PaginationLink
+                href="#"
+                isActive={currentPage === 1}
+                onClick={(event) => {
+                  event.preventDefault()
+                  handlePageChange(1)
+                }}
+              >
+                1
+              </PaginationLink>
+            </PaginationItem>
+
+            {showLeftEllipsis && (
+              <PaginationItem>
+                <PaginationEllipsis />
+              </PaginationItem>
+            )}
+
+            {visibleMiddlePages.map((pageNumber) => (
+              <PaginationItem key={pageNumber}>
+                <PaginationLink
+                  href="#"
+                  isActive={currentPage === pageNumber}
+                  onClick={(event) => {
+                    event.preventDefault()
+                    handlePageChange(pageNumber)
+                  }}
+                >
+                  {pageNumber}
+                </PaginationLink>
+              </PaginationItem>
+            ))}
+
+            {showRightEllipsis && (
+              <PaginationItem>
+                <PaginationEllipsis />
+              </PaginationItem>
+            )}
+
+            {totalPages > 1 && (
+              <PaginationItem>
+                <PaginationLink
+                  href="#"
+                  isActive={currentPage === totalPages}
+                  onClick={(event) => {
+                    event.preventDefault()
+                    handlePageChange(totalPages)
+                  }}
+                >
+                  {totalPages}
+                </PaginationLink>
+              </PaginationItem>
+            )}
+
+            <PaginationItem>
+              <PaginationNext
+                href="#"
+                aria-disabled={currentPage === totalPages}
+                className={currentPage === totalPages ? "pointer-events-none opacity-50" : undefined}
+                onClick={(event) => {
+                  event.preventDefault()
+                  handlePageChange(currentPage + 1)
+                }}
+              />
+            </PaginationItem>
+          </PaginationContent>
+        </Pagination>
+      )}
 
       <Dialog open={Boolean(selectedCustomerId)} onOpenChange={(open) => !open && closeCustomerModal()}>
         <DialogContent className="max-w-5xl p-0 sm:max-w-5xl">

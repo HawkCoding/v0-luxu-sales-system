@@ -26,7 +26,11 @@ export async function GET(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  const [{ data: customer, error: customerError }, { data: bookings, error: bookingsError }] =
+  const [
+    { data: customer, error: customerError },
+    { data: bookings, error: bookingsError },
+    { data: linkedAccounts, error: linkedAccountsError },
+  ] =
     await Promise.all([
       supabase.from("customers").select("*").eq("id", id).single(),
       supabase
@@ -36,6 +40,13 @@ export async function GET(
         )
         .eq("customer_id", id)
         .order("created_at", { ascending: false }),
+      supabase
+        .from("customer_linked_accounts")
+        .select(
+          "id, customer_id, linked_customer_id, relationship, first_name, last_name, email, phone, is_mirror, created_at",
+        )
+        .eq("customer_id", id)
+        .order("created_at", { ascending: true }),
     ])
 
   if (customerError || !customer) {
@@ -44,6 +55,36 @@ export async function GET(
 
   if (bookingsError) {
     return NextResponse.json({ error: "Failed to load customer bookings" }, { status: 500 })
+  }
+  if (linkedAccountsError) {
+    return NextResponse.json({ error: "Failed to load linked accounts" }, { status: 500 })
+  }
+
+  const linkedCustomerIds = Array.from(
+    new Set(
+      (linkedAccounts ?? [])
+        .map((account) => account.linked_customer_id)
+        .filter((linkedCustomerId): linkedCustomerId is string => Boolean(linkedCustomerId)),
+    ),
+  )
+  const linkedCustomerNamesById = new Map<string, string>()
+
+  if (linkedCustomerIds.length > 0) {
+    const { data: linkedCustomers, error: linkedCustomersError } = await supabase
+      .from("customers")
+      .select("id, first_name, last_name")
+      .in("id", linkedCustomerIds)
+
+    if (linkedCustomersError) {
+      return NextResponse.json({ error: "Failed to load linked customer details" }, { status: 500 })
+    }
+
+    ;(linkedCustomers ?? []).forEach((linkedCustomer) => {
+      linkedCustomerNamesById.set(
+        linkedCustomer.id,
+        `${linkedCustomer.first_name} ${linkedCustomer.last_name}`.trim(),
+      )
+    })
   }
 
   const historicalSupplierIds = Array.from(
@@ -126,6 +167,24 @@ export async function GET(
         packageName: packageInfo?.name ?? null,
         createdAt: booking.created_at,
         createdAtDisplay: formatDisplayDateTime(booking.created_at),
+      }
+    }),
+    linkedAccounts: (linkedAccounts ?? []).map((linkedAccount) => {
+      const linkedCustomerName = linkedAccount.linked_customer_id
+        ? (linkedCustomerNamesById.get(linkedAccount.linked_customer_id) ?? null)
+        : null
+      return {
+        id: linkedAccount.id,
+        customerId: linkedAccount.customer_id,
+        linkedCustomerId: linkedAccount.linked_customer_id,
+        linkedCustomerName,
+        relationship: linkedAccount.relationship,
+        firstName: linkedAccount.first_name,
+        lastName: linkedAccount.last_name,
+        email: linkedAccount.email,
+        phone: linkedAccount.phone,
+        isMirror: linkedAccount.is_mirror,
+        createdAt: linkedAccount.created_at,
       }
     }),
   })

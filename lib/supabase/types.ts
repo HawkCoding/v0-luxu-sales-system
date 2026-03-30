@@ -1,4 +1,4 @@
-export type Json =
+﻿export type Json =
   | string
   | number
   | boolean
@@ -7,6 +7,11 @@ export type Json =
   | Json[]
 
 export type Database = {
+  // Allows to automatically instantiate createClient with right options
+  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
+  __InternalSupabase: {
+    PostgrestVersion: "14.1"
+  }
   graphql_public: {
     Tables: {
       [_ in never]: never
@@ -333,6 +338,60 @@ export type Database = {
             columns: ["country_id"]
             isOneToOne: false
             referencedRelation: "countries"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      customer_linked_accounts: {
+        Row: {
+          created_at: string
+          customer_id: string
+          email: string | null
+          first_name: string | null
+          id: string
+          is_mirror: boolean
+          last_name: string | null
+          linked_customer_id: string | null
+          phone: string | null
+          relationship: string | null
+        }
+        Insert: {
+          created_at?: string
+          customer_id: string
+          email?: string | null
+          first_name?: string | null
+          id?: string
+          is_mirror?: boolean
+          last_name?: string | null
+          linked_customer_id?: string | null
+          phone?: string | null
+          relationship?: string | null
+        }
+        Update: {
+          created_at?: string
+          customer_id?: string
+          email?: string | null
+          first_name?: string | null
+          id?: string
+          is_mirror?: boolean
+          last_name?: string | null
+          linked_customer_id?: string | null
+          phone?: string | null
+          relationship?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_linked_accounts_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_linked_accounts_linked_customer_id_fkey"
+            columns: ["linked_customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
             referencedColumns: ["id"]
           },
         ]
@@ -1322,7 +1381,12 @@ export type Database = {
         | "phone_call"
         | "email"
         | "travel_agent"
-      supplier_kind: "train_operator" | "hotel_property" | "transfers" | "tour_operator" | "airline"
+      supplier_kind:
+        | "train_operator"
+        | "hotel_property"
+        | "transfers"
+        | "tour_operator"
+        | "airline"
       user_role: "admin" | "manager" | "consultant" | "readonly"
     }
     CompositeTypes: {
@@ -1495,9 +1559,14 @@ export const Constants = {
         "email",
         "travel_agent",
       ],
-      supplier_kind: ["train_operator", "hotel_property", "transfers"],
+      supplier_kind: [
+        "train_operator",
+        "hotel_property",
+        "transfers",
+        "tour_operator",
+        "airline",
+      ],
       user_role: ["admin", "manager", "consultant", "readonly"],
     },
   },
 } as const
-
