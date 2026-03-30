@@ -311,6 +311,10 @@ export default function SuppliersPage() {
             <SupplierDetailView
               supplierSlug={selectedSupplierSlug}
               presentation="modal"
+              onClose={() => {
+                setSelectedSupplierSlug(null)
+                window.history.replaceState({}, "", "/app/suppliers")
+              }}
               onDeleted={() => {
                 setSelectedSupplierSlug(null)
                 window.history.replaceState({}, "", "/app/suppliers")

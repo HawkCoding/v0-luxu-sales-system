@@ -60,6 +60,12 @@ interface RateCardIdCollisionDetails {
   duplicateId: string
 }
 
+interface StaleVersionConflictPayload {
+  error: string
+  code: "STALE_VERSION"
+  currentUpdatedAt: string
+}
+
 class DuplicateRateCardConflictError extends Error {
   details: RateCardConflictDetails
 
@@ -195,6 +201,20 @@ function checkRateCardOverlaps(rateCards: NormalizedRateCard[]) {
       }
     }
   }
+}
+
+function findInvertedRateCardDateRange(
+  rateCards: NormalizedRateCard[],
+): Pick<NormalizedRateCard, "package_id" | "valid_from" | "valid_to"> | null {
+  for (const rateCard of rateCards) {
+    if (!rateCard.valid_to) {
+      continue
+    }
+    if (rateCard.valid_to < rateCard.valid_from) {
+      return rateCard
+    }
+  }
+  return null
 }
 
 export async function GET(
@@ -641,6 +661,12 @@ export async function PATCH(
       }
       seenRateCardIds.add(rateCard.id)
     }
+    const invertedDateRange = findInvertedRateCardDateRange(mergedRateCards)
+    if (invertedDateRange) {
+      throw new Error(
+        `Rate card "Valid to" (${invertedDateRange.valid_to}) is before "Valid from" (${invertedDateRange.valid_from}) for package ${invertedDateRange.package_id}.`,
+      )
+    }
     checkRateCardOverlaps(mergedRateCards)
     phaseDurations.normalizeValidateMs = performance.now() - normalizeValidateStartedAt
   } catch (error) {
@@ -689,14 +715,14 @@ export async function PATCH(
   // --- Optimistic concurrency check ---
   const expectedUpdatedAt = (parsed as Record<string, unknown>).expectedUpdatedAt
   if (typeof expectedUpdatedAt === "string" && expectedUpdatedAt !== existingDetail.supplier.updated_at) {
+    const staleVersionConflict: StaleVersionConflictPayload = {
+      error:
+        "This supplier was modified by another user since you started editing. Please refresh and try again.",
+      code: "STALE_VERSION",
+      currentUpdatedAt: existingDetail.supplier.updated_at,
+    }
     return withPatchTimingHeaders(
-      NextResponse.json(
-        {
-          error:
-            "This supplier was modified by another user since you started editing. Please refresh and try again.",
-        },
-        { status: 409 },
-      ),
+      NextResponse.json(staleVersionConflict, { status: 409 }),
     )
   }
 
@@ -895,6 +921,20 @@ export async function PATCH(
 
     if (routesError) {
       logSupplierMutationError("routes-upsert", supplierId, routesError)
+      if (
+        routesError.code === "23505" &&
+        routesError.message.includes("ux_routes_name_package")
+      ) {
+        return withDbTimingHeaders(
+          NextResponse.json(
+            {
+              error:
+                "A route with this name already exists in the same package. Use a different route name.",
+            },
+            { status: 409 },
+          ),
+        )
+      }
       return withDbTimingHeaders(
         NextResponse.json(
           { error: "Failed to update supplier routes" },

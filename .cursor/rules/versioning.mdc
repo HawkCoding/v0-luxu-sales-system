@@ -1,0 +1,35 @@
+---
+description: Automatically bump app version after code changes and keep dashboard version indicator current
+alwaysApply: true
+---
+
+# App Versioning Rule
+
+## Goal
+
+Keep a visible, monotonically increasing app version for internal tracking.
+
+## Version Source Of Truth
+
+- Store the app version only in `@lib/version.ts` as `APP_VERSION`.
+- Treat `APP_VERSION` as the canonical value displayed in the dashboard UI.
+
+## Bump Trigger
+
+- If an agent session makes one or more code changes, bump `APP_VERSION` exactly once before finishing.
+- Do not bump multiple times in the same session for multiple file edits.
+- If no files are changed, do not bump the version.
+
+## Bump Format
+
+- Keep the version in `X.XX` format.
+- Increment by `0.01` each time.
+- Examples:
+  - `1.00` -> `1.01`
+  - `1.09` -> `1.10`
+  - `1.99` -> `2.00`
+
+## Implementation Notes
+
+- Preserve two decimal places.
+- Ensure the dashboard-facing version display uses `APP_VERSION` from `@lib/version.ts`.

@@ -52,6 +52,10 @@ import {
 } from "@/components/supplier-email-editor"
 import { useRole } from "@/lib/role-context"
 import {
+  parseStaleVersionConflictPayload,
+  SupplierPatchWriteLock,
+} from "@/lib/supplier-save-guard"
+import {
   getOverlapValidationSignature,
   shouldHydrateFormFromServer,
 } from "@/lib/supplier-editor-utils"
@@ -76,6 +80,7 @@ interface SupplierDetailViewProps {
   supplierSlug: string
   presentation?: Presentation
   onDeleted?: () => void
+  onClose?: () => void
 }
 
 interface EditableRoute {
@@ -187,6 +192,20 @@ interface RateCardOverlapConflict {
   secondPeriodKey: string
   firstRange: RateCardDateRange
   secondRange: RateCardDateRange
+}
+
+interface InvertedRateCardDateConflict {
+  packageId: string
+  packageName: string
+  periodKey: string
+  validFrom: string
+  validTo: string
+}
+
+interface StaleVersionDialogState {
+  message: string
+  currentUpdatedAt: string
+  hasRetried: boolean
 }
 
 function makeClientId(): string {
@@ -556,6 +575,24 @@ function detectRateCardDateOverlap(
   return firstStartsBeforeSecondEnds && secondStartsBeforeFirstEnds
 }
 
+function isInvertedDateRange(validFrom: string, validTo: string | null | undefined): boolean {
+  const normalizedValidFrom = validFrom.trim()
+  const normalizedValidTo = validTo?.trim() ?? ""
+  return normalizedValidFrom.length > 0 && normalizedValidTo.length > 0 && normalizedValidTo < normalizedValidFrom
+}
+
+function findPackageInvertedDateRangeConflicts(pkg: EditablePackage): InvertedRateCardDateConflict[] {
+  return groupEditableRateCardsByPeriod(pkg.rateCards)
+    .filter((period) => isInvertedDateRange(period.validFrom, period.validTo))
+    .map((period) => ({
+      packageId: pkg.id,
+      packageName: pkg.name.trim() || "Unnamed package",
+      periodKey: period.key,
+      validFrom: period.validFrom.trim(),
+      validTo: period.validTo?.trim() ?? "",
+    }))
+}
+
 function findPackageRateCardOverlapConflicts(
   pkg: EditablePackage,
   suiteTypes: EditableSuiteType[],
@@ -652,6 +689,19 @@ function findFirstRateCardOverlapConflict(
   return null
 }
 
+function findFirstInvertedDateRangeConflict(
+  packages: EditablePackage[],
+): InvertedRateCardDateConflict | null {
+  for (const pkg of packages) {
+    const conflict = findPackageInvertedDateRangeConflicts(pkg)[0]
+    if (conflict) {
+      return conflict
+    }
+  }
+
+  return null
+}
+
 function buildRateCardDateRangeLabel(range: RateCardDateRange): string {
   return `${range.validFrom} to ${range.validTo ?? "open ended"}`
 }
@@ -670,6 +720,10 @@ function buildRateCardOverlapWarningMessage(
   return `${buildRateCardOverlapConflictMessage(conflict, vocabulary)} You can continue editing, but Save is blocked until this is fixed.`
 }
 
+function buildInvertedDateRangeMessage(_conflict: InvertedRateCardDateConflict): string {
+  return `Invalid date range - "Valid to" must be after "Valid from".`
+}
+
 function getRateCardOverlapFieldErrorKeys(
   pkg: EditablePackage,
   suiteTypes: EditableSuiteType[],
@@ -681,6 +735,16 @@ function getRateCardOverlapFieldErrorKeys(
     fieldErrors.add(`${conflict.firstPeriodKey}|validTo`)
     fieldErrors.add(`${conflict.secondPeriodKey}|validFrom`)
     fieldErrors.add(`${conflict.secondPeriodKey}|validTo`)
+  }
+  return fieldErrors
+}
+
+function getInvertedDateRangeFieldErrorKeys(pkg: EditablePackage): Set<string> {
+  const fieldErrors = new Set<string>()
+  const conflicts = findPackageInvertedDateRangeConflicts(pkg)
+  for (const conflict of conflicts) {
+    fieldErrors.add(`${conflict.periodKey}|validFrom`)
+    fieldErrors.add(`${conflict.periodKey}|validTo`)
   }
   return fieldErrors
 }
@@ -1742,6 +1806,7 @@ export function SupplierDetailView({
   supplierSlug,
   presentation = "page",
   onDeleted,
+  onClose,
 }: SupplierDetailViewProps) {
   const router = useRouter()
   const { data, isLoading, error, mutate: mutateDetail } = useSupplierDetail(supplierSlug)
@@ -1753,6 +1818,8 @@ export function SupplierDetailView({
   const [isEditing, setIsEditing] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isPatchInFlight, setIsPatchInFlight] = useState(false)
+  const [staleVersionDialog, setStaleVersionDialog] = useState<StaleVersionDialogState | null>(null)
   const [form, setForm] = useState<SupplierFormState | null>(null)
   const [draftSaveStatus, setDraftSaveStatus] = useState<"idle" | "saving" | "saved" | "error">(
     "idle",
@@ -1764,7 +1831,9 @@ export function SupplierDetailView({
   const expectedUpdatedAtRef = useRef<string | null>(null)
   const lastDraftConflictSnapshotRef = useRef<string | null>(null)
   const lastOverlapWarningRef = useRef<string | null>(null)
+  const lastInvertedDateWarningRef = useRef<string | null>(null)
   const draftAutosaveInFlightRef = useRef(false)
+  const patchWriteLockRef = useRef(new SupplierPatchWriteLock())
   const draftStatusResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const overlapFieldErrorsCacheRef = useRef<{
     signature: string
@@ -1779,12 +1848,33 @@ export function SupplierDetailView({
   const localDraftStorageKey = `supplier-draft-${supplierSlug}`
   formRef.current = form
 
+  const tryAcquirePatchWriteLock = useCallback(() => {
+    const acquired = patchWriteLockRef.current.tryAcquire()
+    if (acquired) {
+      setIsPatchInFlight(true)
+    }
+    return acquired
+  }, [])
+
+  const releasePatchWriteLock = useCallback(() => {
+    patchWriteLockRef.current.release()
+    setIsPatchInFlight(false)
+  }, [])
+
   useEffect(() => {
     if (!hasLoadError) {
       return
     }
     router.replace("/app/suppliers")
   }, [hasLoadError, router])
+
+  const exitSupplierDetail = useCallback(() => {
+    if (presentation === "modal") {
+      onClose?.()
+      return
+    }
+    router.push("/app/suppliers")
+  }, [onClose, presentation, router])
 
   useEffect(() => {
     if (supplier) {
@@ -1956,10 +2046,14 @@ export function SupplierDetailView({
       return cached.errors
     }
     const errors = new Map(
-      form.packages.map((pkg, packageIndex) => [
-        packageIndex,
-        getRateCardOverlapFieldErrorKeys(pkg, form.suiteTypes),
-      ]),
+      form.packages.map((pkg, packageIndex) => {
+        const overlapFieldErrors = getRateCardOverlapFieldErrorKeys(pkg, form.suiteTypes)
+        const invertedDateFieldErrors = getInvertedDateRangeFieldErrorKeys(pkg)
+        for (const fieldError of invertedDateFieldErrors) {
+          overlapFieldErrors.add(fieldError)
+        }
+        return [packageIndex, overlapFieldErrors]
+      }),
     )
     overlapFieldErrorsCacheRef.current = { signature, errors }
     return errors
@@ -1989,10 +2083,36 @@ export function SupplierDetailView({
         return
       }
       lastOverlapWarningRef.current = warningKey
-      toast.warning(buildRateCardOverlapWarningMessage(overlapConflict, vocabulary))
+      toast.warning(buildRateCardOverlapWarningMessage(overlapConflict, vocabulary), {
+        id: "rate-card-overlap",
+      })
     },
     [],
   )
+
+  const warnForInvertedDateRangeIfNeeded = useCallback((pkg: EditablePackage) => {
+    const invertedDateConflict = findPackageInvertedDateRangeConflicts(pkg)[0]
+    if (!invertedDateConflict) {
+      lastInvertedDateWarningRef.current = null
+      return
+    }
+
+    const warningKey = [
+      invertedDateConflict.packageId,
+      invertedDateConflict.periodKey,
+      invertedDateConflict.validFrom,
+      invertedDateConflict.validTo,
+    ].join("|")
+
+    if (lastInvertedDateWarningRef.current === warningKey) {
+      return
+    }
+    lastInvertedDateWarningRef.current = warningKey
+    toast.warning(buildInvertedDateRangeMessage(invertedDateConflict), {
+      id: "rate-card-inverted-date",
+      duration: 4500,
+    })
+  }, [])
 
   const addPackage = useCallback(() => {
     updatePackages((packages) => [...packages, createEmptyPackage()])
@@ -2035,28 +2155,27 @@ export function SupplierDetailView({
   const removeRoute = useCallback(
     (packageIndex: number, routeIndex: number) => {
       const currentForm = formRef.current
-      updatePackage(packageIndex, (pkg) => {
-        const routeId = pkg.routes[routeIndex]?.id
-        const nextPackage = {
-          ...pkg,
-          routes: pkg.routes.filter((_route, index) => index !== routeIndex),
-          rateCards: pkg.rateCards.map((rateCard) =>
-            rateCard.routeId === routeId ? { ...rateCard, routeId: null } : rateCard,
-          ),
-        }
-        const conflict = findPackageRateCardConflicts(nextPackage, currentForm?.suiteTypes ?? [])[0]
-        if (conflict) {
-          const vocabulary = getSupplierVocabulary(currentForm?.kind ?? "train_operator")
-          toast.error(
-            `Removing this ${vocabulary.route.toLowerCase()} would create duplicate rate cards. Adjust start dates first.`,
-          )
-          return pkg
-        }
+      if (!currentForm) return
+      const pkg = currentForm.packages[packageIndex]
+      if (!pkg) return
 
-        return {
-          ...nextPackage,
-        }
-      })
+      const routeId = pkg.routes[routeIndex]?.id
+      const nextPackage = {
+        ...pkg,
+        routes: pkg.routes.filter((_route, index) => index !== routeIndex),
+        rateCards: pkg.rateCards.map((rateCard) =>
+          rateCard.routeId === routeId ? { ...rateCard, routeId: null } : rateCard,
+        ),
+      }
+
+      const conflict = findPackageRateCardConflicts(nextPackage, currentForm.suiteTypes)[0]
+      if (conflict) {
+        const vocabulary = getSupplierVocabulary(currentForm.kind)
+        toast.error(buildRateCardConflictMessage(conflict, vocabulary), { id: "rate-card-conflict" })
+        return
+      }
+
+      updatePackage(packageIndex, () => nextPackage)
     },
     [updatePackage],
   )
@@ -2064,56 +2183,56 @@ export function SupplierDetailView({
   const addRateCardPeriod = useCallback(
     (packageIndex: number) => {
       const currentForm = formRef.current
-      updatePackage(packageIndex, (pkg) => {
-        const vocabulary = getSupplierVocabulary(currentForm?.kind ?? "train_operator")
-        const availableSuiteTypes = currentForm?.suiteTypes ?? []
-        if (availableSuiteTypes.length === 0) {
-          toast.error(
-            `Add at least one ${vocabulary.suiteType.toLowerCase()} before creating a pricing period.`,
-          )
-          return pkg
-        }
+      if (!currentForm) return
 
-        const currency = pkg.currency.trim().toUpperCase() || "ZAR"
-        const routes = pkg.routes.length > 0 ? pkg.routes : [{ id: null as string | null }]
-        const { nextValidFrom, previousPeriodKey } = getNextRateCardPeriodStart(pkg)
-        const linkedPreviousValidTo = addIsoDays(nextValidFrom, -1)
-        const baseRateCards =
-          previousPeriodKey && linkedPreviousValidTo
-            ? updateRateCardPeriodDateValues(pkg.rateCards, previousPeriodKey, {
-                validTo: linkedPreviousValidTo,
-              })
-            : pkg.rateCards
-
-        const newRateCards = availableSuiteTypes.flatMap((suiteType) =>
-          routes.map((route) => ({
-            id: makeClientId(),
-            routeId: route.id,
-            suiteTypeId: suiteType.id,
-            pricePerPerson: 0,
-            currency,
-            validFrom: nextValidFrom,
-            validTo: null,
-          })),
+      const vocabulary = getSupplierVocabulary(currentForm.kind)
+      const availableSuiteTypes = currentForm.suiteTypes
+      if (availableSuiteTypes.length === 0) {
+        toast.error(
+          `Add at least one ${vocabulary.suiteType.toLowerCase()} before creating a pricing period.`,
+          { id: "rate-card-no-suite-type" },
         )
+        return
+      }
 
-        const nextPackage = {
-          ...pkg,
-          rateCards: [...baseRateCards, ...newRateCards],
-        }
-        const conflict = findPackageRateCardConflicts(nextPackage, availableSuiteTypes)[0]
-        if (conflict) {
-          toast.error(
-            "This pricing period duplicates an existing suite type/route/start-date combination. Choose a different start date.",
-          )
-          return pkg
-        }
-        warnForOverlapIfNeeded(nextPackage, availableSuiteTypes, vocabulary)
+      const pkg = currentForm.packages[packageIndex]
+      if (!pkg) return
 
-        return {
-          ...nextPackage,
-        }
-      })
+      const currency = pkg.currency.trim().toUpperCase() || "ZAR"
+      const routes = pkg.routes.length > 0 ? pkg.routes : [{ id: null as string | null }]
+      const { nextValidFrom, previousPeriodKey } = getNextRateCardPeriodStart(pkg)
+      const linkedPreviousValidTo = addIsoDays(nextValidFrom, -1)
+      const baseRateCards =
+        previousPeriodKey && linkedPreviousValidTo
+          ? updateRateCardPeriodDateValues(pkg.rateCards, previousPeriodKey, {
+              validTo: linkedPreviousValidTo,
+            })
+          : pkg.rateCards
+
+      const newRateCards = availableSuiteTypes.flatMap((suiteType) =>
+        routes.map((route) => ({
+          id: makeClientId(),
+          routeId: route.id,
+          suiteTypeId: suiteType.id,
+          pricePerPerson: 0,
+          currency,
+          validFrom: nextValidFrom,
+          validTo: null,
+        })),
+      )
+
+      const nextPackage = { ...pkg, rateCards: [...baseRateCards, ...newRateCards] }
+      const conflict = findPackageRateCardConflicts(nextPackage, availableSuiteTypes)[0]
+      if (conflict) {
+        toast.error(
+          "This pricing period duplicates an existing suite type/route/start-date combination. Choose a different start date.",
+          { id: "rate-card-conflict" },
+        )
+        return
+      }
+
+      warnForOverlapIfNeeded(nextPackage, availableSuiteTypes, vocabulary)
+      updatePackage(packageIndex, () => nextPackage)
     },
     [updatePackage, warnForOverlapIfNeeded],
   )
@@ -2126,44 +2245,22 @@ export function SupplierDetailView({
       value: string | null,
     ) => {
       const currentForm = formRef.current
-      updatePackage(packageIndex, (pkg) => {
-        let nextPeriodKey = periodKey
-        let nextRateCards = pkg.rateCards.map((rateCard) => {
-          if (
-            getRatePeriodKey(rateCard.validFrom, rateCard.validTo, rateCard.currency) !== periodKey
-          ) {
-            return rateCard
-          }
+      if (!currentForm) return
+      const pkg = currentForm.packages[packageIndex]
+      if (!pkg) return
 
-          if (key === "currency") {
-            const nextRateCard = {
-              ...rateCard,
-              currency: (value ?? "").trim().toUpperCase() || pkg.currency.trim().toUpperCase() || "ZAR",
-            }
-            nextPeriodKey = getRatePeriodKey(
-              nextRateCard.validFrom,
-              nextRateCard.validTo,
-              nextRateCard.currency,
-            )
-            return nextRateCard
-          }
+      let nextPeriodKey = periodKey
+      let nextRateCards = pkg.rateCards.map((rateCard) => {
+        if (
+          getRatePeriodKey(rateCard.validFrom, rateCard.validTo, rateCard.currency) !== periodKey
+        ) {
+          return rateCard
+        }
 
-          if (key === "validFrom") {
-            const nextRateCard = {
-              ...rateCard,
-              validFrom: value ?? "",
-            }
-            nextPeriodKey = getRatePeriodKey(
-              nextRateCard.validFrom,
-              nextRateCard.validTo,
-              nextRateCard.currency,
-            )
-            return nextRateCard
-          }
-
+        if (key === "currency") {
           const nextRateCard = {
             ...rateCard,
-            validTo: value,
+            currency: (value ?? "").trim().toUpperCase() || pkg.currency.trim().toUpperCase() || "ZAR",
           }
           nextPeriodKey = getRatePeriodKey(
             nextRateCard.validFrom,
@@ -2171,34 +2268,52 @@ export function SupplierDetailView({
             nextRateCard.currency,
           )
           return nextRateCard
-        })
-
-        if (key === "validFrom" || key === "validTo") {
-          nextRateCards = applyBidirectionalPeriodDateLinking(nextRateCards, nextPeriodKey, key)
         }
 
-        if (key === "validFrom" || key === "validTo") {
-          const nextPackage = { ...pkg, rateCards: nextRateCards }
-          const availableSuiteTypes = currentForm?.suiteTypes ?? []
-          const conflict = findPackageRateCardConflicts(nextPackage, availableSuiteTypes)[0]
-          if (conflict) {
-            toast.error(
-              "That start date duplicates an existing suite type/route/start-date combination.",
-            )
-            return pkg
-          }
-
-          const vocabulary = getSupplierVocabulary(currentForm?.kind ?? "train_operator")
-          warnForOverlapIfNeeded(nextPackage, availableSuiteTypes, vocabulary)
+        if (key === "validFrom") {
+          const nextRateCard = { ...rateCard, validFrom: value ?? "" }
+          nextPeriodKey = getRatePeriodKey(
+            nextRateCard.validFrom,
+            nextRateCard.validTo,
+            nextRateCard.currency,
+          )
+          return nextRateCard
         }
 
-        return {
-          ...pkg,
-          rateCards: nextRateCards,
-        }
+        const nextRateCard = { ...rateCard, validTo: value }
+        nextPeriodKey = getRatePeriodKey(
+          nextRateCard.validFrom,
+          nextRateCard.validTo,
+          nextRateCard.currency,
+        )
+        return nextRateCard
       })
+
+      if (key === "validFrom" || key === "validTo") {
+        nextRateCards = applyBidirectionalPeriodDateLinking(nextRateCards, nextPeriodKey, key)
+      }
+
+      if (key === "validFrom" || key === "validTo") {
+        const nextPackage = { ...pkg, rateCards: nextRateCards }
+        const availableSuiteTypes = currentForm.suiteTypes
+        const conflict = findPackageRateCardConflicts(nextPackage, availableSuiteTypes)[0]
+        if (conflict) {
+          toast.error(
+            "That start date duplicates an existing suite type/route/start-date combination.",
+            { id: "rate-card-date-conflict" },
+          )
+          return
+        }
+
+        const vocabulary = getSupplierVocabulary(currentForm.kind)
+        warnForInvertedDateRangeIfNeeded(nextPackage)
+        warnForOverlapIfNeeded(nextPackage, availableSuiteTypes, vocabulary)
+      }
+
+      const finalRateCards = nextRateCards
+      updatePackage(packageIndex, () => ({ ...pkg, rateCards: finalRateCards }))
     },
-    [updatePackage, warnForOverlapIfNeeded],
+    [updatePackage, warnForInvertedDateRangeIfNeeded, warnForOverlapIfNeeded],
   )
 
   const removeRateCardPeriod = useCallback(
@@ -2276,7 +2391,7 @@ export function SupplierDetailView({
   )
 
   useEffect(() => {
-    if (!canEdit || !form || !isEditing || isSaving) return
+    if (!canEdit || !form || !isEditing || isPatchInFlight) return
     const disableDraftAutosaveFromQuery =
       new URLSearchParams(window.location.search).get("disableDraftAutosave") === "true"
     const draftAutosaveDisabled =
@@ -2289,6 +2404,9 @@ export function SupplierDetailView({
       }
 
       const timeout = setTimeout(async () => {
+        if (!tryAcquirePatchWriteLock()) {
+          return
+        }
         draftAutosaveInFlightRef.current = true
         setDraftSaveStatus("saving")
 
@@ -2313,15 +2431,22 @@ export function SupplierDetailView({
               expectedUpdatedAt: expectedUpdatedAtRef.current ?? supplierUpdatedAt,
             }),
           })
+          const payload = (await response.json()) as unknown
           if (!response.ok) {
+            const staleConflict = parseStaleVersionConflictPayload(payload)
+            if (staleConflict) {
+              expectedUpdatedAtRef.current = staleConflict.currentUpdatedAt
+              setDraftSaveStatus("idle")
+              return
+            }
             setDraftSaveStatus("error")
             return
           }
-          const payload = (await response.json()) as { updatedAt?: string }
-          if (typeof payload.updatedAt === "string") {
-            expectedUpdatedAtRef.current = payload.updatedAt
+          const successPayload = payload as { updatedAt?: string }
+          if (typeof successPayload.updatedAt === "string") {
+            expectedUpdatedAtRef.current = successPayload.updatedAt
             if (supplier?.id) {
-              hydratedSupplierIdentityRef.current = `${supplier.id}:${payload.updatedAt}`
+              hydratedSupplierIdentityRef.current = `${supplier.id}:${successPayload.updatedAt}`
             }
           }
 
@@ -2338,6 +2463,7 @@ export function SupplierDetailView({
           setDraftSaveStatus("error")
         } finally {
           draftAutosaveInFlightRef.current = false
+          releasePatchWriteLock()
         }
       }, DRAFT_AUTOSAVE_DEBOUNCE_MS)
 
@@ -2360,12 +2486,14 @@ export function SupplierDetailView({
     form,
     isDraftSupplier,
     isEditing,
-    isSaving,
+    isPatchInFlight,
     localDraftStorageKey,
     mutate,
     mutateDetail,
     supplierSlug,
     supplierUpdatedAt,
+    releasePatchWriteLock,
+    tryAcquirePatchWriteLock,
   ])
 
   const restoreLocalDraft = () => {
@@ -2382,12 +2510,12 @@ export function SupplierDetailView({
   }
 
   const cancelEdit = () => {
+    if (supplier?.status === "draft") {
+      exitSupplierDetail()
+      return
+    }
     if (supplier) {
       setForm(buildFormState(supplier))
-    }
-    if (supplier?.status === "draft") {
-      setIsEditing(true)
-      return
     }
     setIsEditing(false)
   }
@@ -2482,6 +2610,11 @@ export function SupplierDetailView({
       toast.error(buildRateCardConflictMessage(rateCardConflict, vocabulary))
       return
     }
+    const invertedDateConflict = findFirstInvertedDateRangeConflict(meaningfulPackages)
+    if (invertedDateConflict) {
+      toast.error(buildInvertedDateRangeMessage(invertedDateConflict), { duration: 4500 })
+      return
+    }
     const overlapConflict = findFirstRateCardOverlapConflict(meaningfulPackages, form.suiteTypes)
     if (overlapConflict) {
       toast.error(buildRateCardOverlapConflictMessage(overlapConflict, vocabulary))
@@ -2514,6 +2647,11 @@ export function SupplierDetailView({
       })),
     }))
 
+    if (!tryAcquirePatchWriteLock()) {
+      toast.error("A supplier save is already in progress. Please wait a moment and try again.")
+      return
+    }
+
     setIsSaving(true)
     try {
       const saveRequestStartedAt = performance.now()
@@ -2536,10 +2674,25 @@ export function SupplierDetailView({
             expectedUpdatedAtRef.current ?? supplier?.updatedAt,
         }),
       })
-      const payload = await response.json()
+      const payload = (await response.json()) as unknown
 
       if (!response.ok) {
-        const conflictDetails = payload?.details as
+        const staleConflict = parseStaleVersionConflictPayload(payload)
+        if (response.status === 409 && staleConflict) {
+          expectedUpdatedAtRef.current = staleConflict.currentUpdatedAt
+          setStaleVersionDialog((current) => ({
+            currentUpdatedAt: staleConflict.currentUpdatedAt,
+            message: staleConflict.error,
+            hasRetried: current?.hasRetried ?? false,
+          }))
+          return
+        }
+
+        const typedPayload = payload as {
+          error?: string
+          details?: unknown
+        }
+        const conflictDetails = typedPayload?.details as
           | {
               packageId?: string
               suiteTypeId?: string
@@ -2547,6 +2700,16 @@ export function SupplierDetailView({
               validFrom?: string
             }
           | undefined
+        const isRouteNameConflict =
+          response.status === 409 &&
+          typeof typedPayload.error === "string" &&
+          typedPayload.error.toLowerCase().includes("route with this name already exists")
+        if (isRouteNameConflict) {
+          toast.error(
+            `Duplicate ${vocabulary.route.toLowerCase()} name in the same ${vocabulary.package.toLowerCase()}. Rename one and try again.`,
+          )
+          return
+        }
         if (
           response.status === 409 &&
           conflictDetails?.packageId &&
@@ -2561,11 +2724,12 @@ export function SupplierDetailView({
             return
           }
         }
-        toast.error(payload.error ?? "Failed to update supplier")
+        toast.error(typedPayload.error ?? "Failed to update supplier")
         return
       }
-      if (typeof payload?.updatedAt === "string") {
-        expectedUpdatedAtRef.current = payload.updatedAt
+      const successPayload = payload as { updatedAt?: string }
+      if (typeof successPayload?.updatedAt === "string") {
+        expectedUpdatedAtRef.current = successPayload.updatedAt
       }
 
       await Promise.all([
@@ -2577,6 +2741,7 @@ export function SupplierDetailView({
       setPendingLocalDraft(null)
       setDraftSaveStatus("idle")
       setIsEditing(false)
+      setStaleVersionDialog(null)
       toast.success(
         isDraftSupplier ? "Supplier published successfully" : "Supplier updated successfully",
       )
@@ -2584,7 +2749,46 @@ export function SupplierDetailView({
       toast.error("Failed to update supplier")
     } finally {
       setIsSaving(false)
+      releasePatchWriteLock()
     }
+  }
+
+  const handleReloadAfterStaleConflict = async () => {
+    if (!tryAcquirePatchWriteLock()) {
+      return
+    }
+
+    setIsSaving(true)
+    try {
+      await mutateDetail()
+      setIsEditing(false)
+      setPendingLocalDraft(null)
+      setStaleVersionDialog(null)
+      toast.success("Latest supplier data loaded. Unsaved local edits were replaced.")
+    } catch {
+      toast.error("Failed to refresh supplier. Please try again.")
+    } finally {
+      setIsSaving(false)
+      releasePatchWriteLock()
+    }
+  }
+
+  const handleRetryAfterStaleConflict = async () => {
+    if (!staleVersionDialog) {
+      return
+    }
+
+    if (staleVersionDialog.hasRetried) {
+      toast.error("Retry already attempted. Reload latest before trying again.")
+      return
+    }
+
+    expectedUpdatedAtRef.current = staleVersionDialog.currentUpdatedAt
+    setStaleVersionDialog({
+      ...staleVersionDialog,
+      hasRetried: true,
+    })
+    await handleSave()
   }
 
   const handleDelete = async () => {
@@ -2643,7 +2847,41 @@ export function SupplierDetailView({
         : []
 
   return (
-    <ContentTransition show>
+    <>
+      <AlertDialog
+        open={staleVersionDialog !== null}
+        onOpenChange={(open) => {
+          if (!open && !isSaving) {
+            setStaleVersionDialog(null)
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Supplier changed while you were editing</AlertDialogTitle>
+            <AlertDialogDescription>
+              {staleVersionDialog?.message ??
+                "This supplier changed before your latest save could complete."}
+              {staleVersionDialog?.hasRetried
+                ? " Retry already attempted once. Reload latest data before trying again."
+                : " You can retry once with the latest server version token, or reload latest data."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isSaving}>Keep editing</AlertDialogCancel>
+            <Button variant="outline" onClick={handleReloadAfterStaleConflict} disabled={isSaving}>
+              Reload latest
+            </Button>
+            <AlertDialogAction
+              onClick={handleRetryAfterStaleConflict}
+              disabled={isSaving || staleVersionDialog?.hasRetried}
+            >
+              Retry my save
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <ContentTransition show>
       <div className={getContainerClass(presentation)}>
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="space-y-3">
@@ -2677,38 +2915,8 @@ export function SupplierDetailView({
               presentation === "modal" ? " mr-10 sm:mr-12" : ""
             }`}
           >
-            {canDelete && !isEditing && (
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button variant="destructive" disabled={isDeleting}>
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    {isDeleting ? "Deleting..." : "Delete supplier"}
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Delete supplier?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This will permanently delete <strong>{supplier.name}</strong> and all
-                      related supplier records. This action cannot be undone.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-                    <AlertDialogAction
-                      onClick={handleDelete}
-                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                      disabled={isDeleting}
-                    >
-                      {isDeleting ? "Deleting..." : "Delete supplier"}
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            )}
-
             {canEdit && !isEditing && (
-            <Button variant="secondary" onClick={() => setIsEditing(true)}>
+              <Button variant="outline" onClick={() => setIsEditing(true)}>
                 <Pencil className="mr-2 h-4 w-4" />
                 Edit
               </Button>
@@ -2716,10 +2924,39 @@ export function SupplierDetailView({
 
             {isEditing && (
               <>
-                <Button variant="outline" onClick={cancelEdit} disabled={isSaving}>
+                {canDelete && (
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="destructive" disabled={isDeleting || isPatchInFlight}>
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        {isDeleting ? "Deleting..." : "Delete supplier"}
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Delete supplier?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This will permanently delete <strong>{supplier.name}</strong> and all
+                          related supplier records. This action cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={handleDelete}
+                          className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          disabled={isDeleting}
+                        >
+                          {isDeleting ? "Deleting..." : "Delete supplier"}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                )}
+                <Button variant="outline" onClick={cancelEdit} disabled={isPatchInFlight}>
                   Cancel
                 </Button>
-                <Button onClick={handleSave} disabled={isSaving}>
+                <Button onClick={handleSave} disabled={isPatchInFlight}>
                   <Save className="mr-2 h-4 w-4" />
                   {isSaving
                     ? "Saving..."
@@ -3043,5 +3280,6 @@ export function SupplierDetailView({
           </Card>
       </div>
     </ContentTransition>
+    </>
   )
 }

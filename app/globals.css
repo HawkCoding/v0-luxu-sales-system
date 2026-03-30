@@ -1,7 +1,7 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark (&:where(.dark, .dark *));
 
 :root {
   /* Theme tint base */
@@ -93,9 +93,84 @@
   --payment-blue: #2563EB;
 }
 
+.dark {
+  /* Theme tint base */
+  --luxu-theme-tint: #4b5d66;
+
+  /* App canvas background */
+  --luxu-app-bg: #111111;
+
+  /* Background layers (4) */
+  --luxu-bg-0: #141414;
+  --luxu-bg-1: #1c1c1c;
+  --luxu-bg-2: #242424;
+  --luxu-bg-3: #2c2c2c;
+  --luxu-bg-white: #363636;
+
+  /* Strokes (2) */
+  --luxu-stroke-1: #2e2e2e;
+  --luxu-stroke-2: #3d474d;
+
+  /* Text variants (3) */
+  --luxu-text-heading: #ebebeb;
+  --luxu-text-body: #d2d2d2;
+  --luxu-text-body-secondary: #bcbcbc;
+  --luxu-text-muted: #8f8f8f;
+  --luxu-text-muted-extra: #767676;
+
+  /* Accent scale (functional) */
+  --luxu-accent-base: #4b5d66;
+  --luxu-accent-hover: #5f737d;
+  --luxu-accent-link: #80939c;
+
+  /* Semantic colors - Danger */
+  --luxu-danger-base: #f97066;
+  --luxu-danger-bg: #3a1717;
+  --luxu-danger-border: #6f2424;
+
+  /* Semantic colors - Success */
+  --luxu-success-base: #4ad295;
+  --luxu-success-bg: #10271f;
+  --luxu-success-border: #1e5a3f;
+
+  /* Semantic colors - Warning */
+  --luxu-warning-base: #f6ad55;
+  --luxu-warning-bg: #332312;
+  --luxu-warning-border: #5c3f1f;
+
+  /* Mapped to shadcn/Tailwind tokens */
+  --background: var(--luxu-bg-0);
+  --foreground: var(--luxu-text-body);
+  --card: var(--luxu-bg-1);
+  --card-foreground: var(--luxu-text-body);
+  --popover: var(--luxu-bg-white);
+  --popover-foreground: var(--luxu-text-body);
+  --primary: var(--luxu-accent-hover);
+  --primary-foreground: #141414;
+  --secondary: var(--luxu-bg-2);
+  --secondary-foreground: var(--luxu-text-body);
+  --muted: var(--luxu-bg-3);
+  --muted-foreground: var(--luxu-text-muted);
+  --accent: var(--luxu-accent-base);
+  --accent-foreground: #141414;
+  --destructive: var(--luxu-danger-base);
+  --destructive-foreground: #1a0a0a;
+  --border: var(--luxu-stroke-1);
+  --input: var(--luxu-stroke-2);
+  --ring: var(--luxu-accent-hover);
+  --sidebar: var(--luxu-bg-1);
+  --sidebar-foreground: var(--luxu-text-body);
+  --sidebar-primary: var(--luxu-accent-base);
+  --sidebar-primary-foreground: #141414;
+  --sidebar-accent: var(--luxu-bg-2);
+  --sidebar-accent-foreground: var(--luxu-text-body);
+  --sidebar-border: var(--luxu-stroke-1);
+  --sidebar-ring: var(--luxu-accent-hover);
+}
 
 
-@theme inline {
+
+@theme {
   /* Fonts */
   --font-sans: var(--font-inter), -apple-system, system-ui, sans-serif;
   --font-mono: 'Geist Mono', 'Geist Mono Fallback';
@@ -238,6 +313,7 @@ body {
   p, span, div {
     color: var(--luxu-text-body);
   }
+
 }
 
 /* Bulk import review table: one scrollport so sticky columns match; GPU layer for smooth scroll */
@@ -273,4 +349,21 @@ body {
   .import-review-scroll::-webkit-scrollbar-corner {
     background: transparent;
   }
+}
+
+[data-sonner-toast] {
+  color: var(--normal-text);
+}
+
+[data-sonner-toaster] :is(div, p, span) {
+  color: inherit;
+}
+
+/* In dark mode, keep toast text identical to light mode readability. */
+.dark [data-sonner-toaster] [data-sonner-toast] {
+  color: #09090b !important;
+}
+
+.dark [data-sonner-toaster] [data-sonner-toast] :is(div, p, span) {
+  color: inherit !important;
 }

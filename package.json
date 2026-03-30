@@ -12,6 +12,7 @@
     "local:start": "node scripts/dev-local.mjs",
     "build": "next build",
     "start": "next start",
+    "app:version:bump": "node scripts/bump-app-version.mjs",
     "db:start": "npx supabase start",
     "db:stop": "npx supabase stop",
     "db:reset": "npx supabase db reset",

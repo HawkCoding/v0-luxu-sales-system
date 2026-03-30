@@ -490,7 +490,12 @@ describe("PATCH /api/suppliers/[slug] additional scenarios", () => {
       }),
       { params: Promise.resolve({ slug: "test" }) },
     )
+    const payload = await response.json()
     expect(response.status).toBe(409)
+    expect(payload).toMatchObject({
+      code: "STALE_VERSION",
+      currentUpdatedAt: "2026-03-23T08:00:00.000Z",
+    })
   })
 
   it("returns 409 for overlapping rate cards", async () => {

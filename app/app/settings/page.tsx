@@ -43,6 +43,7 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { useRole } from "@/lib/role-context"
 import type { Role } from "@/lib/types"
+import { APP_VERSION } from "@/lib/version"
 import { KeyRound, MoreHorizontal, ShieldCheck, Trash2, Upload, UserCheck, UserPlus, UserX } from "lucide-react"
 
 interface AppUser {
@@ -775,7 +776,7 @@ export default function SettingsPage() {
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Application Version</span>
             <Badge variant="outline" className="text-xs">
-              1.0.0-demo
+              v{APP_VERSION}
             </Badge>
           </div>
           <Separator />
