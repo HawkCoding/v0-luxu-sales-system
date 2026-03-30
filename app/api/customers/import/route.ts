@@ -500,6 +500,7 @@ export async function POST(req: Request) {
     purpose: "reservation"
     stage: "closed"
     route_id: string | null
+    hotel_supplier_id: string | null
     terms_accepted: boolean
     extracted_json: {
       historical_import: {
@@ -531,6 +532,7 @@ export async function POST(req: Request) {
         purpose: "reservation" as const,
         stage: "closed" as const,
         route_id: parsed.routeId ?? null,
+        hotel_supplier_id: parsed.supplierId ?? null,
         terms_accepted: false,
         extracted_json: {
           historical_import: {

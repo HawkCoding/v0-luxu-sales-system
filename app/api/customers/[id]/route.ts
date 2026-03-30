@@ -46,6 +46,43 @@ export async function GET(
     return NextResponse.json({ error: "Failed to load customer bookings" }, { status: 500 })
   }
 
+  const historicalSupplierIds = Array.from(
+    new Set(
+      (bookings ?? [])
+        .map((booking) => {
+          const packageInfo = booking.package as
+            | { supplier?: { name?: string | null } | null }
+            | null
+          const hotelSupplier = booking.hotel_supplier as { name?: string | null } | null
+          if (packageInfo?.supplier?.name || hotelSupplier?.name) return null
+
+          const historicalSupplierId = (
+            booking.extracted_json as { historical_import?: { supplier_id?: unknown } } | null
+          )?.historical_import?.supplier_id
+          if (typeof historicalSupplierId !== "string" || !historicalSupplierId.trim()) return null
+
+          return historicalSupplierId
+        })
+        .filter((supplierId): supplierId is string => Boolean(supplierId)),
+    ),
+  )
+
+  const supplierNamesById = new Map<string, string>()
+  if (historicalSupplierIds.length > 0) {
+    const { data: historicalSuppliers, error: historicalSuppliersError } = await supabase
+      .from("suppliers")
+      .select("id, name")
+      .in("id", historicalSupplierIds)
+
+    if (historicalSuppliersError) {
+      return NextResponse.json({ error: "Failed to load booking suppliers" }, { status: 500 })
+    }
+
+    ;(historicalSuppliers ?? []).forEach((supplier) => {
+      supplierNamesById.set(supplier.id, supplier.name)
+    })
+  }
+
   return NextResponse.json({
     customer: {
       id: customer.id,
@@ -66,6 +103,13 @@ export async function GET(
         | { name?: string | null; supplier?: { id?: string; name?: string | null } | null }
         | null
       const hotelSupplier = booking.hotel_supplier as { id?: string; name?: string | null } | null
+      const historicalSupplierId = (
+        booking.extracted_json as { historical_import?: { supplier_id?: string } } | null
+      )?.historical_import?.supplier_id
+      const historicalSupplierName =
+        typeof historicalSupplierId === "string"
+          ? (supplierNamesById.get(historicalSupplierId) ?? null)
+          : null
 
       return {
         id: booking.id,
@@ -78,7 +122,7 @@ export async function GET(
           (booking.route as { name?: string } | null)?.name ??
           ((booking.extracted_json as { historical_import?: { route?: string } } | null)
             ?.historical_import?.route ?? null),
-        supplierName: packageInfo?.supplier?.name ?? hotelSupplier?.name ?? null,
+        supplierName: packageInfo?.supplier?.name ?? hotelSupplier?.name ?? historicalSupplierName,
         packageName: packageInfo?.name ?? null,
         createdAt: booking.created_at,
         createdAtDisplay: formatDisplayDateTime(booking.created_at),

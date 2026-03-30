@@ -9,6 +9,7 @@ vi.mock("@/lib/supabase/server", () => ({
 import { POST } from "./route"
 
 const USER_ID = "00000000-0000-0000-0000-000000000001"
+const SUPPLIER_ID = "00000000-0000-0000-0000-000000000111"
 
 interface MockState {
   customerInsertRows: Array<Record<string, unknown>>
@@ -158,7 +159,7 @@ describe("POST /api/customers/import idempotency", () => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        supplierId: null,
+        supplierId: SUPPLIER_ID,
         routeId: null,
         rows: [
           {
@@ -188,6 +189,7 @@ describe("POST /api/customers/import idempotency", () => {
     })
     expect(state.precheckCustomerIds.sort()).toEqual(["cust-existing", "cust-new"])
     expect(state.bookingInsertRows).toHaveLength(1)
+    expect(state.bookingInsertRows[0]?.hotel_supplier_id).toBe(SUPPLIER_ID)
 
     const insertedBookingMeta = (state.bookingInsertRows[0].extracted_json as {
       historical_import?: { source_row_id?: string }
