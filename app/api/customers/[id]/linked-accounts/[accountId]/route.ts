@@ -88,7 +88,7 @@ async function deleteMirrorFor(
     .delete()
     .eq("customer_id", row.linked_customer_id)
     .eq("linked_customer_id", row.customer_id)
-    .eq("is_mirror", true)
+    .eq("is_mirror", !row.is_mirror)
 }
 
 async function upsertMirrorFor(
