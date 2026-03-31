@@ -2169,45 +2169,46 @@ export function SupplierDetailView({
 
   const removeRoute = useCallback(
     (packageIndex: number, routeIndex: number) => {
-      updatePackage(packageIndex, (pkg) => {
-        const currentForm = formRef.current
-        if (!currentForm) return pkg
+      const currentForm = formRef.current
+      if (!currentForm) return
 
-        const route = pkg.routes[routeIndex]
-        if (!route) return pkg
+      const pkg = currentForm.packages[packageIndex]
+      if (!pkg) return
 
-        const routeId = route.id
-        const linkedRateCardCount = pkg.rateCards.filter((rateCard) => rateCard.routeId === routeId).length
-        if (linkedRateCardCount > 0) {
-          const vocabulary = getSupplierVocabulary(currentForm.kind)
-          const packageName = pkg.name.trim() || "Unnamed package"
-          const routeName = route.name.trim() || "Unnamed route"
-          const shouldDeleteRoute = window.confirm(
-            buildRouteDeletionConfirmationMessage({
-              packageName,
-              routeName,
-              linkedRateCardCount,
-              vocabulary,
-            }),
-          )
-          if (!shouldDeleteRoute) return pkg
-        }
+      const route = pkg.routes[routeIndex]
+      if (!route) return
 
-        const nextPackage = {
-          ...pkg,
-          routes: pkg.routes.filter((_route, index) => index !== routeIndex),
-          rateCards: pkg.rateCards.filter((rateCard) => rateCard.routeId !== routeId),
-        }
+      const routeId = route.id
+      const linkedRateCardCount = pkg.rateCards.filter((rateCard) => rateCard.routeId === routeId).length
+      if (linkedRateCardCount > 0) {
+        const vocabulary = getSupplierVocabulary(currentForm.kind)
+        const packageName = pkg.name.trim() || "Unnamed package"
+        const routeName = route.name.trim() || "Unnamed route"
+        const shouldDeleteRoute = window.confirm(
+          buildRouteDeletionConfirmationMessage({
+            packageName,
+            routeName,
+            linkedRateCardCount,
+            vocabulary,
+          }),
+        )
+        if (!shouldDeleteRoute) return
+      }
 
-        const conflict = findPackageRateCardConflicts(nextPackage, currentForm.suiteTypes)[0]
-        if (conflict) {
-          const vocabulary = getSupplierVocabulary(currentForm.kind)
-          toast.error(buildRateCardConflictMessage(conflict, vocabulary), { id: "rate-card-conflict" })
-          return pkg
-        }
+      const nextPackage = {
+        ...pkg,
+        routes: pkg.routes.filter((_route, index) => index !== routeIndex),
+        rateCards: pkg.rateCards.filter((rateCard) => rateCard.routeId !== routeId),
+      }
 
-        return nextPackage
-      })
+      const conflict = findPackageRateCardConflicts(nextPackage, currentForm.suiteTypes)[0]
+      if (conflict) {
+        const vocabulary = getSupplierVocabulary(currentForm.kind)
+        toast.error(buildRateCardConflictMessage(conflict, vocabulary), { id: "rate-card-conflict" })
+        return
+      }
+
+      updatePackage(packageIndex, () => nextPackage)
     },
     [updatePackage],
   )
@@ -2907,12 +2908,14 @@ export function SupplierDetailView({
             <Button variant="outline" onClick={handleReloadAfterStaleConflict} disabled={isSaving}>
               Reload latest
             </Button>
-            <AlertDialogAction
-              onClick={handleRetryAfterStaleConflict}
+            <Button
+              onClick={() => {
+                void handleRetryAfterStaleConflict()
+              }}
               disabled={isSaving || staleVersionDialog?.hasRetried}
             >
               Retry my save
-            </AlertDialogAction>
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

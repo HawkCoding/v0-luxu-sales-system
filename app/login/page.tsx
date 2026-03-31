@@ -13,9 +13,24 @@ import { Spinner } from "@/components/ui/spinner"
 const loginPageClassName = "min-h-screen bg-background flex items-center justify-center p-4"
 // DEV_QUICK_LOGIN_START
 const canUseDevQuickLogin = process.env.NODE_ENV === "development"
-// TODO: Remove this temporary dev shortcut before production launch.
-const DEV_QUICK_LOGIN_EMAIL = "carmen@luxustravel.co.za"
-const DEV_QUICK_LOGIN_PASSWORDS = ["password123", "14789"] as const
+
+function getDevQuickLoginCandidates() {
+  if (process.env.NODE_ENV !== "development" || typeof window === "undefined") {
+    return null
+  }
+
+  const email = window.localStorage.getItem("devQuickLoginEmail")?.trim().toLowerCase() ?? ""
+  const passwords = (window.localStorage.getItem("devQuickLoginPasswords") ?? "")
+    .split(",")
+    .map((password) => password.trim())
+    .filter(Boolean)
+
+  if (!email || passwords.length === 0) {
+    return null
+  }
+
+  return { email, passwords }
+}
 // DEV_QUICK_LOGIN_END
 
 function LoginShell({ children }: { children: React.ReactNode }) {
@@ -118,21 +133,27 @@ function LoginForm() {
   const handleDevQuickLogin = async () => {
     if (!canUseDevQuickLogin) return
 
+    const candidates = getDevQuickLoginCandidates()
+    if (!candidates) {
+      setError(
+        "Dev quick login is not configured. Set localStorage keys devQuickLoginEmail and devQuickLoginPasswords (comma-separated).",
+      )
+      return
+    }
+
     setError("")
     setSubmitting(true)
     try {
-      for (const passwordOption of DEV_QUICK_LOGIN_PASSWORDS) {
-        const success = await loginWithPassword(DEV_QUICK_LOGIN_EMAIL, passwordOption)
+      for (const passwordOption of candidates.passwords) {
+        const success = await loginWithPassword(candidates.email, passwordOption)
         if (success) {
-          localStorage.setItem("lastLoginEmail", DEV_QUICK_LOGIN_EMAIL)
+          localStorage.setItem("lastLoginEmail", candidates.email)
           router.push("/app")
           return
         }
       }
 
-      setError(
-        "Dev quick login failed. Seed local DB (password123) or set the user password to 14789.",
-      )
+      setError("Dev quick login failed with configured credentials.")
     } finally {
       setSubmitting(false)
     }

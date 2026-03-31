@@ -654,15 +654,6 @@ export async function PATCH(
 
       if (
         !isDraftSave &&
-        mergedRateCards.some(
-          (rateCard) => rateCard.route_id && !routeIds.has(rateCard.route_id),
-        )
-      ) {
-        throw new Error("Each rate card must reference a route from the same package.")
-      }
-
-      if (
-        !isDraftSave &&
         mergedRateCards.some((rateCard) => !suiteTypeIds.has(rateCard.suite_type_id))
       ) {
         throw new Error("Each rate card must reference a suite type from this supplier.")
