@@ -1,7 +1,14 @@
 "use client"
 
 import useSWR from "swr"
-import type { Booking, Customer, Location, Supplier, SupplierDetail } from "@/lib/types"
+import type {
+  Booking,
+  Customer,
+  CustomerLinkedAccount,
+  Location,
+  Supplier,
+  SupplierDetail,
+} from "@/lib/types"
 
 type ApiError = Error & { status?: number }
 
@@ -84,6 +91,7 @@ export function useCustomerDetail(id: string) {
   return useSWR<
     | {
         customer: Customer
+        linkedAccounts: CustomerLinkedAccount[]
         bookings: Array<
           Pick<Booking, "id" | "bookingNumber" | "stage" | "consultant" | "departureDate" | "createdAt"> & {
             direction: string | null

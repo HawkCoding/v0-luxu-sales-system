@@ -14,7 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useLocations } from "@/lib/use-data"
 import type { Location } from "@/lib/types"
 
@@ -150,13 +150,13 @@ export function ManageLocationsDialog({ open, onOpenChange }: ManageLocationsDia
           </div>
         </div>
 
-        <div className="max-h-[45vh] overflow-y-auto rounded-md border">
-          <Table>
+        <div className="import-review-scroll max-h-[45vh] overflow-x-scroll rounded-md border">
+          <table className="w-full min-w-[640px] table-fixed caption-bottom text-sm">
             <TableHeader className="sticky top-0 z-10 bg-background">
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Country</TableHead>
-                <TableHead>Region code</TableHead>
+                <TableHead className="w-[48%]">Name</TableHead>
+                <TableHead className="w-[32%]">Country</TableHead>
+                <TableHead className="w-[88px]">Region code</TableHead>
                 <TableHead className="w-[92px] text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -176,9 +176,15 @@ export function ManageLocationsDialog({ open, onOpenChange }: ManageLocationsDia
               ) : (
                 sortedLocations.map((location) => (
                   <TableRow key={location.id}>
-                    <TableCell className="font-medium">{location.name}</TableCell>
-                    <TableCell>{location.country}</TableCell>
-                    <TableCell>{location.regionCode ?? "—"}</TableCell>
+                    <TableCell className="max-w-0 font-medium">
+                      <span className="block truncate">{location.name}</span>
+                    </TableCell>
+                    <TableCell className="max-w-0">
+                      <span className="block truncate">{location.country}</span>
+                    </TableCell>
+                    <TableCell className="max-w-0">
+                      <span className="block truncate">{location.regionCode ?? "—"}</span>
+                    </TableCell>
                     <TableCell className="text-right">
                       <Button
                         variant="ghost"
@@ -195,7 +201,7 @@ export function ManageLocationsDialog({ open, onOpenChange }: ManageLocationsDia
                 ))
               )}
             </TableBody>
-          </Table>
+          </table>
         </div>
 
         <DialogFooter>

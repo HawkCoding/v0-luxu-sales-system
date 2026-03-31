@@ -13,7 +13,6 @@ export interface User {
 interface AuthContextValue {
   user: User | null
   loading: boolean
-  loginWithMicrosoft: () => Promise<boolean>
   loginWithPassword: (email: string, password: string) => Promise<boolean>
   requestPasswordReset: (email: string) => Promise<{ ok: boolean; error?: string }>
   logout: () => Promise<void>
@@ -203,17 +202,6 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
   // eslint-disable-next-line react-hooks/exhaustive-deps -- callbacks are stable (useCallback with [] deps); auth setup must run exactly once
   }, [])
 
-  const loginWithMicrosoft = async (): Promise<boolean> => {
-    const supabase = getSupabase()
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "azure",
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-      },
-    })
-    return !error
-  }
-
   const loginWithPassword = async (email: string, password: string): Promise<boolean> => {
     const supabase = getSupabase()
     const normalizedEmail = email.trim().toLowerCase()
@@ -245,7 +233,7 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, loginWithMicrosoft, loginWithPassword, requestPasswordReset, logout }}>
+    <AuthContext.Provider value={{ user, loading, loginWithPassword, requestPasswordReset, logout }}>
       {children}
     </AuthContext.Provider>
   )

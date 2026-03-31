@@ -5,6 +5,7 @@ import {
   allowedRoles,
   buildErrorResponse,
   checkDeletionDependencies,
+  deleteInChunks,
   loadSupplierDetail,
   makeUuid,
   normalizeNullableDate,
@@ -58,6 +59,12 @@ interface RateCardOverlapConflictDetails {
 
 interface RateCardIdCollisionDetails {
   duplicateId: string
+}
+
+interface StaleVersionConflictPayload {
+  error: string
+  code: "STALE_VERSION"
+  currentUpdatedAt: string
 }
 
 class DuplicateRateCardConflictError extends Error {
@@ -195,6 +202,20 @@ function checkRateCardOverlaps(rateCards: NormalizedRateCard[]) {
       }
     }
   }
+}
+
+function findInvertedRateCardDateRange(
+  rateCards: NormalizedRateCard[],
+): Pick<NormalizedRateCard, "package_id" | "valid_from" | "valid_to"> | null {
+  for (const rateCard of rateCards) {
+    if (!rateCard.valid_to) {
+      continue
+    }
+    if (rateCard.valid_to < rateCard.valid_from) {
+      return rateCard
+    }
+  }
+  return null
 }
 
 export async function GET(
@@ -503,6 +524,12 @@ export async function PATCH(
     const existingRateCardByBusinessKey = new Map(
       existingDetail.rateCards.map((rateCard) => [getRateCardBusinessKey(rateCard), rateCard]),
     )
+    const existingRouteIdsByPackageId = new Map<string, Set<string>>()
+    for (const route of existingDetail.routes) {
+      const routeIds = existingRouteIdsByPackageId.get(route.package_id) ?? new Set<string>()
+      routeIds.add(route.id)
+      existingRouteIdsByPackageId.set(route.package_id, routeIds)
+    }
     const incomingRateCardKeys = new Set<string>()
     const clientProvidedRateCardIds = new Set<string>(
       parsed.packages.flatMap((pkg) =>
@@ -564,7 +591,7 @@ export async function PATCH(
           })
         : normalizedRateCardCandidates
 
-      const mergedRateCards: NormalizedRateCard[] = normalizedRateCards.map((rateCard) => {
+      let mergedRateCards: NormalizedRateCard[] = normalizedRateCards.map((rateCard) => {
         const businessKey = getRateCardBusinessKey({
           package_id: rateCard.package_id,
           suite_type_id: rateCard.suite_type_id,
@@ -602,13 +629,27 @@ export async function PATCH(
         }
       })
 
-      if (
-        !isDraftSave &&
-        mergedRateCards.some(
-          (rateCard) => rateCard.route_id && !routeIds.has(rateCard.route_id),
+      if (!isDraftSave) {
+        const removedRouteIds = new Set(
+          Array.from(existingRouteIdsByPackageId.get(packageId) ?? []).filter(
+            (routeId) => !routeIds.has(routeId),
+          ),
         )
-      ) {
-        throw new Error("Each rate card must reference a route from the same package.")
+        const hasInvalidRouteReference = mergedRateCards.some((rateCard) => {
+          if (!rateCard.route_id || routeIds.has(rateCard.route_id)) {
+            return false
+          }
+          return !removedRouteIds.has(rateCard.route_id)
+        })
+
+        if (hasInvalidRouteReference) {
+          throw new Error("Each rate card must reference a route from the same package.")
+        }
+
+        // If a route was removed in this save, treat lingering rate cards for that route as deletions.
+        mergedRateCards = mergedRateCards.filter(
+          (rateCard) => !rateCard.route_id || !removedRouteIds.has(rateCard.route_id),
+        )
       }
 
       if (
@@ -640,6 +681,12 @@ export async function PATCH(
         throw new RateCardIdCollisionError({ duplicateId: rateCard.id })
       }
       seenRateCardIds.add(rateCard.id)
+    }
+    const invertedDateRange = findInvertedRateCardDateRange(mergedRateCards)
+    if (invertedDateRange) {
+      throw new Error(
+        `Rate card "Valid to" (${invertedDateRange.valid_to}) is before "Valid from" (${invertedDateRange.valid_from}) for package ${invertedDateRange.package_id}.`,
+      )
     }
     checkRateCardOverlaps(mergedRateCards)
     phaseDurations.normalizeValidateMs = performance.now() - normalizeValidateStartedAt
@@ -689,14 +736,14 @@ export async function PATCH(
   // --- Optimistic concurrency check ---
   const expectedUpdatedAt = (parsed as Record<string, unknown>).expectedUpdatedAt
   if (typeof expectedUpdatedAt === "string" && expectedUpdatedAt !== existingDetail.supplier.updated_at) {
+    const staleVersionConflict: StaleVersionConflictPayload = {
+      error:
+        "This supplier was modified by another user since you started editing. Please refresh and try again.",
+      code: "STALE_VERSION",
+      currentUpdatedAt: existingDetail.supplier.updated_at,
+    }
     return withPatchTimingHeaders(
-      NextResponse.json(
-        {
-          error:
-            "This supplier was modified by another user since you started editing. Please refresh and try again.",
-        },
-        { status: 409 },
-      ),
+      NextResponse.json(staleVersionConflict, { status: 409 }),
     )
   }
 
@@ -793,13 +840,22 @@ export async function PATCH(
   const incomingSuiteTypeIds = new Set(normalizedSuiteTypes.map((suiteType) => suiteType.id))
   const incomingEmailIds = new Set(normalizedEmails.map((entry) => entry.id))
   const incomingRateCardIds = new Set(rateCardRows.map((rateCard) => rateCard.id))
-
-  const rateCardIdsToDelete = existingDetail.rateCards
-    .map((rateCard) => rateCard.id)
-    .filter((rateCardId) => !incomingRateCardIds.has(rateCardId))
   const routeIdsToDelete = existingDetail.routes
     .map((route) => route.id)
     .filter((routeId) => !incomingRouteIds.has(routeId))
+  const routeIdsToDeleteSet = new Set(routeIdsToDelete)
+
+  const rateCardIdsToDelete = Array.from(
+    new Set(
+      existingDetail.rateCards
+        .filter(
+          (rateCard) =>
+            !incomingRateCardIds.has(rateCard.id) ||
+            (rateCard.route_id ? routeIdsToDeleteSet.has(rateCard.route_id) : false),
+        )
+        .map((rateCard) => rateCard.id),
+    ),
+  )
   const suiteTypeIdsToDelete = existingDetail.suiteTypes
     .map((suiteType) => suiteType.id)
     .filter((suiteTypeId) => !incomingSuiteTypeIds.has(suiteTypeId))
@@ -837,23 +893,45 @@ export async function PATCH(
     return withPatchTimingHeaders(response)
   }
 
-  const { error: supplierUpdateError } = await supabase
-    .from("suppliers")
-    .update({
-      name: parsed.name,
-      kind: parsed.kind,
-      email: normalizedEmails[0]?.email ?? null,
-      phone: parsed.phone || null,
-      website: parsed.website || null,
-      location: parsed.location || null,
-      notes: parsed.notes || null,
-      active: isDraftSave ? false : parsed.active,
-    })
-    .eq("id", supplierId)
+  const supplierUpdatePayload = {
+    name: parsed.name,
+    kind: parsed.kind,
+    email: normalizedEmails[0]?.email ?? null,
+    phone: parsed.phone || null,
+    website: parsed.website || null,
+    location: parsed.location || null,
+    notes: parsed.notes || null,
+    active: isDraftSave ? false : parsed.active,
+  }
+
+  let supplierUpdateQuery = supabase.from("suppliers").update(supplierUpdatePayload).eq("id", supplierId)
+  if (typeof expectedUpdatedAt === "string") {
+    supplierUpdateQuery = supplierUpdateQuery.eq("updated_at", expectedUpdatedAt)
+  }
+
+  const { data: updatedSupplier, error: supplierUpdateError } = await supplierUpdateQuery
+    .select("updated_at")
+    .maybeSingle()
 
   if (supplierUpdateError) {
     logSupplierMutationError("supplier-update", supplierId, supplierUpdateError)
     return withDbTimingHeaders(NextResponse.json({ error: "Failed to update supplier" }, { status: 500 }))
+  }
+
+  if (!updatedSupplier) {
+    const { data: latestSupplierSnapshot } = await supabase
+      .from("suppliers")
+      .select("updated_at")
+      .eq("id", supplierId)
+      .maybeSingle()
+
+    const staleVersionConflict: StaleVersionConflictPayload = {
+      error:
+        "This supplier was modified by another user since you started editing. Please refresh and try again.",
+      code: "STALE_VERSION",
+      currentUpdatedAt: latestSupplierSnapshot?.updated_at ?? existingDetail.supplier.updated_at,
+    }
+    return withDbTimingHeaders(NextResponse.json(staleVersionConflict, { status: 409 }))
   }
 
   if (normalizedEmails.length > 0) {
@@ -895,6 +973,20 @@ export async function PATCH(
 
     if (routesError) {
       logSupplierMutationError("routes-upsert", supplierId, routesError)
+      if (
+        routesError.code === "23505" &&
+        routesError.message.includes("ux_routes_name_package")
+      ) {
+        return withDbTimingHeaders(
+          NextResponse.json(
+            {
+              error:
+                "A route with this name already exists in the same package. Use a different route name.",
+            },
+            { status: 409 },
+          ),
+        )
+      }
       return withDbTimingHeaders(
         NextResponse.json(
           { error: "Failed to update supplier routes" },
@@ -959,10 +1051,11 @@ export async function PATCH(
   }
 
   if (rateCardIdsToDelete.length > 0) {
-    const { error: deleteRateCardsError } = await supabase
-      .from("rate_cards")
-      .delete()
-      .in("id", rateCardIdsToDelete)
+    const { error: deleteRateCardsError } = await deleteInChunks(
+      supabase,
+      "rate_cards",
+      rateCardIdsToDelete,
+    )
 
     if (deleteRateCardsError) {
       logSupplierMutationError("rate-cards-delete", supplierId, deleteRateCardsError)
@@ -976,10 +1069,11 @@ export async function PATCH(
   }
 
   if (emailIdsToDelete.length > 0) {
-    const { error: deleteEmailsError } = await supabase
-      .from("supplier_emails")
-      .delete()
-      .in("id", emailIdsToDelete)
+    const { error: deleteEmailsError } = await deleteInChunks(
+      supabase,
+      "supplier_emails",
+      emailIdsToDelete,
+    )
 
     if (deleteEmailsError) {
       logSupplierMutationError("supplier-emails-delete", supplierId, deleteEmailsError)
@@ -993,10 +1087,11 @@ export async function PATCH(
   }
 
   if (routeIdsToDelete.length > 0) {
-    const { error: deleteRoutesError } = await supabase
-      .from("routes")
-      .delete()
-      .in("id", routeIdsToDelete)
+    const { error: deleteRoutesError } = await deleteInChunks(
+      supabase,
+      "routes",
+      routeIdsToDelete,
+    )
 
     if (deleteRoutesError) {
       logSupplierMutationError("routes-delete", supplierId, deleteRoutesError)
@@ -1010,10 +1105,11 @@ export async function PATCH(
   }
 
   if (suiteTypeIdsToDelete.length > 0) {
-    const { error: deleteSuiteTypesError } = await supabase
-      .from("suite_types")
-      .delete()
-      .in("id", suiteTypeIdsToDelete)
+    const { error: deleteSuiteTypesError } = await deleteInChunks(
+      supabase,
+      "suite_types",
+      suiteTypeIdsToDelete,
+    )
 
     if (deleteSuiteTypesError) {
       logSupplierMutationError("suite-types-delete", supplierId, deleteSuiteTypesError)
@@ -1027,10 +1123,11 @@ export async function PATCH(
   }
 
   if (packageIdsToDelete.length > 0) {
-    const { error: deletePackagesError } = await supabase
-      .from("packages")
-      .delete()
-      .in("id", packageIdsToDelete)
+    const { error: deletePackagesError } = await deleteInChunks(
+      supabase,
+      "packages",
+      packageIdsToDelete,
+    )
 
     if (deletePackagesError) {
       logSupplierMutationError("packages-delete", supplierId, deletePackagesError)

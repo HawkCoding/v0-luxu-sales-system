@@ -11,6 +11,27 @@ import { LoadingState } from "@/components/ui/loading-state"
 import { Spinner } from "@/components/ui/spinner"
 
 const loginPageClassName = "min-h-screen bg-background flex items-center justify-center p-4"
+// DEV_QUICK_LOGIN_START
+const canUseDevQuickLogin = process.env.NODE_ENV === "development"
+
+function getDevQuickLoginCandidates() {
+  if (process.env.NODE_ENV !== "development" || typeof window === "undefined") {
+    return null
+  }
+
+  const email = window.localStorage.getItem("devQuickLoginEmail")?.trim().toLowerCase() ?? ""
+  const passwords = (window.localStorage.getItem("devQuickLoginPasswords") ?? "")
+    .split(",")
+    .map((password) => password.trim())
+    .filter(Boolean)
+
+  if (!email || passwords.length === 0) {
+    return null
+  }
+
+  return { email, passwords }
+}
+// DEV_QUICK_LOGIN_END
 
 function LoginShell({ children }: { children: React.ReactNode }) {
   return <div className={loginPageClassName}>{children}</div>
@@ -19,13 +40,12 @@ function LoginShell({ children }: { children: React.ReactNode }) {
 function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { user, loading, loginWithMicrosoft, loginWithPassword, requestPasswordReset } = useAuth()
+  const { user, loading, loginWithPassword, requestPasswordReset } = useAuth()
   const [hydrated, setHydrated] = useState(false)
   const [password, setPassword] = useState("")
   const [email, setEmail] = useState("")
   const [error, setError] = useState("")
   const [submitting, setSubmitting] = useState(false)
-  const [oauthSubmitting, setOauthSubmitting] = useState(false)
   const [forgotMode, setForgotMode] = useState(false)
   const [forgotEmail, setForgotEmail] = useState("")
   const [forgotSubmitting, setForgotSubmitting] = useState(false)
@@ -55,29 +75,12 @@ function LoginForm() {
   useEffect(() => {
     const authError = searchParams.get("error")
     if (!authError) return
-    if (authError === "unauthorized") {
-      setError("Your Microsoft account is not authorized. Contact your administrator.")
-      return
-    }
     if (authError === "account-link-mismatch") {
       setError("This email is already linked to another account. Contact your administrator.")
       return
     }
     setError("Sign in failed. Please try again.")
   }, [searchParams])
-
-  const handleMicrosoftLogin = async () => {
-    setError("")
-    setOauthSubmitting(true)
-    try {
-      const success = await loginWithMicrosoft()
-      if (!success) {
-        setError("Unable to start Microsoft sign-in. Please try again.")
-      }
-    } finally {
-      setOauthSubmitting(false)
-    }
-  }
 
   const handleEmailPasswordLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -125,6 +128,37 @@ function LoginForm() {
       setForgotSubmitting(false)
     }
   }
+
+  // DEV_QUICK_LOGIN_START
+  const handleDevQuickLogin = async () => {
+    if (!canUseDevQuickLogin) return
+
+    const candidates = getDevQuickLoginCandidates()
+    if (!candidates) {
+      setError(
+        "Dev quick login is not configured. Set localStorage keys devQuickLoginEmail and devQuickLoginPasswords (comma-separated).",
+      )
+      return
+    }
+
+    setError("")
+    setSubmitting(true)
+    try {
+      for (const passwordOption of candidates.passwords) {
+        const success = await loginWithPassword(candidates.email, passwordOption)
+        if (success) {
+          localStorage.setItem("lastLoginEmail", candidates.email)
+          router.push("/app")
+          return
+        }
+      }
+
+      setError("Dev quick login failed with configured credentials.")
+    } finally {
+      setSubmitting(false)
+    }
+  }
+  // DEV_QUICK_LOGIN_END
 
   if (loading || !hydrated) {
     return (
@@ -235,33 +269,20 @@ function LoginForm() {
                       "Sign in with email"
                     )}
                   </Button>
-                </form>
-
-                <div className="relative">
-                  <div className="absolute inset-0 flex items-center">
-                    <span className="w-full border-t" />
-                  </div>
-                  <div className="relative flex justify-center text-xs uppercase text-muted-foreground">
-                    <span className="bg-card px-2">Or</span>
-                  </div>
-                </div>
-
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full h-11 text-base font-medium"
-                  disabled={oauthSubmitting}
-                  onClick={handleMicrosoftLogin}
-                >
-                  {oauthSubmitting ? (
-                    <>
-                      <Spinner className="size-4" aria-hidden="true" />
-                      Redirecting…
-                    </>
-                  ) : (
-                    "Sign in with Microsoft"
+                  {/* DEV_QUICK_LOGIN_START */}
+                  {canUseDevQuickLogin && (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full h-11 text-base"
+                      onClick={handleDevQuickLogin}
+                      disabled={submitting}
+                    >
+                      Quick login (dev only)
+                    </Button>
                   )}
-                </Button>
+                  {/* DEV_QUICK_LOGIN_END */}
+                </form>
               </>
             )}
 

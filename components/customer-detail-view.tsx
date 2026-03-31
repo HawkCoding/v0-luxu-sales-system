@@ -4,8 +4,10 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
 import { useSWRConfig } from "swr"
-import { ArrowLeft, CalendarDays, Globe, Mail, Pencil, Phone, Save } from "lucide-react"
+import { ArrowLeft, CalendarDays, Globe, Link2, Mail, Pencil, Phone, Save, Trash2 } from "lucide-react"
 import { toast } from "sonner"
+import { LinkedAccountForm, type LinkedAccountFormValue } from "@/components/linked-account-form"
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -26,6 +28,8 @@ interface CustomerDetailViewProps {
   presentation?: Presentation
 }
 
+const LINKED_ACCOUNTS_ACCORDION_VALUE = "linked-accounts"
+
 export function CustomerDetailView({
   customerId,
   presentation = "page",
@@ -40,6 +44,13 @@ export function CustomerDetailView({
   const [notesDraft, setNotesDraft] = useState("")
   const [isEditing, setIsEditing] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [isAddingLinkedAccount, setIsAddingLinkedAccount] = useState(false)
+  const [editingLinkedAccountId, setEditingLinkedAccountId] = useState<string | null>(null)
+  const [isSavingLinkedAccount, setIsSavingLinkedAccount] = useState(false)
+  const [deletingLinkedAccountId, setDeletingLinkedAccountId] = useState<string | null>(null)
+  const [linkedAccountsAccordionValue, setLinkedAccountsAccordionValue] = useState<string | undefined>(
+    undefined,
+  )
   const hasLoadError = Boolean(error)
 
   useEffect(() => {
@@ -88,9 +99,10 @@ export function CustomerDetailView({
     )
   }
 
-  const { customer, bookings } = data
+  const { customer, bookings, linkedAccounts } = data
   const fullName = `${customer.firstName} ${customer.lastName}`.trim()
   const initials = `${customer.firstName?.[0] ?? ""}${customer.lastName?.[0] ?? ""}`.toUpperCase()
+  const linkedAccountsCount = linkedAccounts.length
   const hasChanges =
     emailDraft !== customer.email ||
     phoneDraft !== (customer.phone ?? "") ||
@@ -131,6 +143,91 @@ export function CustomerDetailView({
       toast.error(message)
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  async function createLinkedAccount(payload: LinkedAccountFormValue) {
+    setIsSavingLinkedAccount(true)
+    try {
+      const response = await fetch(`/api/customers/${customerId}/linked-accounts`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      })
+
+      if (!response.ok) {
+        const errorPayload = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null
+        throw new Error(errorPayload?.error ?? "Failed to create linked account")
+      }
+
+      await mutate()
+      await mutateGlobal("/api/data")
+      setIsAddingLinkedAccount(false)
+      toast.success("Linked account saved")
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not save linked account"
+      toast.error(message)
+    } finally {
+      setIsSavingLinkedAccount(false)
+    }
+  }
+
+  async function updateLinkedAccount(linkedAccountId: string, payload: LinkedAccountFormValue) {
+    setIsSavingLinkedAccount(true)
+    try {
+      const response = await fetch(`/api/customers/${customerId}/linked-accounts/${linkedAccountId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      })
+
+      if (!response.ok) {
+        const errorPayload = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null
+        throw new Error(errorPayload?.error ?? "Failed to update linked account")
+      }
+
+      await mutate()
+      await mutateGlobal("/api/data")
+      setEditingLinkedAccountId(null)
+      toast.success("Linked account updated")
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not update linked account"
+      toast.error(message)
+    } finally {
+      setIsSavingLinkedAccount(false)
+    }
+  }
+
+  async function deleteLinkedAccount(linkedAccountId: string) {
+    setDeletingLinkedAccountId(linkedAccountId)
+    try {
+      const response = await fetch(`/api/customers/${customerId}/linked-accounts/${linkedAccountId}`, {
+        method: "DELETE",
+      })
+
+      if (!response.ok) {
+        const errorPayload = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null
+        throw new Error(errorPayload?.error ?? "Failed to delete linked account")
+      }
+
+      await mutate()
+      await mutateGlobal("/api/data")
+      toast.success("Linked account removed")
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not delete linked account"
+      toast.error(message)
+    } finally {
+      setDeletingLinkedAccountId(null)
     }
   }
 
@@ -247,6 +344,161 @@ export function CustomerDetailView({
             </div>
           </div>
         </CardContent>
+      </Card>
+
+      <Card>
+        <Accordion
+          type="single"
+          collapsible
+          value={linkedAccountsAccordionValue}
+          onValueChange={(nextValue) => {
+            setLinkedAccountsAccordionValue(nextValue || undefined)
+          }}
+        >
+          <AccordionItem value={LINKED_ACCOUNTS_ACCORDION_VALUE} className="border-b-0">
+            <CardHeader className="space-y-0 py-4">
+              <div className="flex flex-row items-center justify-between gap-3">
+                <AccordionTrigger className="py-0 hover:no-underline">
+                  <div className="flex items-center gap-2">
+                    <CardTitle>Linked Accounts</CardTitle>
+                    <Badge variant="secondary" className="min-w-6 justify-center px-2 text-xs tabular-nums">
+                      {linkedAccountsCount}
+                    </Badge>
+                  </div>
+                </AccordionTrigger>
+                {canEditCustomers ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setEditingLinkedAccountId(null)
+                      setIsAddingLinkedAccount((current) => {
+                        const nextValue = !current
+                        if (nextValue) {
+                          setLinkedAccountsAccordionValue(LINKED_ACCOUNTS_ACCORDION_VALUE)
+                        }
+                        return nextValue
+                      })
+                    }}
+                    disabled={isSavingLinkedAccount}
+                  >
+                    {isAddingLinkedAccount ? "Cancel" : "Add"}
+                  </Button>
+                ) : null}
+              </div>
+            </CardHeader>
+            <AccordionContent className="px-6 pb-6">
+              <CardContent className="space-y-3 p-0">
+                {isAddingLinkedAccount ? (
+                  <LinkedAccountForm
+                    currentCustomerId={customerId}
+                    currentCustomerEmail={customer.email}
+                    currentCustomerPhone={customer.phone}
+                    submitLabel="Save linked account"
+                    isSubmitting={isSavingLinkedAccount}
+                    onCancel={() => setIsAddingLinkedAccount(false)}
+                    onSubmit={createLinkedAccount}
+                  />
+                ) : null}
+
+                {linkedAccounts.length === 0 && !isAddingLinkedAccount ? (
+                  <p className="text-sm text-muted-foreground">No linked accounts.</p>
+                ) : null}
+
+                {linkedAccounts.map((linkedAccount) => {
+                  const isEditingThisAccount = editingLinkedAccountId === linkedAccount.id
+                  const linkedDisplayName = linkedAccount.linkedCustomerName
+                    ? linkedAccount.linkedCustomerName
+                    : [linkedAccount.firstName, linkedAccount.lastName].filter(Boolean).join(" ").trim()
+                  const relationshipLabel = linkedAccount.relationship ?? "Not specified"
+                  const isDeletingThisAccount = deletingLinkedAccountId === linkedAccount.id
+
+                  return (
+                    <div key={linkedAccount.id} className="rounded-lg border p-3 space-y-2">
+                      {isEditingThisAccount ? (
+                        <LinkedAccountForm
+                          currentCustomerId={customerId}
+                          currentCustomerEmail={customer.email}
+                          currentCustomerPhone={customer.phone}
+                          initialValue={{
+                            relationship: linkedAccount.relationship,
+                            firstName: linkedAccount.firstName,
+                            lastName: linkedAccount.lastName,
+                            email: linkedAccount.email,
+                            phone: linkedAccount.phone,
+                            linkedCustomerId: linkedAccount.linkedCustomerId,
+                          }}
+                          submitLabel="Update linked account"
+                          isSubmitting={isSavingLinkedAccount}
+                          onCancel={() => setEditingLinkedAccountId(null)}
+                          onSubmit={(payload) => updateLinkedAccount(linkedAccount.id, payload)}
+                        />
+                      ) : (
+                        <>
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="space-y-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <Badge variant="outline">{relationshipLabel}</Badge>
+                                {linkedAccount.linkedCustomerId ? (
+                                  <span className="text-[11px] text-muted-foreground inline-flex items-center gap-1">
+                                    <Link2 className="h-3 w-3" />
+                                    Linked to existing customer
+                                  </span>
+                                ) : null}
+                              </div>
+                              {linkedAccount.linkedCustomerId ? (
+                                <Link
+                                  href={`/app/customers/${linkedAccount.linkedCustomerId}`}
+                                  className="text-sm font-medium hover:underline"
+                                >
+                                  {linkedDisplayName || "Open linked customer"}
+                                </Link>
+                              ) : (
+                                <p className="text-sm font-medium">{linkedDisplayName || "Unnamed contact"}</p>
+                              )}
+                              <p className="text-xs text-muted-foreground">
+                                {linkedAccount.email ?? "No email"} • {linkedAccount.phone ?? "No cell phone"}
+                              </p>
+                            </div>
+                            {canEditCustomers ? (
+                              <div className="flex items-center gap-2 shrink-0">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    setIsAddingLinkedAccount(false)
+                                    setEditingLinkedAccountId(linkedAccount.id)
+                                  }}
+                                  disabled={isSavingLinkedAccount || isDeletingThisAccount}
+                                >
+                                  Edit
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    void deleteLinkedAccount(linkedAccount.id)
+                                  }}
+                                  disabled={isSavingLinkedAccount || isDeletingThisAccount}
+                                >
+                                  <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                  {isDeletingThisAccount ? "Removing..." : "Delete"}
+                                </Button>
+                              </div>
+                            ) : null}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )
+                })}
+              </CardContent>
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
       </Card>
 
       <CustomerActivitySummary bookings={bookings} />

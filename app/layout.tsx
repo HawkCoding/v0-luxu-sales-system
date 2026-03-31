@@ -1,7 +1,8 @@
 import type { Metadata } from 'next'
 import { Playfair_Display, Inter } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
-import { Toaster } from 'sonner'
+import { Toaster } from '@/components/ui/sonner'
+import { ThemeProvider } from '@/components/theme-provider'
 import './globals.css'
 
 const playfair = Playfair_Display({
@@ -28,9 +29,11 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${playfair.variable} ${inter.variable}`} suppressHydrationWarning>
       <body className="font-sans antialiased">
-        {children}
-        <Toaster position="top-right" />
-        <Analytics />
+        <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
+          {children}
+          <Toaster position="top-right" />
+          <Analytics />
+        </ThemeProvider>
       </body>
     </html>
   )

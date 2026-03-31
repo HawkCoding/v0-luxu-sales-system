@@ -68,6 +68,60 @@ Common restart problems:
 - local auth redirects assume the app is running at `http://localhost:3000`
 - `pnpm db:stop` only stops the local Supabase stack; use `Ctrl+C` to stop the app server without touching the database
 
+## Environment Migration (Desktop Backup)
+
+To move your full local dev setup to another Windows machine, use:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\export-dev-environment.ps1 -IncludeVolumeSnapshots
+```
+
+Optional heavy image export:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\export-dev-environment.ps1 -IncludeVolumeSnapshots -IncludeDockerImages
+```
+
+What this export includes:
+
+- full workspace copy
+- Cursor user settings from `%APPDATA%\Cursor\User`
+- PowerShell profiles and Windows Terminal settings (if present)
+- local caches (unless `-SkipCaches` is passed)
+- Docker/Supabase runtime metadata
+- Supabase local SQL dumps (`schema.sql` + `data.sql`) when available, with container fallback dump (unless `-SkipDbDump` is passed)
+- optional Docker volume snapshots and image tar exports
+
+Restore on the new machine:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\restore-dev-environment.ps1 -BackupRoot "<path-to-Cursor-Migration-folder>" -RestoreWebsiteState -StartSupabase -RestoreDb
+```
+
+Notes:
+
+- If DB container discovery differs on the new machine, pass `-DbContainerName`.
+- If `postgres` defaults are wrong, pass `-DbUser` and `-DbName`.
+- If you need caches restored, include `-RestoreCaches`.
+- If local paths changed, review `_restored-website-state/runtime-bind-mappings.json` and remap bind mounts.
+
+## Supabase Migration Metadata Repair
+
+If `npx supabase migration list --linked` shows the same migration as both local-only and remote-only, but schema apply already succeeded, this is usually migration-history metadata drift.
+
+Recommended repair workflow (metadata only):
+
+1. Capture baseline:
+   - `npx supabase migration list --linked`
+2. If a migration ID is not in full timestamp format (`YYYYMMDDHHMMSS`), normalize the local filename first.
+3. Repair linked history:
+   - `npx supabase migration repair <old_version> --status reverted --linked --yes`
+   - `npx supabase migration repair <canonical_version> --status applied --linked --yes`
+4. Verify:
+   - `npx supabase migration list --linked`
+
+Use this only for history bookkeeping mismatches, not for fixing failed schema migrations.
+
 ---
 
 This project uses a development-first workflow:

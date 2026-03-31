@@ -13,12 +13,14 @@ import {
   LayoutDashboard, Kanban, Briefcase, Users,
   CreditCard, FolderOpen, Mail, Package, CalendarCheck,
   FileCode, BarChart3, ClipboardList, Settings, Search,
-  ChevronLeft, Menu, LogOut,
+  ChevronLeft, Menu, LogOut, Sun, Moon,
 } from "lucide-react"
 import { useState, useEffect, type ReactNode } from "react"
+import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
 import { ConnectionErrorBanner } from "@/components/connection-error-banner"
 import { useAllData } from "@/lib/use-data"
+import { APP_VERSION } from "@/lib/version"
 import type { User } from "@/lib/auth-context"
 
 const navItems = [
@@ -44,11 +46,13 @@ function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname()
   const { user, loading: authLoading, logout } = useAuth()
   const { role, setRole, can } = useRole()
+  const { theme, setTheme } = useTheme()
   const { data, error: dataError } = useAllData()
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [slowLoad, setSlowLoad] = useState(false)
+  const isDarkMode = theme === "dark"
 
   const enquiriesCount = data?.bookings?.filter((b: any) => b.stage === "enquiry").length || 0
 
@@ -76,6 +80,10 @@ function AppShell({ children }: { children: ReactNode }) {
   const handleLogout = async () => {
     await logout()
     window.location.replace("/login")
+  }
+
+  const handleToggleTheme = () => {
+    setTheme(isDarkMode ? "light" : "dark")
   }
 
   if (!mounted || authLoading || !user) {
@@ -170,7 +178,12 @@ function AppShell({ children }: { children: ReactNode }) {
             })}
           </nav>
         </ScrollArea>
-        <div className="border-t border-stroke p-2 hidden lg:block">
+        <div className="border-t border-stroke p-2 hidden lg:block space-y-2">
+          <div className={cn("text-center", collapsed && "text-[10px]")}>
+            <Badge variant="outline" className={cn("font-mono text-[11px] text-text-muted", collapsed && "px-1.5 py-0 h-5")}>
+              v{APP_VERSION}
+            </Badge>
+          </div>
           <Button variant="ghost" size="sm" onClick={() => setCollapsed(!collapsed)} className="w-full">
             <ChevronLeft className={cn("w-4 h-4 transition-transform", collapsed && "rotate-180")} />
           </Button>
@@ -189,6 +202,34 @@ function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleToggleTheme}
+              className="relative h-8 w-14 rounded-full border border-stroke bg-bg-raised/90 px-1 hover:bg-bg-raised"
+              title={isDarkMode ? "Switch to light mode" : "Switch to dark mode"}
+              aria-label={isDarkMode ? "Switch to light mode" : "Switch to dark mode"}
+              aria-pressed={isDarkMode}
+            >
+              <span
+                className={cn(
+                  "pointer-events-none absolute left-1 top-1 h-6 w-6 rounded-full bg-bg-white shadow-sm transition-transform duration-200",
+                  isDarkMode ? "translate-x-6" : "translate-x-0",
+                )}
+              />
+              <Sun
+                className={cn(
+                  "relative z-10 w-3.5 h-3.5 transition-colors",
+                  isDarkMode ? "text-text-muted" : "text-accent-hover",
+                )}
+              />
+              <Moon
+                className={cn(
+                  "relative z-10 w-3.5 h-3.5 transition-colors",
+                  isDarkMode ? "text-accent-hover" : "text-text-muted",
+                )}
+              />
+            </Button>
             <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-md bg-bg-raised">
               <span className="text-sm font-medium text-text-heading">{user.name}</span>
               <span className="text-xs text-text-muted">•</span>
