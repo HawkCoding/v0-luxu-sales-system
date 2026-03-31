@@ -106,79 +106,112 @@ Ensure every `profiles.email` has a matching Supabase Auth user; use initial pas
 
 ---
 
-## Supplier subsystem runbook (slugs, drafts, labels, rate cards)
+## Supplier subsystem runbook (kinds, drafts, labels, rate cards)
 
-**Date:** 2026-03-23
+**Date:** 2026-03-30
 
-This section documents the supplier flows that were recently expanded and are now used by multiple pages and API routes.
+This section documents the current supplier workflows used across supplier list/detail pages, quote flows, and supplier API routes.
 
 ### Intent and architecture
 
-- Supplier pages are driven by SWR hooks in `lib/use-data.ts`: `useSuppliers`, `useActiveSuppliers`, `useSupplierDetail`, and `useSupplierEmailLabels`.
-- Core supplier routes live in:
+- Supplier UI data is loaded through SWR hooks in `lib/use-data.ts`:
+  - `useSuppliers()` -> `GET /api/suppliers?includeDrafts=true`
+  - `useActiveSuppliers()` -> `GET /api/suppliers`
+  - `useSupplierDetail(slug)` -> `GET /api/suppliers/:slug`
+  - `useSupplierEmailLabels()` -> `GET /api/supplier-email-labels`
+- Core routes:
   - `app/api/suppliers/route.ts` (`GET`, `POST`)
   - `app/api/suppliers/[slug]/route.ts` (`GET`, `PATCH`, `DELETE`)
   - `app/api/supplier-email-labels/route.ts` (`GET`, `POST`, `DELETE`)
-- Supplier mapping and response shapes are centralized in `lib/suppliers.ts`.
-- Supplier editing UI is primarily `components/supplier-detail-view.tsx` and creation starts in `components/add-supplier-dialog.tsx`.
+- Mapping and frontend response shapes are centralized in `lib/suppliers.ts`.
+- Primary editor UI is `components/supplier-detail-view.tsx`; creation starts in `components/add-supplier-dialog.tsx`.
+
+### Supplier kinds and vocabulary constraints
+
+- Supported kinds in API/schema/types:
+  - `train_operator`
+  - `hotel_property`
+  - `transfers`
+  - `tour_operator`
+  - `airline`
+- Label mapping (`SUPPLIER_KIND_LABELS`):
+  - `tour_operator` -> `Tours`
+  - `airline` -> `Airlines`
+- Vocabulary behavior (`SUPPLIER_VOCABULARY`):
+  - `hotel_property` uses hotel-oriented terms (`Room Type`, `Season`, `Meal Plan`) and does not require route locations.
+  - `train_operator`, `transfers`, `tour_operator`, and `airline` share journey-oriented terms (`Suite Type`, `Package`, `Route`) and route locations.
+- Database enum support for new kinds is in migration `supabase/migrations/20260327_add_supplier_kind_tours_airline.sql`.
 
 ### Public interfaces and behavior
 
 - `GET /api/suppliers`
-  - Returns only active suppliers by default.
-  - `?includeDrafts=true` includes draft and inactive rows.
+  - Returns active suppliers by default.
+  - `?includeDrafts=true` includes draft and inactive suppliers.
 - `POST /api/suppliers`
   - Requires authenticated `admin` or `manager`.
-  - Creates supplier as draft (`active: false`) and auto-generates a unique slug from name.
-  - Accepts `emails[]` and deduplicates case-insensitively before writing `supplier_emails`.
+  - Creates supplier in draft state (`active: false`).
+  - Generates a unique slug from name (`name`, then `name-2`, `name-3`, ...).
+  - Accepts `emails[]`; email rows are deduplicated case-insensitively before insert.
 - `GET /api/suppliers/:slug`
-  - Reads by slug.
-  - Backward compatibility: if slug lookup misses and path segment is a UUID, route falls back to supplier `id`.
+  - Loads by slug first.
+  - If slug is missing and path segment is a UUID, falls back to supplier `id` lookup for backward compatibility.
 - `PATCH /api/suppliers/:slug`
   - Requires authenticated `admin` or `manager`.
   - Full save: `PATCH /api/suppliers/:slug`.
-  - Draft save (partial-tolerant): `PATCH /api/suppliers/:slug?draft=true`.
-  - Supports optimistic concurrency via `expectedUpdatedAt` and returns `409` if stale.
-  - Returns `Server-Timing` headers for auth/parse/normalize/write phases.
+  - Draft save: `PATCH /api/suppliers/:slug?draft=true`.
+  - Enforces optimistic concurrency via `expectedUpdatedAt`; stale saves return `409`.
+  - Validates duplicate business keys and overlapping periods in rate cards, returning `409` with conflict details.
+  - Uses chunked ID validation when querying reference IDs to avoid oversized URL/query strings on large `IN (...)` checks.
+  - Includes `Server-Timing` headers (`auth`, `parse`, `loadExisting`, `normalize`, `idValidation`, `dbWrites`, `loadUpdated`, `total`).
 - `DELETE /api/suppliers/:slug`
-  - Requires `admin`.
-  - Blocks delete (`409`) if supplier/package/route data is still referenced by active bookings.
+  - Requires authenticated `admin`.
+  - Returns `409` when supplier/package/route data is still referenced by active bookings or related dependency checks.
 - `GET /api/supplier-email-labels`
   - Any authenticated user can read labels.
 - `POST` and `DELETE /api/supplier-email-labels`
   - Requires `admin` or `manager`.
-  - Duplicate label names return `409`.
+  - Duplicate names return `409`.
 
 ### Workflow notes
 
 - Create supplier:
-  - Use Add Supplier dialog (`components/add-supplier-dialog.tsx`), which posts to `/api/suppliers`.
-  - User is redirected to `/app/suppliers/:slug` after create.
-- Draft vs published behavior:
-  - Draft suppliers open directly in edit mode.
-  - Draft autosave debounces ~3s and writes to `PATCH ...?draft=true`.
-  - For non-draft suppliers, unsaved edits are stored in `localStorage` and can be restored/discarded on next open.
-- Rate card matrix behavior:
-  - Prevents duplicate business key combinations (`suiteTypeId + routeId + validFrom`).
-  - Prevents overlapping date ranges for same package/suite type/route combination.
-  - Supports route-specific and "no route" (`routeId: null`) cells; null-route cells are shown as `No route` in matrix UI.
+  - Use Add Supplier dialog, which posts to `/api/suppliers`.
+  - User is redirected to `/app/suppliers/:slug`.
+- Draft suppliers:
+  - Draft supplier details open directly in edit mode.
+  - Autosave debounces at 3s and sends `PATCH ...?draft=true`.
+  - Autosave status badges/messages cycle through `saving`, `saved`, `error`.
+  - Debug flags to disable autosave:
+    - Query string: `?disableDraftAutosave=true`
+    - Runtime flag: `window.__DISABLE_DRAFT_AUTOSAVE = true`
+- Published/non-draft suppliers:
+  - Unsaved edits are stored in `localStorage` under `supplier-draft-<slug>`.
+  - UI exposes `Restore draft` and `Discard` actions on next open.
+- Hydration/editing behavior:
+  - Server revalidation only rehydrates form state when supplier identity (`id + updatedAt`) changes, reducing in-flight edit clobbering.
+  - Autosave updates `expectedUpdatedAt` from server responses so subsequent draft/full saves stay in sync.
+- Rate card matrix:
+  - Prevents duplicate key combinations (`packageId + suiteTypeId + routeId + validFrom`).
+  - Prevents overlapping date ranges for same (`packageId + suiteTypeId + routeId`) group.
+  - Supports route-specific cells and `routeId: null` (`No route`) cells.
 
 ### Troubleshooting and common pitfalls
 
 - `409 This supplier was modified by another user...`
   - Cause: stale `expectedUpdatedAt`.
-  - Fix: refresh supplier detail and reapply changes.
-- `409 Duplicate rate card...` or overlap errors on save:
-  - Cause: conflicting period rows in same package/suite type/route grouping.
-  - Fix: adjust `validFrom` / `validTo` so each grouping has unique start dates and non-overlapping periods.
-- `409 Cannot remove items that are still referenced...`:
-  - Cause: attempting to remove package/route/suite type used by active bookings or hotel offers.
-  - Fix: move/close dependent records first, then retry edit/delete.
-- Label create/delete appears to revert in UI:
-  - Label UI uses optimistic SWR updates.
-  - If API call fails, client intentionally rolls back to previous label list.
-- Draft autosave diagnostics:
-  - The browser console logs `[supplier-draft-autosave]` and `[supplier-save]` entries, including response status and `server-timing`.
+  - Fix: refresh supplier detail, reapply edits, save again.
+- `409 Duplicate rate cards...` or overlap conflict responses:
+  - Cause: duplicate business-key start dates or overlapping date windows in same grouping.
+  - Fix: adjust period boundaries (`validFrom` / `validTo`) so each grouping is unique and non-overlapping.
+- `409 Cannot remove items that are still referenced...`
+  - Cause: trying to delete package/route/suite type rows still used by active bookings or hotel offers.
+  - Fix: reassign/close dependencies first, then retry save/delete.
+- Draft save appears to ignore incomplete rows:
+  - Cause: draft save filters incomplete route/rate card entries (for example missing UUID refs or invalid dates) before persistence.
+  - Fix: complete required IDs/date fields, then allow autosave/full save to persist.
+- Label changes appear to revert:
+  - Cause: label UI uses optimistic SWR updates and rolls back on failed API calls.
+  - Fix: inspect failing label route response in Network tab and retry.
 
 ### Example payloads
 
@@ -186,17 +219,17 @@ Create supplier:
 
 ```json
 {
-  "kind": "train_operator",
-  "name": "Blue Rail",
+  "kind": "airline",
+  "name": "Skyway Air",
   "email": "",
   "emails": [
-    { "email": "ops@bluerail.example", "label": "Operations" },
-    { "email": "accounts@bluerail.example", "label": "Accounts" }
+    { "email": "ops@skyway.example", "label": "Operations" },
+    { "email": "accounts@skyway.example", "label": "Accounts" }
   ],
   "phone": "+27 21 555 0000",
-  "website": "bluerail.example",
+  "website": "skyway.example",
   "location": "Cape Town",
-  "notes": "Preferred partner for peak season."
+  "notes": "Preferred short-haul partner."
 }
 ```
 
@@ -204,10 +237,10 @@ Draft save:
 
 ```json
 {
-  "name": "Blue Rail",
-  "kind": "train_operator",
+  "name": "Skyway Air",
+  "kind": "airline",
   "email": "",
-  "emails": [{ "id": "uuid", "email": "ops@bluerail.example", "label": "Operations" }],
+  "emails": [{ "id": "uuid", "email": "ops@skyway.example", "label": "Operations" }],
   "phone": "",
   "website": "",
   "location": "",
@@ -215,7 +248,7 @@ Draft save:
   "active": false,
   "suiteTypes": [],
   "packages": [],
-  "expectedUpdatedAt": "2026-03-23T12:00:00.000Z"
+  "expectedUpdatedAt": "2026-03-30T12:00:00.000Z"
 }
 ```
 
