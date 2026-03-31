@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
+import { normalizeOptionalString } from "@/lib/normalize-optional-string"
 import { createSessionClient } from "@/lib/supabase/server"
 
 const allowedRoles = new Set(["admin", "manager"])
@@ -26,11 +27,6 @@ type LinkedAccountRow = {
   phone: string | null
   is_mirror: boolean
   created_at: string
-}
-
-function normalizeOptionalString(value: string | null | undefined): string | null {
-  const normalized = value?.trim()
-  return normalized ? normalized : null
 }
 
 function normalizePatch(payload: LinkedAccountPatchPayload) {

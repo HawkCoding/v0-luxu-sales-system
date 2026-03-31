@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
+import { normalizeOptionalString } from "@/lib/normalize-optional-string"
 import { createSessionClient } from "@/lib/supabase/server"
 
 const querySchema = z.object({
@@ -7,11 +8,6 @@ const querySchema = z.object({
   phone: z.string().trim().max(50).optional(),
   excludeId: z.string().uuid().optional(),
 })
-
-function normalizeOptionalString(value: string | undefined): string | null {
-  const normalized = value?.trim()
-  return normalized ? normalized : null
-}
 
 export async function GET(req: Request) {
   const supabase = await createSessionClient()

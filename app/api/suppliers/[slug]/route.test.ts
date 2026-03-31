@@ -42,6 +42,31 @@ const EMAIL_OLD = "00000000-0000-0000-0000-000000000041"
 const EMAIL_NEW = "00000000-0000-0000-0000-000000000042"
 const RATE_CARD_OLD = "00000000-0000-0000-0000-000000000051"
 
+function buildSupplierUpdateQueryResult(
+  result: { data: { updated_at: string } | null; error: unknown } = {
+    data: { updated_at: "2026-03-24T00:00:00.000Z" },
+    error: null,
+  },
+) {
+  const maybeSingleMock = vi.fn(async () => result)
+  const selectMock = vi.fn(() => ({
+    maybeSingle: maybeSingleMock,
+  }))
+  const eqMock = vi.fn()
+  const query = {
+    eq: eqMock,
+    select: selectMock,
+  }
+  eqMock.mockImplementation(() => query)
+
+  return {
+    query,
+    eqMock,
+    selectMock,
+    maybeSingleMock,
+  }
+}
+
 describe("PATCH /api/suppliers/[slug]", () => {
   beforeEach(() => {
     helperMocks.supabaseFrom.mockReset()
@@ -507,6 +532,92 @@ describe("PATCH /api/suppliers/[slug] additional scenarios", () => {
     })
   })
 
+  it("returns 409 when write-phase supplier lock claim fails", async () => {
+    const supplierUpdateQuery = buildSupplierUpdateQueryResult({ data: null, error: null })
+    const latestSupplierEqMock = vi.fn(() => ({
+      maybeSingle: async () => ({ data: { updated_at: "2026-03-23T08:05:00.000Z" }, error: null }),
+    }))
+    const packageUpsertMock = vi.fn(async () => ({ error: null }))
+
+    helperMocks.supabaseFrom.mockImplementation((table: string) => {
+      if (table === "profiles") {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { clearance_level: "manager" }, error: null }),
+            }),
+          }),
+        }
+      }
+      if (table === "suppliers") {
+        return {
+          update: vi.fn(() => supplierUpdateQuery.query),
+          select: vi.fn(() => ({
+            eq: latestSupplierEqMock,
+          })),
+        }
+      }
+      if (table === "packages") {
+        return {
+          upsert: packageUpsertMock,
+        }
+      }
+      throw new Error(`Unexpected table ${table}`)
+    })
+
+    helperMocks.requireAuthenticatedUser.mockResolvedValue({
+      supabase: { from: helperMocks.supabaseFrom },
+      user: { id: USER_ID },
+    })
+    helperMocks.queryExistingIds.mockResolvedValue([])
+    helperMocks.checkDeletionDependencies.mockResolvedValue([])
+    helperMocks.loadSupplierDetail.mockResolvedValue({
+      supplier: {
+        id: SUPPLIER_ID,
+        updated_at: "2026-03-23T08:00:00.000Z",
+      },
+      packages: [],
+      routes: [],
+      suiteTypes: [],
+      emails: [],
+      rateCards: [],
+      locations: [],
+    })
+
+    const response = await PATCH(
+      new Request("http://localhost/api/suppliers/test", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Supplier Updated",
+          kind: "hotel_property",
+          email: "",
+          phone: "",
+          website: "",
+          location: "",
+          notes: "",
+          active: true,
+          emails: [],
+          suiteTypes: [],
+          packages: [],
+          expectedUpdatedAt: "2026-03-23T08:00:00.000Z",
+        }),
+      }),
+      { params: Promise.resolve({ slug: "test" }) },
+    )
+    const payload = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(payload).toMatchObject({
+      code: "STALE_VERSION",
+      currentUpdatedAt: "2026-03-23T08:05:00.000Z",
+    })
+    expect(supplierUpdateQuery.eqMock).toHaveBeenCalledWith("id", SUPPLIER_ID)
+    expect(supplierUpdateQuery.eqMock).toHaveBeenCalledWith("updated_at", "2026-03-23T08:00:00.000Z")
+    expect(latestSupplierEqMock).toHaveBeenCalledWith("id", SUPPLIER_ID)
+    expect(packageUpsertMock).not.toHaveBeenCalled()
+  })
+
   it("returns 409 for overlapping rate cards", async () => {
     helperMocks.supabaseFrom.mockImplementation((table: string) => {
       if (table !== "profiles") throw new Error(`Unexpected table ${table}`)
@@ -606,7 +717,7 @@ describe("PATCH /api/suppliers/[slug] additional scenarios", () => {
   })
 
   it("cascades route deletion to linked rate cards", async () => {
-    const supplierUpdateEq = vi.fn(async () => ({ error: null }))
+    const supplierUpdateQuery = buildSupplierUpdateQueryResult()
     helperMocks.supabaseFrom.mockImplementation((table: string) => {
       if (table === "profiles") {
         return {
@@ -629,9 +740,7 @@ describe("PATCH /api/suppliers/[slug] additional scenarios", () => {
       }
       if (table === "suppliers") {
         return {
-          update: vi.fn(() => ({
-            eq: supplierUpdateEq,
-          })),
+          update: vi.fn(() => supplierUpdateQuery.query),
         }
       }
       throw new Error(`Unexpected table ${table}`)
@@ -728,11 +837,12 @@ describe("PATCH /api/suppliers/[slug] additional scenarios", () => {
       RATE_CARD_OLD,
     ])
     expect(helperMocks.deleteInChunks).toHaveBeenCalledWith(expect.anything(), "routes", [ROUTE_OLD])
-    expect(supplierUpdateEq).toHaveBeenCalledWith("id", SUPPLIER_ID)
+    expect(supplierUpdateQuery.eqMock).toHaveBeenCalledWith("id", SUPPLIER_ID)
+    expect(supplierUpdateQuery.eqMock).toHaveBeenCalledWith("updated_at", "2026-03-23T08:00:00.000Z")
   })
 
   it("treats stale route-linked rate cards as deletions when route is removed", async () => {
-    const supplierUpdateEq = vi.fn(async () => ({ error: null }))
+    const supplierUpdateQuery = buildSupplierUpdateQueryResult()
     helperMocks.supabaseFrom.mockImplementation((table: string) => {
       if (table === "profiles") {
         return {
@@ -755,9 +865,7 @@ describe("PATCH /api/suppliers/[slug] additional scenarios", () => {
       }
       if (table === "suppliers") {
         return {
-          update: vi.fn(() => ({
-            eq: supplierUpdateEq,
-          })),
+          update: vi.fn(() => supplierUpdateQuery.query),
         }
       }
       throw new Error(`Unexpected table ${table}`)
@@ -864,7 +972,8 @@ describe("PATCH /api/suppliers/[slug] additional scenarios", () => {
       RATE_CARD_OLD,
     ])
     expect(helperMocks.deleteInChunks).toHaveBeenCalledWith(expect.anything(), "routes", [ROUTE_OLD])
-    expect(supplierUpdateEq).toHaveBeenCalledWith("id", SUPPLIER_ID)
+    expect(supplierUpdateQuery.eqMock).toHaveBeenCalledWith("id", SUPPLIER_ID)
+    expect(supplierUpdateQuery.eqMock).toHaveBeenCalledWith("updated_at", "2026-03-23T08:00:00.000Z")
   })
 
   it("returns 409 when routes upsert hits duplicate name per package (ux_routes_name_package)", async () => {
@@ -879,10 +988,9 @@ describe("PATCH /api/suppliers/[slug] additional scenarios", () => {
         }
       }
       if (table === "suppliers") {
+        const supplierUpdateQuery = buildSupplierUpdateQueryResult()
         return {
-          update: vi.fn(() => ({
-            eq: vi.fn(async () => ({ error: null })),
-          })),
+          update: vi.fn(() => supplierUpdateQuery.query),
         }
       }
       if (table === "packages") {
@@ -980,7 +1088,7 @@ describe("PATCH /api/suppliers/[slug] additional scenarios", () => {
   })
 
   it("draft save forces supplier active=false and returns updated detail", async () => {
-    const supplierUpdateEq = vi.fn(async () => ({ error: null }))
+    const supplierUpdateQuery = buildSupplierUpdateQueryResult()
     helperMocks.supabaseFrom.mockImplementation((table: string) => {
       if (table === "profiles") {
         return {
@@ -993,9 +1101,7 @@ describe("PATCH /api/suppliers/[slug] additional scenarios", () => {
       }
       if (table === "suppliers") {
         return {
-          update: vi.fn(() => ({
-            eq: supplierUpdateEq,
-          })),
+          update: vi.fn(() => supplierUpdateQuery.query),
         }
       }
       throw new Error(`Unexpected table ${table}`)
@@ -1054,7 +1160,8 @@ describe("PATCH /api/suppliers/[slug] additional scenarios", () => {
     const payload = await response.json()
 
     expect(response.status).toBe(200)
-    expect(supplierUpdateEq).toHaveBeenCalledWith("id", SUPPLIER_ID)
+    expect(supplierUpdateQuery.eqMock).toHaveBeenCalledWith("id", SUPPLIER_ID)
+    expect(supplierUpdateQuery.eqMock).not.toHaveBeenCalledWith("updated_at", expect.anything())
     expect(payload).toMatchObject({ id: SUPPLIER_ID, active: false, status: "draft" })
   })
 })

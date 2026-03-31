@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { normalizeOptionalString } from "@/lib/normalize-optional-string"
 
 export const LINKED_ACCOUNT_RELATIONSHIP_OPTIONS = [
   "Spouse",
@@ -45,11 +46,6 @@ interface LinkedAccountFormProps {
   isSubmitting: boolean
   onCancel: () => void
   onSubmit: (value: LinkedAccountFormValue) => Promise<void> | void
-}
-
-function normalizeOptionalString(value: string): string | null {
-  const normalized = value.trim()
-  return normalized ? normalized : null
 }
 
 export function LinkedAccountForm({

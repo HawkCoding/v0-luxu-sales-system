@@ -893,6 +893,47 @@ export async function PATCH(
     return withPatchTimingHeaders(response)
   }
 
+  const supplierUpdatePayload = {
+    name: parsed.name,
+    kind: parsed.kind,
+    email: normalizedEmails[0]?.email ?? null,
+    phone: parsed.phone || null,
+    website: parsed.website || null,
+    location: parsed.location || null,
+    notes: parsed.notes || null,
+    active: isDraftSave ? false : parsed.active,
+  }
+
+  let supplierUpdateQuery = supabase.from("suppliers").update(supplierUpdatePayload).eq("id", supplierId)
+  if (typeof expectedUpdatedAt === "string") {
+    supplierUpdateQuery = supplierUpdateQuery.eq("updated_at", expectedUpdatedAt)
+  }
+
+  const { data: updatedSupplier, error: supplierUpdateError } = await supplierUpdateQuery
+    .select("updated_at")
+    .maybeSingle()
+
+  if (supplierUpdateError) {
+    logSupplierMutationError("supplier-update", supplierId, supplierUpdateError)
+    return withDbTimingHeaders(NextResponse.json({ error: "Failed to update supplier" }, { status: 500 }))
+  }
+
+  if (!updatedSupplier) {
+    const { data: latestSupplierSnapshot } = await supabase
+      .from("suppliers")
+      .select("updated_at")
+      .eq("id", supplierId)
+      .maybeSingle()
+
+    const staleVersionConflict: StaleVersionConflictPayload = {
+      error:
+        "This supplier was modified by another user since you started editing. Please refresh and try again.",
+      code: "STALE_VERSION",
+      currentUpdatedAt: latestSupplierSnapshot?.updated_at ?? existingDetail.supplier.updated_at,
+    }
+    return withDbTimingHeaders(NextResponse.json(staleVersionConflict, { status: 409 }))
+  }
+
   if (normalizedEmails.length > 0) {
     const { error: supplierEmailsUpsertError } = await supabase
       .from("supplier_emails")
@@ -1097,25 +1138,6 @@ export async function PATCH(
         ),
       )
     }
-  }
-
-  const { error: supplierUpdateError } = await supabase
-    .from("suppliers")
-    .update({
-      name: parsed.name,
-      kind: parsed.kind,
-      email: normalizedEmails[0]?.email ?? null,
-      phone: parsed.phone || null,
-      website: parsed.website || null,
-      location: parsed.location || null,
-      notes: parsed.notes || null,
-      active: isDraftSave ? false : parsed.active,
-    })
-    .eq("id", supplierId)
-
-  if (supplierUpdateError) {
-    logSupplierMutationError("supplier-update", supplierId, supplierUpdateError)
-    return withDbTimingHeaders(NextResponse.json({ error: "Failed to update supplier" }, { status: 500 }))
   }
 
   phaseDurations.dbWritesMs = performance.now() - dbWritesStartedAt
