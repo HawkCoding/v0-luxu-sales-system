@@ -33,6 +33,8 @@ function createPatchSupabase(
     is_mirror: boolean
   },
   counterpartDeleteCapture: Array<[string, unknown]>,
+  upsertLookupMirrorFlags: boolean[],
+  insertedUpsertRows: Array<Record<string, unknown>>,
 ) {
   const existingRow = {
     id: existing.id,
@@ -63,12 +65,17 @@ function createPatchSupabase(
             data: existingRow,
             error: null,
           })),
-          eq: vi.fn(() => ({
+          eq: vi.fn((column: string, value: unknown) => {
+            if (column === "is_mirror" && typeof value === "boolean") {
+              upsertLookupMirrorFlags.push(value)
+            }
+            return {
             maybeSingle: vi.fn(async () => ({
               data: null,
               error: null,
             })),
-          })),
+            }
+          }),
         })),
       })),
     })),
@@ -85,7 +92,10 @@ function createPatchSupabase(
         })),
       })),
     })),
-    insert: vi.fn(() => Promise.resolve({ error: null })),
+    insert: vi.fn((row: Record<string, unknown>) => {
+      insertedUpsertRows.push(row)
+      return Promise.resolve({ error: null })
+    }),
   }
 
   return {
@@ -138,6 +148,8 @@ describe("PATCH /api/customers/[id]/linked-accounts/[accountId]", () => {
 
   it("deletes counterpart mirror (is_mirror true) when primary row linked customer changes", async () => {
     const counterpartDelete: Array<[string, unknown]> = []
+    const upsertLookupMirrorFlags: boolean[] = []
+    const insertedUpsertRows: Array<Record<string, unknown>> = []
     const supabase = createPatchSupabase(
       {
         id: ACCOUNT_PRIMARY,
@@ -146,6 +158,8 @@ describe("PATCH /api/customers/[id]/linked-accounts/[accountId]", () => {
         is_mirror: false,
       },
       counterpartDelete,
+      upsertLookupMirrorFlags,
+      insertedUpsertRows,
     )
     createSessionClientMock.mockResolvedValue(supabase)
 
@@ -167,10 +181,14 @@ describe("PATCH /api/customers/[id]/linked-accounts/[accountId]", () => {
       ["linked_customer_id", CUSTOMER_A],
       ["is_mirror", true],
     ])
+    expect(upsertLookupMirrorFlags).toEqual([true])
+    expect(insertedUpsertRows.at(-1)?.is_mirror).toBe(true)
   })
 
   it("deletes counterpart primary (is_mirror false) when mirror row linked customer changes", async () => {
     const counterpartDelete: Array<[string, unknown]> = []
+    const upsertLookupMirrorFlags: boolean[] = []
+    const insertedUpsertRows: Array<Record<string, unknown>> = []
     const supabase = createPatchSupabase(
       {
         id: ACCOUNT_MIRROR,
@@ -179,6 +197,8 @@ describe("PATCH /api/customers/[id]/linked-accounts/[accountId]", () => {
         is_mirror: true,
       },
       counterpartDelete,
+      upsertLookupMirrorFlags,
+      insertedUpsertRows,
     )
     createSessionClientMock.mockResolvedValue(supabase)
 
@@ -200,5 +220,7 @@ describe("PATCH /api/customers/[id]/linked-accounts/[accountId]", () => {
       ["linked_customer_id", CUSTOMER_B],
       ["is_mirror", false],
     ])
+    expect(upsertLookupMirrorFlags).toEqual([false])
+    expect(insertedUpsertRows.at(-1)?.is_mirror).toBe(false)
   })
 })

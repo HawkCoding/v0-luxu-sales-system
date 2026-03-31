@@ -100,7 +100,7 @@ async function upsertMirrorFor(
     .select("id")
     .eq("customer_id", sourceRow.linked_customer_id)
     .eq("linked_customer_id", sourceRow.customer_id)
-    .eq("is_mirror", true)
+    .eq("is_mirror", !sourceRow.is_mirror)
     .maybeSingle()
 
   const mirrorPayload = {
@@ -109,7 +109,7 @@ async function upsertMirrorFor(
     last_name: sourceRow.last_name,
     email: sourceRow.email,
     phone: sourceRow.phone,
-    is_mirror: true,
+    is_mirror: !sourceRow.is_mirror,
   }
 
   if (existingMirror?.id) {
