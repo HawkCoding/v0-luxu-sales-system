@@ -72,8 +72,15 @@ function AppShell({ children }: { children: ReactNode }) {
   }, [mounted, authLoading, user])
 
   useEffect(() => {
-    if (user && role !== user.role) {
+    if (!user) return
+
+    if (user.roleStatus === "resolved" && user.role && role !== user.role) {
       setRole(user.role)
+      return
+    }
+
+    if (user.roleStatus !== "resolved" && role !== "readonly") {
+      setRole("readonly")
     }
   }, [user, role, setRole])
 
@@ -233,7 +240,9 @@ function AppShell({ children }: { children: ReactNode }) {
             <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-md bg-bg-raised">
               <span className="text-sm font-medium text-text-heading">{user.name}</span>
               <span className="text-xs text-text-muted">•</span>
-              <span className="text-xs text-text-muted capitalize">{role}</span>
+              <span className="text-xs text-text-muted capitalize">
+                {user.roleStatus === "pending" ? "resolving permissions" : role}
+              </span>
             </div>
             <Button variant="ghost" size="sm" onClick={handleLogout} className="gap-2 hover:text-text-heading" title="Logout">
               <LogOut className="w-4 h-4" />

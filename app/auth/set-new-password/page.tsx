@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { getSupabase } from "@/lib/supabase/client"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { PasswordInput } from "@/components/ui/password-input"
 import { Label } from "@/components/ui/label"
 
 // Minimal auth wrapper so we can use getSupabase (no full AuthProvider required for this page)
@@ -79,9 +79,8 @@ export default function SetNewPasswordPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="new-password">New password</Label>
-              <Input
+              <PasswordInput
                 id="new-password"
-                type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Min 6 characters"
@@ -92,9 +91,8 @@ export default function SetNewPasswordPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="confirm-password">Confirm password</Label>
-              <Input
+              <PasswordInput
                 id="confirm-password"
-                type="password"
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
                 placeholder="Repeat password"

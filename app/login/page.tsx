@@ -6,6 +6,7 @@ import { AuthProvider, useAuth } from "@/lib/auth-context"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { PasswordInput } from "@/components/ui/password-input"
 import { Label } from "@/components/ui/label"
 import { LoadingState } from "@/components/ui/loading-state"
 import { Spinner } from "@/components/ui/spinner"
@@ -19,8 +20,19 @@ function getDevQuickLoginCandidates() {
     return null
   }
 
-  const email = window.localStorage.getItem("devQuickLoginEmail")?.trim().toLowerCase() ?? ""
-  const passwords = (window.localStorage.getItem("devQuickLoginPasswords") ?? "")
+  const email = (
+    process.env.NEXT_PUBLIC_DEV_QUICK_LOGIN_EMAIL ??
+    window.localStorage.getItem("devQuickLoginEmail") ??
+    ""
+  )
+    .trim()
+    .toLowerCase()
+
+  const passwords = (
+    process.env.NEXT_PUBLIC_DEV_QUICK_LOGIN_PASSWORDS ??
+    window.localStorage.getItem("devQuickLoginPasswords") ??
+    ""
+  )
     .split(",")
     .map((password) => password.trim())
     .filter(Boolean)
@@ -249,9 +261,8 @@ function LoginForm() {
                         Forgot password?
                       </button>
                     </div>
-                    <Input
+                    <PasswordInput
                       id="password"
-                      type="password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="Enter your password"

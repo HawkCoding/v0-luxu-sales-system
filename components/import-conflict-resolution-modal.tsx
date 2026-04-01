@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useEffect, useMemo, useState } from "react"
+import { Fragment, memo, useEffect, useMemo, useState, useTransition } from "react"
 import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -62,11 +62,7 @@ function formatSourceLine(sourceLabel: string): string {
   return sourceLabel
 }
 
-function initialSelectionsFromConflicts(conflicts: ImportConflictGroup[]): Record<string, string> {
-  return Object.fromEntries(conflicts.map((group) => [group.email, group.rows[0]?.id ?? ""]))
-}
-
-export function ImportConflictResolutionModal({
+export const ImportConflictResolutionModal = memo(function ImportConflictResolutionModal({
   open,
   conflicts,
   onOpenChange,
@@ -74,29 +70,33 @@ export function ImportConflictResolutionModal({
 }: ImportConflictResolutionModalProps) {
   const [index, setIndex] = useState(0)
   const [selections, setSelections] = useState<Record<string, string>>({})
+  const [isPending, startTransition] = useTransition()
 
   useEffect(() => {
     if (!open) return
     setIndex(0)
-    setSelections(initialSelectionsFromConflicts(conflicts))
+    // Avoid precomputing a large selections object for all conflicts up-front.
+    // We treat the first row as the implicit default when an email has no explicit selection.
+    setSelections({})
   }, [open, conflicts])
 
   const current = conflicts[index] ?? null
+  const getSelectedId = (conflict: ImportConflictGroup): string =>
+    selections[conflict.email] ?? conflict.rows[0]?.id ?? ""
   const allResolved = useMemo(
-    () => conflicts.every((conflict) => Boolean(selections[conflict.email])),
+    () => conflicts.every((conflict) => Boolean(getSelectedId(conflict))),
     [conflicts, selections],
   )
 
   const resolvedCount = useMemo(
-    () => conflicts.filter((conflict) => Boolean(selections[conflict.email])).length,
+    () => conflicts.filter((conflict) => Boolean(getSelectedId(conflict))).length,
     [conflicts, selections],
   )
 
   const resolutionProgress =
     conflicts.length === 0 ? 0 : Math.round((resolvedCount / conflicts.length) * 100)
 
-  const differingFields = useMemo(() => {
-    if (!current) return new Set<string>()
+  const allDifferingFields = useMemo(() => {
     const fields: Array<keyof ConflictCandidateRow> = [
       "title",
       "first_name",
@@ -104,13 +104,17 @@ export function ImportConflictResolutionModal({
       "phone",
       "country",
     ]
-    return new Set(
-      fields.filter((field) => {
-        const values = new Set(current.rows.map((row) => row[field].trim().toLowerCase()))
-        return values.size > 1
-      }),
+    return conflicts.map(
+      (conflict) =>
+        new Set(
+          fields.filter((field) => {
+            const values = new Set(conflict.rows.map((row) => row[field].trim().toLowerCase()))
+            return values.size > 1
+          }),
+        ),
     )
-  }, [current])
+  }, [conflicts])
+  const differingFields = (current ? allDifferingFields[index] : null) ?? new Set<string>()
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -127,7 +131,7 @@ export function ImportConflictResolutionModal({
         </DialogHeader>
 
         {current ? (
-          <div className="space-y-4">
+          <div className={cn("space-y-4 transition-opacity", isPending ? "opacity-60" : "opacity-100")}>
             <div className="space-y-2">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                 <p className="text-sm font-medium text-foreground">
@@ -141,14 +145,16 @@ export function ImportConflictResolutionModal({
             </div>
 
             <RadioGroup
-              value={selections[current.email] ?? ""}
+              value={getSelectedId(current)}
               onValueChange={(value) => {
-                setSelections((prev) => ({ ...prev, [current.email]: value }))
+                startTransition(() => {
+                  setSelections((prev) => ({ ...prev, [current.email]: value }))
+                })
               }}
               className="grid gap-3 md:grid-cols-2"
             >
               {current.rows.map((row) => {
-                const selected = selections[current.email] === row.id
+                const selected = getSelectedId(current) === row.id
                 const sourceLine = formatSourceLine(row.sourceLabel)
                 return (
                   <label
@@ -218,7 +224,11 @@ export function ImportConflictResolutionModal({
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => setIndex((value) => Math.max(0, value - 1))}
+              onClick={() =>
+                startTransition(() => {
+                  setIndex((value) => Math.max(0, value - 1))
+                })
+              }
               disabled={index === 0}
             >
               <ChevronLeft className="size-4" aria-hidden="true" />
@@ -228,7 +238,11 @@ export function ImportConflictResolutionModal({
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => setIndex((value) => Math.min(conflicts.length - 1, value + 1))}
+              onClick={() =>
+                startTransition(() => {
+                  setIndex((value) => Math.min(conflicts.length - 1, value + 1))
+                })
+              }
               disabled={conflicts.length === 0 || index >= conflicts.length - 1}
             >
               Next
@@ -252,4 +266,4 @@ export function ImportConflictResolutionModal({
       </DialogContent>
     </Dialog>
   )
-}
+})

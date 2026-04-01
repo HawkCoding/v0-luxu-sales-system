@@ -16,6 +16,7 @@
     "db:start": "npx supabase start",
     "db:stop": "npx supabase stop",
     "db:reset": "npx supabase db reset",
+    "db:clean-customers-bookings": "npx supabase db query --local -f supabase/scripts/clean-customers-bookings-local.sql",
     "db:push": "npx supabase db push",
     "db:pull": "npx supabase db pull --schema public",
     "db:types": "npx supabase gen types typescript --local > lib/supabase/types.ts",

@@ -2,8 +2,7 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { normalizeOptionalString } from "@/lib/normalize-optional-string"
 import { createSessionClient } from "@/lib/supabase/server"
-
-const allowedRoles = new Set(["admin", "manager"])
+import { hasWriteAccess } from "./helpers"
 
 const linkedAccountCreateSchema = z.object({
   relationship: z.string().max(100).nullable().optional(),
@@ -42,20 +41,6 @@ function hasAtLeastOneValue(payload: ReturnType<typeof buildNormalizedPayload>):
       payload.phone ||
       payload.linked_customer_id,
   )
-}
-
-async function hasWriteAccess(
-  supabase: Awaited<ReturnType<typeof createSessionClient>>,
-  userId: string,
-) {
-  const { data: profile, error } = await supabase
-    .from("profiles")
-    .select("clearance_level")
-    .eq("user_id", userId)
-    .single()
-
-  if (error || !profile) return false
-  return allowedRoles.has(profile.clearance_level)
 }
 
 async function getLinkedCustomerSummary(

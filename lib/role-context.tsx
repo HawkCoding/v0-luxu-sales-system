@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
+import { createContext, useContext, useState, type ReactNode } from "react"
 import type { Role } from "./types"
 
 interface RoleContextValue {
@@ -45,29 +45,17 @@ export const permissions: Record<string, Role[]> = {
   "manage:users": ["admin"],
 }
 
-const ROLE_STORAGE_KEY = "luxu_user_role"
-
 export function canRolePerform(role: Role, action: string) {
   const allowed = permissions[action]
   return allowed ? allowed.includes(role) : false
 }
 
 export function RoleProvider({ children }: { children: ReactNode }) {
-  // Initialize from localStorage, fallback to consultant
-  const [role, setRoleState] = useState<Role>(() => {
-    if (typeof window !== "undefined") {
-      const stored = localStorage.getItem(ROLE_STORAGE_KEY) as Role | null
-      return stored || "consultant"
-    }
-    return "consultant"
-  })
+  // Keep permissions conservative until auth resolves an authoritative role.
+  const [role, setRoleState] = useState<Role>("readonly")
 
-  // Persist role changes to localStorage
   const setRole = (newRole: Role) => {
     setRoleState(newRole)
-    if (typeof window !== "undefined") {
-      localStorage.setItem(ROLE_STORAGE_KEY, newRole)
-    }
   }
 
   const can = (action: string) => canRolePerform(role, action)

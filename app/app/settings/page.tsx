@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { PasswordInput } from "@/components/ui/password-input"
 import {
   Select,
   SelectContent,
@@ -480,9 +481,8 @@ function UserManagementCard() {
 
             <div className="space-y-2">
               <Label htmlFor="new-user-password">Password</Label>
-              <Input
+              <PasswordInput
                 id="new-user-password"
-                type="password"
                 value={createForm.password}
                 onChange={(e) => setCreateForm((prev) => ({ ...prev, password: e.target.value }))}
                 placeholder="Min 6 characters"
@@ -493,9 +493,8 @@ function UserManagementCard() {
 
             <div className="space-y-2">
               <Label htmlFor="new-user-confirm-password">Confirm password</Label>
-              <Input
+              <PasswordInput
                 id="new-user-confirm-password"
-                type="password"
                 value={createForm.confirmPassword}
                 onChange={(e) =>
                   setCreateForm((prev) => ({ ...prev, confirmPassword: e.target.value }))
@@ -536,9 +535,8 @@ function UserManagementCard() {
           <form onSubmit={handleSetPassword} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="new-password">New password</Label>
-              <Input
+              <PasswordInput
                 id="new-password"
-                type="password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="Min 6 characters"
@@ -548,9 +546,8 @@ function UserManagementCard() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="confirm-password">Confirm password</Label>
-              <Input
+              <PasswordInput
                 id="confirm-password"
-                type="password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="Repeat password"

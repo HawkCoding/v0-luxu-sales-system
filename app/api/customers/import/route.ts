@@ -469,28 +469,35 @@ export async function POST(req: Request) {
   )
   if (rowsWithSourceIds.length > 0) {
     const customerIds = Array.from(new Set(rowsWithSourceIds.map((row) => row.customerId)))
-    const { data: existingBookingRows, error: existingBookingsError } = await supabase
-      .from("bookings")
-      .select("extracted_json")
-      .eq("owner_user_id", user.id)
-      .in("customer_id", customerIds)
-      .contains("extracted_json", { historical_import: { imported_via: "supplier_csv" } })
+    const existingBookingRows: Array<{ extracted_json: unknown }> = []
 
-    if (existingBookingsError) {
-      return buildImportErrorResponse({
-        traceId,
-        phase: "check_existing_bookings",
-        error: "Failed to validate existing historical imports",
-        status: 500,
-        cause: existingBookingsError,
-        context: {
-          customerCount: customerIds.length,
-          sourceRowCandidateCount: rowsWithSourceIds.length,
-        },
-      })
+    for (let index = 0; index < customerIds.length; index += LOOKUP_BY_CUSTOMER_BATCH_SIZE) {
+      const customerBatch = customerIds.slice(index, index + LOOKUP_BY_CUSTOMER_BATCH_SIZE)
+      const { data: batchRows, error: existingBookingsError } = await supabase
+        .from("bookings")
+        .select("extracted_json")
+        .eq("owner_user_id", user.id)
+        .in("customer_id", customerBatch)
+        .contains("extracted_json", { historical_import: { imported_via: "supplier_csv" } })
+
+      if (existingBookingsError) {
+        return buildImportErrorResponse({
+          traceId,
+          phase: "check_existing_bookings",
+          error: "Failed to validate existing historical imports",
+          status: 500,
+          cause: existingBookingsError,
+          context: {
+            customerCount: customerIds.length,
+            sourceRowCandidateCount: rowsWithSourceIds.length,
+          },
+        })
+      }
+
+      existingBookingRows.push(...(batchRows ?? []))
     }
 
-    const collected = collectHistoricalImportSourceRowIds(existingBookingRows ?? [])
+    const collected = collectHistoricalImportSourceRowIds(existingBookingRows)
     collected.forEach((sourceRowId) => existingSourceRowIds.add(sourceRowId))
   }
 

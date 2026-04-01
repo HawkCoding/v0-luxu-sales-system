@@ -1,13 +1,12 @@
 "use client"
 
 import Link from "next/link"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { flushSync } from "react-dom"
 import { AlertCircle, CheckCircle2, FileText, X } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Input } from "@/components/ui/input"
 import { LoadingState } from "@/components/ui/loading-state"
 import { Progress } from "@/components/ui/progress"
 import { Spinner } from "@/components/ui/spinner"
@@ -278,7 +277,133 @@ function formatImportApiError(payload: ImportApiErrorPayload): string {
   return suffixParts.length > 0 ? `${baseMessage} (${suffixParts.join(", ")})` : baseMessage
 }
 
-export function CustomerBulkImportPanel() {
+interface ReviewTableProps {
+  rows: EditableImportRow[]
+  selectedConflictEmailSet: Set<string>
+  onToggleSelected: (id: string, selected: boolean) => void
+  removeRow: (id: string) => void
+}
+
+const ReviewTable = memo(function ReviewTable({
+  rows,
+  selectedConflictEmailSet,
+  onToggleSelected,
+  removeRow,
+}: ReviewTableProps) {
+  return (
+    <div className="import-review-scroll max-h-[45vh] w-full min-w-0 rounded-md border">
+      <table className="caption-bottom w-full min-w-[980px] table-fixed text-sm">
+        <TableHeader>
+          <TableRow>
+            <TableHead className="sticky left-0 top-0 z-[30] w-10 bg-background">Use</TableHead>
+            <TableHead className="sticky left-[40px] top-0 z-[30] w-24 bg-background">Title</TableHead>
+            <TableHead className="sticky left-[136px] top-0 z-[30] w-36 bg-background">First</TableHead>
+            <TableHead className="sticky left-[280px] top-0 z-[30] w-36 bg-background shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]">
+              Last
+            </TableHead>
+            <TableHead className="sticky top-0 z-20 w-72 bg-background">Email</TableHead>
+            <TableHead className="sticky top-0 z-20 w-40 bg-background">Phone</TableHead>
+            <TableHead className="sticky top-0 z-20 w-32 bg-background">Country</TableHead>
+            <TableHead className="sticky top-0 z-20 w-56 bg-background">Source</TableHead>
+            <TableHead className="sticky top-0 z-20 w-24 bg-background">Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((row) => {
+            const valid = isRowValid(row)
+            const hasConflict = row.selected && selectedConflictEmailSet.has(normalizeEmail(row.email))
+            // Sticky cells must use opaque backgrounds so horizontally scrolled content does not show through.
+            const stickyFrozenBg = !valid
+              ? "bg-red-50 group-hover:bg-red-100 dark:bg-red-950 dark:group-hover:bg-red-900"
+              : hasConflict
+                ? IMPORT_CONFLICT_ROW_TINT
+                : "bg-background group-hover:bg-muted"
+
+            return (
+              <TableRow
+                key={row.id}
+                className={cn(
+                  "group",
+                  !valid ? "bg-destructive/5" : "",
+                  hasConflict ? IMPORT_CONFLICT_ROW_TINT : "",
+                )}
+              >
+                <TableCell
+                  className={cn(
+                    "sticky left-0 z-10 w-10",
+                    stickyFrozenBg,
+                  )}
+                >
+                  <Checkbox
+                    checked={row.selected}
+                    onCheckedChange={(checked) => onToggleSelected(row.id, checked === true)}
+                  />
+                </TableCell>
+                <TableCell
+                  className={cn(
+                    "sticky left-[40px] z-10 w-24",
+                    stickyFrozenBg,
+                  )}
+                >
+                  <span className="block truncate text-sm text-foreground">{row.title.trim() || "—"}</span>
+                </TableCell>
+                <TableCell
+                  className={cn(
+                    "sticky left-[136px] z-10 w-36",
+                    stickyFrozenBg,
+                  )}
+                >
+                  <span className={cn("block truncate text-sm", row.first_name.trim().length > 0 ? "text-foreground" : "text-destructive")}>
+                    {row.first_name.trim() || "Missing first name"}
+                  </span>
+                </TableCell>
+                <TableCell
+                  className={cn(
+                    "sticky left-[280px] z-10 w-36 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]",
+                    stickyFrozenBg,
+                  )}
+                >
+                  <span className={cn("block truncate text-sm", row.last_name.trim().length > 0 ? "text-foreground" : "text-destructive")}>
+                    {row.last_name.trim() || "Missing last name"}
+                  </span>
+                </TableCell>
+                <TableCell className={cn("w-72", isEmail(row.email) ? "text-foreground" : "text-destructive")}>
+                  <span className="block truncate text-sm">{row.email.trim() || "Missing email"}</span>
+                </TableCell>
+                <TableCell className="w-40">
+                  <span className="block truncate text-sm text-foreground">{row.phone.trim() || "—"}</span>
+                </TableCell>
+                <TableCell className="w-32">
+                  <span className="block truncate text-sm text-foreground">{row.country.trim() || "—"}</span>
+                </TableCell>
+                <TableCell className="w-56 truncate text-xs text-muted-foreground" title={row.sourceLabel}>
+                  {row.sourceLabel}
+                </TableCell>
+                <TableCell className="w-24">
+                  <Button variant="ghost" size="sm" onClick={() => removeRow(row.id)}>
+                    Remove
+                  </Button>
+                </TableCell>
+              </TableRow>
+            )
+          })}
+        </TableBody>
+      </table>
+    </div>
+  )
+})
+
+interface CustomerBulkImportPanelProps {
+  discardRequestToken?: number
+  onDiscardHandled?: () => void
+  onDirtyStateChange?: (dirty: boolean) => void
+}
+
+export function CustomerBulkImportPanel({
+  discardRequestToken,
+  onDiscardHandled,
+  onDirtyStateChange,
+}: CustomerBulkImportPanelProps = {}) {
   const { data: suppliers = [] } = useActiveSuppliers()
   const [files, setFiles] = useState<File[]>([])
   const [rows, setRows] = useState<EditableImportRow[]>([])
@@ -300,6 +425,7 @@ export function CustomerBulkImportPanel() {
   const inputRef = useRef<HTMLInputElement>(null)
   const importRunConfigRef = useRef<ImportRunConfig | null>(null)
   const frozenPreImportCheckRef = useRef<PreImportCheckSummary | null>(null)
+  const lastDiscardRequestTokenRef = useRef<number | undefined>(undefined)
 
   const selectedSupplierSlug = useMemo(
     () => suppliers.find((supplier) => supplier.id === selectedSupplierId)?.slug ?? "",
@@ -378,7 +504,7 @@ export function CustomerBulkImportPanel() {
     e.target.value = ""
   }
 
-  const handleClear = () => {
+  const handleReset = useCallback(() => {
     setFiles([])
     setRows([])
     setResult(null)
@@ -395,10 +521,25 @@ export function CustomerBulkImportPanel() {
     setPreImportCheckSummary(null)
     importRunConfigRef.current = null
     frozenPreImportCheckRef.current = null
-  }
+    if (inputRef.current) inputRef.current.value = ""
+  }, [])
+
+  const hasUnsavedImportData = rows.length > 0 && !result
 
   useEffect(() => {
-    if (isSubmitting || isPreparingConflicts) {
+    onDirtyStateChange?.(hasUnsavedImportData)
+  }, [hasUnsavedImportData, onDirtyStateChange])
+
+  useEffect(() => {
+    if (discardRequestToken === undefined) return
+    if (discardRequestToken === lastDiscardRequestTokenRef.current) return
+    lastDiscardRequestTokenRef.current = discardRequestToken
+    handleReset()
+    onDiscardHandled?.()
+  }, [discardRequestToken, handleReset, onDiscardHandled])
+
+  useEffect(() => {
+    if (isSubmitting || isPreparingConflicts || conflictModalOpen) {
       setIsCheckingExistingCustomers(false)
       return
     }
@@ -478,7 +619,7 @@ export function CustomerBulkImportPanel() {
       clearTimeout(timer)
       controller.abort()
     }
-  }, [isPreparingConflicts, isSubmitting, selectedRouteId, selectedValidRows, selectedValidUniqueEmailCount])
+  }, [conflictModalOpen, isPreparingConflicts, isSubmitting, selectedRouteId, selectedValidRows, selectedValidUniqueEmailCount])
 
   const parseCsvFile = async (file: File): Promise<EditableImportRow[]> => {
     const text = await file.text()
@@ -542,13 +683,13 @@ export function CustomerBulkImportPanel() {
     }
   }
 
-  const updateRow = (id: string, patch: Partial<EditableImportRow>) => {
-    setRows((current) => current.map((row) => (row.id === id ? { ...row, ...patch } : row)))
-  }
+  const toggleRowSelected = useCallback((id: string, selected: boolean) => {
+    setRows((current) => current.map((row) => (row.id === id ? { ...row, selected } : row)))
+  }, [])
 
-  const removeRow = (id: string) => {
+  const removeRow = useCallback((id: string) => {
     setRows((current) => current.filter((row) => row.id !== id))
-  }
+  }, [])
 
   const updateChunkStatus = (chunkNumber: number, patch: Partial<ChunkStatus>) => {
     setChunkStatuses((current) =>
@@ -607,7 +748,7 @@ export function CustomerBulkImportPanel() {
     }
   }
 
-  const runChunkImport = async (
+  const runChunkImport = useCallback(async (
     rowsToImport: EditableImportRow[],
     conflictEmailsFromPrescan: string[],
     invalidSkipped: number,
@@ -725,7 +866,7 @@ export function CustomerBulkImportPanel() {
     } finally {
       setIsSubmitting(false)
     }
-  }
+  }, [preImportCheckSummary, selectedRouteId, selectedSupplierId])
 
   const handleRetryFailedChunks = async () => {
     if (retryableChunks.length === 0 || !result) return
@@ -849,7 +990,7 @@ export function CustomerBulkImportPanel() {
     await runChunkImport(selectedValidRows, [], selectedInvalidCount)
   }
 
-  const handleConflictModalOpenChange = (open: boolean) => {
+  const handleConflictModalOpenChange = useCallback((open: boolean) => {
     setConflictModalOpen(open)
     if (!open) {
       setIsPreparingConflicts(false)
@@ -857,9 +998,9 @@ export function CustomerBulkImportPanel() {
       setPendingRowsForImport(null)
       setPendingConflicts([])
     }
-  }
+  }, [])
 
-  const handleConfirmConflictResolution = async (selections: Record<string, string>) => {
+  const handleConfirmConflictResolution = useCallback(async (selections: Record<string, string>) => {
     if (!pendingRowsForImport || pendingConflicts.length === 0) return
 
     const conflictEmails = pendingConflicts.map((group) => group.email)
@@ -894,7 +1035,7 @@ export function CustomerBulkImportPanel() {
     setPendingConflicts([])
 
     await runChunkImport(resolvedRowsForImport, conflictEmails, selectedInvalidCount)
-  }
+  }, [pendingConflicts, pendingRowsForImport, runChunkImport, selectedInvalidCount])
 
   return (
     <div className="relative space-y-4">
@@ -918,10 +1059,12 @@ export function CustomerBulkImportPanel() {
         </p>
       </div>
 
-      <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
-        Required CSV fields are first name, surname/last name, and email. Supported headers include template headers and supplier headers like
-        Title, Name, Surname, Contact Number, Email (Email), Country.
-      </div>
+      {!result ? (
+        <>
+          <div className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">
+            Required CSV fields are first name, surname/last name, and email. Supported headers include template headers and supplier headers like
+            Title, Name, Surname, Contact Number, Email (Email), Country.
+          </div>
 
       <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 md:grid-cols-2">
         <div className="space-y-1">
@@ -1011,7 +1154,7 @@ export function CustomerBulkImportPanel() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={handleClear}
+              onClick={handleReset}
               disabled={isProcessing || isSubmitting || isPreparingConflicts}
             >
               <X className="mr-1 h-4 w-4" />
@@ -1050,140 +1193,47 @@ export function CustomerBulkImportPanel() {
             </Alert>
           ) : null}
 
-          <div className="import-review-scroll max-h-[45vh] w-full min-w-0 rounded-md border">
-            <table className="caption-bottom w-full min-w-[980px] table-fixed text-sm">
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="sticky left-0 top-0 z-[30] w-10 bg-background">Use</TableHead>
-                  <TableHead className="sticky left-[40px] top-0 z-[30] w-24 bg-background">Title</TableHead>
-                  <TableHead className="sticky left-[136px] top-0 z-[30] w-36 bg-background">First</TableHead>
-                  <TableHead className="sticky left-[280px] top-0 z-[30] w-36 bg-background shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]">
-                    Last
-                  </TableHead>
-                  <TableHead className="sticky top-0 z-20 w-72 bg-background">Email</TableHead>
-                  <TableHead className="sticky top-0 z-20 w-40 bg-background">Phone</TableHead>
-                  <TableHead className="sticky top-0 z-20 w-32 bg-background">Country</TableHead>
-                  <TableHead className="sticky top-0 z-20 w-56 bg-background">Source</TableHead>
-                  <TableHead className="sticky top-0 z-20 w-24 bg-background">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.map((row) => {
-                  const valid = isRowValid(row)
-                  const hasConflict = row.selected && selectedConflictEmailSet.has(normalizeEmail(row.email))
-                  // Sticky cells must use opaque backgrounds so horizontally scrolled content does not show through.
-                  const stickyFrozenBg = !valid
-                    ? "bg-red-50 group-hover:bg-red-100 dark:bg-red-950 dark:group-hover:bg-red-900"
-                    : hasConflict
-                      ? IMPORT_CONFLICT_ROW_TINT
-                      : "bg-background group-hover:bg-muted"
-
-                  return (
-                    <TableRow
-                      key={row.id}
-                      className={cn(
-                        "group",
-                        !valid ? "bg-destructive/5" : "",
-                        hasConflict ? IMPORT_CONFLICT_ROW_TINT : "",
-                      )}
-                    >
-                      <TableCell
-                        className={cn(
-                          "sticky left-0 z-10 w-10",
-                          stickyFrozenBg,
-                        )}
-                      >
-                        <Checkbox
-                          checked={row.selected}
-                          onCheckedChange={(checked) => updateRow(row.id, { selected: checked === true })}
-                        />
-                      </TableCell>
-                      <TableCell
-                        className={cn(
-                          "sticky left-[40px] z-10 w-24",
-                          stickyFrozenBg,
-                        )}
-                      >
-                        <Input value={row.title} onChange={(e) => updateRow(row.id, { title: e.target.value })} className="h-8 w-full" />
-                      </TableCell>
-                      <TableCell
-                        className={cn(
-                          "sticky left-[136px] z-10 w-36",
-                          stickyFrozenBg,
-                        )}
-                      >
-                        <Input
-                          value={row.first_name}
-                          onChange={(e) => updateRow(row.id, { first_name: e.target.value })}
-                          className={cn("h-8 w-full", row.first_name.trim().length > 0 ? "" : "border-destructive")}
-                        />
-                      </TableCell>
-                      <TableCell
-                        className={cn(
-                          "sticky left-[280px] z-10 w-36 shadow-[2px_0_4px_-2px_rgba(0,0,0,0.08)]",
-                          stickyFrozenBg,
-                        )}
-                      >
-                        <Input
-                          value={row.last_name}
-                          onChange={(e) => updateRow(row.id, { last_name: e.target.value })}
-                          className={cn("h-8 w-full", row.last_name.trim().length > 0 ? "" : "border-destructive")}
-                        />
-                      </TableCell>
-                      <TableCell className="w-72">
-                        <Input
-                          value={row.email}
-                          onChange={(e) => updateRow(row.id, { email: e.target.value.toLowerCase() })}
-                          className={cn("h-8 w-full", isEmail(row.email) ? "" : "border-destructive")}
-                        />
-                      </TableCell>
-                      <TableCell className="w-40">
-                        <Input value={row.phone} onChange={(e) => updateRow(row.id, { phone: e.target.value })} className="h-8 w-full" />
-                      </TableCell>
-                      <TableCell className="w-32">
-                        <Input value={row.country} onChange={(e) => updateRow(row.id, { country: e.target.value })} className="h-8 w-full" />
-                      </TableCell>
-                      <TableCell className="w-56 truncate text-xs text-muted-foreground" title={row.sourceLabel}>
-                        {row.sourceLabel}
-                      </TableCell>
-                      <TableCell className="w-24">
-                        <Button variant="ghost" size="sm" onClick={() => removeRow(row.id)}>
-                          Remove
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </table>
-          </div>
+          {conflictModalOpen ? (
+            <div className="rounded-md border border-dashed p-4 text-xs text-muted-foreground">
+              Conflict resolution is open. Row editing is temporarily paused to keep the modal responsive.
+            </div>
+          ) : (
+            <ReviewTable
+              rows={rows}
+              selectedConflictEmailSet={selectedConflictEmailSet}
+              onToggleSelected={toggleRowSelected}
+              removeRow={removeRow}
+            />
+          )}
         </div>
       )}
 
-      {displayPreImportCheckSummary ? (
-        <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
-          <p className="text-sm font-medium">Pre-import customer match check</p>
-          {preImportSummaryIsFrozen ? (
-            <p className="text-xs text-muted-foreground">Captured before import started.</p>
+          {displayPreImportCheckSummary ? (
+            <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+              <p className="text-sm font-medium">Pre-import customer match check</p>
+              {preImportSummaryIsFrozen ? (
+                <p className="text-xs text-muted-foreground">Captured before import started.</p>
+              ) : null}
+              <p className="text-xs text-muted-foreground">
+                Checked customers: {displayPreImportCheckSummary.checkedCustomers} | New customers: {displayPreImportCheckSummary.newCustomers} |
+                Existing customers: {displayPreImportCheckSummary.existingCustomers}
+              </p>
+              {selectedRouteId && displayPreImportCheckSummary.potentialDuplicateCustomers > 0 ? (
+                <Alert className="border-amber-500/30 bg-amber-500/10">
+                  <AlertCircle className="h-4 w-4 text-amber-600" />
+                  <AlertTitle>Potential duplicate route bookings found</AlertTitle>
+                  <AlertDescription>
+                    {displayPreImportCheckSummary.potentialDuplicateCustomers} existing customer
+                    {displayPreImportCheckSummary.potentialDuplicateCustomers === 1 ? "" : "s"} already have a historical supplier import
+                    for this route. Those rows will be skipped during import.
+                  </AlertDescription>
+                </Alert>
+              ) : null}
+              {displayPreImportCheckSummary.error ? <p className="text-xs text-destructive">{displayPreImportCheckSummary.error}</p> : null}
+              {isCheckingExistingCustomers ? <p className="text-xs text-muted-foreground">Checking existing customers...</p> : null}
+            </div>
           ) : null}
-          <p className="text-xs text-muted-foreground">
-            Checked customers: {displayPreImportCheckSummary.checkedCustomers} | New customers: {displayPreImportCheckSummary.newCustomers} |
-            Existing customers: {displayPreImportCheckSummary.existingCustomers}
-          </p>
-          {selectedRouteId && displayPreImportCheckSummary.potentialDuplicateCustomers > 0 ? (
-            <Alert className="border-amber-500/30 bg-amber-500/10">
-              <AlertCircle className="h-4 w-4 text-amber-600" />
-              <AlertTitle>Potential duplicate route bookings found</AlertTitle>
-              <AlertDescription>
-                {displayPreImportCheckSummary.potentialDuplicateCustomers} existing customer
-                {displayPreImportCheckSummary.potentialDuplicateCustomers === 1 ? "" : "s"} already have a historical supplier import
-                for this route. Those rows will be skipped during import.
-              </AlertDescription>
-            </Alert>
-          ) : null}
-          {displayPreImportCheckSummary.error ? <p className="text-xs text-destructive">{displayPreImportCheckSummary.error}</p> : null}
-          {isCheckingExistingCustomers ? <p className="text-xs text-muted-foreground">Checking existing customers...</p> : null}
-        </div>
+        </>
       ) : null}
 
       {chunkStatuses.length > 0 ? (
@@ -1218,18 +1268,50 @@ export function CustomerBulkImportPanel() {
       ) : null}
 
       {result ? (
-        <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
-          <p className="text-sm font-medium">
-            {result.failedChunks > 0 ? "Import partially complete" : "Import complete"}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Customers created: {result.createdCustomers} | Duplicate Customers: {result.matchedCustomers} | Historical bookings imported:{" "}
-            {result.importedBookings} | Duplicate bookings from customers: {result.skippedDuplicates} | Profiles enriched:{" "}
-            {result.enrichedProfiles} | Invalid skipped: {result.skippedInvalid}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Chunks succeeded: {result.successfulChunks}/{result.totalChunks}
-          </p>
+        <div className="space-y-4 rounded-lg border bg-muted/30 p-4">
+          <div className="flex items-start gap-3 rounded-md border bg-background/80 p-3">
+            {result.failedChunks > 0 ? (
+              <AlertCircle className="mt-0.5 h-5 w-5 text-amber-600" />
+            ) : (
+              <CheckCircle2 className="mt-0.5 h-5 w-5 text-green-600" />
+            )}
+            <div className="space-y-1">
+              <p className="text-sm font-semibold">
+                {result.failedChunks > 0 ? "Import partially complete" : "Import complete"}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {result.createdCustomers} customers and {result.importedBookings} bookings imported. {result.successfulChunks}/
+                {result.totalChunks} chunks succeeded.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="rounded-md border bg-background/70 p-2">
+              <p className="text-lg font-semibold text-foreground">{result.createdCustomers}</p>
+              <p className="text-xs text-muted-foreground">Customers created</p>
+            </div>
+            <div className="rounded-md border bg-background/70 p-2">
+              <p className="text-lg font-semibold text-foreground">{result.matchedCustomers}</p>
+              <p className="text-xs text-muted-foreground">Duplicates matched</p>
+            </div>
+            <div className="rounded-md border bg-background/70 p-2">
+              <p className="text-lg font-semibold text-foreground">{result.importedBookings}</p>
+              <p className="text-xs text-muted-foreground">Bookings imported</p>
+            </div>
+            <div className="rounded-md border bg-background/70 p-2">
+              <p className="text-lg font-semibold text-foreground">{result.skippedDuplicates}</p>
+              <p className="text-xs text-muted-foreground">Duplicate bookings skipped</p>
+            </div>
+            <div className="rounded-md border bg-background/70 p-2">
+              <p className="text-lg font-semibold text-foreground">{result.enrichedProfiles}</p>
+              <p className="text-xs text-muted-foreground">Profiles enriched</p>
+            </div>
+            <div className="rounded-md border bg-background/70 p-2">
+              <p className="text-lg font-semibold text-foreground">{result.skippedInvalid}</p>
+              <p className="text-xs text-muted-foreground">Invalid skipped</p>
+            </div>
+          </div>
 
           {result.conflictEmails.length > 0 ? (
             <div className="space-y-1">
@@ -1256,50 +1338,69 @@ export function CustomerBulkImportPanel() {
             </div>
           ) : null}
 
-          {retryableChunks.length > 0 ? (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={isSubmitting || isPreparingConflicts}
-              onClick={handleRetryFailedChunks}
-            >
-              Retry failed chunks
-            </Button>
-          ) : null}
         </div>
       ) : null}
 
-      <div className="flex items-center justify-end gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={files.length === 0 || isProcessing || isSubmitting || isPreparingConflicts}
-          onClick={handlePrepareRows}
-        >
-          {isProcessing ? (
-            <>
-              <Spinner className="size-4" aria-hidden="true" />
-              Processing...
-            </>
-          ) : (
-            "Extract Rows"
-          )}
-        </Button>
-        <Button
-          size="sm"
-          disabled={selectedValidRows.length === 0 || isSubmitting || isProcessing || isPreparingConflicts}
-          onClick={handleImport}
-        >
-          {isSubmitting || isPreparingConflicts ? (
-            <>
-              <Spinner className="size-4" aria-hidden="true" />
-              {isPreparingConflicts ? "Preparing conflict resolution..." : "Importing customers and bookings..."}
-            </>
-          ) : (
-            "Import Customers"
-          )}
-        </Button>
-      </div>
+      {result ? (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            {retryableChunks.length > 0 ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={isSubmitting || isPreparingConflicts}
+                onClick={handleRetryFailedChunks}
+              >
+                Retry failed chunks
+              </Button>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Import finished. You can review customers now or start another import.
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button asChild size="sm" variant="outline">
+              <Link href="/app/customers">View Customers</Link>
+            </Button>
+            <Button size="sm" onClick={handleReset}>
+              Start New Import
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-end gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={files.length === 0 || isProcessing || isSubmitting || isPreparingConflicts}
+            onClick={handlePrepareRows}
+          >
+            {isProcessing ? (
+              <>
+                <Spinner className="size-4" aria-hidden="true" />
+                Processing...
+              </>
+            ) : (
+              "Extract Rows"
+            )}
+          </Button>
+          <Button
+            size="sm"
+            disabled={selectedValidRows.length === 0 || isSubmitting || isProcessing || isPreparingConflicts}
+            onClick={handleImport}
+          >
+            {isSubmitting || isPreparingConflicts ? (
+              <>
+                <Spinner className="size-4" aria-hidden="true" />
+                {isPreparingConflicts ? "Preparing conflict resolution..." : "Importing customers and bookings..."}
+              </>
+            ) : (
+              "Import Customers"
+            )}
+          </Button>
+        </div>
+      )}
 
       <ImportConflictResolutionModal
         open={conflictModalOpen}

@@ -19,6 +19,12 @@ export function getSupabase() {
     )
   }
 
-  supabase = createBrowserClient<Database>(supabaseUrl, supabaseAnonKey)
+  supabase = createBrowserClient<Database>(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      // Disable Web Locks coordination to avoid cross-tab AbortError
+      // ("Lock broken by another request with the 'steal' option.").
+      lock: async (_name, _acquireTimeout, fn) => await fn(),
+    },
+  })
   return supabase
 }

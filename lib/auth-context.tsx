@@ -7,7 +7,8 @@ import type { Role } from "./types"
 export interface User {
   name: string
   email: string
-  role: Role
+  role: Role | null
+  roleStatus: "resolved" | "pending" | "missing"
 }
 
 interface AuthContextValue {
@@ -20,6 +21,7 @@ interface AuthContextValue {
 
 const AUTH_INIT_TIMEOUT_MS = 4000
 const AUTH_INIT_TIMEOUT_MESSAGE = "Timed out initializing auth session"
+const PENDING_ROLE_RETRY_DELAYS_MS = [2000, 5000, 15000, 30000] as const
 const STALE_REFRESH_TOKEN_MESSAGES = [
   "Invalid Refresh Token",
   "Refresh Token Not Found",
@@ -38,14 +40,59 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
   const [user, setUser] = useState<User | null>(initialUserRef.current)
   const [loading, setLoading] = useState(initialUserRef.current === null)
   const authHandlerInFlightRef = useRef(false)
+  const userStateRef = useRef<User | null>(initialUserRef.current)
+
+  useEffect(() => {
+    userStateRef.current = user
+  }, [user])
+
+  const makeEmailDisplayName = useCallback((email: string) => {
+    const emailName = email.split("@")[0]
+    return emailName.charAt(0).toUpperCase() + emailName.slice(1)
+  }, [])
+
+  const markUserRolePending = useCallback((fallbackEmail?: string) => {
+    console.warn("[auth] Role resolution pending - profile lookup failed transiently", { fallbackEmail })
+    setUser((current) => {
+      if (current) {
+        return {
+          ...current,
+          roleStatus: current.roleStatus === "missing" ? "missing" : "pending",
+        }
+      }
+
+      if (!fallbackEmail) {
+        return null
+      }
+
+      return {
+        name: makeEmailDisplayName(fallbackEmail),
+        email: fallbackEmail,
+        role: null,
+        roleStatus: "pending",
+      }
+    })
+  }, [makeEmailDisplayName])
 
   const loadProfile = useCallback(async (userId: string, fallbackEmail: string) => {
     const supabase = getSupabase()
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("name, surname, clearance_level, email")
-      .eq("user_id", userId)
-      .single()
+    const tryFetchProfile = async () =>
+      supabase
+        .from("profiles")
+        .select("name, surname, clearance_level, email")
+        .eq("user_id", userId)
+        .single()
+
+    let result = await tryFetchProfile()
+
+    // Retry once for transient profile read issues so we can recover admin/manager roles quickly.
+    if (!result.data && result.error && result.error.code !== "PGRST116") {
+      await new Promise((r) => setTimeout(r, 250))
+      result = await tryFetchProfile()
+    }
+
+    const profile = result.data
+    const profileError = result.error
 
     if (profile) {
       const displayName = [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.name
@@ -53,13 +100,23 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
         name: displayName,
         email: profile.email || fallbackEmail,
         role: profile.clearance_level as Role,
+        roleStatus: "resolved",
       })
-    } else {
-      const emailName = fallbackEmail.split("@")[0]
-      const displayName = emailName.charAt(0).toUpperCase() + emailName.slice(1)
-      setUser({ name: displayName, email: fallbackEmail, role: "consultant" })
+      return
     }
-  }, [])
+
+    if (!profileError || profileError.code === "PGRST116") {
+      setUser({
+        name: makeEmailDisplayName(fallbackEmail),
+        email: fallbackEmail,
+        role: "consultant",
+        roleStatus: "missing",
+      })
+      return
+    }
+
+    markUserRolePending(fallbackEmail)
+  }, [makeEmailDisplayName, markUserRolePending])
 
   const isStaleRefreshTokenError = useCallback((error: unknown) => {
     if (!error) return false
@@ -79,6 +136,46 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
     await supabase.auth.signOut({ scope: "local" }).catch(() => {})
     setUser(null)
   }, [])
+
+  useEffect(() => {
+    if (!user || user.roleStatus !== "pending") return
+
+    let cancelled = false
+
+    const retryRoleResolution = async () => {
+      const supabase = getSupabase()
+
+      for (const delayMs of PENDING_ROLE_RETRY_DELAYS_MS) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs))
+        if (cancelled) return
+
+        try {
+          const {
+            data: { user: authUser },
+            error: authUserError,
+          } = await supabase.auth.getUser()
+
+          if (cancelled) return
+          if (authUserError || !authUser) return
+
+          await loadProfile(authUser.id, authUser.email ?? "")
+          if (cancelled) return
+
+          if (userStateRef.current?.roleStatus !== "pending") {
+            return
+          }
+        } catch (error) {
+          console.warn("[auth] Pending role retry failed", { error })
+        }
+      }
+    }
+
+    void retryRoleResolution()
+
+    return () => {
+      cancelled = true
+    }
+  }, [user, loadProfile])
 
   useEffect(() => {
     let mounted = true
@@ -104,17 +201,10 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
         }
       }
 
-      // Check existing session on mount. Retry once on Supabase lock conflict (concurrent getSession calls).
-      const LOCK_STEAL_MSG = "Lock broken by another request with the 'steal' option."
+      // Check existing session on mount.
       const init = async () => {
         try {
-          let result = await getSessionWithTimeout()
-          const errMsg = result.error?.message ?? null
-          if (errMsg === LOCK_STEAL_MSG && mounted) {
-            await new Promise((r) => setTimeout(r, 80))
-            if (!mounted) return
-            result = await getSessionWithTimeout()
-          }
+          const result = await getSessionWithTimeout()
 
           if (result.error && isStaleRefreshTokenError(result.error)) {
             await clearLocalSession()
@@ -127,37 +217,26 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
           }
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error)
-          if (msg === LOCK_STEAL_MSG && mounted) {
-            await new Promise((r) => setTimeout(r, 80))
-            if (!mounted) return
-            try {
-              const { data: { session }, error: retryErr } = await getSessionWithTimeout()
-              if (retryErr && isStaleRefreshTokenError(retryErr)) {
-                await clearLocalSession()
-                return
-              }
-              if (!retryErr && mounted && session?.user) await loadProfile(session.user.id, session.user.email ?? "")
-            } catch {
-              if (mounted) setUser(null)
-            }
-          } else if (msg === AUTH_INIT_TIMEOUT_MESSAGE && mounted) {
+          if (msg === AUTH_INIT_TIMEOUT_MESSAGE && mounted) {
             try {
               const { data: { user }, error: userError } = await supabase.auth.getUser()
               if (userError) {
-                setUser(null)
+                markUserRolePending()
               } else if (user) {
                 await loadProfile(user.id, user.email ?? "")
               } else {
                 setUser(null)
               }
             } catch {
-              setUser(null)
+              markUserRolePending()
             }
           } else if (isStaleRefreshTokenError(error)) {
             await clearLocalSession()
           } else {
             console.error("Failed to initialize auth session", error)
-            if (mounted) setUser(null)
+            if (mounted) {
+              markUserRolePending()
+            }
           }
         } finally {
           if (mounted) setLoading(false)
@@ -182,7 +261,7 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
           }
         } catch (error) {
           console.error("Failed to update auth state", error)
-          setUser(null)
+          markUserRolePending(session?.user?.email ?? "")
         } finally {
           authHandlerInFlightRef.current = false
           if (mounted) setLoading(false)
@@ -191,7 +270,7 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
       subscription = authState.data.subscription
     } catch (error) {
       console.error("Failed to set up auth", error)
-      setUser(null)
+      markUserRolePending()
       setLoading(false)
     }
 
@@ -200,7 +279,7 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
       subscription?.unsubscribe()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- callbacks are stable (useCallback with [] deps); auth setup must run exactly once
-  }, [])
+  }, [clearLocalSession, isStaleRefreshTokenError, loadProfile, markUserRolePending])
 
   const loginWithPassword = async (email: string, password: string): Promise<boolean> => {
     const supabase = getSupabase()
