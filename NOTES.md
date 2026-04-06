@@ -2,6 +2,145 @@
 
 ---
 
+## Customer linked accounts runbook (matching, mirrors, and edit flows)
+
+**Date:** 2026-04-06
+
+This section documents the linked customer account workflows now used on customer detail pages and related customer API routes.
+
+### Intent and architecture
+
+- Linked account data is loaded from `GET /api/customers/:id` and returned in a `linkedAccounts` array alongside the customer and booking payload.
+- Primary UI surfaces:
+  - `components/customer-detail-view.tsx` (`Linked Accounts` accordion, add/edit/delete actions)
+  - `components/linked-account-form.tsx` (relationship/contact form + match detection)
+- Supporting routes:
+  - `app/api/customers/[id]/route.ts` (`GET`, `PATCH`) for customer detail payload and notes/email/phone edits
+  - `app/api/customers/detect-match/route.ts` (`GET`) for duplicate customer detection by email/phone
+  - `app/api/customers/[id]/linked-accounts/route.ts` (`POST`) for creating linked account rows
+  - `app/api/customers/[id]/linked-accounts/[accountId]/route.ts` (`PATCH`, `DELETE`) for edits/removal
+- Database shape is defined in `supabase/migrations/20260327160000_add_customer_linked_accounts.sql`.
+  - Table: `customer_linked_accounts`
+  - Key constraints:
+    - `customer_id <> linked_customer_id` check
+    - unique `(customer_id, linked_customer_id)` when `linked_customer_id IS NOT NULL`
+  - RLS: authenticated users can `SELECT`; only `admin`/`manager` can `INSERT`/`UPDATE`/`DELETE`.
+
+### Public interfaces and behavior
+
+- `GET /api/customers/:id`
+  - Requires authentication.
+  - Returns `linkedAccounts[]` with `linkedCustomerName` hydrated from referenced `customers` rows.
+- `GET /api/customers/detect-match`
+  - Requires authentication.
+  - Query params: `email?`, `phone?`, `excludeId?`.
+  - Matching order: email first (case-insensitive), then phone.
+  - Returns `{ match: null }` when no match or no usable query input.
+- `POST /api/customers/:id/linked-accounts`
+  - Requires authenticated `admin` or `manager`.
+  - Validates payload with Zod and normalizes optional strings.
+  - Requires at least one non-empty linked account field.
+  - Prevents self-linking (`linkedCustomerId === customerId`).
+  - If `linkedCustomerId` is set, creates a mirrored reverse row (`is_mirror: true`) for the linked customer.
+  - Duplicate links return `409` with `These customers are already linked on this account`.
+- `PATCH /api/customers/:id/linked-accounts/:accountId`
+  - Requires authenticated `admin` or `manager`.
+  - Validates payload with Zod and rejects empty patch payloads (`400`).
+  - If linked target changes, deletes old counterpart row using opposite `is_mirror` and upserts a new counterpart for the new target.
+  - Duplicate links return `409`.
+- `DELETE /api/customers/:id/linked-accounts/:accountId`
+  - Requires authenticated `admin` or `manager`.
+  - Deletes counterpart row first (if present), then deletes the requested row.
+  - Returns `204` on success.
+
+### Workflow notes
+
+- Add flow (`CustomerDetailView` -> `LinkedAccountForm`):
+  - User clicks `Add` in `Linked Accounts`.
+  - Form supports relationship + optional name/email/phone + optional `linkedCustomerId`.
+  - Saving calls `POST /api/customers/:id/linked-accounts`, then revalidates `useCustomerDetail()` and `/api/data`.
+- Existing-customer detection:
+  - Email and phone blur handlers call `GET /api/customers/detect-match?...&excludeId=<currentCustomerId>`.
+  - On match, UI offers:
+    - `Go to account`
+    - `Open in new tab`
+    - `Yes, link this account`
+  - Confirming the link sets `linkedCustomerId` and locks contact fields to avoid divergence from the linked customer record.
+- Edit flow:
+  - `PATCH` updates primary row and mirror counterpart handling runs server-side.
+- Delete flow:
+  - `DELETE` removes both sides (primary + counterpart) when counterpart exists.
+
+### Constraints and normalization details
+
+- Relationship options currently exposed in UI:
+  - `Spouse`, `Partner`, `Family Member`, `Travel Agent`, `Other`
+- Normalization:
+  - `email` is trimmed and lowercased.
+  - `phone` and name fields are trimmed; empty strings become `null`.
+- Validation constraints:
+  - `relationship`, `firstName`, `lastName` max length `100`
+  - `phone` max length `50`
+  - `email` max length `255` and valid format
+  - `linkedCustomerId` must be UUID when provided
+
+### Troubleshooting and common pitfalls
+
+- `403 Forbidden` on create/edit/delete:
+  - Cause: user is authenticated but not `admin`/`manager`.
+  - Fix: verify `profiles.clearance_level`.
+- `400 Please provide at least one linked account field`:
+  - Cause: all optional fields normalize to empty.
+  - Fix: provide at least one field (relationship, name, email, phone, or linked customer).
+- `400 Cannot link a customer to themselves`:
+  - Cause: `linkedCustomerId` equals current customer.
+  - Fix: select a different customer.
+- `404 Linked customer not found`:
+  - Cause: stale/deleted customer reference.
+  - Fix: re-run match detection and relink.
+- `409 These customers are already linked on this account`:
+  - Cause: unique `(customer_id, linked_customer_id)` conflict.
+  - Fix: edit existing link instead of creating a duplicate.
+- Match detection appears inconsistent:
+  - Cause: route prioritizes email match before phone, and excludes current customer via `excludeId`.
+  - Fix: verify normalized values and query parameters in Network tab.
+
+### Example requests
+
+Detect existing customer by email:
+
+```http
+GET /api/customers/detect-match?email=alex@example.com&excludeId=690b9670-420c-4777-8334-3a5f380ecf97
+```
+
+Create linked account as contact-only entry:
+
+```json
+{
+  "relationship": "Travel Agent",
+  "firstName": "Alex",
+  "lastName": "Meyer",
+  "email": "alex@example.com",
+  "phone": "+27 82 555 0101",
+  "linkedCustomerId": null
+}
+```
+
+Create linked account tied to an existing customer:
+
+```json
+{
+  "relationship": "Partner",
+  "firstName": null,
+  "lastName": null,
+  "email": null,
+  "phone": null,
+  "linkedCustomerId": "790b9670-420c-4777-8334-3a5f380ecf98"
+}
+```
+
+---
+
 ## Deferred TODO: dependency freshness follow-up
 
 **Date:** 2026-03-11
