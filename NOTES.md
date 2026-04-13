@@ -106,6 +106,133 @@ Ensure every `profiles.email` has a matching Supabase Auth user; use initial pas
 
 ---
 
+## Customer linked accounts runbook
+
+**Date:** 2026-04-13
+
+This section documents the customer linked-account flow across customer detail UI and linked-account API routes.
+
+### Intent and architecture
+
+- Linked accounts let consultants/admins connect related people (for example spouse, partner, or travel agent contact) to a customer profile.
+- If a linked account references an existing customer (`linkedCustomerId`), the system stores a mirrored reverse link so both customer profiles stay in sync.
+- Data path:
+  - UI: `components/customer-detail-view.tsx` and `components/linked-account-form.tsx`
+  - Read model: `GET /api/customers/:id` in `app/api/customers/[id]/route.ts`
+  - Mutations: `POST /api/customers/:id/linked-accounts`, `PATCH/DELETE /api/customers/:id/linked-accounts/:accountId`
+  - Match detection: `GET /api/customers/detect-match`
+- Database table and constraints are in `supabase/migrations/20260327160000_add_customer_linked_accounts.sql`.
+
+### Public interfaces and behavior
+
+- `GET /api/customers/:id`
+  - Requires authenticated user.
+  - Returns `customer`, `bookings`, and `linkedAccounts[]` in one payload.
+  - Enriches linked rows with `linkedCustomerName` when `linkedCustomerId` is set.
+- `POST /api/customers/:id/linked-accounts`
+  - Requires authenticated `admin` or `manager`.
+  - Validates payload with Zod and normalizes optional strings.
+  - Requires at least one non-empty field (`relationship`, name, email, phone, or `linkedCustomerId`).
+  - Rejects self-links (`linkedCustomerId === customerId`) with `400`.
+  - Returns `409` when the customer pair already exists.
+  - Creates a mirrored reverse row when `linkedCustomerId` is provided.
+- `PATCH /api/customers/:id/linked-accounts/:accountId`
+  - Requires authenticated `admin` or `manager`.
+  - Supports partial updates.
+  - If linked customer changes, removes old mirror and upserts a new reverse mirror.
+  - Returns `404` when linked account or referenced customer is missing.
+  - Returns `409` for duplicate customer-pair conflicts.
+- `DELETE /api/customers/:id/linked-accounts/:accountId`
+  - Requires authenticated `admin` or `manager`.
+  - Deletes reverse mirror first (if present), then deletes the selected row.
+  - Returns `204` on success.
+- `GET /api/customers/detect-match?email=&phone=&excludeId=`
+  - Requires authenticated user.
+  - Returns `{ match: null }` if no candidate exists.
+  - Matching order: email first (case-insensitive), then phone (exact) if email did not match.
+  - `excludeId` prevents matching the current customer.
+
+### Data model and constraints
+
+- `customer_linked_accounts` fields:
+  - `customer_id`, optional `linked_customer_id`, optional relationship and contact fields
+  - `is_mirror` marks system-generated reverse rows
+- Constraint highlights:
+  - `customer_id <> linked_customer_id` (no self-link rows).
+  - Unique index on `(customer_id, linked_customer_id)` when `linked_customer_id` is not null.
+  - Foreign keys:
+    - `customer_id` -> `customers(id)` with `ON DELETE CASCADE`
+    - `linked_customer_id` -> `customers(id)` with `ON DELETE SET NULL`
+- RLS policies allow read for authenticated users and restrict insert/update/delete to `admin` and `manager`.
+
+### UI workflow notes
+
+- Linked accounts are shown in the customer detail accordion.
+- Add/edit flow uses `LinkedAccountForm`:
+  - Relationship defaults to `Partner`.
+  - Email/phone blur triggers match detection for existing customers.
+  - On confirmed match, form sets `linkedCustomerId`, pre-fills matched fields, and locks name/contact fields.
+- Successful create/update/delete actions revalidate:
+  - `useCustomerDetail(customerId)` data
+  - global `/api/data` SWR cache
+- Read-only roles can view linked accounts but cannot add/edit/delete.
+
+### Troubleshooting and common pitfalls
+
+- `400 Please provide at least one linked account field`
+  - Cause: payload is effectively empty after normalization.
+  - Fix: include at least one non-empty value.
+- `400 Cannot link a customer to themselves`
+  - Cause: current customer ID passed as `linkedCustomerId`.
+  - Fix: clear `linkedCustomerId` or choose a different customer.
+- `404 Linked customer not found`
+  - Cause: stale/invalid `linkedCustomerId`.
+  - Fix: re-run detect flow or resolve customer ID before save.
+- `409 These customers are already linked on this account`
+  - Cause: duplicate `(customer_id, linked_customer_id)` pair.
+  - Fix: edit/delete existing link rather than creating another row.
+- Linked row appears one-sided after manual DB edits
+  - Cause: mirror maintenance logic only runs via API routes.
+  - Fix: use API/UI for edits, or repair both directions in SQL.
+
+### Example payloads
+
+Create a standalone linked account (no existing customer reference):
+
+```json
+{
+  "relationship": "Travel Agent",
+  "firstName": "Nina",
+  "lastName": "Parker",
+  "email": "nina.agent@example.com",
+  "phone": "+27 82 000 0000",
+  "linkedCustomerId": null
+}
+```
+
+Create a linked account that references an existing customer:
+
+```json
+{
+  "relationship": "Spouse",
+  "firstName": "Alex",
+  "lastName": "Doe",
+  "email": "alex@example.com",
+  "phone": "+27 82 111 1111",
+  "linkedCustomerId": "790b9670-420c-4777-8334-3a5f380ecf98"
+}
+```
+
+Patch an existing link to connect to a different customer:
+
+```json
+{
+  "linkedCustomerId": "890b9670-420c-4777-8334-3a5f380ecf99"
+}
+```
+
+---
+
 ## Supplier subsystem runbook (kinds, drafts, labels, rate cards)
 
 **Date:** 2026-03-30
