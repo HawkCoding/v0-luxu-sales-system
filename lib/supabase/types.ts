@@ -1433,6 +1433,16 @@ export type Database = {
         Args: { required_roles: Database["public"]["Enums"]["user_role"][] }
         Returns: boolean
       }
+      replace_quote_line_items: {
+        Args: {
+          p_line_items: Json
+          p_quote_id: string
+          p_subtotal: number
+          p_total: number
+          p_vat: number
+        }
+        Returns: undefined
+      }
     }
     Enums: {
       booking_purpose: "quote" | "availability" | "reservation"

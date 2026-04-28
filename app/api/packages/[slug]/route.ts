@@ -81,6 +81,16 @@ export async function PATCH(
     return NextResponse.json({ error: "Failed to validate package slug" }, { status: 500 })
   }
 
+  let children
+  try {
+    children = normalizePackageChildren(existing.packageRow.id, parsed)
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Invalid package structure" },
+      { status: 400 },
+    )
+  }
+
   let updateQuery = supabase
     .from("packages")
     .update({
@@ -121,16 +131,6 @@ export async function PATCH(
       currentUpdatedAt: latestPackageSnapshot?.updated_at ?? existing.packageRow.updated_at,
     }
     return NextResponse.json(staleVersionConflict, { status: 409 })
-  }
-
-  let children
-  try {
-    children = normalizePackageChildren(existing.packageRow.id, parsed)
-  } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Invalid package structure" },
-      { status: 400 },
-    )
   }
 
   const incomingLegIds = new Set(children.legs.map((leg) => leg.id).filter(Boolean))

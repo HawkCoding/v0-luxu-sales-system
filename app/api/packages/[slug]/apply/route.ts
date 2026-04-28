@@ -44,7 +44,7 @@ export async function POST(req: Request, { params }: RouteParams) {
 
   const { data: job, error: jobError } = await supabase
     .from("bookings")
-    .select("id, no_of_adults, no_of_children, departure_date")
+    .select("id, no_of_adults, no_of_children, child_ages, departure_date")
     .eq("id", parsed.jobId)
     .single()
 
@@ -57,21 +57,30 @@ export async function POST(req: Request, { params }: RouteParams) {
   )
 
   const lineItems: Array<{ description: string; qty: number; unitPrice: number; total: number }> = []
+  const childAges = job.child_ages ?? []
+  const infantCount = childAges.filter((age) => age <= 2).length
+  const childCount = Math.max(0, job.no_of_children - infantCount)
+
+  function addLineItem(description: string, qty: number, unitPrice: number) {
+    if (qty <= 0) return
+
+    lineItems.push({
+      description,
+      qty,
+      unitPrice,
+      total: Math.round(unitPrice * qty * 100) / 100,
+    })
+  }
 
   if (detail.fixedPricePerPerson !== null) {
     const pricePerLeg = detail.legs.length > 0
       ? detail.fixedPricePerPerson / detail.legs.length
       : detail.fixedPricePerPerson
-    const qty = job.no_of_adults
+    const travellerCount = job.no_of_adults + job.no_of_children
 
     for (const leg of detail.legs) {
       const unitPrice = Math.round(pricePerLeg * 100) / 100
-      lineItems.push({
-        description: leg.label ?? leg.supplierName,
-        qty,
-        unitPrice,
-        total: Math.round(unitPrice * qty * 100) / 100,
-      })
+      addLineItem(leg.label ?? leg.supplierName, travellerCount, unitPrice)
     }
   } else {
     for (const leg of detail.legs) {
@@ -101,14 +110,20 @@ export async function POST(req: Request, { params }: RouteParams) {
         )
       }
 
-      const qty = job.no_of_adults
-      const unitPrice = validRateCard.pricePerPerson
-      lineItems.push({
-        description: leg.label ?? leg.supplierName,
-        qty,
-        unitPrice,
-        total: Math.round(unitPrice * qty * 100) / 100,
-      })
+      const legLabel = leg.label ?? leg.supplierName
+      addLineItem(`${legLabel} - Adult`, job.no_of_adults, validRateCard.pricePerPerson)
+      addLineItem(
+        `${legLabel} - Child`,
+        childCount,
+        validRateCard.childPrice ?? validRateCard.pricePerPerson,
+      )
+      addLineItem(
+        `${legLabel} - Infant`,
+        infantCount,
+        validRateCard.infantPrice ??
+          validRateCard.childPrice ??
+          validRateCard.pricePerPerson,
+      )
     }
   }
 
