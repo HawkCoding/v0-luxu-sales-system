@@ -16,6 +16,7 @@ import { useState } from "react"
 import { toast } from "sonner"
 import { useAuth } from "@/lib/auth-context"
 import { formatDisplayDate } from "@/lib/date-format"
+import { getPipelineStageLabel } from "@/lib/types"
 
 export default function PaymentsPage() {
   const { data, isLoading, mutate } = useAllData()
@@ -378,7 +379,7 @@ export default function PaymentsPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-sm font-semibold text-foreground">{j.jobNumber}</span>
-                        <Badge variant="outline" className="text-xs">{j.stage?.replace(/_/g, " ")}</Badge>
+                        <Badge variant="outline" className="text-xs">{j.stage ? getPipelineStageLabel(j.stage) : "-"}</Badge>
                         {j.consultant && (
                           <Badge variant="default" className="text-xs font-bold">{j.consultant}</Badge>
                         )}

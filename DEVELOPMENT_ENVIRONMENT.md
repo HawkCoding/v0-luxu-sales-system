@@ -61,6 +61,8 @@ pnpm db:stop
 
 If `pnpm dev` or `pnpm local:start` reports `.next/dev/lock`, the shared launcher now handles the common stale-lock case automatically. If you still see that message, it usually means another local dev session is genuinely still running and should be stopped first.
 
+The local Next.js app is pinned to `http://localhost:3000`. Do not start a second copy of the app on fallback ports such as `3001`. If port `3000` is already in use, use the existing app running there instead of launching another instance.
+
 Common restart problems:
 
 - Docker Desktop is not running, so `supabase start` cannot bring up the local stack

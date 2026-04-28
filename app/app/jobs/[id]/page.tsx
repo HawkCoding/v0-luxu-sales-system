@@ -2,16 +2,22 @@
 
 import { useJobDetail } from "@/lib/use-data"
 import { useParams, useRouter } from "next/navigation"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ContentTransition } from "@/components/ui/content-transition"
 import { Skeleton } from "@/components/ui/skeleton"
-import { PIPELINE_STAGES, type PipelineStage } from "@/lib/types"
+import {
+  CONSULTANTS,
+  getCanonicalPipelineStage,
+  getPipelineStageLabel,
+  PIPELINE_STAGES,
+  type PipelineStage,
+} from "@/lib/types"
 import { useRole } from "@/lib/role-context"
-import { ArrowLeft, ChevronRight, ChevronLeft as ChevronLeftIcon } from "lucide-react"
+import { ArrowLeft, ChevronRight, ChevronLeft as ChevronLeftIcon, XCircle } from "lucide-react"
 import Link from "next/link"
 import { JobEnquiryTab } from "@/components/job-enquiry-tab"
 import { JobQuotesTab } from "@/components/job-quotes-tab"
@@ -19,6 +25,7 @@ import { JobPaymentsTab } from "@/components/job-payments-tab"
 import { JobCorrespondenceTab } from "@/components/job-correspondence-tab"
 import { JobDocumentsTab } from "@/components/job-documents-tab"
 import { JobAuditTab } from "@/components/job-audit-tab"
+import { CancelBookingDialog } from "@/components/cancel-booking-dialog"
 
 function JobDetailSkeleton() {
   return (
@@ -91,6 +98,7 @@ export default function JobDetailPage() {
   const { data, isLoading, error, mutate } = useJobDetail(id)
   const { can } = useRole()
   const hasLoadError = Boolean(error)
+  const [cancelOpen, setCancelOpen] = useState(false)
 
   useEffect(() => {
     if (!hasLoadError) {
@@ -104,7 +112,9 @@ export default function JobDetailPage() {
   }
 
   const { job, customer, enquiry, itineraries, quotes, payments, documents, correspondence, auditLogs } = data
-  const currentStageIdx = PIPELINE_STAGES.findIndex(s => s.key === job.stage)
+  const currentStage = getCanonicalPipelineStage(job.stage as PipelineStage)
+  const currentStageIdx = PIPELINE_STAGES.findIndex(s => s.key === currentStage)
+  const consultantName = CONSULTANTS.find((consultant) => consultant.key === job.consultant)?.name ?? job.consultant ?? undefined
 
   const moveStage = async (direction: "forward" | "back") => {
     const newIdx = direction === "forward" ? currentStageIdx + 1 : currentStageIdx - 1
@@ -129,7 +139,7 @@ export default function JobDetailPage() {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-xl font-semibold text-foreground tracking-tight" style={{ fontFamily: "var(--font-inter)" }}>{job.jobNumber}</h1>
-              <Badge variant="outline" className="text-xs">{job.stage.replace(/_/g, " ")}</Badge>
+              <Badge variant="outline" className="text-xs">{getPipelineStageLabel(job.stage)}</Badge>
               <Badge variant="secondary" className="text-xs">{job.purpose}</Badge>
             </div>
             <p className="text-sm text-muted-foreground mt-0.5">
@@ -145,6 +155,11 @@ export default function JobDetailPage() {
             <Button size="sm" disabled={currentStageIdx >= PIPELINE_STAGES.length - 1} onClick={() => moveStage("forward")}>
               Next <ChevronRight className="w-4 h-4 ml-1" />
             </Button>
+            {can("cancel:booking") && job.stage !== "lost" && job.stage !== "closed" && (
+              <Button variant="destructive" size="sm" onClick={() => setCancelOpen(true)}>
+                <XCircle className="w-4 h-4 mr-1" /> Cancel Booking
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -186,7 +201,7 @@ export default function JobDetailPage() {
           <TabsTrigger value="enquiry" className="text-xs">Enquiry</TabsTrigger>
           <TabsTrigger value="quotes" className="text-xs">Quotes ({quotes.length})</TabsTrigger>
           <TabsTrigger value="payments" className="text-xs">Payments ({payments.length})</TabsTrigger>
-          <TabsTrigger value="correspondence" className="text-xs">Correspondence ({correspondence.length})</TabsTrigger>
+          <TabsTrigger value="correspondence" className="text-xs">Emails Sent ({correspondence.length})</TabsTrigger>
           <TabsTrigger value="documents" className="text-xs">Documents ({documents.length})</TabsTrigger>
           <TabsTrigger value="audit" className="text-xs">Audit Log</TabsTrigger>
         </TabsList>
@@ -195,7 +210,7 @@ export default function JobDetailPage() {
           <JobEnquiryTab enquiry={enquiry} itineraries={itineraries} />
         </TabsContent>
         <TabsContent value="quotes">
-          <JobQuotesTab quotes={quotes} jobId={id} itineraries={itineraries} mutate={mutate} />
+          <JobQuotesTab quotes={quotes} jobId={id} itineraries={itineraries} travelDate={enquiry?.departureDate ?? null} mutate={mutate} />
         </TabsContent>
         <TabsContent value="payments">
           <JobPaymentsTab payments={payments} jobId={id} mutate={mutate} />
@@ -207,10 +222,30 @@ export default function JobDetailPage() {
           <JobDocumentsTab documents={documents} job={job} enquiry={enquiry} customer={customer} />
         </TabsContent>
         <TabsContent value="audit">
-          <JobAuditTab auditLogs={auditLogs} />
+          <JobAuditTab
+            auditLogs={auditLogs}
+            context={{
+              entities: {
+                [job.id]: {
+                  label: [job.jobNumber, `${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()]
+                    .filter(Boolean)
+                    .join(" - "),
+                  actorLabel: consultantName,
+                },
+              },
+            }}
+          />
         </TabsContent>
       </Tabs>
       </div>
+
+      <CancelBookingDialog
+        open={cancelOpen}
+        onOpenChange={setCancelOpen}
+        bookingId={id}
+        bookingNumber={job.jobNumber}
+        onCancelled={() => router.push("/app/pipeline")}
+      />
     </ContentTransition>
   )
 }

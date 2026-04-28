@@ -1,9 +1,22 @@
 import { NextResponse } from "next/server"
 import { createSessionClient } from "@/lib/supabase/server"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
+import { getAuditCutoffDate } from "@/lib/audit"
 
 export async function GET() {
   const supabase = await createSessionClient()
+  const auditCutoff = getAuditCutoffDate().toISOString()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  const { data: profile } = user
+    ? await supabase
+        .from("profiles")
+        .select("clearance_level")
+        .eq("user_id", user.id)
+        .single()
+    : { data: null }
+  const canReadAuditLogs = profile?.clearance_level === "admin" || profile?.clearance_level === "manager"
 
   const [
     { data: customers },
@@ -31,7 +44,14 @@ export async function GET() {
     supabase.from("itineraries").select("*").order("created_at", { ascending: false }),
     supabase.from("documents").select("*").order("created_at", { ascending: false }),
     supabase.from("correspondences").select("*").order("created_at", { ascending: false }),
-    supabase.from("audit_logs").select("*").order("created_at", { ascending: false }),
+    canReadAuditLogs
+      ? supabase
+          .from("audit_logs")
+          .select("id, actor, actor_user_id, entity_type, entity_id, action, before_json, after_json, meta_json, created_at")
+          .gte("created_at", auditCutoff)
+          .order("created_at", { ascending: false })
+          .limit(1000)
+      : Promise.resolve({ data: [] }),
     supabase.from("pipeline_history").select("*").order("moved_at", { ascending: false }),
     supabase.from("templates").select("*").order("key", { ascending: true }),
   ])
@@ -184,7 +204,7 @@ export async function GET() {
     auditLogs: (auditLogs ?? []).map((a) => ({
       id: a.id,
       actor: a.actor,
-      actorUserId: a.actor_user_id,
+      actorUserId: a.actor_user_id ?? undefined,
       entityType: a.entity_type,
       entityId: a.entity_id,
       action: a.action,

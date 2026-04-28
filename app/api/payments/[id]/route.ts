@@ -3,8 +3,14 @@ import { createSessionClient } from "@/lib/supabase/server"
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const body = await req.json()
   const supabase = await createSessionClient()
+  const { data: { user } } = await supabase.auth.getUser()
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  const body = await req.json()
 
   const updates: Record<string, unknown> = {}
   if (body.bookingId !== undefined) updates.booking_id = body.bookingId

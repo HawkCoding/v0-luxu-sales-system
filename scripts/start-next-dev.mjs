@@ -1,4 +1,5 @@
 import fs from "node:fs"
+import net from "node:net"
 import path from "node:path"
 import { spawn } from "node:child_process"
 import { fileURLToPath } from "node:url"
@@ -13,7 +14,8 @@ import {
 const __filename = fileURLToPath(import.meta.url)
 const scriptPath = path.resolve(__filename)
 const nextLockPath = path.join(projectRoot, ".next", "dev", "lock")
-const appPorts = [3000, 3001, 3002, 3003, 3004, 3005]
+const appPort = 3000
+const appPorts = [appPort]
 const scriptMarkers = [
   scriptPath.toLowerCase(),
   path.join("scripts", "start-next-dev.mjs").toLowerCase(),
@@ -178,11 +180,43 @@ function removeStaleNextLock() {
   }
 }
 
+function canListenOnAppPort() {
+  return new Promise((resolve) => {
+    const server = net.createServer()
+
+    server.once("error", () => {
+      resolve(false)
+    })
+
+    server.once("listening", () => {
+      server.close(() => resolve(true))
+    })
+
+    server.listen(appPort, "127.0.0.1")
+  })
+}
+
+async function ensureAppPortAvailable() {
+  const available = await canListenOnAppPort()
+
+  if (!available) {
+    throw new Error(
+      `Port ${appPort} is already in use. Use the existing app at http://localhost:${appPort}; do not start a second dev server on another port.`
+    )
+  }
+}
+
 function startNextDev(env) {
   ensureNoExistingDevSession()
   removeStaleNextLock()
 
-  const invocation = getCommandInvocation("pnpm", ["exec", "next", "dev"])
+  const invocation = getCommandInvocation("pnpm", [
+    "exec",
+    "next",
+    "dev",
+    "--port",
+    String(appPort),
+  ])
   const child = spawn(invocation.file, invocation.args, {
     cwd: projectRoot,
     env,
@@ -213,4 +247,11 @@ function startNextDev(env) {
   })
 }
 
-startNextDev(process.env)
+try {
+  await ensureAppPortAvailable()
+  startNextDev(process.env)
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error)
+  console.error(message)
+  process.exit(1)
+}

@@ -99,9 +99,11 @@ interface EditableSuiteType {
 
 interface EditableRateCard {
   id: string
-  routeId: string | null
+  routeId: string
   suiteTypeId: string
   pricePerPerson: number
+  childPrice: number | null
+  infantPrice: number | null
   currency: string
   validFrom: string
   validTo: string | null
@@ -126,6 +128,7 @@ interface SupplierFormState {
   phone: string
   website: string
   location: string
+  locationId: string | null
   notes: string
   active: boolean
   suiteTypes: EditableSuiteType[]
@@ -171,7 +174,7 @@ interface RateCardConflict {
   packageName: string
   suiteTypeId: string
   suiteTypeName: string
-  routeId: string | null
+  routeId: string
   routeName: string
   validFrom: string
 }
@@ -186,7 +189,7 @@ interface RateCardOverlapConflict {
   packageName: string
   suiteTypeId: string
   suiteTypeName: string
-  routeId: string | null
+  routeId: string
   routeName: string
   firstPeriodKey: string
   secondPeriodKey: string
@@ -247,6 +250,14 @@ function createEmptyPackage(): EditablePackage {
   }
 }
 
+function createRoutesRateGroup(): EditablePackage {
+  return {
+    ...createEmptyPackage(),
+    id: "supplier-routes-and-rates",
+    name: "Routes and Rates",
+  }
+}
+
 function buildFormState(supplier: SupplierDetail): SupplierFormState {
   const detailEmails =
     supplier.emails.length > 0
@@ -266,6 +277,7 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
     phone: supplier.phone ?? "",
     website: supplier.website ?? "",
     location: supplier.location ?? "",
+    locationId: supplier.locationId ?? null,
     notes: supplier.notes ?? "",
     active: supplier.active,
     suiteTypes: supplier.suiteTypes.map((suiteType) => ({
@@ -273,31 +285,29 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
       name: suiteType.name,
       active: suiteType.active,
     })),
-    packages: supplier.packages.map((pkg) => ({
-      id: pkg.id,
-      name: pkg.name,
-      description: pkg.description ?? "",
-      durationNights: pkg.durationNights,
-      singleSupplementPct: pkg.singleSupplementPct,
-      currency: pkg.currency,
-      active: pkg.active,
-      routes: pkg.routes.map((route) => ({
-        id: route.id,
-        name: route.name,
-        originLocationId: route.originLocationId,
-        destinationLocationId: route.destinationLocationId,
-        active: route.active,
-      })),
-      rateCards: pkg.rateCards.map((rateCard) => ({
-        id: rateCard.id,
-        routeId: rateCard.routeId,
-        suiteTypeId: rateCard.suiteTypeId,
-        pricePerPerson: rateCard.pricePerPerson,
-        currency: rateCard.currency,
-        validFrom: rateCard.validFrom,
-        validTo: rateCard.validTo,
-      })),
-    })),
+    packages: [
+      {
+        ...createRoutesRateGroup(),
+        routes: supplier.routes.map((route) => ({
+          id: route.id,
+          name: route.name,
+          originLocationId: route.originLocationId,
+          destinationLocationId: route.destinationLocationId,
+          active: route.active,
+        })),
+        rateCards: supplier.rateCards.map((rateCard) => ({
+          id: rateCard.id,
+          routeId: rateCard.routeId,
+          suiteTypeId: rateCard.suiteTypeId,
+          pricePerPerson: rateCard.pricePerPerson,
+          childPrice: rateCard.childPrice,
+          infantPrice: rateCard.infantPrice,
+          currency: rateCard.currency,
+          validFrom: rateCard.validFrom,
+          validTo: rateCard.validTo,
+        })),
+      },
+    ],
   }
 }
 
@@ -314,6 +324,7 @@ function buildDraftPayload(form: SupplierFormState) {
     phone: form.phone.trim(),
     website: form.website.trim(),
     location: form.location.trim(),
+    locationId: form.locationId ?? null,
     notes: form.notes.trim(),
     active: form.active,
     suiteTypes: form.suiteTypes.map((suiteType) => ({
@@ -321,30 +332,25 @@ function buildDraftPayload(form: SupplierFormState) {
       name: suiteType.name.trim(),
       active: suiteType.active,
     })),
-    packages: form.packages.map((pkg) => ({
-      id: pkg.id,
-      name: pkg.name.trim(),
-      description: pkg.description.trim() || null,
-      durationNights: pkg.durationNights,
-      singleSupplementPct: pkg.singleSupplementPct,
-      currency: pkg.currency.trim().toUpperCase() || "ZAR",
-      active: pkg.active,
-      routes: pkg.routes.map((route) => ({
+    routes: (form.packages[0]?.routes ?? []).map((route) => ({
         id: route.id,
         name: route.name.trim(),
         originLocationId: route.originLocationId,
         destinationLocationId: route.destinationLocationId,
         active: route.active,
-      })),
-      rateCards: pkg.rateCards.map((rateCard) => ({
-        id: rateCard.id,
-        routeId: rateCard.routeId,
-        suiteTypeId: rateCard.suiteTypeId,
-        pricePerPerson: rateCard.pricePerPerson,
-        currency: rateCard.currency.trim().toUpperCase() || pkg.currency.trim().toUpperCase() || "ZAR",
-        validFrom: rateCard.validFrom,
-        validTo: rateCard.validTo ?? "",
-      })),
+        rateCards: (form.packages[0]?.rateCards ?? [])
+          .filter((rateCard) => rateCard.routeId === route.id)
+          .map((rateCard) => ({
+            id: rateCard.id,
+            routeId: rateCard.routeId,
+            suiteTypeId: rateCard.suiteTypeId,
+            pricePerPerson: rateCard.pricePerPerson,
+            childPrice: rateCard.childPrice,
+            infantPrice: rateCard.infantPrice,
+            currency: rateCard.currency.trim().toUpperCase() || "ZAR",
+            validFrom: rateCard.validFrom,
+            validTo: rateCard.validTo ?? "",
+          })),
     })),
   }
 }
@@ -404,9 +410,11 @@ function updateRateCardPeriodDateValues(
   rateCards: EditableRateCard[],
   periodKey: string,
   updates: Partial<Pick<EditableRateCard, "validFrom" | "validTo">>,
+  routeId?: string,
 ): EditableRateCard[] {
   return rateCards.map((rateCard) =>
-    getRatePeriodKey(rateCard.validFrom, rateCard.validTo, rateCard.currency) === periodKey
+    getRatePeriodKey(rateCard.validFrom, rateCard.validTo, rateCard.currency) === periodKey &&
+    (!routeId || rateCard.routeId === routeId)
       ? { ...rateCard, ...updates }
       : rateCard,
   )
@@ -488,7 +496,7 @@ function getNextRateCardPeriodStart(pkg: EditablePackage): {
 
 function buildRateCardBusinessKey(rateCard: {
   suiteTypeId: string
-  routeId: string | null
+  routeId: string
   validFrom: string
 }) {
   return [rateCard.suiteTypeId, rateCard.routeId ?? "__null__", rateCard.validFrom].join("|")
@@ -555,22 +563,20 @@ function buildRateCardConflictMessage(
   conflict: RateCardConflict,
   vocabulary: SupplierVocabulary,
 ): string {
-  return `Duplicate rate card in "${conflict.packageName}" for ${vocabulary.suiteType.toLowerCase()} "${conflict.suiteTypeName}", ${vocabulary.route.toLowerCase()} "${conflict.routeName}", start date ${conflict.validFrom}. Keep only one row for that combination.`
+  return `Duplicate rate for ${vocabulary.suiteType.toLowerCase()} "${conflict.suiteTypeName}", ${vocabulary.route.toLowerCase()} "${conflict.routeName}", start date ${conflict.validFrom}. Keep only one row for that combination.`
 }
 
 function buildRouteDeletionConfirmationMessage({
-  packageName,
   routeName,
   linkedRateCardCount,
   vocabulary,
 }: {
-  packageName: string
   routeName: string
   linkedRateCardCount: number
   vocabulary: SupplierVocabulary
 }): string {
   const rateCardLabel = linkedRateCardCount === 1 ? "pricing row" : "pricing rows"
-  return `Delete ${vocabulary.route.toLowerCase()} "${routeName}" in "${packageName}"? This will also permanently delete ${linkedRateCardCount} linked ${rateCardLabel}.`
+  return `Delete ${vocabulary.route.toLowerCase()} "${routeName}"? This will also permanently delete ${linkedRateCardCount} linked ${rateCardLabel}.`
 }
 
 function detectRateCardDateOverlap(
@@ -618,7 +624,7 @@ function findPackageRateCardOverlapConflicts(
     string,
     Array<{
       suiteTypeId: string
-      routeId: string | null
+  routeId: string
       periodKey: string
       validFrom: string
       validTo: string | null
@@ -725,7 +731,7 @@ function buildRateCardOverlapConflictMessage(
   conflict: RateCardOverlapConflict,
   vocabulary: SupplierVocabulary,
 ): string {
-  return `Overlapping rate card periods in "${conflict.packageName}" for ${vocabulary.suiteType.toLowerCase()} "${conflict.suiteTypeName}", ${vocabulary.route.toLowerCase()} "${conflict.routeName}": ${buildRateCardDateRangeLabel(conflict.firstRange)} overlaps ${buildRateCardDateRangeLabel(conflict.secondRange)}. Adjust dates so periods do not overlap.`
+  return `Overlapping rate periods for ${vocabulary.suiteType.toLowerCase()} "${conflict.suiteTypeName}", ${vocabulary.route.toLowerCase()} "${conflict.routeName}": ${buildRateCardDateRangeLabel(conflict.firstRange)} overlaps ${buildRateCardDateRangeLabel(conflict.secondRange)}. Adjust dates so periods do not overlap.`
 }
 
 function buildRateCardOverlapWarningMessage(
@@ -828,6 +834,10 @@ function getRouteLabel(
   locationsById: Record<string, Location>,
   vocabulary: SupplierVocabulary,
 ) {
+  if (route.name.trim()) {
+    return route.name
+  }
+
   if (!vocabulary.routeHasLocations) {
     return route.name || `Unnamed ${vocabulary.route.toLowerCase()}`
   }
@@ -876,7 +886,7 @@ function PackageRateCardMatrix({
   if (pkg.routes.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-        {`No ${vocabulary.routePlural.toLowerCase()} have been configured for this ${vocabulary.package.toLowerCase()} yet.`}
+        {`No ${vocabulary.routePlural.toLowerCase()} have been configured for this supplier yet.`}
       </div>
     )
   }
@@ -884,7 +894,7 @@ function PackageRateCardMatrix({
   if (periodGroups.length === 0 || suiteTypes.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-        No rate cards have been configured for this package yet.
+        No rates have been configured for this supplier yet.
       </div>
     )
   }
@@ -938,10 +948,6 @@ function PackageRateCardMatrix({
                           period.items.find(
                             (item) =>
                               item.suiteTypeId === suiteType.id && item.routeId === route.id,
-                          ) ??
-                          period.items.find(
-                            (item) =>
-                              item.suiteTypeId === suiteType.id && item.routeId === null,
                           )
 
                         return (
@@ -989,10 +995,11 @@ interface RateCardMatrixEditorProps {
   packageIndex: number
   locationsById: Record<string, Location>
   vocabulary: SupplierVocabulary
-  onAddPeriod: (packageIndex: number) => void
-  onRemovePeriod: (packageIndex: number, periodKey: string) => void
+  onAddPeriod: (packageIndex: number, routeId: string) => void
+  onRemovePeriod: (packageIndex: number, routeId: string, periodKey: string) => void
   onUpdatePeriodField: (
     packageIndex: number,
+    routeId: string,
     periodKey: string,
     key: "validFrom" | "validTo" | "currency",
     value: string | null,
@@ -1002,11 +1009,17 @@ interface RateCardMatrixEditorProps {
     rateCardId: string,
     value: number,
   ) => void
+  onUpdateCellField: (
+    packageIndex: number,
+    rateCardId: string,
+    field: "childPrice" | "infantPrice",
+    value: number | null,
+  ) => void
   onToggleCell: (
     packageIndex: number,
     periodKey: string,
     suiteTypeId: string,
-    routeId: string | null,
+    routeId: string,
     enabled: boolean,
   ) => void
   periodFieldErrors: Set<string>
@@ -1023,14 +1036,20 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
   onRemovePeriod,
   onUpdatePeriodField,
   onUpdateCellPrice,
+  onUpdateCellField,
   onToggleCell,
   periodFieldErrors,
 }: RateCardMatrixEditorProps) {
-  const periodGroups = useMemo(
-    () => groupEditableRateCardsByPeriod(rateCards),
-    [rateCards],
-  )
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(routes[0]?.id ?? null)
+  const periodGroups = useMemo(
+    () =>
+      groupEditableRateCardsByPeriod(
+        selectedRouteId
+          ? rateCards.filter((rateCard) => rateCard.routeId === selectedRouteId)
+          : [],
+      ),
+    [rateCards, selectedRouteId],
+  )
 
   useEffect(() => {
     if (routes.length === 0) {
@@ -1056,12 +1075,17 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-sm font-semibold text-foreground">Rate cards</p>
+        <p className="text-sm font-semibold text-foreground">Rates</p>
         <Button
           type="button"
           size="sm"
           variant="outline"
-          onClick={() => onAddPeriod(packageIndex)}
+          onClick={() => {
+            if (selectedRouteId) {
+              onAddPeriod(packageIndex, selectedRouteId)
+            }
+          }}
+          disabled={!selectedRouteId}
         >
           <Plus className="mr-2 h-4 w-4" />
           Add pricing period
@@ -1097,16 +1121,12 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
 
       {periodGroups.length > 0 ? (
         periodGroups.map((period) => {
-          const hasNullRouteItems = period.items.some((item) => item.routeId === null)
           const routeColumns =
             routes.length === 0
-              ? [null]
+              ? []
               : selectedRouteId
-                ? [
-                    ...routes.filter((route) => route.id === selectedRouteId),
-                    ...(hasNullRouteItems ? [null] : []),
-                  ]
-                : [...routes, ...(hasNullRouteItems ? [null] : [])]
+                ? routes.filter((route) => route.id === selectedRouteId)
+                : routes
 
           return (
             <div key={period.key} className="rounded-lg border overflow-hidden">
@@ -1123,6 +1143,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                     onChange={(value) =>
                       onUpdatePeriodField(
                         packageIndex,
+                        selectedRouteId ?? "",
                         period.key,
                         "validFrom",
                         value ?? "",
@@ -1151,6 +1172,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                       onChange={(value) =>
                         onUpdatePeriodField(
                           packageIndex,
+                          selectedRouteId ?? "",
                           period.key,
                           "validTo",
                           value || null,
@@ -1167,6 +1189,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                     onValueChange={(value) =>
                       onUpdatePeriodField(
                         packageIndex,
+                        selectedRouteId ?? "",
                         period.key,
                         "currency",
                         value.toUpperCase(),
@@ -1181,7 +1204,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                     size="icon"
                     className={REMOVE_ICON_BUTTON_CLASS}
                     aria-label="Remove period"
-                    onClick={() => onRemovePeriod(packageIndex, period.key)}
+                    onClick={() => onRemovePeriod(packageIndex, selectedRouteId ?? "", period.key)}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
@@ -1197,12 +1220,10 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                       </th>
                       {routeColumns.map((route) => (
                         <th
-                          key={route?.id ?? "no-route"}
+                          key={route.id}
                           className="whitespace-nowrap px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
                         >
-                          {route
-                            ? getRouteLabel(route, locationsById, vocabulary)
-                            : `No ${vocabulary.route.toLowerCase()}`}
+                          {getRouteLabel(route, locationsById, vocabulary)}
                         </th>
                       ))}
                     </tr>
@@ -1212,16 +1233,16 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                       <tr key={suiteType.id} className="border-b last:border-0">
                         <td className="px-4 py-3 font-medium text-foreground">{suiteType.name}</td>
                         {routeColumns.map((route) => {
-                          const routeId = route?.id ?? null
+                          const routeId = route.id
                           const match = period.items.find(
                             (item) =>
                               item.suiteTypeId === suiteType.id && item.routeId === routeId,
                           )
 
                           return (
-                            <td key={`${suiteType.id}-${routeId ?? "no-route"}`} className="px-4 py-3">
+                            <td key={`${suiteType.id}-${routeId}`} className="px-4 py-3">
                               {match ? (
-                                <div className="flex items-center gap-2">
+                                <div className="flex flex-col gap-1.5">
                                   <NumericInput
                                     min="0"
                                     step="0.01"
@@ -1230,6 +1251,32 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                                       onUpdateCellPrice(packageIndex, match.id, value ?? 0)
                                     }
                                   />
+                                  <div className="flex items-center gap-1">
+                                    <span className="w-10 shrink-0 text-xs text-muted-foreground">Child</span>
+                                    <NumericInput
+                                      min="0"
+                                      step="0.01"
+                                      nullable
+                                      placeholder="—"
+                                      value={match.childPrice}
+                                      onValueChange={(value) =>
+                                        onUpdateCellField(packageIndex, match.id, "childPrice", value)
+                                      }
+                                    />
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                    <span className="w-10 shrink-0 text-xs text-muted-foreground">Infant</span>
+                                    <NumericInput
+                                      min="0"
+                                      step="0.01"
+                                      nullable
+                                      placeholder="—"
+                                      value={match.infantPrice}
+                                      onValueChange={(value) =>
+                                        onUpdateCellField(packageIndex, match.id, "infantPrice", value)
+                                      }
+                                    />
+                                  </div>
                                   <Button
                                     type="button"
                                     size="icon"
@@ -1281,137 +1328,13 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
         })
       ) : (
         <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-          No rate cards added yet. Add a pricing period to begin.
+          No rates added yet. Add a pricing period to begin.
         </div>
       )}
     </div>
   )
 })
 
-function PackageReadOnlyCard({
-  pkg,
-  suiteTypes,
-  locationsById,
-  vocabulary,
-}: {
-  pkg: SupplierPackage
-  suiteTypes: SupplierSuiteType[]
-  locationsById: Record<string, Location>
-  vocabulary: SupplierVocabulary
-}) {
-  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(pkg.routes[0]?.id ?? null)
-
-  useEffect(() => {
-    if (pkg.routes.length === 0) {
-      if (selectedRouteId !== null) {
-        setSelectedRouteId(null)
-      }
-      return
-    }
-
-    if (!selectedRouteId || !pkg.routes.some((route) => route.id === selectedRouteId)) {
-      setSelectedRouteId(pkg.routes[0].id)
-    }
-  }, [pkg.routes, selectedRouteId])
-
-  return (
-    <div className="rounded-lg border p-4 space-y-4">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-base font-semibold text-foreground">{pkg.name}</p>
-            {vocabulary.showDurationNights ? (
-              <Badge variant="secondary">
-                {pkg.durationNights ? `${pkg.durationNights} nights` : "Duration TBD"}
-              </Badge>
-            ) : null}
-            {vocabulary.showSingleSupplement ? (
-              <Badge variant="outline">Single supplement {pkg.singleSupplementPct}%</Badge>
-            ) : null}
-            <Badge variant="outline">{pkg.currency}</Badge>
-          </div>
-          {pkg.description && <p className="text-sm text-muted-foreground">{pkg.description}</p>}
-        </div>
-        <Badge variant={pkg.active ? "default" : "outline"}>
-          {pkg.active ? "Active" : "Inactive"}
-        </Badge>
-      </div>
-
-      <div className="space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          {vocabulary.routePlural}
-        </p>
-        {pkg.routes.length > 0 ? (
-          <div className="flex flex-wrap gap-2">
-            {pkg.routes.map((route) => {
-              const routeLabel = getRouteLabel(route, locationsById, vocabulary)
-              const isSelected = selectedRouteId === route.id
-
-              return (
-                <Button
-                  key={route.id}
-                  type="button"
-                  size="sm"
-                  variant={isSelected ? "default" : "outline"}
-                  className="h-7 rounded-full px-3 text-xs"
-                  onClick={() => setSelectedRouteId(route.id)}
-                >
-                  {routeLabel}
-                </Button>
-              )
-            })}
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            {`No ${vocabulary.routePlural.toLowerCase()} configured.`}
-          </p>
-        )}
-      </div>
-
-      <PackageRateCardMatrix
-        pkg={pkg}
-        suiteTypes={suiteTypes}
-        locationsById={locationsById}
-        selectedRouteId={selectedRouteId}
-        vocabulary={vocabulary}
-      />
-    </div>
-  )
-}
-
-function SupplierPackagesReadOnly({
-  packages,
-  suiteTypes,
-  locationsById,
-  vocabulary,
-}: {
-  packages: SupplierPackage[]
-  suiteTypes: SupplierSuiteType[]
-  locationsById: Record<string, Location>
-  vocabulary: SupplierVocabulary
-}) {
-  if (packages.length === 0) {
-    return (
-      <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-        {`No ${vocabulary.packagePlural.toLowerCase()} have been configured for this supplier yet.`}
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-4">
-      {packages.map((pkg) => (
-        <PackageReadOnlyCard
-          key={pkg.id}
-          pkg={pkg}
-          suiteTypes={suiteTypes}
-          locationsById={locationsById}
-          vocabulary={vocabulary}
-        />
-      ))}
-    </div>
-  )
-}
 
 interface SuiteTypeEditorRowProps {
   suiteType: EditableSuiteType
@@ -1502,7 +1425,7 @@ const RouteEditorRow = memo(function RouteEditorRow({
       {vocabulary.routeHasLocations ? (
         <>
           <div className="min-w-0 space-y-2">
-            <Label>Origin</Label>
+            <Label>{vocabulary.originLabel}</Label>
             <Select
               value={route.originLocationId || undefined}
               onValueChange={(value) =>
@@ -1522,7 +1445,7 @@ const RouteEditorRow = memo(function RouteEditorRow({
             </Select>
           </div>
           <div className="min-w-0 space-y-2">
-            <Label>Destination</Label>
+            <Label>{vocabulary.destinationLabel}</Label>
             <Select
               value={route.destinationLocationId || undefined}
               onValueChange={(value) =>
@@ -1562,222 +1485,6 @@ const RouteEditorRow = memo(function RouteEditorRow({
           <Trash2 className="h-4 w-4" />
         </Button>
       </div>
-    </div>
-  )
-})
-
-interface PackageEditorProps {
-  pkg: EditablePackage
-  packageIndex: number
-  suiteTypes: EditableSuiteType[]
-  locations: Location[]
-  locationsById: Record<string, Location>
-  vocabulary: SupplierVocabulary
-  periodFieldErrors: Set<string>
-  onRemovePackage: (packageIndex: number) => void
-  onUpdatePackage: (
-    packageIndex: number,
-    updater: (pkg: EditablePackage) => EditablePackage,
-  ) => void
-  onAddRoute: (packageIndex: number) => void
-  onUpdateRoute: (
-    packageIndex: number,
-    routeIndex: number,
-    key: keyof EditableRoute,
-    value: string | boolean,
-  ) => void
-  onRemoveRoute: (packageIndex: number, routeIndex: number) => void
-  onAddRateCardPeriod: (packageIndex: number) => void
-  onRemoveRateCardPeriod: (packageIndex: number, periodKey: string) => void
-  onUpdateRateCardPeriodField: (
-    packageIndex: number,
-    periodKey: string,
-    key: "validFrom" | "validTo" | "currency",
-    value: string | null,
-  ) => void
-  onUpdateRateCardPrice: (packageIndex: number, rateCardId: string, value: number) => void
-  onToggleRateCardCell: (
-    packageIndex: number,
-    periodKey: string,
-    suiteTypeId: string,
-    routeId: string | null,
-    enabled: boolean,
-  ) => void
-}
-
-const PackageEditor = memo(function PackageEditor({
-  pkg,
-  packageIndex,
-  suiteTypes,
-  locations,
-  locationsById,
-  vocabulary,
-  periodFieldErrors,
-  onRemovePackage,
-  onUpdatePackage,
-  onAddRoute,
-  onUpdateRoute,
-  onRemoveRoute,
-  onAddRateCardPeriod,
-  onRemoveRateCardPeriod,
-  onUpdateRateCardPeriodField,
-  onUpdateRateCardPrice,
-  onToggleRateCardCell,
-}: PackageEditorProps) {
-  return (
-    <div className="rounded-lg border p-4 space-y-5">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <p className="text-sm font-semibold text-foreground">{`${vocabulary.package} ${packageIndex + 1}`}</p>
-        <Button
-          type="button"
-          size="icon"
-          variant="outline"
-          className={REMOVE_ICON_BUTTON_CLASS}
-          aria-label={`Remove ${vocabulary.package.toLowerCase()}`}
-          onClick={() => onRemovePackage(packageIndex)}
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <div className="space-y-2 xl:col-span-2">
-          <Label>{`${vocabulary.package} name`}</Label>
-          <BufferedInput
-            value={pkg.name}
-            onValueChange={(value) =>
-              onUpdatePackage(packageIndex, (current) => ({
-                ...current,
-                name: value,
-              }))
-            }
-          />
-        </div>
-        {vocabulary.showDurationNights ? (
-          <div className="space-y-2">
-            <Label>Duration (nights)</Label>
-            <NumericInput
-              min="0"
-              nullable
-              value={pkg.durationNights}
-              onValueChange={(value) =>
-                onUpdatePackage(packageIndex, (current) => ({
-                  ...current,
-                  durationNights: value,
-                }))
-              }
-            />
-          </div>
-        ) : null}
-        {vocabulary.showSingleSupplement ? (
-          <div className="space-y-2">
-            <Label>Single supplement %</Label>
-            <NumericInput
-              min="0"
-              step="0.01"
-              value={pkg.singleSupplementPct}
-              onValueChange={(value) =>
-                onUpdatePackage(packageIndex, (current) => ({
-                  ...current,
-                  singleSupplementPct: value ?? 0,
-                }))
-              }
-            />
-          </div>
-        ) : null}
-        <div className="space-y-2">
-          <Label>Currency</Label>
-          <BufferedInput
-            maxLength={10}
-            value={pkg.currency}
-            onValueChange={(value) =>
-              onUpdatePackage(packageIndex, (current) => ({
-                ...current,
-                currency: value.toUpperCase(),
-              }))
-            }
-          />
-        </div>
-        <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-          <div>
-            <p className="text-sm font-medium text-foreground">Active</p>
-            <p className="text-xs text-muted-foreground">
-              {`Include this ${vocabulary.package.toLowerCase()} in supplier listings.`}
-            </p>
-          </div>
-          <Switch
-            checked={pkg.active}
-            onCheckedChange={(checked) =>
-              onUpdatePackage(packageIndex, (current) => ({
-                ...current,
-                active: checked,
-              }))
-            }
-          />
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <Label>Description</Label>
-        <BufferedTextarea
-          rows={3}
-          value={pkg.description}
-          onValueChange={(value) =>
-            onUpdatePackage(packageIndex, (current) => ({
-              ...current,
-              description: value,
-            }))
-          }
-        />
-      </div>
-
-      <Separator />
-
-      <div className="space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-sm font-semibold text-foreground">{vocabulary.routePlural}</p>
-          <Button type="button" size="sm" variant="outline" onClick={() => onAddRoute(packageIndex)}>
-            <Plus className="mr-2 h-4 w-4" />
-            {`Add ${vocabulary.route.toLowerCase()}`}
-          </Button>
-        </div>
-
-        {pkg.routes.length > 0 ? (
-          pkg.routes.map((route, routeIndex) => (
-            <RouteEditorRow
-              key={route.id}
-              route={route}
-              routeIndex={routeIndex}
-              packageIndex={packageIndex}
-              vocabulary={vocabulary}
-              locations={locations}
-              onUpdateRoute={onUpdateRoute}
-              onRemoveRoute={onRemoveRoute}
-            />
-          ))
-        ) : (
-          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-            {`No ${vocabulary.routePlural.toLowerCase()} added yet.`}
-          </div>
-        )}
-      </div>
-
-      <Separator />
-
-      <RateCardMatrixEditor
-        routes={pkg.routes}
-        rateCards={pkg.rateCards}
-        suiteTypes={suiteTypes}
-        packageIndex={packageIndex}
-        locationsById={locationsById}
-        vocabulary={vocabulary}
-        onAddPeriod={onAddRateCardPeriod}
-        onRemovePeriod={onRemoveRateCardPeriod}
-        onUpdatePeriodField={onUpdateRateCardPeriodField}
-        onUpdateCellPrice={onUpdateRateCardPrice}
-        onToggleCell={onToggleRateCardCell}
-        periodFieldErrors={periodFieldErrors}
-      />
     </div>
   )
 })
@@ -2182,11 +1889,9 @@ export function SupplierDetailView({
       const linkedRateCardCount = pkg.rateCards.filter((rateCard) => rateCard.routeId === routeId).length
       if (linkedRateCardCount > 0) {
         const vocabulary = getSupplierVocabulary(currentForm.kind)
-        const packageName = pkg.name.trim() || "Unnamed package"
         const routeName = route.name.trim() || "Unnamed route"
         const shouldDeleteRoute = window.confirm(
           buildRouteDeletionConfirmationMessage({
-            packageName,
             routeName,
             linkedRateCardCount,
             vocabulary,
@@ -2214,7 +1919,7 @@ export function SupplierDetailView({
   )
 
   const addRateCardPeriod = useCallback(
-    (packageIndex: number) => {
+    (packageIndex: number, routeId: string) => {
       updatePackage(packageIndex, (pkg) => {
         const currentForm = formRef.current
         if (!currentForm) return pkg
@@ -2230,27 +1935,37 @@ export function SupplierDetailView({
         }
 
         const currency = pkg.currency.trim().toUpperCase() || "ZAR"
-        const routes = pkg.routes.length > 0 ? pkg.routes : [{ id: null as string | null }]
-        const { nextValidFrom, previousPeriodKey } = getNextRateCardPeriodStart(pkg)
+        const route = pkg.routes.find((candidate) => candidate.id === routeId)
+        if (!route) {
+          toast.error(
+            `Add at least one ${vocabulary.route.toLowerCase()} before creating a pricing period.`,
+            { id: "rate-card-no-route" },
+          )
+          return pkg
+        }
+        const { nextValidFrom, previousPeriodKey } = getNextRateCardPeriodStart({
+          ...pkg,
+          rateCards: pkg.rateCards.filter((rateCard) => rateCard.routeId === route.id),
+        })
         const linkedPreviousValidTo = addIsoDays(nextValidFrom, -1)
         const baseRateCards =
           previousPeriodKey && linkedPreviousValidTo
             ? updateRateCardPeriodDateValues(pkg.rateCards, previousPeriodKey, {
                 validTo: linkedPreviousValidTo,
-              })
+              }, route.id)
             : pkg.rateCards
 
-        const newRateCards = availableSuiteTypes.flatMap((suiteType) =>
-          routes.map((route) => ({
+        const newRateCards = availableSuiteTypes.map((suiteType) => ({
             id: makeClientId(),
             routeId: route.id,
             suiteTypeId: suiteType.id,
             pricePerPerson: 0,
+            childPrice: null,
+            infantPrice: null,
             currency,
             validFrom: nextValidFrom,
             validTo: null,
-          })),
-        )
+          }))
 
         const nextPackage = { ...pkg, rateCards: [...baseRateCards, ...newRateCards] }
         const conflict = findPackageRateCardConflicts(nextPackage, availableSuiteTypes)[0]
@@ -2272,6 +1987,7 @@ export function SupplierDetailView({
   const updateRateCardPeriodField = useCallback(
     (
       packageIndex: number,
+      routeId: string,
       periodKey: string,
       key: "validFrom" | "validTo" | "currency",
       value: string | null,
@@ -2283,6 +1999,7 @@ export function SupplierDetailView({
         let nextPeriodKey = periodKey
         let nextRateCards = pkg.rateCards.map((rateCard) => {
           if (
+            rateCard.routeId !== routeId ||
             getRatePeriodKey(rateCard.validFrom, rateCard.validTo, rateCard.currency) !== periodKey
           ) {
             return rateCard
@@ -2322,7 +2039,11 @@ export function SupplierDetailView({
         })
 
         if (key === "validFrom" || key === "validTo") {
-          nextRateCards = applyBidirectionalPeriodDateLinking(nextRateCards, nextPeriodKey, key)
+          nextRateCards = applyBidirectionalPeriodDateLinking(
+            nextRateCards.filter((rateCard) => rateCard.routeId === routeId),
+            nextPeriodKey,
+            key,
+          ).concat(nextRateCards.filter((rateCard) => rateCard.routeId !== routeId))
         }
 
         const nextPackage = { ...pkg, rateCards: nextRateCards }
@@ -2349,11 +2070,12 @@ export function SupplierDetailView({
   )
 
   const removeRateCardPeriod = useCallback(
-    (packageIndex: number, periodKey: string) => {
+    (packageIndex: number, routeId: string, periodKey: string) => {
       updatePackage(packageIndex, (pkg) => ({
         ...pkg,
         rateCards: pkg.rateCards.filter(
           (rateCard) =>
+            rateCard.routeId !== routeId ||
             getRatePeriodKey(rateCard.validFrom, rateCard.validTo, rateCard.currency) !== periodKey,
         ),
       }))
@@ -2375,12 +2097,31 @@ export function SupplierDetailView({
     [updatePackage],
   )
 
+  const updateRateCardField = useCallback(
+    (
+      packageIndex: number,
+      rateCardId: string,
+      field: "childPrice" | "infantPrice",
+      value: number | null,
+    ) => {
+      startTransition(() => {
+        updatePackage(packageIndex, (pkg) => ({
+          ...pkg,
+          rateCards: pkg.rateCards.map((rateCard) =>
+            rateCard.id === rateCardId ? { ...rateCard, [field]: value } : rateCard,
+          ),
+        }))
+      })
+    },
+    [updatePackage],
+  )
+
   const toggleRateCardCell = useCallback(
     (
       packageIndex: number,
       periodKey: string,
       suiteTypeId: string,
-      routeId: string | null,
+      routeId: string,
       enabled: boolean,
     ) => {
       updatePackage(packageIndex, (pkg) => {
@@ -2404,6 +2145,8 @@ export function SupplierDetailView({
                 routeId,
                 suiteTypeId,
                 pricePerPerson: 0,
+                childPrice: null,
+                infantPrice: null,
                 currency: period.currency,
                 validFrom: period.validFrom,
                 validTo: period.validTo,
@@ -2598,40 +2341,43 @@ export function SupplierDetailView({
       }))
     const suiteTypeIds = new Set(cleanedSuiteTypes.map((suiteType) => suiteType.id))
 
-    const meaningfulPackages = form.packages.filter(
-      (pkg) =>
-        pkg.name.trim() ||
-        pkg.description.trim() ||
-        pkg.routes.length > 0 ||
-        pkg.rateCards.length > 0,
-    )
+    const routeRateGroup = form.packages[0] ?? createRoutesRateGroup()
+    const meaningfulPackages = [
+      {
+        ...routeRateGroup,
+        routes: routeRateGroup.routes.filter(
+          (route) =>
+            route.name.trim() ||
+            route.originLocationId ||
+            route.destinationLocationId ||
+            routeRateGroup.rateCards.some((rateCard) => rateCard.routeId === route.id),
+        ),
+        rateCards: routeRateGroup.rateCards,
+      },
+    ]
 
     const hasRateCards = meaningfulPackages.some((pkg) => pkg.rateCards.length > 0)
     if (hasRateCards && cleanedSuiteTypes.length === 0) {
       toast.error(
-        `Add at least one supplier ${vocabulary.suiteType.toLowerCase()} before saving rate cards.`,
+        `Add at least one supplier ${vocabulary.suiteType.toLowerCase()} before saving rates.`,
       )
       return
     }
 
     for (const pkg of meaningfulPackages) {
-      if (!pkg.name.trim()) {
-        toast.error(`Every ${vocabulary.package.toLowerCase()} needs a name before saving.`)
-        return
-      }
       for (const route of pkg.routes) {
         const needsLocations = vocabulary.routeHasLocations
         if (
           !route.name.trim() ||
           (needsLocations && (!route.originLocationId || !route.destinationLocationId))
         ) {
-          toast.error(`Complete all ${vocabulary.route.toLowerCase()} fields for "${pkg.name}".`)
+          toast.error(`Complete all ${vocabulary.route.toLowerCase()} fields before saving.`)
           return
         }
       }
       for (const rateCard of pkg.rateCards) {
         if (!rateCard.suiteTypeId || !rateCard.validFrom || !suiteTypeIds.has(rateCard.suiteTypeId)) {
-          toast.error(`Complete all rate card fields for "${pkg.name}".`)
+          toast.error("Complete all rate fields before saving.")
           return
         }
       }
@@ -2653,31 +2399,28 @@ export function SupplierDetailView({
       return
     }
 
-    const cleanedPackages = meaningfulPackages.map((pkg) => ({
-      id: pkg.id,
-      name: pkg.name.trim(),
-      description: pkg.description.trim() || null,
-      durationNights: pkg.durationNights,
-      singleSupplementPct: pkg.singleSupplementPct,
-      currency: pkg.currency.trim().toUpperCase() || "ZAR",
-      active: pkg.active,
-      routes: pkg.routes.map((route) => ({
+    const cleanedRoutes = routeRateGroup.routes
+      .filter((route) => route.name.trim())
+      .map((route) => ({
         id: route.id,
         name: route.name.trim(),
         originLocationId: route.originLocationId,
         destinationLocationId: route.destinationLocationId,
         active: route.active,
-      })),
-      rateCards: pkg.rateCards.map((rateCard) => ({
-        id: rateCard.id,
-        routeId: rateCard.routeId,
-        suiteTypeId: rateCard.suiteTypeId,
-        pricePerPerson: rateCard.pricePerPerson,
-        currency: rateCard.currency.trim().toUpperCase() || pkg.currency.trim().toUpperCase() || "ZAR",
-        validFrom: rateCard.validFrom,
-        validTo: rateCard.validTo ?? "",
-      })),
-    }))
+        rateCards: routeRateGroup.rateCards
+          .filter((rateCard) => rateCard.routeId === route.id)
+          .map((rateCard) => ({
+            id: rateCard.id,
+            routeId: rateCard.routeId,
+            suiteTypeId: rateCard.suiteTypeId,
+            pricePerPerson: rateCard.pricePerPerson,
+            childPrice: rateCard.childPrice,
+            infantPrice: rateCard.infantPrice,
+            currency: rateCard.currency.trim().toUpperCase() || "ZAR",
+            validFrom: rateCard.validFrom,
+            validTo: rateCard.validTo ?? "",
+          })),
+      }))
 
     if (!tryAcquirePatchWriteLock()) {
       toast.error("A supplier save is already in progress. Please wait a moment and try again.")
@@ -2698,10 +2441,11 @@ export function SupplierDetailView({
           phone: form.phone.trim(),
           website: form.website.trim(),
           location: form.location.trim(),
+          locationId: form.locationId ?? null,
           notes: form.notes.trim(),
           active: form.active,
           suiteTypes: cleanedSuiteTypes,
-          packages: cleanedPackages,
+          routes: cleanedRoutes,
           expectedUpdatedAt:
             expectedUpdatedAtRef.current ?? supplier?.updatedAt,
         }),
@@ -2742,7 +2486,7 @@ export function SupplierDetailView({
           typedPayload.error.toLowerCase().includes("route with this name already exists")
         if (isRouteNameConflict) {
           toast.error(
-            `Duplicate ${vocabulary.route.toLowerCase()} name in the same ${vocabulary.package.toLowerCase()}. Rename one and try again.`,
+            `Duplicate ${vocabulary.route.toLowerCase()} name for this supplier. Rename one and try again.`,
           )
           return
         }
@@ -2875,6 +2619,21 @@ export function SupplierDetailView({
   }
 
   const activeVocabulary = getSupplierVocabulary(isEditing ? form.kind : supplier.kind)
+  const routeRateGroup = form?.packages[0] ?? createRoutesRateGroup()
+  const supplierRouteRatePackage: SupplierPackage = {
+    id: "supplier-routes-and-rates",
+    slug: "supplier-routes-and-rates",
+    name: "Routes and Rates",
+    description: null,
+    durationNights: null,
+    singleSupplementPct: 0,
+    currency: "ZAR",
+    active: true,
+    createdAt: supplier.createdAt,
+    updatedAt: supplier.updatedAt,
+    routes: supplier.routes,
+    rateCards: supplier.rateCards,
+  }
   const supplierEmailsForDisplay =
     supplier.emails.length > 0
       ? supplier.emails
@@ -3038,7 +2797,7 @@ export function SupplierDetailView({
           <Card className="border-dashed">
             <CardContent className="p-4 text-sm text-muted-foreground">
               Supplier details are view-only for your role. Editing supplier fields,
-              {` ${activeVocabulary.packagePlural.toLowerCase()}, ${activeVocabulary.routePlural.toLowerCase()}, ${activeVocabulary.suiteTypePlural.toLowerCase()}, and rate cards is restricted to managers`}
+              {` ${activeVocabulary.routePlural.toLowerCase()}, ${activeVocabulary.suiteTypePlural.toLowerCase()}, and rates are restricted to managers`}
               and admins.
             </CardContent>
           </Card>
@@ -3100,12 +2859,34 @@ export function SupplierDetailView({
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="supplier-location">Location</Label>
+                    <Label htmlFor="supplier-location">Location (text)</Label>
                     <BufferedInput
                       id="supplier-location"
                       value={form.location}
                       onValueChange={(value) => updateField("location", value)}
                     />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="supplier-location-city">City</Label>
+                    <Select
+                      value={form.locationId ?? "none"}
+                      onValueChange={(value) =>
+                        updateField("locationId", value === "none" ? null : value)
+                      }
+                    >
+                      <SelectTrigger id="supplier-location-city">
+                        <SelectValue placeholder="Select city" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">— None —</SelectItem>
+                        {locations.map((loc) => (
+                          <SelectItem key={loc.id} value={loc.id}>
+                            {loc.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
 
@@ -3144,6 +2925,14 @@ export function SupplierDetailView({
                   <InfoItem label="Phone" value={supplier.phone} />
                   <InfoItem label="Website" value={supplier.website} />
                   <InfoItem label="Location" value={supplier.location} />
+                  <InfoItem
+                    label="City"
+                    value={
+                      supplier.locationId
+                        ? (locations.find((loc) => loc.id === supplier.locationId)?.name ?? null)
+                        : null
+                    }
+                  />
                   <InfoItem
                     label="Last updated"
                     value={formatDisplayDate(supplier.updatedAt)}
@@ -3215,9 +3004,9 @@ export function SupplierDetailView({
                   </p>
                 </div>
                 {isEditing && (
-                  <Button variant="outline" size="sm" onClick={addPackage}>
+                  <Button variant="outline" size="sm" onClick={() => addRoute(0)}>
                     <Plus className="mr-2 h-4 w-4" />
-                    {`Add ${activeVocabulary.package.toLowerCase()}`}
+                    {`Add ${activeVocabulary.route.toLowerCase()}`}
                   </Button>
                 )}
               </div>
@@ -3229,9 +3018,7 @@ export function SupplierDetailView({
                     <p className="text-sm font-semibold text-foreground">
                       {`Supplier ${activeVocabulary.suiteTypePlural.toLowerCase()}`}
                     </p>
-                    <p className="text-xs text-muted-foreground">
-                      {`Shared across all ${activeVocabulary.packagePlural.toLowerCase()} and used by rate cards.`}
-                    </p>
+                    <p className="text-xs text-muted-foreground">Used by all route rate cards.</p>
                   </div>
                   {isEditing && (
                     <Button type="button" size="sm" variant="outline" onClick={addSuiteType}>
@@ -3275,45 +3062,81 @@ export function SupplierDetailView({
 
               <Separator />
 
-              {isEditing ? (
-                form.packages.length > 0 ? (
-                  form.packages.map((pkg, packageIndex) => (
-                    <PackageEditor
-                      key={pkg.id}
-                      pkg={pkg}
-                      packageIndex={packageIndex}
-                      suiteTypes={form.suiteTypes}
-                      locations={locations}
-                      locationsById={locationsById}
-                      vocabulary={activeVocabulary}
-                      periodFieldErrors={
-                        overlapFieldErrorsByPackage.get(packageIndex) ?? EMPTY_PERIOD_FIELD_ERRORS
-                      }
-                      onRemovePackage={removePackage}
-                      onUpdatePackage={updatePackage}
-                      onAddRoute={addRoute}
-                      onUpdateRoute={updateRoute}
-                      onRemoveRoute={removeRoute}
-                      onAddRateCardPeriod={addRateCardPeriod}
-                      onRemoveRateCardPeriod={removeRateCardPeriod}
-                      onUpdateRateCardPeriodField={updateRateCardPeriodField}
-                      onUpdateRateCardPrice={updateRateCardPrice}
-                      onToggleRateCardCell={toggleRateCardCell}
-                    />
-                  ))
-                ) : (
-                  <div className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-                    {`No ${activeVocabulary.packagePlural.toLowerCase()} added yet.`}
+              <div className="rounded-lg border p-4 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-foreground">
+                    {activeVocabulary.routePlural}
+                  </p>
+                  {isEditing && (
+                    <Button type="button" size="sm" variant="outline" onClick={() => addRoute(0)}>
+                      <Plus className="mr-2 h-4 w-4" />
+                      {`Add ${activeVocabulary.route.toLowerCase()}`}
+                    </Button>
+                  )}
+                </div>
+
+                {isEditing ? (
+                  routeRateGroup.routes.length > 0 ? (
+                    routeRateGroup.routes.map((route, routeIndex) => (
+                      <RouteEditorRow
+                        key={route.id}
+                        route={route}
+                        routeIndex={routeIndex}
+                        packageIndex={0}
+                        vocabulary={activeVocabulary}
+                        locations={locations}
+                        onUpdateRoute={updateRoute}
+                        onRemoveRoute={removeRoute}
+                      />
+                    ))
+                  ) : (
+                    <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                      {`No ${activeVocabulary.routePlural.toLowerCase()} added yet.`}
+                    </div>
+                  )
+                ) : supplier.routes.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {supplier.routes.map((route) => (
+                      <Badge key={route.id} variant="outline">
+                        {getRouteLabel(route, locationsById, activeVocabulary)}
+                      </Badge>
+                    ))}
                   </div>
-                )
+                ) : (
+                  <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                    {`No ${activeVocabulary.routePlural.toLowerCase()} configured.`}
+                  </div>
+                )}
+              </div>
+
+              <Separator />
+
+              {isEditing ? (
+                <RateCardMatrixEditor
+                  routes={routeRateGroup.routes}
+                  rateCards={routeRateGroup.rateCards}
+                  suiteTypes={form.suiteTypes}
+                  packageIndex={0}
+                  locationsById={locationsById}
+                  vocabulary={activeVocabulary}
+                  onAddPeriod={addRateCardPeriod}
+                  onRemovePeriod={removeRateCardPeriod}
+                  onUpdatePeriodField={updateRateCardPeriodField}
+                  onUpdateCellPrice={updateRateCardPrice}
+                  onUpdateCellField={updateRateCardField}
+                  onToggleCell={toggleRateCardCell}
+                  periodFieldErrors={overlapFieldErrorsByPackage.get(0) ?? EMPTY_PERIOD_FIELD_ERRORS}
+                />
               ) : (
-                <SupplierPackagesReadOnly
-                  packages={supplier.packages}
+                <PackageRateCardMatrix
+                  pkg={supplierRouteRatePackage}
                   suiteTypes={supplier.suiteTypes}
                   locationsById={locationsById}
+                  selectedRouteId={supplier.routes[0]?.id ?? null}
                   vocabulary={activeVocabulary}
                 />
               )}
+
             </CardContent>
           </Card>
       </div>

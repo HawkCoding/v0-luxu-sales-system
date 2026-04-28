@@ -6,16 +6,15 @@ import { RoleProvider, useRole } from "@/lib/role-context"
 import { AuthProvider, useAuth } from "@/lib/auth-context"
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
 import {
   LayoutDashboard, Kanban, Briefcase, Users,
-  CreditCard, FolderOpen, Mail, Package, CalendarCheck,
+  TicketsPlane, FolderOpen, Mail, Hotel, CalendarCheck,
   FileCode, BarChart3, ClipboardList, Settings, Search,
-  ChevronLeft, Menu, LogOut, Sun, Moon,
+  ChevronDown, ChevronLeft, ChevronUp, Menu, LogOut, Sun, Moon,
 } from "lucide-react"
-import { useState, useEffect, type ReactNode } from "react"
+import { useState, useEffect, useRef, type ReactNode } from "react"
 import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
 import { ConnectionErrorBanner } from "@/components/connection-error-banner"
@@ -29,10 +28,10 @@ const navItems = [
   { label: "Pipeline", href: "/app/pipeline", icon: Kanban, permission: "view:pipeline" },
   { label: "Bookings", href: "/app/bookings", icon: CalendarCheck, permission: "view:jobs" },
   { label: "Customers", href: "/app/customers", icon: Users, permission: "view:customers" },
-  { label: "Suppliers", href: "/app/suppliers", icon: Package, permission: "view:suppliers" },
-  { label: "Payments Rcvd", href: "/app/payments", icon: CreditCard, permission: "view:payments" },
+  { label: "Suppliers", href: "/app/suppliers", icon: Hotel, permission: "view:suppliers" },
+  { label: "Packages", href: "/app/packages", icon: TicketsPlane, permission: "view:packages" },
   { label: "Documents", href: "/app/documents", icon: FolderOpen, permission: "view:documents" },
-  { label: "Correspondence", href: "/app/correspondence", icon: Mail, permission: "view:correspondence" },
+  { label: "Emails Sent", href: "/app/correspondence", icon: Mail, permission: "view:correspondence" },
   { type: "separator" as const, label: "Admin" },
   { label: "Templates", href: "/app/templates", icon: FileCode, permission: "view:templates" },
   { type: "separator" as const, label: "Manager" },
@@ -52,6 +51,14 @@ function AppShell({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [slowLoad, setSlowLoad] = useState(false)
+  const [sidebarScrollState, setSidebarScrollState] = useState({
+    hasOverflow: false,
+    canScrollUp: false,
+    canScrollDown: false,
+    bottomPadding: 0,
+  })
+  const sidebarScrollViewportRef = useRef<HTMLDivElement | null>(null)
+  const sidebarNavRef = useRef<HTMLElement | null>(null)
   const isDarkMode = theme === "dark"
 
   const enquiriesCount = data?.bookings?.filter((b: any) => b.stage === "enquiry").length || 0
@@ -77,6 +84,92 @@ function AppShell({ children }: { children: ReactNode }) {
     }
   }, [user, role, setRole])
 
+  useEffect(() => {
+    const viewport = sidebarScrollViewportRef.current
+    const nav = sidebarNavRef.current
+
+    if (!viewport || !nav) {
+      return
+    }
+
+    let frameId = 0
+
+    const updateScrollState = () => {
+      const viewportHeight = viewport.clientHeight
+      const navChildren = Array.from(nav.children)
+      const lastNavItem = [...navChildren]
+        .reverse()
+        .find((child) => child.tagName === "A") as HTMLAnchorElement | undefined
+      const lastNavItemHeight = lastNavItem?.offsetHeight ?? 0
+      const bottomPadding = Math.max(0, viewportHeight - lastNavItemHeight - 8)
+      const maxScrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+
+      setSidebarScrollState({
+        hasOverflow: maxScrollTop > 4,
+        canScrollUp: viewport.scrollTop > 4,
+        canScrollDown: viewport.scrollTop < maxScrollTop - 4,
+        bottomPadding,
+      })
+    }
+
+    const scheduleScrollStateUpdate = () => {
+      cancelAnimationFrame(frameId)
+      frameId = window.requestAnimationFrame(() => {
+        updateScrollState()
+      })
+    }
+
+    scheduleScrollStateUpdate()
+
+    viewport.addEventListener("scroll", scheduleScrollStateUpdate, { passive: true })
+
+    const resizeObserver = new ResizeObserver(() => {
+      scheduleScrollStateUpdate()
+    })
+
+    resizeObserver.observe(viewport)
+    resizeObserver.observe(nav)
+
+    const mutationObserver = new MutationObserver(() => {
+      scheduleScrollStateUpdate()
+    })
+
+    mutationObserver.observe(nav, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      characterData: true,
+    })
+
+    window.addEventListener("resize", scheduleScrollStateUpdate)
+
+    return () => {
+      cancelAnimationFrame(frameId)
+      viewport.removeEventListener("scroll", scheduleScrollStateUpdate)
+      window.removeEventListener("resize", scheduleScrollStateUpdate)
+      resizeObserver.disconnect()
+      mutationObserver.disconnect()
+    }
+  }, [collapsed, mobileOpen, pathname, role, enquiriesCount])
+
+  const scrollSidebarBy = (direction: "up" | "down") => {
+    const viewport = sidebarScrollViewportRef.current
+
+    if (!viewport) {
+      return
+    }
+
+    const scrollStep = Math.max(120, Math.round(viewport.clientHeight * 0.45))
+    const nextTop = direction === "down"
+      ? viewport.scrollTop + scrollStep
+      : viewport.scrollTop - scrollStep
+
+    viewport.scrollTo({
+      top: nextTop,
+      behavior: "smooth",
+    })
+  }
+
   const handleLogout = async () => {
     await logout()
     window.location.replace("/login")
@@ -89,7 +182,7 @@ function AppShell({ children }: { children: ReactNode }) {
   if (!mounted || authLoading || !user) {
     return (
       <div
-        className="flex h-screen items-center justify-center overflow-hidden bg-app-canvas"
+        className="flex h-svh items-center justify-center overflow-hidden bg-app-canvas"
       >
         <div className="space-y-3 text-center">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 animate-pulse">
@@ -108,18 +201,18 @@ function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div
-      className="flex h-screen overflow-hidden bg-app-canvas"
+      className="flex h-svh overflow-hidden bg-app-canvas"
     >
       {mobileOpen && (
         <div className="fixed inset-0 bg-foreground/20 z-40 lg:hidden" onClick={() => setMobileOpen(false)} />
       )}
 
       <aside className={cn(
-        "h-screen bg-bg-surface border-r border-stroke flex flex-col transition-all duration-200 z-50",
+        "h-svh bg-bg-surface border-r border-stroke flex flex-col transition-all duration-200 z-50",
         collapsed ? "w-16" : "w-60",
         mobileOpen ? "fixed inset-y-0 left-0 w-60" : "hidden lg:flex",
       )}>
-        <div className="h-14 flex items-center px-4 border-b border-stroke">
+        <div className="app-header h-14 flex items-center px-4 border-b border-stroke">
           {!collapsed && (
             <Link href="/app" className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
@@ -134,12 +227,20 @@ function AppShell({ children }: { children: ReactNode }) {
             </div>
           )}
         </div>
-        <ScrollArea className="flex-1 py-2">
-          <nav className="px-2 space-y-0.5">
+        <div className="relative flex-1 min-h-0 py-2">
+          <div
+            ref={sidebarScrollViewportRef}
+            className="h-full overflow-y-auto overflow-x-hidden scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            <nav
+              ref={sidebarNavRef}
+              className="space-y-0.5 px-2"
+              style={{ paddingBottom: `${sidebarScrollState.bottomPadding}px` }}
+            >
             {navItems.map((item, i) => {
               if ("type" in item && item.type === "separator") {
                 return (
-                  <div key={i} className="pt-4 pb-1 px-2">
+                  <div key={i} className="sidebar-nav-section pt-4 pb-1 px-2">
                     {!collapsed && <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">{item.label}</p>}
                     {collapsed && <Separator />}
                   </div>
@@ -156,7 +257,7 @@ function AppShell({ children }: { children: ReactNode }) {
                   href={item.href!}
                   onClick={() => setMobileOpen(false)}
                   className={cn(
-                    "flex items-center gap-3 px-3 py-2.5 rounded-lg text-[15px] font-medium transition-all",
+                    "sidebar-nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg text-[15px] font-medium transition-all",
                     active ? "bg-accent-hover text-white shadow-sm" : "text-text-muted hover:text-text-heading hover:bg-bg-raised",
                     collapsed && "justify-center px-0",
                   )}
@@ -176,22 +277,55 @@ function AppShell({ children }: { children: ReactNode }) {
                 </Link>
               )
             })}
-          </nav>
-        </ScrollArea>
+            </nav>
+          </div>
+          {sidebarScrollState.hasOverflow && (
+            <>
+              {sidebarScrollState.canScrollUp && (
+                <div className="pointer-events-none absolute inset-x-0 top-2 z-10 flex justify-center px-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => scrollSidebarBy("up")}
+                    aria-label="Scroll sidebar up"
+                    className="pointer-events-auto h-6 w-7 rounded-md p-0 text-text-muted border border-stroke/40 bg-bg-surface/50 opacity-70 hover:opacity-100 transition-opacity duration-150"
+                  >
+                    <ChevronUp className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+              {sidebarScrollState.canScrollDown && (
+                <div className="pointer-events-none absolute inset-x-0 bottom-2 z-10 flex justify-center px-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => scrollSidebarBy("down")}
+                    aria-label="Scroll sidebar down"
+                    className="pointer-events-auto h-6 w-7 rounded-md p-0 text-text-muted border border-stroke/40 bg-bg-surface/50 opacity-70 hover:opacity-100 transition-opacity duration-150"
+                  >
+                    <ChevronDown className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
         <div className="border-t border-stroke p-2 hidden lg:block space-y-2">
           <div className={cn("text-center", collapsed && "text-[10px]")}>
             <Badge variant="outline" className={cn("font-mono text-[11px] text-text-muted", collapsed && "px-1.5 py-0 h-5")}>
               v{APP_VERSION}
             </Badge>
           </div>
-          <Button variant="ghost" size="sm" onClick={() => setCollapsed(!collapsed)} className="w-full">
+          <Button variant="ghost" size="sm" onClick={() => setCollapsed(!collapsed)} className="w-full border border-stroke/40 bg-bg-surface/50">
             <ChevronLeft className={cn("w-4 h-4 transition-transform", collapsed && "rotate-180")} />
           </Button>
         </div>
       </aside>
 
       <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-14 border-b border-stroke bg-bg-surface flex items-center justify-between px-4 gap-4">
+        <header className="app-header h-14 border-b border-stroke bg-bg-surface flex items-center justify-between px-4 gap-4">
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="sm" className="lg:hidden" onClick={() => setMobileOpen(true)}>
               <Menu className="w-4 h-4" />

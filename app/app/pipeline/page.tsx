@@ -2,10 +2,17 @@
 
 import { usePipeline, useAllData } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
-import { PIPELINE_STAGES, KANBAN_STAGES, CONSULTANTS, type PipelineStage, type ConsultantAbbreviation } from "@/lib/types"
+import {
+  getCanonicalPipelineStage,
+  getPipelineStageLabel,
+  PIPELINE_STAGES,
+  KANBAN_STAGES,
+  CONSULTANTS,
+  type PipelineStage,
+  type ConsultantAbbreviation,
+} from "@/lib/types"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -22,9 +29,12 @@ import { Switch } from "@/components/ui/switch"
 import { downloadAuditLog } from "@/lib/export-audit"
 import { toast } from "sonner"
 import { parseEmailDraft, type ParsedDraft } from "@/lib/import/parseEmailDraft"
+import { buildEnquiryImportPayload } from "@/lib/import/enquiry-payload"
 import { ReviewImportedDraftModal } from "@/components/review-imported-draft-modal"
 import { RequiredEmailModal, type RequiredEmail } from "@/components/required-email-modal"
 import { useAuth } from "@/lib/auth-context"
+import { useRouter } from "next/navigation"
+import { ProgressDialog } from "@/components/progress-dialog"
 
 interface PipelineJob {
   id: string
@@ -47,7 +57,17 @@ const PAYMENT_COLORS: Record<string, string> = {
   blue: "bg-payment-blue",
 }
 
+const ENQUIRY_SAVE_STEPS = [
+  "Reading customer details",
+  "Saving customer record",
+  "Creating job",
+  "Saving travel details",
+  "Finalising enquiry",
+  "Opening job",
+]
+
 export default function PipelinePage() {
+  const router = useRouter()
   const { data: jobs, isLoading: loadingJobs, error: jobsError, mutate: mutateJobs } = usePipeline()
   const { data, isLoading: loadingAll, error: allDataError, mutate: mutateAll } = useAllData()
   const { can } = useRole()
@@ -61,6 +81,11 @@ export default function PipelinePage() {
   const [pasting, setPasting] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [parsedDraft, setParsedDraft] = useState<ParsedDraft | null>(null)
+  const [saveProgressOpen, setSaveProgressOpen] = useState(false)
+  const [saveProgress, setSaveProgress] = useState(0)
+  const [saveStepIndex, setSaveStepIndex] = useState(0)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [failedDraft, setFailedDraft] = useState<ParsedDraft | null>(null)
   const [showAllItems, setShowAllItems] = useState(false)
   const [consultantFilter, setConsultantFilter] = useState<"all" | ConsultantAbbreviation>("all")
   
@@ -69,6 +94,20 @@ export default function PipelinePage() {
   const [requiredEmail, setRequiredEmail] = useState<RequiredEmail | null>(null)
   const [pendingJobId, setPendingJobId] = useState<string | null>(null)
   const [pendingToStage, setPendingToStage] = useState<PipelineStage | null>(null)
+
+  useEffect(() => {
+    if (!saveProgressOpen || saveError) return
+
+    const timer = window.setInterval(() => {
+      setSaveProgress((current) => Math.min(current + 14, 94))
+      setSaveStepIndex((current) => {
+        const maxOptimisticStep = ENQUIRY_SAVE_STEPS.length - 2
+        return current < maxOptimisticStep ? current + 1 : current
+      })
+    }, 450)
+
+    return () => window.clearInterval(timer)
+  }, [saveError, saveProgressOpen])
 
   // Load showAllItems setting from localStorage
   useEffect(() => {
@@ -111,14 +150,14 @@ export default function PipelinePage() {
       if (!hasInvoice) {
         return {
           type: "invoice",
-          stageName: "Waiting on Deposit",
+          stageName: "Deposit Invoice Sent",
           subject: "Invoice / Deposit Request",
           bodyPreview: "Thank you for your enquiry. Please find attached the deposit invoice for your booking. A 25% deposit is required to confirm your reservation."
         }
       }
     }
     
-    // Check for Reservation Confirmation when moving to accepted
+    // Check for quotation confirmation when moving to accepted
     if (toStage === "accepted") {
       const hasReservation = correspondence.some((c: any) => 
         c.subject.toLowerCase().includes("reservation") || c.subject.toLowerCase().includes("confirmation")
@@ -126,7 +165,7 @@ export default function PipelinePage() {
       if (!hasReservation) {
         return {
           type: "reservation",
-          stageName: "Reservation",
+          stageName: "Quote Accepted",
           subject: "Reservation Confirmation",
           bodyPreview: "We are pleased to confirm your reservation. Your booking has been confirmed and we look forward to welcoming you aboard."
         }
@@ -224,20 +263,6 @@ export default function PipelinePage() {
       body: JSON.stringify({ stage: pendingToStage }),
     })
 
-    // 4. Log stage change audit
-    await fetch("/api/audit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        actor: user?.name || "System",
-        entityType: "job",
-        entityId: pendingJobId,
-        action: "stage_change",
-        beforeJson: JSON.stringify({ stage: job.stage }),
-        afterJson: JSON.stringify({ stage: pendingToStage }),
-      }),
-    })
-
     // Refresh data
     mutateJobs()
     mutateAll()
@@ -271,6 +296,68 @@ export default function PipelinePage() {
     setReviewOpen(false)
     setPasteText("")
     setParsedDraft(null)
+  }
+
+  const handleSaveAndOpen = async (draft: ParsedDraft) => {
+    setParsedDraft(draft)
+    setReviewOpen(false)
+    setSaveError(null)
+    setFailedDraft(null)
+    setSaveProgress(5)
+    setSaveStepIndex(0)
+    setSaveProgressOpen(true)
+
+    try {
+      const response = await fetch("/api/enquiries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildEnquiryImportPayload(draft)),
+      })
+
+      const payload: unknown = await response.json().catch(() => null)
+      if (!response.ok) {
+        const message =
+          payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string"
+            ? payload.error
+            : "Please review the enquiry and try again."
+        throw new Error(message)
+      }
+
+      const jobId =
+        payload && typeof payload === "object" && "jobId" in payload && typeof payload.jobId === "string"
+          ? payload.jobId
+          : null
+
+      if (!jobId) {
+        throw new Error("The enquiry was saved, but the new job could not be opened.")
+      }
+
+      setSaveStepIndex(ENQUIRY_SAVE_STEPS.length - 1)
+      setSaveProgress(100)
+      window.setTimeout(() => {
+        router.push(`/app/bookings/${jobId}`)
+      }, 350)
+    } catch (error) {
+      setFailedDraft(draft)
+      setSaveError(error instanceof Error ? error.message : "Please review the enquiry and try again.")
+    }
+  }
+
+  const handleBackToReviewAfterSaveError = () => {
+    if (failedDraft) {
+      setParsedDraft(failedDraft)
+    }
+    setSaveProgressOpen(false)
+    setSaveError(null)
+    setReviewOpen(true)
+  }
+
+  const handleDismissSaveError = () => {
+    setSaveProgressOpen(false)
+    setSaveError(null)
+    setFailedDraft(null)
+    setParsedDraft(null)
+    setPasteText("")
   }
 
   if (loadingJobs || loadingAll) {
@@ -315,7 +402,7 @@ export default function PipelinePage() {
     ? (jobs as PipelineJob[])
     : ((jobs as PipelineJob[]) || []).filter((j: any) => j.consultant === consultantFilter)
 
-  // Group jobs by kanban stages (merging quoted and quote_sent)
+  // Group jobs by configured Kanban stages
   const grouped = KANBAN_STAGES.reduce(
     (acc, stage) => {
       acc[stage.key] = (filteredJobs || []).filter((j) => stage.includes.includes(j.stage))
@@ -345,7 +432,7 @@ export default function PipelinePage() {
 
   const filtered = enriched.filter((b: any) => {
     const matchSearch = !search || [b.bookingNumber, b.customerName, b.direction].some((f: string) => f?.toLowerCase().includes(search.toLowerCase()))
-    const matchStage = stageFilter === "all" || b.stage === stageFilter
+    const matchStage = stageFilter === "all" || getCanonicalPipelineStage(b.stage as PipelineStage) === stageFilter
     return matchSearch && matchStage
   })
 
@@ -362,7 +449,7 @@ export default function PipelinePage() {
     })
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="flex h-full min-h-0 flex-col p-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-semibold text-foreground tracking-tight">Pipeline</h1>
@@ -386,7 +473,7 @@ export default function PipelinePage() {
                   value={pasteText}
                   onChange={(e) => setPasteText(e.target.value)}
                   rows={10}
-                  className="text-sm"
+                  className="text-sm field-sizing-fixed h-48 resize-none overflow-y-auto"
                 />
                 <div className="flex justify-end gap-2">
                   <Button variant="outline" size="sm" onClick={() => setPasteOpen(false)}>Cancel</Button>
@@ -420,7 +507,7 @@ export default function PipelinePage() {
         </div>
       </div>
 
-      <Tabs defaultValue="kanban" className="w-full">
+      <Tabs defaultValue="kanban" className="mt-5 flex min-h-0 flex-1 flex-col w-full">
         <TabsList className={`grid w-full max-w-md ${showAllItems ? 'grid-cols-3' : 'grid-cols-2'}`}>
           {showAllItems && <TabsTrigger value="table">All Items</TabsTrigger>}
           <TabsTrigger value="kanban">Status board</TabsTrigger>
@@ -465,7 +552,7 @@ export default function PipelinePage() {
                         </div>
                       </div>
                       <div className="text-right flex-shrink-0">
-                        <Badge variant="outline" className="text-xs">{b.stage.replace(/_/g, " ")}</Badge>
+                        <Badge variant="outline" className="text-xs">{getPipelineStageLabel(b.stage)}</Badge>
                         <p className="text-xs text-muted-foreground mt-1">{formatDisplayDate(b.updatedAt)}</p>
                       </div>
                     </div>
@@ -479,7 +566,7 @@ export default function PipelinePage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="kanban" className="mt-5">
+        <TabsContent value="kanban" className="mt-5 flex min-h-0 flex-1 flex-col">
           <div className="mb-4 flex items-center justify-between">
             <div className="text-sm text-muted-foreground">
               {can("edit:pipeline") ? "Drag jobs between stages to update their status" : "View-only mode"}
@@ -496,24 +583,19 @@ export default function PipelinePage() {
               </SelectContent>
             </Select>
           </div>
-          <ScrollArea className="w-full">
-            <div className="flex gap-3 pb-4 min-h-[500px]">
+          <div className="min-h-0 flex-1 overflow-x-auto">
+            <div className="flex min-w-max h-full gap-3 pb-4">
               {KANBAN_STAGES.map((stage) => {
                 const stageJobs = grouped[stage.key] || []
                 const isOver = dragOverStage === stage.key
-                // For merged quoted column, allow dropping on either quoted or quote_sent
-                const acceptDropStage = stage.key === "quoted_combined" ? "quoted" : stage.includes[0]
+                const acceptDropStage = stage.includes[0]
                 return (
-                  <div
-                    key={stage.key}
-                    className={`w-64 flex-shrink-0 flex flex-col rounded-lg transition-colors ${
-                      isOver ? "bg-primary/10" : "bg-secondary"
-                    }`}
-                    onDragOver={(e) => handleDragOver(e, stage.key)}
-                    onDragLeave={handleDragLeave}
-                    onDrop={(e) => handleDrop(e, acceptDropStage as PipelineStage)}
-                  >
-                    <div className="px-3 py-3 flex items-center justify-between border-b border-border">
+                  <div key={stage.key} className="flex w-64 flex-shrink-0 flex-col h-full">
+                    <div
+                      className={`flex-shrink-0 flex items-center justify-between rounded-t-lg border-b border-border px-3 py-3 transition-colors ${
+                        isOver ? "bg-primary/10" : "bg-secondary"
+                      }`}
+                    >
                       <span className="text-xs font-bold text-foreground uppercase tracking-wider">
                         {stage.label}
                       </span>
@@ -521,7 +603,14 @@ export default function PipelinePage() {
                         {stageJobs.length}
                       </Badge>
                     </div>
-                    <div className="flex-1 p-2 space-y-2 min-h-[100px]">
+                    <div
+                      className={`flex-1 min-h-0 overflow-y-auto rounded-b-lg p-2 space-y-2 transition-colors ${
+                        isOver ? "bg-primary/10" : "bg-secondary"
+                      }`}
+                      onDragOver={(e) => handleDragOver(e, stage.key)}
+                      onDragLeave={handleDragLeave}
+                      onDrop={(e) => handleDrop(e, acceptDropStage as PipelineStage)}
+                    >
                       {stageJobs.map((job) => (
                         <PipelineCard
                           key={job.id}
@@ -542,8 +631,7 @@ export default function PipelinePage() {
                 )
               })}
             </div>
-            <ScrollBar orientation="horizontal" />
-          </ScrollArea>
+          </div>
         </TabsContent>
 
         <TabsContent value="drafts" className="mt-5 space-y-3">
@@ -567,7 +655,7 @@ export default function PipelinePage() {
                         </div>
                       </div>
                       <div className="text-right flex-shrink-0">
-                        <Badge variant="outline" className="text-xs">{b.stage?.replace(/_/g, " ")}</Badge>
+                        <Badge variant="outline" className="text-xs">{getPipelineStageLabel(b.stage)}</Badge>
                         <p className="text-xs text-muted-foreground mt-1">{formatDisplayDate(b.createdAt)}</p>
                       </div>
                     </div>
@@ -588,6 +676,19 @@ export default function PipelinePage() {
         onOpenChange={handleReviewClose}
         parsedDraft={parsedDraft}
         onBack={handleBackToPaste}
+        onSaveAndOpen={handleSaveAndOpen}
+      />
+
+      <ProgressDialog
+        open={saveProgressOpen}
+        title="Preparing enquiry"
+        description="The new job will open automatically when it is ready."
+        progress={saveProgress}
+        currentMessage={ENQUIRY_SAVE_STEPS[saveStepIndex] ?? ENQUIRY_SAVE_STEPS[0]}
+        completedMessages={ENQUIRY_SAVE_STEPS.slice(0, saveStepIndex)}
+        errorMessage={saveError}
+        onDismiss={handleDismissSaveError}
+        onRetry={handleBackToReviewAfterSaveError}
       />
 
       {/* Required Email Modal */}

@@ -31,6 +31,17 @@ export const jobs: Job[] = [
   { id: "j10", jobNumber: "LUX-2025-000010", ownerUser: "consultant", customerId: "c10", consultant: "DL", purpose: "availability", source: "web_form", stage: "lost", createdAt: "2025-10-20T08:35:00Z", updatedAt: "2025-11-15T09:00:00Z" },
   { id: "j11", jobNumber: "LUX-2025-000011", ownerUser: "consultant", customerId: "c11", consultant: "LB", purpose: "reservation", source: "web_form", stage: "enquiry", createdAt: "2025-11-01T10:05:00Z", updatedAt: "2025-11-01T10:05:00Z" },
   { id: "j12", jobNumber: "LUX-2025-000012", ownerUser: "consultant", customerId: "c12", consultant: "CDJ", purpose: "quote", source: "web_form", stage: "quoted", createdAt: "2025-11-05T12:05:00Z", updatedAt: "2025-11-08T14:00:00Z" },
+  { id: "j13", jobNumber: "LUX-2025-000013", ownerUser: "consultant", customerId: "c1", consultant: "LB", purpose: "reservation", source: "web_form", stage: "accepted", createdAt: "2025-11-12T09:05:00Z", updatedAt: "2025-11-14T11:00:00Z" },
+  { id: "j14", jobNumber: "LUX-2025-000014", ownerUser: "consultant", customerId: "c2", consultant: "CDJ", purpose: "reservation", source: "web_form", stage: "accepted", createdAt: "2025-11-13T09:05:00Z", updatedAt: "2025-11-15T11:00:00Z" },
+  { id: "j15", jobNumber: "LUX-2025-000015", ownerUser: "consultant", customerId: "c3", consultant: "DR", purpose: "reservation", source: "web_form", stage: "accepted", createdAt: "2025-11-14T09:05:00Z", updatedAt: "2025-11-16T11:00:00Z" },
+  { id: "j16", jobNumber: "LUX-2025-000016", ownerUser: "consultant", customerId: "c4", consultant: "MVE", purpose: "reservation", source: "web_form", stage: "accepted", createdAt: "2025-11-15T09:05:00Z", updatedAt: "2025-11-17T11:00:00Z" },
+  { id: "j17", jobNumber: "LUX-2025-000017", ownerUser: "consultant", customerId: "c5", consultant: "DL", purpose: "reservation", source: "web_form", stage: "accepted", createdAt: "2025-11-16T09:05:00Z", updatedAt: "2025-11-18T11:00:00Z" },
+  { id: "j18", jobNumber: "LUX-2025-000018", ownerUser: "consultant", customerId: "c6", consultant: "LB", purpose: "reservation", source: "web_form", stage: "accepted", createdAt: "2025-11-17T09:05:00Z", updatedAt: "2025-11-19T11:00:00Z" },
+  { id: "j19", jobNumber: "LUX-2025-000019", ownerUser: "consultant", customerId: "c7", consultant: "CDJ", purpose: "reservation", source: "web_form", stage: "deposit_requested", createdAt: "2025-11-18T09:05:00Z", updatedAt: "2025-11-21T10:00:00Z" },
+  { id: "j20", jobNumber: "LUX-2025-000020", ownerUser: "consultant", customerId: "c8", consultant: "DR", purpose: "reservation", source: "web_form", stage: "deposit_requested", createdAt: "2025-11-19T09:05:00Z", updatedAt: "2025-11-22T10:00:00Z" },
+  { id: "j21", jobNumber: "LUX-2025-000021", ownerUser: "consultant", customerId: "c9", consultant: "MVE", purpose: "reservation", source: "web_form", stage: "deposit_requested", createdAt: "2025-11-20T09:05:00Z", updatedAt: "2025-11-23T10:00:00Z" },
+  { id: "j22", jobNumber: "LUX-2025-000022", ownerUser: "consultant", customerId: "c10", consultant: "DL", purpose: "reservation", source: "web_form", stage: "final_paid", createdAt: "2025-11-21T09:05:00Z", updatedAt: "2025-11-26T16:00:00Z" },
+  { id: "j23", jobNumber: "LUX-2025-000023", ownerUser: "consultant", customerId: "c11", consultant: "LB", purpose: "reservation", source: "web_form", stage: "final_paid", createdAt: "2025-11-22T09:05:00Z", updatedAt: "2025-11-27T16:00:00Z" },
 ]
 
 const directions = [
@@ -70,6 +81,17 @@ export const itineraries: Itinerary[] = [
   { id: "it6", jobId: "j8", name: "Cape Town to Pretoria - Family Adventure", notes: "3-night journey with children's activities", acceptedAt: "2025-10-20T09:00:00Z" },
   { id: "it7", jobId: "j9", name: "Pretoria to Cape Town - Classic", notes: "Standard 3-night route", acceptedAt: "2025-10-28T11:00:00Z" },
   { id: "it8", jobId: "j12", name: "Pretoria to Cape Town - Luxury Group", notes: "3-night journey, 2 suites, VIP treatment" },
+  { id: "it9", jobId: "j13", name: "Pretoria to Cape Town - Confirmed", notes: "Reservation sent and awaiting booking form", acceptedAt: "2025-11-14T11:00:00Z" },
+  { id: "it10", jobId: "j14", name: "Cape Town to Pretoria - Confirmed", notes: "Reservation sent and awaiting booking form", acceptedAt: "2025-11-15T11:00:00Z" },
+  { id: "it11", jobId: "j15", name: "Pretoria to Victoria Falls - Confirmed", notes: "Reservation sent with transfer request", acceptedAt: "2025-11-16T11:00:00Z" },
+  { id: "it12", jobId: "j16", name: "Cape Town to Dar es Salaam - Confirmed", notes: "Reservation sent and awaiting guest details", acceptedAt: "2025-11-17T11:00:00Z" },
+  { id: "it13", jobId: "j17", name: "Pretoria to Cape Town - Family Confirmed", notes: "Two-suite family reservation sent", acceptedAt: "2025-11-18T11:00:00Z" },
+  { id: "it14", jobId: "j18", name: "Durban to Pretoria - Confirmed", notes: "Reservation sent for Pullman Double Suite", acceptedAt: "2025-11-19T11:00:00Z" },
+  { id: "it15", jobId: "j19", name: "Pretoria to Swakopmund - Invoice Sent", notes: "Deposit invoice sent after accepted reservation", acceptedAt: "2025-11-20T11:00:00Z" },
+  { id: "it16", jobId: "j20", name: "Cape Town to Pretoria - Family Invoice Sent", notes: "Deposit invoice sent for family reservation", acceptedAt: "2025-11-21T11:00:00Z" },
+  { id: "it17", jobId: "j21", name: "Pretoria to Cape Town - Invoice Sent", notes: "Deposit invoice sent and awaiting payment", acceptedAt: "2025-11-22T11:00:00Z" },
+  { id: "it18", jobId: "j22", name: "Pretoria to Victoria Falls - Paid", notes: "Fully paid reservation awaiting voucher", acceptedAt: "2025-11-24T11:00:00Z" },
+  { id: "it19", jobId: "j23", name: "Swakopmund to Pretoria - Paid", notes: "Fully paid solo traveller reservation", acceptedAt: "2025-11-25T11:00:00Z" },
 ]
 
 export const quotes: Quote[] = [
@@ -78,6 +100,17 @@ export const quotes: Quote[] = [
   { id: "q3", itineraryId: "it5", jobId: "j7", status: "accepted", validityUntil: "2025-11-30", lineItems: [{ description: "Deluxe Double Suite (2 pax)", qty: 1, unitPrice: 38500, total: 38500 }, { description: "Swakopmund excursion package", qty: 2, unitPrice: 3500, total: 7000 }], subtotal: 45500, vat: 6825, total: 52325, lastSentAt: "2025-10-12T14:00:00Z", overridePin: "1234", overrideReason: "Supplier special case" },
   { id: "q4", itineraryId: "it3", jobId: "j5", status: "ready", validityUntil: "2026-01-15", lineItems: [{ description: "Royal Twin Suite (2 pax)", qty: 1, unitPrice: 58000, total: 58000 }, { description: "Deluxe Double Suite (2 pax)", qty: 1, unitPrice: 38500, total: 38500 }, { description: "Ivory Manor Hotel (1 night)", qty: 4, unitPrice: 3200, total: 12800 }], subtotal: 109300, vat: 16395, total: 125695 },
   { id: "q5", itineraryId: "it8", jobId: "j12", status: "draft", validityUntil: "2026-02-28", lineItems: [{ description: "Royal Double Suite (4 pax)", qty: 1, unitPrice: 62000, total: 62000 }, { description: "Deluxe Double Suite (2 pax - placeholder)", qty: 1, unitPrice: 38500, total: 38500 }], subtotal: 100500, vat: 15075, total: 115575 },
+  { id: "q6", itineraryId: "it9", jobId: "j13", status: "accepted", validityUntil: "2026-01-30", lineItems: [{ description: "Deluxe Double Suite (2 pax)", qty: 1, unitPrice: 77000, total: 77000 }], subtotal: 77000, vat: 11550, total: 88550, lastSentAt: "2025-11-14T10:30:00Z" },
+  { id: "q7", itineraryId: "it10", jobId: "j14", status: "accepted", validityUntil: "2026-01-31", lineItems: [{ description: "Pullman Twin Suite (2 pax)", qty: 1, unitPrice: 49800, total: 49800 }], subtotal: 49800, vat: 7470, total: 57270, lastSentAt: "2025-11-15T10:30:00Z" },
+  { id: "q8", itineraryId: "it11", jobId: "j15", status: "accepted", validityUntil: "2026-02-15", lineItems: [{ description: "Royal Double Suite (2 pax)", qty: 1, unitPrice: 144000, total: 144000 }, { description: "Airport transfer and private guide", qty: 1, unitPrice: 8400, total: 8400 }], subtotal: 152400, vat: 22860, total: 175260, lastSentAt: "2025-11-16T10:30:00Z" },
+  { id: "q9", itineraryId: "it12", jobId: "j16", status: "accepted", validityUntil: "2026-02-28", lineItems: [{ description: "Deluxe Twin Suite (2 pax)", qty: 1, unitPrice: 141000, total: 141000 }], subtotal: 141000, vat: 21150, total: 162150, lastSentAt: "2025-11-17T10:30:00Z" },
+  { id: "q10", itineraryId: "it13", jobId: "j17", status: "accepted", validityUntil: "2026-03-15", lineItems: [{ description: "Royal Twin Suite (2 pax)", qty: 1, unitPrice: 116000, total: 116000 }, { description: "Deluxe Double Suite (2 pax)", qty: 1, unitPrice: 77000, total: 77000 }], subtotal: 193000, vat: 28950, total: 221950, lastSentAt: "2025-11-18T10:30:00Z" },
+  { id: "q11", itineraryId: "it14", jobId: "j18", status: "accepted", validityUntil: "2026-03-31", lineItems: [{ description: "Pullman Double Suite (2 pax)", qty: 1, unitPrice: 37000, total: 37000 }], subtotal: 37000, vat: 5550, total: 42550, lastSentAt: "2025-11-19T10:30:00Z" },
+  { id: "q12", itineraryId: "it15", jobId: "j19", status: "accepted", validityUntil: "2026-04-15", lineItems: [{ description: "Deluxe Double Suite (2 pax)", qty: 1, unitPrice: 110000, total: 110000 }], subtotal: 110000, vat: 16500, total: 126500, lastSentAt: "2025-11-21T09:30:00Z" },
+  { id: "q13", itineraryId: "it16", jobId: "j20", status: "accepted", validityUntil: "2026-04-30", lineItems: [{ description: "Royal Double Suite (2 adults, 2 children)", qty: 1, unitPrice: 124000, total: 124000 }, { description: "Family tour and transfers", qty: 1, unitPrice: 8000, total: 8000 }], subtotal: 132000, vat: 19800, total: 151800, lastSentAt: "2025-11-22T09:30:00Z" },
+  { id: "q14", itineraryId: "it17", jobId: "j21", status: "accepted", validityUntil: "2026-05-15", lineItems: [{ description: "Pullman Twin Suite (2 pax)", qty: 1, unitPrice: 49800, total: 49800 }], subtotal: 49800, vat: 7470, total: 57270, lastSentAt: "2025-11-23T09:30:00Z" },
+  { id: "q15", itineraryId: "it18", jobId: "j22", status: "accepted", validityUntil: "2026-05-31", lineItems: [{ description: "Deluxe Twin Suite (2 pax)", qty: 1, unitPrice: 97000, total: 97000 }], subtotal: 97000, vat: 14550, total: 111550, lastSentAt: "2025-11-24T09:30:00Z" },
+  { id: "q16", itineraryId: "it19", jobId: "j23", status: "accepted", validityUntil: "2026-06-15", lineItems: [{ description: "Pullman Twin Suite (1 pax)", qty: 1, unitPrice: 55000, total: 55000 }], subtotal: 55000, vat: 8250, total: 63250, lastSentAt: "2025-11-25T09:30:00Z" },
 ]
 
 export const payments: Payment[] = [
@@ -88,6 +121,9 @@ export const payments: Payment[] = [
   { id: "p5", jobId: "j5", amount: 5000, receivedAt: "2025-09-30T11:00:00Z", method: "EFT", reference: "REF-RC-001", notes: "Partial deposit - below threshold" },
   { id: "p6", jobId: "j9", amount: 28000, receivedAt: "2025-11-05T10:00:00Z", method: "EFT", reference: "REF-DK-001", notes: "Full payment" },
   { id: "p7", jobId: "j9", amount: -2000, receivedAt: "2025-11-08T15:00:00Z", method: "Credit Adjustment", reference: "ADJ-DK-001", notes: "Credit adjustment for service not rendered" },
+  { id: "p8", jobId: "j19", amount: 12500, receivedAt: "2025-11-24T11:00:00Z", method: "EFT", reference: "REF-MR-019", notes: "Partial deposit received" },
+  { id: "p9", jobId: "j22", amount: 111550, receivedAt: "2025-11-26T15:30:00Z", method: "Credit Card", reference: "CC-MD-022", notes: "Full payment received" },
+  { id: "p10", jobId: "j23", amount: 63250, receivedAt: "2025-11-27T15:30:00Z", method: "EFT", reference: "REF-HJ-023", notes: "Full payment received" },
 ]
 
 export const documents: DocRecord[] = [
@@ -110,6 +146,9 @@ export const correspondences: Correspondence[] = [
   { id: "cor3", jobId: "j3", channel: "email", subject: "Following up on your Rovos Rail enquiry - LUX-2025-000003", bodyHtml: "<p>Dear Thomas, following up...</p>", status: "sent", sentAt: "2025-09-17T10:00:00Z" },
   { id: "cor4", jobId: "j8", channel: "email", subject: "Your Travel Voucher - LUX-2025-000008", bodyHtml: "<p>Dear Elizabeth...</p>", status: "sent", sentAt: "2025-11-01T08:30:00Z" },
   { id: "cor5", jobId: "j5", channel: "email", subject: "Deposit Request - LUX-2025-000005", bodyHtml: "<p>Dear Robert...</p>", status: "scheduled", scheduledAt: "2025-10-01T09:00:00Z" },
+  { id: "cor6", jobId: "j19", channel: "email", subject: "Deposit Request - LUX-2025-000019", bodyHtml: "<p>Dear Marco, your deposit invoice is attached.</p>", status: "sent", sentAt: "2025-11-21T10:15:00Z" },
+  { id: "cor7", jobId: "j20", channel: "email", subject: "Deposit Request - LUX-2025-000020", bodyHtml: "<p>Dear Elizabeth, your deposit invoice is attached.</p>", status: "sent", sentAt: "2025-11-22T10:15:00Z" },
+  { id: "cor8", jobId: "j21", channel: "email", subject: "Deposit Request - LUX-2025-000021", bodyHtml: "<p>Dear David, your deposit invoice is attached.</p>", status: "sent", sentAt: "2025-11-23T10:15:00Z" },
 ]
 
 export const auditLogs: AuditLog[] = [

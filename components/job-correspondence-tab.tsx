@@ -77,7 +77,7 @@ export function JobCorrespondenceTab({ correspondence, jobId, mutate }: { corres
       )}
 
       {correspondence.length === 0 ? (
-        <div className="text-center py-8 text-sm text-muted-foreground">No correspondence</div>
+        <div className="text-center py-8 text-sm text-muted-foreground">No emails sent</div>
       ) : (
         <div className="space-y-2">
           {correspondence.map(c => {

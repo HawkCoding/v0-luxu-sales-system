@@ -5,14 +5,12 @@ import type {
   Supplier,
   SupplierDetail,
   SupplierEmail,
-  SupplierPackage,
   SupplierRateCard,
   SupplierRoute,
   SupplierSuiteType,
 } from "@/lib/types"
 
 type LocationRow = Database["public"]["Tables"]["locations"]["Row"]
-type PackageRow = Database["public"]["Tables"]["packages"]["Row"]
 type RateCardRow = Database["public"]["Tables"]["rate_cards"]["Row"]
 type RouteRow = Database["public"]["Tables"]["routes"]["Row"]
 type SupplierRow = Database["public"]["Tables"]["suppliers"]["Row"]
@@ -37,6 +35,7 @@ export function mapSupplier(row: SupplierRow): Supplier {
     phone: row.phone,
     website: row.website,
     location: row.location,
+    locationId: row.location_id ?? null,
     notes: row.notes,
     active: row.active,
     createdAt: row.created_at,
@@ -62,7 +61,7 @@ export function mapLocation(row: LocationRow): Location {
 export function mapSupplierRoute(row: RouteRow): SupplierRoute {
   return {
     id: row.id,
-    packageId: row.package_id,
+    supplierId: row.supplier_id,
     name: row.name,
     originLocationId: row.origin_location_id,
     destinationLocationId: row.destination_location_id,
@@ -90,10 +89,11 @@ export function mapSupplierSuiteType(row: SuiteTypeRow): SupplierSuiteType {
 export function mapSupplierRateCard(row: RateCardRow): SupplierRateCard {
   return {
     id: row.id,
-    packageId: row.package_id,
     routeId: row.route_id,
     suiteTypeId: row.suite_type_id,
     pricePerPerson: row.price_per_person,
+    childPrice: row.child_price,
+    infantPrice: row.infant_price,
     currency: row.currency,
     validFrom: row.valid_from,
     validTo: row.valid_to,
@@ -101,29 +101,6 @@ export function mapSupplierRateCard(row: RateCardRow): SupplierRateCard {
     validFromDisplay: formatDisplayDate(row.valid_from),
     validToDisplay: formatDisplayDate(row.valid_to),
     createdAtDisplay: formatDisplayDateTime(row.created_at),
-  }
-}
-
-export function mapSupplierPackage(
-  row: PackageRow,
-  routes: RouteRow[],
-  rateCards: RateCardRow[],
-): SupplierPackage {
-  return {
-    id: row.id,
-    supplierId: row.supplier_id,
-    name: row.name,
-    description: row.description,
-    durationNights: row.duration_nights,
-    singleSupplementPct: row.single_supplement_pct,
-    currency: row.currency,
-    active: row.active,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    createdAtDisplay: formatDisplayDateTime(row.created_at),
-    updatedAtDisplay: formatDisplayDateTime(row.updated_at),
-    routes: routes.map(mapSupplierRoute),
-    rateCards: rateCards.map(mapSupplierRateCard),
   }
 }
 
@@ -140,24 +117,18 @@ export function mapSupplierEmail(row: SupplierEmailRow): SupplierEmail {
 
 export function mapSupplierDetail(
   supplier: SupplierRow,
-  packages: PackageRow[],
-  routes: RouteRow[],
   suiteTypes: SuiteTypeRow[],
   emails: SupplierEmailRow[],
-  rateCards: RateCardRow[],
-  locations: LocationRow[],
+  routes: RouteRow[] = [],
+  rateCards: RateCardRow[] = [],
+  locations: LocationRow[] = [],
 ): SupplierDetail {
   return {
     ...mapSupplier(supplier),
     emails: emails.map(mapSupplierEmail),
     suiteTypes: suiteTypes.map(mapSupplierSuiteType),
-    packages: packages.map((pkg) =>
-      mapSupplierPackage(
-        pkg,
-        routes.filter((route) => route.package_id === pkg.id),
-        rateCards.filter((rateCard) => rateCard.package_id === pkg.id),
-      ),
-    ),
+    routes: routes.map(mapSupplierRoute),
+    rateCards: rateCards.map(mapSupplierRateCard),
     locations: locations.map(mapLocation),
   }
 }

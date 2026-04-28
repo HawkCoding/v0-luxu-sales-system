@@ -19,12 +19,34 @@ interface AuthContextValue {
 }
 
 const AUTH_INIT_TIMEOUT_MS = 4000
-const AUTH_INIT_TIMEOUT_MESSAGE = "Timed out initializing auth session"
 const STALE_REFRESH_TOKEN_MESSAGES = [
   "Invalid Refresh Token",
   "Refresh Token Not Found",
   "refresh_token_not_found",
 ]
+
+type AuthTimeoutResult<T> =
+  | { timedOut: false; value: T }
+  | { timedOut: true }
+
+async function withAuthTimeout<T>(operation: PromiseLike<T>): Promise<AuthTimeoutResult<T>> {
+  let timeoutId: number | undefined
+
+  try {
+    return await Promise.race([
+      Promise.resolve(operation).then((value) => ({ timedOut: false as const, value })),
+      new Promise<AuthTimeoutResult<T>>((resolve) => {
+        timeoutId = window.setTimeout(() => {
+          resolve({ timedOut: true })
+        }, AUTH_INIT_TIMEOUT_MS)
+      }),
+    ])
+  } finally {
+    if (timeoutId !== undefined) {
+      window.clearTimeout(timeoutId)
+    }
+  }
+}
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
@@ -86,21 +108,23 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
 
     try {
       const supabase = getSupabase()
-      const getSessionWithTimeout = async () => {
-        let timeoutId: number | undefined
-        try {
-          return await Promise.race([
-            supabase.auth.getSession(),
-            new Promise<never>((_, reject) => {
-              timeoutId = window.setTimeout(() => {
-                reject(new Error(AUTH_INIT_TIMEOUT_MESSAGE))
-              }, AUTH_INIT_TIMEOUT_MS)
-            }),
-          ])
-        } finally {
-          if (timeoutId !== undefined) {
-            window.clearTimeout(timeoutId)
-          }
+
+      const loadUserWithTimeout = async () => {
+        const userResult = await withAuthTimeout(supabase.auth.getUser())
+        if (!mounted) return
+
+        if (userResult.timedOut) {
+          setUser(null)
+          return
+        }
+
+        const { data: { user }, error: userError } = userResult.value
+        if (userError) {
+          setUser(null)
+        } else if (user) {
+          await loadProfile(user.id, user.email ?? "")
+        } else {
+          setUser(null)
         }
       }
 
@@ -108,12 +132,23 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
       const LOCK_STEAL_MSG = "Lock broken by another request with the 'steal' option."
       const init = async () => {
         try {
-          let result = await getSessionWithTimeout()
+          let sessionResult = await withAuthTimeout(supabase.auth.getSession())
+          if (sessionResult.timedOut) {
+            void loadUserWithTimeout()
+            return
+          }
+
+          let result = sessionResult.value
           const errMsg = result.error?.message ?? null
           if (errMsg === LOCK_STEAL_MSG && mounted) {
             await new Promise((r) => setTimeout(r, 80))
             if (!mounted) return
-            result = await getSessionWithTimeout()
+            sessionResult = await withAuthTimeout(supabase.auth.getSession())
+            if (sessionResult.timedOut) {
+              void loadUserWithTimeout()
+              return
+            }
+            result = sessionResult.value
           }
 
           if (result.error && isStaleRefreshTokenError(result.error)) {
@@ -131,7 +166,13 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
             await new Promise((r) => setTimeout(r, 80))
             if (!mounted) return
             try {
-              const { data: { session }, error: retryErr } = await getSessionWithTimeout()
+              const retryResult = await withAuthTimeout(supabase.auth.getSession())
+              if (retryResult.timedOut) {
+                void loadUserWithTimeout()
+                return
+              }
+
+              const { data: { session }, error: retryErr } = retryResult.value
               if (retryErr && isStaleRefreshTokenError(retryErr)) {
                 await clearLocalSession()
                 return
@@ -139,19 +180,6 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
               if (!retryErr && mounted && session?.user) await loadProfile(session.user.id, session.user.email ?? "")
             } catch {
               if (mounted) setUser(null)
-            }
-          } else if (msg === AUTH_INIT_TIMEOUT_MESSAGE && mounted) {
-            try {
-              const { data: { user }, error: userError } = await supabase.auth.getUser()
-              if (userError) {
-                setUser(null)
-              } else if (user) {
-                await loadProfile(user.id, user.email ?? "")
-              } else {
-                setUser(null)
-              }
-            } catch {
-              setUser(null)
             }
           } else if (isStaleRefreshTokenError(error)) {
             await clearLocalSession()

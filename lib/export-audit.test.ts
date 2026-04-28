@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import type { AuditLog } from "./types"
-import { exportAuditToText } from "./export-audit"
+import { exportAuditToCsv, exportAuditToText } from "./export-audit"
 
 const baseLog: AuditLog = {
   id: "audit-1",
@@ -81,5 +81,34 @@ describe("exportAuditToText", () => {
 
     expect(result).toContain("Before State:")
     expect(result).toContain("{not-valid-json")
+  })
+})
+
+describe("exportAuditToCsv", () => {
+  it("exports headers and audit fields as RFC 4180 quoted cells", () => {
+    const result = exportAuditToCsv([
+      {
+        ...baseLog,
+        beforeJson: JSON.stringify({ note: 'old "value"' }),
+        afterJson: JSON.stringify({ note: "new,value" }),
+        metaJson: JSON.stringify({ source: "test" }),
+      },
+    ])
+
+    expect(result.split("\r\n")[0]).toBe(
+      '"Timestamp","Actor","Action","Description","Entity Type","Entity ID","Before (JSON)","After (JSON)","Metadata"',
+    )
+    expect(result).toContain('"2026-03-07T10:30:00.000Z"')
+    expect(result).toContain('"Jane Admin recorded updated on Booking"')
+    expect(result).toContain('"{""note"":""old \\""value\\""""}"')
+    expect(result).toContain('"{""note"":""new,value""}"')
+  })
+
+  it("exports an empty audit log with only the header row", () => {
+    const result = exportAuditToCsv([])
+
+    expect(result).toBe(
+      '"Timestamp","Actor","Action","Description","Entity Type","Entity ID","Before (JSON)","After (JSON)","Metadata"',
+    )
   })
 })

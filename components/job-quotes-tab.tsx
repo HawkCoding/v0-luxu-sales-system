@@ -6,6 +6,7 @@ import { Separator } from "@/components/ui/separator"
 import type { Quote, Itinerary } from "@/lib/types"
 import { useRole } from "@/lib/role-context"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
+import { ApplyPackageDialog } from "@/components/apply-package-dialog"
 
 const STATUS_BADGE: Record<string, { variant: "default" | "secondary" | "outline" | "destructive"; label: string }> = {
   draft: { variant: "secondary", label: "Draft" },
@@ -15,7 +16,15 @@ const STATUS_BADGE: Record<string, { variant: "default" | "secondary" | "outline
   accepted: { variant: "default", label: "Accepted" },
 }
 
-export function JobQuotesTab({ quotes, jobId, itineraries, mutate }: { quotes: Quote[]; jobId: string; itineraries: Itinerary[]; mutate: () => void }) {
+interface JobQuotesTabProps {
+  quotes: Quote[]
+  jobId: string
+  itineraries: Itinerary[]
+  travelDate: string | null
+  mutate: () => void
+}
+
+export function JobQuotesTab({ quotes, jobId, itineraries, travelDate, mutate }: JobQuotesTabProps) {
   const { can } = useRole()
 
   if (quotes.length === 0) {
@@ -32,13 +41,24 @@ export function JobQuotesTab({ quotes, jobId, itineraries, mutate }: { quotes: Q
         return (
           <Card key={q.id}>
             <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div className="flex items-center gap-2">
                   <CardTitle className="text-sm font-medium">{it?.name || "Quote"}</CardTitle>
                   <Badge variant={badge.variant} className="text-[10px]">{badge.label}</Badge>
                   {hasIncomplete && <Badge variant="destructive" className="text-[10px]">Missing pricing</Badge>}
                 </div>
-                <span className="text-xs text-muted-foreground">Valid until {formatDisplayDate(q.validityUntil)}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Valid until {formatDisplayDate(q.validityUntil)}</span>
+                  {can("edit:quotes") && (
+                    <ApplyPackageDialog
+                      jobId={jobId}
+                      quoteId={q.id}
+                      travelDate={travelDate}
+                      existingLineItemCount={q.lineItems.length}
+                      onApplied={mutate}
+                    />
+                  )}
+                </div>
               </div>
             </CardHeader>
             <CardContent>

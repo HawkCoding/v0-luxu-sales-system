@@ -3,8 +3,14 @@ import { createSessionClient } from "@/lib/supabase/server"
 import { formatDisplayDate } from "@/lib/date-format"
 
 export async function POST(req: Request) {
-  const body = await req.json()
   const supabase = await createSessionClient()
+  const { data: { user } } = await supabase.auth.getUser()
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  const body = await req.json()
 
   // Accept jobId (from existing components) or bookingId
   const bookingId = body.bookingId || body.jobId

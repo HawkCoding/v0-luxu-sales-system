@@ -24,7 +24,7 @@ John Smith
 
     const draft = parseEmailDraft(text)
 
-    expect(draft.customer).toEqual({
+    expect(draft.customer).toMatchObject({
       firstName: "John",
       surname: "Smith",
       email: "john.smith@example.com",
@@ -99,15 +99,183 @@ John Smith
     expect(draft.confidence["guests.suites"]).toBe("low")
   })
 
+  it("extracts labeled name and surname with high confidence", () => {
+    const draft = parseEmailDraft(`
+Title: Mr
+Name: John
+Surname: Smith
+Email: john.smith@example.com
+`)
+
+    expect(draft.customer.firstName).toBe("John")
+    expect(draft.customer.surname).toBe("Smith")
+    expect(draft.confidence["customer.firstName"]).toBe("high")
+    expect(draft.confidence["customer.surname"]).toBe("high")
+  })
+
+  it("extracts a full name from a labeled name field", () => {
+    const draft = parseEmailDraft("Name: Jane Doe")
+
+    expect(draft.customer.firstName).toBe("Jane")
+    expect(draft.customer.surname).toBe("Doe")
+    expect(draft.confidence["customer.firstName"]).toBe("high")
+    expect(draft.confidence["customer.surname"]).toBe("high")
+  })
+
+  it("extracts passengers as adults with high confidence", () => {
+    const draft = parseEmailDraft("Passengers: 2")
+
+    expect(draft.guests.adults).toBe(2)
+    expect(draft.confidence["guests.adults"]).toBe("high")
+  })
+
+  it("does not read a passenger count across a newline as the suite count", () => {
+    const draft = parseEmailDraft(`
+Passengers: 2
+Suite Type: Deluxe Double Suite
+`)
+
+    expect(draft.guests.adults).toBe(2)
+    expect(draft.guests.suites).toBe(1)
+    expect(draft.confidence["guests.suites"]).toBe("low")
+    expect(draft.guests.suiteType).toBe("Deluxe Double Suite")
+  })
+
+  it("extracts labeled and same-line inline suite counts", () => {
+    expect(parseEmailDraft("Number of Suites: 1").guests.suites).toBe(1)
+    expect(parseEmailDraft("1 x Deluxe Double Suite").guests.suites).toBe(1)
+  })
+
   it("extracts suite types for deluxe and pullman options", () => {
     expect(parseEmailDraft("We need a deluxe twin suite for 2 adults.").guests.suiteType).toBe("Deluxe Twin Suite")
     expect(parseEmailDraft("We need a pullman double suite for 2 adults.").guests.suiteType).toBe("Pullman Double Suite")
+  })
+
+  it("marks unknown suite types as Other with low confidence", () => {
+    const draft = parseEmailDraft("Suite Type: Harmonic Mountain Suite")
+
+    expect(draft.guests.suiteType).toBe("Other")
+    expect(draft.confidence["guests.suiteType"]).toBe("low")
+  })
+
+  it("parses a Blue Train form email with values on the lines after labels", () => {
+    const draft = parseEmailDraft(`
+Subject: New submission from Blue Train SA Specials 2026 - Mashike
+
+Please indicate the purpose of your request
+
+Availability
+Contact Information
+Title
+
+Ms
+Name
+
+Mpho
+Surname
+
+Mashike
+Contact Number
+
+0723093611
+Email
+
+mphopmashike@gmail.com
+Country
+
+South Africa
+Province
+
+Mpumalanga
+Blue Train Information
+Direction
+
+Pretoria to Cape Town
+Departure Date
+
+11 May 2026
+No. of Adults
+
+2
+No of Suites
+
+1
+Suite Type 1
+
+Deluxe Twin with shower
+Package Options
+Package Options
+
+Five Night Cape Town Package
+Hotel Options
+
+PH Breakwater Lodge - Waterfront
+Flight Booking
+
+Cape Town to Johannesburg
+Flight Departure Date
+
+15/05/2026
+Additional Pre and Post Train Travel Services
+Acceptance
+
+I have read and accept the Terms and Conditions*
+`)
+
+    expect(draft.customer).toEqual({
+      title: "Ms",
+      firstName: "Mpho",
+      surname: "Mashike",
+      email: "mphopmashike@gmail.com",
+      phone: "0723093611",
+      country: "South Africa",
+      province: "Mpumalanga",
+    })
+    expect(draft.trip.supplier).toBe("Blue Train")
+    expect(draft.trip.route).toBe("Pretoria To Cape Town")
+    expect(draft.trip.departureDate).toBe("2026-05-11")
+    expect(draft.trip.purpose).toBe("availability")
+    expect(draft.trip.packageOption).toBe("Five Night Cape Town Package")
+    expect(draft.trip.hotelOption).toBe("PH Breakwater Lodge - Waterfront")
+    expect(draft.trip.flightBooking).toBe("Cape Town to Johannesburg")
+    expect(draft.trip.flightDepartureDate).toBe("15/05/2026")
+    expect(draft.formFields).toMatchObject({
+      country: "South Africa",
+      province: "Mpumalanga",
+      packageOption: "Five Night Cape Town Package",
+      hotelOption: "PH Breakwater Lodge - Waterfront",
+      flightBooking: "Cape Town to Johannesburg",
+      flightDepartureDate: "15/05/2026",
+    })
+    expect(draft.guests).toEqual({
+      adults: 2,
+      children: 0,
+      suites: 1,
+      suiteType: "Deluxe Twin Suite",
+    })
+    expect(draft.confidence).toMatchObject({
+      "customer.firstName": "high",
+      "customer.surname": "high",
+      "customer.email": "high",
+      "customer.phone": "high",
+      "customer.title": "high",
+      "customer.country": "high",
+      "customer.province": "high",
+      "trip.purpose": "high",
+      "trip.supplier": "high",
+      "trip.route": "high",
+      "trip.departureDate": "low",
+      "guests.adults": "high",
+      "guests.suites": "high",
+      "guests.suiteType": "high",
+    })
   })
 
   it("returns empty defaults for empty text", () => {
     const draft = parseEmailDraft("")
 
     expect(draft.customer.email).toBe("")
+    expect(draft.customer.country).toBe("")
     expect(draft.trip.supplier).toBe("")
     expect(draft.trip.route).toBe("")
     expect(draft.trip.departureDate).toBe("")
@@ -130,6 +298,7 @@ Pretoria to Cape Town
 2 adults
 1 suite
 john@example.com
+Country: South Africa
 Regards,
 John Smith
 `)
@@ -149,6 +318,7 @@ John Smith
     expect(result.missingRequired).toEqual([
       "First name (Customer)",
       "Surname (Customer)",
+      "Country",
       "Email or Phone (Customer)",
       "Supplier",
       "Departure date",
@@ -159,10 +329,36 @@ John Smith
 
   it("accepts phone-only contact information", () => {
     const draft: ParsedDraft = {
-      customer: { firstName: "John", surname: "Smith", email: "", phone: "+27 82 555 1234" },
-      trip: { supplier: "Rovos Rail", route: "Pretoria To Cape Town", departureDate: "2026-05-15" },
+      customer: {
+        title: "",
+        firstName: "John",
+        surname: "Smith",
+        email: "",
+        phone: "+27 82 555 1234",
+        country: "South Africa",
+        province: "",
+      },
+      trip: {
+        supplier: "Rovos Rail",
+        route: "Pretoria To Cape Town",
+        departureDate: "2026-05-15",
+        purpose: "quote",
+        packageOption: "",
+        hotelOption: "",
+        flightBooking: "",
+        flightDepartureDate: "",
+      },
       guests: { adults: 2, children: 0, suites: 1, suiteType: "Royal Double Suite" },
       notes: "",
+      formFields: {
+        title: "",
+        country: "South Africa",
+        province: "",
+        packageOption: "",
+        hotelOption: "",
+        flightBooking: "",
+        flightDepartureDate: "",
+      },
       confidence: {},
       rawText: "",
     }
@@ -195,20 +391,21 @@ Pretoria to Cape Town
 2 adults
 1 suite
 john@example.com
+Country: South Africa
 Regards,
 John Smith
 `)
 
-    expect(countRequiredComplete(draft)).toEqual({ completed: 7, total: 7 })
+    expect(countRequiredComplete(draft)).toEqual({ completed: 8, total: 8 })
   })
 
   it("returns zero for an empty draft", () => {
-    expect(countRequiredComplete(parseEmailDraft(""))).toEqual({ completed: 0, total: 7 })
+    expect(countRequiredComplete(parseEmailDraft(""))).toEqual({ completed: 0, total: 8 })
   })
 
   it("counts only the fields that are present", () => {
     const draft = parseEmailDraft("Blue Train 2026-05-15 2 adults")
 
-    expect(countRequiredComplete(draft)).toEqual({ completed: 4, total: 7 })
+    expect(countRequiredComplete(draft)).toEqual({ completed: 4, total: 8 })
   })
 })

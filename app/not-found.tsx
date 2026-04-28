@@ -19,22 +19,27 @@ const TRAIN_FACTS = [
 export default function NotFound() {
   const router = useRouter()
   const [countdown, setCountdown] = useState(10)
-  const [fact] = useState(() => TRAIN_FACTS[Math.floor(Math.random() * TRAIN_FACTS.length)])
+  const [fact, setFact] = useState(TRAIN_FACTS[0])
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          clearInterval(timer)
-          router.push("/app")
-          return 0
-        }
-        return prev - 1
-      })
+    setFact(TRAIN_FACTS[Math.floor(Math.random() * TRAIN_FACTS.length)])
+  }, [])
+
+  useEffect(() => {
+    if (countdown === 0) return
+
+    const timer = window.setTimeout(() => {
+      setCountdown((prev) => Math.max(prev - 1, 0))
     }, 1000)
 
-    return () => clearInterval(timer)
-  }, [router])
+    return () => window.clearTimeout(timer)
+  }, [countdown])
+
+  useEffect(() => {
+    if (countdown === 0) {
+      router.replace("/app")
+    }
+  }, [countdown, router])
 
   const progress = ((10 - countdown) / 10) * 100
 

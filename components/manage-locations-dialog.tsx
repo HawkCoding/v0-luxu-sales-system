@@ -122,7 +122,7 @@ export function ManageLocationsDialog({ open, onOpenChange }: ManageLocationsDia
         <DialogHeader>
           <DialogTitle>Manage Locations</DialogTitle>
           <DialogDescription>
-            Create and remove destination locations used for supplier routes.
+            Create and remove destination cities used by suppliers.
           </DialogDescription>
         </DialogHeader>
 

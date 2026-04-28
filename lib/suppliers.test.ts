@@ -5,14 +5,12 @@ import {
   mapSupplier,
   mapSupplierDetail,
   mapSupplierEmail,
-  mapSupplierPackage,
   mapSupplierRateCard,
   mapSupplierRoute,
   mapSupplierSuiteType,
 } from "@/lib/suppliers"
 
 type LocationRow = Database["public"]["Tables"]["locations"]["Row"]
-type PackageRow = Database["public"]["Tables"]["packages"]["Row"]
 type RateCardRow = Database["public"]["Tables"]["rate_cards"]["Row"]
 type RouteRow = Database["public"]["Tables"]["routes"]["Row"]
 type SupplierRow = Database["public"]["Tables"]["suppliers"]["Row"]
@@ -28,6 +26,7 @@ const supplierRow: SupplierRow = {
   email: "ops@example.com",
   phone: "+27 12 345 6789",
   website: "example.com",
+  location_id: null,
   location: "Cape Town",
   notes: "Preferred",
   active: false,
@@ -35,22 +34,9 @@ const supplierRow: SupplierRow = {
   updated_at: "2026-01-02T11:30:00.000Z",
 }
 
-const packageRow: PackageRow = {
-  id: "00000000-0000-4000-8000-000000000002",
-  supplier_id: supplierRow.id,
-  name: "Cape Explorer",
-  description: null,
-  duration_nights: 3,
-  single_supplement_pct: 50,
-  currency: "ZAR",
-  active: true,
-  created_at: "2026-01-01T10:00:00.000Z",
-  updated_at: "2026-01-02T10:00:00.000Z",
-}
-
 const routeRow: RouteRow = {
   id: "00000000-0000-4000-8000-000000000003",
-  package_id: packageRow.id,
+  supplier_id: supplierRow.id,
   name: "Cape Town - Pretoria",
   origin_location_id: "00000000-0000-4000-8000-000000000101",
   destination_location_id: "00000000-0000-4000-8000-000000000102",
@@ -70,10 +56,11 @@ const suiteTypeRow: SuiteTypeRow = {
 
 const rateCardRow: RateCardRow = {
   id: "00000000-0000-4000-8000-000000000005",
-  package_id: packageRow.id,
   route_id: routeRow.id,
   suite_type_id: suiteTypeRow.id,
   price_per_person: 15000,
+  child_price: null,
+  infant_price: null,
   currency: "ZAR",
   valid_from: "2026-01-01",
   valid_to: null,
@@ -156,7 +143,7 @@ describe("individual row mappers", () => {
     const result = mapSupplierRoute(routeRow)
     expect(result).toMatchObject({
       id: routeRow.id,
-      packageId: routeRow.package_id,
+      supplierId: supplierRow.id,
       originLocationId: routeRow.origin_location_id,
       destinationLocationId: routeRow.destination_location_id,
       active: routeRow.active,
@@ -173,12 +160,11 @@ describe("individual row mappers", () => {
     })
   })
 
-  it("maps supplier rate card with nullable route", () => {
-    const result = mapSupplierRateCard({ ...rateCardRow, route_id: null })
+  it("maps supplier rate card", () => {
+    const result = mapSupplierRateCard(rateCardRow)
     expect(result).toMatchObject({
       id: rateCardRow.id,
-      packageId: rateCardRow.package_id,
-      routeId: null,
+      routeId: rateCardRow.route_id,
       suiteTypeId: rateCardRow.suite_type_id,
       pricePerPerson: rateCardRow.price_per_person,
       currency: rateCardRow.currency,
@@ -190,44 +176,22 @@ describe("individual row mappers", () => {
   })
 })
 
-describe("mapSupplierPackage", () => {
-  it("maps package and nests routes/rate cards", () => {
-    const result = mapSupplierPackage(packageRow, [routeRow], [rateCardRow])
-    expect(result).toMatchObject({
-      id: packageRow.id,
-      supplierId: packageRow.supplier_id,
-      name: packageRow.name,
-      description: packageRow.description,
-      durationNights: packageRow.duration_nights,
-      singleSupplementPct: packageRow.single_supplement_pct,
-      currency: packageRow.currency,
-      active: packageRow.active,
-    })
-    expect(result.routes).toHaveLength(1)
-    expect(result.rateCards).toHaveLength(1)
-    expect(result.routes[0].id).toBe(routeRow.id)
-    expect(result.rateCards[0].id).toBe(rateCardRow.id)
-  })
-})
-
 describe("mapSupplierDetail", () => {
   it("assembles full nested detail payload", () => {
     const detail = mapSupplierDetail(
       supplierRow,
-      [packageRow],
-      [routeRow],
       [suiteTypeRow],
       [supplierEmailRow],
+      [routeRow],
       [rateCardRow],
       [locationRow],
     )
 
     expect(detail.id).toBe(supplierRow.id)
-    expect(detail.packages).toHaveLength(1)
-    expect(detail.packages[0].routes).toHaveLength(1)
-    expect(detail.packages[0].rateCards).toHaveLength(1)
     expect(detail.suiteTypes).toHaveLength(1)
     expect(detail.emails).toHaveLength(1)
+    expect(detail.routes).toHaveLength(1)
+    expect(detail.rateCards).toHaveLength(1)
     expect(detail.locations).toHaveLength(1)
     expect(detail.locations[0].id).toBe(locationRow.id)
   })

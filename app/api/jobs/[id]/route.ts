@@ -53,6 +53,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     updatedAt: booking.updated_at,
     createdAtDisplay: formatDisplayDateTime(booking.created_at),
     updatedAtDisplay: formatDisplayDateTime(booking.updated_at),
+    cancelReason: booking.cancel_reason ?? null,
+    cancelledAt: booking.cancelled_at ?? null,
+    cancelledAtDisplay: formatDisplayDateTime(booking.cancelled_at),
   }
 
   // Map customer
@@ -227,6 +230,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const { id } = await params
   const body = await req.json()
   const supabase = await createSessionClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
 
   const { data: booking } = await supabase
     .from("bookings")
@@ -240,23 +246,48 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   if (body.stage) {
     const fromStage = booking.stage
+    let actorName = user?.email ?? "System"
+
+    if (user) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("name, surname")
+        .eq("user_id", user.id)
+        .maybeSingle()
+
+      const profileName = [profile?.name, profile?.surname].filter(Boolean).join(" ").trim()
+      if (profileName) actorName = profileName
+    }
 
     // Record pipeline history
     await supabase.from("pipeline_history").insert({
       booking_id: id,
       from_stage: fromStage,
       to_stage: body.stage as PipelineStage,
-      moved_by: body.actor || "consultant",
+      moved_by: actorName,
+      moved_by_user_id: user?.id ?? null,
     })
+
+    // Persist cancel reason when moving to lost
+    const cancelReason =
+      body.stage === "lost" && typeof body.cancelReason === "string" && body.cancelReason.trim()
+        ? body.cancelReason.trim()
+        : undefined
+
+    if (cancelReason) {
+      updates.cancel_reason = cancelReason
+      updates.cancelled_at = new Date().toISOString()
+    }
 
     // Audit log
     await supabase.from("audit_logs").insert({
-      actor: body.actor || "consultant",
+      actor: actorName,
+      actor_user_id: user?.id ?? null,
       entity_type: "Booking",
       entity_id: id,
       action: "stage_change",
       before_json: { stage: fromStage },
-      after_json: { stage: body.stage },
+      after_json: { stage: body.stage, ...(cancelReason ? { cancel_reason: cancelReason } : {}) },
     })
 
     updates.stage = body.stage
@@ -279,6 +310,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     jobNumber: updated.booking_number,
     stage: updated.stage,
     consultant: updated.consultant,
+    cancelReason: updated.cancel_reason ?? null,
+    cancelledAt: updated.cancelled_at ?? null,
     updatedAt: updated.updated_at,
     updatedAtDisplay: formatDisplayDateTime(updated.updated_at),
   })

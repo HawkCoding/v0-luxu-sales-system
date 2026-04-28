@@ -2,7 +2,7 @@
 
 import { useAllData } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
-import { PIPELINE_STAGES } from "@/lib/types"
+import { getCanonicalPipelineStage, getPipelineStageLabel, PIPELINE_STAGES, type PipelineStage } from "@/lib/types"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
@@ -18,11 +18,11 @@ export default function DashboardPage() {
 
   const stageCount = PIPELINE_STAGES.map(s => ({
     ...s,
-    count: data.bookings.filter((b: { stage: string }) => b.stage === s.key).length,
+    count: data.bookings.filter((b: { stage: PipelineStage }) => getCanonicalPipelineStage(b.stage) === s.key).length,
   }))
 
   const openJobs = data.bookings.filter((b: { stage: string }) => !["closed", "lost"].includes(b.stage)).length
-  const quotedJobs = data.bookings.filter((b: { stage: string }) => ["quoted", "re_quoted"].includes(b.stage)).length
+  const quotedJobs = data.bookings.filter((b: { stage: PipelineStage }) => getCanonicalPipelineStage(b.stage) === "quote_sent").length
   const depositsPaid = data.bookings.filter((b: { stage: string }) => b.stage === "deposit_paid").length
   const fullPayments = data.bookings.filter((b: { stage: string }) => b.stage === "final_paid").length
 
@@ -44,7 +44,7 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         <StatCard icon={Briefcase} label="Open Jobs" value={openJobs} href="/app/bookings" />
-        <StatCard icon={FileText} label="Quoted" value={quotedJobs} href="/app/pipeline" />
+        <StatCard icon={FileText} label="Quotes Sent" value={quotedJobs} href="/app/pipeline" />
         <StatCard icon={CreditCard} label="Deposits Paid" value={depositsPaid} href="/app/payments" />
         <StatCard icon={CreditCard} label="Full Payment" value={fullPayments} href="/app/payments" />
       </div>
@@ -78,7 +78,7 @@ export default function DashboardPage() {
                     <p className="text-text-muted mt-1">{customer?.firstName} {customer?.lastName}</p>
                   </div>
                   <div className="text-right">
-                    <Badge variant="outline" className="text-sm">{booking.stage.replace(/_/g, " ")}</Badge>
+                    <Badge variant="outline" className="text-sm">{getPipelineStageLabel(booking.stage)}</Badge>
                     <p className="text-sm text-text-muted mt-1">{formatDisplayDate(booking.createdAt)}</p>
                   </div>
                 </Link>

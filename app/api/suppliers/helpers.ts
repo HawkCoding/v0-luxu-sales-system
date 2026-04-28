@@ -9,7 +9,6 @@ export type SessionClient = Awaited<ReturnType<typeof createSessionClient>>
 type LocationRow = Database["public"]["Tables"]["locations"]["Row"]
 
 export type RefTableName =
-  | "packages"
   | "rate_cards"
   | "routes"
   | "supplier_emails"
@@ -117,36 +116,10 @@ interface DeletionDependency {
 
 export async function checkDeletionDependencies(
   supabase: SessionClient,
-  packageIds: string[],
   routeIds: string[],
   suiteTypeIds: string[],
 ): Promise<DeletionDependency[]> {
   const conflicts: DeletionDependency[] = []
-
-  if (packageIds.length > 0) {
-    const [bookingCheck, offerCheck] = await Promise.all([
-      supabase
-        .from("bookings")
-        .select("package_id", { count: "exact", head: false })
-        .in("package_id", packageIds)
-        .neq("stage", "closed")
-        .neq("stage", "lost"),
-      supabase
-        .from("hotel_offers")
-        .select("package_id", { count: "exact", head: false })
-        .in("package_id", packageIds),
-    ])
-
-    const bookingPkgIds = Array.from(new Set((bookingCheck.data ?? []).map((r) => r.package_id)))
-    if (bookingPkgIds.length > 0) {
-      conflicts.push({ table: "packages", ids: bookingPkgIds.filter(Boolean) as string[], referencedBy: "bookings" })
-    }
-
-    const offerPkgIds = Array.from(new Set((offerCheck.data ?? []).map((r) => r.package_id)))
-    if (offerPkgIds.length > 0) {
-      conflicts.push({ table: "packages", ids: offerPkgIds.filter(Boolean) as string[], referencedBy: "hotel_offers" })
-    }
-  }
 
   if (routeIds.length > 0) {
     const bookingCheck = await supabase
@@ -216,15 +189,10 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
 
   const supplierId = supplier.id
   const [
-    { data: packages, error: packagesError },
     { data: suiteTypes, error: suiteTypesError },
     { data: emails, error: emailsError },
+    { data: routes, error: routesError },
   ] = await Promise.all([
-    supabase
-      .from("packages")
-      .select("*")
-      .eq("supplier_id", supplierId)
-      .order("name", { ascending: true }),
     supabase
       .from("suite_types")
       .select("*")
@@ -236,17 +204,12 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
       .eq("supplier_id", supplierId)
       .order("label", { ascending: true })
       .order("email", { ascending: true }),
+    supabase
+      .from("routes")
+      .select("*")
+      .eq("supplier_id", supplierId)
+      .order("name", { ascending: true }),
   ])
-
-  if (packagesError) {
-    console.error("Failed to load supplier packages", { supplierId, supplierSlug: slug, error: packagesError })
-    return {
-      error: NextResponse.json(
-        { error: "Failed to load supplier packages" },
-        { status: 500 },
-      ),
-    }
-  }
 
   if (suiteTypesError) {
     console.error("Failed to load supplier suite types", {
@@ -276,42 +239,36 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     }
   }
 
-  const packageIds = (packages ?? []).map((pkg) => pkg.id)
-
-  const [
-    { data: routes, error: routesError },
-    { data: rateCards, error: rateCardsError },
-  ] = await Promise.all([
-    packageIds.length > 0
-      ? supabase
-          .from("routes")
-          .select("*")
-          .in("package_id", packageIds)
-          .order("name", { ascending: true })
-      : Promise.resolve({ data: [], error: null }),
-    packageIds.length > 0
-      ? supabase
-          .from("rate_cards")
-          .select("*")
-          .in("package_id", packageIds)
-          .order("valid_from", { ascending: true })
-      : Promise.resolve({ data: [], error: null }),
-  ])
-
-  if (routesError || rateCardsError) {
-    if (routesError) {
-      console.error("Failed to load supplier routes", { supplierId, supplierSlug: slug, error: routesError })
-    }
-    if (rateCardsError) {
-      console.error("Failed to load supplier rate cards", {
-        supplierId,
-        supplierSlug: slug,
-        error: rateCardsError,
-      })
-    }
+  if (routesError) {
+    console.error("Failed to load supplier routes", { supplierId, supplierSlug: slug, error: routesError })
     return {
       error: NextResponse.json(
-        { error: "Failed to load supplier reference data" },
+        { error: "Failed to load supplier routes" },
+        { status: 500 },
+      ),
+    }
+  }
+
+  const routeIds = (routes ?? []).map((route) => route.id)
+  const rateCardResult =
+    routeIds.length > 0
+      ? await supabase
+          .from("rate_cards")
+          .select("*")
+          .in("route_id", routeIds)
+          .order("valid_from", { ascending: true })
+      : { data: [], error: null }
+
+  const { data: rateCards, error: rateCardsError } = rateCardResult
+  if (rateCardsError) {
+    console.error("Failed to load supplier rate cards", {
+      supplierId,
+      supplierSlug: slug,
+      error: rateCardsError,
+    })
+    return {
+      error: NextResponse.json(
+        { error: "Failed to load supplier rate cards" },
         { status: 500 },
       ),
     }
@@ -355,10 +312,9 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
 
   return {
     supplier,
-    packages: packages ?? [],
-    routes: routes ?? [],
     suiteTypes: suiteTypes ?? [],
     emails: emails ?? [],
+    routes: routes ?? [],
     rateCards: rateCards ?? [],
     locations: locations ?? [],
   }

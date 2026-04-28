@@ -13,23 +13,83 @@ import { Spinner } from "@/components/ui/spinner"
 const loginPageClassName = "min-h-screen bg-background flex items-center justify-center p-4"
 // DEV_QUICK_LOGIN_START
 const canUseDevQuickLogin = process.env.NODE_ENV === "development"
+const defaultDevQuickLoginEmail = "carmen@luxustravel.co.za"
+const defaultDevQuickLoginPasswords = ["password123"]
+
+interface DevQuickLoginCandidates {
+  email: string
+  passwords: string[]
+}
+
+interface DevQuickLoginAttempt {
+  email: string
+  password: string
+}
+
+function splitCommaSeparatedValues(rawValue: string): string[] {
+  return rawValue
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean)
+}
+
+function dedupeValues(values: string[]): string[] {
+  const seen = new Set<string>()
+  const deduped: string[] = []
+
+  for (const value of values) {
+    if (seen.has(value)) continue
+    seen.add(value)
+    deduped.push(value)
+  }
+
+  return deduped
+}
 
 function getDevQuickLoginCandidates() {
   if (process.env.NODE_ENV !== "development" || typeof window === "undefined") {
     return null
   }
 
-  const email = window.localStorage.getItem("devQuickLoginEmail")?.trim().toLowerCase() ?? ""
-  const passwords = (window.localStorage.getItem("devQuickLoginPasswords") ?? "")
-    .split(",")
-    .map((password) => password.trim())
-    .filter(Boolean)
+  const configuredEmail = (
+    window.localStorage.getItem("devQuickLoginEmail") ??
+    process.env.NEXT_PUBLIC_DEV_QUICK_LOGIN_EMAIL ??
+    ""
+  ).trim()
+  const rawPasswords =
+    window.localStorage.getItem("devQuickLoginPasswords") ??
+    process.env.NEXT_PUBLIC_DEV_QUICK_LOGIN_PASSWORDS ??
+    ""
 
-  if (!email || passwords.length === 0) {
+  const candidateEmails = dedupeValues([
+    ...splitCommaSeparatedValues(configuredEmail).map((email) => email.toLowerCase()),
+    defaultDevQuickLoginEmail,
+  ])
+  const candidatePasswords = dedupeValues([
+    ...splitCommaSeparatedValues(rawPasswords),
+    ...defaultDevQuickLoginPasswords,
+  ])
+
+  if (candidateEmails.length === 0 || candidatePasswords.length === 0) {
     return null
   }
 
-  return { email, passwords }
+  return candidateEmails.map((email) => ({
+    email,
+    passwords: candidatePasswords,
+  })) satisfies DevQuickLoginCandidates[]
+}
+
+function getDevQuickLoginAttempts(candidates: DevQuickLoginCandidates[]) {
+  const attempts: DevQuickLoginAttempt[] = []
+
+  for (const candidate of candidates) {
+    for (const password of candidate.passwords) {
+      attempts.push({ email: candidate.email, password })
+    }
+  }
+
+  return attempts
 }
 // DEV_QUICK_LOGIN_END
 
@@ -134,20 +194,22 @@ function LoginForm() {
     if (!canUseDevQuickLogin) return
 
     const candidates = getDevQuickLoginCandidates()
-    if (!candidates) {
+    if (!candidates || candidates.length === 0) {
       setError(
         "Dev quick login is not configured. Set localStorage keys devQuickLoginEmail and devQuickLoginPasswords (comma-separated).",
       )
       return
     }
 
+    const attempts = getDevQuickLoginAttempts(candidates)
+
     setError("")
     setSubmitting(true)
     try {
-      for (const passwordOption of candidates.passwords) {
-        const success = await loginWithPassword(candidates.email, passwordOption)
+      for (const attempt of attempts) {
+        const success = await loginWithPassword(attempt.email, attempt.password)
         if (success) {
-          localStorage.setItem("lastLoginEmail", candidates.email)
+          localStorage.setItem("lastLoginEmail", attempt.email)
           router.push("/app")
           return
         }
