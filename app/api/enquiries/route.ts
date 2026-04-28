@@ -3,6 +3,59 @@ import { detectCountryInText, loadCountryAliasMap, normalizeCountry } from "@/li
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
 import { createServiceClient } from "@/lib/supabase/server"
 
+type ServiceClient = ReturnType<typeof createServiceClient>
+
+function normalizeLookupValue(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
+}
+
+async function findRouteId(supabase: ServiceClient, direction: unknown): Promise<string | null> {
+  if (typeof direction !== "string" || !direction.trim()) return null
+
+  const { data: exactRoute } = await supabase
+    .from("routes")
+    .select("id")
+    .ilike("name", direction.trim())
+    .maybeSingle()
+
+  return exactRoute?.id ?? null
+}
+
+async function findPackageId(supabase: ServiceClient, packageOption: unknown): Promise<string | null> {
+  if (typeof packageOption !== "string" || !packageOption.trim()) return null
+
+  const normalizedOption = normalizeLookupValue(packageOption)
+  const { data: packages } = await supabase
+    .from("packages")
+    .select("id, name")
+    .eq("active", true)
+
+  const match = (packages ?? []).find((item) => {
+    const normalizedName = normalizeLookupValue(item.name)
+    return normalizedName === normalizedOption || normalizedOption.includes(normalizedName) || normalizedName.includes(normalizedOption)
+  })
+
+  return match?.id ?? null
+}
+
+async function findHotelSupplierId(supabase: ServiceClient, hotelOption: unknown): Promise<string | null> {
+  if (typeof hotelOption !== "string" || !hotelOption.trim()) return null
+
+  const normalizedOption = normalizeLookupValue(hotelOption)
+  const { data: suppliers } = await supabase
+    .from("suppliers")
+    .select("id, name")
+    .eq("kind", "hotel_property")
+    .eq("active", true)
+
+  const match = (suppliers ?? []).find((item) => {
+    const normalizedName = normalizeLookupValue(item.name)
+    return normalizedName === normalizedOption || normalizedOption.includes(normalizedName) || normalizedName.includes(normalizedOption)
+  })
+
+  return match?.id ?? null
+}
+
 export async function POST(req: Request) {
   const body = await req.json()
 
@@ -73,6 +126,33 @@ export async function POST(req: Request) {
 
   // --- 2. Insert booking ---
   const source = body.rawText ? "paste_import" : "web_form"
+  const routeId = await findRouteId(supabase, body.direction)
+  const packageId = await findPackageId(supabase, body.packageOption)
+  const hotelSupplierId = await findHotelSupplierId(supabase, body.hotelOption)
+  const existingExtractedJson =
+    body.extractedJson && typeof body.extractedJson === "object" && !Array.isArray(body.extractedJson)
+      ? body.extractedJson as Record<string, unknown>
+      : {}
+  const existingFormFields =
+    existingExtractedJson.formFields && typeof existingExtractedJson.formFields === "object" && !Array.isArray(existingExtractedJson.formFields)
+      ? existingExtractedJson.formFields as Record<string, unknown>
+      : {}
+  const extractedJson = {
+    ...existingExtractedJson,
+    formFields: {
+      ...existingFormFields,
+      province: body.province || null,
+      packageOption: body.packageOption || null,
+      hotelOption: body.hotelOption || null,
+      flightBooking: body.flightBooking || null,
+      flightDepartureDate: body.flightDepartureDate || null,
+    },
+    resolvedReferences: {
+      routeId,
+      packageId,
+      hotelSupplierId,
+    },
+  }
 
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
@@ -82,12 +162,15 @@ export async function POST(req: Request) {
       source,
       stage: "enquiry",
       departure_date: body.departureDate || null,
+      route_id: routeId,
+      package_id: packageId,
+      hotel_supplier_id: hotelSupplierId,
       no_of_adults: body.noOfAdults ?? 1,
       no_of_children: body.noOfChildren ?? 0,
       no_of_suites: body.noOfSuites ?? 1,
       child_ages: body.childAges || null,
       raw_text: body.rawText || null,
-      extracted_json: body.extractedJson || null,
+      extracted_json: extractedJson,
       terms_accepted: body.termsAccepted ?? false,
       extend_stay: body.extendStay === "yes" || body.extendStay === true || false,
       extra_nights: body.extraNights ? Number(body.extraNights) : null,

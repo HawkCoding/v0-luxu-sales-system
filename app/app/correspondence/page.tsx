@@ -44,14 +44,14 @@ export default function CorrespondencePage() {
   return (
     <div className="p-6 space-y-4 max-w-5xl">
       <div>
-        <h1 className="text-2xl font-semibold text-foreground tracking-tight">Correspondence</h1>
+        <h1 className="text-2xl font-semibold text-foreground tracking-tight">Emails Sent</h1>
         <p className="text-sm text-muted-foreground mt-1">{filtered.length} messages</p>
       </div>
 
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input placeholder="Search correspondence..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8 h-9 text-sm" />
+          <Input placeholder="Search emails sent..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8 h-9 text-sm" />
         </div>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
           <SelectTrigger className="w-36 h-9 text-sm">

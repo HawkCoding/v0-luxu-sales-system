@@ -1,14 +1,22 @@
 export interface ParsedDraft {
   customer: {
+    title: string
     firstName: string
     surname: string
     email: string
     phone: string
+    country: string
+    province: string
   }
   trip: {
     supplier: string
     route: string
     departureDate: string
+    purpose: 'quote' | 'availability' | 'reservation'
+    packageOption: string
+    hotelOption: string
+    flightBooking: string
+    flightDepartureDate: string
   }
   guests: {
     adults: number
@@ -17,6 +25,15 @@ export interface ParsedDraft {
     suiteType: string
   }
   notes: string
+  formFields: {
+    title: string
+    country: string
+    province: string
+    packageOption: string
+    hotelOption: string
+    flightBooking: string
+    flightDepartureDate: string
+  }
   confidence: {
     [key: string]: 'high' | 'low'
   }
@@ -33,14 +50,91 @@ const REQUIRED_FIELDS = [
   'customer.firstName',
   'customer.surname',
   'customer.email',
+  'customer.country',
   'trip.supplier',
   'trip.departureDate',
   'guests.adults',
   'guests.suites'
 ]
 
+const FORM_FIELD_LABEL_PATTERNS = [
+  /^title$/i,
+  /^name$/i,
+  /^first\s*name$/i,
+  /^forename$/i,
+  /^surname$/i,
+  /^last\s*name$/i,
+  /^family\s*name$/i,
+  /^contact\s*number$/i,
+  /^email$/i,
+  /^country$/i,
+  /^province$/i,
+  /^direction$/i,
+  /^departure\s*date$/i,
+  /^(?:no\.?|number)\s*of\s*adults?$/i,
+  /^(?:no\.?|number)\s*of\s*suites?$/i,
+  /^suite\s*type(?:\s*\d+)?$/i,
+  /^package\s*options$/i,
+  /^hotel\s*options$/i,
+  /^flight\s*booking$/i,
+  /^flight\s*departure\s*date$/i,
+  /^acceptance$/i,
+  /^please\s+indicate\s+the\s+purpose\s+of\s+your\s+request$/i,
+  /^contact\s+information$/i,
+  /^.+\s+information$/i,
+  /^additional\s+pre\s+and\s+post\s+train\s+travel\s+services$/i,
+]
+
+function normalizeLabel(line: string): string {
+  return line.replace(/[:|*]+$/g, '').trim()
+}
+
+function isFormFieldLabel(line: string): boolean {
+  const label = normalizeLabel(line)
+  return FORM_FIELD_LABEL_PATTERNS.some((pattern) => pattern.test(label))
+}
+
+function getLabeledFieldValue(text: string, labelPatterns: RegExp[]): string {
+  const lines = text.split(/\r?\n/)
+
+  for (const rawLine of lines) {
+    const sameLineMatch = rawLine.trim().match(/^(.+?)\s*[:|]\s*(.+)$/)
+    if (!sameLineMatch) continue
+
+    const label = normalizeLabel(sameLineMatch[1])
+    const value = sameLineMatch[2].trim()
+    if (value && labelPatterns.some((pattern) => pattern.test(label))) {
+      return value
+    }
+  }
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const label = normalizeLabel(lines[index])
+    if (!labelPatterns.some((pattern) => pattern.test(label))) continue
+
+    const value = lines.slice(index + 1).map((line) => line.trim()).find((line) => line.length > 0)
+    if (value && !isFormFieldLabel(value)) {
+      return value
+    }
+  }
+
+  return ''
+}
+
 export function parseEmailDraft(text: string): ParsedDraft {
   const confidence: { [key: string]: 'high' | 'low' } = {}
+  const title = getLabeledFieldValue(text, [/^title$/i])
+  const country = getLabeledFieldValue(text, [/^country$/i])
+  const province = getLabeledFieldValue(text, [/^province$/i, /^region$/i])
+  const purposeValue = getLabeledFieldValue(text, [/^please\s+indicate\s+the\s+purpose\s+of\s+your\s+request$/i])
+  const packageOption = getLabeledFieldValue(text, [/^package\s*options$/i])
+  const hotelOption = getLabeledFieldValue(text, [/^hotel\s*options?$/i])
+  const flightBooking = getLabeledFieldValue(text, [/^flight\s*booking$/i])
+  const flightDepartureDateValue = getLabeledFieldValue(text, [/^flight\s*departure\s*date$/i])
+
+  if (title) confidence['customer.title'] = 'high'
+  if (country) confidence['customer.country'] = 'high'
+  if (province) confidence['customer.province'] = 'high'
   
   // Extract email (high confidence if found)
   const emailMatch = text.match(/[\w.+-]+@[\w-]+\.[\w.-]+/)
@@ -52,13 +146,43 @@ export function parseEmailDraft(text: string): ParsedDraft {
   const phone = phoneMatch?.[0] || ''
   if (phoneMatch) confidence['customer.phone'] = 'high'
   
-  // Extract name (from signature - lower confidence)
-  const nameMatch = text.match(/(?:regards|sincerely|cheers|thanks|best),?\s*\n?\s*([A-Z][a-z]+)\s+([A-Z][a-z]+)/i)
-  const firstName = nameMatch?.[1] || ''
-  const surname = nameMatch?.[2] || ''
-  if (nameMatch) {
+  // Extract name: structured form labels first, signature fallback second.
+  const firstNameLabelValue = getLabeledFieldValue(text, [/^first\s*name$/i, /^forename$/i])
+  const nameLabelValue = getLabeledFieldValue(text, [/^name$/i])
+  const surnameLabelValue = getLabeledFieldValue(text, [/^surname$/i, /^last\s*name$/i, /^family\s*name$/i])
+  const fullNameLabelMatch = !firstNameLabelValue && nameLabelValue
+    ? nameLabelValue.match(/^([A-Za-z][A-Za-z'-]*)\s+([A-Za-z][A-Za-z'-]*)$/)
+    : null
+  const singleNameLabelMatch = !firstNameLabelValue && !fullNameLabelMatch && nameLabelValue
+    ? nameLabelValue.match(/^([A-Za-z][A-Za-z'-]*)$/)
+    : null
+  const signatureNameMatch = !firstNameLabelValue && !surnameLabelValue && !fullNameLabelMatch && !singleNameLabelMatch
+    ? text.match(/(?:regards|sincerely|cheers|thanks|best),?\s*\n?\s*([A-Z][a-z]+)\s+([A-Z][a-z]+)/i)
+    : null
+
+  const firstName = firstNameLabelValue || fullNameLabelMatch?.[1] || singleNameLabelMatch?.[1] || signatureNameMatch?.[1] || ''
+  const surname = surnameLabelValue || fullNameLabelMatch?.[2] || signatureNameMatch?.[2] || ''
+  if (firstNameLabelValue || fullNameLabelMatch || singleNameLabelMatch) {
+    confidence['customer.firstName'] = 'high'
+  } else if (signatureNameMatch) {
     confidence['customer.firstName'] = 'low'
+  }
+  if (surnameLabelValue || fullNameLabelMatch) {
+    confidence['customer.surname'] = 'high'
+  } else if (signatureNameMatch) {
     confidence['customer.surname'] = 'low'
+  }
+
+  let purpose: 'quote' | 'availability' | 'reservation' = 'quote'
+  if (/availability/i.test(purposeValue)) {
+    purpose = 'availability'
+    confidence['trip.purpose'] = 'high'
+  } else if (/reservation|booking/i.test(purposeValue)) {
+    purpose = 'reservation'
+    confidence['trip.purpose'] = 'high'
+  } else if (/quote/i.test(purposeValue)) {
+    purpose = 'quote'
+    confidence['trip.purpose'] = 'high'
   }
   
   // Extract supplier (high confidence) - Only Rovos Rail and Blue Train
@@ -115,10 +239,10 @@ export function parseEmailDraft(text: string): ParsedDraft {
       }
       const month = monthMap[dateMatch[2].toLowerCase().slice(0, 3)]
       const year = dateMatch[3]
-      if (month) {
-        departureDate = `${year}-${month}-${day}`
-        confidence['trip.departureDate'] = 'low'
-      }
+    if (month) {
+      departureDate = `${year}-${month}-${day}`
+      confidence['trip.departureDate'] = 'low'
+    }
     } else {
       // "15/03/2026" or "03/15/2026"
       const slashMatch = text.match(/\b([0-3]?[0-9])\/([0-1]?[0-9])\/([0-9]{4})\b/)
@@ -135,9 +259,24 @@ export function parseEmailDraft(text: string): ParsedDraft {
   
   // Extract adults (high confidence if explicit)
   let adults = 0
-  const adultsMatch = text.match(/(\d+)\s*adult/i)
-  if (adultsMatch) {
-    adults = parseInt(adultsMatch[1])
+  const adultsLabelValue = getLabeledFieldValue(text, [
+    /^(?:no\.?|number)\s*of\s*adults?$/i,
+    /^(?:no\.?|number)\s*of\s*passengers?$/i,
+    /^adults?$/i,
+    /^passengers?$/i,
+    /^pax$/i,
+    /^people$/i,
+    /^guests?$/i,
+    /^travell?ers?$/i,
+  ])
+  const adultsInlineMatch = text.match(
+    /(\d+)\s*(?:adults?|passengers?|pax|people|guests?|travell?ers?)/i
+  )
+  if (/^\d+$/.test(adultsLabelValue)) {
+    adults = parseInt(adultsLabelValue)
+    confidence['guests.adults'] = 'high'
+  } else if (adultsInlineMatch) {
+    adults = parseInt(adultsInlineMatch[1])
     confidence['guests.adults'] = 'high'
   } else {
     // Infer from "myself and my wife" = 2
@@ -160,9 +299,16 @@ export function parseEmailDraft(text: string): ParsedDraft {
   
   // Extract suites
   let suites = 0
-  const suitesMatch = text.match(/(\d+)\s+(?:[A-Za-z-]+\s+){0,3}suite/i)
-  if (suitesMatch) {
-    suites = parseInt(suitesMatch[1])
+  const suitesLabelValue = getLabeledFieldValue(text, [
+    /^(?:no\.?|number)\s*of\s*suites?$/i,
+    /^suites?$/i,
+  ])
+  const suitesInlineMatch = text.match(/(\d+)[ \t]+(?:x[ \t]+)?(?:[A-Za-z-]+[ \t]+){0,3}suite/i)
+  if (/^\d+$/.test(suitesLabelValue)) {
+    suites = parseInt(suitesLabelValue)
+    confidence['guests.suites'] = 'high'
+  } else if (suitesInlineMatch) {
+    suites = parseInt(suitesInlineMatch[1])
     confidence['guests.suites'] = 'high'
   } else if (adults > 0) {
     // Default to 1 suite if not specified
@@ -190,6 +336,9 @@ export function parseEmailDraft(text: string): ParsedDraft {
     if (/double|couple/i.test(text)) suiteType = 'Pullman Double Suite'
     else if (/twin/i.test(text)) suiteType = 'Pullman Twin Suite'
     else suiteType = 'Pullman Double Suite'
+  } else if (/\bsuite\b/i.test(text)) {
+    suiteType = 'Other'
+    confidence['guests.suiteType'] = 'low'
   }
   
   // Notes: everything not explicitly extracted
@@ -197,15 +346,23 @@ export function parseEmailDraft(text: string): ParsedDraft {
   
   return {
     customer: {
+      title,
       firstName,
       surname,
       email,
-      phone
+      phone,
+      country,
+      province
     },
     trip: {
       supplier,
       route,
-      departureDate
+      departureDate,
+      purpose,
+      packageOption,
+      hotelOption,
+      flightBooking,
+      flightDepartureDate: flightDepartureDateValue
     },
     guests: {
       adults,
@@ -214,6 +371,15 @@ export function parseEmailDraft(text: string): ParsedDraft {
       suiteType
     },
     notes,
+    formFields: {
+      title,
+      country,
+      province,
+      packageOption,
+      hotelOption,
+      flightBooking,
+      flightDepartureDate: flightDepartureDateValue
+    },
     confidence,
     rawText: text
   }
@@ -226,6 +392,7 @@ export function validateDraft(draft: ParsedDraft): ValidationResult {
   // Check required fields
   if (!draft.customer.firstName) missingRequired.push('First name (Customer)')
   if (!draft.customer.surname) missingRequired.push('Surname (Customer)')
+  if (!draft.customer.country) missingRequired.push('Country')
   if (!draft.customer.email && !draft.customer.phone) {
     missingRequired.push('Email or Phone (Customer)')
   }
@@ -256,6 +423,7 @@ export function countRequiredComplete(draft: ParsedDraft): { completed: number; 
   if (draft.customer.firstName) completed++
   if (draft.customer.surname) completed++
   if (draft.customer.email || draft.customer.phone) completed++
+  if (draft.customer.country) completed++
   if (draft.trip.supplier) completed++
   if (draft.trip.departureDate) completed++
   if (draft.guests.adults > 0) completed++

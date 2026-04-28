@@ -17,7 +17,7 @@ import {
   ImportConflictResolutionModal,
   type ImportConflictGroup,
 } from "@/components/import-conflict-resolution-modal"
-import { useActiveSuppliers, useSupplierDetail } from "@/lib/use-data"
+import { useActiveSuppliers } from "@/lib/use-data"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { mutate } from "swr"
@@ -29,7 +29,7 @@ const AUTO_RETRY_ATTEMPTS = 1
 
 /** Opaque tint matching former `bg-amber-500/10` / hover `15%` over `--background` (sticky cells cannot use alpha or scroll bleeds through). */
 const IMPORT_CONFLICT_ROW_TINT =
-  "bg-[color-mix(in_srgb,var(--background)_90%,rgb(245_158_11)_10%)] group-hover:bg-[color-mix(in_srgb,var(--background)_85%,rgb(245_158_11)_15%)]"
+  "import-conflict-row-tint group-hover-import-conflict-row-tint"
 
 interface EditableImportRow {
   id: string
@@ -301,21 +301,9 @@ export function CustomerBulkImportPanel() {
   const importRunConfigRef = useRef<ImportRunConfig | null>(null)
   const frozenPreImportCheckRef = useRef<PreImportCheckSummary | null>(null)
 
-  const selectedSupplierSlug = useMemo(
-    () => suppliers.find((supplier) => supplier.id === selectedSupplierId)?.slug ?? "",
-    [selectedSupplierId, suppliers],
-  )
-  const { data: supplierDetail } = useSupplierDetail(selectedSupplierSlug)
-
-  const routeOptions = useMemo(() => {
-    if (!supplierDetail || "error" in supplierDetail) return []
-    return supplierDetail.packages.flatMap((pkg) =>
-      pkg.routes.map((route) => ({
-        id: route.id,
-        label: `${route.name} (${pkg.name})`,
-      })),
-    )
-  }, [supplierDetail])
+  const routeOptions = useMemo<Array<{ id: string; label: string }>>(() => {
+    return []
+  }, [])
 
   const selectedValidRows = useMemo(() => rows.filter((row) => row.selected && isRowValid(row)), [rows])
   const selectedInvalidCount = useMemo(() => rows.filter((row) => row.selected && !isRowValid(row)).length, [rows])

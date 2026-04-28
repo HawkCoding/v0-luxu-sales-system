@@ -8,14 +8,6 @@ export const dateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD")
 
-export const routeSchema = z.object({
-  id: z.string().uuid().optional(),
-  name: z.string().trim().min(1, "Route name is required"),
-  originLocationId: z.string().uuid(),
-  destinationLocationId: z.string().uuid(),
-  active: z.boolean(),
-})
-
 export const suiteTypeSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().trim().min(1, "Suite type name is required"),
@@ -24,24 +16,23 @@ export const suiteTypeSchema = z.object({
 
 export const rateCardSchema = z.object({
   id: z.string().uuid().optional(),
-  routeId: z.string().uuid().nullable(),
+  routeId: z.string().uuid(),
   suiteTypeId: z.string().uuid(),
   pricePerPerson: z.number().finite().nonnegative(),
+  childPrice: z.number().finite().nonnegative().nullable(),
+  infantPrice: z.number().finite().nonnegative().nullable(),
   currency: z.string().trim().min(1).max(10),
   validFrom: dateSchema,
   validTo: z.union([dateSchema, z.literal(""), z.null()]),
 })
 
-export const packageSchema = z.object({
+export const routeSchema = z.object({
   id: z.string().uuid().optional(),
-  name: z.string().trim().min(1, "Package name is required"),
-  description: z.string().trim().max(5000).nullable(),
-  durationNights: z.number().int().nonnegative().nullable(),
-  singleSupplementPct: z.number().finite().min(0).max(1000),
-  currency: z.string().trim().min(1).max(10),
+  name: z.string().trim().min(1, "Route name is required"),
+  originLocationId: z.string().uuid(),
+  destinationLocationId: z.string().uuid(),
   active: z.boolean(),
-  routes: z.array(routeSchema),
-  rateCards: z.array(rateCardSchema),
+  rateCards: z.array(rateCardSchema).default([]),
 })
 
 export const supplierEmailSchema = z.object({
@@ -103,23 +94,16 @@ export const supplierSaveSchema = z.object({
     .refine((value) => value === "" || value.length >= 2, {
       message: "Location must be at least 2 characters",
     }),
+  locationId: z.string().uuid().nullable().optional(),
   notes: z.string().trim().max(5000),
   active: z.boolean(),
   emails: z.array(supplierEmailSchema).default([]),
   suiteTypes: z.array(suiteTypeSchema),
-  packages: z.array(packageSchema),
+  routes: z.array(routeSchema).default([]),
   expectedUpdatedAt: z.string().optional(),
 })
 
 export type SupplierSaveInput = z.infer<typeof supplierSaveSchema>
-
-export const draftRouteSchema = z.object({
-  id: z.string().uuid().optional(),
-  name: z.string().trim().max(200).default(""),
-  originLocationId: z.union([z.string().uuid(), z.literal("")]).default(""),
-  destinationLocationId: z.union([z.string().uuid(), z.literal("")]).default(""),
-  active: z.boolean().default(true),
-})
 
 export const draftSuiteTypeSchema = z.object({
   id: z.string().uuid().optional(),
@@ -129,25 +113,22 @@ export const draftSuiteTypeSchema = z.object({
 
 export const draftRateCardSchema = z.object({
   id: z.string().uuid().optional(),
-  routeId: z.union([z.string().uuid(), z.null(), z.literal("")]).transform((value) =>
-    value === "" ? null : value,
-  ),
+  routeId: z.union([z.string().uuid(), z.literal("")]).default(""),
   suiteTypeId: z.union([z.string().uuid(), z.literal("")]).default(""),
   pricePerPerson: z.number().finite().nonnegative().default(0),
+  childPrice: z.number().finite().nonnegative().nullable().default(null),
+  infantPrice: z.number().finite().nonnegative().nullable().default(null),
   currency: z.string().trim().max(10).default("ZAR"),
   validFrom: z.union([dateSchema, z.literal("")]).default(""),
   validTo: z.union([dateSchema, z.literal(""), z.null()]).default(""),
 })
 
-export const draftPackageSchema = z.object({
+export const draftRouteSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().trim().max(200).default(""),
-  description: z.string().trim().max(5000).nullable().default(null),
-  durationNights: z.number().int().nonnegative().nullable().default(null),
-  singleSupplementPct: z.number().finite().min(0).max(1000).default(50),
-  currency: z.string().trim().max(10).default("ZAR"),
+  originLocationId: z.union([z.string().uuid(), z.literal("")]).default(""),
+  destinationLocationId: z.union([z.string().uuid(), z.literal("")]).default(""),
   active: z.boolean().default(true),
-  routes: z.array(draftRouteSchema).default([]),
   rateCards: z.array(draftRateCardSchema).default([]),
 })
 
@@ -179,11 +160,12 @@ export const supplierDraftSaveSchema = z.object({
     })
     .default(""),
   location: z.string().trim().max(255).default(""),
+  locationId: z.string().uuid().nullable().optional(),
   notes: z.string().trim().max(5000).default(""),
   active: z.boolean().default(true),
   emails: z.array(draftSupplierEmailSchema).default([]),
   suiteTypes: z.array(draftSuiteTypeSchema).default([]),
-  packages: z.array(draftPackageSchema).default([]),
+  routes: z.array(draftRouteSchema).default([]),
   expectedUpdatedAt: z.string().optional(),
 })
 

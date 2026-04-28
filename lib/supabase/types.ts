@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -7,11 +7,6 @@
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
-  __InternalSupabase: {
-    PostgrestVersion: "14.1"
-  }
   graphql_public: {
     Tables: {
       [_ in never]: never
@@ -39,6 +34,51 @@ export type Database = {
   }
   public: {
     Tables: {
+      audit_log_archives: {
+        Row: {
+          action: string
+          actor: string
+          actor_user_id: string | null
+          after_json: Json | null
+          archive_batch_id: string
+          archived_at: string
+          before_json: Json | null
+          created_at: string
+          entity_id: string
+          entity_type: string
+          id: string
+          meta_json: Json | null
+        }
+        Insert: {
+          action: string
+          actor: string
+          actor_user_id?: string | null
+          after_json?: Json | null
+          archive_batch_id?: string
+          archived_at?: string
+          before_json?: Json | null
+          created_at: string
+          entity_id: string
+          entity_type: string
+          id: string
+          meta_json?: Json | null
+        }
+        Update: {
+          action?: string
+          actor?: string
+          actor_user_id?: string | null
+          after_json?: Json | null
+          archive_batch_id?: string
+          archived_at?: string
+          before_json?: Json | null
+          created_at?: string
+          entity_id?: string
+          entity_type?: string
+          id?: string
+          meta_json?: Json | null
+        }
+        Relationships: []
+      }
       audit_logs: {
         Row: {
           action: string
@@ -125,6 +165,8 @@ export type Database = {
           additional_services: boolean
           additional_services_details: string | null
           booking_number: string
+          cancel_reason: string | null
+          cancelled_at: string | null
           child_ages: number[] | null
           consultant: string | null
           created_at: string
@@ -155,6 +197,8 @@ export type Database = {
           additional_services?: boolean
           additional_services_details?: string | null
           booking_number?: string
+          cancel_reason?: string | null
+          cancelled_at?: string | null
           child_ages?: number[] | null
           consultant?: string | null
           created_at?: string
@@ -185,6 +229,8 @@ export type Database = {
           additional_services?: boolean
           additional_services_details?: string | null
           booking_number?: string
+          cancel_reason?: string | null
+          cancelled_at?: string | null
           child_ages?: number[] | null
           consultant?: string | null
           created_at?: string
@@ -590,6 +636,48 @@ export type Database = {
         }
         Relationships: []
       }
+      package_legs: {
+        Row: {
+          created_at: string
+          id: string
+          label: string | null
+          package_id: string
+          sort_order: number
+          supplier_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          label?: string | null
+          package_id: string
+          sort_order?: number
+          supplier_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          label?: string | null
+          package_id?: string
+          sort_order?: number
+          supplier_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "package_legs_package_id_fkey"
+            columns: ["package_id"]
+            isOneToOne: false
+            referencedRelation: "packages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "package_legs_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       packages: {
         Row: {
           active: boolean
@@ -597,10 +685,11 @@ export type Database = {
           currency: string
           description: string | null
           duration_nights: number | null
+          fixed_price_per_person: number | null
           id: string
           name: string
           single_supplement_pct: number
-          supplier_id: string
+          slug: string
           updated_at: string
         }
         Insert: {
@@ -609,10 +698,11 @@ export type Database = {
           currency?: string
           description?: string | null
           duration_nights?: number | null
+          fixed_price_per_person?: number | null
           id?: string
           name: string
           single_supplement_pct?: number
-          supplier_id: string
+          slug: string
           updated_at?: string
         }
         Update: {
@@ -621,21 +711,14 @@ export type Database = {
           currency?: string
           description?: string | null
           duration_nights?: number | null
+          fixed_price_per_person?: number | null
           id?: string
           name?: string
           single_supplement_pct?: number
-          supplier_id?: string
+          slug?: string
           updated_at?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "packages_supplier_id_fkey"
-            columns: ["supplier_id"]
-            isOneToOne: false
-            referencedRelation: "suppliers"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       payments: {
         Row: {
@@ -855,46 +938,42 @@ export type Database = {
       }
       rate_cards: {
         Row: {
+          child_price: number | null
           created_at: string
           currency: string
           id: string
-          package_id: string
+          infant_price: number | null
           price_per_person: number
-          route_id: string | null
+          route_id: string
           suite_type_id: string
           valid_from: string
           valid_to: string | null
         }
         Insert: {
+          child_price?: number | null
           created_at?: string
           currency?: string
           id?: string
-          package_id: string
+          infant_price?: number | null
           price_per_person: number
-          route_id?: string | null
+          route_id: string
           suite_type_id: string
           valid_from?: string
           valid_to?: string | null
         }
         Update: {
+          child_price?: number | null
           created_at?: string
           currency?: string
           id?: string
-          package_id?: string
+          infant_price?: number | null
           price_per_person?: number
-          route_id?: string | null
+          route_id?: string
           suite_type_id?: string
           valid_from?: string
           valid_to?: string | null
         }
         Relationships: [
-          {
-            foreignKeyName: "rate_cards_package_id_fkey"
-            columns: ["package_id"]
-            isOneToOne: false
-            referencedRelation: "packages"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "rate_cards_route_id_fkey"
             columns: ["route_id"]
@@ -943,7 +1022,7 @@ export type Database = {
           id: string
           name: string
           origin_location_id: string
-          package_id: string
+          supplier_id: string
           updated_at: string
         }
         Insert: {
@@ -953,7 +1032,7 @@ export type Database = {
           id?: string
           name: string
           origin_location_id: string
-          package_id: string
+          supplier_id: string
           updated_at?: string
         }
         Update: {
@@ -963,7 +1042,7 @@ export type Database = {
           id?: string
           name?: string
           origin_location_id?: string
-          package_id?: string
+          supplier_id?: string
           updated_at?: string
         }
         Relationships: [
@@ -982,10 +1061,10 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "routes_package_id_fkey"
-            columns: ["package_id"]
+            foreignKeyName: "routes_supplier_id_fkey"
+            columns: ["supplier_id"]
             isOneToOne: false
-            referencedRelation: "packages"
+            referencedRelation: "suppliers"
             referencedColumns: ["id"]
           },
         ]
@@ -1213,6 +1292,7 @@ export type Database = {
           id: string
           kind: Database["public"]["Enums"]["supplier_kind"]
           location: string | null
+          location_id: string | null
           name: string
           notes: string | null
           phone: string | null
@@ -1228,6 +1308,7 @@ export type Database = {
           id?: string
           kind: Database["public"]["Enums"]["supplier_kind"]
           location?: string | null
+          location_id?: string | null
           name: string
           notes?: string | null
           phone?: string | null
@@ -1243,6 +1324,7 @@ export type Database = {
           id?: string
           kind?: Database["public"]["Enums"]["supplier_kind"]
           location?: string | null
+          location_id?: string | null
           name?: string
           notes?: string | null
           phone?: string | null
@@ -1251,7 +1333,15 @@ export type Database = {
           updated_at?: string
           website?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "suppliers_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       templates: {
         Row: {
@@ -1338,6 +1428,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      archive_old_audit_logs: { Args: { cutoff_date: string }; Returns: number }
       auth_has_role: {
         Args: { required_roles: Database["public"]["Enums"]["user_role"][] }
         Returns: boolean
@@ -1365,6 +1456,9 @@ export type Database = {
         | "voucher_sent"
         | "closed"
         | "lost"
+        | "form_done"
+        | "payment_schedule"
+        | "trip_active"
       quote_status:
         | "draft"
         | "pricing_incomplete"
@@ -1540,6 +1634,9 @@ export const Constants = {
         "voucher_sent",
         "closed",
         "lost",
+        "form_done",
+        "payment_schedule",
+        "trip_active",
       ],
       quote_status: [
         "draft",

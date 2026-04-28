@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Packages Icon Options</title>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      background: #0f0f0f;
+      color: #f0f0f0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 48px 24px;
+      gap: 48px;
+    }
+    h1 { font-size: 1.25rem; color: #a0a0a0; font-weight: 400; margin: 0; }
+    .section-title {
+      font-size: 0.7rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #555;
+      margin-bottom: 4px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      width: 100%;
+      max-width: 640px;
+    }
+    .card {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 12px;
+      padding: 24px 16px 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .card:hover { border-color: #6366f1; background: #1e1e2e; }
+    .card.current { border-color: #6366f1; background: #1e1e2e; }
+    .card .label {
+      font-size: 0.7rem;
+      color: #888;
+      text-align: center;
+      font-family: monospace;
+    }
+    .card .tag {
+      font-size: 0.6rem;
+      color: #555;
+      text-align: center;
+    }
+    .card svg { color: #e0e0e0; }
+    .badge {
+      font-size: 0.55rem;
+      background: #6366f1;
+      color: white;
+      border-radius: 4px;
+      padding: 1px 5px;
+      letter-spacing: 0.05em;
+    }
+    .section { width: 100%; max-width: 640px; }
+    .note {
+      font-size: 0.75rem;
+      color: #555;
+      max-width: 640px;
+      text-align: center;
+      line-height: 1.6;
+    }
+    .note a { color: #6366f1; }
+  </style>
+</head>
+<body>
+  <h1>Packages — Icon Options</h1>
+
+  <div class="section">
+    <div class="section-title">Lucide Icons (already in your project)</div>
+    <div class="grid">
+      <div class="card current">
+        <i data-lucide="tickets-plane" width="28" height="28"></i>
+        <div class="label">TicketsPlane</div>
+        <div class="tag">flight • travel • vacation</div>
+        <span class="badge">current</span>
+      </div>
+      <div class="card">
+        <i data-lucide="globe" width="28" height="28"></i>
+        <div class="label">Globe</div>
+        <div class="tag">world • international • travel</div>
+      </div>
+      <div class="card">
+        <i data-lucide="plane-takeoff" width="28" height="28"></i>
+        <div class="label">PlaneTakeoff</div>
+        <div class="tag">departure • airplane • trip</div>
+      </div>
+      <div class="card">
+        <i data-lucide="plane" width="28" height="28"></i>
+        <div class="label">Plane</div>
+        <div class="tag">airplane • trip • flight</div>
+      </div>
+      <div class="card">
+        <i data-lucide="route" width="28" height="28"></i>
+        <div class="label">Route</div>
+        <div class="tag">journey • planner • stops</div>
+      </div>
+      <div class="card">
+        <i data-lucide="waypoints" width="28" height="28"></i>
+        <div class="label">Waypoints</div>
+        <div class="tag">journey • stations • path</div>
+      </div>
+      <div class="card">
+        <i data-lucide="map" width="28" height="28"></i>
+        <div class="label">Map</div>
+        <div class="tag">location • travel • navigation</div>
+      </div>
+      <div class="card">
+        <i data-lucide="briefcase" width="28" height="28"></i>
+        <div class="label">Briefcase</div>
+        <div class="tag">luggage • travel • bag</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">More Lucide Options</div>
+    <div class="grid">
+      <div class="card">
+        <i data-lucide="ship" width="28" height="28"></i>
+        <div class="label">Ship</div>
+        <div class="tag">boat • cruise • sea</div>
+      </div>
+      <div class="card">
+        <i data-lucide="train-front" width="28" height="28"></i>
+        <div class="label">TrainFront</div>
+        <div class="tag">rail • train • journey</div>
+      </div>
+      <div class="card">
+        <i data-lucide="navigation" width="28" height="28"></i>
+        <div class="label">Navigation</div>
+        <div class="tag">location • travel • compass</div>
+      </div>
+      <div class="card">
+        <i data-lucide="compass" width="28" height="28"></i>
+        <div class="label">Compass</div>
+        <div class="tag">direction • explore • travel</div>
+      </div>
+    </div>
+  </div>
+
+  <p class="note">
+    Don't see what you want? Browse globe+plane combination icons at
+    <a href="https://thenounproject.com/browse/icons/term/airplane-turning-globe/" target="_blank">The Noun Project</a>
+    or <a href="https://www.flaticon.com/free-icons/globe-plane" target="_blank">Flaticon</a>
+    — download the SVG and I can add it directly to the sidebar.
+  </p>
+
+  <script>
+    lucide.createIcons();
+    document.querySelectorAll('.card').forEach(card => {
+      card.addEventListener('click', () => {
+        document.querySelectorAll('.card').forEach(c => c.classList.remove('current'));
+        const badge = card.querySelector('.badge');
+        if (!badge) {
+          const b = document.createElement('span');
+          b.className = 'badge';
+          b.textContent = 'selected';
+          card.appendChild(b);
+        }
+        card.classList.add('current');
+      });
+    });
+  </script>
+</body>
+</html>

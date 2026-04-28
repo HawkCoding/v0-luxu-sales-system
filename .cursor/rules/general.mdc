@@ -23,6 +23,13 @@ This project uses:
 - Main directories live at the repo root: `app/`, `components/`, `lib/`, `hooks/`.
 - Use the `@/` path alias for imports from the project root.
 
+## Local Development Server
+
+- Use the existing app at `http://localhost:3000`.
+- Do not start a second app instance on a fallback port such as `3001`.
+- If port `3000` is already in use, assume the website/app is already running there and use that instance.
+- `pnpm dev` must stay pinned to port `3000` and should fail rather than auto-select another port.
+
 ## Naming And Exports
 
 - Use kebab-case for file names.

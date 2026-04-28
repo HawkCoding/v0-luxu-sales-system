@@ -1,7 +1,7 @@
 "use client"
 
 import { useAllData } from "@/lib/use-data"
-import { PIPELINE_STAGES } from "@/lib/types"
+import { getCanonicalPipelineStage, PIPELINE_STAGES, type PipelineStage } from "@/lib/types"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
@@ -21,7 +21,7 @@ export default function ReportingPage() {
 
   const stageCounts = PIPELINE_STAGES.map(s => ({
     ...s,
-    count: data.bookings.filter((b: any) => b.stage === s.key).length,
+    count: data.bookings.filter((b: { stage: PipelineStage }) => getCanonicalPipelineStage(b.stage) === s.key).length,
   }))
 
   // Revenue by method

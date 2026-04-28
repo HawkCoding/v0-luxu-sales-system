@@ -45,6 +45,7 @@ describe("canRolePerform", () => {
       "view:documents",
       "view:correspondence",
       "view:suppliers",
+      "view:packages",
       "view:products",
     ])
 

@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { useRole } from "@/lib/role-context"
-import { PIPELINE_STAGES } from "@/lib/types"
+import { getPipelineStageLabel, PIPELINE_STAGES } from "@/lib/types"
 import { useCustomerDetail } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
 
@@ -519,7 +519,7 @@ export function CustomerDetailView({
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-sm font-medium">{booking.bookingNumber}</p>
                       <Badge variant="outline" className="text-[10px]">
-                        {stageLabels[booking.stage] ?? booking.stage.replace(/_/g, " ")}
+                        {stageLabels[booking.stage] ?? getPipelineStageLabel(booking.stage)}
                       </Badge>
                     </div>
                     <p className="text-xs text-muted-foreground mt-1 truncate">

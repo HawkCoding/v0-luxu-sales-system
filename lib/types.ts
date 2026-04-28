@@ -27,37 +27,67 @@ export type PipelineStage =
   | "quoted"
   | "quote_sent"
   | "accepted"
+  | "form_done"
   | "deposit_requested"
+  | "payment_schedule"
   | "deposit_paid"
   | "final_paid"
   | "voucher_sent"
+  | "trip_active"
   | "closed"
   | "lost"
 
+export const LEGACY_PIPELINE_STAGE_MAP: Partial<Record<PipelineStage, PipelineStage>> = {
+  quoted: "quote_sent",
+  form_done: "accepted",
+  payment_schedule: "deposit_requested",
+  trip_active: "voucher_sent",
+}
+
+export function getCanonicalPipelineStage(stage: PipelineStage): PipelineStage {
+  return LEGACY_PIPELINE_STAGE_MAP[stage] ?? stage
+}
+
 export const PIPELINE_STAGES: { key: PipelineStage; label: string }[] = [
   { key: "enquiry", label: "Enquiry" },
-  { key: "quoted", label: "Quoted" },
-  { key: "quote_sent", label: "Quoted" }, // Merged with "quoted" for display
-  { key: "accepted", label: "Reservation" },
-  { key: "deposit_requested", label: "Waiting on Deposit" },
+  { key: "quote_sent", label: "Quote Sent" },
+  { key: "accepted", label: "Quote Accepted" },
+  { key: "deposit_requested", label: "Deposit Invoice Sent" },
   { key: "deposit_paid", label: "Deposit Paid" },
-  { key: "final_paid", label: "Final Paid" },
+  { key: "final_paid", label: "Paid in Full" },
   { key: "voucher_sent", label: "Voucher Sent" },
-  { key: "closed", label: "Closed/Won" },
+  { key: "closed", label: "Closed" },
   { key: "lost", label: "Lost" },
 ]
 
-// Kanban board stages - merges quoted and quote_sent into one column
-export const KANBAN_STAGES: { key: PipelineStage | "quoted_combined"; label: string; includes: PipelineStage[] }[] = [
-  { key: "enquiry", label: "Enquiry", includes: ["enquiry"] },
-  { key: "quoted_combined", label: "Quoted", includes: ["quoted", "quote_sent"] },
-  { key: "accepted", label: "Reservation", includes: ["accepted"] },
-  { key: "deposit_requested", label: "Waiting on Deposit", includes: ["deposit_requested"] },
+export const PIPELINE_STAGE_LABELS: Record<PipelineStage, string> = {
+  enquiry: "Enquiry",
+  quoted: "Quote Sent",
+  quote_sent: "Quote Sent",
+  accepted: "Quote Accepted",
+  form_done: "Quote Accepted",
+  deposit_requested: "Deposit Invoice Sent",
+  payment_schedule: "Deposit Invoice Sent",
+  deposit_paid: "Deposit Paid",
+  final_paid: "Paid in Full",
+  voucher_sent: "Voucher Sent",
+  trip_active: "Voucher Sent",
+  closed: "Closed",
+  lost: "Lost",
+}
+
+export function getPipelineStageLabel(stage: PipelineStage | string): string {
+  return PIPELINE_STAGE_LABELS[stage as PipelineStage] ?? stage.replace(/_/g, " ")
+}
+
+// Kanban board stages - active booking workflow only.
+export const KANBAN_STAGES: { key: PipelineStage; label: string; includes: PipelineStage[] }[] = [
+  { key: "quote_sent", label: "Quote Sent", includes: ["quote_sent", "quoted"] },
+  { key: "accepted", label: "Quote Accepted", includes: ["accepted", "form_done"] },
+  { key: "deposit_requested", label: "Deposit Invoice Sent", includes: ["deposit_requested", "payment_schedule"] },
   { key: "deposit_paid", label: "Deposit Paid", includes: ["deposit_paid"] },
-  { key: "final_paid", label: "Final Paid", includes: ["final_paid"] },
-  { key: "voucher_sent", label: "Voucher Sent", includes: ["voucher_sent"] },
-  { key: "closed", label: "Closed/Won", includes: ["closed"] },
-  { key: "lost", label: "Lost", includes: ["lost"] },
+  { key: "final_paid", label: "Paid in Full", includes: ["final_paid"] },
+  { key: "voucher_sent", label: "Voucher Sent", includes: ["voucher_sent", "trip_active"] },
 ]
 
 export interface Customer {
@@ -122,7 +152,21 @@ export interface Booking {
   createdAtDisplay?: string
   updatedAt: string
   updatedAtDisplay?: string
+  cancelReason: string | null
+  cancelledAt: string | null
+  cancelledAtDisplay?: string
 }
+
+export const CANCEL_REASONS = [
+  "Client cancelled",
+  "No availability",
+  "Price or payment concern",
+  "Duplicate request",
+  "Created by mistake",
+  "Other",
+] as const
+
+export type CancelReason = (typeof CANCEL_REASONS)[number]
 
 export type SupplierKind =
   | "train_operator"
@@ -153,6 +197,9 @@ export interface SupplierVocabulary {
   routeHasLocations: boolean
   showSingleSupplement: boolean
   showDurationNights: boolean
+  originLabel: string
+  destinationLabel: string
+  durationLabel: string
 }
 
 const JOURNEY_SUPPLIER_VOCABULARY: SupplierVocabulary = {
@@ -162,17 +209,21 @@ const JOURNEY_SUPPLIER_VOCABULARY: SupplierVocabulary = {
   packagePlural: "Packages",
   route: "Route",
   routePlural: "Routes",
-  sectionTitle: "Packages, Routes and Rate Cards",
+  sectionTitle: "Suite Types, Routes and Rates",
   sectionDescription:
-    "Manage the journeys this supplier operates, the routes they cover, suite types, and period-based rate cards.",
+    "Manage the suite types this supplier offers, the routes they cover, and period-based rates.",
   priceLabel: "per person sharing",
   routeHasLocations: true,
   showSingleSupplement: true,
   showDurationNights: true,
+  originLabel: "Origin",
+  destinationLabel: "Destination",
+  durationLabel: "nights",
 }
 
 export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
   train_operator: JOURNEY_SUPPLIER_VOCABULARY,
+
   hotel_property: {
     suiteType: "Room Type",
     suiteTypePlural: "Room Types",
@@ -180,17 +231,74 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     packagePlural: "Seasons",
     route: "Meal Plan",
     routePlural: "Meal Plans",
-    sectionTitle: "Room Types, Seasons and Rates",
+    sectionTitle: "Room Types, Meal Plans and Rates",
     sectionDescription:
-      "Manage room types, seasonal groupings, meal plans, and period-based rate cards.",
+      "Manage room types, meal plans, and period-based rates.",
     priceLabel: "per room per night",
     routeHasLocations: false,
     showSingleSupplement: false,
     showDurationNights: false,
+    originLabel: "Origin",
+    destinationLabel: "Destination",
+    durationLabel: "nights",
   },
-  transfers: JOURNEY_SUPPLIER_VOCABULARY,
-  tour_operator: JOURNEY_SUPPLIER_VOCABULARY,
-  airline: JOURNEY_SUPPLIER_VOCABULARY,
+
+  transfers: {
+    suiteType: "Vehicle Type",
+    suiteTypePlural: "Vehicle Types",
+    package: "Service",
+    packagePlural: "Services",
+    route: "Route",
+    routePlural: "Routes",
+    sectionTitle: "Vehicle Types, Routes and Rates",
+    sectionDescription:
+      "Manage the transfers this supplier offers, routes covered, vehicle types, and period-based rates.",
+    priceLabel: "flat per transfer",
+    routeHasLocations: true,
+    showSingleSupplement: false,
+    showDurationNights: false,
+    originLabel: "Pickup",
+    destinationLabel: "Drop-off",
+    durationLabel: "nights",
+  },
+
+  tour_operator: {
+    suiteType: "Tour Type",
+    suiteTypePlural: "Tour Types",
+    package: "Event",
+    packagePlural: "Events",
+    route: "Itinerary",
+    routePlural: "Itineraries",
+    sectionTitle: "Tour Types, Itineraries and Rates",
+    sectionDescription:
+      "Manage the tour types this operator offers, itineraries, and per-person pricing.",
+    priceLabel: "per person",
+    routeHasLocations: false,
+    showSingleSupplement: true,
+    showDurationNights: true,
+    originLabel: "Origin",
+    destinationLabel: "Destination",
+    durationLabel: "days",
+  },
+
+  airline: {
+    suiteType: "Cabin",
+    suiteTypePlural: "Cabins",
+    package: "Season",
+    packagePlural: "Seasons",
+    route: "Route",
+    routePlural: "Routes",
+    sectionTitle: "Cabins, Routes and Rates",
+    sectionDescription:
+      "Manage the cabins this airline offers, routes, and per-person pricing.",
+    priceLabel: "per person",
+    routeHasLocations: true,
+    showSingleSupplement: true,
+    showDurationNights: false,
+    originLabel: "Origin",
+    destinationLabel: "Destination",
+    durationLabel: "nights",
+  },
 }
 
 export function getSupplierVocabulary(kind: SupplierKind): SupplierVocabulary {
@@ -210,7 +318,7 @@ export interface Location {
 
 export interface SupplierRoute {
   id: string
-  packageId: string
+  supplierId: string
   name: string
   originLocationId: string
   destinationLocationId: string
@@ -234,10 +342,11 @@ export interface SupplierSuiteType {
 
 export interface SupplierRateCard {
   id: string
-  packageId: string
-  routeId: string | null
+  routeId: string
   suiteTypeId: string
   pricePerPerson: number
+  childPrice: number | null
+  infantPrice: number | null
   currency: string
   validFrom: string
   validFromDisplay?: string
@@ -249,7 +358,7 @@ export interface SupplierRateCard {
 
 export interface SupplierPackage {
   id: string
-  supplierId: string
+  slug: string
   name: string
   description: string | null
   durationNights: number | null
@@ -262,6 +371,52 @@ export interface SupplierPackage {
   updatedAtDisplay?: string
   routes: SupplierRoute[]
   rateCards: SupplierRateCard[]
+}
+
+export interface PackageLeg {
+  id: string
+  packageId: string
+  supplierId: string
+  supplierName: string
+  supplierKind: SupplierKind
+  label: string | null
+  sortOrder: number
+  routes: SupplierRoute[]
+  rateCards: SupplierRateCard[]
+  suiteTypes: SupplierSuiteType[]
+}
+
+export interface PackageDetail {
+  id: string
+  name: string
+  slug: string
+  description: string | null
+  durationNights: number | null
+  singleSupplementPct: number
+  fixedPricePerPerson: number | null
+  currency: string
+  active: boolean
+  legs: PackageLeg[]
+  createdAt: string
+  createdAtDisplay?: string
+  updatedAt: string
+  updatedAtDisplay?: string
+}
+
+export interface Package {
+  id: string
+  name: string
+  slug: string
+  description: string | null
+  durationNights: number | null
+  currency: string
+  active: boolean
+  legCount: number
+  supplierKinds: SupplierKind[]
+  priceFrom: number | null
+  priceTo: number | null
+  trainRouteName: string | null
+  fixedPricePerPerson: number | null
 }
 
 export interface SupplierEmail {
@@ -283,6 +438,7 @@ export interface Supplier {
   phone: string | null
   website: string | null
   location: string | null
+  locationId: string | null
   notes: string | null
   active: boolean
   createdAt: string
@@ -294,7 +450,8 @@ export interface Supplier {
 export interface SupplierDetail extends Supplier {
   emails: SupplierEmail[]
   suiteTypes: SupplierSuiteType[]
-  packages: SupplierPackage[]
+  routes: SupplierRoute[]
+  rateCards: SupplierRateCard[]
   locations: Location[]
 }
 
@@ -442,8 +599,11 @@ export interface Correspondence {
 export interface AuditLog {
   id: string
   actor: string
+  actorUserId?: string
+  actorDisplayName?: string
   entityType: string
   entityId: string
+  entityDisplayLabel?: string
   action: string
   beforeJson?: string
   afterJson?: string

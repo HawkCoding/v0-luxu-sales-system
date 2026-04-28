@@ -2,10 +2,12 @@
 
 import useSWR from "swr"
 import type {
+  AuditLog,
   Booking,
   Customer,
   CustomerLinkedAccount,
   Location,
+  Package,
   Supplier,
   SupplierDetail,
 } from "@/lib/types"
@@ -16,6 +18,27 @@ export interface SupplierEmailLabel {
   id: string
   name: string
   sortOrder: number
+}
+
+export interface AuditLogListResponse {
+  logs: AuditLog[]
+  total: number
+  page: number
+  pageSize: number
+  retentionMonths: number
+  cutoffDate: string
+  scope: "active" | "archive"
+}
+
+export interface AuditLogFilters {
+  scope?: "active" | "archive"
+  page?: number
+  pageSize?: number
+  from?: string
+  to?: string
+  entityType?: string
+  entityId?: string
+  search?: string
 }
 
 const fetcher = async (url: string) => {
@@ -57,6 +80,18 @@ const swrOptions = {
 
 export function useAllData() {
   return useSWR("/api/data", fetcher, swrOptions)
+}
+
+export function useAuditLogs(filters: AuditLogFilters) {
+  const params = new URLSearchParams()
+
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== "" && value !== "all") {
+      params.set(key, String(value))
+    }
+  })
+
+  return useSWR<AuditLogListResponse>(`/api/audit?${params.toString()}`, fetcher, swrOptions)
 }
 
 export function usePipeline() {
@@ -112,4 +147,8 @@ export function useLocations() {
 
 export function useSupplierEmailLabels() {
   return useSWR<SupplierEmailLabel[]>("/api/supplier-email-labels", fetcher, swrOptions)
+}
+
+export function useActivePackages() {
+  return useSWR<Package[]>("/api/packages", fetcher, swrOptions)
 }

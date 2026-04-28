@@ -1,4 +1,5 @@
 import type { AuditLog } from "./types"
+import { getAuditDisplay } from "./audit-display"
 
 export function exportAuditToText(auditLogs: AuditLog[], jobNumber: string): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
@@ -75,6 +76,60 @@ export function downloadAuditLog(auditLogs: AuditLog[], jobNumber: string) {
   const a = document.createElement('a')
   a.href = url
   a.download = `audit-${jobNumber}-${Date.now()}.txt`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+function csvCell(value: unknown): string {
+  const text = value === null || value === undefined ? "" : String(value)
+
+  return `"${text.replace(/"/g, '""')}"`
+}
+
+export function exportAuditToCsv(auditLogs: AuditLog[]): string {
+  const headers = [
+    "Timestamp",
+    "Actor",
+    "Action",
+    "Description",
+    "Entity Type",
+    "Entity ID",
+    "Before (JSON)",
+    "After (JSON)",
+    "Metadata",
+  ]
+
+  const rows = auditLogs.map((log) => {
+    const display = getAuditDisplay(log)
+
+    return [
+      new Date(log.createdAt).toISOString(),
+      log.actor,
+      log.action,
+      display.title,
+      log.entityType,
+      log.entityId,
+      log.beforeJson ?? "",
+      log.afterJson ?? "",
+      log.metaJson ?? "",
+    ]
+  })
+
+  return [headers, ...rows]
+    .map((row) => row.map(csvCell).join(","))
+    .join("\r\n")
+}
+
+export function downloadAuditLogCsv(auditLogs: AuditLog[]) {
+  const content = exportAuditToCsv(auditLogs)
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `audit-export-${Date.now()}.csv`
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)

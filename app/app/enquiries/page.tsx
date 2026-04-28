@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Search, Plus, FileText, Clipboard, Send, AlertCircle, Download } from "lucide-react"
+import { Search, Plus, FileText, Clipboard, Send, AlertCircle, Download, HelpCircle } from "lucide-react"
 import Link from "next/link"
 import { useState } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog"
@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useRole } from "@/lib/role-context"
 import { useAuth } from "@/lib/auth-context"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { toast } from "sonner"
 import { downloadAuditLog } from "@/lib/export-audit"
 import { formatDisplayDate } from "@/lib/date-format"
@@ -169,7 +170,7 @@ export default function EnquiriesPage() {
 
       mutate()
       toast.success("Deposit request sent successfully", {
-        description: `Moved to Pipeline at "Waiting on Deposit" stage.`
+        description: "Moved to the Pipeline."
       })
     } catch (error) {
       console.error("Failed to send deposit request:", error)
@@ -186,7 +187,26 @@ export default function EnquiriesPage() {
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-3xl font-semibold text-foreground tracking-tight">Enquiries</h1>
-          <p className="text-base text-muted-foreground mt-2">Intake queue for newly captured enquiries</p>
+          <div className="mt-2 flex items-center gap-2">
+            <p className="text-base text-muted-foreground">New enquiries ready for sales review and follow-up</p>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 rounded-full text-muted-foreground hover:text-foreground"
+                  aria-label="Show enquiry queue note"
+                >
+                  <HelpCircle className="h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-80 text-sm leading-6">
+                <p>
+                  This queue shows newly captured enquiries, including unreviewed enquiries and enquiries that need attention. Once you send a deposit request, the job will move to the Pipeline.
+                </p>
+              </PopoverContent>
+            </Popover>
+          </div>
         </div>
         {can("create:enquiry") && (
           <Link href="/enquire/rovos">
@@ -196,13 +216,6 @@ export default function EnquiriesPage() {
           </Link>
         )}
       </div>
-
-      <Alert>
-        <AlertCircle className="h-4 w-4" />
-        <AlertDescription>
-          This queue shows all newly captured enquiries. Once you send a deposit request, the enquiry will move to the Pipeline at "Waiting on Deposit" stage.
-        </AlertDescription>
-      </Alert>
 
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-sm">

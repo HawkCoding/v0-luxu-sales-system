@@ -13,17 +13,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight } from "lucide-react"
 import { type ParsedDraft, validateDraft, countRequiredComplete } from "@/lib/import/parseEmailDraft"
-import { useRouter } from "next/navigation"
+import { buildEnquiryImportPayload } from "@/lib/import/enquiry-payload"
 
 interface ReviewImportedDraftModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   parsedDraft: ParsedDraft | null
   onBack: () => void
+  onSaveAndOpen: (draft: ParsedDraft) => void
 }
 
-export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBack }: ReviewImportedDraftModalProps) {
-  const router = useRouter()
+export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBack, onSaveAndOpen }: ReviewImportedDraftModalProps) {
   const [draft, setDraft] = useState<ParsedDraft | null>(null)
   const [saving, setSaving] = useState(false)
   const [customerExpanded, setCustomerExpanded] = useState(true)
@@ -73,40 +73,24 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
 
   const handleSave = async (openAfterSave: boolean = false) => {
     if (!validation.isValid) return
+
+    if (openAfterSave) {
+      onSaveAndOpen(draft)
+      return
+    }
+
     setSaving(true)
 
     try {
       const response = await fetch("/api/enquiries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rawText: draft.rawText,
-          purpose: "quote",
-          title: "Mr",
-          name: draft.customer.firstName,
-          surname: draft.customer.surname,
-          contactNumber: draft.customer.phone,
-          email: draft.customer.email,
-          country: "Other",
-          direction: draft.trip.route || "Pretoria to Cape Town",
-          departureDate: draft.trip.departureDate,
-          noOfSuites: draft.guests.suites,
-          noOfAdults: draft.guests.adults,
-          noOfChildren: draft.guests.children,
-          suiteTypes: draft.guests.suiteType ? [draft.guests.suiteType] : ["Pullman Twin Suite"],
-          termsAccepted: true,
-        }),
+        body: JSON.stringify(buildEnquiryImportPayload(draft)),
       })
 
       if (response.ok) {
-        const data = await response.json()
         onOpenChange(false)
-        
-        if (openAfterSave && data.jobId) {
-          router.push(`/app/bookings/${data.jobId}`)
-        } else {
-          window.location.reload()
-        }
+        window.location.reload()
       }
     } finally {
       setSaving(false)
@@ -152,6 +136,35 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
               </CardHeader>
               {customerExpanded && (
                 <CardContent className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-sm flex items-center gap-1.5">
+                        Title
+                        {draft.confidence['customer.title'] === 'low' && (
+                          <Badge variant="outline" className="text-[10px] h-4">Check</Badge>
+                        )}
+                      </Label>
+                      <Input
+                        value={draft.customer.title}
+                        onChange={(e) => updateDraft('customer.title', e.target.value)}
+                        placeholder="Mr, Ms, Mrs..."
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-sm flex items-center gap-1.5">
+                        Country <span className="text-destructive">*</span>
+                        {draft.confidence['customer.country'] === 'low' && (
+                          <Badge variant="outline" className="text-[10px] h-4">Check</Badge>
+                        )}
+                      </Label>
+                      <Input
+                        value={draft.customer.country}
+                        onChange={(e) => updateDraft('customer.country', e.target.value)}
+                        placeholder="Country"
+                        className={!draft.customer.country ? 'border-destructive' : ''}
+                      />
+                    </div>
+                  </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
                       <Label className="text-sm flex items-center gap-1.5">
@@ -209,6 +222,19 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                       onChange={(e) => updateDraft('customer.phone', e.target.value)}
                       placeholder="+27 XX XXX XXXX"
                       className={!draft.customer.email && !draft.customer.phone ? 'border-destructive' : ''}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm flex items-center gap-1.5">
+                      Province / Region
+                      {draft.confidence['customer.province'] === 'low' && (
+                        <Badge variant="outline" className="text-[10px] h-4">Check</Badge>
+                      )}
+                    </Label>
+                    <Input
+                      value={draft.customer.province}
+                      onChange={(e) => updateDraft('customer.province', e.target.value)}
+                      placeholder="Province or region"
                     />
                   </div>
                 </CardContent>
@@ -275,6 +301,40 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                       onChange={(value) => updateDraft('trip.departureDate', value ?? '')}
                       buttonClassName={!draft.trip.departureDate ? 'border-destructive' : ''}
                     />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm">Package Option</Label>
+                    <Input
+                      value={draft.trip.packageOption}
+                      onChange={(e) => updateDraft('trip.packageOption', e.target.value)}
+                      placeholder="Package option"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm">Hotel Option</Label>
+                    <Input
+                      value={draft.trip.hotelOption}
+                      onChange={(e) => updateDraft('trip.hotelOption', e.target.value)}
+                      placeholder="Hotel option"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-sm">Flight Booking</Label>
+                      <Input
+                        value={draft.trip.flightBooking}
+                        onChange={(e) => updateDraft('trip.flightBooking', e.target.value)}
+                        placeholder="Flight route"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-sm">Flight Departure Date</Label>
+                      <Input
+                        value={draft.trip.flightDepartureDate}
+                        onChange={(e) => updateDraft('trip.flightDepartureDate', e.target.value)}
+                        placeholder="Flight date"
+                      />
+                    </div>
                   </div>
                 </CardContent>
               )}
@@ -359,6 +419,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                         <SelectItem value="Deluxe Twin Suite">Deluxe Twin Suite</SelectItem>
                         <SelectItem value="Royal Double Suite">Royal Double Suite</SelectItem>
                         <SelectItem value="Royal Twin Suite">Royal Twin Suite</SelectItem>
+                        <SelectItem value="Other">Other (specify manually)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>

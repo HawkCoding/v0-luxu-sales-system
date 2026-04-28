@@ -263,7 +263,7 @@ export async function POST(req: Request) {
   if (parsed.routeId) {
     const { data: route, error: routeError } = await supabase
       .from("routes")
-      .select("id, package_id")
+      .select("id, supplier_id")
       .eq("id", parsed.routeId)
       .maybeSingle()
 
@@ -284,29 +284,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Selected route was not found" }, { status: 400 })
     }
 
-    if (parsed.supplierId && route.package_id) {
-      const { data: pkg, error: packageError } = await supabase
-        .from("packages")
-        .select("supplier_id")
-        .eq("id", route.package_id)
-        .maybeSingle()
-
-      if (packageError) {
-        return buildImportErrorResponse({
-          traceId,
-          phase: "validate_supplier_route",
-          error: "Failed to validate selected supplier route",
-          status: 500,
-          cause: packageError,
-          context: {
-            routeId: parsed.routeId,
-            supplierId: parsed.supplierId ?? null,
-            packageId: route.package_id,
-          },
-        })
-      }
-
-      if (!pkg || pkg.supplier_id !== parsed.supplierId) {
+    if (parsed.supplierId) {
+      if (route.supplier_id !== parsed.supplierId) {
         return NextResponse.json({ error: "Selected route does not belong to selected supplier" }, { status: 400 })
       }
     }
