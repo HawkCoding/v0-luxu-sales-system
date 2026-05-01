@@ -285,6 +285,7 @@ describe("POST /api/suppliers", () => {
                       website: null,
                       location: null,
                       notes: null,
+                      single_supplement_pct: 0,
                       active: false,
                       created_at: "2026-01-01T00:00:00.000Z",
                       updated_at: "2026-01-01T00:00:00.000Z",
@@ -309,6 +310,7 @@ describe("POST /api/suppliers", () => {
                         website: row.website,
                         location: row.location,
                         notes: row.notes,
+                        single_supplement_pct: row.single_supplement_pct,
                         active: row.active,
                         created_at: "2026-01-01T00:00:00.000Z",
                         updated_at: "2026-01-01T00:00:00.000Z",
@@ -359,6 +361,7 @@ describe("POST /api/suppliers", () => {
       slug: "blue-train-3",
       active: false,
       email: "Sales@Example.com",
+      single_supplement_pct: 0,
     })
     expect(supplierEmailsInsert).toHaveBeenCalledTimes(1)
     expect(supplierEmailsInsert).toHaveBeenCalledWith([

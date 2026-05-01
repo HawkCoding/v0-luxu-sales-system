@@ -55,6 +55,7 @@ export function JobQuotesTab({ quotes, jobId, itineraries, travelDate, mutate }:
                       quoteId={q.id}
                       travelDate={travelDate}
                       existingLineItemCount={q.lineItems.length}
+                      expectedUpdatedAt={q.updatedAt}
                       onApplied={mutate}
                     />
                   )}

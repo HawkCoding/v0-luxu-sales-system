@@ -134,8 +134,8 @@ export async function PATCH(
   }
 
   const incomingLegIds = new Set(children.legs.map((leg) => leg.id).filter(Boolean))
-  const incomingRouteIds = new Set(children.routes.map((route) => route.id).filter(Boolean))
-  const incomingRateCardIds = new Set(children.rateCards.map((rateCard) => rateCard.id).filter(Boolean))
+  const incomingRouteIds = new Set(children.allRouteIds.filter(Boolean))
+  const incomingRateCardIds = new Set(children.allRateCardIds.filter(Boolean))
   const existingLegIds = existing.legs.map((leg) => leg.id)
   const existingRouteIds = existing.detail.legs.flatMap((leg) => leg.routes.map((route) => route.id))
   const existingRateCardIds = existing.detail.legs.flatMap((leg) =>

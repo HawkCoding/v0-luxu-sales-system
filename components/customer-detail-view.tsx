@@ -2,16 +2,18 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useSWRConfig } from "swr"
-import { ArrowLeft, CalendarDays, Globe, Link2, Mail, Pencil, Phone, Save, Trash2 } from "lucide-react"
+import { AlertCircle, ArrowLeft, CalendarDays, Globe, Link2, Mail, Pencil, Phone, Save, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { LinkedAccountForm, type LinkedAccountFormValue } from "@/components/linked-account-form"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { CustomerActivitySummary } from "@/components/customer-activity-summary"
+import { PresenceAvatars } from "@/components/presence-avatars"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -20,8 +22,23 @@ import { useRole } from "@/lib/role-context"
 import { getPipelineStageLabel, PIPELINE_STAGES } from "@/lib/types"
 import { useCustomerDetail } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
+import { useRecordPresence } from "@/hooks/use-record-presence"
+import { useVersionedSave } from "@/hooks/use-versioned-save"
 
 type Presentation = "page" | "modal"
+
+interface CustomerPatchPayload {
+  notes: string
+  email: string
+  phone: string | null
+}
+
+interface CustomerPatchResponse {
+  notes: string | null
+  email: string
+  phone: string | null
+  updatedAt: string
+}
 
 interface CustomerDetailViewProps {
   customerId: string
@@ -38,12 +55,15 @@ export function CustomerDetailView({
   const { data, isLoading, error, mutate } = useCustomerDetail(customerId)
   const { mutate: mutateGlobal } = useSWRConfig()
   const { can } = useRole()
+  const { others, setEditing: setPresenceEditing } = useRecordPresence("customer", customerId)
   const canEditCustomers = can("edit:customers")
   const [emailDraft, setEmailDraft] = useState("")
   const [phoneDraft, setPhoneDraft] = useState("")
   const [notesDraft, setNotesDraft] = useState("")
   const [isEditing, setIsEditing] = useState(false)
-  const [isSaving, setIsSaving] = useState(false)
+  const [editingStartedUpdatedAt, setEditingStartedUpdatedAt] = useState<string | undefined>(undefined)
+  const [hasExternalUpdate, setHasExternalUpdate] = useState(false)
+  const [lastCustomerPayload, setLastCustomerPayload] = useState<CustomerPatchPayload | null>(null)
   const [isAddingLinkedAccount, setIsAddingLinkedAccount] = useState(false)
   const [editingLinkedAccountId, setEditingLinkedAccountId] = useState<string | null>(null)
   const [isSavingLinkedAccount, setIsSavingLinkedAccount] = useState(false)
@@ -52,14 +72,42 @@ export function CustomerDetailView({
     undefined,
   )
   const hasLoadError = Boolean(error)
+  const lastSeenCustomerUpdatedAtRef = useRef<string | undefined>(undefined)
+  const customerUpdatedAt = data && "customer" in data ? data.customer.updatedAt : undefined
+  const {
+    save: saveCustomer,
+    isSaving,
+    conflict: customerConflict,
+    clearConflict: clearCustomerConflict,
+  } = useVersionedSave<CustomerPatchPayload, CustomerPatchResponse>({
+    url: `/api/customers/${customerId}`,
+    method: "PATCH",
+    entity: "customer",
+    recordId: customerId,
+    expectedUpdatedAt: isEditing ? editingStartedUpdatedAt : customerUpdatedAt,
+  })
 
   useEffect(() => {
     if (data && "customer" in data) {
-      setEmailDraft(data.customer.email)
-      setPhoneDraft(data.customer.phone ?? "")
-      setNotesDraft(data.customer.notes ?? "")
+      const previousUpdatedAt = lastSeenCustomerUpdatedAtRef.current
+      const nextUpdatedAt = data.customer.updatedAt
+
+      if (isEditing && previousUpdatedAt && nextUpdatedAt && previousUpdatedAt !== nextUpdatedAt) {
+        setHasExternalUpdate(true)
+        lastSeenCustomerUpdatedAtRef.current = nextUpdatedAt
+        return
+      }
+
+      if (!isEditing) {
+        setEmailDraft(data.customer.email)
+        setPhoneDraft(data.customer.phone ?? "")
+        setNotesDraft(data.customer.notes ?? "")
+        setEditingStartedUpdatedAt(undefined)
+      }
+
+      lastSeenCustomerUpdatedAtRef.current = nextUpdatedAt
     }
-  }, [data])
+  }, [data, isEditing])
 
   useEffect(() => {
     if (!hasLoadError) {
@@ -67,6 +115,10 @@ export function CustomerDetailView({
     }
     router.replace("/app/customers")
   }, [hasLoadError, router])
+
+  useEffect(() => {
+    setPresenceEditing(isEditing || isAddingLinkedAccount || editingLinkedAccountId !== null)
+  }, [editingLinkedAccountId, isAddingLinkedAccount, isEditing, setPresenceEditing])
 
   const contentClassName =
     presentation === "modal"
@@ -108,42 +160,43 @@ export function CustomerDetailView({
     phoneDraft !== (customer.phone ?? "") ||
     notesDraft !== (customer.notes ?? "")
 
+  function getCustomerPatchPayload(): CustomerPatchPayload {
+    return {
+      notes: notesDraft,
+      email: emailDraft,
+      phone: phoneDraft || null,
+    }
+  }
+
+  async function persistCustomer(
+    payload: CustomerPatchPayload,
+    options?: { ignoreExpectedUpdatedAt?: boolean },
+  ): Promise<boolean> {
+    setLastCustomerPayload(payload)
+
+    try {
+      const updated = await saveCustomer(payload, options)
+      await mutate()
+      await mutateGlobal("/api/data")
+      setIsEditing(false)
+      setEditingStartedUpdatedAt(updated.updatedAt)
+      setHasExternalUpdate(false)
+      clearCustomerConflict()
+      toast.success("Customer saved")
+      return true
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not save customer"
+      toast.error(message)
+      return false
+    }
+  }
+
   async function saveNotes() {
     if (!canEditCustomers || !isEditing || !hasChanges || isSaving) {
       return
     }
 
-    setIsSaving(true)
-    try {
-      const response = await fetch(`/api/customers/${customerId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          notes: notesDraft,
-          email: emailDraft,
-          phone: phoneDraft || null,
-        }),
-      })
-
-      if (!response.ok) {
-        const errorPayload = (await response.json().catch(() => null)) as
-          | { error?: string }
-          | null
-        throw new Error(errorPayload?.error ?? "Failed to save customer")
-      }
-
-      await mutate()
-      await mutateGlobal("/api/data")
-      setIsEditing(false)
-      toast.success("Customer saved")
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not save customer"
-      toast.error(message)
-    } finally {
-      setIsSaving(false)
-    }
+    await persistCustomer(getCustomerPatchPayload())
   }
 
   async function createLinkedAccount(payload: LinkedAccountFormValue) {
@@ -252,7 +305,10 @@ export function CustomerDetailView({
               </span>
             </div>
             <div>
-              <h1 className="text-2xl font-semibold text-foreground tracking-tight">{fullName}</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-2xl font-semibold text-foreground tracking-tight">{fullName}</h1>
+                <PresenceAvatars users={others} />
+              </div>
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground mt-1">
                 {customer.title && <Badge variant="outline">{customer.title}</Badge>}
                 <span className="inline-flex items-center gap-1">
@@ -270,7 +326,15 @@ export function CustomerDetailView({
               }`}
             >
               {!isEditing ? (
-                <Button variant="secondary" onClick={() => setIsEditing(true)}>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setEditingStartedUpdatedAt(customer.updatedAt)
+                    setHasExternalUpdate(false)
+                    clearCustomerConflict()
+                    setIsEditing(true)
+                  }}
+                >
                   <Pencil className="mr-2 h-4 w-4" />
                   Edit
                 </Button>
@@ -282,6 +346,8 @@ export function CustomerDetailView({
                       setPhoneDraft(customer.phone ?? "")
                       setNotesDraft(customer.notes ?? "")
                       setIsEditing(false)
+                      setHasExternalUpdate(false)
+                      clearCustomerConflict()
                     }}
                     variant="outline"
                     disabled={isSaving}
@@ -298,6 +364,46 @@ export function CustomerDetailView({
           )}
         </div>
       </div>
+
+      {(customerConflict || hasExternalUpdate) && (
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>This customer changed elsewhere</AlertTitle>
+          <AlertDescription>
+            <p>
+              {customerConflict?.error ??
+                "Another user just updated this customer. Refresh to load their changes or save anyway to attempt your current edits."}
+            </p>
+            <div className="mt-2 flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  clearCustomerConflict()
+                  setHasExternalUpdate(false)
+                  setIsEditing(false)
+                  void mutate()
+                }}
+              >
+                Refresh
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => {
+                  void persistCustomer(lastCustomerPayload ?? getCustomerPatchPayload(), {
+                    ignoreExpectedUpdatedAt: true,
+                  })
+                }}
+                disabled={isSaving}
+              >
+                Save anyway
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      )}
 
       <Card>
         <CardHeader>

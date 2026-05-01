@@ -6,29 +6,28 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Search, Plus, FileText, Clipboard, Send, AlertCircle, Download, HelpCircle } from "lucide-react"
+import { Search, Plus, FileText, Clipboard, Send, AlertCircle, Download, HelpCircle, CheckCircle2, Trash2 } from "lucide-react"
 import Link from "next/link"
 import { useState } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { useRole } from "@/lib/role-context"
-import { useAuth } from "@/lib/auth-context"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { toast } from "sonner"
 import { downloadAuditLog } from "@/lib/export-audit"
 import { formatDisplayDate } from "@/lib/date-format"
+import { SendQuoteDialog } from "@/components/send-quote-dialog"
 
 export default function EnquiriesPage() {
   const { data, isLoading, mutate } = useAllData()
   const { can } = useRole()
-  const { user } = useAuth()
   const [search, setSearch] = useState("")
   const [sourceFilter, setSourceFilter] = useState("all")
   const [pasteOpen, setPasteOpen] = useState(false)
   const [pasteText, setPasteText] = useState("")
   const [pasting, setPasting] = useState(false)
-  const [sending, setSending] = useState<string | null>(null)
+  const [dialogOpenId, setDialogOpenId] = useState<string | null>(null)
 
   if (isLoading || !data) {
     return <div className="p-6"><div className="animate-pulse space-y-3">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-16 bg-secondary rounded-lg" />)}</div></div>
@@ -115,71 +114,25 @@ export default function EnquiriesPage() {
     }
   }
 
-  const handleSendDepositRequest = async (enquiry: any) => {
-    // Validation: Check if quote exists and has a total
-    if (!enquiry.totalQuote || enquiry.totalQuote === 0) {
-      toast.error("Cannot send deposit request", {
-        description: "A quote with a total amount is required before sending deposit request."
-      })
+  const handleResolveReview = async (enquiryId: string) => {
+    await fetch(`/api/jobs/${enquiryId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resolveEmailImportReview: true }),
+    })
+    mutate()
+    toast.success("Import review resolved")
+  }
+
+  const handleRejectImportedEnquiry = async (enquiryId: string) => {
+    const response = await fetch(`/api/jobs/${enquiryId}`, { method: "DELETE" })
+    if (!response.ok) {
+      const body = (await response.json()) as { error?: string }
+      toast.error(body.error || "Failed to reject enquiry")
       return
     }
-
-    const depositAmount = Math.round(enquiry.totalQuote * 0.25) // 25% deposit
-
-    setSending(enquiry.id)
-    try {
-      // 1. Create correspondence entry (mock email)
-      await fetch("/api/correspondence", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          bookingId: enquiry.id,
-          channel: "email",
-          subject: "Invoice / Deposit Request",
-          bodyHtml: `<p>Dear ${enquiry.title} ${enquiry.surname},</p>
-<p>Thank you for your enquiry. We are pleased to provide you with the deposit request for your booking.</p>
-<p><strong>Deposit Amount: R ${depositAmount.toLocaleString()}</strong> (25% of total quote)</p>
-<p>Please process payment at your earliest convenience.</p>
-<p>Kind regards,<br/>Luxus Travel & Tours</p>`,
-          status: "sent",
-          sentAt: new Date().toISOString(),
-        }),
-      })
-
-      // 2. Update booking stage to "deposit_requested"
-      await fetch(`/api/jobs/${enquiry.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          stage: "deposit_requested",
-        }),
-      })
-
-      // 3. Log audit entry
-      await fetch("/api/audit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          actor: user?.name || "Unknown",
-          entityType: "Booking",
-          entityId: enquiry.id,
-          action: "send_deposit_request",
-          metaJson: JSON.stringify({ depositAmount, totalQuote: enquiry.totalQuote }),
-        }),
-      })
-
-      mutate()
-      toast.success("Deposit request sent successfully", {
-        description: "Moved to the Pipeline."
-      })
-    } catch (error) {
-      console.error("Failed to send deposit request:", error)
-      toast.error("Failed to send deposit request", {
-        description: "Please try again."
-      })
-    } finally {
-      setSending(null)
-    }
+    mutate()
+    toast.success("Imported enquiry rejected")
   }
 
   return (
@@ -202,7 +155,7 @@ export default function EnquiriesPage() {
               </PopoverTrigger>
               <PopoverContent align="start" className="w-80 text-sm leading-6">
                 <p>
-                  This queue shows newly captured enquiries, including unreviewed enquiries and enquiries that need attention. Once you send a deposit request, the job will move to the Pipeline.
+                  This queue shows newly captured enquiries, including unreviewed enquiries and enquiries that need attention. Once you send a quote, the job will move to the Pipeline.
                 </p>
               </PopoverContent>
             </Popover>
@@ -243,10 +196,6 @@ export default function EnquiriesPage() {
 
       <div className="space-y-3">
         {filtered.map((e: any) => {
-          const canSendDeposit = e.totalQuote && e.totalQuote > 0
-          const depositAmount = canSendDeposit ? Math.round(e.totalQuote * 0.25) : 0
-          const isSending = sending === e.id
-
           return (
             <Card key={e.id} className="group hover:shadow-md transition-shadow border-2 relative">
               <CardContent className="p-5">
@@ -267,6 +216,12 @@ export default function EnquiriesPage() {
                         )}
                         <Badge variant="outline" className="text-xs">{e.source.replace("_", " ")}</Badge>
                         <Badge variant="secondary" className="text-xs">{e.purpose}</Badge>
+                        {e.emailImportNeedsReview && (
+                          <Badge variant="destructive" className="text-xs">Needs Review</Badge>
+                        )}
+                        {e.emailImportDuplicateOfBookingId && (
+                          <Badge variant="outline" className="text-xs">Possible duplicate</Badge>
+                        )}
                       </div>
                       <p className="text-sm text-muted-foreground mb-2">
                         {e.title} {e.name} {e.surname} • {e.email}
@@ -278,11 +233,19 @@ export default function EnquiriesPage() {
                         <span>•</span>
                         <span>{e.noOfAdults} adults, {e.noOfChildren} children</span>
                       </div>
-                      {!canSendDeposit && (
+                      {e.emailImportNeedsReview && (
+                        <Alert className="mt-3 py-2 border-destructive/40">
+                          <AlertCircle className="h-3 w-3" />
+                          <AlertDescription className="text-xs">
+                            Needs Review: {[...(e.emailImportMissingFields || []), ...(e.emailImportWarnings || [])].join(", ") || "Review parsed email fields"}
+                          </AlertDescription>
+                        </Alert>
+                      )}
+                      {!e.emailImportNeedsReview && (
                         <Alert className="mt-3 py-2">
                           <AlertCircle className="h-3 w-3" />
                           <AlertDescription className="text-xs">
-                            Quote with total amount required before sending deposit request
+                            Open a package to price and send a quote
                           </AlertDescription>
                         </Alert>
                       )}
@@ -290,24 +253,55 @@ export default function EnquiriesPage() {
                   </div>
                   <div className="flex flex-col items-end gap-2 flex-shrink-0">
                     <div className="text-right">
-                      {canSendDeposit && (
-                        <p className="text-sm font-semibold text-foreground">
-                          Deposit: R {depositAmount.toLocaleString()}
-                        </p>
-                      )}
                       <p className="text-xs text-muted-foreground mt-0.5">
                         Created {formatDisplayDate(e.createdAt)}
                       </p>
                     </div>
                     <Button
                       size="sm"
-                      onClick={() => handleSendDepositRequest(e)}
-                      disabled={!canSendDeposit || isSending}
+                      onClick={() => setDialogOpenId(e.id)}
                       className="w-full"
                     >
                       <Send className="w-3.5 h-3.5 mr-1.5" />
-                      {isSending ? "Sending..." : "Send Deposit Request"}
+                      Send Quote
                     </Button>
+                    <SendQuoteDialog
+                      open={dialogOpenId === e.id}
+                      onOpenChange={(open) => setDialogOpenId(open ? e.id : null)}
+                      bookingId={e.id}
+                      bookingNumber={e.bookingNumber}
+                      departureDate={e.departureDate}
+                      noOfAdults={e.noOfAdults}
+                      noOfChildren={e.noOfChildren}
+                      customerName={`${e.title} ${e.surname}`.trim()}
+                      emailImportNeedsReview={e.emailImportNeedsReview}
+                      onSent={() => {
+                        mutate()
+                        setDialogOpenId(null)
+                      }}
+                    />
+                    {e.emailImportNeedsReview && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleResolveReview(e.id)}
+                        className="w-full"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
+                        Resolve Review
+                      </Button>
+                    )}
+                    {e.source === "email" && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleRejectImportedEnquiry(e.id)}
+                        className="w-full text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                        Reject Import
+                      </Button>
+                    )}
                   </div>
                 </div>
                 <button

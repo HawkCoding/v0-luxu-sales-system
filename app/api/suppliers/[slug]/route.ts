@@ -539,6 +539,7 @@ export async function PATCH(
     location: parsed.location || null,
     location_id: parsed.locationId ?? null,
     notes: parsed.notes || null,
+    single_supplement_pct: parsed.singleSupplementPct,
     active: isDraftSave ? false : parsed.active,
   }
 

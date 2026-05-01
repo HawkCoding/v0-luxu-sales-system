@@ -12,12 +12,37 @@ export function JobEnquiryTab({ enquiry, itineraries }: { enquiry: Enquiry | nul
 
   return (
     <div className="space-y-4">
-      {/* Raw text if paste import */}
+      {enquiry.source === "email" && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              Email Source <Badge variant="secondary" className="text-[10px]">inbound</Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Field label="Mailbox" value={enquiry.emailImportMailbox ?? "-"} />
+              <Field label="Subject" value={enquiry.emailImportSubject ?? "-"} />
+              <Field label="Received" value={enquiry.emailImportReceivedAtDisplay ?? "-"} />
+            </div>
+            {enquiry.emailImportNeedsReview && (
+              <div className="mt-4 rounded-md border border-destructive/40 p-3 text-sm">
+                <p className="font-medium text-destructive">Needs Review</p>
+                <p className="mt-1 text-muted-foreground">
+                  {[...(enquiry.emailImportMissingFields ?? []), ...(enquiry.emailImportWarnings ?? [])].join(", ") || "Review parsed fields."}
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Raw text if paste or email import */}
       {enquiry.rawText && (
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
-              Original Text <Badge variant="secondary" className="text-[10px]">paste import</Badge>
+              Original Text <Badge variant="secondary" className="text-[10px]">{enquiry.source === "email" ? "email import" : "paste import"}</Badge>
             </CardTitle>
           </CardHeader>
           <CardContent>

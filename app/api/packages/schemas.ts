@@ -10,6 +10,7 @@ export const packageRouteSchema = z.object({
   originLocationId: z.string().uuid(),
   destinationLocationId: z.string().uuid(),
   active: z.boolean().default(true),
+  existing: z.boolean().default(false),
 })
 
 export const packageRateCardSchema = z.object({
@@ -22,6 +23,7 @@ export const packageRateCardSchema = z.object({
   currency: z.string().trim().min(1).max(10),
   validFrom: dateSchema,
   validTo: z.union([dateSchema, z.literal(""), z.null()]),
+  existing: z.boolean().default(false),
 })
 
 export const packageLegSchema = z.object({

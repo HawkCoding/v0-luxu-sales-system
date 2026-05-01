@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
+import { staleVersionResponse } from "@/lib/concurrency"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 
 const allowedRoles = new Set(["admin", "manager"])
@@ -9,6 +10,7 @@ const patchCustomerSchema = z.object({
   notes: z.string().max(5000),
   email: z.string().email().max(255),
   phone: z.string().max(50).nullable(),
+  expectedUpdatedAt: z.string().datetime({ offset: true }).optional(),
 })
 
 export async function GET(
@@ -222,11 +224,25 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
   }
 
+  const { data: existingCustomer, error: existingCustomerError } = await supabase
+    .from("customers")
+    .select("updated_at")
+    .eq("id", id)
+    .single()
+
+  if (existingCustomerError || !existingCustomer) {
+    return NextResponse.json({ error: "Customer not found" }, { status: 404 })
+  }
+
+  if (parsed.expectedUpdatedAt && parsed.expectedUpdatedAt !== existingCustomer.updated_at) {
+    return staleVersionResponse("customer", existingCustomer.updated_at)
+  }
+
   const normalizedNotes = parsed.notes.trim()
   const normalizedEmail = parsed.email.trim()
   const normalizedPhone = parsed.phone?.trim()
 
-  const { data: updated, error: updateError } = await supabase
+  let updateQuery = supabase
     .from("customers")
     .update({
       notes: normalizedNotes ? normalizedNotes : null,
@@ -235,8 +251,24 @@ export async function PATCH(
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)
+
+  if (parsed.expectedUpdatedAt) {
+    updateQuery = updateQuery.eq("updated_at", parsed.expectedUpdatedAt)
+  }
+
+  const { data: updated, error: updateError } = await updateQuery
     .select("id, notes, email, phone, updated_at")
     .single()
+
+  if (!updated && parsed.expectedUpdatedAt) {
+    const { data: currentCustomer } = await supabase
+      .from("customers")
+      .select("updated_at")
+      .eq("id", id)
+      .maybeSingle()
+
+    return staleVersionResponse("customer", currentCustomer?.updated_at ?? existingCustomer.updated_at)
+  }
 
   if (updateError || !updated) {
     return NextResponse.json({ error: "Failed to update customer" }, { status: 500 })

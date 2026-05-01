@@ -30,6 +30,7 @@ const supplierRow: SupplierRow = {
   location: "Cape Town",
   notes: "Preferred",
   active: false,
+  single_supplement_pct: 35,
   created_at: "2026-01-01T10:00:00.000Z",
   updated_at: "2026-01-02T11:30:00.000Z",
 }
@@ -99,6 +100,7 @@ describe("mapSupplier", () => {
       location: supplierRow.location,
       notes: supplierRow.notes,
       active: supplierRow.active,
+      singleSupplementPct: supplierRow.single_supplement_pct,
       createdAt: supplierRow.created_at,
       updatedAt: supplierRow.updated_at,
     })

@@ -38,6 +38,7 @@ export function mapSupplier(row: SupplierRow): Supplier {
     locationId: row.location_id ?? null,
     notes: row.notes,
     active: row.active,
+    singleSupplementPct: Number(row.single_supplement_pct ?? 0),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     createdAtDisplay: formatDisplayDateTime(row.created_at),

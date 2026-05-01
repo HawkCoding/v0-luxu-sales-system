@@ -3,5 +3,15 @@
   "framework": "nextjs",
   "installCommand": "pnpm install --frozen-lockfile",
   "buildCommand": "pnpm build",
-  "devCommand": "pnpm dev"
+  "devCommand": "pnpm dev",
+  "crons": [
+    {
+      "path": "/api/cron/email-sync",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/pipeline-auto-close",
+      "schedule": "0 3 * * *"
+    }
+  ]
 }

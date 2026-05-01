@@ -172,9 +172,10 @@ export default async function PackagesPage() {
           <CardContent className="p-12 text-center">
             <Boxes className="mx-auto h-12 w-12 text-muted-foreground/40" />
             <p className="mt-3 text-base font-medium">No packages yet</p>
-            <p className="text-sm text-muted-foreground">
+            <p className="mb-6 text-sm text-muted-foreground">
               Create a package to combine legs from multiple suppliers.
             </p>
+            <PackageWizard />
           </CardContent>
         </Card>
       ) : null}

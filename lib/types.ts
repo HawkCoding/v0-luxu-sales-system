@@ -132,6 +132,20 @@ export interface Booking {
   departureDate: string | null
   departureDateDisplay?: string
   durationNights: number | null
+  tripEndDate?: string | null
+  thankYouScheduledAt?: string | null
+  emailImportNeedsReview: boolean
+  emailImportReviewResolvedAt: string | null
+  emailImportReviewResolvedAtDisplay?: string
+  emailImportMissingFields: string[]
+  emailImportWarnings: string[]
+  emailImportSourceMessageId: string | null
+  emailImportDuplicateOfBookingId: string | null
+  emailImportSubject: string | null
+  emailImportMailbox: string | null
+  emailImportReceivedAt: string | null
+  emailImportReceivedAtDisplay?: string
+  emailImportRawPreview: string | null
   noOfAdults: number
   noOfChildren: number
   noOfSuites: number
@@ -152,9 +166,22 @@ export interface Booking {
   createdAtDisplay?: string
   updatedAt: string
   updatedAtDisplay?: string
+  quoteSentAt: string | null
+  acceptedAt: string | null
+  depositRequestedAt: string | null
+  depositPaidAt: string | null
+  finalPaidAt: string | null
+  voucherSentAt: string | null
+  closedAt: string | null
+  depositPaid: boolean
+  invoiceBalance: number | null
   cancelReason: string | null
   cancelledAt: string | null
   cancelledAtDisplay?: string
+  refundStatus: "refunded" | "not_refunded" | null
+  refundAmount: number | null
+  refundReference: string | null
+  refundedAt: string | null
 }
 
 export const CANCEL_REASONS = [
@@ -175,6 +202,14 @@ export type SupplierKind =
   | "tour_operator"
   | "airline"
 export type SupplierStatus = "draft" | "active" | "inactive"
+
+export const CURRENCIES: { value: string; label: string }[] = [
+  { value: "ZAR", label: "ZAR — South African Rand" },
+  { value: "USD", label: "USD — US Dollar" },
+  { value: "EUR", label: "EUR — Euro" },
+  { value: "GBP", label: "GBP — British Pound" },
+  { value: "AUD", label: "AUD — Australian Dollar" },
+]
 
 export const SUPPLIER_KIND_LABELS: Record<SupplierKind, string> = {
   train_operator: "Train",
@@ -441,6 +476,7 @@ export interface Supplier {
   locationId: string | null
   notes: string | null
   active: boolean
+  singleSupplementPct: number
   createdAt: string
   createdAtDisplay?: string
   updatedAt: string
@@ -478,6 +514,15 @@ export interface Enquiry {
   purpose: Purpose
   rawText?: string
   extractedJson?: Record<string, unknown>
+  emailImportNeedsReview?: boolean
+  emailImportMissingFields?: string[]
+  emailImportWarnings?: string[]
+  emailImportDuplicateOfBookingId?: string | null
+  emailImportSubject?: string | null
+  emailImportMailbox?: string | null
+  emailImportReceivedAt?: string | null
+  emailImportReceivedAtDisplay?: string
+  emailImportRawPreview?: string | null
   title: string
   name: string
   surname: string
@@ -541,6 +586,8 @@ export interface Quote {
   status: QuoteStatus
   validityUntil: string
   validityUntilDisplay?: string
+  updatedAt?: string
+  updatedAtDisplay?: string
   lineItems: QuoteLineItem[]
   subtotal: number
   vat: number
@@ -562,12 +609,13 @@ export interface Payment {
   notes: string
 }
 
-export type DocumentKind = "quote_pdf" | "voucher_pdf"
+export type DocumentKind = "quote_pdf" | "invoice_pdf" | "voucher_pdf" | "summary_pdf" | "other"
 
 export interface DocRecord {
   id: string
   jobId: string
   kind: DocumentKind
+  status?: "required" | "received" | "generated" | "sent"
   generatedAt: string
   generatedAtDisplay?: string
   urlOrBlobRef: string
@@ -586,6 +634,7 @@ export interface Correspondence {
   id: string
   jobId: string
   channel: "email"
+  kind?: string | null
   subject: string
   bodyHtml: string
   status: "sent" | "failed" | "scheduled"

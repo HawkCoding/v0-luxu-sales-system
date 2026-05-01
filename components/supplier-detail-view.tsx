@@ -131,6 +131,7 @@ interface SupplierFormState {
   locationId: string | null
   notes: string
   active: boolean
+  singleSupplementPct: number
   suiteTypes: EditableSuiteType[]
   packages: EditablePackage[]
 }
@@ -277,9 +278,10 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
     phone: supplier.phone ?? "",
     website: supplier.website ?? "",
     location: supplier.location ?? "",
-    locationId: supplier.locationId ?? null,
+    locationId: supplier.kind === "train_operator" ? null : supplier.locationId ?? null,
     notes: supplier.notes ?? "",
     active: supplier.active,
+    singleSupplementPct: supplier.singleSupplementPct,
     suiteTypes: supplier.suiteTypes.map((suiteType) => ({
       id: suiteType.id,
       name: suiteType.name,
@@ -311,6 +313,10 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
   }
 }
 
+function getSupplierLocationId(form: SupplierFormState): string | null {
+  return form.kind === "train_operator" ? null : form.locationId ?? null
+}
+
 function buildDraftPayload(form: SupplierFormState) {
   return {
     name: form.name.trim(),
@@ -324,9 +330,10 @@ function buildDraftPayload(form: SupplierFormState) {
     phone: form.phone.trim(),
     website: form.website.trim(),
     location: form.location.trim(),
-    locationId: form.locationId ?? null,
+    locationId: getSupplierLocationId(form),
     notes: form.notes.trim(),
     active: form.active,
+    singleSupplementPct: form.singleSupplementPct,
     suiteTypes: form.suiteTypes.map((suiteType) => ({
       id: suiteType.id,
       name: suiteType.name.trim(),
@@ -881,8 +888,6 @@ function PackageRateCardMatrix({
   selectedRouteId?: string | null
   vocabulary: SupplierVocabulary
 }) {
-  const periodGroups = groupRateCardsByPeriod(pkg.rateCards)
-
   if (pkg.routes.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
@@ -890,6 +895,14 @@ function PackageRateCardMatrix({
       </div>
     )
   }
+
+  const routeColumns = selectedRouteId
+    ? pkg.routes.filter((route) => route.id === selectedRouteId)
+    : pkg.routes
+  const visibleRateCards = selectedRouteId
+    ? pkg.rateCards.filter((rateCard) => rateCard.routeId === selectedRouteId)
+    : pkg.rateCards
+  const periodGroups = groupRateCardsByPeriod(visibleRateCards)
 
   if (periodGroups.length === 0 || suiteTypes.length === 0) {
     return (
@@ -902,10 +915,6 @@ function PackageRateCardMatrix({
   return (
     <div className="space-y-4">
       {periodGroups.map((period) => {
-        const routeColumns = selectedRouteId
-          ? pkg.routes.filter((route) => route.id === selectedRouteId)
-          : pkg.routes
-
         return (
           <div key={period.key} className="rounded-lg border overflow-hidden">
             <div className="flex items-center justify-between gap-2 bg-secondary/40 px-4 py-3">
@@ -1243,14 +1252,17 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                             <td key={`${suiteType.id}-${routeId}`} className="px-4 py-3">
                               {match ? (
                                 <div className="flex flex-col gap-1.5">
-                                  <NumericInput
-                                    min="0"
-                                    step="0.01"
-                                    value={match.pricePerPerson}
-                                    onValueChange={(value) =>
-                                      onUpdateCellPrice(packageIndex, match.id, value ?? 0)
-                                    }
-                                  />
+                                  <div className="flex items-center gap-1">
+                                    <span className="w-10 shrink-0 text-xs text-muted-foreground">Adult</span>
+                                    <NumericInput
+                                      min="0"
+                                      step="0.01"
+                                      value={match.pricePerPerson}
+                                      onValueChange={(value) =>
+                                        onUpdateCellPrice(packageIndex, match.id, value ?? 0)
+                                      }
+                                    />
+                                  </div>
                                   <div className="flex items-center gap-1">
                                     <span className="w-10 shrink-0 text-xs text-muted-foreground">Child</span>
                                     <NumericInput
@@ -1687,6 +1699,20 @@ export function SupplierDetailView({
   ) => {
     startTransition(() => {
       setForm((current) => (current ? { ...current, [key]: value } : current))
+    })
+  }
+
+  const updateSupplierKind = (kind: SupplierKind) => {
+    startTransition(() => {
+      setForm((current) =>
+        current
+          ? {
+              ...current,
+              kind,
+              locationId: kind === "train_operator" ? null : current.locationId,
+            }
+          : current,
+      )
     })
   }
 
@@ -2441,9 +2467,10 @@ export function SupplierDetailView({
           phone: form.phone.trim(),
           website: form.website.trim(),
           location: form.location.trim(),
-          locationId: form.locationId ?? null,
+          locationId: getSupplierLocationId(form),
           notes: form.notes.trim(),
           active: form.active,
+          singleSupplementPct: form.singleSupplementPct,
           suiteTypes: cleanedSuiteTypes,
           routes: cleanedRoutes,
           expectedUpdatedAt:
@@ -2619,6 +2646,8 @@ export function SupplierDetailView({
   }
 
   const activeVocabulary = getSupplierVocabulary(isEditing ? form.kind : supplier.kind)
+  const isTrainOperatorForm = form.kind === "train_operator"
+  const isTrainOperatorSupplier = supplier.kind === "train_operator"
   const routeRateGroup = form?.packages[0] ?? createRoutesRateGroup()
   const supplierRouteRatePackage: SupplierPackage = {
     id: "supplier-routes-and-rates",
@@ -2626,7 +2655,7 @@ export function SupplierDetailView({
     name: "Routes and Rates",
     description: null,
     durationNights: null,
-    singleSupplementPct: 0,
+    singleSupplementPct: supplier.singleSupplementPct,
     currency: "ZAR",
     active: true,
     createdAt: supplier.createdAt,
@@ -2824,7 +2853,7 @@ export function SupplierDetailView({
                     <Label htmlFor="supplier-kind">Category</Label>
                     <Select
                       value={form.kind}
-                      onValueChange={(value: SupplierKind) => updateField("kind", value)}
+                      onValueChange={(value: SupplierKind) => updateSupplierKind(value)}
                     >
                       <SelectTrigger id="supplier-kind">
                         <SelectValue />
@@ -2859,7 +2888,7 @@ export function SupplierDetailView({
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="supplier-location">Location (text)</Label>
+                    <Label htmlFor="supplier-location">Location</Label>
                     <BufferedInput
                       id="supplier-location"
                       value={form.location}
@@ -2867,27 +2896,29 @@ export function SupplierDetailView({
                     />
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="supplier-location-city">City</Label>
-                    <Select
-                      value={form.locationId ?? "none"}
-                      onValueChange={(value) =>
-                        updateField("locationId", value === "none" ? null : value)
-                      }
-                    >
-                      <SelectTrigger id="supplier-location-city">
-                        <SelectValue placeholder="Select city" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">— None —</SelectItem>
-                        {locations.map((loc) => (
-                          <SelectItem key={loc.id} value={loc.id}>
-                            {loc.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  {!isTrainOperatorForm && (
+                    <div className="space-y-2">
+                      <Label htmlFor="supplier-location-city">City</Label>
+                      <Select
+                        value={form.locationId ?? "none"}
+                        onValueChange={(value) =>
+                          updateField("locationId", value === "none" ? null : value)
+                        }
+                      >
+                        <SelectTrigger id="supplier-location-city">
+                          <SelectValue placeholder="Select city" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">— None —</SelectItem>
+                          {locations.map((loc) => (
+                            <SelectItem key={loc.id} value={loc.id}>
+                              {loc.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                 </div>
 
                 <SupplierEmailEditor
@@ -2925,14 +2956,16 @@ export function SupplierDetailView({
                   <InfoItem label="Phone" value={supplier.phone} />
                   <InfoItem label="Website" value={supplier.website} />
                   <InfoItem label="Location" value={supplier.location} />
-                  <InfoItem
-                    label="City"
-                    value={
-                      supplier.locationId
-                        ? (locations.find((loc) => loc.id === supplier.locationId)?.name ?? null)
-                        : null
-                    }
-                  />
+                  {!isTrainOperatorSupplier && (
+                    <InfoItem
+                      label="City"
+                      value={
+                        supplier.locationId
+                          ? (locations.find((loc) => loc.id === supplier.locationId)?.name ?? null)
+                          : null
+                      }
+                    />
+                  )}
                   <InfoItem
                     label="Last updated"
                     value={formatDisplayDate(supplier.updatedAt)}
@@ -3012,6 +3045,46 @@ export function SupplierDetailView({
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
+              {activeVocabulary.showSingleSupplement ? (
+                <div className="rounded-lg border p-4">
+                  {isEditing ? (
+                    <div className="grid gap-3 sm:grid-cols-[minmax(0,16rem)_1fr] sm:items-end">
+                      <div className="space-y-2">
+                        <Label htmlFor="supplier-single-supplement">
+                          Single supplement %
+                        </Label>
+                        <NumericInput
+                          id="supplier-single-supplement"
+                          min="0"
+                          step="0.01"
+                          value={form.singleSupplementPct}
+                          onValueChange={(value) =>
+                            updateField("singleSupplementPct", value ?? 0)
+                          }
+                        />
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Added to the per-person sharing rate when a traveller occupies a suite alone.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">
+                          Single supplement
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Added when a traveller occupies a suite alone.
+                        </p>
+                      </div>
+                      <Badge variant="outline">
+                        +{supplier.singleSupplementPct.toFixed(2)}%
+                      </Badge>
+                    </div>
+                  )}
+                </div>
+              ) : null}
+
               <div className="rounded-lg border p-4 space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>

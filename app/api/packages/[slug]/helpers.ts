@@ -185,23 +185,27 @@ export function normalizePackageChildren(
   const now = new Date().toISOString()
   const legs = parsed.legs.map((leg, index) => {
     const legId = leg.id ?? makeUuid()
-    const routes: RouteInsert[] = leg.routes.map((route) => ({
-      id: route.id ?? makeUuid(),
-      supplier_id: leg.supplierId,
-      name: route.name.trim(),
-      origin_location_id: route.originLocationId,
-      destination_location_id: route.destinationLocationId,
-      active: route.active,
-      created_at: now,
-      updated_at: now,
-    }))
-    const routeIds = new Set(routes.map((route) => route.id).filter(Boolean))
-    const rateCards: RateCardInsert[] = leg.rateCards.map((rateCard) => {
+    const routeRows = leg.routes.map((route) => {
+      const id = route.id ?? makeUuid()
+      const insert: RouteInsert = {
+        id,
+        supplier_id: leg.supplierId,
+        name: route.name.trim(),
+        origin_location_id: route.originLocationId,
+        destination_location_id: route.destinationLocationId,
+        active: route.active,
+        created_at: now,
+        updated_at: now,
+      }
+      return { insert, existing: route.existing }
+    })
+    const routeIds = new Set(routeRows.map((row) => row.insert.id))
+    const rateCardRows = leg.rateCards.map((rateCard) => {
       if (!rateCard.routeId || !routeIds.has(rateCard.routeId)) {
         throw new Error("Each rate card must reference a route from the same leg.")
       }
 
-      return {
+      const insert: RateCardInsert = {
         id: rateCard.id ?? makeUuid(),
         route_id: rateCard.routeId,
         suite_type_id: rateCard.suiteTypeId,
@@ -216,6 +220,7 @@ export function normalizePackageChildren(
         valid_to: normalizeNullableDate(rateCard.validTo),
         created_at: now,
       }
+      return { insert, existing: rateCard.existing }
     })
 
     return {
@@ -227,14 +232,19 @@ export function normalizePackageChildren(
         sort_order: leg.sortOrder ?? index,
         created_at: now,
       },
-      routes,
-      rateCards,
+      routeRows,
+      rateCardRows,
     }
   })
 
+  const allRouteRows = legs.flatMap((entry) => entry.routeRows)
+  const allRateCardRows = legs.flatMap((entry) => entry.rateCardRows)
+
   return {
     legs: legs.map((entry) => entry.leg),
-    routes: legs.flatMap((entry) => entry.routes),
-    rateCards: legs.flatMap((entry) => entry.rateCards),
+    routes: allRouteRows.filter((row) => !row.existing).map((row) => row.insert),
+    rateCards: allRateCardRows.filter((row) => !row.existing).map((row) => row.insert),
+    allRouteIds: allRouteRows.map((row) => row.insert.id),
+    allRateCardIds: allRateCardRows.map((row) => row.insert.id),
   }
 }

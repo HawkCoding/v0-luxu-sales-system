@@ -34,6 +34,24 @@ export type Database = {
   }
   public: {
     Tables: {
+      app_settings: {
+        Row: {
+          key: string
+          updated_at: string
+          value: string
+        }
+        Insert: {
+          key: string
+          updated_at?: string
+          value: string
+        }
+        Update: {
+          key?: string
+          updated_at?: string
+          value?: string
+        }
+        Relationships: []
+      }
       audit_log_archives: {
         Row: {
           action: string
@@ -48,6 +66,8 @@ export type Database = {
           entity_type: string
           id: string
           meta_json: Json | null
+          override_reason: string | null
+          overridden_by: string | null
         }
         Insert: {
           action: string
@@ -103,6 +123,8 @@ export type Database = {
           entity_type: string
           id?: string
           meta_json?: Json | null
+          override_reason?: string | null
+          overridden_by?: string | null
         }
         Update: {
           action?: string
@@ -115,6 +137,8 @@ export type Database = {
           entity_type?: string
           id?: string
           meta_json?: Json | null
+          override_reason?: string | null
+          overridden_by?: string | null
         }
         Relationships: []
       }
@@ -164,21 +188,39 @@ export type Database = {
         Row: {
           additional_services: boolean
           additional_services_details: string | null
+          accepted_at: string | null
           booking_number: string
           cancel_reason: string | null
           cancelled_at: string | null
           child_ages: number[] | null
+          closed_at: string | null
           consultant: string | null
           created_at: string
           customer_id: string
           departure_date: string | null
+          deposit_paid: boolean
+          deposit_paid_at: string | null
+          deposit_requested_at: string | null
           duration_nights: number | null
+          email_import_duplicate_of_booking_id: string | null
+          email_import_mailbox: string | null
+          email_import_missing_fields: string[]
+          email_import_needs_review: boolean
+          email_import_raw_preview: string | null
+          email_import_received_at: string | null
+          email_import_review_resolved_at: string | null
+          email_import_review_resolved_by: string | null
+          email_import_source_message_id: string | null
+          email_import_subject: string | null
+          email_import_warnings: string[]
           extend_stay: boolean
           extra_nights: number | null
           extracted_json: Json | null
+          final_paid_at: string | null
           hotel_phase: Database["public"]["Enums"]["hotel_phase"]
           hotel_supplier_id: string | null
           id: string
+          invoice_balance: number | null
           no_of_adults: number
           no_of_children: number
           no_of_suites: number
@@ -187,30 +229,54 @@ export type Database = {
           promotion_code: string | null
           purpose: Database["public"]["Enums"]["booking_purpose"]
           raw_text: string | null
+          refunded_at: string | null
+          refund_amount: number | null
+          refund_reference: string | null
+          refund_status: string | null
           route_id: string | null
           source: Database["public"]["Enums"]["source_kind"]
           stage: Database["public"]["Enums"]["pipeline_stage"]
           terms_accepted: boolean
+          quote_sent_at: string | null
           updated_at: string
+          voucher_sent_at: string | null
         }
         Insert: {
           additional_services?: boolean
           additional_services_details?: string | null
+          accepted_at?: string | null
           booking_number?: string
           cancel_reason?: string | null
           cancelled_at?: string | null
           child_ages?: number[] | null
+          closed_at?: string | null
           consultant?: string | null
           created_at?: string
           customer_id: string
           departure_date?: string | null
+          deposit_paid?: boolean
+          deposit_paid_at?: string | null
+          deposit_requested_at?: string | null
           duration_nights?: number | null
+          email_import_duplicate_of_booking_id?: string | null
+          email_import_mailbox?: string | null
+          email_import_missing_fields?: string[]
+          email_import_needs_review?: boolean
+          email_import_raw_preview?: string | null
+          email_import_received_at?: string | null
+          email_import_review_resolved_at?: string | null
+          email_import_review_resolved_by?: string | null
+          email_import_source_message_id?: string | null
+          email_import_subject?: string | null
+          email_import_warnings?: string[]
           extend_stay?: boolean
           extra_nights?: number | null
           extracted_json?: Json | null
+          final_paid_at?: string | null
           hotel_phase?: Database["public"]["Enums"]["hotel_phase"]
           hotel_supplier_id?: string | null
           id?: string
+          invoice_balance?: number | null
           no_of_adults?: number
           no_of_children?: number
           no_of_suites?: number
@@ -219,30 +285,54 @@ export type Database = {
           promotion_code?: string | null
           purpose: Database["public"]["Enums"]["booking_purpose"]
           raw_text?: string | null
+          refunded_at?: string | null
+          refund_amount?: number | null
+          refund_reference?: string | null
+          refund_status?: string | null
           route_id?: string | null
           source?: Database["public"]["Enums"]["source_kind"]
           stage?: Database["public"]["Enums"]["pipeline_stage"]
           terms_accepted?: boolean
+          quote_sent_at?: string | null
           updated_at?: string
+          voucher_sent_at?: string | null
         }
         Update: {
           additional_services?: boolean
           additional_services_details?: string | null
+          accepted_at?: string | null
           booking_number?: string
           cancel_reason?: string | null
           cancelled_at?: string | null
           child_ages?: number[] | null
+          closed_at?: string | null
           consultant?: string | null
           created_at?: string
           customer_id?: string
           departure_date?: string | null
+          deposit_paid?: boolean
+          deposit_paid_at?: string | null
+          deposit_requested_at?: string | null
           duration_nights?: number | null
+          email_import_duplicate_of_booking_id?: string | null
+          email_import_mailbox?: string | null
+          email_import_missing_fields?: string[]
+          email_import_needs_review?: boolean
+          email_import_raw_preview?: string | null
+          email_import_received_at?: string | null
+          email_import_review_resolved_at?: string | null
+          email_import_review_resolved_by?: string | null
+          email_import_source_message_id?: string | null
+          email_import_subject?: string | null
+          email_import_warnings?: string[]
           extend_stay?: boolean
           extra_nights?: number | null
           extracted_json?: Json | null
+          final_paid_at?: string | null
           hotel_phase?: Database["public"]["Enums"]["hotel_phase"]
           hotel_supplier_id?: string | null
           id?: string
+          invoice_balance?: number | null
           no_of_adults?: number
           no_of_children?: number
           no_of_suites?: number
@@ -251,11 +341,17 @@ export type Database = {
           promotion_code?: string | null
           purpose?: Database["public"]["Enums"]["booking_purpose"]
           raw_text?: string | null
+          refunded_at?: string | null
+          refund_amount?: number | null
+          refund_reference?: string | null
+          refund_status?: string | null
           route_id?: string | null
           source?: Database["public"]["Enums"]["source_kind"]
           stage?: Database["public"]["Enums"]["pipeline_stage"]
           terms_accepted?: boolean
+          quote_sent_at?: string | null
           updated_at?: string
+          voucher_sent_at?: string | null
         }
         Relationships: [
           {
@@ -263,6 +359,20 @@ export type Database = {
             columns: ["customer_id"]
             isOneToOne: false
             referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bookings_email_import_duplicate_of_booking_id_fkey"
+            columns: ["email_import_duplicate_of_booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bookings_email_import_source_message_id_fkey"
+            columns: ["email_import_source_message_id"]
+            isOneToOne: false
+            referencedRelation: "inbound_email_messages"
             referencedColumns: ["id"]
           },
           {
@@ -296,6 +406,7 @@ export type Database = {
           created_at: string
           error: string | null
           id: string
+          kind: string | null
           scheduled_at: string | null
           sent_at: string | null
           status: Database["public"]["Enums"]["correspondence_status"]
@@ -308,6 +419,7 @@ export type Database = {
           created_at?: string
           error?: string | null
           id?: string
+          kind?: string | null
           scheduled_at?: string | null
           sent_at?: string | null
           status?: Database["public"]["Enums"]["correspondence_status"]
@@ -320,6 +432,7 @@ export type Database = {
           created_at?: string
           error?: string | null
           id?: string
+          kind?: string | null
           scheduled_at?: string | null
           sent_at?: string | null
           status?: Database["public"]["Enums"]["correspondence_status"]
@@ -567,6 +680,228 @@ export type Database = {
             columns: ["package_id"]
             isOneToOne: false
             referencedRelation: "packages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      inbound_email_accounts: {
+        Row: {
+          created_at: string
+          email: string
+          enabled: boolean
+          first_sync_completed: boolean
+          host: string
+          id: string
+          inbox_folder: string
+          last_seen_uid: number
+          last_synced_at: string | null
+          last_uidvalidity: number | null
+          needs_review_folder: string
+          password_encrypted: string
+          port: number
+          processed_folder: string
+          tls_mode: string
+          updated_at: string
+          username: string
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          enabled?: boolean
+          first_sync_completed?: boolean
+          host: string
+          id?: string
+          inbox_folder?: string
+          last_seen_uid?: number
+          last_synced_at?: string | null
+          last_uidvalidity?: number | null
+          needs_review_folder?: string
+          password_encrypted: string
+          port?: number
+          processed_folder?: string
+          tls_mode?: string
+          updated_at?: string
+          username: string
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          enabled?: boolean
+          first_sync_completed?: boolean
+          host?: string
+          id?: string
+          inbox_folder?: string
+          last_seen_uid?: number
+          last_synced_at?: string | null
+          last_uidvalidity?: number | null
+          needs_review_folder?: string
+          password_encrypted?: string
+          port?: number
+          processed_folder?: string
+          tls_mode?: string
+          updated_at?: string
+          username?: string
+        }
+        Relationships: []
+      }
+      inbound_email_messages: {
+        Row: {
+          booking_id: string | null
+          created_at: string
+          email_account_id: string
+          error: string | null
+          filing_status: string
+          from_address: string | null
+          id: string
+          message_id: string | null
+          missing_fields: string[]
+          raw_preview: string | null
+          received_at: string | null
+          status: string
+          subject: string
+          sync_run_id: string | null
+          uid: number
+          uidvalidity: number
+          updated_at: string
+          warnings: string[]
+        }
+        Insert: {
+          booking_id?: string | null
+          created_at?: string
+          email_account_id: string
+          error?: string | null
+          filing_status?: string
+          from_address?: string | null
+          id?: string
+          message_id?: string | null
+          missing_fields?: string[]
+          raw_preview?: string | null
+          received_at?: string | null
+          status?: string
+          subject: string
+          sync_run_id?: string | null
+          uid: number
+          uidvalidity: number
+          updated_at?: string
+          warnings?: string[]
+        }
+        Update: {
+          booking_id?: string | null
+          created_at?: string
+          email_account_id?: string
+          error?: string | null
+          filing_status?: string
+          from_address?: string | null
+          id?: string
+          message_id?: string | null
+          missing_fields?: string[]
+          raw_preview?: string | null
+          received_at?: string | null
+          status?: string
+          subject?: string
+          sync_run_id?: string | null
+          uid?: number
+          uidvalidity?: number
+          updated_at?: string
+          warnings?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inbound_email_messages_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inbound_email_messages_email_account_id_fkey"
+            columns: ["email_account_id"]
+            isOneToOne: false
+            referencedRelation: "inbound_email_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inbound_email_messages_sync_run_id_fkey"
+            columns: ["sync_run_id"]
+            isOneToOne: false
+            referencedRelation: "inbound_email_sync_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      inbound_email_rules: {
+        Row: {
+          active: boolean
+          created_at: string
+          id: string
+          match_type: string
+          name: string
+          subject_pattern: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          id?: string
+          match_type?: string
+          name: string
+          subject_pattern: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          id?: string
+          match_type?: string
+          name?: string
+          subject_pattern?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      inbound_email_sync_runs: {
+        Row: {
+          duplicate_count: number
+          email_account_id: string | null
+          error: string | null
+          finished_at: string | null
+          id: string
+          imported_count: number
+          needs_review_count: number
+          scanned_count: number
+          started_at: string
+          status: string
+        }
+        Insert: {
+          duplicate_count?: number
+          email_account_id?: string | null
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          imported_count?: number
+          needs_review_count?: number
+          scanned_count?: number
+          started_at?: string
+          status?: string
+        }
+        Update: {
+          duplicate_count?: number
+          email_account_id?: string | null
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          imported_count?: number
+          needs_review_count?: number
+          scanned_count?: number
+          started_at?: string
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inbound_email_sync_runs_email_account_id_fkey"
+            columns: ["email_account_id"]
+            isOneToOne: false
+            referencedRelation: "inbound_email_accounts"
             referencedColumns: ["id"]
           },
         ]
@@ -1296,6 +1631,7 @@ export type Database = {
           name: string
           notes: string | null
           phone: string | null
+          single_supplement_pct: number
           slug: string
           status: string
           updated_at: string
@@ -1312,6 +1648,7 @@ export type Database = {
           name: string
           notes?: string | null
           phone?: string | null
+          single_supplement_pct?: number
           slug: string
           status?: string
           updated_at?: string
@@ -1328,6 +1665,7 @@ export type Database = {
           name?: string
           notes?: string | null
           phone?: string | null
+          single_supplement_pct?: number
           slug?: string
           status?: string
           updated_at?: string
@@ -1433,6 +1771,7 @@ export type Database = {
         Args: { required_roles: Database["public"]["Enums"]["user_role"][] }
         Returns: boolean
       }
+      custom_access_token_hook: { Args: { event: Json }; Returns: Json }
       replace_quote_line_items: {
         Args: {
           p_line_items: Json
@@ -1453,7 +1792,7 @@ export type Database = {
         | "voucher_pdf"
         | "summary_pdf"
         | "other"
-      document_status: "required" | "received" | "generated"
+      document_status: "required" | "received" | "generated" | "sent"
       hotel_phase: "pre" | "post" | "none"
       pipeline_stage:
         | "enquiry"
@@ -1631,7 +1970,7 @@ export const Constants = {
         "summary_pdf",
         "other",
       ],
-      document_status: ["required", "received", "generated"],
+      document_status: ["required", "received", "generated", "sent"],
       hotel_phase: ["pre", "post", "none"],
       pipeline_stage: [
         "enquiry",

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Boxes, Search } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -26,13 +26,30 @@ import { Badge } from "@/components/ui/badge"
 import { useActivePackages } from "@/lib/use-data"
 import type { Package, PackageDetail, QuoteLineItem } from "@/lib/types"
 import { SUPPLIER_KIND_LABELS } from "@/lib/types"
+import { PresenceAvatars } from "@/components/presence-avatars"
+import { useRecordPresence } from "@/hooks/use-record-presence"
+import { useVersionedSave } from "@/hooks/use-versioned-save"
 
 interface ApplyPackageDialogProps {
   jobId: string
   quoteId: string
   travelDate: string | null
   existingLineItemCount: number
+  expectedUpdatedAt?: string
   onApplied: () => void
+}
+
+interface QuotePatchPayload {
+  lineItems: QuoteLineItem[]
+}
+
+interface QuotePatchResponse {
+  id: string
+  subtotal: number
+  vat: number
+  total: number
+  lineItems: QuoteLineItem[]
+  updatedAt: string
 }
 
 function formatPrice(amount: number | null, currency: string) {
@@ -55,6 +72,7 @@ export function ApplyPackageDialog({
   quoteId,
   travelDate,
   existingLineItemCount,
+  expectedUpdatedAt,
   onApplied,
 }: ApplyPackageDialogProps) {
   const { data: packages = [] } = useActivePackages()
@@ -67,14 +85,30 @@ export function ApplyPackageDialog({
   const [suiteTypeSelections, setSuiteTypeSelections] = useState<Record<string, string>>({})
   const [previewLineItems, setPreviewLineItems] = useState<QuoteLineItem[]>([])
   const [validating, setValidating] = useState(false)
-  const [applying, setApplying] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
+  const { others, setEditing } = useRecordPresence("quote", open ? quoteId : "")
+  const {
+    save: saveQuote,
+    isSaving: applying,
+    conflict: quoteConflict,
+    clearConflict: clearQuoteConflict,
+  } = useVersionedSave<QuotePatchPayload, QuotePatchResponse>({
+    url: `/api/quotes/${quoteId}`,
+    method: "PATCH",
+    entity: "quote",
+    recordId: quoteId,
+    expectedUpdatedAt,
+  })
 
   const activePackages = packages.filter((pkg) => pkg.active)
   const filteredPackages = activePackages.filter((pkg) =>
     pkg.name.toLowerCase().includes(search.toLowerCase()) ||
     (pkg.trainRouteName ?? "").toLowerCase().includes(search.toLowerCase()),
   )
+
+  useEffect(() => {
+    setEditing(open && step !== "pick")
+  }, [open, setEditing, step])
 
   function reset() {
     setStep("pick")
@@ -84,6 +118,7 @@ export function ApplyPackageDialog({
     setSuiteTypeSelections({})
     setPreviewLineItems([])
     setApplyError(null)
+    clearQuoteConflict()
   }
 
   async function selectPackage(pkg: Package) {
@@ -151,26 +186,31 @@ export function ApplyPackageDialog({
 
   async function applyToQuote() {
     if (previewLineItems.length === 0) return
-    setApplying(true)
     try {
-      const res = await fetch(`/api/quotes/${quoteId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lineItems: previewLineItems }),
-      })
-      if (!res.ok) {
-        const payload = await res.json()
-        toast.error(typeof payload?.error === "string" ? payload.error : "Failed to apply package")
-        return
-      }
+      await saveQuote({ lineItems: previewLineItems })
       toast.success(`Package "${selectedPackage?.name}" applied to quote`)
       setOpen(false)
       reset()
       onApplied()
-    } catch {
-      toast.error("Failed to apply package")
-    } finally {
-      setApplying(false)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to apply package"
+      setApplyError(message)
+      toast.error(message)
+    }
+  }
+
+  async function applyToQuoteAnyway() {
+    if (previewLineItems.length === 0) return
+    try {
+      await saveQuote({ lineItems: previewLineItems }, { ignoreExpectedUpdatedAt: true })
+      toast.success(`Package "${selectedPackage?.name}" applied to quote`)
+      setOpen(false)
+      reset()
+      onApplied()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to apply package"
+      setApplyError(message)
+      toast.error(message)
     }
   }
 
@@ -186,7 +226,10 @@ export function ApplyPackageDialog({
         {step === "pick" && (
           <>
             <DialogHeader>
-              <DialogTitle>Apply a package</DialogTitle>
+              <DialogTitle className="flex items-center gap-2">
+                Apply a package
+                <PresenceAvatars users={others} />
+              </DialogTitle>
               <DialogDescription>
                 Select a package to pre-fill this quote with pricing from its rate cards.
               </DialogDescription>
@@ -250,7 +293,10 @@ export function ApplyPackageDialog({
         {step === "configure" && packageDetail && (
           <>
             <DialogHeader>
-              <DialogTitle>{packageDetail.name}</DialogTitle>
+              <DialogTitle className="flex items-center gap-2">
+                {packageDetail.name}
+                <PresenceAvatars users={others} />
+              </DialogTitle>
               <DialogDescription>
                 {packageDetail.fixedPricePerPerson !== null
                   ? "This package uses a fixed price. No suite type selection needed."
@@ -318,7 +364,10 @@ export function ApplyPackageDialog({
         {step === "confirm" && (
           <>
             <DialogHeader>
-              <DialogTitle>Confirm replacement</DialogTitle>
+              <DialogTitle className="flex items-center gap-2">
+                Confirm replacement
+                <PresenceAvatars users={others} />
+              </DialogTitle>
               <DialogDescription>
                 {existingLineItemCount > 0
                   ? `This will replace ${existingLineItemCount} existing line item${existingLineItemCount === 1 ? "" : "s"} with the following:`
@@ -349,10 +398,21 @@ export function ApplyPackageDialog({
               </table>
             </div>
 
+            {quoteConflict && (
+              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {quoteConflict.error}
+              </p>
+            )}
+
             <DialogFooter>
               <Button variant="outline" onClick={() => setStep("configure")}>
                 Back
               </Button>
+              {quoteConflict && (
+                <Button variant="outline" onClick={applyToQuoteAnyway} disabled={applying}>
+                  Save anyway
+                </Button>
+              )}
               <Button onClick={applyToQuote} disabled={applying}>
                 {applying ? "Applying…" : existingLineItemCount > 0 ? "Replace & apply" : "Apply to quote"}
               </Button>

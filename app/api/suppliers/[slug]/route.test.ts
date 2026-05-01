@@ -38,6 +38,7 @@ const supplierRow = {
   location: null,
   notes: null,
   active: true,
+  single_supplement_pct: 0,
   created_at: "2026-01-01T00:00:00.000Z",
   updated_at: "2026-01-02T00:00:00.000Z",
 }
@@ -249,6 +250,7 @@ describe("PATCH /api/suppliers/[slug]", () => {
   })
 
   it("updates supplier metadata, emails, and suite types", async () => {
+    const supplierUpdatePayloads: Array<Record<string, unknown>> = []
     const supplierMaybeSingle = vi.fn(async () => ({
       data: { updated_at: "2026-01-03T00:00:00.000Z" },
       error: null,
@@ -269,7 +271,10 @@ describe("PATCH /api/suppliers/[slug]", () => {
       if (table === "profiles") return profileQuery("manager")
       if (table === "suppliers") {
         return {
-          update: () => supplierUpdateQuery,
+          update: (payload: Record<string, unknown>) => {
+            supplierUpdatePayloads.push(payload)
+            return supplierUpdateQuery
+          },
         }
       }
       if (table === "supplier_emails") {
@@ -297,6 +302,7 @@ describe("PATCH /api/suppliers/[slug]", () => {
           website: "",
           location: "",
           notes: "",
+          singleSupplementPct: 12.5,
           active: true,
           emails: [{ id: EMAIL_ID, email: "ops@example.com", label: "General" }],
           suiteTypes: [{ id: SUITE_TYPE_ID, name: "Suite", active: true }],
@@ -307,6 +313,9 @@ describe("PATCH /api/suppliers/[slug]", () => {
     )
 
     expect(response.status).toBe(200)
+    expect(supplierUpdatePayloads[0]).toMatchObject({
+      single_supplement_pct: 12.5,
+    })
     expect(emailUpsert).toHaveBeenCalled()
     expect(suiteTypeUpsert).toHaveBeenCalled()
   })

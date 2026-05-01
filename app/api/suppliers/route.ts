@@ -193,6 +193,7 @@ export async function POST(req: Request) {
       website: parsed.website.trim() || null,
       location: parsed.location.trim() || null,
       notes: parsed.notes.trim() || null,
+      single_supplement_pct: 0,
       active: false,
     })
     .select("*")

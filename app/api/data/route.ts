@@ -3,6 +3,13 @@ import { createSessionClient } from "@/lib/supabase/server"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { getAuditCutoffDate } from "@/lib/audit"
 
+function addDaysToDateString(value: string, days: number): string {
+  const [year = "1970", month = "1", day = "1"] = value.split("-")
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)))
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
 export async function GET() {
   const supabase = await createSessionClient()
   const auditCutoff = getAuditCutoffDate().toISOString()
@@ -115,6 +122,22 @@ export async function GET() {
       departureDate: b.departure_date,
       departureDateDisplay: formatDisplayDate(b.departure_date),
       durationNights: b.duration_nights,
+      tripEndDate:
+        b.departure_date && b.duration_nights !== null
+          ? addDaysToDateString(b.departure_date, b.duration_nights)
+          : null,
+      emailImportNeedsReview: b.email_import_needs_review,
+      emailImportReviewResolvedAt: b.email_import_review_resolved_at,
+      emailImportReviewResolvedAtDisplay: formatDisplayDateTime(b.email_import_review_resolved_at),
+      emailImportMissingFields: b.email_import_missing_fields,
+      emailImportWarnings: b.email_import_warnings,
+      emailImportSourceMessageId: b.email_import_source_message_id,
+      emailImportDuplicateOfBookingId: b.email_import_duplicate_of_booking_id,
+      emailImportSubject: b.email_import_subject,
+      emailImportMailbox: b.email_import_mailbox,
+      emailImportReceivedAt: b.email_import_received_at,
+      emailImportReceivedAtDisplay: formatDisplayDateTime(b.email_import_received_at),
+      emailImportRawPreview: b.email_import_raw_preview,
       noOfAdults: b.no_of_adults,
       noOfChildren: b.no_of_children,
       noOfSuites: b.no_of_suites,
@@ -137,6 +160,22 @@ export async function GET() {
       updatedAt: b.updated_at,
       createdAtDisplay: formatDisplayDateTime(b.created_at),
       updatedAtDisplay: formatDisplayDateTime(b.updated_at),
+      quoteSentAt: b.quote_sent_at,
+      acceptedAt: b.accepted_at,
+      depositRequestedAt: b.deposit_requested_at,
+      depositPaidAt: b.deposit_paid_at,
+      finalPaidAt: b.final_paid_at,
+      voucherSentAt: b.voucher_sent_at,
+      closedAt: b.closed_at,
+      depositPaid: b.deposit_paid,
+      invoiceBalance: b.invoice_balance,
+      cancelReason: b.cancel_reason,
+      cancelledAt: b.cancelled_at,
+      cancelledAtDisplay: formatDisplayDateTime(b.cancelled_at),
+      refundStatus: b.refund_status,
+      refundAmount: b.refund_amount,
+      refundReference: b.refund_reference,
+      refundedAt: b.refunded_at,
     })),
 
     bookingSuites: (bookingSuites ?? []).map((s) => ({
@@ -189,6 +228,7 @@ export async function GET() {
       id: c.id,
       bookingId: c.booking_id,
       channel: c.channel,
+      kind: c.kind,
       subject: c.subject,
       bodyHtml: c.body_html,
       status: c.status,

@@ -19,8 +19,13 @@ import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
 import { ConnectionErrorBanner } from "@/components/connection-error-banner"
 import { useAllData } from "@/lib/use-data"
+import { useRealtimeSync } from "@/hooks/use-realtime-sync"
 import { APP_VERSION } from "@/lib/version"
 import type { User } from "@/lib/auth-context"
+import { LuxusLogo } from "@/components/luxus-logo"
+import useSWR from "swr"
+
+const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
 const navItems = [
   { label: "Dashboard", href: "/app", icon: LayoutDashboard, permission: "view:dashboard" },
@@ -42,11 +47,15 @@ const navItems = [
 ]
 
 function AppShell({ children }: { children: ReactNode }) {
+  useRealtimeSync()
+
   const pathname = usePathname()
   const { user, loading: authLoading, logout } = useAuth()
   const { role, setRole, can } = useRole()
   const { theme, setTheme } = useTheme()
   const { data, error: dataError } = useAllData()
+  const { data: companySettings } = useSWR("/api/settings/company", fetcher)
+  const businessName: string = companySettings?.business_name || "Luxus Travel"
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
@@ -214,17 +223,15 @@ function AppShell({ children }: { children: ReactNode }) {
       )}>
         <div className="app-header h-14 flex items-center px-4 border-b border-stroke">
           {!collapsed && (
-            <Link href="/app" className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
-                <span className="text-xs font-bold text-primary-foreground" style={{ fontFamily: "var(--font-inter)" }}>LT</span>
-              </div>
-              <span className="text-sm font-semibold text-foreground tracking-tight">Luxus</span>
+            <Link href="/app" className="flex items-center gap-2 w-full">
+              <LuxusLogo className="w-16 h-16 flex-shrink-0 text-foreground" size={64} />
+              <span className="text-xs font-semibold text-foreground tracking-tight leading-tight text-center flex-1">
+                {businessName}
+              </span>
             </Link>
           )}
           {collapsed && (
-            <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center mx-auto">
-              <span className="text-xs font-bold text-primary-foreground" style={{ fontFamily: "var(--font-inter)" }}>L</span>
-            </div>
+            <LuxusLogo className="w-16 h-16 mx-auto text-foreground" size={64} />
           )}
         </div>
         <div className="relative flex-1 min-h-0 py-2">
@@ -387,7 +394,7 @@ function AppShell({ children }: { children: ReactNode }) {
 export default function AppClientLayout({ children, initialUser }: { children: ReactNode; initialUser: User | null }) {
   return (
     <AuthProvider initialUser={initialUser}>
-      <RoleProvider>
+      <RoleProvider initialRole={initialUser?.role}>
         <AppShell>{children}</AppShell>
       </RoleProvider>
     </AuthProvider>

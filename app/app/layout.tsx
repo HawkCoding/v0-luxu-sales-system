@@ -1,6 +1,7 @@
 import type { ReactNode } from "react"
 import { redirect } from "next/navigation"
 import AppClientLayout from "./client-layout"
+import { extractRoleFromJwt, isRole } from "@/lib/role-utils"
 import { createSessionClient } from "@/lib/supabase/server"
 import type { Role } from "@/lib/types"
 
@@ -14,23 +15,41 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
     redirect("/login")
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("name, surname, clearance_level, email")
-    .eq("user_id", user.id)
-    .single()
+  const jwtRole = extractRoleFromJwt(user)
 
-  const initialUser = profile
-    ? {
-        name: [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.name,
-        email: profile.email || user.email || "",
-        role: profile.clearance_level as Role,
-      }
-    : {
-        name: (user.email ?? "").split("@")[0].replace(/^./, (char) => char.toUpperCase()),
-        email: user.email ?? "",
-        role: "consultant" as const,
-      }
+  let displayName: string
+  let email: string
+  let role: Role
+
+  if (jwtRole) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("name, surname, email")
+      .eq("user_id", user.id)
+      .single()
+
+    role = jwtRole
+    displayName = profile
+      ? [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.name
+      : (user.email ?? "").split("@")[0].replace(/^./, (char) => char.toUpperCase())
+    email = profile?.email || user.email || ""
+  } else {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("name, surname, clearance_level, email")
+      .eq("user_id", user.id)
+      .single()
+
+    if (!profile || !isRole(profile.clearance_level)) {
+      redirect("/login")
+    }
+
+    role = profile.clearance_level
+    displayName = [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.name
+    email = profile.email || user.email || ""
+  }
+
+  const initialUser = { id: user.id, name: displayName, email, role }
 
   return <AppClientLayout initialUser={initialUser}>{children}</AppClientLayout>
 }
