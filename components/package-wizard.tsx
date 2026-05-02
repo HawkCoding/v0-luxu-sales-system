@@ -127,28 +127,34 @@ function payloadFromState(state: WizardState) {
         supplierId: leg.supplierId,
         label: leg.label.trim() || null,
         sortOrder: leg.sortOrder ?? index,
-        routes: leg.routes.filter((route) => selectedRouteIds.has(route.id)).map((route) => ({
-          id: route.id,
-          name: route.name.trim(),
-          originLocationId: route.originLocationId,
-          destinationLocationId: route.destinationLocationId,
-          active: route.active,
-          existing: Boolean(route.existing),
-        })),
-        rateCards: leg.rateCards
-          .filter((rateCard) => selectedRouteIds.has(rateCard.routeId))
-          .map((rateCard) => ({
-            id: rateCard.id,
-            routeId: rateCard.routeId,
-            suiteTypeId: rateCard.suiteTypeId,
-            pricePerPerson: rateCard.pricePerPerson,
-            childPrice: rateCard.childPrice,
-            infantPrice: rateCard.infantPrice,
-            currency: rateCard.currency.trim().toUpperCase() || state.currency.trim().toUpperCase() || "ZAR",
-            validFrom: rateCard.validFrom,
-            validTo: rateCard.validTo ?? "",
-            existing: Boolean(rateCard.existing),
-          })),
+        routes:
+          leg.supplierKind === "hotel_property"
+            ? []
+            : leg.routes.filter((route) => selectedRouteIds.has(route.id)).map((route) => ({
+                id: route.id,
+                name: route.name.trim(),
+                originLocationId: route.originLocationId,
+                destinationLocationId: route.destinationLocationId,
+                active: route.active,
+                existing: Boolean(route.existing),
+              })),
+        rateCards:
+          leg.supplierKind === "hotel_property"
+            ? []
+            : leg.rateCards
+                .filter((rateCard) => selectedRouteIds.has(rateCard.routeId))
+                .map((rateCard) => ({
+                  id: rateCard.id,
+                  routeId: rateCard.routeId,
+                  suiteTypeId: rateCard.suiteTypeId,
+                  pricePerPerson: rateCard.pricePerPerson,
+                  childPrice: rateCard.childPrice,
+                  infantPrice: rateCard.infantPrice,
+                  currency: rateCard.currency.trim().toUpperCase() || state.currency.trim().toUpperCase() || "ZAR",
+                  validFrom: rateCard.validFrom,
+                  validTo: rateCard.validTo ?? "",
+                  existing: Boolean(rateCard.existing),
+                })),
       }
     }),
   }
@@ -180,7 +186,10 @@ interface CurrencyRange {
 }
 
 function selectedRouteCount(legs: PackageWizardLeg[]): number {
-  return legs.reduce((total, leg) => total + leg.selectedRouteIds.length, 0)
+  return legs.reduce(
+    (total, leg) => total + (leg.supplierKind === "hotel_property" ? 0 : leg.selectedRouteIds.length),
+    0,
+  )
 }
 
 function getSelectedRoutes(leg: PackageWizardLeg): SupplierRoute[] {
@@ -279,9 +288,12 @@ function getPackageCurrencyRanges(
 }
 
 function routeLocationLabel(route: SupplierRoute, locations: Location[]): string | null {
+  if (route.pickupPoint || route.dropoffPoint) {
+    return `${route.pickupPoint || "Pickup"} -> ${route.dropoffPoint || "Drop-off"}`
+  }
   const locationsById = new Map(locations.map((location) => [location.id, location.name]))
-  const origin = locationsById.get(route.originLocationId)
-  const destination = locationsById.get(route.destinationLocationId)
+  const origin = route.originLocationId ? locationsById.get(route.originLocationId) : null
+  const destination = route.destinationLocationId ? locationsById.get(route.destinationLocationId) : null
 
   if (!origin && !destination) {
     return null
@@ -586,6 +598,7 @@ export function PackageWizard() {
                   const selectedRoutes = getSelectedRoutes(leg)
                   const selectedRateCards = getSelectedRateCards(leg)
                   const legRanges = getCurrencyRanges(selectedRateCards, packageCurrency)
+                  const isHotel = leg.supplierKind === "hotel_property"
 
                   return (
                     <div key={leg.id} className="space-y-3 rounded-lg border p-3 text-sm">
@@ -593,7 +606,11 @@ export function PackageWizard() {
                         <p className="font-medium">{leg.label || leg.supplierName}</p>
                         <Badge variant="secondary">{SUPPLIER_KIND_LABELS[leg.supplierKind]}</Badge>
                       </div>
-                      {selectedRoutes.length === 0 ? (
+                      {isHotel ? (
+                        <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+                          Included as a hotel option. Room type and meal plan will be chosen when applying the package.
+                        </div>
+                      ) : selectedRoutes.length === 0 ? (
                         <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
                           Select a {vocab.route.toLowerCase()} to include this leg in the price range.
                         </div>

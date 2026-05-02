@@ -71,6 +71,7 @@ import {
   type SupplierPackage,
   type SupplierRateCard,
   type SupplierSuiteType,
+  type TransportServiceType,
   type SupplierVocabulary,
 } from "@/lib/types"
 
@@ -86,14 +87,24 @@ interface SupplierDetailViewProps {
 interface EditableRoute {
   id: string
   name: string
-  originLocationId: string
-  destinationLocationId: string
+  originLocationId: string | null
+  destinationLocationId: string | null
+  transportServiceType: TransportServiceType | null
+  pickupPoint: string | null
+  dropoffPoint: string | null
+  includedKmPerDay: number | null
+  extraKmPrice: number | null
+  securityDeposit: number | null
+  oneWayFee: number | null
   active: boolean
 }
 
 interface EditableSuiteType {
   id: string
   name: string
+  passengerCapacity: number | null
+  luggageCapacity: number | null
+  description: string | null
   active: boolean
 }
 
@@ -216,15 +227,23 @@ function makeClientId(): string {
   return crypto.randomUUID()
 }
 
-function createEmptyRoute(locations: Location[]): EditableRoute {
+function createEmptyRoute(locations: Location[], kind: SupplierKind): EditableRoute {
   const origin = locations[0]?.id ?? ""
   const destination = locations[1]?.id ?? origin
+  const isTransport = kind === "transfers"
 
   return {
     id: makeClientId(),
     name: "",
-    originLocationId: origin,
-    destinationLocationId: destination,
+    originLocationId: isTransport ? null : origin,
+    destinationLocationId: isTransport ? null : destination,
+    transportServiceType: isTransport ? "transfer" : null,
+    pickupPoint: "",
+    dropoffPoint: "",
+    includedKmPerDay: null,
+    extraKmPrice: null,
+    securityDeposit: null,
+    oneWayFee: null,
     active: true,
   }
 }
@@ -233,6 +252,9 @@ function createEmptySuiteType(): EditableSuiteType {
   return {
     id: makeClientId(),
     name: "",
+    passengerCapacity: null,
+    luggageCapacity: null,
+    description: null,
     active: true,
   }
 }
@@ -285,6 +307,9 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
     suiteTypes: supplier.suiteTypes.map((suiteType) => ({
       id: suiteType.id,
       name: suiteType.name,
+      passengerCapacity: suiteType.passengerCapacity ?? null,
+      luggageCapacity: suiteType.luggageCapacity ?? null,
+      description: suiteType.description ?? null,
       active: suiteType.active,
     })),
     packages: [
@@ -295,6 +320,13 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
           name: route.name,
           originLocationId: route.originLocationId,
           destinationLocationId: route.destinationLocationId,
+          transportServiceType: route.transportServiceType ?? null,
+          pickupPoint: route.pickupPoint ?? null,
+          dropoffPoint: route.dropoffPoint ?? null,
+          includedKmPerDay: route.includedKmPerDay ?? null,
+          extraKmPrice: route.extraKmPrice ?? null,
+          securityDeposit: route.securityDeposit ?? null,
+          oneWayFee: route.oneWayFee ?? null,
           active: route.active,
         })),
         rateCards: supplier.rateCards.map((rateCard) => ({
@@ -337,6 +369,9 @@ function buildDraftPayload(form: SupplierFormState) {
     suiteTypes: form.suiteTypes.map((suiteType) => ({
       id: suiteType.id,
       name: suiteType.name.trim(),
+      passengerCapacity: form.kind === "transfers" ? suiteType.passengerCapacity : null,
+      luggageCapacity: form.kind === "transfers" ? suiteType.luggageCapacity : null,
+      description: form.kind === "transfers" ? suiteType.description?.trim() || null : null,
       active: suiteType.active,
     })),
     routes: (form.packages[0]?.routes ?? []).map((route) => ({
@@ -344,6 +379,25 @@ function buildDraftPayload(form: SupplierFormState) {
         name: route.name.trim(),
         originLocationId: route.originLocationId,
         destinationLocationId: route.destinationLocationId,
+        transportServiceType: form.kind === "transfers" ? route.transportServiceType ?? "transfer" : null,
+        pickupPoint: form.kind === "transfers" ? route.pickupPoint?.trim() ?? "" : null,
+        dropoffPoint: form.kind === "transfers" ? route.dropoffPoint?.trim() ?? "" : null,
+        includedKmPerDay:
+          form.kind === "transfers" && route.transportServiceType === "rental"
+            ? route.includedKmPerDay
+            : null,
+        extraKmPrice:
+          form.kind === "transfers" && route.transportServiceType === "rental"
+            ? route.extraKmPrice
+            : null,
+        securityDeposit:
+          form.kind === "transfers" && route.transportServiceType === "rental"
+            ? route.securityDeposit
+            : null,
+        oneWayFee:
+          form.kind === "transfers" && route.transportServiceType === "rental"
+            ? route.oneWayFee
+            : null,
         active: route.active,
         rateCards: (form.packages[0]?.rateCards ?? [])
           .filter((rateCard) => rateCard.routeId === route.id)
@@ -832,12 +886,19 @@ function getContainerClass(presentation: Presentation) {
     : "max-h-[80vh] overflow-y-auto p-6 space-y-6"
 }
 
-function getLocationName(locationsById: Record<string, Location>, id: string) {
+function getLocationName(locationsById: Record<string, Location>, id: string | null) {
+  if (!id) return "Unknown location"
   return locationsById[id]?.name ?? "Unknown location"
 }
 
 function getRouteLabel(
-  route: { name: string; originLocationId: string; destinationLocationId: string },
+  route: {
+    name: string
+    originLocationId: string | null
+    destinationLocationId: string | null
+    pickupPoint?: string | null
+    dropoffPoint?: string | null
+  },
   locationsById: Record<string, Location>,
   vocabulary: SupplierVocabulary,
 ) {
@@ -847,6 +908,10 @@ function getRouteLabel(
 
   if (!vocabulary.routeHasLocations) {
     return route.name || `Unnamed ${vocabulary.route.toLowerCase()}`
+  }
+
+  if (route.pickupPoint || route.dropoffPoint) {
+    return `${route.pickupPoint || "Pickup"} -> ${route.dropoffPoint || "Drop-off"}`
   }
 
   return `${getLocationName(locationsById, route.originLocationId)} -> ${getLocationName(
@@ -879,15 +944,19 @@ function PackageRateCardMatrix({
   pkg,
   suiteTypes,
   locationsById,
-  selectedRouteId,
   vocabulary,
 }: {
   pkg: SupplierPackage
   suiteTypes: SupplierSuiteType[]
   locationsById: Record<string, Location>
-  selectedRouteId?: string | null
   vocabulary: SupplierVocabulary
 }) {
+  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null)
+  const effectiveSelectedRouteId =
+    selectedRouteId && pkg.routes.some((route) => route.id === selectedRouteId)
+      ? selectedRouteId
+      : pkg.routes[0]?.id ?? null
+
   if (pkg.routes.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
@@ -896,103 +965,129 @@ function PackageRateCardMatrix({
     )
   }
 
-  const routeColumns = selectedRouteId
-    ? pkg.routes.filter((route) => route.id === selectedRouteId)
+  const routeColumns = effectiveSelectedRouteId
+    ? pkg.routes.filter((route) => route.id === effectiveSelectedRouteId)
     : pkg.routes
-  const visibleRateCards = selectedRouteId
-    ? pkg.rateCards.filter((rateCard) => rateCard.routeId === selectedRouteId)
+  const visibleRateCards = effectiveSelectedRouteId
+    ? pkg.rateCards.filter((rateCard) => rateCard.routeId === effectiveSelectedRouteId)
     : pkg.rateCards
   const periodGroups = groupRateCardsByPeriod(visibleRateCards)
 
-  if (periodGroups.length === 0 || suiteTypes.length === 0) {
-    return (
-      <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-        No rates have been configured for this supplier yet.
-      </div>
-    )
-  }
-
   return (
     <div className="space-y-4">
-      {periodGroups.map((period) => {
-        return (
-          <div key={period.key} className="rounded-lg border overflow-hidden">
-            <div className="flex items-center justify-between gap-2 bg-secondary/40 px-4 py-3">
-              <div>
-                <p className="text-sm font-medium text-foreground">{period.label}</p>
-                <p className="text-xs text-muted-foreground">
-                  {vocabulary.showSingleSupplement
-                    ? `${period.currency} ${vocabulary.priceLabel} (single: +${pkg.singleSupplementPct.toFixed(
-                        0,
-                      )}%)`
-                    : `${period.currency} ${vocabulary.priceLabel}`}
-                </p>
-              </div>
-              <Badge variant="outline">{period.currency}</Badge>
-            </div>
+      {pkg.routes.length > 1 ? (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {vocabulary.routePlural}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {pkg.routes.map((route) => {
+              const routeLabel = getRouteLabel(route, locationsById, vocabulary)
+              const isSelected = effectiveSelectedRouteId === route.id
 
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="bg-secondary/20">
-                  <tr className="border-b">
-                    <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      {vocabulary.suiteType}
-                    </th>
-                    {routeColumns.map((route) => (
-                      <th
-                        key={route.id}
-                        className="whitespace-nowrap px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-                      >
-                        {getRouteLabel(route, locationsById, vocabulary)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {suiteTypes.map((suiteType) => (
-                    <tr key={suiteType.id} className="border-b last:border-0">
-                      <td className="px-4 py-3 font-medium text-foreground">{suiteType.name}</td>
-                      {routeColumns.map((route) => {
-                        const match =
-                          period.items.find(
-                            (item) =>
-                              item.suiteTypeId === suiteType.id && item.routeId === route.id,
-                          )
-
-                        return (
-                          <td
-                            key={`${suiteType.id}-${route.id}`}
-                            className="px-4 py-3 text-muted-foreground"
-                          >
-                            {match ? (
-                              <div className="space-y-1">
-                                <p className="font-medium text-foreground">
-                                  {formatCurrency(match.pricePerPerson, match.currency)}
-                                </p>
-                                {vocabulary.showSingleSupplement ? (
-                                  <p className="text-xs">
-                                    Single:{" "}
-                                    {formatCurrency(
-                                      match.pricePerPerson * (1 + pkg.singleSupplementPct / 100),
-                                      match.currency,
-                                    )}
-                                  </p>
-                                ) : null}
-                              </div>
-                            ) : (
-                              "-"
-                            )}
-                          </td>
-                        )
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+              return (
+                <Button
+                  key={route.id}
+                  type="button"
+                  size="sm"
+                  variant={isSelected ? "default" : "outline"}
+                  className="h-7 rounded-full px-3 text-xs"
+                  aria-pressed={isSelected}
+                  onClick={() => setSelectedRouteId(route.id)}
+                >
+                  {routeLabel}
+                </Button>
+              )
+            })}
           </div>
-        )
-      })}
+        </div>
+      ) : null}
+
+      {periodGroups.length === 0 || suiteTypes.length === 0 ? (
+        <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+          No rates have been configured for this supplier yet.
+        </div>
+      ) : (
+        periodGroups.map((period) => {
+          return (
+            <div key={period.key} className="rounded-lg border overflow-hidden">
+              <div className="flex items-center justify-between gap-2 bg-secondary/40 px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">{period.label}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {vocabulary.showSingleSupplement
+                      ? `${period.currency} ${vocabulary.priceLabel} (single: +${pkg.singleSupplementPct.toFixed(
+                          0,
+                        )}%)`
+                      : `${period.currency} ${vocabulary.priceLabel}`}
+                  </p>
+                </div>
+                <Badge variant="outline">{period.currency}</Badge>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-secondary/20">
+                    <tr className="border-b">
+                      <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {vocabulary.suiteType}
+                      </th>
+                      {routeColumns.map((route) => (
+                        <th
+                          key={route.id}
+                          className="whitespace-nowrap px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                        >
+                          {getRouteLabel(route, locationsById, vocabulary)}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {suiteTypes.map((suiteType) => (
+                      <tr key={suiteType.id} className="border-b last:border-0">
+                        <td className="px-4 py-3 font-medium text-foreground">{suiteType.name}</td>
+                        {routeColumns.map((route) => {
+                          const match =
+                            period.items.find(
+                              (item) =>
+                                item.suiteTypeId === suiteType.id && item.routeId === route.id,
+                            )
+
+                          return (
+                            <td
+                              key={`${suiteType.id}-${route.id}`}
+                              className="px-4 py-3 text-muted-foreground"
+                            >
+                              {match ? (
+                                <div className="space-y-1">
+                                  <p className="font-medium text-foreground">
+                                    {formatCurrency(match.pricePerPerson, match.currency)}
+                                  </p>
+                                  {vocabulary.showSingleSupplement ? (
+                                    <p className="text-xs">
+                                      Single:{" "}
+                                      {formatCurrency(
+                                        match.pricePerPerson * (1 + pkg.singleSupplementPct / 100),
+                                        match.currency,
+                                      )}
+                                    </p>
+                                  ) : null}
+                                </div>
+                              ) : (
+                                "-"
+                              )}
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )
+        })
+      )}
     </div>
   )
 }
@@ -1004,6 +1099,7 @@ interface RateCardMatrixEditorProps {
   packageIndex: number
   locationsById: Record<string, Location>
   vocabulary: SupplierVocabulary
+  isTransport: boolean
   onAddPeriod: (packageIndex: number, routeId: string) => void
   onRemovePeriod: (packageIndex: number, routeId: string, periodKey: string) => void
   onUpdatePeriodField: (
@@ -1041,6 +1137,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
   packageIndex,
   locationsById,
   vocabulary,
+  isTransport,
   onAddPeriod,
   onRemovePeriod,
   onUpdatePeriodField,
@@ -1253,7 +1350,13 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                               {match ? (
                                 <div className="flex flex-col gap-1.5">
                                   <div className="flex items-center gap-1">
-                                    <span className="w-10 shrink-0 text-xs text-muted-foreground">Adult</span>
+                                    <span className="w-16 shrink-0 text-xs text-muted-foreground">
+                                      {isTransport
+                                        ? route.transportServiceType === "rental"
+                                          ? "Daily"
+                                          : "Flat"
+                                        : "Adult"}
+                                    </span>
                                     <NumericInput
                                       min="0"
                                       step="0.01"
@@ -1263,32 +1366,36 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                                       }
                                     />
                                   </div>
-                                  <div className="flex items-center gap-1">
-                                    <span className="w-10 shrink-0 text-xs text-muted-foreground">Child</span>
-                                    <NumericInput
-                                      min="0"
-                                      step="0.01"
-                                      nullable
-                                      placeholder="—"
-                                      value={match.childPrice}
-                                      onValueChange={(value) =>
-                                        onUpdateCellField(packageIndex, match.id, "childPrice", value)
-                                      }
-                                    />
-                                  </div>
-                                  <div className="flex items-center gap-1">
-                                    <span className="w-10 shrink-0 text-xs text-muted-foreground">Infant</span>
-                                    <NumericInput
-                                      min="0"
-                                      step="0.01"
-                                      nullable
-                                      placeholder="—"
-                                      value={match.infantPrice}
-                                      onValueChange={(value) =>
-                                        onUpdateCellField(packageIndex, match.id, "infantPrice", value)
-                                      }
-                                    />
-                                  </div>
+                                  {!isTransport ? (
+                                    <>
+                                      <div className="flex items-center gap-1">
+                                        <span className="w-10 shrink-0 text-xs text-muted-foreground">Child</span>
+                                        <NumericInput
+                                          min="0"
+                                          step="0.01"
+                                          nullable
+                                          nullDisplayValue="0"
+                                          value={match.childPrice}
+                                          onValueChange={(value) =>
+                                            onUpdateCellField(packageIndex, match.id, "childPrice", value)
+                                          }
+                                        />
+                                      </div>
+                                      <div className="flex items-center gap-1">
+                                        <span className="w-10 shrink-0 text-xs text-muted-foreground">Infant</span>
+                                        <NumericInput
+                                          min="0"
+                                          step="0.01"
+                                          nullable
+                                          nullDisplayValue="0"
+                                          value={match.infantPrice}
+                                          onValueChange={(value) =>
+                                            onUpdateCellField(packageIndex, match.id, "infantPrice", value)
+                                          }
+                                        />
+                                      </div>
+                                    </>
+                                  ) : null}
                                   <Button
                                     type="button"
                                     size="icon"
@@ -1355,7 +1462,7 @@ interface SuiteTypeEditorRowProps {
   onUpdateSuiteType: (
     suiteTypeIndex: number,
     key: keyof EditableSuiteType,
-    value: string | boolean,
+    value: string | boolean | number | null,
   ) => void
   onRemoveSuiteType: (suiteTypeIndex: number) => void
 }
@@ -1367,8 +1474,16 @@ const SuiteTypeEditorRow = memo(function SuiteTypeEditorRow({
   onUpdateSuiteType,
   onRemoveSuiteType,
 }: SuiteTypeEditorRowProps) {
+  const isTransport = vocabulary.suiteType === "Vehicle Type"
+
   return (
-    <div className="grid gap-4 rounded-lg border p-3 md:grid-cols-[1fr_auto_auto]">
+    <div
+      className={
+        isTransport
+          ? "grid gap-4 rounded-lg border p-3 md:grid-cols-2 xl:grid-cols-[1fr_10rem_10rem_1fr_auto_auto]"
+          : "grid gap-4 rounded-lg border p-3 md:grid-cols-[1fr_auto_auto]"
+      }
+    >
       <div className="space-y-2">
         <Label>{`${vocabulary.suiteType} name`}</Label>
         <BufferedInput
@@ -1376,6 +1491,41 @@ const SuiteTypeEditorRow = memo(function SuiteTypeEditorRow({
           onValueChange={(value) => onUpdateSuiteType(suiteTypeIndex, "name", value)}
         />
       </div>
+      {isTransport ? (
+        <>
+          <div className="space-y-2">
+            <Label>Passengers</Label>
+            <NumericInput
+              min="0"
+              step="1"
+              nullable
+              value={suiteType.passengerCapacity}
+              onValueChange={(value) =>
+                onUpdateSuiteType(suiteTypeIndex, "passengerCapacity", value)
+              }
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Luggage</Label>
+            <NumericInput
+              min="0"
+              step="1"
+              nullable
+              value={suiteType.luggageCapacity}
+              onValueChange={(value) =>
+                onUpdateSuiteType(suiteTypeIndex, "luggageCapacity", value)
+              }
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Description</Label>
+            <BufferedInput
+              value={suiteType.description ?? ""}
+              onValueChange={(value) => onUpdateSuiteType(suiteTypeIndex, "description", value)}
+            />
+          </div>
+        </>
+      ) : null}
       <div className="flex items-end gap-2">
         <Switch
           checked={suiteType.active}
@@ -1407,7 +1557,7 @@ interface RouteEditorRowProps {
     packageIndex: number,
     routeIndex: number,
     key: keyof EditableRoute,
-    value: string | boolean,
+    value: string | boolean | number | null,
   ) => void
   onRemoveRoute: (packageIndex: number, routeIndex: number) => void
 }
@@ -1421,10 +1571,17 @@ const RouteEditorRow = memo(function RouteEditorRow({
   onUpdateRoute,
   onRemoveRoute,
 }: RouteEditorRowProps) {
+  const isTransport = vocabulary.suiteType === "Vehicle Type"
+  const isRental = route.transportServiceType === "rental"
+
   return (
     <div
       className={`grid min-w-0 gap-4 overflow-hidden rounded-lg border p-3 ${
-        vocabulary.routeHasLocations ? "md:grid-cols-2 xl:grid-cols-5" : "md:grid-cols-[1fr_auto]"
+        isTransport
+          ? "md:grid-cols-2 xl:grid-cols-4"
+          : vocabulary.routeHasLocations
+            ? "md:grid-cols-2 xl:grid-cols-5"
+            : "md:grid-cols-[1fr_auto]"
       }`}
     >
       <div className={`space-y-2 ${vocabulary.routeHasLocations ? "xl:col-span-2" : ""}`}>
@@ -1434,7 +1591,95 @@ const RouteEditorRow = memo(function RouteEditorRow({
           onValueChange={(value) => onUpdateRoute(packageIndex, routeIndex, "name", value)}
         />
       </div>
-      {vocabulary.routeHasLocations ? (
+      {isTransport ? (
+        <>
+          <div className="min-w-0 space-y-2">
+            <Label>Service type</Label>
+            <Select
+              value={route.transportServiceType ?? "transfer"}
+              onValueChange={(value: TransportServiceType) =>
+                onUpdateRoute(packageIndex, routeIndex, "transportServiceType", value)
+              }
+            >
+              <SelectTrigger className="max-w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="transfer">Transfer</SelectItem>
+                <SelectItem value="rental">Vehicle rental</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="min-w-0 space-y-2">
+            <Label>{isRental ? "Rental pickup point" : vocabulary.originLabel}</Label>
+            <BufferedInput
+              value={route.pickupPoint ?? ""}
+              onValueChange={(value) => onUpdateRoute(packageIndex, routeIndex, "pickupPoint", value)}
+              placeholder="Airport, hotel, address..."
+            />
+          </div>
+          <div className="min-w-0 space-y-2">
+            <Label>{isRental ? "Return point" : vocabulary.destinationLabel}</Label>
+            <BufferedInput
+              value={route.dropoffPoint ?? ""}
+              onValueChange={(value) => onUpdateRoute(packageIndex, routeIndex, "dropoffPoint", value)}
+              placeholder="Airport, hotel, address..."
+            />
+          </div>
+          {isRental ? (
+            <>
+              <div className="min-w-0 space-y-2">
+                <Label>Included km/day</Label>
+                <NumericInput
+                  min="0"
+                  step="1"
+                  nullable
+                  value={route.includedKmPerDay}
+                  onValueChange={(value) =>
+                    onUpdateRoute(packageIndex, routeIndex, "includedKmPerDay", value)
+                  }
+                />
+              </div>
+              <div className="min-w-0 space-y-2">
+                <Label>Extra km price</Label>
+                <NumericInput
+                  min="0"
+                  step="0.01"
+                  nullable
+                  value={route.extraKmPrice}
+                  onValueChange={(value) =>
+                    onUpdateRoute(packageIndex, routeIndex, "extraKmPrice", value)
+                  }
+                />
+              </div>
+              <div className="min-w-0 space-y-2">
+                <Label>Security deposit</Label>
+                <NumericInput
+                  min="0"
+                  step="0.01"
+                  nullable
+                  value={route.securityDeposit}
+                  onValueChange={(value) =>
+                    onUpdateRoute(packageIndex, routeIndex, "securityDeposit", value)
+                  }
+                />
+              </div>
+              <div className="min-w-0 space-y-2">
+                <Label>One-way fee</Label>
+                <NumericInput
+                  min="0"
+                  step="0.01"
+                  nullable
+                  value={route.oneWayFee}
+                  onValueChange={(value) =>
+                    onUpdateRoute(packageIndex, routeIndex, "oneWayFee", value)
+                  }
+                />
+              </div>
+            </>
+          ) : null}
+        </>
+      ) : vocabulary.routeHasLocations ? (
         <>
           <div className="min-w-0 space-y-2">
             <Label>{vocabulary.originLabel}</Label>
@@ -1735,7 +1980,7 @@ export function SupplierDetailView({
     (
       suiteTypeIndex: number,
       key: keyof EditableSuiteType,
-      value: string | boolean,
+      value: string | boolean | number | null,
     ) => {
       updateSuiteTypes((suiteTypes) =>
         suiteTypes.map((suiteType, index) =>
@@ -1875,9 +2120,12 @@ export function SupplierDetailView({
 
   const addRoute = useCallback(
     (packageIndex: number) => {
+      const currentForm = formRef.current
+      if (!currentForm) return
+
       updatePackage(packageIndex, (pkg) => ({
         ...pkg,
-        routes: [...pkg.routes, createEmptyRoute(locations)],
+        routes: [...pkg.routes, createEmptyRoute(locations, currentForm.kind)],
       }))
     },
     [locations, updatePackage],
@@ -1888,7 +2136,7 @@ export function SupplierDetailView({
       packageIndex: number,
       routeIndex: number,
       key: keyof EditableRoute,
-      value: string | boolean,
+      value: string | boolean | number | null,
     ) => {
       updatePackage(packageIndex, (pkg) => ({
         ...pkg,
@@ -2363,6 +2611,9 @@ export function SupplierDetailView({
       .map((suiteType) => ({
         id: suiteType.id,
         name: suiteType.name.trim(),
+        passengerCapacity: form.kind === "transfers" ? suiteType.passengerCapacity : null,
+        luggageCapacity: form.kind === "transfers" ? suiteType.luggageCapacity : null,
+        description: form.kind === "transfers" ? suiteType.description?.trim() || null : null,
         active: suiteType.active,
       }))
     const suiteTypeIds = new Set(cleanedSuiteTypes.map((suiteType) => suiteType.id))
@@ -2376,6 +2627,8 @@ export function SupplierDetailView({
             route.name.trim() ||
             route.originLocationId ||
             route.destinationLocationId ||
+            route.pickupPoint ||
+            route.dropoffPoint ||
             routeRateGroup.rateCards.some((rateCard) => rateCard.routeId === route.id),
         ),
         rateCards: routeRateGroup.rateCards,
@@ -2392,12 +2645,17 @@ export function SupplierDetailView({
 
     for (const pkg of meaningfulPackages) {
       for (const route of pkg.routes) {
-        const needsLocations = vocabulary.routeHasLocations
+        const isTransport = form.kind === "transfers"
+        const needsLocations = vocabulary.routeHasLocations && !isTransport
         if (
           !route.name.trim() ||
           (needsLocations && (!route.originLocationId || !route.destinationLocationId))
         ) {
           toast.error(`Complete all ${vocabulary.route.toLowerCase()} fields before saving.`)
+          return
+        }
+        if (isTransport && (!route.transportServiceType || !route.pickupPoint?.trim() || !route.dropoffPoint?.trim())) {
+          toast.error("Complete service type, pickup point, and drop-off point before saving transport services.")
           return
         }
       }
@@ -2432,6 +2690,25 @@ export function SupplierDetailView({
         name: route.name.trim(),
         originLocationId: route.originLocationId,
         destinationLocationId: route.destinationLocationId,
+        transportServiceType: form.kind === "transfers" ? route.transportServiceType ?? "transfer" : null,
+        pickupPoint: form.kind === "transfers" ? route.pickupPoint?.trim() ?? "" : null,
+        dropoffPoint: form.kind === "transfers" ? route.dropoffPoint?.trim() ?? "" : null,
+        includedKmPerDay:
+          form.kind === "transfers" && route.transportServiceType === "rental"
+            ? route.includedKmPerDay
+            : null,
+        extraKmPrice:
+          form.kind === "transfers" && route.transportServiceType === "rental"
+            ? route.extraKmPrice
+            : null,
+        securityDeposit:
+          form.kind === "transfers" && route.transportServiceType === "rental"
+            ? route.securityDeposit
+            : null,
+        oneWayFee:
+          form.kind === "transfers" && route.transportServiceType === "rental"
+            ? route.oneWayFee
+            : null,
         active: route.active,
         rateCards: routeRateGroup.rateCards
           .filter((rateCard) => rateCard.routeId === route.id)
@@ -2440,8 +2717,8 @@ export function SupplierDetailView({
             routeId: rateCard.routeId,
             suiteTypeId: rateCard.suiteTypeId,
             pricePerPerson: rateCard.pricePerPerson,
-            childPrice: rateCard.childPrice,
-            infantPrice: rateCard.infantPrice,
+            childPrice: form.kind === "transfers" ? null : rateCard.childPrice,
+            infantPrice: form.kind === "transfers" ? null : rateCard.infantPrice,
             currency: rateCard.currency.trim().toUpperCase() || "ZAR",
             validFrom: rateCard.validFrom,
             validTo: rateCard.validTo ?? "",
@@ -3192,6 +3469,7 @@ export function SupplierDetailView({
                   packageIndex={0}
                   locationsById={locationsById}
                   vocabulary={activeVocabulary}
+                  isTransport={form.kind === "transfers"}
                   onAddPeriod={addRateCardPeriod}
                   onRemovePeriod={removeRateCardPeriod}
                   onUpdatePeriodField={updateRateCardPeriodField}
@@ -3205,7 +3483,6 @@ export function SupplierDetailView({
                   pkg={supplierRouteRatePackage}
                   suiteTypes={supplier.suiteTypes}
                   locationsById={locationsById}
-                  selectedRouteId={supplier.routes[0]?.id ?? null}
                   vocabulary={activeVocabulary}
                 />
               )}

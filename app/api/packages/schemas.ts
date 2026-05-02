@@ -7,8 +7,15 @@ const dateSchema = z
 export const packageRouteSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().trim().min(1, "Route name is required"),
-  originLocationId: z.string().uuid(),
-  destinationLocationId: z.string().uuid(),
+  originLocationId: z.string().uuid().nullable().optional(),
+  destinationLocationId: z.string().uuid().nullable().optional(),
+  transportServiceType: z.enum(["transfer", "rental"]).nullable().optional(),
+  pickupPoint: z.string().trim().max(500).nullable().optional(),
+  dropoffPoint: z.string().trim().max(500).nullable().optional(),
+  includedKmPerDay: z.number().finite().nonnegative().nullable().optional(),
+  extraKmPrice: z.number().finite().nonnegative().nullable().optional(),
+  securityDeposit: z.number().finite().nonnegative().nullable().optional(),
+  oneWayFee: z.number().finite().nonnegative().nullable().optional(),
   active: z.boolean().default(true),
   existing: z.boolean().default(false),
 })

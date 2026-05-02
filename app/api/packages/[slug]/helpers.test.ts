@@ -85,6 +85,15 @@ describe("normalizePackageChildren", () => {
     expect(result.allRouteIds).toEqual([EXISTING_ROUTE_ID, NEW_ROUTE_ID])
   })
 
+  it("creates package route links for selected existing and new routes", () => {
+    const result = normalizePackageChildren(PACKAGE_ID, buildInput())
+
+    expect(result.routeLinks).toEqual([
+      expect.objectContaining({ package_leg_id: LEG_ID, route_id: EXISTING_ROUTE_ID }),
+      expect.objectContaining({ package_leg_id: LEG_ID, route_id: NEW_ROUTE_ID }),
+    ])
+  })
+
   it("excludes existing rate cards from inserts but includes them in allRateCardIds", () => {
     const result = normalizePackageChildren(PACKAGE_ID, buildInput())
 

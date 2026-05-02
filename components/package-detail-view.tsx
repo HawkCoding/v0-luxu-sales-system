@@ -113,26 +113,32 @@ export function PackageDetailView({ packageDetail }: PackageDetailViewProps) {
       supplierId: leg.supplierId,
       label: leg.label.trim() || null,
       sortOrder: leg.sortOrder ?? index,
-      routes: leg.routes.map((route) => ({
-        id: route.id,
-        name: route.name.trim(),
-        originLocationId: route.originLocationId,
-        destinationLocationId: route.destinationLocationId,
-        active: route.active,
-        existing: Boolean(route.existing),
-      })),
-      rateCards: leg.rateCards.map((rateCard) => ({
-        id: rateCard.id,
-        routeId: rateCard.routeId,
-        suiteTypeId: rateCard.suiteTypeId,
-        pricePerPerson: rateCard.pricePerPerson,
-        childPrice: rateCard.childPrice,
-        infantPrice: rateCard.infantPrice,
-        currency: rateCard.currency.trim().toUpperCase() || currency.trim().toUpperCase() || "ZAR",
-        validFrom: rateCard.validFrom,
-        validTo: rateCard.validTo ?? "",
-        existing: Boolean(rateCard.existing),
-      })),
+      routes:
+        leg.supplierKind === "hotel_property"
+          ? []
+          : leg.routes.map((route) => ({
+              id: route.id,
+              name: route.name.trim(),
+              originLocationId: route.originLocationId,
+              destinationLocationId: route.destinationLocationId,
+              active: route.active,
+              existing: Boolean(route.existing),
+            })),
+      rateCards:
+        leg.supplierKind === "hotel_property"
+          ? []
+          : leg.rateCards.map((rateCard) => ({
+              id: rateCard.id,
+              routeId: rateCard.routeId,
+              suiteTypeId: rateCard.suiteTypeId,
+              pricePerPerson: rateCard.pricePerPerson,
+              childPrice: rateCard.childPrice,
+              infantPrice: rateCard.infantPrice,
+              currency: rateCard.currency.trim().toUpperCase() || currency.trim().toUpperCase() || "ZAR",
+              validFrom: rateCard.validFrom,
+              validTo: rateCard.validTo ?? "",
+              existing: Boolean(rateCard.existing),
+            })),
     })),
   })
 

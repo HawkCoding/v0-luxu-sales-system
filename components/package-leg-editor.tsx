@@ -21,6 +21,7 @@ import type {
   SupplierRateCard,
   SupplierRoute,
   SupplierSuiteType,
+  TransportServiceType,
 } from "@/lib/types"
 import { SUPPLIER_KIND_LABELS, getSupplierVocabulary } from "@/lib/types"
 
@@ -54,6 +55,7 @@ function createRoute(
   supplierId: string,
   locations: Location[],
   hasLocations: boolean,
+  isTransport: boolean,
 ): EditableSupplierRoute {
   const origin = hasLocations ? locations[0]?.id ?? "" : ""
   const destination = hasLocations ? locations[1]?.id ?? origin : ""
@@ -62,8 +64,15 @@ function createRoute(
     id: makeClientId(),
     supplierId,
     name: "",
-    originLocationId: origin,
-    destinationLocationId: destination,
+    originLocationId: isTransport ? null : origin,
+    destinationLocationId: isTransport ? null : destination,
+    transportServiceType: isTransport ? "transfer" : null,
+    pickupPoint: "",
+    dropoffPoint: "",
+    includedKmPerDay: null,
+    extraKmPrice: null,
+    securityDeposit: null,
+    oneWayFee: null,
     active: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -99,11 +108,13 @@ export function PackageLegEditor({
   const routeLabel = vocab.route
   const routePluralLabel = vocab.routePlural
   const showLocations = vocab.routeHasLocations
+  const isHotel = leg.supplierKind === "hotel_property"
+  const isTransport = leg.supplierKind === "transfers"
 
   const updateRoute = (
     routeId: string,
     key: keyof SupplierRoute,
-    value: string | boolean,
+    value: string | boolean | number | null,
   ) => {
     onChange({
       ...leg,
@@ -127,7 +138,9 @@ export function PackageLegEditor({
   }
 
   const routeGridClass = showLocations
-    ? "grid gap-3 rounded-lg border p-3 md:grid-cols-[1fr_1fr_1fr_auto_auto]"
+    ? isTransport
+      ? "grid gap-3 rounded-lg border p-3 md:grid-cols-2 xl:grid-cols-4"
+      : "grid gap-3 rounded-lg border p-3 md:grid-cols-[1fr_1fr_1fr_auto_auto]"
     : "grid gap-3 rounded-lg border p-3 md:grid-cols-[1fr_auto_auto]"
 
   return (
@@ -157,7 +170,7 @@ export function PackageLegEditor({
             />
           </div>
           <div className="space-y-2">
-            <Label>Order</Label>
+            <Label>Display order</Label>
             <NumericInput
               min="0"
               step="1"
@@ -168,6 +181,14 @@ export function PackageLegEditor({
         </div>
       </CardHeader>
       <CardContent className="space-y-6">
+        {isHotel ? (
+          <section className="space-y-3">
+            <h3 className="text-sm font-semibold">Hotel option</h3>
+            <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+              This hotel is included as an option. Room type and meal plan are selected when applying the package to a quote.
+            </div>
+          </section>
+        ) : (
         <section className="space-y-3">
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-sm font-semibold">{routePluralLabel}</h3>
@@ -178,7 +199,7 @@ export function PackageLegEditor({
               onClick={() =>
                 onChange({
                   ...leg,
-                  routes: [...leg.routes, createRoute(leg.supplierId, locations, showLocations)],
+                    routes: [...leg.routes, createRoute(leg.supplierId, locations, showLocations, isTransport)],
                 })
               }
             >
@@ -202,7 +223,44 @@ export function PackageLegEditor({
                     disabled={route.existing}
                   />
                 </div>
-                {showLocations ? (
+                {isTransport ? (
+                  <>
+                    <div className="space-y-2">
+                      <Label>Service type</Label>
+                      <Select
+                        value={route.transportServiceType ?? "transfer"}
+                        onValueChange={(value: TransportServiceType) =>
+                          updateRoute(route.id, "transportServiceType", value)
+                        }
+                        disabled={route.existing}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="transfer">Transfer</SelectItem>
+                          <SelectItem value="rental">Vehicle rental</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>{route.transportServiceType === "rental" ? "Rental pickup point" : vocab.originLabel}</Label>
+                      <Input
+                        value={route.pickupPoint ?? ""}
+                        onChange={(event) => updateRoute(route.id, "pickupPoint", event.target.value)}
+                        disabled={route.existing}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>{route.transportServiceType === "rental" ? "Return point" : vocab.destinationLabel}</Label>
+                      <Input
+                        value={route.dropoffPoint ?? ""}
+                        onChange={(event) => updateRoute(route.id, "dropoffPoint", event.target.value)}
+                        disabled={route.existing}
+                      />
+                    </div>
+                  </>
+                ) : showLocations ? (
                   <>
                     <div className="space-y-2">
                       <Label>{vocab.originLabel}</Label>
@@ -282,7 +340,9 @@ export function PackageLegEditor({
             ) : null}
           </div>
         </section>
+        )}
 
+        {!isHotel ? (
         <section className="space-y-3">
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-sm font-semibold">Rate cards</h3>
@@ -299,7 +359,14 @@ export function PackageLegEditor({
           </div>
           <div className="space-y-3">
             {leg.rateCards.map((rateCard) => (
-              <div key={rateCard.id} className="grid gap-3 rounded-lg border p-3 md:grid-cols-4 xl:grid-cols-[1fr_1fr_1fr_1fr_1fr_1fr_1fr_auto]">
+              <div
+                key={rateCard.id}
+                className={
+                  isTransport
+                    ? "grid gap-3 rounded-lg border p-3 md:grid-cols-4 xl:grid-cols-[1fr_1fr_1fr_1fr_1fr_auto]"
+                    : "grid gap-3 rounded-lg border p-3 md:grid-cols-4 xl:grid-cols-[1fr_1fr_1fr_1fr_1fr_1fr_1fr_auto]"
+                }
+              >
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <Label>{vocab.suiteType}</Label>
@@ -344,7 +411,7 @@ export function PackageLegEditor({
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Adult price</Label>
+                  <Label>{isTransport ? "Vehicle price" : "Adult price"}</Label>
                   <NumericInput
                     min="0"
                     step="0.01"
@@ -353,28 +420,34 @@ export function PackageLegEditor({
                     disabled={rateCard.existing}
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label>Child price</Label>
-                  <NumericInput
-                    min="0"
-                    step="0.01"
-                    nullable
-                    value={rateCard.childPrice}
-                    onValueChange={(value) => updateRateCard(rateCard.id, "childPrice", value)}
-                    disabled={rateCard.existing}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Infant price</Label>
-                  <NumericInput
-                    min="0"
-                    step="0.01"
-                    nullable
-                    value={rateCard.infantPrice}
-                    onValueChange={(value) => updateRateCard(rateCard.id, "infantPrice", value)}
-                    disabled={rateCard.existing}
-                  />
-                </div>
+                {!isTransport ? (
+                  <>
+                    <div className="space-y-2">
+                      <Label>Child price</Label>
+                      <NumericInput
+                        min="0"
+                        step="0.01"
+                        nullable
+                        nullDisplayValue="0"
+                        value={rateCard.childPrice}
+                        onValueChange={(value) => updateRateCard(rateCard.id, "childPrice", value)}
+                        disabled={rateCard.existing}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Infant price</Label>
+                      <NumericInput
+                        min="0"
+                        step="0.01"
+                        nullable
+                        nullDisplayValue="0"
+                        value={rateCard.infantPrice}
+                        onValueChange={(value) => updateRateCard(rateCard.id, "infantPrice", value)}
+                        disabled={rateCard.existing}
+                      />
+                    </div>
+                  </>
+                ) : null}
                 <div className="space-y-2">
                   <Label>Valid from</Label>
                   <Input
@@ -426,6 +499,7 @@ export function PackageLegEditor({
             ) : null}
           </div>
         </section>
+        ) : null}
       </CardContent>
     </Card>
   )

@@ -64,6 +64,7 @@ export function PackageLegSelector({
   const vocab = getSupplierVocabulary(leg.supplierKind)
   const selectedRoutes = new Set(selectedRouteIds)
   const locationsById = new Map(locations.map((location) => [location.id, location.name]))
+  const isHotel = leg.supplierKind === "hotel_property"
 
   return (
     <Card>
@@ -92,7 +93,7 @@ export function PackageLegSelector({
             />
           </div>
           <div className="space-y-2">
-            <Label>Order</Label>
+            <Label>Display order</Label>
             <NumericInput
               min="0"
               step="1"
@@ -103,15 +104,19 @@ export function PackageLegSelector({
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
-        <h3 className="text-sm font-semibold">{vocab.routePlural}</h3>
-        {leg.routes.length > 0 ? (
+        <h3 className="text-sm font-semibold">{isHotel ? "Hotel option" : vocab.routePlural}</h3>
+        {isHotel ? (
+          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+            This hotel is included as an option. Room type and meal plan are selected when applying the package to a quote.
+          </div>
+        ) : leg.routes.length > 0 ? (
           <div className="space-y-2">
             {leg.routes.map((route) => {
               const routeRateCards = leg.rateCards.filter(
                 (rateCard) => rateCard.routeId === route.id,
               )
-              const origin = locationsById.get(route.originLocationId)
-              const destination = locationsById.get(route.destinationLocationId)
+              const origin = route.pickupPoint ?? (route.originLocationId ? locationsById.get(route.originLocationId) : null)
+              const destination = route.dropoffPoint ?? (route.destinationLocationId ? locationsById.get(route.destinationLocationId) : null)
               const checkboxId = `${leg.id}-${route.id}`
 
               return (

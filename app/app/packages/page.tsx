@@ -32,6 +32,7 @@ export default async function PackagesPage() {
   const [
     { data: packages },
     { data: legRows },
+    { data: legRouteRows },
     { data: routeRows },
     { data: rateCardRows },
   ] = await Promise.all([
@@ -43,6 +44,9 @@ export default async function PackagesPage() {
       .from("package_legs")
       .select("*, suppliers(name, kind)")
       .order("sort_order", { ascending: true }),
+    supabase
+      .from("package_leg_routes")
+      .select("package_leg_id, route_id"),
     supabase
       .from("routes")
       .select("id, supplier_id, name"),
@@ -68,19 +72,35 @@ export default async function PackagesPage() {
 
   const routes = routeRows ?? []
   const rateCards = rateCardRows ?? []
+  const legRoutes = legRouteRows ?? []
 
   const list = (packages ?? []).map((pkg) => {
     const pkgLegs = legs.filter((leg) => leg.package_id === pkg.id)
-    const supplierIds = new Set(pkgLegs.map((leg) => leg.supplier_id))
-    const pkgRoutes = routes.filter((route) => supplierIds.has(route.supplier_id))
-    const pkgRouteIds = new Set(pkgRoutes.map((route) => route.id))
+    const pkgRouteIds = new Set(
+      pkgLegs.flatMap((leg) => {
+        const supplierRoutes = routes.filter((route) => route.supplier_id === leg.supplier_id)
+        if (leg.supplierKind === "hotel_property") {
+          return supplierRoutes.map((route) => route.id)
+        }
+        return legRoutes
+          .filter((link) => link.package_leg_id === leg.id)
+          .map((link) => link.route_id)
+      }),
+    )
     const prices = rateCards
       .filter((rc) => pkgRouteIds.has(rc.route_id))
       .map((rc) => rc.price_per_person)
 
     const trainLeg = pkgLegs.find((leg) => leg.supplierKind === "train_operator")
+    const trainRouteIds = new Set(
+      trainLeg
+        ? legRoutes
+            .filter((link) => link.package_leg_id === trainLeg.id)
+            .map((link) => link.route_id)
+        : [],
+    )
     const trainRoute = trainLeg
-      ? pkgRoutes.find((route) => route.supplier_id === trainLeg.supplier_id)
+      ? routes.find((route) => trainRouteIds.has(route.id))
       : null
 
     return mapPackageListItem(pkg, pkgLegs, prices, trainRoute?.name ?? null)

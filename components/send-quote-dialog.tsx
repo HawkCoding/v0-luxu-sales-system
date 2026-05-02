@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Progress } from "@/components/ui/progress"
 import {
   Select,
@@ -52,6 +53,12 @@ interface SendQuoteDialogProps {
 interface ApplyPackageResponse {
   lineItems?: QuoteLineItem[]
   error?: string
+}
+
+interface LegSelectionState {
+  selected: boolean
+  routeId: string
+  suiteTypeId: string
 }
 
 const SENDING_STEPS = [
@@ -116,6 +123,43 @@ function delay(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
 
+function isOptionalLeg(kind: PackageDetail["legs"][number]["supplierKind"]): boolean {
+  return kind === "hotel_property" || kind === "transfers"
+}
+
+function getRouteLabel(kind: PackageDetail["legs"][number]["supplierKind"]): string {
+  if (kind === "hotel_property") return "meal plan"
+  if (kind === "transfers") return "transfer"
+  return "route"
+}
+
+function getSuiteLabel(kind: PackageDetail["legs"][number]["supplierKind"]): string {
+  if (kind === "hotel_property") return "room type"
+  if (kind === "transfers") return "vehicle type"
+  if (kind === "airline") return "cabin"
+  return "suite type"
+}
+
+function buildDefaultSelections(detail: PackageDetail): Record<string, LegSelectionState> {
+  return Object.fromEntries(
+    detail.legs.map((leg) => {
+      const activeSuiteTypes = leg.suiteTypes.filter((suiteType) => suiteType.active)
+      return [
+        leg.id,
+        {
+          selected: !isOptionalLeg(leg.supplierKind),
+          routeId: leg.routes.length === 1 ? leg.routes[0].id : "",
+          suiteTypeId: activeSuiteTypes.length === 1 ? activeSuiteTypes[0].id : "",
+        },
+      ]
+    }),
+  )
+}
+
+function getEmptySelection(selected: boolean): LegSelectionState {
+  return { selected, routeId: "", suiteTypeId: "" }
+}
+
 export function SendQuoteDialog({
   open,
   onOpenChange,
@@ -134,7 +178,7 @@ export function SendQuoteDialog({
   const [search, setSearch] = useState("")
   const [selectedPackage, setSelectedPackage] = useState<Package | null>(null)
   const [packageDetail, setPackageDetail] = useState<PackageDetail | null>(null)
-  const [suiteTypeSelections, setSuiteTypeSelections] = useState<Record<string, string>>({})
+  const [legSelections, setLegSelections] = useState<Record<string, LegSelectionState>>({})
   const [previewLineItems, setPreviewLineItems] = useState<QuoteLineItem[]>([])
   const [validityUntil, setValidityUntil] = useState(getValidityDate)
   const [loadingDetail, setLoadingDetail] = useState(false)
@@ -151,17 +195,22 @@ export function SendQuoteDialog({
   const totals = useMemo(() => calculateTotals(previewLineItems), [previewLineItems])
   const travelDate = getDefaultTravelDate(departureDate)
   const consultantAbbreviation = resolveConsultantAbbreviation(user?.name)
-  const allSuiteTypesSelected =
+  const allSelectionsComplete =
     packageDetail !== null &&
-    (packageDetail.fixedPricePerPerson !== null ||
-      packageDetail.legs.every((leg) => Boolean(suiteTypeSelections[leg.id])))
+    packageDetail.legs.every((leg) => {
+      const selection = legSelections[leg.id]
+      if (!selection) return false
+      if (isOptionalLeg(leg.supplierKind) && !selection.selected) return true
+      const hasRoute = leg.routes.length <= 1 || Boolean(selection.routeId)
+      return hasRoute && Boolean(selection.suiteTypeId)
+    })
 
   function reset() {
     setStep("pick")
     setSearch("")
     setSelectedPackage(null)
     setPackageDetail(null)
-    setSuiteTypeSelections({})
+    setLegSelections({})
     setPreviewLineItems([])
     setValidityUntil(getValidityDate())
     setSendError(null)
@@ -177,7 +226,7 @@ export function SendQuoteDialog({
   async function previewPackage(
     pkg: Package,
     detail: PackageDetail,
-    selections: Record<string, string>,
+    selections: Record<string, LegSelectionState>,
   ) {
     setPreviewing(true)
     setSendError(null)
@@ -190,9 +239,11 @@ export function SendQuoteDialog({
           jobId: bookingId,
           quoteId: bookingId,
           travelDate,
-          legSuiteTypes: detail.legs.map((leg) => ({
+          selections: detail.legs.map((leg) => ({
             legId: leg.id,
-            suiteTypeId: selections[leg.id] ?? leg.suiteTypes[0]?.id ?? leg.id,
+            selected: selections[leg.id]?.selected ?? !isOptionalLeg(leg.supplierKind),
+            routeId: selections[leg.id]?.routeId || undefined,
+            suiteTypeId: selections[leg.id]?.suiteTypeId || undefined,
           })),
         }),
       })
@@ -222,19 +273,12 @@ export function SendQuoteDialog({
       if (!response.ok) throw new Error("Failed to load package")
 
       const detail = (await response.json()) as PackageDetail
-      const defaults: Record<string, string> = {}
-
-      for (const leg of detail.legs) {
-        const activeSuiteTypes = leg.suiteTypes.filter((suiteType) => suiteType.active)
-        if (activeSuiteTypes.length === 1) {
-          defaults[leg.id] = activeSuiteTypes[0].id
-        }
-      }
+      const defaults = buildDefaultSelections(detail)
 
       setPackageDetail(detail)
-      setSuiteTypeSelections(defaults)
+      setLegSelections(defaults)
 
-      if (detail.fixedPricePerPerson !== null) {
+      if (detail.fixedPricePerPerson !== null && detail.legs.every((leg) => !isOptionalLeg(leg.supplierKind))) {
         await previewPackage(pkg, detail, defaults)
       } else {
         setStep("configure")
@@ -248,7 +292,7 @@ export function SendQuoteDialog({
 
   async function previewConfiguredPackage() {
     if (!selectedPackage || !packageDetail) return
-    await previewPackage(selectedPackage, packageDetail, suiteTypeSelections)
+    await previewPackage(selectedPackage, packageDetail, legSelections)
   }
 
   async function sendQuote() {
@@ -420,7 +464,7 @@ export function SendQuoteDialog({
             <DialogHeader>
               <DialogTitle>{packageDetail.name}</DialogTitle>
               <DialogDescription>
-                Select a suite type for each leg before previewing the quote.
+                Select the package options that apply before previewing the quote.
               </DialogDescription>
             </DialogHeader>
 
@@ -433,36 +477,100 @@ export function SendQuoteDialog({
             </div>
 
             <div className="space-y-4">
-              {packageDetail.legs.map((leg) => (
-                <div key={leg.id} className="space-y-1.5">
-                  <Label>{leg.label ?? leg.supplierName}</Label>
-                  {leg.suiteTypes.filter((suiteType) => suiteType.active).length === 0 ? (
-                    <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                      No active suite types configured for this leg.
-                    </p>
-                  ) : (
-                    <Select
-                      value={suiteTypeSelections[leg.id] ?? ""}
-                      onValueChange={(value) =>
-                        setSuiteTypeSelections((current) => ({ ...current, [leg.id]: value }))
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select suite type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {leg.suiteTypes
-                          .filter((suiteType) => suiteType.active)
-                          .map((suiteType) => (
-                            <SelectItem key={suiteType.id} value={suiteType.id}>
-                              {suiteType.name}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                </div>
-              ))}
+              {packageDetail.legs.map((leg) => {
+                const selection = legSelections[leg.id]
+                const optional = isOptionalLeg(leg.supplierKind)
+                const enabled = selection?.selected ?? !optional
+                const activeSuiteTypes = leg.suiteTypes.filter((suiteType) => suiteType.active)
+
+                return (
+                  <div key={leg.id} className="space-y-3 rounded-md border p-3">
+                    <div className="flex items-start gap-3">
+                      {optional ? (
+                        <Checkbox
+                          checked={enabled}
+                          onCheckedChange={(checked) =>
+                            setLegSelections((current) => ({
+                              ...current,
+                              [leg.id]: {
+                                ...(current[leg.id] ?? getEmptySelection(!optional)),
+                                selected: checked === true,
+                              },
+                            }))
+                          }
+                          className="mt-1"
+                        />
+                      ) : null}
+                      <div className="min-w-0 flex-1">
+                        <Label>{leg.label ?? leg.supplierName}</Label>
+                        {optional ? (
+                          <p className="text-xs text-muted-foreground">Optional {SUPPLIER_KIND_LABELS[leg.supplierKind].toLowerCase()}</p>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    {enabled ? (
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {leg.routes.length > 1 || leg.supplierKind === "hotel_property" || leg.supplierKind === "transfers" ? (
+                          <div className="space-y-1.5">
+                            <Label className="capitalize">{getRouteLabel(leg.supplierKind)}</Label>
+                            <Select
+                              value={selection?.routeId ?? ""}
+                              onValueChange={(value) =>
+                                setLegSelections((current) => ({
+                                  ...current,
+                                  [leg.id]: { ...(current[leg.id] ?? getEmptySelection(!optional)), routeId: value },
+                                }))
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder={`Select ${getRouteLabel(leg.supplierKind)}`} />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {leg.routes.map((route) => (
+                                  <SelectItem key={route.id} value={route.id}>
+                                    {route.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        ) : null}
+
+                        <div className="space-y-1.5">
+                          <Label className="capitalize">{getSuiteLabel(leg.supplierKind)}</Label>
+                          {activeSuiteTypes.length === 0 ? (
+                            <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                              No active {getSuiteLabel(leg.supplierKind)} configured for this leg.
+                            </p>
+                          ) : (
+                            <Select
+                              value={selection?.suiteTypeId ?? ""}
+                              onValueChange={(value) =>
+                                setLegSelections((current) => ({
+                                  ...current,
+                                  [leg.id]: { ...(current[leg.id] ?? getEmptySelection(!optional)), suiteTypeId: value },
+                                }))
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder={`Select ${getSuiteLabel(leg.supplierKind)}`} />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {activeSuiteTypes.map((suiteType) => (
+                                  <SelectItem key={suiteType.id} value={suiteType.id}>
+                                    {suiteType.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                )
+              })}
             </div>
 
             {sendError ? (
@@ -477,7 +585,7 @@ export function SendQuoteDialog({
               </Button>
               <Button
                 onClick={previewConfiguredPackage}
-                disabled={!allSuiteTypesSelected || previewing}
+                disabled={!allSelectionsComplete || previewing}
               >
                 {previewing ? "Previewing..." : "Preview Pricing"}
               </Button>

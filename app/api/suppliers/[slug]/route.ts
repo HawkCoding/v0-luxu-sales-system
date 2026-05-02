@@ -27,8 +27,15 @@ interface NormalizedRoute {
   id: string
   supplier_id: string
   name: string
-  origin_location_id: string
-  destination_location_id: string
+  origin_location_id: string | null
+  destination_location_id: string | null
+  transport_service_type: "transfer" | "rental" | null
+  pickup_point: string | null
+  dropoff_point: string | null
+  included_km_per_day: number | null
+  extra_km_price: number | null
+  security_deposit: number | null
+  one_way_fee: number | null
   active: boolean
   created_at: string
   updated_at: string
@@ -82,6 +89,15 @@ function getRateCardBusinessKey(rateCard: {
   valid_from: string
 }) {
   return [rateCard.route_id, rateCard.suite_type_id, rateCard.valid_from].join("|")
+}
+
+function normalizeOptionalText(value: string | null | undefined): string | null {
+  const normalized = value?.trim()
+  return normalized ? normalized : null
+}
+
+function normalizeOptionalUuid(value: string | null | undefined): string | null {
+  return value && value.length > 0 ? value : null
 }
 
 function areRateCardDateRangesOverlapping(
@@ -331,6 +347,9 @@ export async function PATCH(
       id: suiteType.id ?? makeUuid(),
       supplier_id: supplierId,
       name: suiteType.name.trim(),
+      passenger_capacity: parsed.kind === "transfers" ? (suiteType.passengerCapacity ?? null) : null,
+      luggage_capacity: parsed.kind === "transfers" ? (suiteType.luggageCapacity ?? null) : null,
+      description: parsed.kind === "transfers" ? normalizeOptionalText(suiteType.description) : null,
       active: suiteType.active,
       created_at: now,
       updated_at: now,
@@ -342,15 +361,36 @@ export async function PATCH(
       id: route.id ?? makeUuid(),
       supplier_id: supplierId,
       name: route.name.trim(),
-      origin_location_id: route.originLocationId,
-      destination_location_id: route.destinationLocationId,
+      origin_location_id: parsed.kind === "transfers" ? null : normalizeOptionalUuid(route.originLocationId),
+      destination_location_id: parsed.kind === "transfers" ? null : normalizeOptionalUuid(route.destinationLocationId),
+      transport_service_type: parsed.kind === "transfers" ? (route.transportServiceType ?? "transfer") : null,
+      pickup_point: parsed.kind === "transfers" ? normalizeOptionalText(route.pickupPoint) : null,
+      dropoff_point: parsed.kind === "transfers" ? normalizeOptionalText(route.dropoffPoint) : null,
+      included_km_per_day:
+        parsed.kind === "transfers" && route.transportServiceType === "rental"
+          ? (route.includedKmPerDay ?? null)
+          : null,
+      extra_km_price:
+        parsed.kind === "transfers" && route.transportServiceType === "rental"
+          ? (route.extraKmPrice ?? null)
+          : null,
+      security_deposit:
+        parsed.kind === "transfers" && route.transportServiceType === "rental"
+          ? (route.securityDeposit ?? null)
+          : null,
+      one_way_fee:
+        parsed.kind === "transfers" && route.transportServiceType === "rental"
+          ? (route.oneWayFee ?? null)
+          : null,
       active: route.active,
       created_at: now,
       updated_at: now,
     }))
     .filter((route) =>
       isDraftSave
-        ? route.name.length > 0 && route.origin_location_id.length > 0 && route.destination_location_id.length > 0
+        ? parsed.kind === "transfers"
+          ? route.name.length > 0 && Boolean(route.pickup_point) && Boolean(route.dropoff_point)
+          : route.name.length > 0 && Boolean(route.origin_location_id) && Boolean(route.destination_location_id)
         : true,
     )
 
@@ -387,8 +427,8 @@ export async function PATCH(
           route_id: routeId,
           suite_type_id: rateCard.suiteTypeId,
           price_per_person: rateCard.pricePerPerson,
-          child_price: rateCard.childPrice,
-          infant_price: rateCard.infantPrice,
+          child_price: parsed.kind === "transfers" ? null : rateCard.childPrice,
+          infant_price: parsed.kind === "transfers" ? null : rateCard.infantPrice,
           currency: rateCard.currency.trim().toUpperCase() || "ZAR",
           valid_from: rateCard.validFrom,
           valid_to: normalizeNullableDate(rateCard.validTo),

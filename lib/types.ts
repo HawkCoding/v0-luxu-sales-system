@@ -202,6 +202,7 @@ export type SupplierKind =
   | "tour_operator"
   | "airline"
 export type SupplierStatus = "draft" | "active" | "inactive"
+export type TransportServiceType = "transfer" | "rental"
 
 export const CURRENCIES: { value: string; label: string }[] = [
   { value: "ZAR", label: "ZAR — South African Rand" },
@@ -283,12 +284,12 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     suiteTypePlural: "Vehicle Types",
     package: "Service",
     packagePlural: "Services",
-    route: "Route",
-    routePlural: "Routes",
-    sectionTitle: "Vehicle Types, Routes and Rates",
+    route: "Service",
+    routePlural: "Services",
+    sectionTitle: "Vehicle Types, Services and Rates",
     sectionDescription:
-      "Manage the transfers this supplier offers, routes covered, vehicle types, and period-based rates.",
-    priceLabel: "flat per transfer",
+      "Manage transfer and rental services, pickup/drop-off points, vehicle types, and period-based rates.",
+    priceLabel: "per vehicle",
     routeHasLocations: true,
     showSingleSupplement: false,
     showDurationNights: false,
@@ -355,8 +356,15 @@ export interface SupplierRoute {
   id: string
   supplierId: string
   name: string
-  originLocationId: string
-  destinationLocationId: string
+  originLocationId: string | null
+  destinationLocationId: string | null
+  transportServiceType?: TransportServiceType | null
+  pickupPoint?: string | null
+  dropoffPoint?: string | null
+  includedKmPerDay?: number | null
+  extraKmPrice?: number | null
+  securityDeposit?: number | null
+  oneWayFee?: number | null
   active: boolean
   createdAt: string
   createdAtDisplay?: string
@@ -368,6 +376,9 @@ export interface SupplierSuiteType {
   id: string
   supplierId: string
   name: string
+  passengerCapacity?: number | null
+  luggageCapacity?: number | null
+  description?: string | null
   active: boolean
   createdAt: string
   createdAtDisplay?: string
@@ -491,6 +502,30 @@ export interface SupplierDetail extends Supplier {
   locations: Location[]
 }
 
+export interface BookingTransportRequest {
+  id: string
+  bookingId: string
+  serviceType: TransportServiceType
+  supplierId: string | null
+  routeId: string | null
+  suiteTypeId: string | null
+  pickupPoint: string
+  dropoffPoint: string
+  pickupAt: string | null
+  pickupAtDisplay?: string
+  returnAt: string | null
+  returnAtDisplay?: string
+  passengerCount: number | null
+  luggageCount: number | null
+  flightNumber: string | null
+  notes: string | null
+  sortOrder: number
+  createdAt: string
+  createdAtDisplay?: string
+  updatedAt: string
+  updatedAtDisplay?: string
+}
+
 // Legacy alias — kept so existing components that reference Job still compile
 export interface Job {
   id: string
@@ -547,6 +582,7 @@ export interface Enquiry {
   additionalServices?: string
   additionalServicesDetails?: string
   promotionCode?: string
+  transportRequests?: BookingTransportRequest[]
   termsAccepted: boolean
   createdAt: string
   createdAtDisplay?: string

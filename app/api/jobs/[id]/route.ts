@@ -8,6 +8,7 @@ import type { PipelineStage } from "@/lib/types"
 import { extractRoleFromJwt } from "@/lib/role-utils"
 import { applyTransition } from "@/lib/pipeline/apply-transition"
 import { validateTransition } from "@/lib/pipeline/validate-transition"
+import { mapBookingTransportRequest } from "@/lib/suppliers"
 
 const pipelineStageSchema = z.enum([
   "enquiry",
@@ -70,6 +71,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     { data: customer },
     { data: bookingSuites },
     { data: travellers },
+    { data: transportRequestsData },
     { data: itinerariesData },
     { data: quotesData },
     { data: quoteLineItemsData },
@@ -81,6 +83,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     supabase.from("customers").select("*").eq("id", booking.customer_id).single(),
     supabase.from("booking_suites").select("*").eq("booking_id", id),
     supabase.from("travellers").select("*").eq("booking_id", id).order("sort_order"),
+    supabase.from("booking_transport_requests").select("*").eq("booking_id", id).order("sort_order"),
     supabase.from("itineraries").select("*").eq("booking_id", id).order("created_at"),
     supabase.from("quotes").select("*").eq("booking_id", id).order("created_at"),
     supabase.from("quote_line_items").select("*").order("sort_order"),
@@ -164,6 +167,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     additionalServices: booking.additional_services ? "Yes" : undefined,
     additionalServicesDetails: booking.additional_services_details ?? undefined,
     promotionCode: booking.promotion_code ?? undefined,
+    transportRequests: (transportRequestsData ?? []).map(mapBookingTransportRequest),
     termsAccepted: booking.terms_accepted,
     createdAt: booking.created_at,
     createdAtDisplay: formatDisplayDateTime(booking.created_at),

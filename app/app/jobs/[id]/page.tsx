@@ -355,7 +355,7 @@ export default function JobDetailPage() {
         </TabsList>
 
         <TabsContent value="enquiry">
-          <JobEnquiryTab enquiry={enquiry} itineraries={itineraries} />
+          <JobEnquiryTab enquiry={enquiry} itineraries={itineraries} onTransportRequestsChange={mutate} />
         </TabsContent>
         <TabsContent value="quotes">
           <JobQuotesTab quotes={quotes} jobId={id} itineraries={itineraries} travelDate={enquiry?.departureDate ?? null} mutate={mutate} />
