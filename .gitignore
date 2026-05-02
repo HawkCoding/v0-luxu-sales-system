@@ -17,6 +17,7 @@ next-env.d.ts
 
 # Temporary files
 tmp-*.sql
+tmp-db-sync/
 
 # Cursor IDE
 .cursor/debug-*.log
