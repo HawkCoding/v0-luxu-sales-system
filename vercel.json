@@ -7,7 +7,7 @@
   "crons": [
     {
       "path": "/api/cron/email-sync",
-      "schedule": "*/10 * * * *"
+      "schedule": "0 2 * * *"
     },
     {
       "path": "/api/cron/pipeline-auto-close",
