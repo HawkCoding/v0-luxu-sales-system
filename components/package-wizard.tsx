@@ -26,7 +26,15 @@ import {
 } from "@/components/ui/sheet"
 import { Textarea } from "@/components/ui/textarea"
 import { PackageLegSelector } from "@/components/package-leg-selector"
-import type { EditablePackageLeg, EditableSupplierRateCard } from "@/components/package-leg-editor"
+import type { SelectablePackageLeg } from "@/components/package-leg-selector"
+import type { EditableSupplierRateCard } from "@/components/package-leg-editor"
+import {
+  formatMoney,
+  formatRange,
+  getCurrencyRanges,
+  getPackageCurrencyRanges,
+  getSelectedRateCards,
+} from "@/components/package-wizard-pricing"
 import {
   Table,
   TableBody,
@@ -39,9 +47,7 @@ import { useActiveSuppliers, useLocations } from "@/lib/use-data"
 import type { Location, Supplier, SupplierDetail, SupplierRateCard, SupplierRoute, SupplierSuiteType } from "@/lib/types"
 import { CURRENCIES, SUPPLIER_KIND_LABELS, getSupplierVocabulary, type SupplierKind } from "@/lib/types"
 
-interface PackageWizardLeg extends EditablePackageLeg {
-  selectedRouteIds: string[]
-}
+type PackageWizardLeg = SelectablePackageLeg
 
 interface WizardState {
   name: string
@@ -179,12 +185,6 @@ async function loadSupplierContext(supplier: Supplier): Promise<SupplierContext>
   }
 }
 
-interface CurrencyRange {
-  currency: string
-  min: number
-  max: number
-}
-
 function selectedRouteCount(legs: PackageWizardLeg[]): number {
   return legs.reduce(
     (total, leg) => total + (leg.supplierKind === "hotel_property" ? 0 : leg.selectedRouteIds.length),
@@ -192,14 +192,13 @@ function selectedRouteCount(legs: PackageWizardLeg[]): number {
   )
 }
 
+function legHasRequiredSelection(leg: PackageWizardLeg): boolean {
+  return leg.supplierKind === "hotel_property" || leg.selectedRouteIds.length > 0
+}
+
 function getSelectedRoutes(leg: PackageWizardLeg): SupplierRoute[] {
   const selectedRouteIds = new Set(leg.selectedRouteIds)
   return leg.routes.filter((route) => selectedRouteIds.has(route.id))
-}
-
-function getSelectedRateCards(leg: PackageWizardLeg): EditableSupplierRateCard[] {
-  const selectedRouteIds = new Set(leg.selectedRouteIds)
-  return leg.rateCards.filter((rateCard) => selectedRouteIds.has(rateCard.routeId))
 }
 
 function getRouteRateCards(
@@ -209,82 +208,8 @@ function getRouteRateCards(
   return leg.rateCards.filter((rateCard) => rateCard.routeId === routeId)
 }
 
-function formatAmount(value: number): string {
-  return value.toLocaleString(undefined, {
-    minimumFractionDigits: value % 1 === 0 ? 0 : 2,
-    maximumFractionDigits: 2,
-  })
-}
-
-function formatMoney(currency: string, value: number): string {
-  return `${currency} ${formatAmount(value)}`
-}
-
-function formatRange(range: CurrencyRange): string {
-  if (range.min === range.max) {
-    return formatMoney(range.currency, range.min)
-  }
-
-  return `${formatMoney(range.currency, range.min)} - ${formatMoney(range.currency, range.max)}`
-}
-
 function formatDateRange(validFrom: string, validTo: string | null): string {
   return validTo ? `${validFrom} - ${validTo}` : `from ${validFrom}`
-}
-
-function getCurrencyRanges(
-  rateCards: EditableSupplierRateCard[],
-  fallbackCurrency: string,
-): CurrencyRange[] {
-  const pricesByCurrency = new Map<string, number[]>()
-  rateCards.forEach((rateCard) => {
-    const currency = rateCard.currency.trim().toUpperCase() || fallbackCurrency
-    pricesByCurrency.set(currency, [
-      ...(pricesByCurrency.get(currency) ?? []),
-      rateCard.pricePerPerson,
-    ])
-  })
-
-  return Array.from(pricesByCurrency.entries())
-    .map(([currency, prices]) => ({
-      currency,
-      min: Math.min(...prices),
-      max: Math.max(...prices),
-    }))
-    .sort((left, right) => left.currency.localeCompare(right.currency))
-}
-
-function getPackageCurrencyRanges(
-  legs: PackageWizardLeg[],
-  fallbackCurrency: string,
-): CurrencyRange[] {
-  const currencies = new Set<string>()
-  legs.forEach((leg) => {
-    getSelectedRateCards(leg).forEach((rateCard) => {
-      currencies.add(rateCard.currency.trim().toUpperCase() || fallbackCurrency)
-    })
-  })
-
-  return Array.from(currencies)
-    .map((currency) => {
-      const legRanges = legs
-        .map((leg) =>
-          getCurrencyRanges(
-            getSelectedRateCards(leg).filter(
-              (rateCard) => (rateCard.currency.trim().toUpperCase() || fallbackCurrency) === currency,
-            ),
-            fallbackCurrency,
-          )[0],
-        )
-        .filter((range): range is CurrencyRange => Boolean(range))
-
-      return {
-        currency,
-        min: legRanges.reduce((total, range) => total + range.min, 0),
-        max: legRanges.reduce((total, range) => total + range.max, 0),
-      }
-    })
-    .sort((left, right) => left.currency.localeCompare(right.currency))
 }
 
 function routeLocationLabel(route: SupplierRoute, locations: Location[]): string | null {
@@ -315,6 +240,12 @@ export function PackageWizard() {
 
   const filteredSuppliers = suppliers.filter((supplier) => supplier.kind === supplierKind)
   const selectedSupplier = suppliers.find((supplier) => supplier.id === selectedSupplierId)
+  const hasAnySelection =
+    state.legs.length > 0 && state.legs.every((leg) => legHasRequiredSelection(leg))
+  const isNextDisabled =
+    step === 5 ||
+    (step === 2 && state.legs.length === 0) ||
+    (step === 3 && !hasAnySelection)
 
   const addSelectedSupplier = async () => {
     if (!selectedSupplier) return
@@ -343,6 +274,12 @@ export function PackageWizard() {
   const savePackage = async () => {
     if (!state.name.trim()) {
       toast.error("Package name is required")
+      return
+    }
+    const legWithoutSelection = state.legs.find((leg) => !legHasRequiredSelection(leg))
+    if (legWithoutSelection) {
+      const vocab = getSupplierVocabulary(legWithoutSelection.supplierKind)
+      toast.error(`Each leg needs at least one selected ${vocab.route.toLowerCase()}`)
       return
     }
 
@@ -551,7 +488,7 @@ export function PackageWizard() {
                     dispatch({
                       type: "updateLeg",
                       index,
-                      leg: { ...nextLeg, selectedRouteIds: leg.selectedRouteIds },
+                      leg: nextLeg,
                     })
                   }
                   onToggleRoute={(routeId) => dispatch({ type: "toggleRoute", legIndex: index, routeId })}
@@ -582,7 +519,6 @@ export function PackageWizard() {
                     ),
                   )
                   const hasCurrencyMismatch =
-                    selectedCurrencies.size > 1 ||
                     Array.from(selectedCurrencies).some((currency) => currency !== packageCurrency)
 
                   return hasCurrencyMismatch ? (
@@ -689,6 +625,8 @@ export function PackageWizard() {
                   const packageCurrency = state.currency.trim().toUpperCase() || "ZAR"
                   const packageRanges = getPackageCurrencyRanges(state.legs, packageCurrency)
                   const singleMultiplier = 1 + state.singleSupplementPct / 100
+                  const pct = state.singleSupplementPct
+                  const pctLabel = Number.isInteger(pct) ? pct.toString() : pct.toFixed(2)
 
                   return (
                     <div className="space-y-2 rounded-lg border bg-muted/30 p-4">
@@ -711,7 +649,7 @@ export function PackageWizard() {
                             </p>
                           ))}
                           <p className="text-muted-foreground">
-                            Single supplement: +{formatAmount(state.singleSupplementPct)}%
+                            Single supplement: +{pctLabel}%
                           </p>
                           {packageRanges.map((range) => {
                             const singleMin = range.min * singleMultiplier
@@ -770,7 +708,7 @@ export function PackageWizard() {
             </Button>
             <Button
               type="button"
-              disabled={step === 5}
+              disabled={isNextDisabled}
               onClick={() => setStep((current) => Math.min(5, current + 1))}
             >
               Next

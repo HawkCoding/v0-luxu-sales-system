@@ -2,7 +2,7 @@ import type { PipelineStage } from "@/lib/types"
 
 export type GateSeverity = "block" | "confirm"
 
-export type GateAutoFix = "create_invoice_25pct"
+export type GateAutoFix = "create_invoice_25pct" | "create_invoice_correspondence"
 
 export interface GateFailure {
   gateId: string
@@ -47,6 +47,7 @@ export interface TransitionCorrespondence {
 
 export interface ManualConfirmations {
   createDepositInvoice?: boolean
+  createInvoiceCorrespondence?: boolean
   depositReceived?: boolean
   finalPaymentReceived?: boolean
 }
@@ -241,13 +242,15 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
       })
     } else if (
       hasInvoiceDocument &&
-      !hasCorrespondence(correspondences, "invoice", ["invoice", "deposit request"])
+      !hasCorrespondence(correspondences, "invoice", ["invoice", "deposit request"]) &&
+      !manualConfirmations.createInvoiceCorrespondence
     ) {
       failures.push({
         gateId: "invoice_correspondence",
         message: "Invoice correspondence must exist before the deposit invoice stage.",
-        fixHint: "Create or send the invoice/deposit request email from the booking correspondence tab.",
-        severity: "block",
+        fixHint: "Confirm that the system should schedule the invoice/deposit request email.",
+        severity: "confirm",
+        autoFixable: "create_invoice_correspondence",
       })
     }
   }

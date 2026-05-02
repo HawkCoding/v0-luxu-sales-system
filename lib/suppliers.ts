@@ -9,6 +9,7 @@ import type {
   SupplierRateCard,
   SupplierRoute,
   SupplierSuiteType,
+  TransportServiceType,
 } from "@/lib/types"
 
 type BookingTransportRequestRow = Database["public"]["Tables"]["booking_transport_requests"]["Row"]
@@ -24,6 +25,11 @@ function normalizeSupplierStatus(value: string): Supplier["status"] {
     return value
   }
   return "inactive"
+}
+
+function normalizeTransportServiceType(value: string | null): TransportServiceType | null {
+  if (value === "transfer" || value === "rental") return value
+  return null
 }
 
 export function mapSupplier(row: SupplierRow): Supplier {
@@ -68,7 +74,7 @@ export function mapSupplierRoute(row: RouteRow): SupplierRoute {
     name: row.name,
     originLocationId: row.origin_location_id ?? null,
     destinationLocationId: row.destination_location_id ?? null,
-    transportServiceType: row.transport_service_type ?? null,
+    transportServiceType: normalizeTransportServiceType(row.transport_service_type),
     pickupPoint: row.pickup_point ?? null,
     dropoffPoint: row.dropoff_point ?? null,
     includedKmPerDay: row.included_km_per_day ?? null,
@@ -103,7 +109,7 @@ export function mapBookingTransportRequest(row: BookingTransportRequestRow): Boo
   return {
     id: row.id,
     bookingId: row.booking_id,
-    serviceType: row.service_type,
+    serviceType: normalizeTransportServiceType(row.service_type) ?? "transfer",
     supplierId: row.supplier_id ?? null,
     routeId: row.route_id ?? null,
     suiteTypeId: row.suite_type_id ?? null,

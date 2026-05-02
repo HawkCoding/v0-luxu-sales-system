@@ -21,6 +21,20 @@ import { Textarea } from "@/components/ui/textarea"
 import type { GateFailure, ManualConfirmations } from "@/lib/pipeline/validate-transition"
 import { getPipelineStageLabel, type PipelineStage } from "@/lib/types"
 
+const GATE_TAB_MAP: Record<string, string> = {
+  customer_complete: "?tab=enquiry",
+  quote_sent_or_accepted: "?tab=quotes",
+  invoice_document: "?tab=documents",
+  invoice_correspondence: "?tab=correspondence",
+  voucher_document: "?tab=documents",
+  voucher_correspondence: "?tab=correspondence",
+  email_import_review: "?tab=enquiry",
+  cancel_reason: "",
+  refund_capture: "",
+  deposit_received_confirmation: "",
+  final_payment_confirmation: "",
+}
+
 interface StageTransitionModalProps {
   open: boolean
   jobId: string
@@ -34,8 +48,13 @@ interface StageTransitionModalProps {
   onOverride: (overrideReason: string) => Promise<void>
 }
 
-function confirmationKeyForFailure(failure: GateFailure): keyof ManualConfirmations | null {
+export function gateIdToTabPath(gateId: string): string {
+  return GATE_TAB_MAP[gateId] ?? ""
+}
+
+export function confirmationKeyForFailure(failure: GateFailure): keyof ManualConfirmations | null {
   if (failure.autoFixable === "create_invoice_25pct") return "createDepositInvoice"
+  if (failure.autoFixable === "create_invoice_correspondence") return "createInvoiceCorrespondence"
   if (failure.gateId === "deposit_received_confirmation") return "depositReceived"
   if (failure.gateId === "final_payment_confirmation") return "finalPaymentReceived"
   return null
@@ -118,7 +137,7 @@ export function StageTransitionModal({
                         <p className="mt-1 text-sm">{failure.fixHint}</p>
                       </div>
                       <Button asChild size="sm" variant="outline">
-                        <Link href={`/app/bookings/${jobId}`}>Fix</Link>
+                        <Link href={`/app/bookings/${jobId}${gateIdToTabPath(failure.gateId)}`}>Fix</Link>
                       </Button>
                     </div>
                     {confirmationKey && (

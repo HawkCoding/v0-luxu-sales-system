@@ -117,13 +117,20 @@ FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 UPDATE public.routes route
 SET
   transport_service_type = COALESCE(route.transport_service_type, 'transfer'),
-  pickup_point = COALESCE(route.pickup_point, origin_location.name),
-  dropoff_point = COALESCE(route.dropoff_point, destination_location.name)
-FROM public.suppliers supplier
-LEFT JOIN public.locations origin_location ON origin_location.id = route.origin_location_id
-LEFT JOIN public.locations destination_location ON destination_location.id = route.destination_location_id
-WHERE route.supplier_id = supplier.id
-  AND supplier.kind = 'transfers';
+  pickup_point = COALESCE(
+    route.pickup_point,
+    (SELECT origin_location.name FROM public.locations origin_location WHERE origin_location.id = route.origin_location_id)
+  ),
+  dropoff_point = COALESCE(
+    route.dropoff_point,
+    (SELECT destination_location.name FROM public.locations destination_location WHERE destination_location.id = route.destination_location_id)
+  )
+WHERE EXISTS (
+  SELECT 1
+  FROM public.suppliers supplier
+  WHERE supplier.id = route.supplier_id
+    AND supplier.kind = 'transfers'
+);
 
 GRANT ALL ON TABLE public.booking_transport_requests TO anon;
 GRANT ALL ON TABLE public.booking_transport_requests TO authenticated;

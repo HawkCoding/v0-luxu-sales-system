@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import type { PipelineStage } from "@/lib/types"
+import { calculateDepositAmount } from "./constants"
 import { getCrossedForwardStages, type LostContext, type ManualConfirmations } from "./validate-transition"
 
 type BookingRow = Database["public"]["Tables"]["bookings"]["Row"]
@@ -155,8 +156,14 @@ export async function applyTransition(
       if (balanceError) throw new Error(balanceError.message)
     }
 
-    if (!hasCorrespondence(input.correspondences ?? [], "invoice", ["invoice", "deposit request"])) {
-      const depositAmount = latestQuote?.total ? Math.round(latestQuote.total * 25) / 100 : null
+    const shouldScheduleDepositCorrespondence =
+      (hasInvoiceDocument || createdInvoiceDocument) &&
+      !hasCorrespondence(input.correspondences ?? [], "invoice", ["invoice", "deposit request"]) &&
+      (input.manualConfirmations?.createDepositInvoice === true ||
+        input.manualConfirmations?.createInvoiceCorrespondence === true)
+
+    if (shouldScheduleDepositCorrespondence) {
+      const depositAmount = latestQuote?.total ? calculateDepositAmount(latestQuote.total) : null
       const subject = `Deposit invoice for ${input.booking.booking_number}`
       const amountLine = depositAmount === null ? "" : `<p>Deposit amount: ${depositAmount.toFixed(2)}</p>`
       const { error: correspondenceError } = await supabase.from("correspondences").insert({

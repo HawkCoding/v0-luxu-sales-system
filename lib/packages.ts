@@ -8,6 +8,7 @@ import type {
   SupplierRateCard,
   SupplierRoute,
   SupplierSuiteType,
+  TransportServiceType,
 } from "@/lib/types"
 
 type PackageRow = Database["public"]["Tables"]["packages"]["Row"]
@@ -30,6 +31,11 @@ export function buildPackageSlugBase(name: string): string {
     .replace(/^-+|-+$/g, "")
 
   return slug || "package"
+}
+
+function normalizeTransportServiceType(value: string | null): TransportServiceType | null {
+  if (value === "transfer" || value === "rental") return value
+  return null
 }
 
 export function mapPackageListItem(
@@ -64,7 +70,7 @@ export function mapPackageRoute(row: RouteRow): SupplierRoute {
     name: row.name,
     originLocationId: row.origin_location_id ?? null,
     destinationLocationId: row.destination_location_id ?? null,
-    transportServiceType: row.transport_service_type ?? null,
+    transportServiceType: normalizeTransportServiceType(row.transport_service_type),
     pickupPoint: row.pickup_point ?? null,
     dropoffPoint: row.dropoff_point ?? null,
     includedKmPerDay: row.included_km_per_day ?? null,

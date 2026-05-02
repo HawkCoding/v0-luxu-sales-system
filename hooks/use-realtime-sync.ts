@@ -2,44 +2,29 @@
 
 import { useCallback, useEffect } from "react"
 import { useSWRConfig } from "swr"
-import { broadcast, useCrossTab, type CrossTabEvent } from "@/lib/cross-tab"
+import { broadcast, useCrossTab, type CrossTabEvent, type RealtimeInvalidationEntity } from "@/lib/cross-tab"
 import { getSupabase } from "@/lib/supabase/client"
 
-type RealtimeTable = "bookings" | "quotes" | "customers"
+type RealtimeTable = RealtimeInvalidationEntity
 
-interface RealtimeRow {
-  id?: unknown
+const TABLE_PREFIXES: Record<RealtimeTable, readonly string[]> = {
+  bookings: ["/api/data", "/api/jobs"],
+  quotes: ["/api/data", "/api/quotes"],
+  customers: ["/api/data", "/api/customers"],
 }
 
-function getRecordId(payload: { new: RealtimeRow | null; old: RealtimeRow | null }): string | null {
-  const id = payload.new?.id ?? payload.old?.id
-  return typeof id === "string" && id.length > 0 ? id : null
-}
-
-function getInvalidationKeys(table: RealtimeTable, id: string | null): string[] {
-  const keys = ["/api/data"]
-
-  if (!id) return keys
-
-  if (table === "bookings") {
-    keys.push(`/api/jobs/${id}`)
-  } else if (table === "quotes") {
-    keys.push(`/api/quotes/${id}`)
-  } else {
-    keys.push(`/api/customers/${id}`)
-  }
-
-  return keys
+function makePredicate(prefixes: readonly string[]) {
+  return (key: unknown): boolean =>
+    typeof key === "string" &&
+    prefixes.some((prefix) => key === prefix || key.startsWith(`${prefix}/`) || key.startsWith(`${prefix}?`))
 }
 
 export function useRealtimeSync(): void {
   const { mutate } = useSWRConfig()
 
   const invalidate = useCallback(
-    (keys: string[]) => {
-      keys.forEach((key) => {
-        void mutate(key)
-      })
+    (table: RealtimeTable) => {
+      void mutate(makePredicate(TABLE_PREFIXES[table]))
     },
     [mutate],
   )
@@ -48,20 +33,25 @@ export function useRealtimeSync(): void {
     useCallback(
       (event: CrossTabEvent) => {
         if (event.type === "swr-invalidate") {
-          invalidate(event.keys)
+          invalidate(event.entity)
           return
         }
 
         if (event.type === "record-saved") {
-          const keys =
+          const table =
             event.entity === "job"
-              ? getInvalidationKeys("bookings", event.id)
+              ? "bookings"
               : event.entity === "quote"
-                ? getInvalidationKeys("quotes", event.id)
+                ? "quotes"
                 : event.entity === "customer"
-                  ? getInvalidationKeys("customers", event.id)
-                  : ["/api/data"]
-          invalidate(keys)
+                  ? "customers"
+                  : null
+
+          if (table) {
+            invalidate(table)
+          } else {
+            void mutate("/api/data")
+          }
           return
         }
 
@@ -77,21 +67,20 @@ export function useRealtimeSync(): void {
     const supabase = getSupabase()
     const channel = supabase.channel("luxus-record-sync")
 
-    const handleChange = (table: RealtimeTable, payload: { new: RealtimeRow | null; old: RealtimeRow | null }) => {
-      const keys = getInvalidationKeys(table, getRecordId(payload))
-      invalidate(keys)
-      broadcast({ type: "swr-invalidate", keys })
+    const handleChange = (table: RealtimeTable) => {
+      invalidate(table)
+      broadcast({ type: "swr-invalidate", entity: table })
     }
 
     channel
-      .on("postgres_changes", { event: "*", schema: "public", table: "bookings" }, (payload) => {
-        handleChange("bookings", payload)
+      .on("postgres_changes", { event: "*", schema: "public", table: "bookings" }, () => {
+        handleChange("bookings")
       })
-      .on("postgres_changes", { event: "*", schema: "public", table: "quotes" }, (payload) => {
-        handleChange("quotes", payload)
+      .on("postgres_changes", { event: "*", schema: "public", table: "quotes" }, () => {
+        handleChange("quotes")
       })
-      .on("postgres_changes", { event: "*", schema: "public", table: "customers" }, (payload) => {
-        handleChange("customers", payload)
+      .on("postgres_changes", { event: "*", schema: "public", table: "customers" }, () => {
+        handleChange("customers")
       })
       .subscribe()
 

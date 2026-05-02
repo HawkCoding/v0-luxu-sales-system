@@ -130,7 +130,7 @@ export function ApplyPackageDialog({
   const [previewLineItems, setPreviewLineItems] = useState<QuoteLineItem[]>([])
   const [validating, setValidating] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
-  const { others, setEditing } = useRecordPresence("quote", open ? quoteId : "")
+  const { others, setEditing } = useRecordPresence("quote", open ? quoteId : undefined)
   const {
     save: saveQuote,
     isSaving: applying,

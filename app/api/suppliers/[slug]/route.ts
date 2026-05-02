@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { staleVersionResponse } from "@/lib/concurrency"
 import { mapSupplierDetail } from "@/lib/suppliers"
 import {
   allowedRoles,
@@ -16,12 +17,6 @@ import {
   type SupplierDraftSaveInput,
   type SupplierSaveInput,
 } from "../schemas"
-
-interface StaleVersionConflictPayload {
-  error: string
-  code: "STALE_VERSION"
-  currentUpdatedAt: string
-}
 
 interface NormalizedRoute {
   id: string
@@ -300,13 +295,7 @@ export async function PATCH(
   const supplierId = existingDetail.supplier.id
   const expectedUpdatedAt = parsed.expectedUpdatedAt
   if (typeof expectedUpdatedAt === "string" && expectedUpdatedAt !== existingDetail.supplier.updated_at) {
-    const staleVersionConflict: StaleVersionConflictPayload = {
-      error:
-        "This supplier was modified by another user since you started editing. Please refresh and try again.",
-      code: "STALE_VERSION",
-      currentUpdatedAt: existingDetail.supplier.updated_at,
-    }
-    return NextResponse.json(staleVersionConflict, { status: 409 })
+    return staleVersionResponse("supplier", existingDetail.supplier.updated_at)
   }
 
   const parsedEmailRows = parsed.emails
@@ -604,13 +593,10 @@ export async function PATCH(
       .eq("id", supplierId)
       .maybeSingle()
 
-    const staleVersionConflict: StaleVersionConflictPayload = {
-      error:
-        "This supplier was modified by another user since you started editing. Please refresh and try again.",
-      code: "STALE_VERSION",
-      currentUpdatedAt: latestSupplierSnapshot?.updated_at ?? existingDetail.supplier.updated_at,
-    }
-    return NextResponse.json(staleVersionConflict, { status: 409 })
+    return staleVersionResponse(
+      "supplier",
+      latestSupplierSnapshot?.updated_at ?? existingDetail.supplier.updated_at,
+    )
   }
 
   if (normalizedEmails.length > 0) {

@@ -9,23 +9,21 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { NumericInput } from "@/components/ui/numeric-input"
 import type { EditablePackageLeg, EditableSupplierRateCard } from "@/components/package-leg-editor"
+import { formatMoneyAmount } from "@/components/package-wizard-pricing"
 import type { Location } from "@/lib/types"
 import { SUPPLIER_KIND_LABELS, getSupplierVocabulary } from "@/lib/types"
 
-interface PackageLegSelectorProps {
-  leg: EditablePackageLeg
-  locations: Location[]
+export interface SelectablePackageLeg extends EditablePackageLeg {
   selectedRouteIds: string[]
-  onChange: (leg: EditablePackageLeg) => void
-  onToggleRoute: (routeId: string) => void
-  onRemove?: () => void
 }
 
-function formatAmount(value: number): string {
-  return value.toLocaleString(undefined, {
-    minimumFractionDigits: value % 1 === 0 ? 0 : 2,
-    maximumFractionDigits: 2,
-  })
+interface PackageLegSelectorProps {
+  leg: SelectablePackageLeg
+  locations: Location[]
+  selectedRouteIds: string[]
+  onChange: (leg: SelectablePackageLeg) => void
+  onToggleRoute: (routeId: string) => void
+  onRemove?: () => void
 }
 
 function summarizeRateCards(rateCards: EditableSupplierRateCard[]): string {
@@ -46,8 +44,8 @@ function summarizeRateCards(rateCards: EditableSupplierRateCard[]): string {
     const min = Math.min(...prices)
     const max = Math.max(...prices)
     return min === max
-      ? `${currency} ${formatAmount(min)}`
-      : `${currency} ${formatAmount(min)} - ${formatAmount(max)}`
+      ? `${currency} ${formatMoneyAmount(min)}`
+      : `${currency} ${formatMoneyAmount(min)} - ${formatMoneyAmount(max)}`
   })
 
   return `${rateCards.length} rates - ${ranges.join("; ")}`

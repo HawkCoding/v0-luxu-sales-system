@@ -2,8 +2,10 @@
 
 import { useEffect, useRef } from "react"
 
+export type RealtimeInvalidationEntity = "bookings" | "quotes" | "customers"
+
 export type CrossTabEvent =
-  | { type: "swr-invalidate"; keys: string[] }
+  | { type: "swr-invalidate"; entity: RealtimeInvalidationEntity }
   | { type: "record-saved"; entity: string; id: string; updatedAt: string }
   | { type: "auth-changed" }
 
