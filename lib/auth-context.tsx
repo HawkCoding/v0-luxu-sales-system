@@ -1,10 +1,14 @@
 "use client"
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react"
+import { broadcast, useCrossTab } from "@/lib/cross-tab"
 import { getSupabase } from "@/lib/supabase/client"
+import { extractRoleFromJwt, isRole } from "@/lib/role-utils"
 import type { Role } from "./types"
+import type { User as SupabaseUser } from "@supabase/supabase-js"
 
 export interface User {
+  id: string
   name: string
   email: string
   role: Role
@@ -50,6 +54,11 @@ async function withAuthTimeout<T>(operation: PromiseLike<T>): Promise<AuthTimeou
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
+function getDisplayNameFromEmail(email: string) {
+  const emailName = email.split("@")[0]
+  return emailName.charAt(0).toUpperCase() + emailName.slice(1)
+}
+
 interface AuthProviderProps {
   children: ReactNode
   initialUser?: User | null
@@ -61,26 +70,68 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
   const [loading, setLoading] = useState(initialUserRef.current === null)
   const authHandlerInFlightRef = useRef(false)
 
-  const loadProfile = useCallback(async (userId: string, fallbackEmail: string) => {
+  const loadProfile = useCallback(async (supabaseUser: SupabaseUser) => {
     const supabase = getSupabase()
-    const { data: profile } = await supabase
+    const fallbackEmail = supabaseUser.email ?? ""
+    const jwtRole = extractRoleFromJwt(supabaseUser)
+
+    if (jwtRole) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("name, surname, email")
+        .eq("user_id", supabaseUser.id)
+        .single()
+
+      if (profile) {
+        const displayName = [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.name
+        setUser({
+          id: supabaseUser.id,
+          name: displayName,
+          email: profile.email || fallbackEmail,
+          role: jwtRole,
+        })
+        return
+      }
+
+      setUser({
+        id: supabaseUser.id,
+        name: getDisplayNameFromEmail(fallbackEmail),
+        email: fallbackEmail,
+        role: jwtRole,
+      })
+      return
+    }
+
+    const { data: profile, error } = await supabase
       .from("profiles")
       .select("name, surname, clearance_level, email")
-      .eq("user_id", userId)
+      .eq("user_id", supabaseUser.id)
       .single()
 
-    if (profile) {
+    if (profile && isRole(profile.clearance_level)) {
       const displayName = [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.name
       setUser({
+        id: supabaseUser.id,
         name: displayName,
         email: profile.email || fallbackEmail,
-        role: profile.clearance_level as Role,
+        role: profile.clearance_level,
       })
-    } else {
-      const emailName = fallbackEmail.split("@")[0]
-      const displayName = emailName.charAt(0).toUpperCase() + emailName.slice(1)
-      setUser({ name: displayName, email: fallbackEmail, role: "consultant" })
+      return
     }
+
+    console.error("Failed to resolve user role from profile", error ?? "Profile is missing or has an invalid clearance level")
+    setUser((previousUser) => {
+      if (!previousUser) {
+        return null
+      }
+
+      return {
+        id: supabaseUser.id,
+        name: fallbackEmail ? getDisplayNameFromEmail(fallbackEmail) : previousUser.name,
+        email: fallbackEmail || previousUser.email,
+        role: previousUser.role,
+      }
+    })
   }, [])
 
   const isStaleRefreshTokenError = useCallback((error: unknown) => {
@@ -102,6 +153,17 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
     setUser(null)
   }, [])
 
+  useCrossTab(
+    useCallback(
+      (event) => {
+        if (event.type === "auth-changed") {
+          void clearLocalSession()
+        }
+      },
+      [clearLocalSession],
+    ),
+  )
+
   useEffect(() => {
     let mounted = true
     let subscription: { unsubscribe: () => void } | undefined
@@ -122,7 +184,7 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
         if (userError) {
           setUser(null)
         } else if (user) {
-          await loadProfile(user.id, user.email ?? "")
+          await loadProfile(user)
         } else {
           setUser(null)
         }
@@ -158,7 +220,7 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
 
           const { data: { session }, error } = result
           if (mounted && session?.user) {
-            await loadProfile(session.user.id, session.user.email ?? "")
+            await loadProfile(session.user)
           }
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error)
@@ -177,7 +239,7 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
                 await clearLocalSession()
                 return
               }
-              if (!retryErr && mounted && session?.user) await loadProfile(session.user.id, session.user.email ?? "")
+              if (!retryErr && mounted && session?.user) await loadProfile(session.user)
             } catch {
               if (mounted) setUser(null)
             }
@@ -204,7 +266,7 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
         authHandlerInFlightRef.current = true
         try {
           if (session?.user) {
-            await loadProfile(session.user.id, session.user.email ?? "")
+            await loadProfile(session.user)
           } else {
             setUser(null)
           }
@@ -254,6 +316,7 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
   const logout = async () => {
     setUser(null)
     setLoading(false)
+    broadcast({ type: "auth-changed" })
     const supabase = getSupabase()
     // Best-effort server-side revocation should not block UI logout.
     fetch("/api/logout", { method: "POST" }).catch(() => {})

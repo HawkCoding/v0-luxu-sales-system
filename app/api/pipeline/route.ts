@@ -2,6 +2,13 @@ import { NextResponse } from "next/server"
 import { createSessionClient } from "@/lib/supabase/server"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 
+function addDaysToDateString(value: string, days: number): string {
+  const [year = "1970", month = "1", day = "1"] = value.split("-")
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)))
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
 export async function GET() {
   const supabase = await createSessionClient()
 
@@ -10,6 +17,7 @@ export async function GET() {
     { data: customers },
     { data: payments },
     { data: quotes },
+    { data: thankYous },
   ] = await Promise.all([
     supabase
       .from("bookings")
@@ -18,12 +26,18 @@ export async function GET() {
     supabase.from("customers").select("id, first_name, last_name"),
     supabase.from("payments").select("booking_id, amount"),
     supabase.from("quotes").select("booking_id, total"),
+    supabase.from("correspondences").select("booking_id, scheduled_at, created_at").eq("kind", "thank_you"),
   ])
 
   const enriched = (bookings ?? []).map((booking) => {
     const customer = (customers ?? []).find((c) => c.id === booking.customer_id)
     const bookingPayments = (payments ?? []).filter((p) => p.booking_id === booking.id)
     const bookingQuotes = (quotes ?? []).filter((q) => q.booking_id === booking.id)
+    const thankYou = (thankYous ?? []).find((c) => c.booking_id === booking.id)
+    const tripEndDate =
+      booking.departure_date && booking.duration_nights !== null
+        ? addDaysToDateString(booking.departure_date, booking.duration_nights)
+        : null
 
     const totalPaid = bookingPayments.reduce((s, p) => s + p.amount, 0)
     const quoteTotal = bookingQuotes.reduce((s, q) => Math.max(s, q.total), 0) || 1
@@ -48,6 +62,9 @@ export async function GET() {
       direction: (booking.route as { name?: string } | null)?.name ?? "",
       departureDate: booking.departure_date ?? "",
       departureDateDisplay: formatDisplayDate(booking.departure_date),
+      durationNights: booking.duration_nights,
+      tripEndDate,
+      thankYouScheduledAt: thankYou?.scheduled_at ?? thankYou?.created_at ?? null,
       paymentColor,
       totalPaid,
       quoteTotal,

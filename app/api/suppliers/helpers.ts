@@ -281,7 +281,7 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
         route.destination_location_id,
       ]),
     ),
-  )
+  ).filter((locationId): locationId is string => Boolean(locationId))
 
   const locationResult:
     | { data: LocationRow[]; error: null }

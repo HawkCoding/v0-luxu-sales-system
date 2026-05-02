@@ -132,6 +132,20 @@ export interface Booking {
   departureDate: string | null
   departureDateDisplay?: string
   durationNights: number | null
+  tripEndDate?: string | null
+  thankYouScheduledAt?: string | null
+  emailImportNeedsReview: boolean
+  emailImportReviewResolvedAt: string | null
+  emailImportReviewResolvedAtDisplay?: string
+  emailImportMissingFields: string[]
+  emailImportWarnings: string[]
+  emailImportSourceMessageId: string | null
+  emailImportDuplicateOfBookingId: string | null
+  emailImportSubject: string | null
+  emailImportMailbox: string | null
+  emailImportReceivedAt: string | null
+  emailImportReceivedAtDisplay?: string
+  emailImportRawPreview: string | null
   noOfAdults: number
   noOfChildren: number
   noOfSuites: number
@@ -152,9 +166,22 @@ export interface Booking {
   createdAtDisplay?: string
   updatedAt: string
   updatedAtDisplay?: string
+  quoteSentAt: string | null
+  acceptedAt: string | null
+  depositRequestedAt: string | null
+  depositPaidAt: string | null
+  finalPaidAt: string | null
+  voucherSentAt: string | null
+  closedAt: string | null
+  depositPaid: boolean
+  invoiceBalance: number | null
   cancelReason: string | null
   cancelledAt: string | null
   cancelledAtDisplay?: string
+  refundStatus: "refunded" | "not_refunded" | null
+  refundAmount: number | null
+  refundReference: string | null
+  refundedAt: string | null
 }
 
 export const CANCEL_REASONS = [
@@ -175,6 +202,15 @@ export type SupplierKind =
   | "tour_operator"
   | "airline"
 export type SupplierStatus = "draft" | "active" | "inactive"
+export type TransportServiceType = "transfer" | "rental"
+
+export const CURRENCIES: { value: string; label: string }[] = [
+  { value: "ZAR", label: "ZAR — South African Rand" },
+  { value: "USD", label: "USD — US Dollar" },
+  { value: "EUR", label: "EUR — Euro" },
+  { value: "GBP", label: "GBP — British Pound" },
+  { value: "AUD", label: "AUD — Australian Dollar" },
+]
 
 export const SUPPLIER_KIND_LABELS: Record<SupplierKind, string> = {
   train_operator: "Train",
@@ -248,12 +284,12 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     suiteTypePlural: "Vehicle Types",
     package: "Service",
     packagePlural: "Services",
-    route: "Route",
-    routePlural: "Routes",
-    sectionTitle: "Vehicle Types, Routes and Rates",
+    route: "Service",
+    routePlural: "Services",
+    sectionTitle: "Vehicle Types, Services and Rates",
     sectionDescription:
-      "Manage the transfers this supplier offers, routes covered, vehicle types, and period-based rates.",
-    priceLabel: "flat per transfer",
+      "Manage transfer and rental services, pickup/drop-off points, vehicle types, and period-based rates.",
+    priceLabel: "per vehicle",
     routeHasLocations: true,
     showSingleSupplement: false,
     showDurationNights: false,
@@ -320,8 +356,15 @@ export interface SupplierRoute {
   id: string
   supplierId: string
   name: string
-  originLocationId: string
-  destinationLocationId: string
+  originLocationId: string | null
+  destinationLocationId: string | null
+  transportServiceType?: TransportServiceType | null
+  pickupPoint?: string | null
+  dropoffPoint?: string | null
+  includedKmPerDay?: number | null
+  extraKmPrice?: number | null
+  securityDeposit?: number | null
+  oneWayFee?: number | null
   active: boolean
   createdAt: string
   createdAtDisplay?: string
@@ -333,6 +376,9 @@ export interface SupplierSuiteType {
   id: string
   supplierId: string
   name: string
+  passengerCapacity?: number | null
+  luggageCapacity?: number | null
+  description?: string | null
   active: boolean
   createdAt: string
   createdAtDisplay?: string
@@ -441,6 +487,7 @@ export interface Supplier {
   locationId: string | null
   notes: string | null
   active: boolean
+  singleSupplementPct: number
   createdAt: string
   createdAtDisplay?: string
   updatedAt: string
@@ -453,6 +500,30 @@ export interface SupplierDetail extends Supplier {
   routes: SupplierRoute[]
   rateCards: SupplierRateCard[]
   locations: Location[]
+}
+
+export interface BookingTransportRequest {
+  id: string
+  bookingId: string
+  serviceType: TransportServiceType
+  supplierId: string | null
+  routeId: string | null
+  suiteTypeId: string | null
+  pickupPoint: string
+  dropoffPoint: string
+  pickupAt: string | null
+  pickupAtDisplay?: string
+  returnAt: string | null
+  returnAtDisplay?: string
+  passengerCount: number | null
+  luggageCount: number | null
+  flightNumber: string | null
+  notes: string | null
+  sortOrder: number
+  createdAt: string
+  createdAtDisplay?: string
+  updatedAt: string
+  updatedAtDisplay?: string
 }
 
 // Legacy alias — kept so existing components that reference Job still compile
@@ -478,6 +549,15 @@ export interface Enquiry {
   purpose: Purpose
   rawText?: string
   extractedJson?: Record<string, unknown>
+  emailImportNeedsReview?: boolean
+  emailImportMissingFields?: string[]
+  emailImportWarnings?: string[]
+  emailImportDuplicateOfBookingId?: string | null
+  emailImportSubject?: string | null
+  emailImportMailbox?: string | null
+  emailImportReceivedAt?: string | null
+  emailImportReceivedAtDisplay?: string
+  emailImportRawPreview?: string | null
   title: string
   name: string
   surname: string
@@ -502,6 +582,7 @@ export interface Enquiry {
   additionalServices?: string
   additionalServicesDetails?: string
   promotionCode?: string
+  transportRequests?: BookingTransportRequest[]
   termsAccepted: boolean
   createdAt: string
   createdAtDisplay?: string
@@ -541,6 +622,8 @@ export interface Quote {
   status: QuoteStatus
   validityUntil: string
   validityUntilDisplay?: string
+  updatedAt?: string
+  updatedAtDisplay?: string
   lineItems: QuoteLineItem[]
   subtotal: number
   vat: number
@@ -562,12 +645,13 @@ export interface Payment {
   notes: string
 }
 
-export type DocumentKind = "quote_pdf" | "voucher_pdf"
+export type DocumentKind = "quote_pdf" | "invoice_pdf" | "voucher_pdf" | "summary_pdf" | "other"
 
 export interface DocRecord {
   id: string
   jobId: string
   kind: DocumentKind
+  status?: "required" | "received" | "generated" | "sent"
   generatedAt: string
   generatedAtDisplay?: string
   urlOrBlobRef: string
@@ -586,6 +670,7 @@ export interface Correspondence {
   id: string
   jobId: string
   channel: "email"
+  kind?: string | null
   subject: string
   bodyHtml: string
   status: "sent" | "failed" | "scheduled"

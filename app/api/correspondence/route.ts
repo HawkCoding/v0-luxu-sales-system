@@ -9,7 +9,7 @@ export async function POST(req: Request) {
   // Accept jobId (from existing components) or bookingId
   const bookingId = body.bookingId || body.jobId
 
-  const success = Math.random() > 0.1
+  const success = body.status === "sent" ? true : Math.random() > 0.1
   const now = new Date().toISOString()
 
   const { data: cor, error } = await supabase
@@ -20,7 +20,7 @@ export async function POST(req: Request) {
       subject: body.subject,
       body_html: body.bodyHtml || null,
       status: success ? "sent" : "failed",
-      sent_at: success ? now : null,
+      sent_at: success ? body.sentAt || now : null,
       error: success ? null : "SMTP connection timeout (mock)",
     })
     .select()

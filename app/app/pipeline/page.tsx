@@ -22,7 +22,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useRole } from "@/lib/role-context"
 import Link from "next/link"
 import { useState, useEffect } from "react"
-import { GripVertical, Search, Clipboard, Plus, Settings, Download } from "lucide-react"
+import { CheckCircle2, GripVertical, Search, Clipboard, Plus, Settings, Download } from "lucide-react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
@@ -31,8 +31,8 @@ import { toast } from "sonner"
 import { parseEmailDraft, type ParsedDraft } from "@/lib/import/parseEmailDraft"
 import { buildEnquiryImportPayload } from "@/lib/import/enquiry-payload"
 import { ReviewImportedDraftModal } from "@/components/review-imported-draft-modal"
-import { RequiredEmailModal, type RequiredEmail } from "@/components/required-email-modal"
-import { useAuth } from "@/lib/auth-context"
+import { StageTransitionModal } from "@/components/stage-transition-modal"
+import type { GateFailure, ManualConfirmations } from "@/lib/pipeline/validate-transition"
 import { useRouter } from "next/navigation"
 import { ProgressDialog } from "@/components/progress-dialog"
 
@@ -47,6 +47,8 @@ interface PipelineJob {
   paymentColor: string
   totalPaid: number
   quoteTotal: number
+  tripEndDate: string | null
+  thankYouScheduledAt: string | null
 }
 
 const PAYMENT_COLORS: Record<string, string> = {
@@ -66,12 +68,20 @@ const ENQUIRY_SAVE_STEPS = [
   "Opening job",
 ]
 
+function isPastOrToday(dateString: string | null): boolean {
+  if (!dateString) return false
+  const today = new Date()
+  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())
+  const [year = "1970", month = "1", day = "1"] = dateString.split("-")
+  const dateUtc = Date.UTC(Number(year), Number(month) - 1, Number(day))
+  return dateUtc <= todayUtc
+}
+
 export default function PipelinePage() {
   const router = useRouter()
   const { data: jobs, isLoading: loadingJobs, error: jobsError, mutate: mutateJobs } = usePipeline()
   const { data, isLoading: loadingAll, error: allDataError, mutate: mutateAll } = useAllData()
   const { can } = useRole()
-  const { user } = useAuth()
   const [draggedJob, setDraggedJob] = useState<string | null>(null)
   const [dragOverStage, setDragOverStage] = useState<string | null>(null)
   const [search, setSearch] = useState("")
@@ -89,9 +99,10 @@ export default function PipelinePage() {
   const [showAllItems, setShowAllItems] = useState(false)
   const [consultantFilter, setConsultantFilter] = useState<"all" | ConsultantAbbreviation>("all")
   
-  // Email requirement modal state
-  const [emailModalOpen, setEmailModalOpen] = useState(false)
-  const [requiredEmail, setRequiredEmail] = useState<RequiredEmail | null>(null)
+  const [transitionModalOpen, setTransitionModalOpen] = useState(false)
+  const [transitionFailures, setTransitionFailures] = useState<GateFailure[]>([])
+  const [transitionIsManager, setTransitionIsManager] = useState(false)
+  const [transitionSubmitting, setTransitionSubmitting] = useState(false)
   const [pendingJobId, setPendingJobId] = useState<string | null>(null)
   const [pendingToStage, setPendingToStage] = useState<PipelineStage | null>(null)
 
@@ -138,56 +149,55 @@ export default function PipelinePage() {
     setDragOverStage(null)
   }
 
-  // Check if required email has been sent for this booking
-  const checkRequiredEmail = (jobId: string, toStage: PipelineStage): RequiredEmail | null => {
-    const correspondence = data.correspondences?.filter((c: any) => c.bookingId === jobId) || []
-    
-    // Check for Invoice/Deposit Request when moving to deposit_requested
-    if (toStage === "deposit_requested") {
-      const hasInvoice = correspondence.some((c: any) => 
-        c.subject.toLowerCase().includes("invoice") || c.subject.toLowerCase().includes("deposit request")
-      )
-      if (!hasInvoice) {
-        return {
-          type: "invoice",
-          stageName: "Deposit Invoice Sent",
-          subject: "Invoice / Deposit Request",
-          bodyPreview: "Thank you for your enquiry. Please find attached the deposit invoice for your booking. A 25% deposit is required to confirm your reservation."
-        }
+  const resetPendingTransition = () => {
+    setTransitionModalOpen(false)
+    setTransitionFailures([])
+    setTransitionIsManager(false)
+    setPendingJobId(null)
+    setPendingToStage(null)
+  }
+
+  const moveJob = async (
+    jobId: string,
+    toStage: PipelineStage,
+    options?: { manualConfirmations?: ManualConfirmations; overrideReason?: string },
+  ) => {
+    setTransitionSubmitting(true)
+    try {
+      const response = await fetch(`/api/jobs/${jobId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          stage: toStage,
+          manualConfirmations: options?.manualConfirmations,
+          override: Boolean(options?.overrideReason),
+          overrideReason: options?.overrideReason,
+        }),
+      })
+
+      const payload = await response.json().catch(() => null)
+      if (response.status === 422 && payload?.failures) {
+        setTransitionFailures(payload.failures)
+        setTransitionIsManager(Boolean(payload.isManager))
+        setPendingJobId(jobId)
+        setPendingToStage(toStage)
+        setTransitionModalOpen(true)
+        return
       }
-    }
-    
-    // Check for quotation confirmation when moving to accepted
-    if (toStage === "accepted") {
-      const hasReservation = correspondence.some((c: any) => 
-        c.subject.toLowerCase().includes("reservation") || c.subject.toLowerCase().includes("confirmation")
-      )
-      if (!hasReservation) {
-        return {
-          type: "reservation",
-          stageName: "Quote Accepted",
-          subject: "Reservation Confirmation",
-          bodyPreview: "We are pleased to confirm your reservation. Your booking has been confirmed and we look forward to welcoming you aboard."
-        }
+
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "Stage move failed")
       }
+
+      await mutateJobs()
+      await mutateAll()
+      resetPendingTransition()
+      toast.success("Stage updated")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Stage move failed")
+    } finally {
+      setTransitionSubmitting(false)
     }
-    
-    // Check for Voucher when moving to voucher_sent
-    if (toStage === "voucher_sent") {
-      const hasVoucher = correspondence.some((c: any) => 
-        c.subject.toLowerCase().includes("voucher") || c.subject.toLowerCase().includes("travel document")
-      )
-      if (!hasVoucher) {
-        return {
-          type: "voucher",
-          stageName: "Voucher Sent",
-          subject: "Travel Voucher",
-          bodyPreview: "Please find attached your travel voucher with all the details of your journey. Please present this document upon boarding."
-        }
-      }
-    }
-    
-    return null
   }
 
   const handleDrop = async (e: React.DragEvent, toStage: PipelineStage) => {
@@ -200,79 +210,27 @@ export default function PipelinePage() {
     const job = (jobs as PipelineJob[]).find((j) => j.id === jobId)
     if (!job || job.stage === toStage) return
 
-    // Check if required email has been sent
-    const missingEmail = checkRequiredEmail(jobId, toStage)
-    if (missingEmail) {
-      setRequiredEmail(missingEmail)
-      setPendingJobId(jobId)
-      setPendingToStage(toStage)
-      setEmailModalOpen(true)
+    const preflight = await fetch(`/api/jobs/${jobId}/validate-stage-move`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetStage: toStage }),
+    })
+    const payload = await preflight.json().catch(() => null)
+    if (!preflight.ok) {
+      toast.error(payload?.error ?? "Could not validate stage move")
       return
     }
 
-    // Proceed with stage update
-    await fetch(`/api/jobs/${jobId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stage: toStage }),
-    })
-    mutateJobs()
-  }
+    if (payload.failures?.length) {
+      setTransitionFailures(payload.failures)
+      setTransitionIsManager(Boolean(payload.isManager))
+      setPendingJobId(jobId)
+      setPendingToStage(toStage)
+      setTransitionModalOpen(true)
+      return
+    }
 
-  const handleSendEmailAndProceed = async () => {
-    if (!pendingJobId || !pendingToStage || !requiredEmail) return
-
-    const job = (jobs as PipelineJob[]).find((j) => j.id === pendingJobId)
-    if (!job) return
-
-    // 1. Create correspondence entry (mock send)
-    await fetch("/api/correspondence", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jobId: pendingJobId,
-        channel: "email",
-        subject: requiredEmail.subject,
-        bodyHtml: `<p>${requiredEmail.bodyPreview}</p>`,
-        status: "sent",
-        sentAt: new Date().toISOString(),
-      }),
-    })
-
-    // 2. Log audit entry
-    await fetch("/api/audit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        actor: user?.name || "System",
-        entityType: "job",
-        entityId: pendingJobId,
-        action: `send_${requiredEmail.type}_email`,
-        metaJson: JSON.stringify({ 
-          subject: requiredEmail.subject,
-          autoSent: true,
-          reason: `Required for stage transition to ${pendingToStage}` 
-        }),
-      }),
-    })
-
-    // 3. Update job stage
-    await fetch(`/api/jobs/${pendingJobId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stage: pendingToStage }),
-    })
-
-    // Refresh data
-    mutateJobs()
-    mutateAll()
-
-    // Reset state
-    setPendingJobId(null)
-    setPendingToStage(null)
-    setRequiredEmail(null)
-
-    toast.success("Email sent and stage updated successfully")
+    await moveJob(jobId, toStage)
   }
 
   const handlePasteImport = () => {
@@ -691,14 +649,23 @@ export default function PipelinePage() {
         onRetry={handleBackToReviewAfterSaveError}
       />
 
-      {/* Required Email Modal */}
-      <RequiredEmailModal
-        open={emailModalOpen}
-        onOpenChange={setEmailModalOpen}
-        requiredEmail={requiredEmail}
-        jobNumber={(jobs as PipelineJob[]).find(j => j.id === pendingJobId)?.bookingNumber || ""}
+      <StageTransitionModal
+        open={transitionModalOpen}
         jobId={pendingJobId || ""}
-        onSendAndProceed={handleSendEmailAndProceed}
+        jobNumber={(jobs as PipelineJob[]).find((j) => j.id === pendingJobId)?.bookingNumber || ""}
+        targetStage={pendingToStage}
+        failures={transitionFailures}
+        isManager={transitionIsManager}
+        submitting={transitionSubmitting}
+        onCancel={resetPendingTransition}
+        onProceed={async (manualConfirmations) => {
+          if (!pendingJobId || !pendingToStage) return
+          await moveJob(pendingJobId, pendingToStage, { manualConfirmations })
+        }}
+        onOverride={async (overrideReason) => {
+          if (!pendingJobId || !pendingToStage) return
+          await moveJob(pendingJobId, pendingToStage, { overrideReason })
+        }}
       />
     </div>
   )
@@ -718,6 +685,7 @@ function PipelineCard({
   auditLogs: any[]
 }) {
   const paymentDotClass = PAYMENT_COLORS[job.paymentColor] || "bg-muted-foreground"
+  const showTripCompleteBadge = job.stage === "voucher_sent" && isPastOrToday(job.tripEndDate)
   
   const handleDownloadAudit = async (e: React.MouseEvent, allAuditLogs: any[]) => {
     e.preventDefault()
@@ -763,6 +731,12 @@ function PipelineCard({
           <p className="text-[11px] text-muted-foreground mt-0.5">
             Dep: {formatDisplayDate(job.departureDate)}
           </p>
+        )}
+        {showTripCompleteBadge && (
+          <Badge variant={job.thankYouScheduledAt ? "secondary" : "outline"} className="mt-2 gap-1 text-[10px]">
+            <CheckCircle2 className="w-3 h-3" />
+            {job.thankYouScheduledAt ? "Thank-you scheduled" : "Trip Complete - Follow up"}
+          </Badge>
         )}
         <button
           onClick={(e) => handleDownloadAudit(e, auditLogs)}

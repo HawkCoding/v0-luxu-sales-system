@@ -17,8 +17,8 @@ const inter = Inter({
 })
 
 export const metadata: Metadata = {
-  title: 'Luxus - Travel Sales Operations',
-  description: 'Internal sales ops system for Luxus Travel & Tours',
+  title: 'Luxus Travel and Tourist - Sales Operations',
+  description: 'Internal sales ops system for Luxus Travel and Tourist',
 }
 
 export default function RootLayout({

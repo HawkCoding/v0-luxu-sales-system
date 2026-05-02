@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
+import { staleVersionResponse } from "@/lib/concurrency"
 import type { Json } from "@/lib/supabase/types"
 
 const lineItemSchema = z.object({
@@ -12,6 +13,7 @@ const lineItemSchema = z.object({
 
 const patchQuoteSchema = z.object({
   lineItems: z.array(lineItemSchema).min(1),
+  expectedUpdatedAt: z.string().datetime({ offset: true }).optional(),
 })
 
 interface RouteParams {
@@ -39,12 +41,16 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
-    .select("id")
+    .select("id, updated_at")
     .eq("id", id)
     .single()
 
   if (quoteError || !quote) {
     return NextResponse.json({ error: "Quote not found" }, { status: 404 })
+  }
+
+  if (parsed.expectedUpdatedAt && parsed.expectedUpdatedAt !== quote.updated_at) {
+    return staleVersionResponse("quote", quote.updated_at)
   }
 
   const subtotal = parsed.lineItems.reduce((sum, li) => sum + li.total, 0)
@@ -71,5 +77,22 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     return NextResponse.json({ error: "Failed to replace line items" }, { status: 500 })
   }
 
-  return NextResponse.json({ id, subtotal, vat, total, lineItems: parsed.lineItems })
+  const { data: updatedQuote, error: updatedQuoteError } = await supabase
+    .from("quotes")
+    .select("updated_at")
+    .eq("id", id)
+    .single()
+
+  if (updatedQuoteError || !updatedQuote) {
+    return NextResponse.json({ error: "Failed to load updated quote" }, { status: 500 })
+  }
+
+  return NextResponse.json({
+    id,
+    subtotal,
+    vat,
+    total,
+    lineItems: parsed.lineItems,
+    updatedAt: updatedQuote.updated_at,
+  })
 }

@@ -10,6 +10,7 @@ import type { SessionClient } from "../../suppliers/helpers"
 import type { UpsertPackageInput } from "../schemas"
 
 type PackageLegRow = Database["public"]["Tables"]["package_legs"]["Row"]
+type PackageLegRouteInsert = Database["public"]["Tables"]["package_leg_routes"]["Insert"]
 type PackageRow = Database["public"]["Tables"]["packages"]["Row"]
 type RateCardInsert = Database["public"]["Tables"]["rate_cards"]["Insert"]
 type RouteInsert = Database["public"]["Tables"]["routes"]["Insert"]
@@ -120,11 +121,13 @@ export async function loadPackageDetail(supabase: SessionClient, slug: string) {
   }
 
   const legs = normalizeLegRows((legRows ?? []) as PackageLegJoinRow[])
+  const legIds = legs.map((leg) => leg.id)
   const supplierIds = Array.from(new Set(legs.map((leg) => leg.supplier_id)))
 
   const [
     { data: routes, error: routesError },
     { data: suiteTypes, error: suiteTypesError },
+    { data: packageLegRoutes, error: packageLegRoutesError },
   ] = await Promise.all([
     supplierIds.length > 0
       ? supabase
@@ -141,9 +144,15 @@ export async function loadPackageDetail(supabase: SessionClient, slug: string) {
           .eq("active", true)
           .order("name", { ascending: true })
       : Promise.resolve({ data: [], error: null }),
+    legIds.length > 0
+      ? supabase
+          .from("package_leg_routes")
+          .select("*")
+          .in("package_leg_id", legIds)
+      : Promise.resolve({ data: [], error: null }),
   ])
 
-  if (routesError || suiteTypesError) {
+  if (routesError || suiteTypesError || packageLegRoutesError) {
     return {
       error: NextResponse.json(
         { error: "Failed to load package reference data" },
@@ -174,7 +183,15 @@ export async function loadPackageDetail(supabase: SessionClient, slug: string) {
   return {
     packageRow: pkg as PackageRow,
     legs,
-    detail: mapPackageDetail(pkg, legs, routes ?? [], rateCards ?? [], suiteTypes ?? []),
+    packageLegRoutes: packageLegRoutes ?? [],
+    detail: mapPackageDetail(
+      pkg,
+      legs,
+      routes ?? [],
+      packageLegRoutes ?? [],
+      rateCards ?? [],
+      suiteTypes ?? [],
+    ),
   }
 }
 
@@ -185,23 +202,38 @@ export function normalizePackageChildren(
   const now = new Date().toISOString()
   const legs = parsed.legs.map((leg, index) => {
     const legId = leg.id ?? makeUuid()
-    const routes: RouteInsert[] = leg.routes.map((route) => ({
-      id: route.id ?? makeUuid(),
-      supplier_id: leg.supplierId,
-      name: route.name.trim(),
-      origin_location_id: route.originLocationId,
-      destination_location_id: route.destinationLocationId,
-      active: route.active,
-      created_at: now,
-      updated_at: now,
-    }))
-    const routeIds = new Set(routes.map((route) => route.id).filter(Boolean))
-    const rateCards: RateCardInsert[] = leg.rateCards.map((rateCard) => {
+    const routeRows = leg.routes.map((route) => {
+      const id = route.id ?? makeUuid()
+      const insert: RouteInsert = {
+        id,
+        supplier_id: leg.supplierId,
+        name: route.name.trim(),
+        origin_location_id: route.originLocationId ?? null,
+        destination_location_id: route.destinationLocationId ?? null,
+        transport_service_type: route.transportServiceType ?? null,
+        pickup_point: route.pickupPoint?.trim() || null,
+        dropoff_point: route.dropoffPoint?.trim() || null,
+        included_km_per_day: route.includedKmPerDay ?? null,
+        extra_km_price: route.extraKmPrice ?? null,
+        security_deposit: route.securityDeposit ?? null,
+        one_way_fee: route.oneWayFee ?? null,
+        active: route.active,
+        created_at: now,
+        updated_at: now,
+      }
+      return { insert, existing: route.existing }
+    })
+    const routeIds = new Set(
+      routeRows
+        .map((row) => row.insert.id)
+        .filter((id): id is string => typeof id === "string"),
+    )
+    const rateCardRows = leg.rateCards.map((rateCard) => {
       if (!rateCard.routeId || !routeIds.has(rateCard.routeId)) {
         throw new Error("Each rate card must reference a route from the same leg.")
       }
 
-      return {
+      const insert: RateCardInsert = {
         id: rateCard.id ?? makeUuid(),
         route_id: rateCard.routeId,
         suite_type_id: rateCard.suiteTypeId,
@@ -216,7 +248,17 @@ export function normalizePackageChildren(
         valid_to: normalizeNullableDate(rateCard.validTo),
         created_at: now,
       }
+      return { insert, existing: rateCard.existing }
     })
+
+    const routeLinks: PackageLegRouteInsert[] =
+      leg.routes.length > 0
+        ? Array.from(routeIds).map((routeId) => ({
+            package_leg_id: legId,
+            route_id: routeId,
+            created_at: now,
+          }))
+        : []
 
     return {
       leg: {
@@ -227,14 +269,21 @@ export function normalizePackageChildren(
         sort_order: leg.sortOrder ?? index,
         created_at: now,
       },
-      routes,
-      rateCards,
+      routeRows,
+      rateCardRows,
+      routeLinks,
     }
   })
 
+  const allRouteRows = legs.flatMap((entry) => entry.routeRows)
+  const allRateCardRows = legs.flatMap((entry) => entry.rateCardRows)
+
   return {
     legs: legs.map((entry) => entry.leg),
-    routes: legs.flatMap((entry) => entry.routes),
-    rateCards: legs.flatMap((entry) => entry.rateCards),
+    routeLinks: legs.flatMap((entry) => entry.routeLinks),
+    routes: allRouteRows.filter((row) => !row.existing).map((row) => row.insert),
+    rateCards: allRateCardRows.filter((row) => !row.existing).map((row) => row.insert),
+    allRouteIds: allRouteRows.map((row) => row.insert.id),
+    allRateCardIds: allRateCardRows.map((row) => row.insert.id),
   }
 }

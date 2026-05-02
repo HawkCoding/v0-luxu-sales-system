@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Boxes, Search } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Select,
   SelectContent,
@@ -26,13 +27,30 @@ import { Badge } from "@/components/ui/badge"
 import { useActivePackages } from "@/lib/use-data"
 import type { Package, PackageDetail, QuoteLineItem } from "@/lib/types"
 import { SUPPLIER_KIND_LABELS } from "@/lib/types"
+import { PresenceAvatars } from "@/components/presence-avatars"
+import { useRecordPresence } from "@/hooks/use-record-presence"
+import { useVersionedSave } from "@/hooks/use-versioned-save"
 
 interface ApplyPackageDialogProps {
   jobId: string
   quoteId: string
   travelDate: string | null
   existingLineItemCount: number
+  expectedUpdatedAt?: string
   onApplied: () => void
+}
+
+interface QuotePatchPayload {
+  lineItems: QuoteLineItem[]
+}
+
+interface QuotePatchResponse {
+  id: string
+  subtotal: number
+  vat: number
+  total: number
+  lineItems: QuoteLineItem[]
+  updatedAt: string
 }
 
 function formatPrice(amount: number | null, currency: string) {
@@ -50,11 +68,55 @@ function formatPrice(amount: number | null, currency: string) {
 
 type Step = "pick" | "configure" | "confirm"
 
+interface LegSelectionState {
+  selected: boolean
+  routeId: string
+  suiteTypeId: string
+}
+
+function isOptionalLeg(kind: PackageDetail["legs"][number]["supplierKind"]): boolean {
+  return kind === "hotel_property" || kind === "transfers"
+}
+
+function getRouteLabel(kind: PackageDetail["legs"][number]["supplierKind"]): string {
+  if (kind === "hotel_property") return "meal plan"
+  if (kind === "transfers") return "transfer"
+  return "route"
+}
+
+function getSuiteLabel(kind: PackageDetail["legs"][number]["supplierKind"]): string {
+  if (kind === "hotel_property") return "room type"
+  if (kind === "transfers") return "vehicle type"
+  if (kind === "airline") return "cabin"
+  return "suite type"
+}
+
+function buildDefaultSelections(detail: PackageDetail): Record<string, LegSelectionState> {
+  return Object.fromEntries(
+    detail.legs.map((leg) => {
+      const activeSuiteTypes = leg.suiteTypes.filter((suiteType) => suiteType.active)
+      return [
+        leg.id,
+        {
+          selected: !isOptionalLeg(leg.supplierKind),
+          routeId: leg.routes.length === 1 ? leg.routes[0].id : "",
+          suiteTypeId: activeSuiteTypes.length === 1 ? activeSuiteTypes[0].id : "",
+        },
+      ]
+    }),
+  )
+}
+
+function getEmptySelection(selected: boolean): LegSelectionState {
+  return { selected, routeId: "", suiteTypeId: "" }
+}
+
 export function ApplyPackageDialog({
   jobId,
   quoteId,
   travelDate,
   existingLineItemCount,
+  expectedUpdatedAt,
   onApplied,
 }: ApplyPackageDialogProps) {
   const { data: packages = [] } = useActivePackages()
@@ -64,11 +126,23 @@ export function ApplyPackageDialog({
   const [selectedPackage, setSelectedPackage] = useState<Package | null>(null)
   const [packageDetail, setPackageDetail] = useState<PackageDetail | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
-  const [suiteTypeSelections, setSuiteTypeSelections] = useState<Record<string, string>>({})
+  const [legSelections, setLegSelections] = useState<Record<string, LegSelectionState>>({})
   const [previewLineItems, setPreviewLineItems] = useState<QuoteLineItem[]>([])
   const [validating, setValidating] = useState(false)
-  const [applying, setApplying] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
+  const { others, setEditing } = useRecordPresence("quote", open ? quoteId : "")
+  const {
+    save: saveQuote,
+    isSaving: applying,
+    conflict: quoteConflict,
+    clearConflict: clearQuoteConflict,
+  } = useVersionedSave<QuotePatchPayload, QuotePatchResponse>({
+    url: `/api/quotes/${quoteId}`,
+    method: "PATCH",
+    entity: "quote",
+    recordId: quoteId,
+    expectedUpdatedAt,
+  })
 
   const activePackages = packages.filter((pkg) => pkg.active)
   const filteredPackages = activePackages.filter((pkg) =>
@@ -76,14 +150,19 @@ export function ApplyPackageDialog({
     (pkg.trainRouteName ?? "").toLowerCase().includes(search.toLowerCase()),
   )
 
+  useEffect(() => {
+    setEditing(open && step !== "pick")
+  }, [open, setEditing, step])
+
   function reset() {
     setStep("pick")
     setSearch("")
     setSelectedPackage(null)
     setPackageDetail(null)
-    setSuiteTypeSelections({})
+    setLegSelections({})
     setPreviewLineItems([])
     setApplyError(null)
+    clearQuoteConflict()
   }
 
   async function selectPackage(pkg: Package) {
@@ -94,13 +173,7 @@ export function ApplyPackageDialog({
       if (!res.ok) throw new Error("Failed to load package details")
       const detail: PackageDetail = await res.json()
       setPackageDetail(detail)
-      const defaults: Record<string, string> = {}
-      for (const leg of detail.legs) {
-        if (leg.suiteTypes.length === 1) {
-          defaults[leg.id] = leg.suiteTypes[0].id
-        }
-      }
-      setSuiteTypeSelections(defaults)
+      setLegSelections(buildDefaultSelections(detail))
       setStep("configure")
     } catch {
       toast.error("Could not load package details")
@@ -109,19 +182,26 @@ export function ApplyPackageDialog({
     }
   }
 
-  const allSuiteTypesSelected =
+  const allSelectionsComplete =
     packageDetail !== null &&
-    (packageDetail.fixedPricePerPerson !== null ||
-      packageDetail.legs.every((leg) => Boolean(suiteTypeSelections[leg.id])))
+    packageDetail.legs.every((leg) => {
+      const selection = legSelections[leg.id]
+      if (!selection) return false
+      if (isOptionalLeg(leg.supplierKind) && !selection.selected) return true
+      const hasRoute = leg.routes.length <= 1 || Boolean(selection.routeId)
+      return hasRoute && Boolean(selection.suiteTypeId)
+    })
 
   async function validateAndPreview() {
     if (!selectedPackage || !packageDetail) return
     setValidating(true)
     setApplyError(null)
 
-    const legSuiteTypes = packageDetail.legs.map((leg) => ({
+    const selections = packageDetail.legs.map((leg) => ({
       legId: leg.id,
-      suiteTypeId: suiteTypeSelections[leg.id] ?? "",
+      selected: legSelections[leg.id]?.selected ?? !isOptionalLeg(leg.supplierKind),
+      routeId: legSelections[leg.id]?.routeId || undefined,
+      suiteTypeId: legSelections[leg.id]?.suiteTypeId || undefined,
     }))
 
     try {
@@ -132,7 +212,7 @@ export function ApplyPackageDialog({
           jobId,
           quoteId,
           travelDate: travelDate ?? new Date().toISOString().slice(0, 10),
-          legSuiteTypes,
+          selections,
         }),
       })
       const payload = await res.json()
@@ -151,26 +231,31 @@ export function ApplyPackageDialog({
 
   async function applyToQuote() {
     if (previewLineItems.length === 0) return
-    setApplying(true)
     try {
-      const res = await fetch(`/api/quotes/${quoteId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lineItems: previewLineItems }),
-      })
-      if (!res.ok) {
-        const payload = await res.json()
-        toast.error(typeof payload?.error === "string" ? payload.error : "Failed to apply package")
-        return
-      }
+      await saveQuote({ lineItems: previewLineItems })
       toast.success(`Package "${selectedPackage?.name}" applied to quote`)
       setOpen(false)
       reset()
       onApplied()
-    } catch {
-      toast.error("Failed to apply package")
-    } finally {
-      setApplying(false)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to apply package"
+      setApplyError(message)
+      toast.error(message)
+    }
+  }
+
+  async function applyToQuoteAnyway() {
+    if (previewLineItems.length === 0) return
+    try {
+      await saveQuote({ lineItems: previewLineItems }, { ignoreExpectedUpdatedAt: true })
+      toast.success(`Package "${selectedPackage?.name}" applied to quote`)
+      setOpen(false)
+      reset()
+      onApplied()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to apply package"
+      setApplyError(message)
+      toast.error(message)
     }
   }
 
@@ -186,7 +271,10 @@ export function ApplyPackageDialog({
         {step === "pick" && (
           <>
             <DialogHeader>
-              <DialogTitle>Apply a package</DialogTitle>
+              <DialogTitle className="flex items-center gap-2">
+                Apply a package
+                <PresenceAvatars users={others} />
+              </DialogTitle>
               <DialogDescription>
                 Select a package to pre-fill this quote with pricing from its rate cards.
               </DialogDescription>
@@ -250,11 +338,12 @@ export function ApplyPackageDialog({
         {step === "configure" && packageDetail && (
           <>
             <DialogHeader>
-              <DialogTitle>{packageDetail.name}</DialogTitle>
+              <DialogTitle className="flex items-center gap-2">
+                {packageDetail.name}
+                <PresenceAvatars users={others} />
+              </DialogTitle>
               <DialogDescription>
-                {packageDetail.fixedPricePerPerson !== null
-                  ? "This package uses a fixed price. No suite type selection needed."
-                  : "Select the suite type for each leg."}
+                Select the package options that apply to this quote.
               </DialogDescription>
             </DialogHeader>
 
@@ -264,36 +353,100 @@ export function ApplyPackageDialog({
               </p>
             )}
 
-            {packageDetail.fixedPricePerPerson === null && (
-              <div className="space-y-4">
-                {packageDetail.legs.map((leg) => (
-                  <div key={leg.id} className="space-y-1.5">
-                    <Label>{leg.label ?? leg.supplierName}</Label>
-                    {leg.suiteTypes.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">No suite types configured</p>
-                    ) : (
-                      <Select
-                        value={suiteTypeSelections[leg.id] ?? ""}
-                        onValueChange={(value) =>
-                          setSuiteTypeSelections((prev) => ({ ...prev, [leg.id]: value }))
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select suite type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {leg.suiteTypes.filter((st) => st.active).map((st) => (
-                            <SelectItem key={st.id} value={st.id}>
-                              {st.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
+            <div className="space-y-4">
+              {packageDetail.legs.map((leg) => {
+                const selection = legSelections[leg.id]
+                const optional = isOptionalLeg(leg.supplierKind)
+                const enabled = selection?.selected ?? !optional
+                const activeSuiteTypes = leg.suiteTypes.filter((st) => st.active)
+
+                return (
+                  <div key={leg.id} className="space-y-3 rounded-md border p-3">
+                    <div className="flex items-start gap-3">
+                      {optional ? (
+                        <Checkbox
+                          checked={enabled}
+                          onCheckedChange={(checked) =>
+                            setLegSelections((prev) => ({
+                              ...prev,
+                              [leg.id]: {
+                                ...(prev[leg.id] ?? getEmptySelection(!optional)),
+                                selected: checked === true,
+                              },
+                            }))
+                          }
+                          className="mt-1"
+                        />
+                      ) : null}
+                      <div className="min-w-0 flex-1">
+                        <Label>{leg.label ?? leg.supplierName}</Label>
+                        {optional ? (
+                          <p className="text-xs text-muted-foreground">Optional {SUPPLIER_KIND_LABELS[leg.supplierKind].toLowerCase()}</p>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    {enabled ? (
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {leg.routes.length > 1 || leg.supplierKind === "hotel_property" || leg.supplierKind === "transfers" ? (
+                          <div className="space-y-1.5">
+                            <Label className="capitalize">{getRouteLabel(leg.supplierKind)}</Label>
+                            <Select
+                              value={selection?.routeId ?? ""}
+                              onValueChange={(value) =>
+                                setLegSelections((prev) => ({
+                                  ...prev,
+                                  [leg.id]: { ...(prev[leg.id] ?? getEmptySelection(!optional)), routeId: value },
+                                }))
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder={`Select ${getRouteLabel(leg.supplierKind)}`} />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {leg.routes.map((route) => (
+                                  <SelectItem key={route.id} value={route.id}>
+                                    {route.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        ) : null}
+
+                        <div className="space-y-1.5">
+                          <Label className="capitalize">{getSuiteLabel(leg.supplierKind)}</Label>
+                          {activeSuiteTypes.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">No {getSuiteLabel(leg.supplierKind)} configured</p>
+                          ) : (
+                            <Select
+                              value={selection?.suiteTypeId ?? ""}
+                              onValueChange={(value) =>
+                                setLegSelections((prev) => ({
+                                  ...prev,
+                                  [leg.id]: { ...(prev[leg.id] ?? getEmptySelection(!optional)), suiteTypeId: value },
+                                }))
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder={`Select ${getSuiteLabel(leg.supplierKind)}`} />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {activeSuiteTypes.map((st) => (
+                                  <SelectItem key={st.id} value={st.id}>
+                                    {st.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
-                ))}
-              </div>
-            )}
+                )
+              })}
+            </div>
 
             {applyError && (
               <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -307,7 +460,7 @@ export function ApplyPackageDialog({
               </Button>
               <Button
                 onClick={validateAndPreview}
-                disabled={!allSuiteTypesSelected || validating}
+                disabled={!allSelectionsComplete || validating}
               >
                 {validating ? "Checking pricing…" : "Next"}
               </Button>
@@ -318,7 +471,10 @@ export function ApplyPackageDialog({
         {step === "confirm" && (
           <>
             <DialogHeader>
-              <DialogTitle>Confirm replacement</DialogTitle>
+              <DialogTitle className="flex items-center gap-2">
+                Confirm replacement
+                <PresenceAvatars users={others} />
+              </DialogTitle>
               <DialogDescription>
                 {existingLineItemCount > 0
                   ? `This will replace ${existingLineItemCount} existing line item${existingLineItemCount === 1 ? "" : "s"} with the following:`
@@ -349,10 +505,21 @@ export function ApplyPackageDialog({
               </table>
             </div>
 
+            {quoteConflict && (
+              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {quoteConflict.error}
+              </p>
+            )}
+
             <DialogFooter>
               <Button variant="outline" onClick={() => setStep("configure")}>
                 Back
               </Button>
+              {quoteConflict && (
+                <Button variant="outline" onClick={applyToQuoteAnyway} disabled={applying}>
+                  Save anyway
+                </Button>
+              )}
               <Button onClick={applyToQuote} disabled={applying}>
                 {applying ? "Applying…" : existingLineItemCount > 0 ? "Replace & apply" : "Apply to quote"}
               </Button>

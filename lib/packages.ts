@@ -12,6 +12,7 @@ import type {
 
 type PackageRow = Database["public"]["Tables"]["packages"]["Row"]
 type PackageLegRow = Database["public"]["Tables"]["package_legs"]["Row"]
+type PackageLegRouteRow = Database["public"]["Tables"]["package_leg_routes"]["Row"]
 type RateCardRow = Database["public"]["Tables"]["rate_cards"]["Row"]
 type RouteRow = Database["public"]["Tables"]["routes"]["Row"]
 type SuiteTypeRow = Database["public"]["Tables"]["suite_types"]["Row"]
@@ -61,8 +62,15 @@ export function mapPackageRoute(row: RouteRow): SupplierRoute {
     id: row.id,
     supplierId: row.supplier_id,
     name: row.name,
-    originLocationId: row.origin_location_id,
-    destinationLocationId: row.destination_location_id,
+    originLocationId: row.origin_location_id ?? null,
+    destinationLocationId: row.destination_location_id ?? null,
+    transportServiceType: row.transport_service_type ?? null,
+    pickupPoint: row.pickup_point ?? null,
+    dropoffPoint: row.dropoff_point ?? null,
+    includedKmPerDay: row.included_km_per_day ?? null,
+    extraKmPrice: row.extra_km_price ?? null,
+    securityDeposit: row.security_deposit ?? null,
+    oneWayFee: row.one_way_fee ?? null,
     active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -94,6 +102,9 @@ export function mapPackageSuiteType(row: SuiteTypeRow): SupplierSuiteType {
     id: row.id,
     supplierId: row.supplier_id,
     name: row.name,
+    passengerCapacity: row.passenger_capacity ?? null,
+    luggageCapacity: row.luggage_capacity ?? null,
+    description: row.description ?? null,
     active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -105,10 +116,20 @@ export function mapPackageSuiteType(row: SuiteTypeRow): SupplierSuiteType {
 export function mapPackageLeg(
   row: PackageLegWithSupplier,
   routes: RouteRow[],
+  packageLegRoutes: PackageLegRouteRow[],
   rateCards: RateCardRow[],
   suiteTypes: SuiteTypeRow[],
 ): PackageLeg {
-  const legRouteIds = new Set(routes.map((route) => route.id))
+  const linkedRouteIds = new Set(
+    packageLegRoutes
+      .filter((link) => link.package_leg_id === row.id)
+      .map((link) => link.route_id),
+  )
+  const eligibleRoutes =
+    row.supplierKind === "hotel_property"
+      ? routes
+      : routes.filter((route) => linkedRouteIds.has(route.id))
+  const legRouteIds = new Set(eligibleRoutes.map((route) => route.id))
 
   return {
     id: row.id,
@@ -118,7 +139,7 @@ export function mapPackageLeg(
     supplierKind: row.supplierKind,
     label: row.label,
     sortOrder: row.sort_order,
-    routes: routes.map(mapPackageRoute),
+    routes: eligibleRoutes.map(mapPackageRoute),
     rateCards: rateCards
       .filter((rateCard) => legRouteIds.has(rateCard.route_id))
       .map(mapPackageRateCard),
@@ -130,6 +151,7 @@ export function mapPackageDetail(
   row: PackageRow,
   legs: PackageLegWithSupplier[],
   routes: RouteRow[],
+  packageLegRoutes: PackageLegRouteRow[],
   rateCards: RateCardRow[],
   suiteTypes: SuiteTypeRow[],
 ): PackageDetail {
@@ -154,6 +176,7 @@ export function mapPackageDetail(
         mapPackageLeg(
           leg,
           routes.filter((route) => route.supplier_id === leg.supplier_id),
+          packageLegRoutes,
           rateCards,
           suiteTypes.filter((suiteType) => suiteType.supplier_id === leg.supplier_id),
         ),

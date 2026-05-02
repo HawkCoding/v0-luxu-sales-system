@@ -4,9 +4,38 @@ import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
 import { createServiceClient } from "@/lib/supabase/server"
 
 type ServiceClient = ReturnType<typeof createServiceClient>
+type TransportServiceType = "transfer" | "rental"
+type TransportRequestInsert = {
+  booking_id: string
+  service_type: TransportServiceType
+  supplier_id: string | null
+  route_id: string | null
+  suite_type_id: string | null
+  pickup_point: string
+  dropoff_point: string
+  pickup_at: string | null
+  return_at: string | null
+  passenger_count: number | null
+  luggage_count: number | null
+  flight_number: string | null
+  notes: string | null
+  sort_order: number
+}
 
 function normalizeLookupValue(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
+}
+
+function normalizeTransportServiceType(value: unknown): TransportServiceType {
+  return value === "rental" ? "rental" : "transfer"
+}
+
+function normalizeNullableText(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null
+}
+
+function normalizeNullableNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null
 }
 
 async function findRouteId(supabase: ServiceClient, direction: unknown): Promise<string | null> {
@@ -238,6 +267,37 @@ export async function POST(req: Request) {
 
   if (travellerRows.length > 0) {
     await supabase.from("travellers").insert(travellerRows)
+  }
+
+  const transportRequests = Array.isArray(body.transportRequests) ? body.transportRequests : []
+  const transportRows: TransportRequestInsert[] = transportRequests
+    .map((request: Record<string, unknown>, index: number): TransportRequestInsert | null => {
+      const pickupPoint = normalizeNullableText(request.pickupPoint)
+      const dropoffPoint = normalizeNullableText(request.dropoffPoint)
+      if (!pickupPoint || !dropoffPoint) return null
+
+      const serviceType = normalizeTransportServiceType(request.serviceType)
+      return {
+        booking_id: booking.id,
+        service_type: serviceType,
+        supplier_id: normalizeNullableText(request.supplierId),
+        route_id: normalizeNullableText(request.routeId),
+        suite_type_id: normalizeNullableText(request.suiteTypeId),
+        pickup_point: pickupPoint,
+        dropoff_point: dropoffPoint,
+        pickup_at: normalizeNullableText(request.pickupAt),
+        return_at: serviceType === "rental" ? normalizeNullableText(request.returnAt) : null,
+        passenger_count: normalizeNullableNumber(request.passengerCount),
+        luggage_count: normalizeNullableNumber(request.luggageCount),
+        flight_number: normalizeNullableText(request.flightNumber),
+        notes: normalizeNullableText(request.notes),
+        sort_order: index,
+      }
+    })
+    .filter((row: TransportRequestInsert | null): row is TransportRequestInsert => Boolean(row))
+
+  if (transportRows.length > 0) {
+    await supabase.from("booking_transport_requests").insert(transportRows)
   }
 
   // --- 5. Audit log ---

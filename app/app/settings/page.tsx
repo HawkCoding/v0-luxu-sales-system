@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
+import { InboundEmailSettings } from "@/components/inbound-email-settings"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -705,6 +706,75 @@ function UserManagementCard() {
   )
 }
 
+function CompanyInfoCard({ canEdit }: { canEdit: boolean }) {
+  const [businessName, setBusinessName] = useState("")
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    fetch("/api/settings/company")
+      .then((r) => r.json())
+      .then((d) => { if (d.business_name) setBusinessName(d.business_name) })
+      .catch(() => {})
+  }, [])
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      const res = await fetch("/api/settings/company", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ business_name: businessName }),
+      })
+      if (!res.ok) throw new Error()
+      toast.success("Business name saved")
+    } catch {
+      toast.error("Failed to save business name")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium">Company Information</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Company Name</label>
+            <div className="flex gap-2 mt-1">
+              <Input
+                value={businessName}
+                onChange={(e) => setBusinessName(e.target.value)}
+                readOnly={!canEdit}
+                placeholder="Luxus Travel"
+              />
+              {canEdit && (
+                <Button size="sm" onClick={handleSave} disabled={saving || !businessName.trim()}>
+                  {saving ? "Saving…" : "Save"}
+                </Button>
+              )}
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Email</label>
+            <Input defaultValue="info@luxustravel.co.za" className="mt-1" readOnly />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Phone</label>
+            <Input defaultValue="+27 12 345 6789" className="mt-1" readOnly />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">VAT Rate</label>
+            <Input defaultValue="15%" className="mt-1" readOnly />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 export default function SettingsPage() {
   const { can } = useRole()
   const canEditSettings = can("edit:settings")
@@ -716,31 +786,7 @@ export default function SettingsPage() {
         <p className="text-sm text-muted-foreground mt-1">System configuration</p>
       </div>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">Company Information</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Company Name</label>
-              <Input defaultValue="Luxus Travel & Tours" className="mt-1" readOnly />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Email</label>
-              <Input defaultValue="info@luxustravel.co.za" className="mt-1" readOnly />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">Phone</label>
-              <Input defaultValue="+27 12 345 6789" className="mt-1" readOnly />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground">VAT Rate</label>
-              <Input defaultValue="15%" className="mt-1" readOnly />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <CompanyInfoCard canEdit={canEditSettings} />
 
       {can("import:customers") && (
         <Card>
@@ -762,6 +808,8 @@ export default function SettingsPage() {
       )}
 
       {can("manage:users") && <UserManagementCard />}
+
+      {canEditSettings && <InboundEmailSettings />}
 
       <Card className={canEditSettings ? undefined : "opacity-70"}>
         <CardHeader className="pb-2">

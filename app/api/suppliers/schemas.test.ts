@@ -7,6 +7,8 @@ import {
 } from "./schemas"
 
 const UUID_2 = "00000000-0000-4000-8000-000000000002"
+const UUID_3 = "00000000-0000-4000-8000-000000000003"
+const UUID_4 = "00000000-0000-4000-8000-000000000004"
 
 function buildValidPayload() {
   return {
@@ -95,6 +97,82 @@ describe("supplierSaveSchema", () => {
     expect(
       supplierSaveSchema.safeParse({ ...buildValidPayload(), location: "A" }).success,
     ).toBe(false)
+  })
+
+  it("accepts transport services with free-form pickup and drop-off points", () => {
+    const parsed = supplierSaveSchema.parse({
+      ...buildValidPayload(),
+      kind: "transfers",
+      suiteTypes: [
+        {
+          id: UUID_2,
+          name: "Premium SUV",
+          passengerCapacity: 4,
+          luggageCapacity: 4,
+          description: "Luxury airport transfer vehicle",
+          active: true,
+        },
+      ],
+      routes: [
+        {
+          id: UUID_3,
+          name: "OR Tambo to Hotel",
+          transportServiceType: "transfer",
+          pickupPoint: "OR Tambo International Airport",
+          dropoffPoint: "Sandton hotel",
+          active: true,
+          rateCards: [
+            {
+              routeId: UUID_3,
+              suiteTypeId: UUID_2,
+              pricePerPerson: 950,
+              childPrice: 300,
+              infantPrice: 100,
+              currency: "ZAR",
+              validFrom: "2026-01-01",
+              validTo: null,
+            },
+          ],
+        },
+      ],
+    })
+
+    expect(parsed.routes[0].originLocationId).toBeUndefined()
+    expect(parsed.routes[0].pickupPoint).toBe("OR Tambo International Airport")
+  })
+
+  it("requires global locations for train and airline routes", () => {
+    expect(
+      supplierSaveSchema.safeParse({
+        ...buildValidPayload(),
+        kind: "train_operator",
+        routes: [
+          {
+            id: UUID_3,
+            name: "Cape Town to Pretoria",
+            active: true,
+            rateCards: [],
+          },
+        ],
+      }).success,
+    ).toBe(false)
+
+    expect(
+      supplierSaveSchema.safeParse({
+        ...buildValidPayload(),
+        kind: "airline",
+        routes: [
+          {
+            id: UUID_3,
+            name: "Cape Town to Johannesburg",
+            originLocationId: UUID_3,
+            destinationLocationId: UUID_4,
+            active: true,
+            rateCards: [],
+          },
+        ],
+      }).success,
+    ).toBe(true)
   })
 })
 

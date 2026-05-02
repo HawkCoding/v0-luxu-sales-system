@@ -10,25 +10,30 @@ interface NumericInputProps
   value: number | null
   onValueChange: (value: number | null) => void
   nullable?: boolean
+  nullDisplayValue?: string
 }
 
 export function NumericInput({
   value,
   onValueChange,
   nullable = false,
+  nullDisplayValue = "",
   onFocus,
   onBlur,
   onWheel,
   ...props
 }: NumericInputProps) {
-  const [displayValue, setDisplayValue] = useState(value === null ? "" : String(value))
+  const getDisplayValue = (nextValue: number | null) =>
+    nextValue === null ? nullDisplayValue : String(nextValue)
+
+  const [displayValue, setDisplayValue] = useState(getDisplayValue(value))
   const [isFocused, setIsFocused] = useState(false)
 
   useEffect(() => {
     if (!isFocused) {
-      setDisplayValue(value === null ? "" : String(value))
+      setDisplayValue(getDisplayValue(value))
     }
-  }, [isFocused, value])
+  }, [isFocused, nullDisplayValue, value])
 
   return (
     <Input
@@ -36,7 +41,7 @@ export function NumericInput({
       value={displayValue}
       onFocus={(event) => {
         setIsFocused(true)
-        if (displayValue === "0") {
+        if (displayValue === "0" && (!nullable || value !== 0)) {
           setDisplayValue("")
         }
         onFocus?.(event)
@@ -61,13 +66,13 @@ export function NumericInput({
         if (displayValue === "") {
           if (nullable) {
             onValueChange(null)
-            setDisplayValue("")
+            setDisplayValue(nullDisplayValue)
           } else {
             onValueChange(0)
             setDisplayValue("0")
           }
         } else {
-          setDisplayValue(value === null ? "" : String(value))
+          setDisplayValue(getDisplayValue(value))
         }
 
         onBlur?.(event)

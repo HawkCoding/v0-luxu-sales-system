@@ -3,6 +3,7 @@ import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import type {
   Location,
   Supplier,
+  BookingTransportRequest,
   SupplierDetail,
   SupplierEmail,
   SupplierRateCard,
@@ -10,6 +11,7 @@ import type {
   SupplierSuiteType,
 } from "@/lib/types"
 
+type BookingTransportRequestRow = Database["public"]["Tables"]["booking_transport_requests"]["Row"]
 type LocationRow = Database["public"]["Tables"]["locations"]["Row"]
 type RateCardRow = Database["public"]["Tables"]["rate_cards"]["Row"]
 type RouteRow = Database["public"]["Tables"]["routes"]["Row"]
@@ -38,6 +40,7 @@ export function mapSupplier(row: SupplierRow): Supplier {
     locationId: row.location_id ?? null,
     notes: row.notes,
     active: row.active,
+    singleSupplementPct: Number(row.single_supplement_pct ?? 0),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     createdAtDisplay: formatDisplayDateTime(row.created_at),
@@ -63,8 +66,15 @@ export function mapSupplierRoute(row: RouteRow): SupplierRoute {
     id: row.id,
     supplierId: row.supplier_id,
     name: row.name,
-    originLocationId: row.origin_location_id,
-    destinationLocationId: row.destination_location_id,
+    originLocationId: row.origin_location_id ?? null,
+    destinationLocationId: row.destination_location_id ?? null,
+    transportServiceType: row.transport_service_type ?? null,
+    pickupPoint: row.pickup_point ?? null,
+    dropoffPoint: row.dropoff_point ?? null,
+    includedKmPerDay: row.included_km_per_day ?? null,
+    extraKmPrice: row.extra_km_price ?? null,
+    securityDeposit: row.security_deposit ?? null,
+    oneWayFee: row.one_way_fee ?? null,
     active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -78,7 +88,36 @@ export function mapSupplierSuiteType(row: SuiteTypeRow): SupplierSuiteType {
     id: row.id,
     supplierId: row.supplier_id,
     name: row.name,
+    passengerCapacity: row.passenger_capacity ?? null,
+    luggageCapacity: row.luggage_capacity ?? null,
+    description: row.description ?? null,
     active: row.active,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    createdAtDisplay: formatDisplayDateTime(row.created_at),
+    updatedAtDisplay: formatDisplayDateTime(row.updated_at),
+  }
+}
+
+export function mapBookingTransportRequest(row: BookingTransportRequestRow): BookingTransportRequest {
+  return {
+    id: row.id,
+    bookingId: row.booking_id,
+    serviceType: row.service_type,
+    supplierId: row.supplier_id ?? null,
+    routeId: row.route_id ?? null,
+    suiteTypeId: row.suite_type_id ?? null,
+    pickupPoint: row.pickup_point,
+    dropoffPoint: row.dropoff_point,
+    pickupAt: row.pickup_at ?? null,
+    pickupAtDisplay: formatDisplayDateTime(row.pickup_at),
+    returnAt: row.return_at ?? null,
+    returnAtDisplay: formatDisplayDateTime(row.return_at),
+    passengerCount: row.passenger_count ?? null,
+    luggageCount: row.luggage_count ?? null,
+    flightNumber: row.flight_number ?? null,
+    notes: row.notes ?? null,
+    sortOrder: row.sort_order,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     createdAtDisplay: formatDisplayDateTime(row.created_at),
