@@ -192,6 +192,10 @@ function selectedRouteCount(legs: PackageWizardLeg[]): number {
   )
 }
 
+function legHasRequiredSelection(leg: PackageWizardLeg): boolean {
+  return leg.supplierKind === "hotel_property" || leg.selectedRouteIds.length > 0
+}
+
 function getSelectedRoutes(leg: PackageWizardLeg): SupplierRoute[] {
   const selectedRouteIds = new Set(leg.selectedRouteIds)
   return leg.routes.filter((route) => selectedRouteIds.has(route.id))
@@ -237,7 +241,7 @@ export function PackageWizard() {
   const filteredSuppliers = suppliers.filter((supplier) => supplier.kind === supplierKind)
   const selectedSupplier = suppliers.find((supplier) => supplier.id === selectedSupplierId)
   const hasAnySelection =
-    state.legs.length > 0 && state.legs.every((leg) => leg.selectedRouteIds.length > 0)
+    state.legs.length > 0 && state.legs.every((leg) => legHasRequiredSelection(leg))
   const isNextDisabled =
     step === 5 ||
     (step === 2 && state.legs.length === 0) ||
@@ -272,7 +276,7 @@ export function PackageWizard() {
       toast.error("Package name is required")
       return
     }
-    const legWithoutSelection = state.legs.find((leg) => leg.selectedRouteIds.length === 0)
+    const legWithoutSelection = state.legs.find((leg) => !legHasRequiredSelection(leg))
     if (legWithoutSelection) {
       const vocab = getSupplierVocabulary(legWithoutSelection.supplierKind)
       toast.error(`Each leg needs at least one selected ${vocab.route.toLowerCase()}`)
