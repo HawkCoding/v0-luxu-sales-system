@@ -13,7 +13,13 @@ import { Spinner } from "@/components/ui/spinner"
 const loginPageClassName = "min-h-screen bg-background flex items-center justify-center p-4"
 // DEV_QUICK_LOGIN_START
 const canUseDevQuickLogin = process.env.NODE_ENV === "development"
-const defaultDevQuickLoginEmail = "carmen@luxustravel.co.za"
+const defaultDevQuickLoginEmails = [
+  "carmen@luxustravel.co.za",
+  "dirk@luxustravel.co.za",
+  "leonie@luxustravel.co.za",
+  "monade@luxustravel.co.za",
+  "douwlien@luxustravel.co.za",
+]
 const defaultDevQuickLoginPasswords = ["password123"]
 
 interface DevQuickLoginCandidates {
@@ -63,7 +69,7 @@ function getDevQuickLoginCandidates() {
 
   const candidateEmails = dedupeValues([
     ...splitCommaSeparatedValues(configuredEmail).map((email) => email.toLowerCase()),
-    defaultDevQuickLoginEmail,
+    ...defaultDevQuickLoginEmails,
   ])
   const candidatePasswords = dedupeValues([
     ...splitCommaSeparatedValues(rawPasswords),
@@ -92,6 +98,14 @@ function getDevQuickLoginAttempts(candidates: DevQuickLoginCandidates[]) {
   return attempts
 }
 // DEV_QUICK_LOGIN_END
+
+function getLoginRequestErrorMessage(error: unknown) {
+  if (error instanceof TypeError && error.message === "Failed to fetch") {
+    return "Unable to reach local Supabase. Start the local Supabase stack, then try signing in again."
+  }
+
+  return "Sign in failed. Please try again."
+}
 
 function LoginShell({ children }: { children: React.ReactNode }) {
   return <div className={loginPageClassName}>{children}</div>
@@ -164,6 +178,8 @@ function LoginForm() {
         setError("Invalid email or password. Check your credentials or use Forgot password.")
         setPassword("")
       }
+    } catch (error) {
+      setError(getLoginRequestErrorMessage(error))
     } finally {
       setSubmitting(false)
     }
@@ -216,6 +232,8 @@ function LoginForm() {
       }
 
       setError("Dev quick login failed with configured credentials.")
+    } catch (error) {
+      setError(getLoginRequestErrorMessage(error))
     } finally {
       setSubmitting(false)
     }

@@ -1,5 +1,11 @@
 -- Local demo seed for everyday development.
 -- Login with any seeded email below using password: password123
+-- Seeded app users:
+--   carmen@luxustravel.co.za  admin
+--   dirk@luxustravel.co.za    manager
+--   leonie@luxustravel.co.za  consultant
+--   monade@luxustravel.co.za  consultant
+--   douwlien@luxustravel.co.za readonly
 
 begin;
 
@@ -135,7 +141,15 @@ values
     '{"name":"Douwlien","surname":"Louw","email_verified":true}'::jsonb,
     '2025-08-01T08:00:00Z',
     '2025-08-01T08:00:00Z'
-  );
+  )
+on conflict (id) do update
+set
+  email = excluded.email,
+  encrypted_password = excluded.encrypted_password,
+  email_confirmed_at = excluded.email_confirmed_at,
+  raw_app_meta_data = excluded.raw_app_meta_data,
+  raw_user_meta_data = excluded.raw_user_meta_data,
+  updated_at = excluded.updated_at;
 
 insert into auth.identities (
   id,
@@ -197,21 +211,29 @@ values
     '2025-08-01T08:00:00Z',
     '2025-08-01T08:00:00Z',
     '2025-08-01T08:00:00Z'
-  );
+  )
+on conflict (id) do update
+set
+  user_id = excluded.user_id,
+  identity_data = excluded.identity_data,
+  provider = excluded.provider,
+  provider_id = excluded.provider_id,
+  updated_at = excluded.updated_at;
 
-insert into public.profiles (user_id, email, name, surname, clearance_level, created_at, updated_at)
+insert into public.profiles (user_id, email, name, surname, clearance_level, is_active, created_at, updated_at)
 values
-  ('00000000-0000-0000-0000-0000000000a1', 'carmen@luxustravel.co.za', 'Carmen', 'de Jager', 'admin', '2025-08-01T08:00:00Z', '2025-08-01T08:00:00Z'),
-  ('00000000-0000-0000-0000-0000000000a2', 'leonie@luxustravel.co.za', 'Leonie', 'Botha', 'consultant', '2025-08-01T08:00:00Z', '2025-08-01T08:00:00Z'),
-  ('00000000-0000-0000-0000-0000000000a3', 'dirk@luxustravel.co.za', 'Dirk', 'Rossouw', 'manager', '2025-08-01T08:00:00Z', '2025-08-01T08:00:00Z'),
-  ('00000000-0000-0000-0000-0000000000a4', 'monade@luxustravel.co.za', 'Monade', 'van Eeden', 'consultant', '2025-08-01T08:00:00Z', '2025-08-01T08:00:00Z'),
-  ('00000000-0000-0000-0000-0000000000a5', 'douwlien@luxustravel.co.za', 'Douwlien', 'Louw', 'readonly', '2025-08-01T08:00:00Z', '2025-08-01T08:00:00Z')
+  ('00000000-0000-0000-0000-0000000000a1', 'carmen@luxustravel.co.za', 'Carmen', 'de Jager', 'admin', true, '2025-08-01T08:00:00Z', '2025-08-01T08:00:00Z'),
+  ('00000000-0000-0000-0000-0000000000a2', 'leonie@luxustravel.co.za', 'Leonie', 'Botha', 'consultant', true, '2025-08-01T08:00:00Z', '2025-08-01T08:00:00Z'),
+  ('00000000-0000-0000-0000-0000000000a3', 'dirk@luxustravel.co.za', 'Dirk', 'Rossouw', 'manager', true, '2025-08-01T08:00:00Z', '2025-08-01T08:00:00Z'),
+  ('00000000-0000-0000-0000-0000000000a4', 'monade@luxustravel.co.za', 'Monade', 'van Eeden', 'consultant', true, '2025-08-01T08:00:00Z', '2025-08-01T08:00:00Z'),
+  ('00000000-0000-0000-0000-0000000000a5', 'douwlien@luxustravel.co.za', 'Douwlien', 'Louw', 'readonly', true, '2025-08-01T08:00:00Z', '2025-08-01T08:00:00Z')
 on conflict (user_id) do update
 set
   email = excluded.email,
   name = excluded.name,
   surname = excluded.surname,
   clearance_level = excluded.clearance_level,
+  is_active = excluded.is_active,
   updated_at = excluded.updated_at;
 
 insert into public.locations (id, name, country, region_code, created_at, updated_at)

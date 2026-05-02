@@ -124,6 +124,44 @@ Recommended repair workflow (metadata only):
 
 Use this only for history bookkeeping mismatches, not for fixing failed schema migrations.
 
+## Local to Hosted Database Sync
+
+Use the guarded remote sync helper when local Supabase needs to be compared with hosted development and production:
+
+```powershell
+pnpm db:remote:compare
+```
+
+The helper expects direct Postgres connection strings, not API URLs. Set them in your shell or in a gitignored `.env.sync.local` file:
+
+```env
+SUPABASE_DEV_DB_URL=postgresql://postgres.<dev-ref>:<password>@aws-0-...pooler.supabase.com:6543/postgres
+SUPABASE_PROD_DB_URL=postgresql://postgres.<prod-ref>:<password>@aws-0-...pooler.supabase.com:6543/postgres
+```
+
+What compare mode does:
+
+- lists local and remote migration history
+- dumps local and remote `public` schema
+- writes a remote-to-local schema diff
+- runs a Supabase migration push dry-run
+- stores reports under `tmp-db-sync/`
+
+To apply local migrations to hosted development:
+
+```powershell
+pnpm db:remote:push:dev
+```
+
+To apply to production, use the explicit production opt-in:
+
+```powershell
+$env:ALLOW_PRODUCTION_DB_PUSH="I_UNDERSTAND_THIS_WRITES_TO_PRODUCTION"
+pnpm db:remote:push:prod
+```
+
+Add `-IncludeSeed` only when you intentionally want Supabase CLI to apply `supabase/seed.sql` as part of the push. Do not use this helper to overwrite production business data; it is for schema migrations and intentional seed data only.
+
 ---
 
 This project uses a development-first workflow:
