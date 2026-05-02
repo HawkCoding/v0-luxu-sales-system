@@ -1,7 +1,7 @@
 "use client"
 
 import { useJobDetail } from "@/lib/use-data"
-import { useParams, useRouter } from "next/navigation"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
@@ -44,6 +44,21 @@ import { toast } from "sonner"
 interface JobPatchResponse {
   id: string
   updatedAt: string
+}
+
+type JobDetailTab = "enquiry" | "quotes" | "payments" | "correspondence" | "documents" | "audit"
+
+const JOB_DETAIL_TABS = new Set<JobDetailTab>([
+  "enquiry",
+  "quotes",
+  "payments",
+  "correspondence",
+  "documents",
+  "audit",
+])
+
+function parseJobDetailTab(value: string | null): JobDetailTab {
+  return value && JOB_DETAIL_TABS.has(value as JobDetailTab) ? (value as JobDetailTab) : "enquiry"
 }
 
 function JobDetailSkeleton() {
@@ -113,6 +128,7 @@ function JobDetailSkeleton() {
 
 export default function JobDetailPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { id } = useParams<{ id: string }>()
   const { data, isLoading, error, mutate } = useJobDetail(id)
   const { can } = useRole()
@@ -124,6 +140,7 @@ export default function JobDetailPage() {
   const [customerResults, setCustomerResults] = useState<Array<{ id: string; firstName: string; lastName: string; email: string }>>([])
   const [changingCustomer, setChangingCustomer] = useState(false)
   const [lastJobPayload, setLastJobPayload] = useState<Record<string, unknown> | null>(null)
+  const [activeTab, setActiveTab] = useState<JobDetailTab>(() => parseJobDetailTab(searchParams.get("tab")))
   const {
     save: saveJob,
     isSaving: isSavingJob,
@@ -147,6 +164,10 @@ export default function JobDetailPage() {
   useEffect(() => {
     setEditing(cancelOpen || changeCustomerOpen)
   }, [cancelOpen, changeCustomerOpen, setEditing])
+
+  useEffect(() => {
+    setActiveTab(parseJobDetailTab(searchParams.get("tab")))
+  }, [searchParams])
 
   if (isLoading || !data || hasLoadError) {
     return <JobDetailSkeleton />
@@ -344,7 +365,7 @@ export default function JobDetailPage() {
       )}
 
       {/* Tabs */}
-      <Tabs defaultValue="enquiry" className="space-y-4">
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(parseJobDetailTab(value))} className="space-y-4">
         <TabsList className="bg-secondary/50">
           <TabsTrigger value="enquiry" className="text-xs">Enquiry</TabsTrigger>
           <TabsTrigger value="quotes" className="text-xs">Quotes ({quotes.length})</TabsTrigger>

@@ -2,6 +2,7 @@
 
 import { usePipeline, useAllData } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
+import { DEFAULT_DEPOSIT_PERCENT } from "@/lib/pipeline/constants"
 import {
   getCanonicalPipelineStage,
   getPipelineStageLabel,
@@ -378,7 +379,7 @@ export default function PipelinePage() {
     let paymentColor = "red"
     if (totalPaid < 0) paymentColor = "blue"
     else if (totalPaid >= quoteTotal && totalPaid > 0) paymentColor = "green"
-    else if (totalPaid >= quoteTotal * 0.25) paymentColor = "yellow"
+    else if (totalPaid >= quoteTotal * DEFAULT_DEPOSIT_PERCENT) paymentColor = "yellow"
     else if (totalPaid > 0) paymentColor = "purple"
     return {
       ...b,

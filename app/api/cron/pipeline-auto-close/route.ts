@@ -4,6 +4,8 @@ import { applyTransition } from "@/lib/pipeline/apply-transition"
 import { createServiceClient } from "@/lib/supabase/server"
 import type { PipelineStage, Source } from "@/lib/types"
 
+const THANK_YOU_CATCHUP_WINDOW_DAYS = 14
+
 interface MaintenanceBooking {
   id: string
   booking_number: string
@@ -32,10 +34,6 @@ function addDays(date: Date, days: number): Date {
 function dateFromDatabaseDate(value: string): Date {
   const [year = "1970", month = "1", day = "1"] = value.split("-")
   return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)))
-}
-
-function datesEqual(left: Date, right: Date): boolean {
-  return left.getTime() === right.getTime()
 }
 
 export async function GET(request: Request) {
@@ -84,9 +82,14 @@ export async function GET(request: Request) {
 
     const tripEndDate = addDays(dateFromDatabaseDate(booking.departure_date), booking.duration_nights ?? 0)
     const thankYouDueDate = addDays(tripEndDate, 3)
+    const thankYouCatchupDeadline = addDays(tripEndDate, 3 + THANK_YOU_CATCHUP_WINDOW_DAYS)
     const closeDueDate = addDays(tripEndDate, 7)
 
-    if (datesEqual(thankYouDueDate, today) && !thankYouBookingIds.has(booking.id)) {
+    if (
+      thankYouDueDate.getTime() <= today.getTime() &&
+      today.getTime() <= thankYouCatchupDeadline.getTime() &&
+      !thankYouBookingIds.has(booking.id)
+    ) {
       const rendered = renderThankYouEmail({
         customerFirstName: booking.customer?.first_name ?? "",
         routeName: booking.route?.name ?? "",

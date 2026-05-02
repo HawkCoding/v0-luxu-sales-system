@@ -179,4 +179,50 @@ describe("applyTransition", () => {
       }),
     )
   })
+
+  it("schedules deposit correspondence when an invoice document already exists", async () => {
+    const now = new Date("2026-05-01T10:00:00.000Z")
+    const { client, operations } = createFakeSupabase({
+      id: "booking-3",
+      stage: "deposit_requested",
+      invoice_balance: null,
+    })
+
+    const result = await applyTransition(client, {
+      booking: {
+        id: "booking-3",
+        booking_number: "BT-2026-0003",
+        stage: "accepted",
+        source: "web_form",
+        raw_text: null,
+        updated_at: "2026-05-01T09:00:00.000Z",
+        customer_id: "customer-3",
+        consultant: "DR",
+      },
+      targetStage: "deposit_requested",
+      actorName: "Douwlien",
+      actorUserId: "user-1",
+      manualConfirmations: {
+        createInvoiceCorrespondence: true,
+      },
+      quotes: [{ id: "quote-3", status: "accepted", total: 1234.56, created_at: "2026-05-01T08:00:00.000Z" }],
+      documents: [{ id: "document-3", kind: "invoice_pdf", status: "generated" }],
+      correspondences: [],
+      now,
+    })
+
+    expect(result.scheduledDepositCorrespondence).toBe(true)
+    expect(operations).toContainEqual(
+      expect.objectContaining({
+        table: "correspondences",
+        action: "insert",
+        payload: expect.objectContaining({
+          booking_id: "booking-3",
+          kind: "invoice",
+          status: "scheduled",
+          body_html: expect.stringContaining("308.64"),
+        }),
+      }),
+    )
+  })
 })

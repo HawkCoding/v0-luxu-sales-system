@@ -97,6 +97,39 @@ describe("validateTransition", () => {
     ])
   })
 
+  it("marks missing invoice correspondence as an auto-fixable confirmation", () => {
+    const failures = validateTransition({
+      ...baseInput,
+      booking: { ...baseInput.booking, stage: "accepted" },
+      targetStage: "deposit_requested",
+      quotes: [{ status: "accepted", total: 1000 }],
+      documents: [{ kind: "invoice_pdf", status: "generated" }],
+      correspondences: [],
+    })
+
+    expect(failures).toEqual([
+      expect.objectContaining({
+        gateId: "invoice_correspondence",
+        severity: "confirm",
+        autoFixable: "create_invoice_correspondence",
+      }),
+    ])
+  })
+
+  it("allows confirmed invoice correspondence creation", () => {
+    const failures = validateTransition({
+      ...baseInput,
+      booking: { ...baseInput.booking, stage: "accepted" },
+      targetStage: "deposit_requested",
+      quotes: [{ status: "accepted", total: 1000 }],
+      documents: [{ kind: "invoice_pdf", status: "generated" }],
+      correspondences: [],
+      manualConfirmations: { createInvoiceCorrespondence: true },
+    })
+
+    expect(failures).toEqual([])
+  })
+
   it("requires manual deposit confirmation", () => {
     const withoutConfirmation = validateTransition({
       ...baseInput,

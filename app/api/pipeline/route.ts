@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { createSessionClient } from "@/lib/supabase/server"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
+import { DEFAULT_DEPOSIT_PERCENT } from "@/lib/pipeline/constants"
 
 function addDaysToDateString(value: string, days: number): string {
   const [year = "1970", month = "1", day = "1"] = value.split("-")
@@ -45,7 +46,7 @@ export async function GET() {
     let paymentColor = "red"
     if (totalPaid < 0) paymentColor = "blue"
     else if (totalPaid >= quoteTotal && totalPaid > 0) paymentColor = "green"
-    else if (totalPaid >= quoteTotal * 0.25) paymentColor = "yellow"
+    else if (totalPaid >= quoteTotal * DEFAULT_DEPOSIT_PERCENT) paymentColor = "yellow"
     else if (totalPaid > 0) paymentColor = "purple"
 
     return {

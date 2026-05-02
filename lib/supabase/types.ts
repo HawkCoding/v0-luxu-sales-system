@@ -66,8 +66,6 @@ export type Database = {
           entity_type: string
           id: string
           meta_json: Json | null
-          override_reason: string | null
-          overridden_by: string | null
         }
         Insert: {
           action: string
@@ -111,6 +109,8 @@ export type Database = {
           entity_type: string
           id: string
           meta_json: Json | null
+          overridden_by: string | null
+          override_reason: string | null
         }
         Insert: {
           action: string
@@ -123,8 +123,8 @@ export type Database = {
           entity_type: string
           id?: string
           meta_json?: Json | null
-          override_reason?: string | null
           overridden_by?: string | null
+          override_reason?: string | null
         }
         Update: {
           action?: string
@@ -137,8 +137,8 @@ export type Database = {
           entity_type?: string
           id?: string
           meta_json?: Json | null
-          override_reason?: string | null
           overridden_by?: string | null
+          override_reason?: string | null
         }
         Relationships: []
       }
@@ -184,11 +184,100 @@ export type Database = {
           },
         ]
       }
+      booking_transport_requests: {
+        Row: {
+          booking_id: string
+          created_at: string
+          dropoff_point: string
+          flight_number: string | null
+          id: string
+          luggage_count: number | null
+          notes: string | null
+          passenger_count: number | null
+          pickup_at: string | null
+          pickup_point: string
+          return_at: string | null
+          route_id: string | null
+          service_type: string
+          sort_order: number
+          suite_type_id: string | null
+          supplier_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          booking_id: string
+          created_at?: string
+          dropoff_point: string
+          flight_number?: string | null
+          id?: string
+          luggage_count?: number | null
+          notes?: string | null
+          passenger_count?: number | null
+          pickup_at?: string | null
+          pickup_point: string
+          return_at?: string | null
+          route_id?: string | null
+          service_type: string
+          sort_order?: number
+          suite_type_id?: string | null
+          supplier_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          booking_id?: string
+          created_at?: string
+          dropoff_point?: string
+          flight_number?: string | null
+          id?: string
+          luggage_count?: number | null
+          notes?: string | null
+          passenger_count?: number | null
+          pickup_at?: string | null
+          pickup_point?: string
+          return_at?: string | null
+          route_id?: string | null
+          service_type?: string
+          sort_order?: number
+          suite_type_id?: string | null
+          supplier_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "booking_transport_requests_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_transport_requests_route_id_fkey"
+            columns: ["route_id"]
+            isOneToOne: false
+            referencedRelation: "routes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_transport_requests_suite_type_id_fkey"
+            columns: ["suite_type_id"]
+            isOneToOne: false
+            referencedRelation: "suite_types"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_transport_requests_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       bookings: {
         Row: {
+          accepted_at: string | null
           additional_services: boolean
           additional_services_details: string | null
-          accepted_at: string | null
           booking_number: string
           cancel_reason: string | null
           cancelled_at: string | null
@@ -228,23 +317,23 @@ export type Database = {
           package_id: string | null
           promotion_code: string | null
           purpose: Database["public"]["Enums"]["booking_purpose"]
+          quote_sent_at: string | null
           raw_text: string | null
-          refunded_at: string | null
           refund_amount: number | null
           refund_reference: string | null
           refund_status: string | null
+          refunded_at: string | null
           route_id: string | null
           source: Database["public"]["Enums"]["source_kind"]
           stage: Database["public"]["Enums"]["pipeline_stage"]
           terms_accepted: boolean
-          quote_sent_at: string | null
           updated_at: string
           voucher_sent_at: string | null
         }
         Insert: {
+          accepted_at?: string | null
           additional_services?: boolean
           additional_services_details?: string | null
-          accepted_at?: string | null
           booking_number?: string
           cancel_reason?: string | null
           cancelled_at?: string | null
@@ -284,23 +373,23 @@ export type Database = {
           package_id?: string | null
           promotion_code?: string | null
           purpose: Database["public"]["Enums"]["booking_purpose"]
+          quote_sent_at?: string | null
           raw_text?: string | null
-          refunded_at?: string | null
           refund_amount?: number | null
           refund_reference?: string | null
           refund_status?: string | null
+          refunded_at?: string | null
           route_id?: string | null
           source?: Database["public"]["Enums"]["source_kind"]
           stage?: Database["public"]["Enums"]["pipeline_stage"]
           terms_accepted?: boolean
-          quote_sent_at?: string | null
           updated_at?: string
           voucher_sent_at?: string | null
         }
         Update: {
+          accepted_at?: string | null
           additional_services?: boolean
           additional_services_details?: string | null
-          accepted_at?: string | null
           booking_number?: string
           cancel_reason?: string | null
           cancelled_at?: string | null
@@ -340,16 +429,16 @@ export type Database = {
           package_id?: string | null
           promotion_code?: string | null
           purpose?: Database["public"]["Enums"]["booking_purpose"]
+          quote_sent_at?: string | null
           raw_text?: string | null
-          refunded_at?: string | null
           refund_amount?: number | null
           refund_reference?: string | null
           refund_status?: string | null
+          refunded_at?: string | null
           route_id?: string | null
           source?: Database["public"]["Enums"]["source_kind"]
           stage?: Database["public"]["Enums"]["pipeline_stage"]
           terms_accepted?: boolean
-          quote_sent_at?: string | null
           updated_at?: string
           voucher_sent_at?: string | null
         }
@@ -971,6 +1060,39 @@ export type Database = {
         }
         Relationships: []
       }
+      package_leg_routes: {
+        Row: {
+          created_at: string
+          package_leg_id: string
+          route_id: string
+        }
+        Insert: {
+          created_at?: string
+          package_leg_id: string
+          route_id: string
+        }
+        Update: {
+          created_at?: string
+          package_leg_id?: string
+          route_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "package_leg_routes_package_leg_id_fkey"
+            columns: ["package_leg_id"]
+            isOneToOne: false
+            referencedRelation: "package_legs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "package_leg_routes_route_id_fkey"
+            columns: ["route_id"]
+            isOneToOne: false
+            referencedRelation: "routes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       package_legs: {
         Row: {
           created_at: string
@@ -1009,39 +1131,6 @@ export type Database = {
             columns: ["supplier_id"]
             isOneToOne: false
             referencedRelation: "suppliers"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      package_leg_routes: {
-        Row: {
-          created_at: string
-          package_leg_id: string
-          route_id: string
-        }
-        Insert: {
-          created_at?: string
-          package_leg_id: string
-          route_id: string
-        }
-        Update: {
-          created_at?: string
-          package_leg_id?: string
-          route_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "package_leg_routes_package_leg_id_fkey"
-            columns: ["package_leg_id"]
-            isOneToOne: false
-            referencedRelation: "package_legs"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "package_leg_routes_route_id_fkey"
-            columns: ["route_id"]
-            isOneToOne: false
-            referencedRelation: "routes"
             referencedColumns: ["id"]
           },
         ]
@@ -1358,95 +1447,6 @@ export type Database = {
           },
         ]
       }
-      booking_transport_requests: {
-        Row: {
-          booking_id: string
-          created_at: string
-          dropoff_point: string
-          flight_number: string | null
-          id: string
-          luggage_count: number | null
-          notes: string | null
-          passenger_count: number | null
-          pickup_at: string | null
-          pickup_point: string
-          return_at: string | null
-          route_id: string | null
-          service_type: "transfer" | "rental"
-          sort_order: number
-          suite_type_id: string | null
-          supplier_id: string | null
-          updated_at: string
-        }
-        Insert: {
-          booking_id: string
-          created_at?: string
-          dropoff_point: string
-          flight_number?: string | null
-          id?: string
-          luggage_count?: number | null
-          notes?: string | null
-          passenger_count?: number | null
-          pickup_at?: string | null
-          pickup_point: string
-          return_at?: string | null
-          route_id?: string | null
-          service_type: "transfer" | "rental"
-          sort_order?: number
-          suite_type_id?: string | null
-          supplier_id?: string | null
-          updated_at?: string
-        }
-        Update: {
-          booking_id?: string
-          created_at?: string
-          dropoff_point?: string
-          flight_number?: string | null
-          id?: string
-          luggage_count?: number | null
-          notes?: string | null
-          passenger_count?: number | null
-          pickup_at?: string | null
-          pickup_point?: string
-          return_at?: string | null
-          route_id?: string | null
-          service_type?: "transfer" | "rental"
-          sort_order?: number
-          suite_type_id?: string | null
-          supplier_id?: string | null
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "booking_transport_requests_booking_id_fkey"
-            columns: ["booking_id"]
-            isOneToOne: false
-            referencedRelation: "bookings"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "booking_transport_requests_route_id_fkey"
-            columns: ["route_id"]
-            isOneToOne: false
-            referencedRelation: "routes"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "booking_transport_requests_suite_type_id_fkey"
-            columns: ["suite_type_id"]
-            isOneToOne: false
-            referencedRelation: "suite_types"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "booking_transport_requests_supplier_id_fkey"
-            columns: ["supplier_id"]
-            isOneToOne: false
-            referencedRelation: "suppliers"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       report_snapshots: {
         Row: {
           created_at: string
@@ -1486,7 +1486,7 @@ export type Database = {
           pickup_point: string | null
           security_deposit: number | null
           supplier_id: string
-          transport_service_type: "transfer" | "rental" | null
+          transport_service_type: string | null
           updated_at: string
         }
         Insert: {
@@ -1503,7 +1503,7 @@ export type Database = {
           pickup_point?: string | null
           security_deposit?: number | null
           supplier_id: string
-          transport_service_type?: "transfer" | "rental" | null
+          transport_service_type?: string | null
           updated_at?: string
         }
         Update: {
@@ -1520,7 +1520,7 @@ export type Database = {
           pickup_point?: string | null
           security_deposit?: number | null
           supplier_id?: string
-          transport_service_type?: "transfer" | "rental" | null
+          transport_service_type?: string | null
           updated_at?: string
         }
         Relationships: [

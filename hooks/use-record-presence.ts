@@ -32,7 +32,7 @@ function getInitials(name: string, email: string): string {
 
 export function useRecordPresence(
   scope: string,
-  recordId: string,
+  recordId: string | undefined,
 ): {
   others: PresenceUser[]
   setEditing: (editing: boolean) => void
