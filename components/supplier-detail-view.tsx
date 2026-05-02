@@ -1369,7 +1369,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                                   {!isTransport ? (
                                     <>
                                       <div className="flex items-center gap-1">
-                                        <span className="w-10 shrink-0 text-xs text-muted-foreground">Child</span>
+                                        <span className="w-16 shrink-0 text-xs text-muted-foreground">Child</span>
                                         <NumericInput
                                           min="0"
                                           step="0.01"
@@ -1382,7 +1382,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                                         />
                                       </div>
                                       <div className="flex items-center gap-1">
-                                        <span className="w-10 shrink-0 text-xs text-muted-foreground">Infant</span>
+                                        <span className="w-16 shrink-0 text-xs text-muted-foreground">Infant</span>
                                         <NumericInput
                                           min="0"
                                           step="0.01"
