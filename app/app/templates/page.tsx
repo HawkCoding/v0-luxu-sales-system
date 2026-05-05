@@ -1,81 +1,56 @@
 "use client"
 
-import { useTemplates } from "@/lib/use-data"
+import { useTemplates, useVoucherTemplate } from "@/lib/use-data"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useRole } from "@/lib/role-context"
-import { useState, useEffect } from "react"
-import { Edit3, Eye, Download, FileText } from "lucide-react"
+import { useState } from "react"
+import { Edit3, Eye, BookOpen } from "lucide-react"
 import type { Template } from "@/lib/types"
+import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
+import { VoucherTemplateEditor } from "@/components/voucher-template-editor"
 
-interface VoucherTemplate {
-  headerText: string
-  productLine: string
-  guidanceText: string
-  footerText: string
-  placeholders: string[]
-}
+const EMAIL_PLACEHOLDERS = [
+  { token: "{{jobNumber}}",     description: "Job/booking reference number (e.g. BT-2026-0001)" },
+  { token: "{{customerName}}", description: "Full name of the customer" },
+  { token: "{{direction}}",     description: "Travel route direction" },
+  { token: "{{departureDate}}", description: "Departure date of the trip" },
+  { token: "{{validityDate}}", description: "Date the quote expires (14 days from issue)" },
+  { token: "{{total}}",         description: "Total quoted price" },
+  { token: "{{lastSentDate}}", description: "Date the quote was last sent to the customer" },
+  { token: "{{depositAmount}}", description: "Deposit amount due (default 25% of total)" },
+]
+
+const VOUCHER_PLACEHOLDERS = [
+  { token: "{voucher_number}",   description: "Unique voucher identifier" },
+  { token: "{guest_names}",      description: "Names of all guests on the booking" },
+  { token: "{consultant_name}",  description: "Name of the assigned consultant" },
+  { token: "{supplier_name}",    description: "Name of the service supplier" },
+  { token: "{route}",            description: "Route or itinerary name" },
+  { token: "{departure}",        description: "Departure location and/or time" },
+  { token: "{arrival}",          description: "Arrival location and/or time" },
+  { token: "{suite_type}",       description: "Accommodation or transport suite type" },
+  { token: "{number_of_guests}", description: "Total number of guests" },
+  { token: "{special_requests}", description: "Any special requests from the customer" },
+  { token: "{customer_email}",   description: "Customer's email address" },
+  { token: "{customer_phone}",   description: "Customer's phone number" },
+]
 
 export default function TemplatesPage() {
   const { data: templates, isLoading, mutate } = useTemplates()
+  const { data: voucherTemplate, isLoading: voucherLoading } = useVoucherTemplate()
   const { can } = useRole()
   const [editing, setEditing] = useState<Template | null>(null)
   const [editSubject, setEditSubject] = useState("")
   const [editBody, setEditBody] = useState("")
   const [saving, setSaving] = useState(false)
   const [preview, setPreview] = useState<Template | null>(null)
-  
-  // Voucher template state
-  const [voucherTemplate, setVoucherTemplate] = useState<VoucherTemplate>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('voucher-template')
-      if (saved) return JSON.parse(saved)
-    }
-    return {
-      headerText: "A division of Luxus Travel & Tours",
-      productLine: "THE BLUE TRAIN  •  ROVOS RAIL",
-      guidanceText: "This voucher confirms your reservation. All services are pre-paid unless indicated. Additional services or upgrades may incur extra charges payable directly to the service provider.",
-      footerText: "For any queries, please contact your consultant. Safe travels!",
-      placeholders: [
-        "{voucher_number}",
-        "{guest_names}",
-        "{consultant_name}",
-        "{supplier_name}",
-        "{route}",
-        "{departure}",
-        "{arrival}",
-        "{suite_type}",
-        "{number_of_guests}",
-        "{special_requests}",
-        "{customer_email}",
-        "{customer_phone}"
-      ]
-    }
-  })
-  const [editingVoucher, setEditingVoucher] = useState(false)
-
-  // Save voucher template to localStorage
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('voucher-template', JSON.stringify(voucherTemplate))
-    }
-  }, [voucherTemplate])
-
-  const downloadVoucherTemplate = () => {
-    const blob = new Blob([JSON.stringify(voucherTemplate, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `voucher-template-${Date.now()}.json`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
+  const [showPlaceholders, setShowPlaceholders] = useState(false)
 
   if (isLoading || !templates) {
     return <div className="p-6"><div className="animate-pulse space-y-3">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-24 bg-secondary rounded-lg" />)}</div></div>
@@ -105,9 +80,15 @@ export default function TemplatesPage() {
 
   return (
     <div className="p-6 space-y-4 max-w-5xl">
-      <div>
-        <h1 className="text-3xl font-semibold text-foreground tracking-tight">Templates</h1>
-        <p className="text-base text-muted-foreground mt-2">Email and voucher templates for customer communications</p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-semibold text-foreground tracking-tight">Templates</h1>
+          <p className="text-base text-muted-foreground mt-2">Email and voucher templates for customer communications</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => setShowPlaceholders(true)}>
+          <BookOpen className="w-4 h-4 mr-1.5" />
+          Placeholder Names
+        </Button>
       </div>
 
       <Tabs defaultValue="email" className="space-y-4">
@@ -117,87 +98,59 @@ export default function TemplatesPage() {
         </TabsList>
 
         <TabsContent value="email" className="space-y-3">
-        {(templates as Template[]).map(t => (
-          <Card key={t.id}>
-            <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <CardTitle className="text-sm font-medium">{t.key.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}</CardTitle>
-                  <Badge variant="secondary" className="text-[10px]">v{t.version}</Badge>
-                  <Badge variant={t.active ? "default" : "outline"} className="text-[10px]">{t.active ? "Active" : "Inactive"}</Badge>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="sm" onClick={() => setPreview(t)}>
-                    <Eye className="w-3.5 h-3.5" />
-                  </Button>
-                  {can("edit:templates") && (
-                    <Button variant="ghost" size="sm" onClick={() => startEdit(t)}>
-                      <Edit3 className="w-3.5 h-3.5" />
+          {(templates as Template[]).map(t => (
+            <Card key={t.id}>
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <CardTitle className="text-sm font-medium">{t.key.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}</CardTitle>
+                    <Badge variant="secondary" className="text-[10px]">v{t.version}</Badge>
+                    <Badge variant={t.active ? "default" : "outline"} className="text-[10px]">{t.active ? "Active" : "Inactive"}</Badge>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button variant="ghost" size="sm" onClick={() => setPreview(t)}>
+                      <Eye className="w-3.5 h-3.5" />
                     </Button>
-                  )}
+                    {can("edit:templates") && (
+                      <Button variant="ghost" size="sm" onClick={() => startEdit(t)}>
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <p className="text-xs text-muted-foreground"><span className="font-medium">Subject:</span> {t.subject}</p>
-            </CardContent>
-          </Card>
-        ))}
+              </CardHeader>
+              <CardContent>
+                <p className="text-xs text-muted-foreground"><span className="font-medium">Subject:</span> {t.subject}</p>
+              </CardContent>
+            </Card>
+          ))}
         </TabsContent>
 
-        <TabsContent value="voucher" className="space-y-4">
+        <TabsContent value="voucher">
           <Card>
             <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-lg">Voucher Template</CardTitle>
-                  <p className="text-sm text-muted-foreground mt-1">Configure the voucher PDF layout and placeholders</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" onClick={downloadVoucherTemplate}>
-                    <Download className="w-4 h-4 mr-1.5" />
-                    Download
-                  </Button>
-                  {can("edit:templates") && (
-                    <Button size="sm" onClick={() => setEditingVoucher(true)}>
-                      <Edit3 className="w-4 h-4 mr-1.5" />
-                      Edit
-                    </Button>
-                  )}
-                </div>
-              </div>
+              <CardTitle className="text-lg">Voucher Template</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Customise the visual design and content of voucher PDFs sent to guests.
+              </p>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <h4 className="text-sm font-semibold mb-2">Header Text</h4>
-                <p className="text-sm text-muted-foreground">{voucherTemplate.headerText}</p>
-              </div>
-              <div>
-                <h4 className="text-sm font-semibold mb-2">Product Line</h4>
-                <p className="text-sm text-muted-foreground">{voucherTemplate.productLine}</p>
-              </div>
-              <div>
-                <h4 className="text-sm font-semibold mb-2">Guidance Text</h4>
-                <p className="text-sm text-muted-foreground">{voucherTemplate.guidanceText}</p>
-              </div>
-              <div>
-                <h4 className="text-sm font-semibold mb-2">Footer Text</h4>
-                <p className="text-sm text-muted-foreground">{voucherTemplate.footerText}</p>
-              </div>
-              <div>
-                <h4 className="text-sm font-semibold mb-2">Available Placeholders</h4>
-                <div className="flex flex-wrap gap-2">
-                  {voucherTemplate.placeholders.map(p => (
-                    <Badge key={p} variant="secondary" className="text-xs font-mono">{p}</Badge>
-                  ))}
+            <CardContent className="pb-20">
+              {voucherLoading ? (
+                <div className="animate-pulse space-y-3">
+                  {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-10 bg-secondary rounded" />)}
                 </div>
-              </div>
+              ) : (
+                <VoucherTemplateEditor
+                  initial={voucherTemplate ?? VOUCHER_TEMPLATE_DEFAULTS}
+                  canEdit={can("edit:templates")}
+                />
+              )}
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
 
-      {/* Edit Dialog */}
+      {/* Edit Email Template Dialog */}
       <Dialog open={!!editing} onOpenChange={(open) => !open && setEditing(null)}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
@@ -221,7 +174,7 @@ export default function TemplatesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Preview Dialog */}
+      {/* Preview Email Template Dialog */}
       <Dialog open={!!preview} onOpenChange={(open) => !open && setPreview(null)}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
@@ -234,52 +187,42 @@ export default function TemplatesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Voucher Edit Dialog */}
-      <Dialog open={editingVoucher} onOpenChange={setEditingVoucher}>
-        <DialogContent className="max-w-2xl">
+      {/* Placeholder Names Reference Dialog */}
+      <Dialog open={showPlaceholders} onOpenChange={setShowPlaceholders}>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Edit Voucher Template</DialogTitle>
-            <DialogDescription>Customize the voucher layout and text. Use placeholders for dynamic content.</DialogDescription>
+            <DialogTitle>Placeholder Names</DialogTitle>
+            <DialogDescription>
+              Insert these tokens into your templates — they are replaced with live data when sent.
+            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+          <div className="space-y-5 max-h-[60vh] overflow-y-auto pr-1">
             <div>
-              <Label className="text-sm font-medium">Header Text</Label>
-              <Input
-                value={voucherTemplate.headerText}
-                onChange={(e) => setVoucherTemplate({ ...voucherTemplate, headerText: e.target.value })}
-                className="mt-1"
-              />
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+                Email Templates <span className="font-normal normal-case">— double curly braces</span>
+              </h3>
+              <div className="space-y-2">
+                {EMAIL_PLACEHOLDERS.map(p => (
+                  <div key={p.token} className="flex items-start gap-3">
+                    <code className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded shrink-0">{p.token}</code>
+                    <span className="text-xs text-muted-foreground">{p.description}</span>
+                  </div>
+                ))}
+              </div>
             </div>
             <div>
-              <Label className="text-sm font-medium">Product Line</Label>
-              <Input
-                value={voucherTemplate.productLine}
-                onChange={(e) => setVoucherTemplate({ ...voucherTemplate, productLine: e.target.value })}
-                className="mt-1"
-              />
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+                Voucher Template <span className="font-normal normal-case">— single curly braces</span>
+              </h3>
+              <div className="space-y-2">
+                {VOUCHER_PLACEHOLDERS.map(p => (
+                  <div key={p.token} className="flex items-start gap-3">
+                    <code className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded shrink-0">{p.token}</code>
+                    <span className="text-xs text-muted-foreground">{p.description}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div>
-              <Label className="text-sm font-medium">Guidance Text</Label>
-              <Textarea
-                value={voucherTemplate.guidanceText}
-                onChange={(e) => setVoucherTemplate({ ...voucherTemplate, guidanceText: e.target.value })}
-                rows={3}
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label className="text-sm font-medium">Footer Text</Label>
-              <Textarea
-                value={voucherTemplate.footerText}
-                onChange={(e) => setVoucherTemplate({ ...voucherTemplate, footerText: e.target.value })}
-                rows={2}
-                className="mt-1"
-              />
-            </div>
-          </div>
-          <div className="flex justify-end gap-2 mt-4">
-            <Button variant="outline" size="sm" onClick={() => setEditingVoucher(false)}>Cancel</Button>
-            <Button size="sm" onClick={() => setEditingVoucher(false)}>Save Changes</Button>
           </div>
         </DialogContent>
       </Dialog>

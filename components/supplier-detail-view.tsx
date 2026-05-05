@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSWRConfig } from "swr"
 import {
   ArrowLeft,
@@ -1942,32 +1942,26 @@ export function SupplierDetailView({
     key: K,
     value: SupplierFormState[K],
   ) => {
-    startTransition(() => {
-      setForm((current) => (current ? { ...current, [key]: value } : current))
-    })
+    setForm((current) => (current ? { ...current, [key]: value } : current))
   }
 
   const updateSupplierKind = (kind: SupplierKind) => {
-    startTransition(() => {
-      setForm((current) =>
-        current
-          ? {
-              ...current,
-              kind,
-              locationId: kind === "train_operator" ? null : current.locationId,
-            }
-          : current,
-      )
-    })
+    setForm((current) =>
+      current
+        ? {
+            ...current,
+            kind,
+            locationId: kind === "train_operator" ? null : current.locationId,
+          }
+        : current,
+    )
   }
 
   const updateSuiteTypes = useCallback(
     (updater: (suiteTypes: EditableSuiteType[]) => EditableSuiteType[]) => {
-      startTransition(() => {
-        setForm((current) =>
-          current ? { ...current, suiteTypes: updater(current.suiteTypes) } : current,
-        )
-      })
+      setForm((current) =>
+        current ? { ...current, suiteTypes: updater(current.suiteTypes) } : current,
+      )
     },
     [],
   )
@@ -2008,11 +2002,9 @@ export function SupplierDetailView({
 
   const updatePackages = useCallback(
     (updater: (packages: EditablePackage[]) => EditablePackage[]) => {
-      startTransition(() => {
-        setForm((current) =>
-          current ? { ...current, packages: updater(current.packages) } : current,
-        )
-      })
+      setForm((current) =>
+        current ? { ...current, packages: updater(current.packages) } : current,
+      )
     },
     [],
   )
@@ -2359,14 +2351,12 @@ export function SupplierDetailView({
 
   const updateRateCardPrice = useCallback(
     (packageIndex: number, rateCardId: string, value: number) => {
-      startTransition(() => {
-        updatePackage(packageIndex, (pkg) => ({
-          ...pkg,
-          rateCards: pkg.rateCards.map((rateCard) =>
-            rateCard.id === rateCardId ? { ...rateCard, pricePerPerson: value } : rateCard,
-          ),
-        }))
-      })
+      updatePackage(packageIndex, (pkg) => ({
+        ...pkg,
+        rateCards: pkg.rateCards.map((rateCard) =>
+          rateCard.id === rateCardId ? { ...rateCard, pricePerPerson: value } : rateCard,
+        ),
+      }))
     },
     [updatePackage],
   )
@@ -2378,14 +2368,12 @@ export function SupplierDetailView({
       field: "childPrice" | "infantPrice",
       value: number | null,
     ) => {
-      startTransition(() => {
-        updatePackage(packageIndex, (pkg) => ({
-          ...pkg,
-          rateCards: pkg.rateCards.map((rateCard) =>
-            rateCard.id === rateCardId ? { ...rateCard, [field]: value } : rateCard,
-          ),
-        }))
-      })
+      updatePackage(packageIndex, (pkg) => ({
+        ...pkg,
+        rateCards: pkg.rateCards.map((rateCard) =>
+          rateCard.id === rateCardId ? { ...rateCard, [field]: value } : rateCard,
+        ),
+      }))
     },
     [updatePackage],
   )
@@ -3313,12 +3301,6 @@ export function SupplierDetailView({
                     {activeVocabulary.sectionDescription}
                   </p>
                 </div>
-                {isEditing && (
-                  <Button variant="outline" size="sm" onClick={() => addRoute(0)}>
-                    <Plus className="mr-2 h-4 w-4" />
-                    {`Add ${activeVocabulary.route.toLowerCase()}`}
-                  </Button>
-                )}
               </div>
             </CardHeader>
             <CardContent className="space-y-4">

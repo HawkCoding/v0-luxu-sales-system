@@ -137,11 +137,20 @@ export function PackageLegEditor({
     })
   }
 
-  const routeGridClass = showLocations
-    ? isTransport
-      ? "grid gap-3 rounded-lg border p-3 md:grid-cols-2 xl:grid-cols-4"
-      : "grid gap-3 rounded-lg border p-3 md:grid-cols-[1fr_1fr_1fr_auto_auto]"
-    : "grid gap-3 rounded-lg border p-3 md:grid-cols-[1fr_auto_auto]"
+  const routeGridClass = isTransport
+    ? "grid items-start gap-2.5 rounded-lg border p-3 md:grid-cols-2 lg:grid-cols-[minmax(10rem,1fr)_minmax(8rem,0.75fr)_minmax(10rem,1fr)_minmax(10rem,1fr)_5.5rem_2.25rem]"
+    : showLocations
+      ? "grid items-start gap-2.5 rounded-lg border p-3 md:grid-cols-2 lg:grid-cols-[minmax(10rem,1fr)_minmax(10rem,1fr)_minmax(10rem,1fr)_5.5rem_2.25rem]"
+      : "grid items-start gap-2.5 rounded-lg border p-3 md:grid-cols-[minmax(12rem,1fr)_5.5rem_2.25rem]"
+  const packageFieldClass = "grid min-w-0 grid-rows-[2.25rem_auto] gap-1.5"
+  const packageLabelClass = "flex min-h-9 items-start gap-2 leading-tight"
+  const compactSelectTriggerClass = "w-full min-w-0 [&_[data-slot=select-value]]:truncate"
+  const rateCardGridClass = isTransport
+    ? "grid items-start gap-2.5 rounded-lg border p-3 md:grid-cols-3 lg:grid-cols-[minmax(10rem,1.4fr)_minmax(10rem,1.4fr)_minmax(6rem,0.7fr)_minmax(8rem,0.85fr)_minmax(8rem,0.85fr)_2.25rem]"
+    : "grid items-start gap-2.5 rounded-lg border p-3 md:grid-cols-3 lg:grid-cols-[minmax(10rem,1.45fr)_minmax(10rem,1.45fr)_minmax(4.75rem,0.55fr)_minmax(4.75rem,0.55fr)_minmax(4.75rem,0.55fr)_minmax(8rem,0.85fr)_minmax(8rem,0.85fr)_2.25rem]"
+  const rateCardFieldClass = packageFieldClass
+  const rateCardLabelClass = packageLabelClass
+  const compactDateInputClass = "w-full px-2 text-sm"
 
   return (
     <Card>
@@ -210,14 +219,15 @@ export function PackageLegEditor({
           <div className="space-y-3">
             {leg.routes.map((route) => (
               <div key={route.id} className={routeGridClass}>
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
+                <div className={packageFieldClass}>
+                  <div className={packageLabelClass}>
                     <Label>Name</Label>
                     {route.existing ? (
                       <Badge variant="outline" className="text-xs">Existing</Badge>
                     ) : null}
                   </div>
                   <Input
+                    title={route.name}
                     value={route.name}
                     onChange={(event) => updateRoute(route.id, "name", event.target.value)}
                     disabled={route.existing}
@@ -225,8 +235,10 @@ export function PackageLegEditor({
                 </div>
                 {isTransport ? (
                   <>
-                    <div className="space-y-2">
-                      <Label>Service type</Label>
+                    <div className={packageFieldClass}>
+                      <div className={packageLabelClass}>
+                        <Label>Service type</Label>
+                      </div>
                       <Select
                         value={route.transportServiceType ?? "transfer"}
                         onValueChange={(value: TransportServiceType) =>
@@ -234,7 +246,10 @@ export function PackageLegEditor({
                         }
                         disabled={route.existing}
                       >
-                        <SelectTrigger>
+                        <SelectTrigger
+                          className={compactSelectTriggerClass}
+                          title={route.transportServiceType === "rental" ? "Vehicle rental" : "Transfer"}
+                        >
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -243,17 +258,23 @@ export function PackageLegEditor({
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="space-y-2">
-                      <Label>{route.transportServiceType === "rental" ? "Rental pickup point" : vocab.originLabel}</Label>
+                    <div className={packageFieldClass}>
+                      <div className={packageLabelClass}>
+                        <Label>{route.transportServiceType === "rental" ? "Rental pickup point" : vocab.originLabel}</Label>
+                      </div>
                       <Input
+                        title={route.pickupPoint ?? ""}
                         value={route.pickupPoint ?? ""}
                         onChange={(event) => updateRoute(route.id, "pickupPoint", event.target.value)}
                         disabled={route.existing}
                       />
                     </div>
-                    <div className="space-y-2">
-                      <Label>{route.transportServiceType === "rental" ? "Return point" : vocab.destinationLabel}</Label>
+                    <div className={packageFieldClass}>
+                      <div className={packageLabelClass}>
+                        <Label>{route.transportServiceType === "rental" ? "Return point" : vocab.destinationLabel}</Label>
+                      </div>
                       <Input
+                        title={route.dropoffPoint ?? ""}
                         value={route.dropoffPoint ?? ""}
                         onChange={(event) => updateRoute(route.id, "dropoffPoint", event.target.value)}
                         disabled={route.existing}
@@ -262,14 +283,19 @@ export function PackageLegEditor({
                   </>
                 ) : showLocations ? (
                   <>
-                    <div className="space-y-2">
-                      <Label>{vocab.originLabel}</Label>
+                    <div className={packageFieldClass}>
+                      <div className={packageLabelClass}>
+                        <Label>{vocab.originLabel}</Label>
+                      </div>
                       <Select
                         value={route.originLocationId || undefined}
                         onValueChange={(value) => updateRoute(route.id, "originLocationId", value)}
                         disabled={route.existing}
                       >
-                        <SelectTrigger>
+                        <SelectTrigger
+                          className={compactSelectTriggerClass}
+                          title={locations.find((location) => location.id === route.originLocationId)?.name}
+                        >
                           <SelectValue placeholder="Select" />
                         </SelectTrigger>
                         <SelectContent>
@@ -281,8 +307,10 @@ export function PackageLegEditor({
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="space-y-2">
-                      <Label>{vocab.destinationLabel}</Label>
+                    <div className={packageFieldClass}>
+                      <div className={packageLabelClass}>
+                        <Label>{vocab.destinationLabel}</Label>
+                      </div>
                       <Select
                         value={route.destinationLocationId || undefined}
                         onValueChange={(value) =>
@@ -290,7 +318,10 @@ export function PackageLegEditor({
                         }
                         disabled={route.existing}
                       >
-                        <SelectTrigger>
+                        <SelectTrigger
+                          className={compactSelectTriggerClass}
+                          title={locations.find((location) => location.id === route.destinationLocationId)?.name}
+                        >
                           <SelectValue placeholder="Select" />
                         </SelectTrigger>
                         <SelectContent>
@@ -304,22 +335,25 @@ export function PackageLegEditor({
                     </div>
                   </>
                 ) : null}
-                <div className="flex items-end gap-2">
-                  <Switch
-                    checked={route.active}
-                    onCheckedChange={(checked) => updateRoute(route.id, "active", checked)}
-                    disabled={route.existing}
-                  />
-                  <span className="self-center text-sm text-muted-foreground">Active</span>
+                <div className={packageFieldClass}>
+                  <div className={packageLabelClass} />
+                  <div className="flex h-9 items-center gap-2">
+                    <Switch
+                      checked={route.active}
+                      onCheckedChange={(checked) => updateRoute(route.id, "active", checked)}
+                      disabled={route.existing}
+                    />
+                    <span className="text-sm text-muted-foreground">Active</span>
+                  </div>
                 </div>
                 {route.existing ? (
-                  <div className="self-end" />
+                  <div className={packageFieldClass} />
                 ) : (
                   <Button
                     type="button"
                     size="icon"
                     variant="outline"
-                    className="self-end"
+                    className="self-end h-9 w-9"
                     onClick={() =>
                       onChange({
                         ...leg,
@@ -361,14 +395,10 @@ export function PackageLegEditor({
             {leg.rateCards.map((rateCard) => (
               <div
                 key={rateCard.id}
-                className={
-                  isTransport
-                    ? "grid gap-3 rounded-lg border p-3 md:grid-cols-4 xl:grid-cols-[1fr_1fr_1fr_1fr_1fr_auto]"
-                    : "grid gap-3 rounded-lg border p-3 md:grid-cols-4 xl:grid-cols-[1fr_1fr_1fr_1fr_1fr_1fr_1fr_auto]"
-                }
+                className={rateCardGridClass}
               >
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
+                <div className={rateCardFieldClass}>
+                  <div className={rateCardLabelClass}>
                     <Label>{vocab.suiteType}</Label>
                     {rateCard.existing ? (
                       <Badge variant="outline" className="text-xs">Existing</Badge>
@@ -379,7 +409,10 @@ export function PackageLegEditor({
                     onValueChange={(value) => updateRateCard(rateCard.id, "suiteTypeId", value)}
                     disabled={rateCard.existing}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger
+                      className={compactSelectTriggerClass}
+                      title={leg.suiteTypes.find((suiteType) => suiteType.id === rateCard.suiteTypeId)?.name}
+                    >
                       <SelectValue placeholder="Select" />
                     </SelectTrigger>
                     <SelectContent>
@@ -391,14 +424,19 @@ export function PackageLegEditor({
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-2">
-                  <Label>{routeLabel}</Label>
+                <div className={rateCardFieldClass}>
+                  <div className={rateCardLabelClass}>
+                    <Label>{routeLabel}</Label>
+                  </div>
                   <Select
                     value={rateCard.routeId || undefined}
                     onValueChange={(value) => updateRateCard(rateCard.id, "routeId", value)}
                     disabled={rateCard.existing}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger
+                      className={compactSelectTriggerClass}
+                      title={leg.routes.find((route) => route.id === rateCard.routeId)?.name}
+                    >
                       <SelectValue placeholder={`Select ${routeLabel.toLowerCase()}`} />
                     </SelectTrigger>
                     <SelectContent>
@@ -410,8 +448,10 @@ export function PackageLegEditor({
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="space-y-2">
-                  <Label>{isTransport ? "Vehicle price" : "Adult price"}</Label>
+                <div className={rateCardFieldClass}>
+                  <div className={rateCardLabelClass}>
+                    <Label>{isTransport ? "Vehicle price" : "Adult price"}</Label>
+                  </div>
                   <NumericInput
                     min="0"
                     step="0.01"
@@ -422,8 +462,10 @@ export function PackageLegEditor({
                 </div>
                 {!isTransport ? (
                   <>
-                    <div className="space-y-2">
-                      <Label>Child price</Label>
+                    <div className={rateCardFieldClass}>
+                      <div className={rateCardLabelClass}>
+                        <Label>Child price</Label>
+                      </div>
                       <NumericInput
                         min="0"
                         step="0.01"
@@ -434,8 +476,10 @@ export function PackageLegEditor({
                         disabled={rateCard.existing}
                       />
                     </div>
-                    <div className="space-y-2">
-                      <Label>Infant price</Label>
+                    <div className={rateCardFieldClass}>
+                      <div className={rateCardLabelClass}>
+                        <Label>Infant price</Label>
+                      </div>
                       <NumericInput
                         min="0"
                         step="0.01"
@@ -448,19 +492,25 @@ export function PackageLegEditor({
                     </div>
                   </>
                 ) : null}
-                <div className="space-y-2">
-                  <Label>Valid from</Label>
+                <div className={rateCardFieldClass}>
+                  <div className={rateCardLabelClass}>
+                    <Label>Valid from</Label>
+                  </div>
                   <Input
                     type="date"
+                    className={compactDateInputClass}
                     value={rateCard.validFrom}
                     onChange={(event) => updateRateCard(rateCard.id, "validFrom", event.target.value)}
                     disabled={rateCard.existing}
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label>Valid to</Label>
+                <div className={rateCardFieldClass}>
+                  <div className={rateCardLabelClass}>
+                    <Label>Valid to</Label>
+                  </div>
                   <Input
                     type="date"
+                    className={compactDateInputClass}
                     value={rateCard.validTo ?? ""}
                     onChange={(event) =>
                       updateRateCard(rateCard.id, "validTo", event.target.value || null)
@@ -469,13 +519,13 @@ export function PackageLegEditor({
                   />
                 </div>
                 {rateCard.existing ? (
-                  <div className="self-end" />
+                  <div className={rateCardFieldClass} />
                 ) : (
                   <Button
                     type="button"
                     size="icon"
                     variant="outline"
-                    className="self-end"
+                    className="self-end h-9 w-9"
                     onClick={() =>
                       onChange({
                         ...leg,

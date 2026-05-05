@@ -1913,6 +1913,60 @@ export type Database = {
           },
         ]
       }
+      voucher_template: {
+        Row: {
+          accent_colour: string
+          banner_url: string | null
+          font_family: string
+          footer_company: string
+          footer_email: string
+          footer_phone: string
+          guidance_text: string
+          header_text: string
+          hidden_sections: string[]
+          id: string
+          logo_url: string | null
+          product_line: string
+          section_bg: string
+          section_order: string[]
+          updated_at: string
+        }
+        Insert: {
+          accent_colour?: string
+          banner_url?: string | null
+          font_family?: string
+          footer_company?: string
+          footer_email?: string
+          footer_phone?: string
+          guidance_text?: string
+          header_text?: string
+          hidden_sections?: string[]
+          id?: string
+          logo_url?: string | null
+          product_line?: string
+          section_bg?: string
+          section_order?: string[]
+          updated_at?: string
+        }
+        Update: {
+          accent_colour?: string
+          banner_url?: string | null
+          font_family?: string
+          footer_company?: string
+          footer_email?: string
+          footer_phone?: string
+          guidance_text?: string
+          header_text?: string
+          hidden_sections?: string[]
+          id?: string
+          logo_url?: string | null
+          product_line?: string
+          section_bg?: string
+          section_order?: string[]
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

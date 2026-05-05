@@ -38,7 +38,7 @@ export async function GET(
       supabase
         .from("bookings")
         .select(
-          "id, booking_number, stage, consultant, departure_date, created_at, route:routes(name), package:packages(name, supplier:suppliers(id, name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(id, name), extracted_json",
+          "id, booking_number, stage, consultant, departure_date, created_at, route:routes(name, supplier:suppliers(id, name)), package:packages(name), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(id, name), extracted_json",
         )
         .eq("customer_id", id)
         .order("created_at", { ascending: false }),
@@ -93,11 +93,11 @@ export async function GET(
     new Set(
       (bookings ?? [])
         .map((booking) => {
-          const packageInfo = booking.package as
+          const routeInfo = booking.route as
             | { supplier?: { name?: string | null } | null }
             | null
           const hotelSupplier = booking.hotel_supplier as { name?: string | null } | null
-          if (packageInfo?.supplier?.name || hotelSupplier?.name) return null
+          if (routeInfo?.supplier?.name || hotelSupplier?.name) return null
 
           const historicalSupplierId = (
             booking.extracted_json as { historical_import?: { supplier_id?: unknown } } | null
@@ -142,9 +142,10 @@ export async function GET(
       updatedAtDisplay: formatDisplayDateTime(customer.updated_at),
     },
     bookings: (bookings ?? []).map((booking) => {
-      const packageInfo = booking.package as
+      const routeInfo = booking.route as
         | { name?: string | null; supplier?: { id?: string; name?: string | null } | null }
         | null
+      const packageInfo = booking.package as { name?: string | null } | null
       const hotelSupplier = booking.hotel_supplier as { id?: string; name?: string | null } | null
       const historicalSupplierId = (
         booking.extracted_json as { historical_import?: { supplier_id?: string } } | null
@@ -162,10 +163,10 @@ export async function GET(
         departureDate: booking.departure_date,
         departureDateDisplay: formatDisplayDate(booking.departure_date),
         direction:
-          (booking.route as { name?: string } | null)?.name ??
+          routeInfo?.name ??
           ((booking.extracted_json as { historical_import?: { route?: string } } | null)
             ?.historical_import?.route ?? null),
-        supplierName: packageInfo?.supplier?.name ?? hotelSupplier?.name ?? historicalSupplierName,
+        supplierName: routeInfo?.supplier?.name ?? hotelSupplier?.name ?? historicalSupplierName,
         packageName: packageInfo?.name ?? null,
         createdAt: booking.created_at,
         createdAtDisplay: formatDisplayDateTime(booking.created_at),

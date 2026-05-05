@@ -1,7 +1,7 @@
 "use client"
 
 import type { ChangeEvent, ComponentProps } from "react"
-import { startTransition, useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 
 import { Textarea } from "@/components/ui/textarea"
 
@@ -30,9 +30,7 @@ export function BufferedTextarea({
   const handleChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     const nextValue = event.target.value
     setDisplayValue(nextValue)
-    startTransition(() => {
-      onValueChange(nextValue)
-    })
+    onValueChange(nextValue)
   }
 
   return (

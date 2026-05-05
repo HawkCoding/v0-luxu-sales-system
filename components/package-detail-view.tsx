@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Plus, Save, Trash2 } from "lucide-react"
 import { toast } from "sonner"
@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
-import { PackageLegEditor, type EditablePackageLeg } from "@/components/package-leg-editor"
+import { PackageLegSelector, type SelectablePackageLeg } from "@/components/package-leg-selector"
 import { parseStaleVersionConflictPayload } from "@/lib/supplier-save-guard"
 import { useActiveSuppliers, useLocations } from "@/lib/use-data"
 import type { PackageDetail, Supplier, SupplierDetail } from "@/lib/types"
@@ -40,7 +40,7 @@ interface PackageDetailViewProps {
   packageDetail: PackageDetail
 }
 
-function buildLegState(packageDetail: PackageDetail): EditablePackageLeg[] {
+function buildLegState(packageDetail: PackageDetail): SelectablePackageLeg[] {
   return packageDetail.legs.map((leg) => ({
     id: leg.id,
     supplierId: leg.supplierId,
@@ -51,6 +51,7 @@ function buildLegState(packageDetail: PackageDetail): EditablePackageLeg[] {
     routes: leg.routes.map((route) => ({ ...route, existing: true })),
     rateCards: leg.rateCards.map((rateCard) => ({ ...rateCard, existing: true })),
     suiteTypes: leg.suiteTypes,
+    selectedRouteIds: leg.routes.map((route) => route.id),
   }))
 }
 
@@ -80,6 +81,7 @@ export function PackageDetailView({ packageDetail }: PackageDetailViewProps) {
   const [fixedPricePerPerson, setFixedPricePerPerson] = useState<number | null>(packageDetail.fixedPricePerPerson)
   const [active, setActive] = useState(packageDetail.active)
   const [legs, setLegs] = useState(() => buildLegState(packageDetail))
+  const [hydratedSupplierIds, setHydratedSupplierIds] = useState<Set<string>>(new Set())
   const [isSaving, setIsSaving] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isDirty, setIsDirty] = useState(false)
@@ -99,6 +101,65 @@ export function PackageDetailView({ packageDetail }: PackageDetailViewProps) {
 
   const markDirty = () => setIsDirty(true)
 
+  useEffect(() => {
+    setLegs(buildLegState(packageDetail))
+    setHydratedSupplierIds(new Set())
+    setIsDirty(false)
+  }, [packageDetail])
+
+  useEffect(() => {
+    const suppliersToHydrate = legs
+      .filter((leg) => !hydratedSupplierIds.has(leg.supplierId))
+      .map((leg) => allSuppliers.find((supplier) => supplier.id === leg.supplierId))
+      .filter((supplier): supplier is Supplier => Boolean(supplier))
+
+    if (suppliersToHydrate.length === 0) return
+
+    let cancelled = false
+
+    Promise.all(
+      suppliersToHydrate.map(async (supplier) => ({
+        supplierId: supplier.id,
+        context: await loadSupplierContext(supplier),
+      })),
+    ).then((results) => {
+      if (cancelled) return
+
+      const contextsBySupplierId = new Map(
+        results.map(({ supplierId, context }) => [supplierId, context]),
+      )
+
+      setLegs((current) =>
+        current.map((leg) => {
+          const context = contextsBySupplierId.get(leg.supplierId)
+          if (!context) return leg
+
+          const selectedRouteIds = new Set(leg.selectedRouteIds)
+          const routeIds = new Set(context.routes.map((route) => route.id))
+
+          return {
+            ...leg,
+            routes: context.routes.map((route) => ({ ...route, existing: true })),
+            rateCards: context.rateCards
+              .filter((rateCard) => routeIds.has(rateCard.routeId))
+              .map((rateCard) => ({ ...rateCard, existing: true })),
+            suiteTypes: context.suiteTypes,
+            selectedRouteIds: leg.selectedRouteIds.filter((routeId) => routeIds.has(routeId)),
+          }
+        }),
+      )
+      setHydratedSupplierIds((current) => {
+        const next = new Set(current)
+        results.forEach(({ supplierId }) => next.add(supplierId))
+        return next
+      })
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [allSuppliers, hydratedSupplierIds, legs])
+
   const buildPayload = () => ({
     name: name.trim(),
     description: description.trim() || null,
@@ -116,18 +177,29 @@ export function PackageDetailView({ packageDetail }: PackageDetailViewProps) {
       routes:
         leg.supplierKind === "hotel_property"
           ? []
-          : leg.routes.map((route) => ({
+          : leg.routes
+            .filter((route) => leg.selectedRouteIds.includes(route.id))
+            .map((route) => ({
               id: route.id,
               name: route.name.trim(),
               originLocationId: route.originLocationId,
               destinationLocationId: route.destinationLocationId,
+              transportServiceType: route.transportServiceType,
+              pickupPoint: route.pickupPoint,
+              dropoffPoint: route.dropoffPoint,
+              includedKmPerDay: route.includedKmPerDay,
+              extraKmPrice: route.extraKmPrice,
+              securityDeposit: route.securityDeposit,
+              oneWayFee: route.oneWayFee,
               active: route.active,
               existing: Boolean(route.existing),
             })),
       rateCards:
         leg.supplierKind === "hotel_property"
           ? []
-          : leg.rateCards.map((rateCard) => ({
+          : leg.rateCards
+            .filter((rateCard) => leg.selectedRouteIds.includes(rateCard.routeId))
+            .map((rateCard) => ({
               id: rateCard.id,
               routeId: rateCard.routeId,
               suiteTypeId: rateCard.suiteTypeId,
@@ -145,6 +217,17 @@ export function PackageDetailView({ packageDetail }: PackageDetailViewProps) {
   const save = async () => {
     if (!name.trim()) {
       toast.error("Package name is required")
+      return
+    }
+
+    const legWithoutRoute = legs.find(
+      (leg) =>
+        leg.supplierKind !== "hotel_property" &&
+        leg.supplierKind !== "transfers" &&
+        leg.selectedRouteIds.length === 0,
+    )
+    if (legWithoutRoute) {
+      toast.error(`Select at least one route for ${legWithoutRoute.label || legWithoutRoute.supplierName}`)
       return
     }
 
@@ -217,6 +300,7 @@ export function PackageDetailView({ packageDetail }: PackageDetailViewProps) {
             .filter((rateCard) => supplierRouteIds.has(rateCard.routeId))
             .map((rateCard) => ({ ...rateCard, existing: true })),
           suiteTypes,
+          selectedRouteIds: [],
         },
       ])
       setAddLegSupplierId("")
@@ -354,17 +438,34 @@ export function PackageDetailView({ packageDetail }: PackageDetailViewProps) {
         <div>
           <h2 className="text-lg font-semibold">Legs</h2>
           <p className="text-sm text-muted-foreground">
-            Configure routes and rate cards for each supplier leg.
+            Select existing supplier routes and services for each package leg. Maintain supplier routes,
+            services, and rate cards on the supplier page.
           </p>
         </div>
         {legs.map((leg, index) => (
-          <PackageLegEditor
+          <PackageLegSelector
             key={leg.id}
             leg={leg}
             locations={locations}
+            selectedRouteIds={leg.selectedRouteIds}
             onChange={(nextLeg) => {
               setLegs((current) =>
                 current.map((item, itemIndex) => (itemIndex === index ? nextLeg : item)),
+              )
+              markDirty()
+            }}
+            onToggleRoute={(routeId) => {
+              setLegs((current) =>
+                current.map((item, itemIndex) => {
+                  if (itemIndex !== index) return item
+                  const selectedRouteIds = new Set(item.selectedRouteIds)
+                  if (selectedRouteIds.has(routeId)) {
+                    selectedRouteIds.delete(routeId)
+                  } else {
+                    selectedRouteIds.add(routeId)
+                  }
+                  return { ...item, selectedRouteIds: Array.from(selectedRouteIds) }
+                }),
               )
               markDirty()
             }}

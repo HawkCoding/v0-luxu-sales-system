@@ -10,6 +10,7 @@ import type {
   Package,
   Supplier,
   SupplierDetail,
+  VoucherTemplate,
 } from "@/lib/types"
 
 type ApiError = Error & { status?: number }
@@ -151,4 +152,8 @@ export function useSupplierEmailLabels() {
 
 export function useActivePackages() {
   return useSWR<Package[]>("/api/packages", fetcher, swrOptions)
+}
+
+export function useVoucherTemplate() {
+  return useSWR<VoucherTemplate>("/api/voucher-template", fetcher, swrOptions)
 }

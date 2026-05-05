@@ -1,7 +1,5 @@
 "use client"
 
-"use client"
-
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -24,11 +22,13 @@ import type {
   Traveller,
 } from "@/lib/types"
 import { formatDisplayDate } from "@/lib/date-format"
-import { Plus, Save, Trash2 } from "lucide-react"
+import { Check, Pencil, Plus, Save, Trash2 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 
-type EditableTransportRequest = BookingTransportRequest
+type EditableTransportRequest = BookingTransportRequest & {
+  isDraft?: boolean
+}
 
 interface JobEnquiryTabProps {
   enquiry: Enquiry | null
@@ -79,10 +79,12 @@ export function JobEnquiryTab({ enquiry, itineraries, onTransportRequestsChange 
     [enquiry?.transportRequests],
   )
   const [transportRequests, setTransportRequests] = useState<EditableTransportRequest[]>(initialTransportRequests)
+  const [editingTransportRequestIds, setEditingTransportRequestIds] = useState<Set<string>>(new Set())
   const [isSavingTransport, setIsSavingTransport] = useState(false)
 
   useEffect(() => {
     setTransportRequests(initialTransportRequests)
+    setEditingTransportRequestIds(new Set())
   }, [initialTransportRequests])
 
   if (!enquiry) {
@@ -147,6 +149,7 @@ export function JobEnquiryTab({ enquiry, itineraries, onTransportRequestsChange 
       }
 
       setTransportRequests(payload as EditableTransportRequest[])
+      setEditingTransportRequestIds(new Set())
       await onTransportRequestsChange?.()
       toast.success("Transport requests saved")
     } catch {
@@ -250,10 +253,11 @@ export function JobEnquiryTab({ enquiry, itineraries, onTransportRequestsChange 
                 size="sm"
                 variant="outline"
                 onClick={() =>
-                  setTransportRequests((current) => [
-                    ...current,
-                    createEmptyTransportRequest(current.length),
-                  ])
+                  setTransportRequests((current) => {
+                    const request = createEmptyTransportRequest(current.length)
+                    setEditingTransportRequestIds((editingIds) => new Set(editingIds).add(request.id))
+                    return [...current, request]
+                  })
                 }
               >
                 <Plus className="mr-2 h-4 w-4" />
@@ -278,134 +282,180 @@ export function JobEnquiryTab({ enquiry, itineraries, onTransportRequestsChange 
             </div>
           ) : (
             <div className="flex flex-col gap-3">
-              {transportRequests.map((request, index) => (
-                <div key={request.id} className="grid gap-3 rounded-md border p-3 md:grid-cols-2 xl:grid-cols-4">
-                  <div className="space-y-1.5">
-                    <Label>Service</Label>
-                    <Select
-                      value={request.serviceType}
-                      onValueChange={(value: TransportServiceType) =>
-                        updateTransportRequest(request.id, "serviceType", value)
+              {transportRequests.map((request, index) => {
+                const isEditing = request.isDraft || editingTransportRequestIds.has(request.id)
+
+                if (!isEditing) {
+                  return (
+                    <TransportRequestSummary
+                      key={request.id}
+                      request={request}
+                      index={index}
+                      onEdit={() =>
+                        setEditingTransportRequestIds((editingIds) => new Set(editingIds).add(request.id))
                       }
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="transfer">Transfer</SelectItem>
-                        <SelectItem value="rental">Vehicle rental</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>{request.serviceType === "rental" ? "Rental pickup" : "Pickup"}</Label>
-                    <Input
-                      value={request.pickupPoint}
-                      onChange={(event) =>
-                        updateTransportRequest(request.id, "pickupPoint", event.target.value)
-                      }
-                      placeholder="Airport, hotel, address..."
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>{request.serviceType === "rental" ? "Return point" : "Drop-off"}</Label>
-                    <Input
-                      value={request.dropoffPoint}
-                      onChange={(event) =>
-                        updateTransportRequest(request.id, "dropoffPoint", event.target.value)
-                      }
-                      placeholder="Airport, hotel, address..."
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Pickup date/time</Label>
-                    <Input
-                      type="datetime-local"
-                      value={toDateTimeLocalValue(request.pickupAt)}
-                      onChange={(event) =>
-                        updateTransportRequest(
-                          request.id,
-                          "pickupAt",
-                          fromDateTimeLocalValue(event.target.value),
-                        )
-                      }
-                    />
-                  </div>
-                  {request.serviceType === "rental" ? (
-                    <div className="space-y-1.5">
-                      <Label>Return date/time</Label>
-                      <Input
-                        type="datetime-local"
-                        value={toDateTimeLocalValue(request.returnAt)}
-                        onChange={(event) =>
-                          updateTransportRequest(
-                            request.id,
-                            "returnAt",
-                            fromDateTimeLocalValue(event.target.value),
-                          )
-                        }
-                      />
-                    </div>
-                  ) : null}
-                  <div className="space-y-1.5">
-                    <Label>Passengers</Label>
-                    <NumericInput
-                      min="0"
-                      step="1"
-                      nullable
-                      value={request.passengerCount}
-                      onValueChange={(value) =>
-                        updateTransportRequest(request.id, "passengerCount", value)
-                      }
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Luggage</Label>
-                    <NumericInput
-                      min="0"
-                      step="1"
-                      nullable
-                      value={request.luggageCount}
-                      onValueChange={(value) =>
-                        updateTransportRequest(request.id, "luggageCount", value)
-                      }
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Flight number</Label>
-                    <Input
-                      value={request.flightNumber ?? ""}
-                      onChange={(event) =>
-                        updateTransportRequest(request.id, "flightNumber", event.target.value || null)
-                      }
-                    />
-                  </div>
-                  <div className="space-y-1.5 md:col-span-2 xl:col-span-3">
-                    <Label>Notes</Label>
-                    <Textarea
-                      value={request.notes ?? ""}
-                      onChange={(event) =>
-                        updateTransportRequest(request.id, "notes", event.target.value || null)
-                      }
-                    />
-                  </div>
-                  <div className="flex items-end justify-end">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      aria-label={`Remove transport request ${index + 1}`}
-                      onClick={() =>
+                      onRemove={() =>
                         setTransportRequests((current) =>
                           current.filter((item) => item.id !== request.id),
                         )
                       }
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    />
+                  )
+                }
+
+                return (
+                  <div key={request.id} className="grid gap-3 rounded-md border p-3 md:grid-cols-2 xl:grid-cols-4">
+                    <div className="space-y-1.5">
+                      <Label>Service</Label>
+                      <Select
+                        value={request.serviceType}
+                        onValueChange={(value: TransportServiceType) =>
+                          updateTransportRequest(request.id, "serviceType", value)
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="transfer">Transfer</SelectItem>
+                          <SelectItem value="rental">Vehicle rental</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>{request.serviceType === "rental" ? "Rental pickup" : "Pickup"}</Label>
+                      <Input
+                        value={request.pickupPoint}
+                        onChange={(event) =>
+                          updateTransportRequest(request.id, "pickupPoint", event.target.value)
+                        }
+                        placeholder="Airport, hotel, address..."
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>{request.serviceType === "rental" ? "Return point" : "Drop-off"}</Label>
+                      <Input
+                        value={request.dropoffPoint}
+                        onChange={(event) =>
+                          updateTransportRequest(request.id, "dropoffPoint", event.target.value)
+                        }
+                        placeholder="Airport, hotel, address..."
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Pickup date/time</Label>
+                      <div className="flex gap-2">
+                        <Input
+                          type="datetime-local"
+                          value={toDateTimeLocalValue(request.pickupAt)}
+                          onChange={(event) =>
+                            updateTransportRequest(
+                              request.id,
+                              "pickupAt",
+                              fromDateTimeLocalValue(event.target.value),
+                            )
+                          }
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          aria-label={`Save pickup date and time for transport request ${index + 1}`}
+                          disabled={isSavingTransport}
+                          onClick={saveTransportRequests}
+                        >
+                          <Check className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                    {request.serviceType === "rental" ? (
+                      <div className="space-y-1.5">
+                        <Label>Return date/time</Label>
+                        <div className="flex gap-2">
+                          <Input
+                            type="datetime-local"
+                            value={toDateTimeLocalValue(request.returnAt)}
+                            onChange={(event) =>
+                              updateTransportRequest(
+                                request.id,
+                                "returnAt",
+                                fromDateTimeLocalValue(event.target.value),
+                              )
+                            }
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            aria-label={`Save return date and time for transport request ${index + 1}`}
+                            disabled={isSavingTransport}
+                            onClick={saveTransportRequests}
+                          >
+                            <Check className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
+                    <div className="space-y-1.5">
+                      <Label>Passengers</Label>
+                      <NumericInput
+                        min="0"
+                        step="1"
+                        nullable
+                        value={request.passengerCount}
+                        onValueChange={(value) =>
+                          updateTransportRequest(request.id, "passengerCount", value)
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Luggage</Label>
+                      <NumericInput
+                        min="0"
+                        step="1"
+                        nullable
+                        value={request.luggageCount}
+                        onValueChange={(value) =>
+                          updateTransportRequest(request.id, "luggageCount", value)
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Flight number</Label>
+                      <Input
+                        value={request.flightNumber ?? ""}
+                        onChange={(event) =>
+                          updateTransportRequest(request.id, "flightNumber", event.target.value || null)
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1.5 md:col-span-2 xl:col-span-3">
+                      <Label>Notes</Label>
+                      <Textarea
+                        value={request.notes ?? ""}
+                        onChange={(event) =>
+                          updateTransportRequest(request.id, "notes", event.target.value || null)
+                        }
+                      />
+                    </div>
+                    <div className="flex items-end justify-end">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        aria-label={`Remove transport request ${index + 1}`}
+                        onClick={() =>
+                          setTransportRequests((current) =>
+                            current.filter((item) => item.id !== request.id),
+                          )
+                        }
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </CardContent>
@@ -461,6 +511,69 @@ export function JobEnquiryTab({ enquiry, itineraries, onTransportRequestsChange 
           </CardContent>
         </Card>
       )}
+    </div>
+  )
+}
+
+interface TransportRequestSummaryProps {
+  request: EditableTransportRequest
+  index: number
+  onEdit: () => void
+  onRemove: () => void
+}
+
+function TransportRequestSummary({ request, index, onEdit, onRemove }: TransportRequestSummaryProps) {
+  const serviceLabel = request.serviceType === "rental" ? "Vehicle rental" : "Transfer"
+  const pickupLabel = request.serviceType === "rental" ? "Rental pickup" : "Pickup"
+  const dropoffLabel = request.serviceType === "rental" ? "Return point" : "Drop-off"
+
+  return (
+    <div className="rounded-md border bg-secondary/20 p-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="secondary">{serviceLabel}</Badge>
+            <p className="text-sm font-medium">
+              {request.pickupPoint} to {request.dropoffPoint}
+            </p>
+          </div>
+          <div className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
+            <Field label={pickupLabel} value={request.pickupPoint} />
+            <Field label={dropoffLabel} value={request.dropoffPoint} />
+            <Field label="Pickup date/time" value={request.pickupAtDisplay ?? "Not set"} />
+            {request.serviceType === "rental" ? (
+              <Field label="Return date/time" value={request.returnAtDisplay ?? "Not set"} />
+            ) : null}
+            <Field label="Passengers" value={request.passengerCount?.toString() ?? "Not set"} />
+            <Field label="Luggage" value={request.luggageCount?.toString() ?? "Not set"} />
+            <Field label="Flight number" value={request.flightNumber ?? "Not set"} />
+          </div>
+          {request.notes ? (
+            <p className="text-sm text-muted-foreground">{request.notes}</p>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-2 sm:justify-end">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-label={`Edit transport request ${index + 1}`}
+            onClick={onEdit}
+          >
+            <Pencil className="mr-2 h-4 w-4" />
+            Edit
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            aria-label={`Remove transport request ${index + 1}`}
+            onClick={onRemove}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
     </div>
   )
 }

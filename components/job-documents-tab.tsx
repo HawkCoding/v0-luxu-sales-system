@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button"
 import type { DocRecord, Enquiry, Job, Customer, ConsultantAbbreviation } from "@/lib/types"
 import { FileText, FileOutput } from "lucide-react"
 import { generateVoucherHTML, downloadVoucherPDF } from "@/lib/generate-voucher"
-import { CONSULTANTS } from "@/lib/types"
+import { CONSULTANTS, VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
+import { useVoucherTemplate } from "@/lib/use-data"
 import { toast } from "sonner"
 import { formatDisplayDateLong, formatDisplayDateTime } from "@/lib/date-format"
 
@@ -18,7 +19,8 @@ interface JobDocumentsTabProps {
 }
 
 export function JobDocumentsTab({ documents, job, enquiry, customer }: JobDocumentsTabProps) {
-  const canGenerateVoucher = job && enquiry && customer && 
+  const { data: voucherTemplate, isLoading: voucherTemplateLoading, error: voucherTemplateError } = useVoucherTemplate()
+  const canGenerateVoucher = job && enquiry && customer &&
     (job.stage === "deposit_paid" || job.stage === "final_paid" || job.stage === "voucher_sent" || job.stage === "closed")
 
   const handleGenerateVoucher = () => {
@@ -47,7 +49,12 @@ export function JobDocumentsTab({ documents, job, enquiry, customer }: JobDocume
       consultant: job.consultant
     }
 
-    const html = generateVoucherHTML(voucherData)
+    if (!voucherTemplate && voucherTemplateLoading) {
+      toast.error("Voucher template is still loading. Please try again in a moment.")
+      return
+    }
+
+    const html = generateVoucherHTML(voucherData, voucherTemplateError ? VOUCHER_TEMPLATE_DEFAULTS : voucherTemplate)
     downloadVoucherPDF(html, `voucher-${job.jobNumber}.html`)
     
     toast.success("Voucher generated successfully", {
@@ -65,7 +72,7 @@ export function JobDocumentsTab({ documents, job, enquiry, customer }: JobDocume
                 <p className="text-sm font-medium text-foreground">Generate Travel Voucher</p>
                 <p className="text-xs text-muted-foreground mt-0.5">Create a PDF voucher for this booking</p>
               </div>
-              <Button size="sm" onClick={handleGenerateVoucher}>
+              <Button size="sm" onClick={handleGenerateVoucher} disabled={voucherTemplateLoading}>
                 <FileOutput className="w-4 h-4 mr-1.5" />
                 Generate Voucher
               </Button>

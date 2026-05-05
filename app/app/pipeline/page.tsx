@@ -60,6 +60,14 @@ const PAYMENT_COLORS: Record<string, string> = {
   blue: "bg-payment-blue",
 }
 
+const PAYMENT_STATUS_LABELS: Record<string, string> = {
+  green: "Fully paid",
+  yellow: "Deposit paid",
+  purple: "Partial payment",
+  red: "No payment",
+  blue: "Credit / refund",
+}
+
 const ENQUIRY_SAVE_STEPS = [
   "Reading customer details",
   "Saving customer record",
@@ -499,7 +507,7 @@ export default function PipelinePage() {
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between gap-4">
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className={`w-3 h-3 rounded-full flex-shrink-0 ${PAYMENT_COLORS[b.paymentColor] || "bg-muted-foreground"}`} />
+                        <div className={`w-3 h-3 rounded-full flex-shrink-0 ${PAYMENT_COLORS[b.paymentColor] || "bg-muted-foreground"}`} title={`Payment: ${PAYMENT_STATUS_LABELS[b.paymentColor] ?? b.paymentColor}`} />
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-semibold text-foreground">{b.bookingNumber}</span>
@@ -720,7 +728,7 @@ function PipelineCard({
             {job.consultant && (
               <Badge variant="default" className="text-[10px] h-4 px-1 font-bold">{job.consultant}</Badge>
             )}
-            <div className={`w-2.5 h-2.5 rounded-full ${paymentDotClass}`} title={`Payment: ${job.paymentColor}`} />
+            <div className={`w-2.5 h-2.5 rounded-full ${paymentDotClass}`} title={`Payment: ${PAYMENT_STATUS_LABELS[job.paymentColor] ?? job.paymentColor}`} />
             {canDrag && <GripVertical className="w-3.5 h-3.5 text-muted-foreground/50" />}
           </div>
         </div>
