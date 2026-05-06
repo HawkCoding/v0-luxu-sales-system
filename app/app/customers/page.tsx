@@ -8,13 +8,14 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
-import { Search, Globe, Filter, X } from "lucide-react"
+import { Search, Globe, Filter, X, UserPlus } from "lucide-react"
 import { useEffect, useState } from "react"
 import { CONSULTANTS, type ConsultantAbbreviation } from "@/lib/types"
 import { formatDisplayDate } from "@/lib/date-format"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { CustomerDetailView } from "@/components/customer-detail-view"
+import { CreateCustomerDialog } from "@/components/create-customer-dialog"
 import {
   Dialog,
   DialogContent,
@@ -40,7 +41,7 @@ function getCustomerIdFromPath(pathname: string): string | null {
 }
 
 export default function CustomersPage() {
-  const { data, isLoading } = useAllData()
+  const { data, isLoading, mutate } = useAllData()
   const searchParams = useSearchParams()
   const [search, setSearch] = useState("")
   const [consultantFilter, setConsultantFilter] = useState<"all" | ConsultantAbbreviation>("all")
@@ -49,6 +50,7 @@ export default function CustomersPage() {
   const [createdDateTo, setCreatedDateTo] = useState<Date | undefined>(undefined)
   const [page, setPage] = useState(1)
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null)
+  const [createDialogOpen, setCreateDialogOpen] = useState(false)
 
   useEffect(() => {
     const handlePopState = () => {
@@ -153,6 +155,11 @@ export default function CustomersPage() {
     window.history.back()
   }
 
+  const handleCustomerCreated = (customerId: string) => {
+    mutate()
+    openCustomerModal(customerId)
+  }
+
   if (isLoading || !data) {
     return <div className="p-6"><div className="animate-pulse space-y-3">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-14 bg-secondary rounded-lg" />)}</div></div>
   }
@@ -183,6 +190,12 @@ export default function CustomersPage() {
             Showing {pageStartDisplay}-{pageEndDisplay} of {filtered.length} customers (Page{" "}
             {currentPage} of {totalPages})
           </p>
+        </div>
+        <div className="flex-shrink-0">
+          <Button onClick={() => setCreateDialogOpen(true)}>
+            <UserPlus className="w-4 h-4 mr-2" />
+            New Customer
+          </Button>
         </div>
       </div>
 
@@ -463,6 +476,12 @@ export default function CustomersPage() {
           ) : null}
         </DialogContent>
       </Dialog>
+
+      <CreateCustomerDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        onSuccess={handleCustomerCreated}
+      />
     </div>
   )
 }

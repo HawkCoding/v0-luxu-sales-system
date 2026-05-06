@@ -9,9 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Search, Plus, FileText, Clipboard, Send, AlertCircle, Download, HelpCircle, CheckCircle2, Trash2 } from "lucide-react"
 import Link from "next/link"
 import { useState } from "react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog"
-import { Textarea } from "@/components/ui/textarea"
 import { useRole } from "@/lib/role-context"
+import { NewEnquiryDialog } from "@/components/new-enquiry-dialog"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { toast } from "sonner"
@@ -24,9 +23,7 @@ export default function EnquiriesPage() {
   const { can } = useRole()
   const [search, setSearch] = useState("")
   const [sourceFilter, setSourceFilter] = useState("all")
-  const [pasteOpen, setPasteOpen] = useState(false)
-  const [pasteText, setPasteText] = useState("")
-  const [pasting, setPasting] = useState(false)
+  const [newEnquiryOpen, setNewEnquiryOpen] = useState(false)
   const [dialogOpenId, setDialogOpenId] = useState<string | null>(null)
 
   if (isLoading || !data) {
@@ -59,44 +56,6 @@ export default function EnquiriesPage() {
     const matchSource = sourceFilter === "all" || e.source === sourceFilter
     return matchSearch && matchSource
   })
-
-  const handlePasteImport = async () => {
-    if (!pasteText.trim()) return
-    setPasting(true)
-    try {
-      const lines = pasteText.split("\n").map((l: string) => l.trim()).filter(Boolean)
-      const nameMatch = pasteText.match(/(?:regards|sincerely|cheers),?\s*\n?\s*([A-Z][a-z]+)\s+([A-Z][a-z]+)/i)
-      const emailMatch = pasteText.match(/[\w.-]+@[\w.-]+\.\w+/)
-      const phoneMatch = pasteText.match(/\+[\d\s-]{8,}/)
-
-      await fetch("/api/enquiries", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          rawText: pasteText,
-          purpose: "quote",
-          title: "Mr",
-          name: nameMatch?.[1] || "Unknown",
-          surname: nameMatch?.[2] || "Unknown",
-          contactNumber: phoneMatch?.[0] || "",
-          email: emailMatch?.[0] || "",
-          country: null,
-          direction: "Pretoria to Cape Town",
-          departureDate: "2026-06-01",
-          noOfSuites: 1,
-          noOfAdults: 2,
-          noOfChildren: 0,
-          suiteTypes: ["Pullman Twin Suite"],
-          termsAccepted: true,
-        }),
-      })
-      mutate()
-      setPasteOpen(false)
-      setPasteText("")
-    } finally {
-      setPasting(false)
-    }
-  }
 
   const handleDownloadAudit = (e: React.MouseEvent, enquiry: any) => {
     e.preventDefault()
@@ -162,11 +121,16 @@ export default function EnquiriesPage() {
           </div>
         </div>
         {can("create:enquiry") && (
-          <Link href="/enquire/rovos">
-            <Button size="default">
+          <>
+            <Button size="default" onClick={() => setNewEnquiryOpen(true)}>
               <Plus className="w-4 h-4 mr-2" /> New Enquiry
             </Button>
-          </Link>
+            <NewEnquiryDialog
+              open={newEnquiryOpen}
+              onOpenChange={setNewEnquiryOpen}
+              onSaved={() => mutate()}
+            />
+          </>
         )}
       </div>
 
