@@ -36,9 +36,12 @@ import { JobCorrespondenceTab } from "@/components/job-correspondence-tab"
 import { JobDocumentsTab } from "@/components/job-documents-tab"
 import { JobAuditTab } from "@/components/job-audit-tab"
 import { CancelBookingDialog } from "@/components/cancel-booking-dialog"
+import { StageTransitionModal } from "@/components/stage-transition-modal"
 import { PresenceAvatars } from "@/components/presence-avatars"
 import { useRecordPresence } from "@/hooks/use-record-presence"
 import { useVersionedSave } from "@/hooks/use-versioned-save"
+import type { GateFailure, ManualConfirmations } from "@/lib/pipeline/validate-transition"
+import { getApiErrorMessage, parseStageTransitionFailurePayload } from "@/lib/pipeline/stage-transition-response"
 import { toast } from "sonner"
 
 interface JobPatchResponse {
@@ -136,6 +139,11 @@ export default function JobDetailPage() {
   const hasLoadError = Boolean(error)
   const [cancelOpen, setCancelOpen] = useState(false)
   const [changeCustomerOpen, setChangeCustomerOpen] = useState(false)
+  const [transitionModalOpen, setTransitionModalOpen] = useState(false)
+  const [transitionFailures, setTransitionFailures] = useState<GateFailure[]>([])
+  const [transitionIsManager, setTransitionIsManager] = useState(false)
+  const [transitionSubmitting, setTransitionSubmitting] = useState(false)
+  const [pendingStage, setPendingStage] = useState<PipelineStage | null>(null)
   const [customerSearch, setCustomerSearch] = useState("")
   const [customerResults, setCustomerResults] = useState<Array<{ id: string; firstName: string; lastName: string; email: string }>>([])
   const [changingCustomer, setChangingCustomer] = useState(false)
@@ -162,8 +170,8 @@ export default function JobDetailPage() {
   }, [hasLoadError, router])
 
   useEffect(() => {
-    setEditing(cancelOpen || changeCustomerOpen)
-  }, [cancelOpen, changeCustomerOpen, setEditing])
+    setEditing(cancelOpen || changeCustomerOpen || transitionModalOpen)
+  }, [cancelOpen, changeCustomerOpen, transitionModalOpen, setEditing])
 
   useEffect(() => {
     setActiveTab(parseJobDetailTab(searchParams.get("tab")))
@@ -196,11 +204,60 @@ export default function JobDetailPage() {
     }
   }
 
+  const resetPendingTransition = () => {
+    setTransitionModalOpen(false)
+    setTransitionFailures([])
+    setTransitionIsManager(false)
+    setPendingStage(null)
+  }
+
+  const moveStageTo = async (
+    targetStage: PipelineStage,
+    options?: { manualConfirmations?: ManualConfirmations; overrideReason?: string },
+  ) => {
+    setTransitionSubmitting(true)
+    try {
+      const response = await fetch(`/api/jobs/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          stage: targetStage,
+          expectedUpdatedAt: data.job.updatedAt,
+          manualConfirmations: options?.manualConfirmations,
+          override: Boolean(options?.overrideReason),
+          overrideReason: options?.overrideReason,
+        }),
+      })
+
+      const payload = await response.json().catch(() => null)
+      const stageGatePayload = response.status === 422 ? parseStageTransitionFailurePayload(payload) : null
+      if (stageGatePayload) {
+        setTransitionFailures(stageGatePayload.failures)
+        setTransitionIsManager(stageGatePayload.isManager)
+        setPendingStage(targetStage)
+        setTransitionModalOpen(true)
+        return
+      }
+
+      if (!response.ok) {
+        throw new Error(getApiErrorMessage(payload, "Stage move failed"))
+      }
+
+      await mutate()
+      resetPendingTransition()
+      toast.success("Stage updated")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Stage move failed")
+    } finally {
+      setTransitionSubmitting(false)
+    }
+  }
+
   const moveStage = async (direction: "forward" | "back") => {
     if (needsEmailReview && direction === "forward") return
     const newIdx = direction === "forward" ? currentStageIdx + 1 : currentStageIdx - 1
     if (newIdx < 0 || newIdx >= PIPELINE_STAGES.length) return
-    await saveJobPatch({ stage: PIPELINE_STAGES[newIdx].key })
+    await moveStageTo(PIPELINE_STAGES[newIdx].key)
   }
 
   const resolveEmailReview = async () => {
@@ -253,10 +310,10 @@ export default function JobDetailPage() {
         </div>
         {can("edit:pipeline") && (
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" disabled={currentStageIdx <= 0} onClick={() => moveStage("back")}>
+            <Button variant="outline" size="sm" disabled={currentStageIdx <= 0 || transitionSubmitting} onClick={() => moveStage("back")}>
               <ChevronLeftIcon className="w-4 h-4 mr-1" /> Back
             </Button>
-            <Button size="sm" disabled={currentStageIdx >= PIPELINE_STAGES.length - 1 || needsEmailReview || isSavingJob} onClick={() => moveStage("forward")}>
+            <Button size="sm" disabled={currentStageIdx >= PIPELINE_STAGES.length - 1 || needsEmailReview || isSavingJob || transitionSubmitting} onClick={() => moveStage("forward")}>
               Next <ChevronRight className="w-4 h-4 ml-1" />
             </Button>
             {can("cancel:booking") && job.stage !== "lost" && job.stage !== "closed" && (
@@ -379,7 +436,18 @@ export default function JobDetailPage() {
           <JobEnquiryTab enquiry={enquiry} itineraries={itineraries} onTransportRequestsChange={mutate} />
         </TabsContent>
         <TabsContent value="quotes">
-          <JobQuotesTab quotes={quotes} jobId={id} itineraries={itineraries} travelDate={enquiry?.departureDate ?? null} mutate={mutate} />
+          <JobQuotesTab
+            quotes={quotes}
+            jobId={id}
+            bookingNumber={job.jobNumber}
+            itineraries={itineraries}
+            travelDate={enquiry?.departureDate ?? null}
+            noOfAdults={enquiry?.noOfAdults ?? 0}
+            noOfChildren={enquiry?.noOfChildren ?? 0}
+            customerName={`${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()}
+            emailImportNeedsReview={needsEmailReview}
+            mutate={mutate}
+          />
         </TabsContent>
         <TabsContent value="payments">
           <JobPaymentsTab payments={payments} jobId={id} mutate={mutate} />
@@ -415,6 +483,25 @@ export default function JobDetailPage() {
         bookingNumber={job.jobNumber}
         sourceStage={job.stage}
         onCancelled={() => router.push("/app/pipeline")}
+      />
+
+      <StageTransitionModal
+        open={transitionModalOpen}
+        jobId={id}
+        jobNumber={job.jobNumber}
+        targetStage={pendingStage}
+        failures={transitionFailures}
+        isManager={transitionIsManager}
+        submitting={transitionSubmitting}
+        onCancel={resetPendingTransition}
+        onProceed={async (manualConfirmations) => {
+          if (!pendingStage) return
+          await moveStageTo(pendingStage, { manualConfirmations })
+        }}
+        onOverride={async (overrideReason) => {
+          if (!pendingStage) return
+          await moveStageTo(pendingStage, { overrideReason })
+        }}
       />
 
       <Dialog open={changeCustomerOpen} onOpenChange={setChangeCustomerOpen}>
@@ -461,9 +548,9 @@ export default function JobDetailPage() {
 
 function InfoItem({ label, value }: { label: string; value?: string }) {
   return (
-    <div>
+    <div className="min-w-0">
       <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider" style={{ fontFamily: "var(--font-inter)" }}>{label}</p>
-      <p className="text-sm text-foreground mt-0.5">{value || "-"}</p>
+      <p className="text-sm text-foreground mt-0.5 truncate" title={value}>{value || "-"}</p>
     </div>
   )
 }
