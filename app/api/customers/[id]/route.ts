@@ -4,7 +4,7 @@ import { createSessionClient } from "@/lib/supabase/server"
 import { staleVersionResponse } from "@/lib/concurrency"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 
-const allowedRoles = new Set(["admin", "manager"])
+const allowedRoles = new Set(["admin", "manager", "consultant"])
 
 const patchCustomerSchema = z.object({
   notes: z.string().max(5000),
