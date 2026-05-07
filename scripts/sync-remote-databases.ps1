@@ -77,6 +77,50 @@ function Get-RequiredEnv {
   return $value
 }
 
+function Get-OptionalEnv {
+  param([Parameter(Mandatory = $true)][string]$Name)
+
+  $value = [Environment]::GetEnvironmentVariable($Name, "Process")
+  if ([string]::IsNullOrWhiteSpace($value)) {
+    return $null
+  }
+  return $value
+}
+
+function New-SupabasePoolerDbUrl {
+  param(
+    [Parameter(Mandatory = $true)][string]$ProjectRef,
+    [Parameter(Mandatory = $true)][string]$Password,
+    [string]$PoolerHost = "aws-1-eu-west-1.pooler.supabase.com"
+  )
+
+  $encodedPassword = [System.Uri]::EscapeDataString($Password)
+  return "postgresql://postgres.$ProjectRef`:$encodedPassword@$PoolerHost`:5432/postgres"
+}
+
+function Get-TargetDbUrl {
+  param([Parameter(Mandatory = $true)][string]$TargetName)
+
+  $prefix = if ($TargetName -eq "production") { "SUPABASE_PROD" } else { "SUPABASE_DEV" }
+  $url = Get-OptionalEnv -Name "$prefix`_DB_URL"
+  if (-not [string]::IsNullOrWhiteSpace($url)) {
+    return $url
+  }
+
+  $projectRef = Get-OptionalEnv -Name "$prefix`_PROJECT_REF"
+  $password = Get-OptionalEnv -Name "$prefix`_DB_PASSWORD"
+  if (-not [string]::IsNullOrWhiteSpace($projectRef) -and -not [string]::IsNullOrWhiteSpace($password)) {
+    $poolerHost = Get-OptionalEnv -Name "$prefix`_POOLER_HOST"
+    if ([string]::IsNullOrWhiteSpace($poolerHost)) {
+      return New-SupabasePoolerDbUrl -ProjectRef $projectRef -Password $password
+    }
+
+    return New-SupabasePoolerDbUrl -ProjectRef $projectRef -Password $password -PoolerHost $poolerHost
+  }
+
+  throw "Missing database connection details for $TargetName. Set $prefix`_DB_URL, or set $prefix`_PROJECT_REF plus $prefix`_DB_PASSWORD, in your shell or .env.sync.local. Set $prefix`_POOLER_HOST too if the project is not in the default West EU pooler."
+}
+
 function Invoke-Checked {
   param(
     [Parameter(Mandatory = $true)][string[]]$Command,
@@ -100,13 +144,18 @@ function Invoke-Checked {
   }
 
   if ($OutputPath) {
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     & $executable @arguments *> $OutputPath
+    $commandExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousErrorActionPreference
   } else {
     & $executable @arguments
+    $commandExitCode = $LASTEXITCODE
   }
 
-  if ($LASTEXITCODE -ne 0) {
-    throw "Command failed with exit code $LASTEXITCODE`: $displayCommand"
+  if ($commandExitCode -ne 0) {
+    throw "Command failed with exit code $commandExitCode`: $displayCommand"
   }
 }
 
@@ -116,14 +165,6 @@ function Get-Targets {
     "production" { return @("production") }
     default { return @("development", "production") }
   }
-}
-
-function Get-DbUrlEnvName {
-  param([string]$TargetName)
-  if ($TargetName -eq "production") {
-    return "SUPABASE_PROD_DB_URL"
-  }
-  return "SUPABASE_DEV_DB_URL"
 }
 
 function Compare-Target {
@@ -191,8 +232,7 @@ try {
   Write-Host "Reports: $reportDir"
 
   foreach ($targetName in Get-Targets) {
-    $envName = Get-DbUrlEnvName -TargetName $targetName
-    $dbUrl = Get-RequiredEnv -Name $envName -TargetName $targetName
+    $dbUrl = Get-TargetDbUrl -TargetName $targetName
 
     Compare-Target -TargetName $targetName -DbUrl $dbUrl
 

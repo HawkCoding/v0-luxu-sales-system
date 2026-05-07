@@ -1,162 +1,139 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`generateVoucherHTML > matches the voucher HTML snapshot with special requests 1`] = `
-"
-<!DOCTYPE html>
+"<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Travel Voucher - LX-2026-001</title>
+  <title>Travel Voucher – LX-2026-001</title>
   <style>
-    @page {
-      size: A4;
-      margin: 20mm;
-    }
+    @page { size: A4; margin: 20mm; }
     body {
-      font-family: 'Helvetica', 'Arial', sans-serif;
+      font-family: Georgia, serif;
       font-size: 11pt;
       line-height: 1.4;
       color: #333;
       margin: 0;
       padding: 0;
     }
-    .header {
-      text-align: center;
-      border-bottom: 2px solid #0B2A3A;
-      padding-bottom: 10px;
-      margin-bottom: 20px;
+
+    /* Header variants */
+    .header { margin-bottom: 20px; }
+    .header-split { display: flex; align-items: stretch; border-bottom: 2px solid #0B2A3A; }
+    .header-logo-side { width: 120px; min-width: 120px; display: flex; align-items: center; justify-content: center; padding: 8px; background: #fff; }
+    .header-logo { max-width: 100px; max-height: 80px; object-fit: contain; }
+    .header-banner-side { flex: 1; position: relative; overflow: hidden; }
+    .header-banner { width: 100%; height: 100px; object-fit: cover; display: block; }
+    .header-text-overlay { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.45); padding: 6px 12px; }
+    .header-text-overlay .product-line { color: #fff; font-size: 10pt; font-weight: bold; letter-spacing: 1px; margin: 0; }
+    .header-text-overlay .header-subtitle { color: rgba(255,255,255,0.85); font-size: 8pt; font-style: italic; margin: 0; }
+
+    .header-logo-only { text-align: center; padding-bottom: 10px; border-bottom: 2px solid #0B2A3A; }
+    .header-logo-center { max-height: 70px; object-fit: contain; margin-bottom: 6px; }
+
+    .header-banner-only .header-banner-full { width: 100%; max-height: 110px; object-fit: cover; display: block; }
+    .header-text-below { text-align: center; padding: 6px 0; border-bottom: 2px solid #0B2A3A; }
+
+    .header-text-only { text-align: center; padding-bottom: 10px; border-bottom: 2px solid #0B2A3A; }
+
+    .product-line { font-size: 9pt; font-weight: bold; color: #0B2A3A; letter-spacing: 1px; margin-top: 5px; }
+    .header-subtitle { font-size: 9pt; color: #666; font-style: italic; margin-top: 3px; }
+
+    /* Voucher number banner */
+    .voucher-number-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: 16px 0 8px;
     }
-    .header-subtitle {
-      font-size: 9pt;
-      color: #666;
-      margin-top: 3px;
-    }
-    .product-line {
-      font-size: 9pt;
+    h1 { font-size: 18pt; color: #0B2A3A; margin: 0; }
+    .voucher-badge {
+      border: 2px solid #0B2A3A;
+      padding: 4px 12px;
+      font-size: 11pt;
       font-weight: bold;
       color: #0B2A3A;
-      letter-spacing: 1px;
-      margin-top: 5px;
+      border-radius: 3px;
     }
-    .voucher-number {
-      text-align: right;
-      font-size: 10pt;
-      color: #666;
-      margin-bottom: 15px;
-    }
-    h1 {
-      font-size: 18pt;
-      color: #0B2A3A;
-      margin: 20px 0 10px 0;
-      border-bottom: 1px solid #ddd;
-      padding-bottom: 5px;
-    }
+
     .guidance {
       background: #f8f9fa;
-      border-left: 3px solid #5E7582;
+      border-left: 3px solid #1a3a4a;
       padding: 10px 15px;
-      margin: 15px 0;
+      margin: 14px 0;
       font-size: 9pt;
       color: #555;
+      font-style: italic;
     }
-    .section {
-      margin-bottom: 20px;
-    }
+
+    .section { margin-bottom: 20px; }
     .section-title {
-      font-size: 12pt;
+      font-size: 11pt;
       font-weight: bold;
-      color: #0B2A3A;
+      color: #fff;
+      background: #1a3a4a;
+      padding: 5px 10px;
       margin-bottom: 8px;
-      border-bottom: 1px solid #ddd;
-      padding-bottom: 3px;
+      border-radius: 2px;
     }
     .info-grid {
       display: grid;
-      grid-template-columns: 130px 1fr;
-      gap: 8px 15px;
-      margin-bottom: 10px;
+      grid-template-columns: 150px 1fr;
+      gap: 6px 12px;
     }
-    .info-label {
-      font-weight: bold;
-      color: #555;
-      font-size: 10pt;
-    }
-    .info-value {
-      color: #333;
-      font-size: 10pt;
-    }
+    .info-label { font-weight: bold; color: #555; font-size: 10pt; }
+    .info-value { color: #333; font-size: 10pt; }
+
     .provider-box {
       border: 1px solid #ddd;
       border-radius: 4px;
-      padding: 15px;
-      margin: 15px 0;
+      padding: 14px;
       background: #fafafa;
     }
-    .provider-name {
-      font-size: 14pt;
-      font-weight: bold;
-      color: #0B2A3A;
-      margin-bottom: 5px;
-    }
-    .provider-contact {
-      font-size: 9pt;
-      color: #666;
-      margin-bottom: 10px;
-    }
-    .footer {
-      margin-top: 30px;
-      padding-top: 15px;
-      border-top: 1px solid #ddd;
-      text-align: center;
-      font-size: 9pt;
-      color: #666;
-    }
-    .page-number {
-      text-align: center;
-      font-size: 8pt;
-      color: #999;
-      margin-top: 20px;
-    }
+    .provider-name { font-size: 13pt; font-weight: bold; color: #0B2A3A; margin-bottom: 10px; }
+
+    .footer-section { margin-top: 30px; padding-top: 14px; border-top: 1px solid #ddd; }
+    .footer-contact { text-align: center; font-size: 9pt; color: #666; }
+
+    .page-number { text-align: center; font-size: 8pt; color: #999; margin-top: 20px; }
   </style>
 </head>
 <body>
-  <div class="header">
-    <div class="header-subtitle">A division of Luxus Travel & Tours</div>
-    <div class="product-line">THE BLUE TRAIN  •  ROVOS RAIL</div>
+
+  <div class="header header-text-only">
+    <div class="product-line">THE BLUE TRAIN • ROVOS RAIL • KRUGER SHALATI</div>
+    <div class="header-subtitle">A division of Luxus Travel &amp; Tours</div>
   </div>
 
-  <div class="voucher-number">
-    <strong>Voucher Number:</strong> LX-2026-001
+  <div class="voucher-number-row">
+    <h1>TRAVEL VOUCHERS</h1>
+    <div class="voucher-badge">Voucher no. LX-2026-001</div>
   </div>
 
-  <h1>TRAVEL VOUCHERS</h1>
+<div class="guidance">Please hand to your service provider. Pre-payment was made by Luxus Travel &amp; Tours for all services mentioned below. Guests must settle extras direct with the service providers.</div>
 
-  <div class="guidance">
-    This voucher confirms your reservation. All services are pre-paid unless indicated. Additional services or upgrades may incur extra charges payable directly to the service provider.
-  </div>
 
   <div class="section">
     <div class="section-title">Guest Information</div>
     <div class="info-grid">
       <div class="info-label">Guest Names:</div>
       <div class="info-value">John and Jane Smith</div>
-      
+
       <div class="info-label">Number of Guests:</div>
-      <div class="info-value">2 (2 adults, 0 children)</div>
-      
+      <div class="info-value">2 (2 adults)</div>
+
       <div class="info-label">Contact Email:</div>
       <div class="info-value">john@example.com</div>
-      
+
       <div class="info-label">Contact Phone:</div>
       <div class="info-value">+27 82 555 1234</div>
-      
+
       <div class="info-label">Consultant:</div>
-      <div class="info-value">LB - Leonie</div>
-      
-      
+      <div class="info-value">LB – Leonie</div>
+
+
       <div class="info-label">Special Requests:</div>
       <div class="info-value">Anniversary celebration</div>
-      
     </div>
   </div>
 
@@ -164,39 +141,37 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
     <div class="section-title">Service Provider</div>
     <div class="provider-box">
       <div class="provider-name">Rovos Rail</div>
-      <div class="provider-contact">Tel: +27 12 315 8242 • Pretoria, South Africa</div>
-      
+
       <div class="info-grid">
         <div class="info-label">Your Reference:</div>
         <div class="info-value">LX-2026-001</div>
-        
+
         <div class="info-label">Route:</div>
         <div class="info-value">Pretoria to Cape Town</div>
-        
+
         <div class="info-label">Departure Date:</div>
         <div class="info-value">15 April 2026</div>
-        
+
         <div class="info-label">Arrival Date:</div>
         <div class="info-value">17 April 2026</div>
-        
+
         <div class="info-label">Suite Type:</div>
         <div class="info-value">Royal Double Suite</div>
-        
+
         <div class="info-label">Number of Suites:</div>
         <div class="info-value">1</div>
-        
+
         <div class="info-label">Meal Basis:</div>
         <div class="info-value">Full Board (All meals included)</div>
       </div>
     </div>
   </div>
 
-  <div class="footer">
-    For any queries, please contact your consultant. Safe travels!
+  <div class="section footer-section">
+    <div class="footer-contact">Luxus Travel &amp; Tours</div>
   </div>
 
   <div class="page-number">Page 1 of 1</div>
 </body>
-</html>
-  "
+</html>"
 `;

@@ -38,6 +38,7 @@ describe("validateTransition", () => {
       ...baseInput,
       customer: { ...baseInput.customer, email: "", phone: null },
       targetStage: "quote_sent",
+      quotes: [{ status: "sent", total: 1000 }],
     })
 
     expect(failures).toEqual([
@@ -56,9 +57,43 @@ describe("validateTransition", () => {
     })
 
     expect(failures.map((failure) => failure.gateId)).toEqual([
-      "quote_sent_or_accepted",
+      "quote_sent_required",
       "invoice_document",
     ])
+  })
+
+  it("requires a sent or accepted quote before quote sent", () => {
+    expect(
+      validateTransition({
+        ...baseInput,
+        targetStage: "quote_sent",
+      }),
+    ).toContainEqual(expect.objectContaining({ gateId: "quote_sent_required" }))
+
+    expect(
+      validateTransition({
+        ...baseInput,
+        targetStage: "quote_sent",
+        quotes: [{ status: "ready", total: 1000 }],
+      }),
+    ).toContainEqual(expect.objectContaining({ gateId: "quote_sent_required" }))
+
+    expect(
+      validateTransition({
+        ...baseInput,
+        targetStage: "quote_sent",
+        quotes: [{ status: "sent", total: 1000 }],
+      }),
+    ).toEqual([])
+  })
+
+  it("does not duplicate quote failures when quote sent is skipped", () => {
+    const failures = validateTransition({
+      ...baseInput,
+      targetStage: "accepted",
+    })
+
+    expect(failures.map((failure) => failure.gateId)).toEqual(["quote_sent_required"])
   })
 
   it("requires a sent or accepted quote before accepted", () => {
@@ -68,7 +103,13 @@ describe("validateTransition", () => {
         booking: { ...baseInput.booking, stage: "quote_sent" },
         targetStage: "accepted",
       }),
-    ).toContainEqual(expect.objectContaining({ gateId: "quote_sent_or_accepted" }))
+    ).toContainEqual(
+      expect.objectContaining({
+        gateId: "quote_sent_or_accepted",
+        message: "At least one sent or accepted quote is required before quote acceptance.",
+        fixHint: "Send a quote for this job before moving it to Quote Accepted.",
+      }),
+    )
 
     expect(
       validateTransition({

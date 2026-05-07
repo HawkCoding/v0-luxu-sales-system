@@ -23,6 +23,7 @@ import { getPipelineStageLabel, type PipelineStage } from "@/lib/types"
 
 const GATE_TAB_MAP: Record<string, string> = {
   customer_complete: "?tab=enquiry",
+  quote_sent_required: "?tab=quotes",
   quote_sent_or_accepted: "?tab=quotes",
   invoice_document: "?tab=documents",
   invoice_correspondence: "?tab=correspondence",

@@ -69,6 +69,11 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
   const [user, setUser] = useState<User | null>(initialUserRef.current)
   const [loading, setLoading] = useState(initialUserRef.current === null)
   const authHandlerInFlightRef = useRef(false)
+  const currentUserRef = useRef<User | null>(initialUserRef.current)
+
+  useEffect(() => {
+    currentUserRef.current = user
+  }, [user])
 
   const loadProfile = useCallback(async (supabaseUser: SupabaseUser) => {
     const supabase = getSupabase()
@@ -259,24 +264,70 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
         setLoading(false)
       }
 
-      // Subscribe to auth state changes (login / logout / token refresh)
-      const authState = supabase.auth.onAuthStateChange(async (_event, session) => {
+      const scheduleProfileLoad = (supabaseUser: SupabaseUser) => {
+        window.setTimeout(() => {
+          if (!mounted) return
+          if (authHandlerInFlightRef.current) return
+
+          authHandlerInFlightRef.current = true
+          void loadProfile(supabaseUser)
+            .catch((error) => {
+              console.error("Failed to update auth state", error)
+              if (mounted) setUser(null)
+            })
+            .finally(() => {
+              authHandlerInFlightRef.current = false
+              if (mounted) setLoading(false)
+            })
+        }, 0)
+      }
+
+      // Subscribe to auth state changes. Keep this callback synchronous; Supabase
+      // runs it inside its auth lock, so database reads must be deferred.
+      const authState = supabase.auth.onAuthStateChange((event, session) => {
         if (!mounted) return
-        if (authHandlerInFlightRef.current) return
-        authHandlerInFlightRef.current = true
-        try {
+
+        if (event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED") {
           if (session?.user) {
-            await loadProfile(session.user)
-          } else {
+            const currentUser = currentUserRef.current
+            if (currentUser?.id === session.user.id) {
+              setLoading(false)
+              return
+            }
+
+            scheduleProfileLoad(session.user)
+            return
+          }
+
+          if (event === "INITIAL_SESSION") {
             setUser(null)
           }
-        } catch (error) {
-          console.error("Failed to update auth state", error)
-          setUser(null)
-        } finally {
-          authHandlerInFlightRef.current = false
-          if (mounted) setLoading(false)
+          setLoading(false)
+          return
         }
+
+        if (event === "SIGNED_OUT") {
+          authHandlerInFlightRef.current = false
+          setUser(null)
+          setLoading(false)
+          return
+        }
+
+        if (event === "SIGNED_IN") {
+          const currentUser = currentUserRef.current
+          if (currentUser?.id === session?.user.id) {
+            setLoading(false)
+            return
+          }
+        }
+
+        if (session?.user) {
+          scheduleProfileLoad(session.user)
+          return
+        }
+
+        setUser(null)
+        setLoading(false)
       })
       subscription = authState.data.subscription
     } catch (error) {

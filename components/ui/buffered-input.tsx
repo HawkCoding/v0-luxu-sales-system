@@ -1,7 +1,7 @@
 "use client"
 
 import type { ChangeEvent, ComponentProps } from "react"
-import { startTransition, useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 
 import { Input } from "@/components/ui/input"
 
@@ -30,9 +30,7 @@ export function BufferedInput({
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
     const nextValue = event.target.value
     setDisplayValue(nextValue)
-    startTransition(() => {
-      onValueChange(nextValue)
-    })
+    onValueChange(nextValue)
   }
 
   return (

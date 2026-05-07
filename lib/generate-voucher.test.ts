@@ -54,6 +54,6 @@ describe("generateVoucherHTML", () => {
     })
 
     expect(html).not.toContain("Special Requests:")
-    expect(html).toContain("Travel Voucher - LX-2026-001")
+    expect(html).toContain("LX-2026-001")
   })
 })

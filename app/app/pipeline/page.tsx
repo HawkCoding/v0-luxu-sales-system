@@ -18,9 +18,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog"
-import { Textarea } from "@/components/ui/textarea"
 import { useRole } from "@/lib/role-context"
+import { NewEnquiryDialog } from "@/components/new-enquiry-dialog"
 import Link from "next/link"
 import { useState, useEffect } from "react"
 import { CheckCircle2, GripVertical, Search, Clipboard, Plus, Settings, Download } from "lucide-react"
@@ -29,13 +28,9 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { downloadAuditLog } from "@/lib/export-audit"
 import { toast } from "sonner"
-import { parseEmailDraft, type ParsedDraft } from "@/lib/import/parseEmailDraft"
-import { buildEnquiryImportPayload } from "@/lib/import/enquiry-payload"
-import { ReviewImportedDraftModal } from "@/components/review-imported-draft-modal"
 import { StageTransitionModal } from "@/components/stage-transition-modal"
 import type { GateFailure, ManualConfirmations } from "@/lib/pipeline/validate-transition"
 import { useRouter } from "next/navigation"
-import { ProgressDialog } from "@/components/progress-dialog"
 
 interface PipelineJob {
   id: string
@@ -60,14 +55,13 @@ const PAYMENT_COLORS: Record<string, string> = {
   blue: "bg-payment-blue",
 }
 
-const ENQUIRY_SAVE_STEPS = [
-  "Reading customer details",
-  "Saving customer record",
-  "Creating job",
-  "Saving travel details",
-  "Finalising enquiry",
-  "Opening job",
-]
+const PAYMENT_STATUS_LABELS: Record<string, string> = {
+  green: "Fully paid",
+  yellow: "Deposit paid",
+  purple: "Partial payment",
+  red: "No payment",
+  blue: "Credit / refund",
+}
 
 function isPastOrToday(dateString: string | null): boolean {
   if (!dateString) return false
@@ -87,16 +81,7 @@ export default function PipelinePage() {
   const [dragOverStage, setDragOverStage] = useState<string | null>(null)
   const [search, setSearch] = useState("")
   const [stageFilter, setStageFilter] = useState("all")
-  const [pasteOpen, setPasteOpen] = useState(false)
-  const [pasteText, setPasteText] = useState("")
-  const [pasting, setPasting] = useState(false)
-  const [reviewOpen, setReviewOpen] = useState(false)
-  const [parsedDraft, setParsedDraft] = useState<ParsedDraft | null>(null)
-  const [saveProgressOpen, setSaveProgressOpen] = useState(false)
-  const [saveProgress, setSaveProgress] = useState(0)
-  const [saveStepIndex, setSaveStepIndex] = useState(0)
-  const [saveError, setSaveError] = useState<string | null>(null)
-  const [failedDraft, setFailedDraft] = useState<ParsedDraft | null>(null)
+  const [newEnquiryOpen, setNewEnquiryOpen] = useState(false)
   const [showAllItems, setShowAllItems] = useState(false)
   const [consultantFilter, setConsultantFilter] = useState<"all" | ConsultantAbbreviation>("all")
   
@@ -106,20 +91,6 @@ export default function PipelinePage() {
   const [transitionSubmitting, setTransitionSubmitting] = useState(false)
   const [pendingJobId, setPendingJobId] = useState<string | null>(null)
   const [pendingToStage, setPendingToStage] = useState<PipelineStage | null>(null)
-
-  useEffect(() => {
-    if (!saveProgressOpen || saveError) return
-
-    const timer = window.setInterval(() => {
-      setSaveProgress((current) => Math.min(current + 14, 94))
-      setSaveStepIndex((current) => {
-        const maxOptimisticStep = ENQUIRY_SAVE_STEPS.length - 2
-        return current < maxOptimisticStep ? current + 1 : current
-      })
-    }, 450)
-
-    return () => window.clearInterval(timer)
-  }, [saveError, saveProgressOpen])
 
   // Load showAllItems setting from localStorage
   useEffect(() => {
@@ -234,91 +205,6 @@ export default function PipelinePage() {
     await moveJob(jobId, toStage)
   }
 
-  const handlePasteImport = () => {
-    if (!pasteText.trim()) return
-    
-    // Parse the email text
-    const parsed = parseEmailDraft(pasteText)
-    setParsedDraft(parsed)
-    
-    // Close paste modal and open review modal
-    setPasteOpen(false)
-    setReviewOpen(true)
-  }
-
-  const handleBackToPaste = () => {
-    setReviewOpen(false)
-    setPasteOpen(true)
-  }
-
-  const handleReviewClose = () => {
-    setReviewOpen(false)
-    setPasteText("")
-    setParsedDraft(null)
-  }
-
-  const handleSaveAndOpen = async (draft: ParsedDraft) => {
-    setParsedDraft(draft)
-    setReviewOpen(false)
-    setSaveError(null)
-    setFailedDraft(null)
-    setSaveProgress(5)
-    setSaveStepIndex(0)
-    setSaveProgressOpen(true)
-
-    try {
-      const response = await fetch("/api/enquiries", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildEnquiryImportPayload(draft)),
-      })
-
-      const payload: unknown = await response.json().catch(() => null)
-      if (!response.ok) {
-        const message =
-          payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string"
-            ? payload.error
-            : "Please review the enquiry and try again."
-        throw new Error(message)
-      }
-
-      const jobId =
-        payload && typeof payload === "object" && "jobId" in payload && typeof payload.jobId === "string"
-          ? payload.jobId
-          : null
-
-      if (!jobId) {
-        throw new Error("The enquiry was saved, but the new job could not be opened.")
-      }
-
-      setSaveStepIndex(ENQUIRY_SAVE_STEPS.length - 1)
-      setSaveProgress(100)
-      window.setTimeout(() => {
-        router.push(`/app/bookings/${jobId}`)
-      }, 350)
-    } catch (error) {
-      setFailedDraft(draft)
-      setSaveError(error instanceof Error ? error.message : "Please review the enquiry and try again.")
-    }
-  }
-
-  const handleBackToReviewAfterSaveError = () => {
-    if (failedDraft) {
-      setParsedDraft(failedDraft)
-    }
-    setSaveProgressOpen(false)
-    setSaveError(null)
-    setReviewOpen(true)
-  }
-
-  const handleDismissSaveError = () => {
-    setSaveProgressOpen(false)
-    setSaveError(null)
-    setFailedDraft(null)
-    setParsedDraft(null)
-    setPasteText("")
-  }
-
   if (loadingJobs || loadingAll) {
     return <div className="p-6"><div className="animate-pulse space-y-4">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-24 bg-secondary rounded-lg" />)}</div></div>
   }
@@ -416,32 +302,16 @@ export default function PipelinePage() {
         </div>
         <div className="flex items-center gap-2">
           {can("create:enquiry") && (
-            <Dialog open={pasteOpen} onOpenChange={setPasteOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm" variant="default">
-                  <Plus className="w-4 h-4 mr-1.5" /> New Enquiry
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-lg">
-                <DialogHeader>
-                  <DialogTitle>Paste Email Import</DialogTitle>
-                  <DialogDescription>Paste an email or enquiry text to create a draft enquiry.</DialogDescription>
-                </DialogHeader>
-                <Textarea
-                  placeholder="Paste the email or text content here..."
-                  value={pasteText}
-                  onChange={(e) => setPasteText(e.target.value)}
-                  rows={10}
-                  className="text-sm field-sizing-fixed h-48 resize-none overflow-y-auto"
-                />
-                <div className="flex justify-end gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setPasteOpen(false)}>Cancel</Button>
-                  <Button size="sm" onClick={handlePasteImport} disabled={!pasteText.trim()}>
-                    Review & Import
-                  </Button>
-                </div>
-              </DialogContent>
-            </Dialog>
+            <>
+              <Button size="sm" variant="default" onClick={() => setNewEnquiryOpen(true)}>
+                <Plus className="w-4 h-4 mr-1.5" /> New Enquiry
+              </Button>
+              <NewEnquiryDialog
+                open={newEnquiryOpen}
+                onOpenChange={setNewEnquiryOpen}
+                onSaved={(jobId) => router.push(`/app/bookings/${jobId}`)}
+              />
+            </>
           )}
           <Popover>
             <PopoverTrigger asChild>
@@ -499,7 +369,7 @@ export default function PipelinePage() {
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between gap-4">
                       <div className="flex items-center gap-3 min-w-0">
-                        <div className={`w-3 h-3 rounded-full flex-shrink-0 ${PAYMENT_COLORS[b.paymentColor] || "bg-muted-foreground"}`} />
+                        <div className={`w-3 h-3 rounded-full flex-shrink-0 ${PAYMENT_COLORS[b.paymentColor] || "bg-muted-foreground"}`} title={`Payment: ${PAYMENT_STATUS_LABELS[b.paymentColor] ?? b.paymentColor}`} />
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-semibold text-foreground">{b.bookingNumber}</span>
@@ -629,27 +499,6 @@ export default function PipelinePage() {
         </TabsContent>
       </Tabs>
 
-      {/* Review Imported Draft Modal */}
-      <ReviewImportedDraftModal
-        open={reviewOpen}
-        onOpenChange={handleReviewClose}
-        parsedDraft={parsedDraft}
-        onBack={handleBackToPaste}
-        onSaveAndOpen={handleSaveAndOpen}
-      />
-
-      <ProgressDialog
-        open={saveProgressOpen}
-        title="Preparing enquiry"
-        description="The new job will open automatically when it is ready."
-        progress={saveProgress}
-        currentMessage={ENQUIRY_SAVE_STEPS[saveStepIndex] ?? ENQUIRY_SAVE_STEPS[0]}
-        completedMessages={ENQUIRY_SAVE_STEPS.slice(0, saveStepIndex)}
-        errorMessage={saveError}
-        onDismiss={handleDismissSaveError}
-        onRetry={handleBackToReviewAfterSaveError}
-      />
-
       <StageTransitionModal
         open={transitionModalOpen}
         jobId={pendingJobId || ""}
@@ -720,7 +569,7 @@ function PipelineCard({
             {job.consultant && (
               <Badge variant="default" className="text-[10px] h-4 px-1 font-bold">{job.consultant}</Badge>
             )}
-            <div className={`w-2.5 h-2.5 rounded-full ${paymentDotClass}`} title={`Payment: ${job.paymentColor}`} />
+            <div className={`w-2.5 h-2.5 rounded-full ${paymentDotClass}`} title={`Payment: ${PAYMENT_STATUS_LABELS[job.paymentColor] ?? job.paymentColor}`} />
             {canDrag && <GripVertical className="w-3.5 h-3.5 text-muted-foreground/50" />}
           </div>
         </div>

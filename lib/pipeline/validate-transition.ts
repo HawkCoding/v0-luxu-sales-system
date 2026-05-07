@@ -217,15 +217,26 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
   const correspondences = input.correspondences ?? []
   const manualConfirmations = input.manualConfirmations ?? {}
   const crossedStages = FORWARD_STAGES.slice(fromIndex + 1, toIndex + 1)
+  const hasSentOrAcceptedQuote = quotes.some((quote) => quote.status === "sent" || quote.status === "accepted")
+
+  if (crossedStages.includes("quote_sent") && !hasSentOrAcceptedQuote) {
+    failures.push({
+      gateId: "quote_sent_required",
+      message: "A sent quote is required before moving to Quote Sent.",
+      fixHint: "Send a quote from the booking before moving it to Quote Sent.",
+      severity: "block",
+    })
+  }
 
   if (
     crossedStages.includes("accepted") &&
-    !quotes.some((quote) => quote.status === "sent" || quote.status === "accepted")
+    !hasSentOrAcceptedQuote &&
+    !crossedStages.includes("quote_sent")
   ) {
     failures.push({
       gateId: "quote_sent_or_accepted",
       message: "At least one sent or accepted quote is required before quote acceptance.",
-      fixHint: "Send a quote from the booking before moving it to Quote Accepted.",
+      fixHint: "Send a quote for this job before moving it to Quote Accepted.",
       severity: "block",
     })
   }

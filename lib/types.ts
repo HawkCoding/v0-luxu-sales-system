@@ -713,3 +713,39 @@ export interface PipelineHistory {
   movedAt: string
   movedAtDisplay?: string
 }
+
+export type VoucherSectionKey = "guest_info" | "service_provider" | "footer"
+
+export interface VoucherTemplate {
+  id?: string
+  logo_url: string | null
+  banner_url: string | null
+  header_text: string
+  product_line: string
+  accent_colour: string
+  section_bg: string
+  font_family: string
+  section_order: VoucherSectionKey[]
+  hidden_sections: VoucherSectionKey[]
+  footer_company: string
+  footer_phone: string
+  footer_email: string
+  guidance_text: string
+}
+
+export const VOUCHER_TEMPLATE_DEFAULTS: VoucherTemplate = {
+  logo_url: null,
+  banner_url: null,
+  header_text: "A division of Luxus Travel & Tours",
+  product_line: "THE BLUE TRAIN • ROVOS RAIL • KRUGER SHALATI",
+  accent_colour: "#0B2A3A",
+  section_bg: "#1a3a4a",
+  font_family: "Georgia, serif",
+  section_order: ["guest_info", "service_provider", "footer"],
+  hidden_sections: [],
+  footer_company: "Luxus Travel & Tours",
+  footer_phone: "",
+  footer_email: "",
+  guidance_text:
+    "Please hand to your service provider. Pre-payment was made by Luxus Travel & Tours for all services mentioned below. Guests must settle extras direct with the service providers.",
+}

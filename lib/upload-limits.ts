@@ -1,0 +1,5 @@
+export const MAX_IMAGE_MB = 5
+export const MAX_IMAGE_BYTES = MAX_IMAGE_MB * 1024 * 1024
+
+export const MAX_DOCUMENT_MB = 10
+export const MAX_DOCUMENT_BYTES = MAX_DOCUMENT_MB * 1024 * 1024

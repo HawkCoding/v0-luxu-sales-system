@@ -26,3 +26,4 @@ tmp-db-sync/
 # Local MCP configuration may contain access tokens
 .mcp.json
 .vscode/mcp.json
+.claude/settings.local.json
