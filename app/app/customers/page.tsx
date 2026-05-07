@@ -12,6 +12,7 @@ import { Search, Globe, Filter, X, UserPlus } from "lucide-react"
 import { useEffect, useState } from "react"
 import { CONSULTANTS, type ConsultantAbbreviation } from "@/lib/types"
 import { formatDisplayDate } from "@/lib/date-format"
+import { useRole } from "@/lib/role-context"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { CustomerDetailView } from "@/components/customer-detail-view"
@@ -42,6 +43,7 @@ function getCustomerIdFromPath(pathname: string): string | null {
 
 export default function CustomersPage() {
   const { data, isLoading, mutate } = useAllData()
+  const { can } = useRole()
   const searchParams = useSearchParams()
   const [search, setSearch] = useState("")
   const [consultantFilter, setConsultantFilter] = useState<"all" | ConsultantAbbreviation>("all")
@@ -51,6 +53,7 @@ export default function CustomersPage() {
   const [page, setPage] = useState(1)
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  const canEditCustomers = can("edit:customers")
 
   useEffect(() => {
     const handlePopState = () => {
@@ -191,12 +194,14 @@ export default function CustomersPage() {
             {currentPage} of {totalPages})
           </p>
         </div>
-        <div className="flex-shrink-0">
-          <Button onClick={() => setCreateDialogOpen(true)}>
-            <UserPlus className="w-4 h-4 mr-2" />
-            New Customer
-          </Button>
-        </div>
+        {canEditCustomers ? (
+          <div className="flex-shrink-0">
+            <Button onClick={() => setCreateDialogOpen(true)}>
+              <UserPlus className="w-4 h-4 mr-2" />
+              New Customer
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       {/* Filter Bar */}
@@ -477,11 +482,13 @@ export default function CustomersPage() {
         </DialogContent>
       </Dialog>
 
-      <CreateCustomerDialog
-        open={createDialogOpen}
-        onOpenChange={setCreateDialogOpen}
-        onSuccess={handleCustomerCreated}
-      />
+      {canEditCustomers ? (
+        <CreateCustomerDialog
+          open={createDialogOpen}
+          onOpenChange={setCreateDialogOpen}
+          onSuccess={handleCustomerCreated}
+        />
+      ) : null}
     </div>
   )
 }

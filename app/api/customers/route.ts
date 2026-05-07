@@ -3,6 +3,8 @@ import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
 
+const allowedRoles = new Set(["admin", "manager"])
+
 const createCustomerSchema = z.object({
   title: z.enum(["Dr", "Prof", "Mr", "Mrs", "Ms"]).nullable().optional(),
   first_name: z.string().trim().min(1, "First name is required").max(100),
@@ -66,6 +68,16 @@ export async function POST(request: Request) {
 
   if (userError || !user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("clearance_level")
+    .eq("user_id", user.id)
+    .single()
+
+  if (profileError || !profile || !allowedRoles.has(profile.clearance_level)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
   let parsed: z.infer<typeof createCustomerSchema>
