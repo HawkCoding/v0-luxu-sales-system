@@ -16,18 +16,38 @@ CREATE TABLE IF NOT EXISTS voucher_template (
   updated_at       timestamptz NOT NULL DEFAULT now()
 );
 
--- Singleton row: only one voucher template config exists
-INSERT INTO voucher_template (id) VALUES (gen_random_uuid())
-ON CONFLICT DO NOTHING;
+-- Singleton row: only one voucher template config exists.
+-- Preserve the most recently updated row if a partially-managed database has duplicates.
+WITH ranked_templates AS (
+  SELECT
+    id,
+    row_number() OVER (ORDER BY updated_at DESC, id) AS row_number
+  FROM voucher_template
+)
+DELETE FROM voucher_template
+WHERE id IN (
+  SELECT id
+  FROM ranked_templates
+  WHERE row_number > 1
+);
+
+INSERT INTO voucher_template (id)
+SELECT gen_random_uuid()
+WHERE NOT EXISTS (SELECT 1 FROM voucher_template);
+
+CREATE UNIQUE INDEX IF NOT EXISTS voucher_template_singleton_idx
+  ON voucher_template ((true));
 
 -- RLS
 ALTER TABLE voucher_template ENABLE ROW LEVEL SECURITY;
 
 -- All authenticated users can read the template
+DROP POLICY IF EXISTS "voucher_template_read" ON voucher_template;
 CREATE POLICY "voucher_template_read" ON voucher_template
   FOR SELECT TO authenticated USING (true);
 
 -- Only admins can update
+DROP POLICY IF EXISTS "voucher_template_write" ON voucher_template;
 CREATE POLICY "voucher_template_write" ON voucher_template
   FOR UPDATE TO authenticated
   USING (

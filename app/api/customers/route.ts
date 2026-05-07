@@ -3,7 +3,7 @@ import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
 
-const allowedRoles = new Set(["admin", "manager"])
+const allowedRoles = new Set(["admin", "manager", "consultant"])
 
 const createCustomerSchema = z.object({
   title: z.enum(["Dr", "Prof", "Mr", "Mrs", "Ms"]).nullable().optional(),

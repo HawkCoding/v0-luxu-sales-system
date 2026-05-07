@@ -113,7 +113,7 @@ describe("POST /api/customers", () => {
   })
 
   it("returns 403 when user lacks customer write role", async () => {
-    const { supabase, insertMock } = createSupabaseMock({ role: "consultant" })
+    const { supabase, insertMock } = createSupabaseMock({ role: "readonly" })
     supabaseMocks.createSessionClient.mockResolvedValue(supabase)
 
     const response = await POST(
@@ -128,8 +128,8 @@ describe("POST /api/customers", () => {
     expect(insertMock).not.toHaveBeenCalled()
   })
 
-  it("creates customers for managers", async () => {
-    const { supabase, insertMock } = createSupabaseMock({ role: "manager" })
+  it("creates customers for consultants", async () => {
+    const { supabase, insertMock } = createSupabaseMock({ role: "consultant" })
     supabaseMocks.createSessionClient.mockResolvedValue(supabase)
 
     const response = await POST(

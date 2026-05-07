@@ -288,6 +288,20 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
         if (!mounted) return
 
         if (event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED") {
+          if (session?.user) {
+            const currentUser = currentUserRef.current
+            if (currentUser?.id === session.user.id) {
+              setLoading(false)
+              return
+            }
+
+            scheduleProfileLoad(session.user)
+            return
+          }
+
+          if (event === "INITIAL_SESSION") {
+            setUser(null)
+          }
           setLoading(false)
           return
         }
