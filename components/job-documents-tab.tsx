@@ -17,7 +17,7 @@ interface JobDocumentsTabProps {
 
 export function JobDocumentsTab({ documents, job, enquiry, customer, onChange }: JobDocumentsTabProps) {
   const canGenerateVoucher = job && enquiry && customer &&
-    (job.stage === "deposit_paid" || job.stage === "final_paid" || job.stage === "voucher_sent" || job.stage === "closed")
+    (job.stage === "final_paid" || job.stage === "voucher_sent" || job.stage === "closed")
 
   return (
     <div className="space-y-3">

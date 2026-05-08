@@ -26,6 +26,8 @@ type CustomerRecord = {
 type BookingVoucherRecord = {
   id: string
   booking_number: string
+  stage: string | null
+  invoice_balance: number | null
   consultant: string | null
   departure_date: string | null
   no_of_suites: number
@@ -91,7 +93,7 @@ export async function POST(req: Request) {
     supabase
       .from("bookings")
       .select(
-        "id, booking_number, consultant, departure_date, no_of_suites, no_of_adults, no_of_children, additional_services_details, customer:customers(first_name, last_name, email, phone, title), route:routes(name, supplier:suppliers(name))",
+        "id, booking_number, stage, invoice_balance, consultant, departure_date, no_of_suites, no_of_adults, no_of_children, additional_services_details, customer:customers(first_name, last_name, email, phone, title), route:routes(name, supplier:suppliers(name))",
       )
       .eq("id", parsed.data.jobId)
       .single(),
@@ -117,6 +119,11 @@ export async function POST(req: Request) {
   if (travellersError) return safeSupabaseError("voucher:travellers", travellersError)
 
   const booking = bookingRaw as unknown as BookingVoucherRecord
+  const paidInFullStages = new Set(["final_paid", "voucher_sent", "closed"])
+  if (!paidInFullStages.has(booking.stage ?? "") || Number(booking.invoice_balance ?? NaN) !== 0) {
+    return jsonError("Booking must be paid in full before generating a voucher", 422)
+  }
+
   const customer = firstRecord(booking.customer)
   if (!customer?.email) return jsonError("Customer email is required before generating a voucher", 422)
 

@@ -23,7 +23,7 @@ export async function calculateInvoiceBalance(
         .from("quotes")
         .select("id, total, status, created_at")
         .eq("booking_id", bookingId)
-        .in("status", ["sent", "accepted", "ready", "draft"])
+        .eq("status", "accepted")
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
