@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
-import { createSessionClient } from "@/lib/supabase/server"
+import { requireRole } from "@/lib/api/auth"
 import { staleVersionResponse } from "@/lib/concurrency"
 import type { Json } from "@/lib/supabase/types"
 
@@ -21,15 +21,10 @@ interface RouteParams {
 }
 
 export async function PATCH(req: Request, { params }: RouteParams) {
-  const supabase = await createSessionClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const auth = await requireRole(["admin", "manager", "consultant"])
+  if (!auth.ok) return auth.response
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-
+  const { supabase } = auth.value
   const { id } = await params
 
   let parsed

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
+import { CUSTOMER_COLUMNS } from "@/lib/supabase/columns"
 import { staleVersionResponse } from "@/lib/concurrency"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 
@@ -34,7 +35,7 @@ export async function GET(
     { data: linkedAccounts, error: linkedAccountsError },
   ] =
     await Promise.all([
-      supabase.from("customers").select("*").eq("id", id).single(),
+      supabase.from("customers").select(CUSTOMER_COLUMNS).eq("id", id).single(),
       supabase
         .from("bookings")
         .select(

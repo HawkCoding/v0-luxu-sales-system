@@ -62,9 +62,9 @@ interface LegSelectionState {
 }
 
 const SENDING_STEPS = [
-  { label: "Generating quote document...", duration: 1000 },
-  { label: "Sending email to customer...", duration: 1200 },
-  { label: "Moving to pipeline...", duration: 800 },
+  { label: "Creating quote...", duration: 0 },
+  { label: "Rendering email preview...", duration: 0 },
+  { label: "Sending email and moving pipeline...", duration: 0 },
 ]
 
 function formatPrice(amount: number | null, currency = "ZAR") {
@@ -117,10 +117,6 @@ function calculateTotals(lineItems: QuoteLineItem[]) {
   const total = Math.round((subtotal + vat) * 100) / 100
 
   return { subtotal, vat, total }
-}
-
-function delay(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
 
 function isOptionalLeg(kind: PackageDetail["legs"][number]["supplierKind"]): boolean {
@@ -307,11 +303,7 @@ export function SendQuoteDialog({
     setSendingStepIndex(0)
 
     try {
-      for (let index = 0; index < SENDING_STEPS.length; index += 1) {
-        setSendingStepIndex(index)
-        await delay(SENDING_STEPS[index].duration)
-      }
-
+      setSendingStepIndex(0)
       const quoteResponse = await fetch("/api/quotes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -332,34 +324,38 @@ export function SendQuoteDialog({
         throw new Error(payload.error ?? "Failed to create quote")
       }
 
-      const jobPayload: { stage: string; consultant?: ConsultantAbbreviation } = {
-        stage: "quote_sent",
-      }
-      if (consultantAbbreviation) {
-        jobPayload.consultant = consultantAbbreviation
-      }
+      const quotePayload = (await quoteResponse.json()) as { id: string; quoteNumber?: string | null }
+      setSendingStepIndex(1)
 
-      const jobResponse = await fetch(`/api/jobs/${bookingId}`, {
-        method: "PATCH",
+      const subject = `Quote ${quotePayload.quoteNumber ?? bookingNumber} - Luxus Travel & Tours`
+      const previewResponse = await fetch(`/api/quotes/${quotePayload.id}/email-preview`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(jobPayload),
+        body: JSON.stringify({
+          subject,
+          introText:
+            "Thank you for your enquiry. We are pleased to share your Luxus Travel & Tours quote for review.",
+        }),
       })
+      const previewPayload = (await previewResponse.json()) as { html?: string; error?: string }
 
-      if (!jobResponse.ok) {
-        const payload = (await jobResponse.json()) as { error?: string }
-        throw new Error(payload.error ?? "Failed to move job to pipeline")
+      if (!previewResponse.ok || !previewPayload.html) {
+        throw new Error(previewPayload.error ?? "Failed to render quote email")
       }
 
+      setSendingStepIndex(2)
       const correspondenceResponse = await fetch("/api/correspondence", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           bookingId,
+          quoteId: quotePayload.id,
           channel: "email",
-          subject: `Quote - ${bookingNumber}`,
-          bodyHtml: `<p>Dear ${customerName || "traveller"},</p><p>Your Luxus quote is ready for review.</p>`,
-          status: "sent",
-          sentAt: new Date().toISOString(),
+          kind: "quote",
+          subject,
+          bodyHtml: previewPayload.html,
+          moveStage: "quote_sent",
+          actor: consultantAbbreviation ?? undefined,
         }),
       })
 

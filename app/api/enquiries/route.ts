@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server"
 import { detectCountryInText, loadCountryAliasMap, normalizeCountry } from "@/lib/countries"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
-import { createServiceClient } from "@/lib/supabase/server"
+import { buildPackageQuoteLineItems, calculateQuoteTotals } from "@/lib/quotes/build-from-package"
+import { buildQuoteNumber } from "@/lib/quotes/quote-number"
+import type { PackageDetail, QuoteLineItem } from "@/lib/types"
+import { createServiceClient, createSessionClient } from "@/lib/supabase/server"
+import { loadPackageDetail } from "../packages/[slug]/helpers"
 
 type ServiceClient = ReturnType<typeof createServiceClient>
 type TransportServiceType = "transfer" | "rental"
@@ -38,6 +42,17 @@ function normalizeNullableNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null
 }
 
+function addDaysToDateString(value: string, days: number): string {
+  const [year = "1970", month = "1", day = "1"] = value.split("-")
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)))
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
+function getDefaultQuoteValidityDate(): string {
+  return addDaysToDateString(new Date().toISOString().slice(0, 10), 14)
+}
+
 async function findRouteId(supabase: ServiceClient, direction: unknown): Promise<string | null> {
   if (typeof direction !== "string" || !direction.trim()) return null
 
@@ -67,6 +82,16 @@ async function findPackageId(supabase: ServiceClient, packageOption: unknown): P
   return match?.id ?? null
 }
 
+async function findPackageSlugById(supabase: ServiceClient, packageId: string): Promise<string | null> {
+  const { data } = await supabase
+    .from("packages")
+    .select("slug")
+    .eq("id", packageId)
+    .maybeSingle()
+
+  return data?.slug ?? null
+}
+
 async function findHotelSupplierId(supabase: ServiceClient, hotelOption: unknown): Promise<string | null> {
   if (typeof hotelOption !== "string" || !hotelOption.trim()) return null
 
@@ -85,12 +110,128 @@ async function findHotelSupplierId(supabase: ServiceClient, hotelOption: unknown
   return match?.id ?? null
 }
 
+function buildDefaultPackageSelections(packageDetail: PackageDetail, suiteTypeNames: string[]) {
+  const normalizedSuiteTypeNames = suiteTypeNames.map(normalizeLookupValue).filter(Boolean)
+
+  return packageDetail.legs.map((leg) => {
+    const isOptional = leg.supplierKind === "hotel_property" || leg.supplierKind === "transfers"
+    const activeSuiteTypes = leg.suiteTypes.filter((suiteType) => suiteType.active)
+    const matchedSuiteType = activeSuiteTypes.find((suiteType) =>
+      normalizedSuiteTypeNames.includes(normalizeLookupValue(suiteType.name)),
+    )
+
+    return {
+      legId: leg.id,
+      selected: !isOptional,
+      routeId: leg.routes.length === 1 ? leg.routes[0].id : undefined,
+      suiteTypeId: matchedSuiteType?.id ?? (activeSuiteTypes.length === 1 ? activeSuiteTypes[0].id : undefined),
+    }
+  })
+}
+
+async function createDraftQuoteForBooking({
+  supabase,
+  bookingId,
+  bookingNumber,
+  packageId,
+  travelDate,
+  suiteTypes,
+}: {
+  supabase: ServiceClient
+  bookingId: string
+  bookingNumber: string
+  packageId: string | null
+  travelDate: string | null
+  suiteTypes: string[]
+}): Promise<{ quoteId: string | null; warning: string | null }> {
+  let lineItems: QuoteLineItem[] = []
+  let status: "draft" | "pricing_incomplete" = "pricing_incomplete"
+  let noPackageMatch = true
+  let warning: string | null = null
+
+  if (packageId) {
+    noPackageMatch = false
+    const packageSlug = await findPackageSlugById(supabase, packageId)
+
+    if (packageSlug) {
+      const packageDetailResult = await loadPackageDetail(supabase, packageSlug)
+
+      const packageDetail = "detail" in packageDetailResult ? packageDetailResult.detail : undefined
+
+      if (packageDetail) {
+        try {
+          const built = await buildPackageQuoteLineItems({
+            supabase,
+            packageDetail,
+            jobId: bookingId,
+            travelDate: travelDate ?? new Date().toISOString().slice(0, 10),
+            selections: buildDefaultPackageSelections(packageDetail, suiteTypes),
+          })
+          lineItems = built.lineItems
+          status = lineItems.length > 0 ? "draft" : "pricing_incomplete"
+        } catch (error) {
+          warning = error instanceof Error ? error.message : "Package matched, but pricing could not be pre-filled."
+        }
+      } else {
+        warning = "Package matched, but package details could not be loaded."
+      }
+    } else {
+      warning = "Package matched, but package details could not be loaded."
+    }
+  } else {
+    warning = "No package was matched from the enquiry."
+  }
+
+  const totals = calculateQuoteTotals(lineItems)
+  const { data: quote, error: quoteError } = await supabase
+    .from("quotes")
+    .insert({
+      booking_id: bookingId,
+      status,
+      validity_until: getDefaultQuoteValidityDate(),
+      subtotal: totals.subtotal,
+      vat: totals.vat,
+      total: totals.total,
+      no_package_match: noPackageMatch,
+      quote_number: buildQuoteNumber(bookingNumber, []),
+    })
+    .select("id")
+    .single()
+
+  if (quoteError || !quote) {
+    return { quoteId: null, warning: "Booking was created, but the draft quote could not be created." }
+  }
+
+  if (lineItems.length > 0) {
+    const { error: lineItemsError } = await supabase.from("quote_line_items").insert(
+      lineItems.map((lineItem, index) => ({
+        quote_id: quote.id,
+        description: lineItem.description,
+        qty: lineItem.qty,
+        unit_price: lineItem.unitPrice,
+        total: lineItem.total,
+        sort_order: index,
+      })),
+    )
+
+    if (lineItemsError) {
+      warning = "Draft quote was created, but line items could not be saved."
+    }
+  }
+
+  return { quoteId: quote.id, warning }
+}
+
 export async function POST(req: Request) {
   const body = await req.json()
 
   // Use the service-role client — this route is public (web form & paste import)
   // so there is no authenticated user session to rely on.
   const supabase = createServiceClient()
+  const sessionClient = await createSessionClient()
+  const {
+    data: { user },
+  } = await sessionClient.auth.getUser()
 
   const normalizedEmail = body.email?.toLowerCase().trim()
   const normalizedCustomerFirstName =
@@ -187,6 +328,8 @@ export async function POST(req: Request) {
     .from("bookings")
     .insert({
       customer_id: customerId,
+      assigned_salesperson_id: user?.id ?? null,
+      owner_user_id: user?.id ?? null,
       purpose: body.purpose || "quote",
       source,
       stage: "enquiry",
@@ -300,12 +443,27 @@ export async function POST(req: Request) {
     await supabase.from("booking_transport_requests").insert(transportRows)
   }
 
+  const draftQuote = await createDraftQuoteForBooking({
+    supabase,
+    bookingId: booking.id,
+    bookingNumber: booking.booking_number,
+    packageId,
+    travelDate: body.departureDate || null,
+    suiteTypes,
+  })
+
   // --- 5. Audit log ---
   await supabase.from("audit_logs").insert({
-    actor: body.rawText ? "consultant" : "system",
+    actor: user?.email ?? (body.rawText ? "consultant" : "system"),
+    actor_user_id: user?.id ?? null,
     entity_type: "Booking",
     entity_id: booking.id,
     action: body.rawText ? "created_from_paste_import" : "created_from_web_form",
+    meta_json: {
+      draft_quote_id: draftQuote.quoteId,
+      draft_quote_warning: draftQuote.warning,
+      assigned_salesperson_id: user?.id ?? null,
+    },
   })
 
   return NextResponse.json({
@@ -314,6 +472,8 @@ export async function POST(req: Request) {
     // Legacy field names kept so the public form still works
     jobNumber: booking.booking_number,
     jobId: booking.id,
+    quoteId: draftQuote.quoteId,
+    quoteWarning: draftQuote.warning,
     needsReview: false,
   })
 }

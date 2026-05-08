@@ -1,20 +1,19 @@
-import { NextResponse } from "next/server"
-import { createSessionClient } from "@/lib/supabase/server"
 import { z } from "zod"
+import { requireRole, requireUser } from "@/lib/api/auth"
+import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 
 export async function GET() {
-  const supabase = await createSessionClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  const auth = await requireUser()
+  if (!auth.ok) return auth.response
 
-  const { data, error } = await supabase
+  const { data, error } = await auth.value.supabase
     .from("app_settings")
     .select("key, value")
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeSupabaseError("settings-company:list", error)
 
   const settings = Object.fromEntries((data ?? []).map(({ key, value }) => [key, value]))
-  return NextResponse.json(settings)
+  return Response.json(settings)
 }
 
 const patchSchema = z.object({
@@ -22,31 +21,28 @@ const patchSchema = z.object({
 })
 
 export async function PATCH(req: Request) {
-  const supabase = await createSessionClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  const auth = await requireRole(["admin"])
+  if (!auth.ok) return auth.response
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("clearance_level")
-    .eq("user_id", user.id)
-    .single()
-
-  if (profile?.clearance_level !== "admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  let raw: unknown
+  try {
+    raw = await req.json()
+  } catch {
+    return jsonError("Invalid JSON body", 400)
   }
 
-  const body = await req.json()
-  const parsed = patchSchema.safeParse(body)
-  if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid input", details: parsed.error.flatten() }, { status: 400 })
-  }
+  const parsed = patchSchema.safeParse(raw)
+  if (!parsed.success) return jsonZodError(parsed.error, "Invalid input")
 
-  const { error } = await supabase
+  const { error } = await auth.value.supabase
     .from("app_settings")
-    .upsert({ key: "business_name", value: parsed.data.business_name, updated_at: new Date().toISOString() })
+    .upsert({
+      key: "business_name",
+      value: parsed.data.business_name,
+      updated_at: new Date().toISOString(),
+    })
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeSupabaseError("settings-company:upsert", error)
 
-  return NextResponse.json({ business_name: parsed.data.business_name })
+  return Response.json({ business_name: parsed.data.business_name })
 }

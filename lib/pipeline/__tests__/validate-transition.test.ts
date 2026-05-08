@@ -190,6 +190,54 @@ describe("validateTransition", () => {
     expect(withConfirmation).toEqual([])
   })
 
+  it("prompts for a final invoice before paid in full", () => {
+    const failures = validateTransition({
+      ...baseInput,
+      booking: { ...baseInput.booking, stage: "deposit_paid" },
+      targetStage: "final_paid",
+      quotes: [{ status: "accepted", total: 1000 }],
+    })
+
+    expect(failures).toEqual([
+      expect.objectContaining({
+        gateId: "final_invoice",
+        severity: "confirm",
+        autoFixable: "create_final_invoice",
+      }),
+      expect.objectContaining({ gateId: "final_payment_confirmation" }),
+    ])
+  })
+
+  it("requires final invoice correspondence before paid in full", () => {
+    const failures = validateTransition({
+      ...baseInput,
+      booking: { ...baseInput.booking, stage: "deposit_paid" },
+      targetStage: "final_paid",
+      quotes: [{ status: "accepted", total: 1000 }],
+      invoices: [{ kind: "final", status: "sent" }],
+      correspondences: [{ kind: "invoice", subject: "Deposit invoice", status: "sent" }],
+      manualConfirmations: { finalPaymentReceived: true },
+    })
+
+    expect(failures).toEqual([
+      expect.objectContaining({ gateId: "final_invoice_correspondence", severity: "block" }),
+    ])
+  })
+
+  it("allows paid in full after final invoice email and payment confirmation", () => {
+    const failures = validateTransition({
+      ...baseInput,
+      booking: { ...baseInput.booking, stage: "deposit_paid" },
+      targetStage: "final_paid",
+      quotes: [{ status: "accepted", total: 1000 }],
+      invoices: [{ kind: "final", status: "sent" }],
+      correspondences: [{ kind: "invoice", subject: "Final invoice BT-2026-0001-FIN1", status: "sent" }],
+      manualConfirmations: { finalPaymentReceived: true },
+    })
+
+    expect(failures).toEqual([])
+  })
+
   it("requires voucher document and correspondence before voucher sent", () => {
     const failures = validateTransition({
       ...baseInput,
@@ -201,6 +249,13 @@ describe("validateTransition", () => {
       "voucher_document",
       "voucher_correspondence",
     ])
+    expect(failures).toContainEqual(
+      expect.objectContaining({
+        gateId: "voucher_document",
+        severity: "confirm",
+        autoFixable: "create_voucher_pdf",
+      }),
+    )
   })
 
   it("requires cancellation and refund capture from paid stages", () => {

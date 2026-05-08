@@ -26,6 +26,7 @@ const validateMoveSchema = z.object({
   manualConfirmations: z
     .object({
       createDepositInvoice: z.boolean().optional(),
+      createInvoiceCorrespondence: z.boolean().optional(),
       depositReceived: z.boolean().optional(),
       finalPaymentReceived: z.boolean().optional(),
     })
@@ -72,6 +73,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     { data: customer },
     { data: quotes },
     { data: documents },
+    { data: invoices },
     { data: correspondences },
   ] = await Promise.all([
     supabase.from("profiles").select("clearance_level").eq("user_id", user.id).maybeSingle(),
@@ -86,6 +88,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       .eq("booking_id", id)
       .order("created_at", { ascending: false }),
     supabase.from("documents").select("kind, status").eq("booking_id", id),
+    supabase.from("invoices").select("kind, status").eq("booking_id", id),
     supabase.from("correspondences").select("kind, subject, status").eq("booking_id", id),
   ])
 
@@ -103,6 +106,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     targetStage: body.targetStage as PipelineStage,
     quotes: quotes ?? [],
     documents: documents ?? [],
+    invoices: invoices ?? [],
     correspondences: correspondences ?? [],
     manualConfirmations: body.manualConfirmations,
     lostContext: body.lostContext,

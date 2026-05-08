@@ -23,7 +23,7 @@ const EMAIL_PLACEHOLDERS = [
   { token: "{{validityDate}}", description: "Date the quote expires (14 days from issue)" },
   { token: "{{total}}",         description: "Total quoted price" },
   { token: "{{lastSentDate}}", description: "Date the quote was last sent to the customer" },
-  { token: "{{depositAmount}}", description: "Deposit amount due (default 25% of total)" },
+  { token: "{{depositAmount}}", description: "Deposit amount due (from the configured default percentage)" },
 ]
 
 const VOUCHER_PLACEHOLDERS = [

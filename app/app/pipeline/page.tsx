@@ -2,7 +2,7 @@
 
 import { usePipeline, useAllData } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
-import { DEFAULT_DEPOSIT_PERCENT } from "@/lib/pipeline/constants"
+import { depositPercentageToRate } from "@/lib/pipeline/constants"
 import {
   getCanonicalPipelineStage,
   getPipelineStageLabel,
@@ -262,10 +262,11 @@ export default function PipelinePage() {
     const quotes = data.quotes.filter((q: any) => q.bookingId === b.id)
     const totalPaid = payments.reduce((s: number, p: any) => s + p.amount, 0)
     const quoteTotal = quotes.reduce((s: number, q: any) => Math.max(s, q.total), 0) || 1
+    const defaultDepositRate = depositPercentageToRate(data.settings?.defaultDepositPercentage)
     let paymentColor = "red"
     if (totalPaid < 0) paymentColor = "blue"
     else if (totalPaid >= quoteTotal && totalPaid > 0) paymentColor = "green"
-    else if (totalPaid >= quoteTotal * DEFAULT_DEPOSIT_PERCENT) paymentColor = "yellow"
+    else if (totalPaid >= quoteTotal * defaultDepositRate) paymentColor = "yellow"
     else if (totalPaid > 0) paymentColor = "purple"
     return {
       ...b,

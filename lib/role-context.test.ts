@@ -30,6 +30,7 @@ describe("canRolePerform", () => {
     expect(canRolePerform("consultant", "view:templates")).toBe(false)
     expect(canRolePerform("consultant", "view:reporting")).toBe(false)
     expect(canRolePerform("consultant", "view:audit")).toBe(false)
+    expect(canRolePerform("consultant", "view:settings")).toBe(true)
     expect(canRolePerform("consultant", "edit:quotes")).toBe(true)
   })
 

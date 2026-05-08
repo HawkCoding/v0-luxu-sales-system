@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
+import { jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { requireAdminSettingsAccess } from "@/lib/settings-access"
 
 const ruleSchema = z.object({
@@ -38,9 +39,7 @@ export async function GET() {
     .select("id, name, subject_pattern, match_type, active, created_at, updated_at")
     .order("created_at", { ascending: false })
 
-  if (error) {
-    return NextResponse.json({ error: "Failed to load inbound email rules" }, { status: 500 })
-  }
+  if (error) return safeSupabaseError("inbound-email-rules:list", error, "Failed to load inbound email rules")
 
   return NextResponse.json({ rules: (data ?? []).map(mapRule) })
 }
@@ -49,12 +48,9 @@ export async function POST(request: Request) {
   const auth = await requireAdminSettingsAccess()
   if (!auth.ok) return auth.response
 
-  let parsed: z.infer<typeof ruleSchema>
-  try {
-    parsed = ruleSchema.parse(await request.json())
-  } catch (error) {
-    return NextResponse.json({ error: "Invalid request payload", details: error }, { status: 400 })
-  }
+  const result = ruleSchema.safeParse(await request.json())
+  if (!result.success) return jsonZodError(result.error, "Invalid request payload")
+  const parsed = result.data
 
   const { data, error } = await auth.value.supabase
     .from("inbound_email_rules")
@@ -67,9 +63,7 @@ export async function POST(request: Request) {
     .select("id, name, subject_pattern, match_type, active, created_at, updated_at")
     .single()
 
-  if (error || !data) {
-    return NextResponse.json({ error: error?.message || "Failed to create rule" }, { status: 500 })
-  }
+  if (error || !data) return safeSupabaseError("inbound-email-rules:create", error, "Failed to create rule")
 
   await auth.value.supabase.from("audit_logs").insert({
     actor: auth.value.actorName,

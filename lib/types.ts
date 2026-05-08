@@ -14,6 +14,10 @@ export type Source =
 
 export type ConsultantAbbreviation = "LB" | "CDJ" | "DR" | "MVE" | "DL"
 
+export interface AppSettings {
+  defaultDepositPercentage: number
+}
+
 export const CONSULTANTS: { key: ConsultantAbbreviation; name: string }[] = [
   { key: "LB", name: "Leonie" },
   { key: "CDJ", name: "Carmen" },
@@ -129,6 +133,8 @@ export interface Booking {
   source: Source
   consultant: string | null
   ownerUserId: string | null
+  assignedSalespersonId: string | null
+  assignedSalespersonName?: string | null
   departureDate: string | null
   departureDateDisplay?: string
   durationNights: number | null
@@ -531,6 +537,8 @@ export interface Job {
   id: string
   jobNumber: string
   ownerUser: string
+  assignedSalespersonId?: string | null
+  assignedSalespersonName?: string | null
   customerId: string
   consultant: ConsultantAbbreviation
   purpose: Purpose
@@ -620,6 +628,8 @@ export interface Quote {
   itineraryId: string
   jobId: string
   status: QuoteStatus
+  quoteNumber?: string | null
+  parentQuoteId?: string | null
   validityUntil: string
   validityUntilDisplay?: string
   updatedAt?: string
@@ -632,6 +642,7 @@ export interface Quote {
   lastSentAtDisplay?: string
   overridePin?: string
   overrideReason?: string
+  noPackageMatch?: boolean
 }
 
 export interface Payment {
@@ -643,6 +654,28 @@ export interface Payment {
   method: string
   reference: string
   notes: string
+}
+
+export type InvoiceKind = "deposit" | "final"
+export type InvoiceStatus = "draft" | "sent" | "paid" | "void"
+
+export interface Invoice {
+  id: string
+  jobId: string
+  quoteId: string | null
+  kind: InvoiceKind
+  status: InvoiceStatus
+  invoiceNumber: string
+  depositPercentage: number | null
+  amount: number
+  amountDisplay?: string
+  currency: string
+  dueDate: string | null
+  dueDateDisplay?: string
+  sentAt: string | null
+  sentAtDisplay?: string
+  createdAt: string
+  createdAtDisplay?: string
 }
 
 export type DocumentKind = "quote_pdf" | "invoice_pdf" | "voucher_pdf" | "summary_pdf" | "other"
@@ -679,6 +712,7 @@ export interface Correspondence {
   scheduledAt?: string
   scheduledAtDisplay?: string
   error?: string
+  providerMessageId?: string | null
 }
 
 export interface AuditLog {

@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ContentTransition } from "@/components/ui/content-transition"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -37,6 +38,9 @@ import { JobDocumentsTab } from "@/components/job-documents-tab"
 import { JobAuditTab } from "@/components/job-audit-tab"
 import { CancelBookingDialog } from "@/components/cancel-booking-dialog"
 import { StageTransitionModal } from "@/components/stage-transition-modal"
+import { GenerateDepositInvoiceDialog } from "@/components/generate-deposit-invoice-dialog"
+import { GenerateFinalInvoiceDialog } from "@/components/generate-final-invoice-dialog"
+import { GenerateVoucherDialog } from "@/components/generate-voucher-dialog"
 import { PresenceAvatars } from "@/components/presence-avatars"
 import { useRecordPresence } from "@/hooks/use-record-presence"
 import { useVersionedSave } from "@/hooks/use-versioned-save"
@@ -134,7 +138,7 @@ export default function JobDetailPage() {
   const searchParams = useSearchParams()
   const { id } = useParams<{ id: string }>()
   const { data, isLoading, error, mutate } = useJobDetail(id)
-  const { can } = useRole()
+  const { can, role } = useRole()
   const { others, setEditing } = useRecordPresence("job", id)
   const hasLoadError = Boolean(error)
   const [cancelOpen, setCancelOpen] = useState(false)
@@ -143,10 +147,14 @@ export default function JobDetailPage() {
   const [transitionFailures, setTransitionFailures] = useState<GateFailure[]>([])
   const [transitionIsManager, setTransitionIsManager] = useState(false)
   const [transitionSubmitting, setTransitionSubmitting] = useState(false)
+  const [depositInvoiceOpen, setDepositInvoiceOpen] = useState(false)
+  const [finalInvoiceOpen, setFinalInvoiceOpen] = useState(false)
+  const [voucherOpen, setVoucherOpen] = useState(false)
   const [pendingStage, setPendingStage] = useState<PipelineStage | null>(null)
   const [customerSearch, setCustomerSearch] = useState("")
   const [customerResults, setCustomerResults] = useState<Array<{ id: string; firstName: string; lastName: string; email: string }>>([])
   const [changingCustomer, setChangingCustomer] = useState(false)
+  const [reassigningSalesperson, setReassigningSalesperson] = useState(false)
   const [lastJobPayload, setLastJobPayload] = useState<Record<string, unknown> | null>(null)
   const [activeTab, setActiveTab] = useState<JobDetailTab>(() => parseJobDetailTab(searchParams.get("tab")))
   const {
@@ -170,8 +178,8 @@ export default function JobDetailPage() {
   }, [hasLoadError, router])
 
   useEffect(() => {
-    setEditing(cancelOpen || changeCustomerOpen || transitionModalOpen)
-  }, [cancelOpen, changeCustomerOpen, transitionModalOpen, setEditing])
+    setEditing(cancelOpen || changeCustomerOpen || transitionModalOpen || depositInvoiceOpen || finalInvoiceOpen || voucherOpen)
+  }, [cancelOpen, changeCustomerOpen, depositInvoiceOpen, finalInvoiceOpen, transitionModalOpen, voucherOpen, setEditing])
 
   useEffect(() => {
     setActiveTab(parseJobDetailTab(searchParams.get("tab")))
@@ -181,11 +189,35 @@ export default function JobDetailPage() {
     return <JobDetailSkeleton />
   }
 
-  const { job, customer, enquiry, itineraries, quotes, payments, documents, correspondence, auditLogs } = data
+  const {
+    job,
+    customer,
+    enquiry,
+    itineraries,
+    quotes,
+    payments,
+    invoices = [],
+    documents,
+    correspondence,
+    auditLogs,
+    salespeople = [],
+    settings,
+  } = data
   const currentStage = getCanonicalPipelineStage(job.stage as PipelineStage)
   const currentStageIdx = PIPELINE_STAGES.findIndex(s => s.key === currentStage)
   const consultantName = CONSULTANTS.find((consultant) => consultant.key === job.consultant)?.name ?? job.consultant ?? undefined
   const needsEmailReview = Boolean(enquiry?.emailImportNeedsReview)
+  const canReassignSalesperson = role === "manager" || role === "admin"
+  const assignedSalespersonName = job.assignedSalespersonName ?? "Unassigned"
+  const hasNoPackageMatchQuote = quotes.some((quote: { noPackageMatch?: boolean }) => quote.noPackageMatch)
+  const hasSentDepositInvoice = invoices.some(
+    (invoice: { kind: string; status: string }) =>
+      invoice.kind === "deposit" && (invoice.status === "sent" || invoice.status === "paid"),
+  )
+  const hasSentFinalInvoice = invoices.some(
+    (invoice: { kind: string; status: string }) =>
+      invoice.kind === "final" && (invoice.status === "sent" || invoice.status === "paid"),
+  )
 
   const saveJobPatch = async (
     payload: Record<string, unknown>,
@@ -232,6 +264,37 @@ export default function JobDetailPage() {
       const payload = await response.json().catch(() => null)
       const stageGatePayload = response.status === 422 ? parseStageTransitionFailurePayload(payload) : null
       if (stageGatePayload) {
+        const canGenerateDepositInvoice =
+          targetStage === "deposit_requested" &&
+          stageGatePayload.failures.some((failure) => failure.autoFixable === "create_invoice_25pct")
+        if (canGenerateDepositInvoice) {
+          setPendingStage(targetStage)
+          setTransitionFailures(stageGatePayload.failures)
+          setTransitionIsManager(stageGatePayload.isManager)
+          setDepositInvoiceOpen(true)
+          return
+        }
+        const canGenerateFinalInvoice =
+          targetStage === "final_paid" &&
+          stageGatePayload.failures.some((failure) => failure.autoFixable === "create_final_invoice")
+        if (canGenerateFinalInvoice) {
+          setPendingStage(targetStage)
+          setTransitionFailures(stageGatePayload.failures)
+          setTransitionIsManager(stageGatePayload.isManager)
+          setFinalInvoiceOpen(true)
+          return
+        }
+        const canGenerateVoucher =
+          targetStage === "voucher_sent" &&
+          stageGatePayload.failures.some((failure) => failure.autoFixable === "create_voucher_pdf")
+        if (canGenerateVoucher) {
+          setPendingStage(targetStage)
+          setTransitionFailures(stageGatePayload.failures)
+          setTransitionIsManager(stageGatePayload.isManager)
+          setVoucherOpen(true)
+          return
+        }
+
         setTransitionFailures(stageGatePayload.failures)
         setTransitionIsManager(stageGatePayload.isManager)
         setPendingStage(targetStage)
@@ -286,6 +349,20 @@ export default function JobDetailPage() {
     }
   }
 
+  const reassignSalesperson = async (salespersonId: string) => {
+    setReassigningSalesperson(true)
+    try {
+      const saved = await saveJobPatch({
+        assignedSalespersonId: salespersonId === "__unassigned" ? null : salespersonId,
+      })
+      if (saved) {
+        toast.success("Salesperson reassigned")
+      }
+    } finally {
+      setReassigningSalesperson(false)
+    }
+  }
+
   return (
     <ContentTransition show>
       <div className="p-6 space-y-6 max-w-5xl">
@@ -306,6 +383,30 @@ export default function JobDetailPage() {
             <p className="text-sm text-muted-foreground mt-0.5">
               {customer?.firstName} {customer?.lastName} &middot; {customer?.email}
             </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">Salesperson</span>
+              {canReassignSalesperson ? (
+                <Select
+                  value={job.assignedSalespersonId ?? "__unassigned"}
+                  onValueChange={(value) => void reassignSalesperson(value)}
+                  disabled={reassigningSalesperson || isSavingJob}
+                >
+                  <SelectTrigger size="sm" className="h-8 w-56 bg-background">
+                    <SelectValue placeholder="Assign salesperson" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__unassigned">Unassigned</SelectItem>
+                    {salespeople.map((salesperson: { id: string; name: string; email: string }) => (
+                      <SelectItem key={salesperson.id} value={salesperson.id}>
+                        {salesperson.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <span>{assignedSalespersonName}</span>
+              )}
+            </div>
           </div>
         </div>
         {can("edit:pipeline") && (
@@ -421,6 +522,47 @@ export default function JobDetailPage() {
         </Card>
       )}
 
+      {hasNoPackageMatchQuote && (
+        <Alert className="border-yellow-300 bg-yellow-50 text-yellow-950">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>No package matched</AlertTitle>
+          <AlertDescription>
+            No package was matched from the email - pricing not pre-filled. Add line items manually before sending.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {can("send:correspondence") && (!hasSentDepositInvoice || !hasSentFinalInvoice) && (
+        <div className="flex justify-end gap-2">
+          {!hasSentFinalInvoice ? (
+            <GenerateFinalInvoiceDialog
+              jobId={id}
+              bookingNumber={job.jobNumber}
+              customerName={`${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()}
+              quotes={quotes}
+              payments={payments}
+              onSent={async () => {
+                await mutate()
+                resetPendingTransition()
+              }}
+            />
+          ) : null}
+          {!hasSentDepositInvoice ? (
+          <GenerateDepositInvoiceDialog
+            jobId={id}
+            bookingNumber={job.jobNumber}
+            customerName={`${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()}
+            quotes={quotes}
+            defaultDepositPercentage={settings?.defaultDepositPercentage ?? 25}
+            onSent={async () => {
+              await mutate()
+              resetPendingTransition()
+            }}
+          />
+          ) : null}
+        </div>
+      )}
+
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(parseJobDetailTab(value))} className="space-y-4">
         <TabsList className="bg-secondary/50">
@@ -456,7 +598,7 @@ export default function JobDetailPage() {
           <JobCorrespondenceTab correspondence={correspondence} jobId={id} mutate={mutate} />
         </TabsContent>
         <TabsContent value="documents">
-          <JobDocumentsTab documents={documents} job={job} enquiry={enquiry} customer={customer} />
+          <JobDocumentsTab documents={documents} job={job} enquiry={enquiry} customer={customer} onChange={mutate} />
         </TabsContent>
         <TabsContent value="audit">
           <JobAuditTab
@@ -501,6 +643,54 @@ export default function JobDetailPage() {
         onOverride={async (overrideReason) => {
           if (!pendingStage) return
           await moveStageTo(pendingStage, { overrideReason })
+        }}
+      />
+
+      <GenerateDepositInvoiceDialog
+        open={depositInvoiceOpen}
+        onOpenChange={setDepositInvoiceOpen}
+        trigger={false}
+        jobId={id}
+        bookingNumber={job.jobNumber}
+        customerName={`${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()}
+        quotes={quotes}
+        defaultDepositPercentage={settings?.defaultDepositPercentage ?? 25}
+        onSent={async () => {
+          setDepositInvoiceOpen(false)
+          await mutate()
+          resetPendingTransition()
+        }}
+      />
+
+      <GenerateFinalInvoiceDialog
+        open={finalInvoiceOpen}
+        onOpenChange={setFinalInvoiceOpen}
+        trigger={false}
+        jobId={id}
+        bookingNumber={job.jobNumber}
+        customerName={`${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()}
+        quotes={quotes}
+        payments={payments}
+        onSent={async () => {
+          setFinalInvoiceOpen(false)
+          await mutate()
+          resetPendingTransition()
+        }}
+      />
+
+      <GenerateVoucherDialog
+        open={voucherOpen}
+        onOpenChange={setVoucherOpen}
+        trigger={false}
+        jobId={id}
+        bookingNumber={job.jobNumber}
+        onGenerated={async () => {
+          await mutate()
+        }}
+        onSent={async () => {
+          setVoucherOpen(false)
+          await mutate()
+          resetPendingTransition()
         }}
       />
 

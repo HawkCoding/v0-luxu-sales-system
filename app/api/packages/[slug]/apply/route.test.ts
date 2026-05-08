@@ -3,12 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { PackageDetail } from "@/lib/types"
 
 const helperMocks = vi.hoisted(() => ({
-  requireAuthenticatedUser: vi.fn(),
+  requireRole: vi.fn(),
   loadPackageDetail: vi.fn(),
 }))
 
-vi.mock("../../../suppliers/helpers", () => ({
-  requireAuthenticatedUser: helperMocks.requireAuthenticatedUser,
+vi.mock("@/lib/api/auth", () => ({
+  requireRole: helperMocks.requireRole,
+  requireUser: vi.fn(),
 }))
 
 vi.mock("../helpers", () => ({
@@ -240,23 +241,50 @@ async function postApply(body: unknown) {
 
 describe("POST /api/packages/[slug]/apply", () => {
   beforeEach(() => {
-    helperMocks.requireAuthenticatedUser.mockReset()
+    helperMocks.requireRole.mockReset()
     helperMocks.loadPackageDetail.mockReset()
-    helperMocks.requireAuthenticatedUser.mockResolvedValue({
-      supabase: createSupabaseMock(),
-      user: { id: "abababab-abab-4aba-8aba-abababababab" },
+    helperMocks.requireRole.mockResolvedValue({
+      ok: true,
+      value: {
+        supabase: createSupabaseMock(),
+        user: { id: "abababab-abab-4aba-8aba-abababababab", email: "u@example.com" },
+        profile: {
+          clearanceLevel: "consultant",
+          actorName: "Jane Doe",
+          name: "Jane",
+          surname: "Doe",
+          email: "u@example.com",
+        },
+      },
     })
     helperMocks.loadPackageDetail.mockResolvedValue({ detail: buildDetail() })
   })
 
   it("returns 401 when unauthenticated", async () => {
-    helperMocks.requireAuthenticatedUser.mockResolvedValue({
-      error: createUnauthorizedResponse(),
+    helperMocks.requireRole.mockResolvedValue({
+      ok: false,
+      response: createUnauthorizedResponse(),
     })
 
     const response = await postApply({})
 
     expect(response.status).toBe(401)
+  })
+
+  it("returns 403 when role is not allowed", async () => {
+    helperMocks.requireRole.mockResolvedValue({
+      ok: false,
+      response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
+    })
+
+    const response = await postApply({
+      jobId: JOB_ID,
+      quoteId: QUOTE_ID,
+      travelDate: "2026-06-01",
+      selections: [],
+    })
+
+    expect(response.status).toBe(403)
   })
 
   it("prices a train-only selection without optional hotel or transfer lines", async () => {
@@ -325,19 +353,27 @@ describe("POST /api/packages/[slug]/apply", () => {
   })
 
   it("prices selected rental by billable days from the booking transport request", async () => {
-    helperMocks.requireAuthenticatedUser.mockResolvedValue({
-      supabase: createSupabaseMock([
-        {
-          service_type: "rental",
-          route_id: RENTAL_ROUTE_ID,
-          suite_type_id: TRANSFER_VEHICLE_ID,
-          pickup_point: "Cape Town Airport",
-          dropoff_point: "Cape Town Airport",
-          pickup_at: "2026-06-01T10:00:00.000Z",
-          return_at: "2026-06-03T09:00:00.000Z",
+    helperMocks.requireRole.mockResolvedValue({
+      ok: true,
+      response: null,
+      value: {
+        supabase: createSupabaseMock([
+          {
+            service_type: "rental",
+            route_id: RENTAL_ROUTE_ID,
+            suite_type_id: TRANSFER_VEHICLE_ID,
+            pickup_point: "Cape Town Airport",
+            dropoff_point: "Cape Town Airport",
+            pickup_at: "2026-06-01T10:00:00.000Z",
+            return_at: "2026-06-03T09:00:00.000Z",
+          },
+        ]),
+        user: { id: "abababab-abab-4aba-8aba-abababababab" },
+        profile: {
+          clearanceLevel: "consultant",
+          actorName: "Consultant",
         },
-      ]),
-      user: { id: "abababab-abab-4aba-8aba-abababababab" },
+      },
     })
 
     const response = await postApply({

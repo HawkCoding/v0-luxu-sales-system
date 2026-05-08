@@ -34,6 +34,11 @@ class FakeQuery {
     return this
   }
 
+  maybeSingle(): FakeQuery {
+    this.returnsSingle = true
+    return this
+  }
+
   then<TResult1 = { data: unknown; error: null }, TResult2 = never>(
     onfulfilled?: ((value: { data: unknown; error: null }) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
@@ -64,6 +69,10 @@ function createFakeSupabase(updatedRow: unknown): {
           const operation: Operation = { table, action: "insert", payload, filters: {} }
           operations.push(operation)
           return new FakeQuery(operation, updatedRow)
+        },
+        select() {
+          const operation: Operation = { table, action: "update", payload: null, filters: {} }
+          return new FakeQuery(operation, { value: "25" })
         },
       }
     },

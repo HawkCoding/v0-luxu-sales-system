@@ -27,6 +27,8 @@ const GATE_TAB_MAP: Record<string, string> = {
   quote_sent_or_accepted: "?tab=quotes",
   invoice_document: "?tab=documents",
   invoice_correspondence: "?tab=correspondence",
+  final_invoice: "?tab=documents",
+  final_invoice_correspondence: "?tab=correspondence",
   voucher_document: "?tab=documents",
   voucher_correspondence: "?tab=correspondence",
   email_import_review: "?tab=enquiry",
@@ -55,6 +57,7 @@ export function gateIdToTabPath(gateId: string): string {
 
 export function confirmationKeyForFailure(failure: GateFailure): keyof ManualConfirmations | null {
   if (failure.autoFixable === "create_invoice_25pct") return "createDepositInvoice"
+  if (failure.autoFixable === "create_final_invoice") return "createFinalInvoice"
   if (failure.autoFixable === "create_invoice_correspondence") return "createInvoiceCorrespondence"
   if (failure.gateId === "deposit_received_confirmation") return "depositReceived"
   if (failure.gateId === "final_payment_confirmation") return "finalPaymentReceived"
