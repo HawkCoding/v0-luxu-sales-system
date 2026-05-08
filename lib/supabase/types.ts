@@ -278,6 +278,7 @@ export type Database = {
           accepted_at: string | null
           additional_services: boolean
           additional_services_details: string | null
+          assigned_salesperson_id: string | null
           booking_number: string
           cancel_reason: string | null
           cancelled_at: string | null
@@ -334,6 +335,7 @@ export type Database = {
           accepted_at?: string | null
           additional_services?: boolean
           additional_services_details?: string | null
+          assigned_salesperson_id?: string | null
           booking_number?: string
           cancel_reason?: string | null
           cancelled_at?: string | null
@@ -390,6 +392,7 @@ export type Database = {
           accepted_at?: string | null
           additional_services?: boolean
           additional_services_details?: string | null
+          assigned_salesperson_id?: string | null
           booking_number?: string
           cancel_reason?: string | null
           cancelled_at?: string | null
@@ -444,6 +447,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "bookings_assigned_salesperson_id_fkey"
+            columns: ["assigned_salesperson_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "bookings_customer_id_fkey"
             columns: ["customer_id"]
             isOneToOne: false
@@ -496,6 +506,7 @@ export type Database = {
           error: string | null
           id: string
           kind: string | null
+          provider_message_id: string | null
           scheduled_at: string | null
           sent_at: string | null
           status: Database["public"]["Enums"]["correspondence_status"]
@@ -509,6 +520,7 @@ export type Database = {
           error?: string | null
           id?: string
           kind?: string | null
+          provider_message_id?: string | null
           scheduled_at?: string | null
           sent_at?: string | null
           status?: Database["public"]["Enums"]["correspondence_status"]
@@ -522,6 +534,7 @@ export type Database = {
           error?: string | null
           id?: string
           kind?: string | null
+          provider_message_id?: string | null
           scheduled_at?: string | null
           sent_at?: string | null
           status?: Database["public"]["Enums"]["correspondence_status"]
@@ -714,6 +727,72 @@ export type Database = {
             columns: ["booking_id"]
             isOneToOne: false
             referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoices: {
+        Row: {
+          amount: number
+          booking_id: string
+          created_at: string
+          created_by: string | null
+          currency: string
+          deposit_percentage: number | null
+          due_date: string | null
+          id: string
+          invoice_number: string
+          kind: string
+          quote_id: string | null
+          sent_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          booking_id: string
+          created_at?: string
+          created_by?: string | null
+          currency?: string
+          deposit_percentage?: number | null
+          due_date?: string | null
+          id?: string
+          invoice_number: string
+          kind: string
+          quote_id?: string | null
+          sent_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          booking_id?: string
+          created_at?: string
+          created_by?: string | null
+          currency?: string
+          deposit_percentage?: number | null
+          due_date?: string | null
+          id?: string
+          invoice_number?: string
+          kind?: string
+          quote_id?: string | null
+          sent_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoices_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoices_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
             referencedColumns: ["id"]
           },
         ]
@@ -1337,8 +1416,11 @@ export type Database = {
           id: string
           itinerary_id: string | null
           last_sent_at: string | null
+          no_package_match: boolean
           override_pin: string | null
           override_reason: string | null
+          parent_quote_id: string | null
+          quote_number: string | null
           status: Database["public"]["Enums"]["quote_status"]
           subtotal: number
           total: number
@@ -1352,8 +1434,11 @@ export type Database = {
           id?: string
           itinerary_id?: string | null
           last_sent_at?: string | null
+          no_package_match?: boolean
           override_pin?: string | null
           override_reason?: string | null
+          parent_quote_id?: string | null
+          quote_number?: string | null
           status?: Database["public"]["Enums"]["quote_status"]
           subtotal?: number
           total?: number
@@ -1367,8 +1452,11 @@ export type Database = {
           id?: string
           itinerary_id?: string | null
           last_sent_at?: string | null
+          no_package_match?: boolean
           override_pin?: string | null
           override_reason?: string | null
+          parent_quote_id?: string | null
+          quote_number?: string | null
           status?: Database["public"]["Enums"]["quote_status"]
           subtotal?: number
           total?: number
@@ -1377,6 +1465,13 @@ export type Database = {
           vat?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "quotes_parent_quote_id_fkey"
+            columns: ["parent_quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "quotes_booking_id_fkey"
             columns: ["booking_id"]

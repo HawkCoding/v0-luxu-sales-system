@@ -1,7 +1,10 @@
-import { NextResponse } from "next/server"
-import { createSessionClient } from "@/lib/supabase/server"
+import { requireUser } from "@/lib/api/auth"
+import { safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
-import { DEFAULT_DEPOSIT_PERCENT } from "@/lib/pipeline/constants"
+import { depositPercentageToRate, getDefaultDepositPercentage } from "@/lib/pipeline/constants"
+
+const BOOKING_COLUMNS =
+  "id, booking_number, customer_id, stage, consultant, purpose, source, departure_date, duration_nights, created_at, updated_at, route:routes(name)"
 
 function addDaysToDateString(value: string, days: number): string {
   const [year = "1970", month = "1", day = "1"] = value.split("-")
@@ -11,24 +14,36 @@ function addDaysToDateString(value: string, days: number): string {
 }
 
 export async function GET() {
-  const supabase = await createSessionClient()
+  const auth = await requireUser()
+  if (!auth.ok) return auth.response
+
+  const { supabase } = auth.value
+  const defaultDepositPercentage = await getDefaultDepositPercentage(supabase)
+  const defaultDepositRate = depositPercentageToRate(defaultDepositPercentage)
 
   const [
-    { data: bookings },
-    { data: customers },
-    { data: payments },
-    { data: quotes },
-    { data: thankYous },
+    { data: bookings, error: bookingsError },
+    { data: customers, error: customersError },
+    { data: payments, error: paymentsError },
+    { data: quotes, error: quotesError },
+    { data: thankYous, error: thankYousError },
   ] = await Promise.all([
     supabase
       .from("bookings")
-      .select("*, route:routes(name)")
+      .select(BOOKING_COLUMNS)
       .order("created_at", { ascending: false }),
     supabase.from("customers").select("id, first_name, last_name"),
     supabase.from("payments").select("booking_id, amount"),
     supabase.from("quotes").select("booking_id, total"),
-    supabase.from("correspondences").select("booking_id, scheduled_at, created_at").eq("kind", "thank_you"),
+    supabase
+      .from("correspondences")
+      .select("booking_id, scheduled_at, created_at")
+      .eq("kind", "thank_you"),
   ])
+
+  const firstError =
+    bookingsError ?? customersError ?? paymentsError ?? quotesError ?? thankYousError
+  if (firstError) return safeSupabaseError("pipeline:load", firstError)
 
   const enriched = (bookings ?? []).map((booking) => {
     const customer = (customers ?? []).find((c) => c.id === booking.customer_id)
@@ -46,7 +61,7 @@ export async function GET() {
     let paymentColor = "red"
     if (totalPaid < 0) paymentColor = "blue"
     else if (totalPaid >= quoteTotal && totalPaid > 0) paymentColor = "green"
-    else if (totalPaid >= quoteTotal * DEFAULT_DEPOSIT_PERCENT) paymentColor = "yellow"
+    else if (totalPaid >= quoteTotal * defaultDepositRate) paymentColor = "yellow"
     else if (totalPaid > 0) paymentColor = "purple"
 
     return {
@@ -76,5 +91,5 @@ export async function GET() {
     }
   })
 
-  return NextResponse.json(enriched)
+  return Response.json(enriched)
 }

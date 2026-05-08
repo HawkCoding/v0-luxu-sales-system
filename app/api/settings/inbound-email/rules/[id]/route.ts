@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
+import { jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { requireAdminSettingsAccess } from "@/lib/settings-access"
 
 const patchRuleSchema = z.object({
@@ -17,12 +18,9 @@ export async function PATCH(
   const auth = await requireAdminSettingsAccess()
   if (!auth.ok) return auth.response
 
-  let parsed: z.infer<typeof patchRuleSchema>
-  try {
-    parsed = patchRuleSchema.parse(await request.json())
-  } catch (error) {
-    return NextResponse.json({ error: "Invalid request payload", details: error }, { status: 400 })
-  }
+  const result = patchRuleSchema.safeParse(await request.json())
+  if (!result.success) return jsonZodError(result.error, "Invalid request payload")
+  const parsed = result.data
 
   const updates: Record<string, unknown> = {}
   if (parsed.name !== undefined) updates.name = parsed.name
@@ -35,9 +33,7 @@ export async function PATCH(
     .update(updates)
     .eq("id", id)
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
+  if (error) return safeSupabaseError("inbound-email-rules:mutate", error)
 
   await auth.value.supabase.from("audit_logs").insert({
     actor: auth.value.actorName,
@@ -63,9 +59,7 @@ export async function DELETE(
     .delete()
     .eq("id", id)
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
+  if (error) return safeSupabaseError("inbound-email-rules:mutate", error)
 
   await auth.value.supabase.from("audit_logs").insert({
     actor: auth.value.actorName,

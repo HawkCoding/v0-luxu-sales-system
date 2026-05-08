@@ -1,7 +1,21 @@
 import { NextResponse } from "next/server"
 import { createSessionClient } from "@/lib/supabase/server"
+import {
+  BOOKING_SUITE_COLUMNS,
+  BOOKING_WITH_ROUTE_COLUMNS,
+  CORRESPONDENCE_COLUMNS,
+  CUSTOMER_COLUMNS,
+  DOCUMENT_COLUMNS,
+  ITINERARY_COLUMNS,
+  PAYMENT_COLUMNS,
+  PIPELINE_HISTORY_COLUMNS,
+  QUOTE_COLUMNS,
+  QUOTE_LINE_ITEM_COLUMNS,
+  TEMPLATE_COLUMNS,
+} from "@/lib/supabase/columns"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { getAuditCutoffDate } from "@/lib/audit"
+import { getDefaultDepositPercentage } from "@/lib/pipeline/constants"
 
 function addDaysToDateString(value: string, days: number): string {
   const [year = "1970", month = "1", day = "1"] = value.split("-")
@@ -13,6 +27,7 @@ function addDaysToDateString(value: string, days: number): string {
 export async function GET() {
   const supabase = await createSessionClient()
   const auditCutoff = getAuditCutoffDate().toISOString()
+  const defaultDepositPercentage = await getDefaultDepositPercentage(supabase)
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -28,6 +43,7 @@ export async function GET() {
   const [
     { data: customers },
     { data: bookings },
+    { data: profiles },
     { data: bookingSuites },
     { data: payments },
     { data: quotes },
@@ -39,18 +55,19 @@ export async function GET() {
     { data: pipelineHistory },
     { data: templates },
   ] = await Promise.all([
-    supabase.from("customers").select("*").order("created_at", { ascending: false }),
+    supabase.from("customers").select(CUSTOMER_COLUMNS).order("created_at", { ascending: false }),
     supabase
       .from("bookings")
-      .select("*, route:routes(id, name)")
+      .select(BOOKING_WITH_ROUTE_COLUMNS)
       .order("created_at", { ascending: false }),
-    supabase.from("booking_suites").select("*"),
-    supabase.from("payments").select("*").order("received_at", { ascending: false }),
-    supabase.from("quotes").select("*").order("created_at", { ascending: false }),
-    supabase.from("quote_line_items").select("*").order("sort_order", { ascending: true }),
-    supabase.from("itineraries").select("*").order("created_at", { ascending: false }),
-    supabase.from("documents").select("*").order("created_at", { ascending: false }),
-    supabase.from("correspondences").select("*").order("created_at", { ascending: false }),
+    supabase.from("profiles").select("user_id, name, surname, email, clearance_level, is_active"),
+    supabase.from("booking_suites").select(BOOKING_SUITE_COLUMNS),
+    supabase.from("payments").select(PAYMENT_COLUMNS).order("received_at", { ascending: false }),
+    supabase.from("quotes").select(QUOTE_COLUMNS).order("created_at", { ascending: false }),
+    supabase.from("quote_line_items").select(QUOTE_LINE_ITEM_COLUMNS).order("sort_order", { ascending: true }),
+    supabase.from("itineraries").select(ITINERARY_COLUMNS).order("created_at", { ascending: false }),
+    supabase.from("documents").select(DOCUMENT_COLUMNS).order("created_at", { ascending: false }),
+    supabase.from("correspondences").select(CORRESPONDENCE_COLUMNS).order("created_at", { ascending: false }),
     canReadAuditLogs
       ? supabase
           .from("audit_logs")
@@ -59,16 +76,31 @@ export async function GET() {
           .order("created_at", { ascending: false })
           .limit(1000)
       : Promise.resolve({ data: [] }),
-    supabase.from("pipeline_history").select("*").order("moved_at", { ascending: false }),
-    supabase.from("templates").select("*").order("key", { ascending: true }),
+    supabase.from("pipeline_history").select(PIPELINE_HISTORY_COLUMNS).order("moved_at", { ascending: false }),
+    supabase.from("templates").select(TEMPLATE_COLUMNS).order("key", { ascending: true }),
   ])
 
   // Embed line items into each quote
+  const profileByUserId = new Map(
+    (profiles ?? []).map((profile) => [
+      profile.user_id,
+      {
+        id: profile.user_id,
+        name: [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.email,
+        email: profile.email,
+        clearanceLevel: profile.clearance_level,
+        isActive: profile.is_active ?? true,
+      },
+    ]),
+  )
+
   const quotesWithLines = (quotes ?? []).map((q) => ({
     id: q.id,
     bookingId: q.booking_id,
     itineraryId: q.itinerary_id,
     status: q.status,
+    quoteNumber: q.quote_number,
+    parentQuoteId: q.parent_quote_id,
     validityUntil: q.validity_until,
     validityUntilDisplay: formatDisplayDate(q.validity_until),
     subtotal: q.subtotal,
@@ -78,6 +110,7 @@ export async function GET() {
     lastSentAtDisplay: formatDisplayDateTime(q.last_sent_at),
     overridePin: q.override_pin,
     overrideReason: q.override_reason,
+    noPackageMatch: q.no_package_match,
     createdAt: q.created_at,
     updatedAt: q.updated_at,
     createdAtDisplay: formatDisplayDateTime(q.created_at),
@@ -95,6 +128,10 @@ export async function GET() {
   }))
 
   return NextResponse.json({
+    settings: {
+      defaultDepositPercentage,
+    },
+
     customers: (customers ?? []).map((c) => ({
       id: c.id,
       firstName: c.first_name,
@@ -119,6 +156,10 @@ export async function GET() {
       source: b.source,
       consultant: b.consultant,
       ownerUserId: b.owner_user_id,
+      assignedSalespersonId: b.assigned_salesperson_id,
+      assignedSalespersonName: b.assigned_salesperson_id
+        ? profileByUserId.get(b.assigned_salesperson_id)?.name ?? null
+        : null,
       departureDate: b.departure_date,
       departureDateDisplay: formatDisplayDate(b.departure_date),
       durationNights: b.duration_nights,
@@ -237,6 +278,7 @@ export async function GET() {
       scheduledAt: c.scheduled_at,
       scheduledAtDisplay: formatDisplayDateTime(c.scheduled_at),
       error: c.error,
+      providerMessageId: c.provider_message_id,
       createdAt: c.created_at,
       createdAtDisplay: formatDisplayDateTime(c.created_at),
     })),

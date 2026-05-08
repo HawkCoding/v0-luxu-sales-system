@@ -8,7 +8,8 @@
 
 import { NextResponse } from "next/server"
 import { createServiceClient, createSessionClient } from "@/lib/supabase/server"
-import { Resend } from "resend"
+import { getEmailFromAddress } from "@/lib/email/from"
+import { sendEmail } from "@/lib/email/transport"
 
 export const runtime = "nodejs"
 
@@ -106,17 +107,15 @@ export async function POST(
   }
 
   // Notification email (optional)
-  const resendKey = process.env.RESEND_API_KEY
-  if (resendKey) {
-    const resend = new Resend(resendKey)
-    const from = process.env.RESEND_FROM_EMAIL || "Luxus <onboarding@resend.dev>"
-    await resend.emails.send({
-      from,
+  try {
+    await sendEmail({
+      from: await getEmailFromAddress(service),
       to: targetEmail,
       subject: "Your password was reset – Luxus Sales",
       text: `Your password for Luxus Sales was reset by ${adminName} at ${new Date().toISOString()}.\n\nIf you did not request this, contact your administrator.`,
     })
-    // Ignore send errors for now; password was already updated
+  } catch {
+    // Ignore send errors for now; password was already updated.
   }
 
   return NextResponse.json({ ok: true })

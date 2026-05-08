@@ -2,65 +2,22 @@
 
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import type { DocRecord, Enquiry, Job, Customer, ConsultantAbbreviation } from "@/lib/types"
-import { FileText, FileOutput } from "lucide-react"
-import { generateVoucherHTML, downloadVoucherPDF } from "@/lib/generate-voucher"
-import { CONSULTANTS, VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
-import { useVoucherTemplate } from "@/lib/use-data"
-import { toast } from "sonner"
-import { formatDisplayDateLong, formatDisplayDateTime } from "@/lib/date-format"
+import type { DocRecord, Enquiry, Job, Customer } from "@/lib/types"
+import { FileText } from "lucide-react"
+import { GenerateVoucherDialog } from "@/components/generate-voucher-dialog"
+import { formatDisplayDateTime } from "@/lib/date-format"
 
 interface JobDocumentsTabProps {
   documents: DocRecord[]
   job?: Job
   enquiry?: Enquiry
   customer?: Customer
+  onChange?: () => Promise<void> | void
 }
 
-export function JobDocumentsTab({ documents, job, enquiry, customer }: JobDocumentsTabProps) {
-  const { data: voucherTemplate, isLoading: voucherTemplateLoading, error: voucherTemplateError } = useVoucherTemplate()
+export function JobDocumentsTab({ documents, job, enquiry, customer, onChange }: JobDocumentsTabProps) {
   const canGenerateVoucher = job && enquiry && customer &&
-    (job.stage === "deposit_paid" || job.stage === "final_paid" || job.stage === "voucher_sent" || job.stage === "closed")
-
-  const handleGenerateVoucher = () => {
-    if (!job || !enquiry || !customer) {
-      toast.error("Missing required data for voucher generation")
-      return
-    }
-
-    const consultant = CONSULTANTS.find(c => c.key === job.consultant)
-    const guestNames = `${enquiry.title} ${enquiry.name} ${enquiry.surname}`
-    
-    const voucherData = {
-      voucherNumber: job.jobNumber,
-      guestNames,
-      consultantName: consultant?.name || "Unknown",
-      supplierName: "Rovos Rail",
-      route: enquiry.direction,
-      departure: formatDisplayDateLong(enquiry.departureDate),
-      arrival: "",
-      suiteType: enquiry.suiteTypes[0] || "Suite",
-      numberOfGuests: enquiry.noOfAdults + enquiry.noOfChildren,
-      specialRequests: enquiry.additionalServicesDetails || "",
-      customerEmail: customer.email,
-      customerPhone: customer.phone ?? "",
-      enquiry,
-      consultant: job.consultant
-    }
-
-    if (!voucherTemplate && voucherTemplateLoading) {
-      toast.error("Voucher template is still loading. Please try again in a moment.")
-      return
-    }
-
-    const html = generateVoucherHTML(voucherData, voucherTemplateError ? VOUCHER_TEMPLATE_DEFAULTS : voucherTemplate)
-    downloadVoucherPDF(html, `voucher-${job.jobNumber}.html`)
-    
-    toast.success("Voucher generated successfully", {
-      description: "The voucher will open in a new window for printing/saving as PDF"
-    })
-  }
+    (job.stage === "final_paid" || job.stage === "voucher_sent" || job.stage === "closed")
 
   return (
     <div className="space-y-3">
@@ -70,12 +27,16 @@ export function JobDocumentsTab({ documents, job, enquiry, customer }: JobDocume
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-foreground">Generate Travel Voucher</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Create a PDF voucher for this booking</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Create, preview, and send the PDF voucher</p>
               </div>
-              <Button size="sm" onClick={handleGenerateVoucher} disabled={voucherTemplateLoading}>
-                <FileOutput className="w-4 h-4 mr-1.5" />
-                Generate Voucher
-              </Button>
+              <GenerateVoucherDialog
+                jobId={job.id}
+                bookingNumber={job.jobNumber}
+                onGenerated={onChange}
+                onSent={async () => {
+                  await onChange?.()
+                }}
+              />
             </div>
           </CardContent>
         </Card>

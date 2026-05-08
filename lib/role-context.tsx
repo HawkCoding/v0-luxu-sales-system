@@ -42,7 +42,7 @@ export const permissions: Record<string, Role[]> = {
   "export:reporting": ["manager"],
   "view:audit": ["admin", "manager"],
   "view:full_audit": ["manager"],
-  "view:settings": ["admin", "manager"],
+  "view:settings": ["admin", "manager", "consultant"],
   "edit:settings": ["admin"],
   "manage:users": ["admin"],
 }

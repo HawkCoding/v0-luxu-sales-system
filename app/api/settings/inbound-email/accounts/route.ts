@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
+import { jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { encryptCredential } from "@/lib/inbound-email/crypto"
 import { requireAdminSettingsAccess } from "@/lib/settings-access"
 
@@ -59,9 +60,7 @@ export async function GET() {
     .select("id, email, host, port, tls_mode, username, inbox_folder, processed_folder, needs_review_folder, enabled, first_sync_completed, last_synced_at, created_at, updated_at")
     .order("created_at", { ascending: false })
 
-  if (error) {
-    return NextResponse.json({ error: "Failed to load inbound email accounts" }, { status: 500 })
-  }
+  if (error) return safeSupabaseError("inbound-email-accounts:list", error, "Failed to load inbound email accounts")
 
   return NextResponse.json({ accounts: (data ?? []).map(mapAccount) })
 }
@@ -70,12 +69,9 @@ export async function POST(request: Request) {
   const auth = await requireAdminSettingsAccess()
   if (!auth.ok) return auth.response
 
-  let parsed: z.infer<typeof accountSchema>
-  try {
-    parsed = accountSchema.parse(await request.json())
-  } catch (error) {
-    return NextResponse.json({ error: "Invalid request payload", details: error }, { status: 400 })
-  }
+  const result = accountSchema.safeParse(await request.json())
+  if (!result.success) return jsonZodError(result.error, "Invalid request payload")
+  const parsed = result.data
 
   const { data, error } = await auth.value.supabase
     .from("inbound_email_accounts")
@@ -94,9 +90,7 @@ export async function POST(request: Request) {
     .select("id, email, host, port, tls_mode, username, inbox_folder, processed_folder, needs_review_folder, enabled, first_sync_completed, last_synced_at, created_at, updated_at")
     .single()
 
-  if (error || !data) {
-    return NextResponse.json({ error: error?.message || "Failed to create account" }, { status: 500 })
-  }
+  if (error || !data) return safeSupabaseError("inbound-email-accounts:create", error, "Failed to create account")
 
   await auth.value.supabase.from("audit_logs").insert({
     actor: auth.value.actorName,

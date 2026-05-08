@@ -7,7 +7,7 @@ Luxus Sales System manages the full lifecycle of luxury train travel bookings:
 
 Key domain rules:
 - Quotes are valid 14 days and versioned (e.g. `BT-2026-0001-Q1`)
-- Default deposit is 25% — a booking cannot be confirmed without `deposit_paid = TRUE`
+- Default deposit is configurable in Settings (default 25%, overridable per job at invoice generation) — a booking cannot be confirmed without `deposit_paid = TRUE`
 - Voucher is only available when `invoice_balance = 0`
 - Core tables: `customers`, `jobs`, `quotes`, `quote_items`, `invoices`, `payments`, `suppliers`
 

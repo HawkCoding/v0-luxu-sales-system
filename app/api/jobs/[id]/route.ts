@@ -1,6 +1,21 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
+import {
+  AUDIT_LOG_COLUMNS,
+  BOOKING_SUITE_COLUMNS,
+  BOOKING_TRANSPORT_REQUEST_COLUMNS,
+  BOOKING_WITH_ROUTE_COLUMNS,
+  CORRESPONDENCE_COLUMNS,
+  CUSTOMER_COLUMNS,
+  DOCUMENT_COLUMNS,
+  INVOICE_COLUMNS,
+  ITINERARY_COLUMNS,
+  PAYMENT_COLUMNS,
+  QUOTE_COLUMNS,
+  QUOTE_LINE_ITEM_COLUMNS,
+  TRAVELLER_COLUMNS,
+} from "@/lib/supabase/columns"
 import type { Json } from "@/lib/supabase/types"
 import { staleVersionResponse } from "@/lib/concurrency"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
@@ -9,6 +24,7 @@ import { extractRoleFromJwt } from "@/lib/role-utils"
 import { applyTransition } from "@/lib/pipeline/apply-transition"
 import { validateTransition } from "@/lib/pipeline/validate-transition"
 import { mapBookingTransportRequest } from "@/lib/suppliers"
+import { getDefaultDepositPercentage } from "@/lib/pipeline/constants"
 
 const pipelineStageSchema = z.enum([
   "enquiry",
@@ -36,6 +52,8 @@ const patchJobSchema = z.object({
   manualConfirmations: z
     .object({
       createDepositInvoice: z.boolean().optional(),
+      createFinalInvoice: z.boolean().optional(),
+      createInvoiceCorrespondence: z.boolean().optional(),
       depositReceived: z.boolean().optional(),
       finalPaymentReceived: z.boolean().optional(),
     })
@@ -51,6 +69,7 @@ const patchJobSchema = z.object({
     .optional(),
   ownerUser: z.string().optional(),
   consultant: z.string().optional(),
+  assignedSalespersonId: z.string().uuid().nullable().optional(),
   customerId: z.string().optional(),
   expectedUpdatedAt: z.string().datetime({ offset: true }).optional(),
 }).passthrough()
@@ -61,14 +80,16 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   const { data: booking } = await supabase
     .from("bookings")
-    .select("*, route:routes(id, name)")
+    .select(BOOKING_WITH_ROUTE_COLUMNS)
     .eq("id", id)
     .single()
 
   if (!booking) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
   const [
+    defaultDepositPercentage,
     { data: customer },
+    { data: profiles },
     { data: bookingSuites },
     { data: travellers },
     { data: transportRequestsData },
@@ -76,24 +97,47 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     { data: quotesData },
     { data: quoteLineItemsData },
     { data: paymentsData },
+    { data: invoicesData },
     { data: documentsData },
     { data: correspondenceData },
     { data: auditData },
   ] = await Promise.all([
-    supabase.from("customers").select("*").eq("id", booking.customer_id).single(),
-    supabase.from("booking_suites").select("*").eq("booking_id", id),
-    supabase.from("travellers").select("*").eq("booking_id", id).order("sort_order"),
-    supabase.from("booking_transport_requests").select("*").eq("booking_id", id).order("sort_order"),
-    supabase.from("itineraries").select("*").eq("booking_id", id).order("created_at"),
-    supabase.from("quotes").select("*").eq("booking_id", id).order("created_at"),
-    supabase.from("quote_line_items").select("*").order("sort_order"),
-    supabase.from("payments").select("*").eq("booking_id", id).order("received_at"),
-    supabase.from("documents").select("*").eq("booking_id", id).order("created_at"),
-    supabase.from("correspondences").select("*").eq("booking_id", id).order("created_at"),
-    supabase.from("audit_logs").select("*").eq("entity_id", id).order("created_at", { ascending: false }),
+    getDefaultDepositPercentage(supabase),
+    supabase.from("customers").select(CUSTOMER_COLUMNS).eq("id", booking.customer_id).single(),
+    supabase.from("profiles").select("user_id, name, surname, email, clearance_level, is_active").order("name"),
+    supabase.from("booking_suites").select(BOOKING_SUITE_COLUMNS).eq("booking_id", id),
+    supabase.from("travellers").select(TRAVELLER_COLUMNS).eq("booking_id", id).order("sort_order"),
+    supabase
+      .from("booking_transport_requests")
+      .select(BOOKING_TRANSPORT_REQUEST_COLUMNS)
+      .eq("booking_id", id)
+      .order("sort_order"),
+    supabase.from("itineraries").select(ITINERARY_COLUMNS).eq("booking_id", id).order("created_at"),
+    supabase.from("quotes").select(QUOTE_COLUMNS).eq("booking_id", id).order("created_at"),
+    supabase.from("quote_line_items").select(QUOTE_LINE_ITEM_COLUMNS).order("sort_order"),
+    supabase.from("payments").select(PAYMENT_COLUMNS).eq("booking_id", id).order("received_at"),
+    supabase.from("invoices").select(INVOICE_COLUMNS).eq("booking_id", id).order("created_at", { ascending: false }),
+    supabase.from("documents").select(DOCUMENT_COLUMNS).eq("booking_id", id).order("created_at"),
+    supabase.from("correspondences").select(CORRESPONDENCE_COLUMNS).eq("booking_id", id).order("created_at"),
+    supabase.from("audit_logs").select(AUDIT_LOG_COLUMNS).eq("entity_id", id).order("created_at", { ascending: false }),
   ])
 
   // Map booking → shape matching the existing Job interface so page components are unchanged
+  const salespeople = (profiles ?? [])
+    .filter((profile) =>
+      ["admin", "manager", "consultant"].includes(profile.clearance_level) &&
+      (profile.is_active ?? true),
+    )
+    .map((profile) => ({
+      id: profile.user_id,
+      name: [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.email,
+      email: profile.email,
+      clearanceLevel: profile.clearance_level,
+    }))
+  const assignedSalesperson = booking.assigned_salesperson_id
+    ? salespeople.find((profile) => profile.id === booking.assigned_salesperson_id) ?? null
+    : null
+
   const job = {
     id: booking.id,
     jobNumber: booking.booking_number,
@@ -103,6 +147,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     source: booking.source,
     ownerUser: booking.consultant ?? "consultant",
     consultant: booking.consultant,
+    assignedSalespersonId: booking.assigned_salesperson_id ?? null,
+    assignedSalespersonName: assignedSalesperson?.name ?? null,
     createdAt: booking.created_at,
     updatedAt: booking.updated_at,
     createdAtDisplay: formatDisplayDateTime(booking.created_at),
@@ -205,6 +251,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     itineraryId: q.itinerary_id ?? "",
     jobId: q.booking_id,
     status: q.status,
+    quoteNumber: q.quote_number,
+    parentQuoteId: q.parent_quote_id,
     validityUntil: q.validity_until ?? "",
     validityUntilDisplay: formatDisplayDate(q.validity_until),
     subtotal: q.subtotal,
@@ -216,6 +264,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     lastSentAtDisplay: formatDisplayDateTime(q.last_sent_at),
     overridePin: q.override_pin ?? undefined,
     overrideReason: q.override_reason ?? undefined,
+    noPackageMatch: q.no_package_match,
     lineItems: (quoteLineItemsData ?? [])
       .filter((li) => li.quote_id === q.id)
       .map((li) => ({
@@ -236,6 +285,29 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     method: p.method ?? "",
     reference: p.reference ?? "",
     notes: p.notes ?? "",
+  }))
+
+  const invoices = (invoicesData ?? []).map((invoice) => ({
+    id: invoice.id,
+    jobId: invoice.booking_id,
+    quoteId: invoice.quote_id,
+    kind: invoice.kind,
+    status: invoice.status,
+    invoiceNumber: invoice.invoice_number,
+    depositPercentage: invoice.deposit_percentage,
+    amount: invoice.amount,
+    amountDisplay: new Intl.NumberFormat("en-ZA", {
+      style: "currency",
+      currency: invoice.currency,
+      maximumFractionDigits: 2,
+    }).format(invoice.amount),
+    currency: invoice.currency,
+    dueDate: invoice.due_date,
+    dueDateDisplay: formatDisplayDate(invoice.due_date),
+    sentAt: invoice.sent_at,
+    sentAtDisplay: formatDisplayDateTime(invoice.sent_at),
+    createdAt: invoice.created_at,
+    createdAtDisplay: formatDisplayDateTime(invoice.created_at),
   }))
 
   // Map documents
@@ -264,6 +336,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     scheduledAt: c.scheduled_at ?? undefined,
     scheduledAtDisplay: formatDisplayDateTime(c.scheduled_at),
     error: c.error ?? undefined,
+    providerMessageId: c.provider_message_id,
   }))
 
   // Map audit logs
@@ -287,9 +360,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     itineraries,
     quotes,
     payments,
+    invoices,
     documents,
     correspondence,
     auditLogs,
+    salespeople,
+    settings: {
+      defaultDepositPercentage,
+    },
   })
 }
 
@@ -312,7 +390,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const { data: booking } = await supabase
     .from("bookings")
     .select(
-      "id, stage, booking_number, customer_id, consultant, source, raw_text, email_import_needs_review, email_import_review_resolved_at, updated_at",
+      "id, stage, booking_number, customer_id, consultant, assigned_salesperson_id, source, raw_text, email_import_needs_review, email_import_review_resolved_at, updated_at",
     )
     .eq("id", id)
     .single()
@@ -376,6 +454,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       { data: customer },
       { data: quotes },
       { data: documents },
+      { data: invoices },
       { data: correspondences },
       { data: payments },
     ] = await Promise.all([
@@ -390,6 +469,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         .eq("booking_id", id)
         .order("created_at", { ascending: false }),
       supabase.from("documents").select("id, kind, status").eq("booking_id", id),
+      supabase.from("invoices").select("id, kind, status").eq("booking_id", id),
       supabase.from("correspondences").select("id, kind, subject, status").eq("booking_id", id),
       supabase.from("payments").select("amount").eq("booking_id", id),
     ])
@@ -411,6 +491,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       targetStage,
       quotes: quotes ?? [],
       documents: documents ?? [],
+      invoices: invoices ?? [],
       correspondences: correspondences ?? [],
       manualConfirmations: body.manualConfirmations,
       lostContext,
@@ -534,6 +615,47 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (body.ownerUser) updates.consultant = body.ownerUser
   if (body.consultant) updates.consultant = body.consultant
 
+  if (body.assignedSalespersonId !== undefined) {
+    const { data: actorProfile } = await supabase
+      .from("profiles")
+      .select("name, surname, email, clearance_level")
+      .eq("user_id", user.id)
+      .maybeSingle()
+
+    const role = extractRoleFromJwt(user) ?? actorProfile?.clearance_level ?? null
+    if (role !== "manager" && role !== "admin") {
+      return NextResponse.json({ error: "Manager access required to reassign salesperson" }, { status: 403 })
+    }
+
+    if (body.assignedSalespersonId) {
+      const { data: targetProfile } = await supabase
+        .from("profiles")
+        .select("user_id, clearance_level, is_active")
+        .eq("user_id", body.assignedSalespersonId)
+        .maybeSingle()
+
+      if (
+        !targetProfile ||
+        !["admin", "manager", "consultant"].includes(targetProfile.clearance_level) ||
+        targetProfile.is_active === false
+      ) {
+        return NextResponse.json({ error: "Assigned salesperson not found" }, { status: 404 })
+      }
+    }
+
+    updates.assigned_salesperson_id = body.assignedSalespersonId
+
+    await supabase.from("audit_logs").insert({
+      actor: [actorProfile?.name, actorProfile?.surname].filter(Boolean).join(" ").trim() || actorProfile?.email || user.email || "System",
+      actor_user_id: user.id,
+      entity_type: "Booking",
+      entity_id: id,
+      action: "salesperson_reassigned",
+      before_json: { assigned_salesperson_id: booking.assigned_salesperson_id },
+      after_json: { assigned_salesperson_id: body.assignedSalespersonId },
+    })
+  }
+
   if (typeof body.customerId === "string" && body.customerId.trim() && body.customerId !== booking.customer_id) {
     const { data: targetCustomer } = await supabase
       .from("customers")
@@ -564,6 +686,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       jobNumber: stageUpdated.booking_number,
       stage: stageUpdated.stage,
       consultant: stageUpdated.consultant,
+      assignedSalespersonId: booking.assigned_salesperson_id ?? null,
       cancelReason: stageUpdated.cancel_reason ?? null,
       cancelledAt: stageUpdated.cancelled_at ?? null,
       updatedAt: stageUpdated.updated_at,
@@ -605,6 +728,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     jobNumber: updated.booking_number,
     stage: updated.stage,
     consultant: updated.consultant,
+    assignedSalespersonId: updated.assigned_salesperson_id ?? null,
     cancelReason: updated.cancel_reason ?? null,
     cancelledAt: updated.cancelled_at ?? null,
     updatedAt: updated.updated_at,

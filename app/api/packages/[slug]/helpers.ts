@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import type { SupabaseClient } from "@supabase/supabase-js"
 import {
   buildPackageSlugBase,
   mapPackageDetail,
@@ -89,7 +90,7 @@ function normalizeLegRows(
   }))
 }
 
-export async function loadPackageDetail(supabase: SessionClient, slug: string) {
+export async function loadPackageDetail(supabase: SupabaseClient<Database>, slug: string) {
   const { data: pkg, error: packageError } = await supabase
     .from("packages")
     .select("*")

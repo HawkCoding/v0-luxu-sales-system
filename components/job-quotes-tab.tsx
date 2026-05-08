@@ -5,13 +5,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
+import { toast } from "sonner"
 import type { Quote, Itinerary } from "@/lib/types"
 import { useRole } from "@/lib/role-context"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { ApplyPackageDialog } from "@/components/apply-package-dialog"
 import { SendQuoteDialog } from "@/components/send-quote-dialog"
 import { CreateQuoteDialog } from "@/components/create-quote-dialog"
-import { Send } from "lucide-react"
+import { QuotePreviewSendDialog } from "@/components/quote-preview-send-dialog"
+import { RotateCcw, Send } from "lucide-react"
 
 const STATUS_BADGE: Record<string, { variant: "default" | "secondary" | "outline" | "destructive"; label: string }> = {
   draft: { variant: "secondary", label: "Draft" },
@@ -48,6 +50,7 @@ export function JobQuotesTab({
 }: JobQuotesTabProps) {
   const { can } = useRole()
   const [sendQuoteOpen, setSendQuoteOpen] = useState(false)
+  const [revisingQuoteId, setRevisingQuoteId] = useState<string | null>(null)
   const sendQuoteDialog = (
     <SendQuoteDialog
       open={sendQuoteOpen}
@@ -65,6 +68,27 @@ export function JobQuotesTab({
       }}
     />
   )
+
+  async function reviseQuote(quoteId: string) {
+    setRevisingQuoteId(quoteId)
+
+    try {
+      const response = await fetch(`/api/quotes/${quoteId}/revise`, { method: "POST" })
+      const payload = (await response.json().catch(() => ({}))) as { error?: string }
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to revise quote")
+      }
+
+      mutate()
+      toast.success("Quote revision created.")
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to revise quote"
+      toast.error(message)
+    } finally {
+      setRevisingQuoteId(null)
+    }
+  }
 
   if (quotes.length === 0) {
     return (
@@ -106,21 +130,41 @@ export function JobQuotesTab({
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div className="flex items-center gap-2">
-                  <CardTitle className="text-sm font-medium">{it?.name || "Quote"}</CardTitle>
+                  <CardTitle className="text-sm font-medium">{q.quoteNumber || it?.name || "Quote"}</CardTitle>
                   <Badge variant={badge.variant} className="text-[10px]">{badge.label}</Badge>
                   {hasIncomplete && <Badge variant="destructive" className="text-[10px]">Missing pricing</Badge>}
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground">Valid until {formatDisplayDate(q.validityUntil)}</span>
                   {can("edit:quotes") && (
-                    <ApplyPackageDialog
-                      jobId={jobId}
-                      quoteId={q.id}
-                      travelDate={travelDate}
-                      existingLineItemCount={q.lineItems.length}
-                      expectedUpdatedAt={q.updatedAt}
-                      onApplied={mutate}
-                    />
+                    <>
+                      <QuotePreviewSendDialog
+                        quote={q}
+                        bookingNumber={bookingNumber}
+                        customerName={customerName}
+                        emailImportNeedsReview={emailImportNeedsReview}
+                        onSent={mutate}
+                      />
+                      {(q.status === "sent" || q.status === "accepted") && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={revisingQuoteId === q.id}
+                          onClick={() => void reviseQuote(q.id)}
+                        >
+                          <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                          Revise Quote
+                        </Button>
+                      )}
+                      <ApplyPackageDialog
+                        jobId={jobId}
+                        quoteId={q.id}
+                        travelDate={travelDate}
+                        existingLineItemCount={q.lineItems.length}
+                        expectedUpdatedAt={q.updatedAt}
+                        onApplied={mutate}
+                      />
+                    </>
                   )}
                 </div>
               </div>

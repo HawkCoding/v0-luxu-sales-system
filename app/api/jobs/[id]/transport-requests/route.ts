@@ -1,7 +1,8 @@
-import { NextResponse } from "next/server"
 import { z } from "zod"
+import { requireRole, requireUser } from "@/lib/api/auth"
+import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { mapBookingTransportRequest } from "@/lib/suppliers"
-import { createSessionClient } from "@/lib/supabase/server"
+import { BOOKING_TRANSPORT_REQUEST_COLUMNS } from "@/lib/supabase/columns"
 
 const nullableUuid = z.union([z.string().uuid(), z.literal(""), z.null()]).optional()
 const nullableDateTime = z.union([z.string().datetime({ offset: true }), z.literal(""), z.null()]).optional()
@@ -42,48 +43,37 @@ function normalizeNullableDateTime(value: string | null | undefined): string | n
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const supabase = await createSessionClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const auth = await requireUser()
+  if (!auth.ok) return auth.response
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-
-  const { data, error } = await supabase
+  const { data, error } = await auth.value.supabase
     .from("booking_transport_requests")
-    .select("*")
+    .select(BOOKING_TRANSPORT_REQUEST_COLUMNS)
     .eq("booking_id", id)
     .order("sort_order", { ascending: true })
 
-  if (error) {
-    return NextResponse.json({ error: "Failed to load transport requests" }, { status: 500 })
-  }
+  if (error) return safeSupabaseError("transport-requests:list", error, "Failed to load transport requests")
 
-  return NextResponse.json((data ?? []).map(mapBookingTransportRequest))
+  return Response.json((data ?? []).map(mapBookingTransportRequest))
 }
 
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const supabase = await createSessionClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const auth = await requireRole(["admin", "manager", "consultant"])
+  if (!auth.ok) return auth.response
 
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-  }
-
-  let parsed: z.infer<typeof saveTransportRequestsSchema>
+  let raw: unknown
   try {
-    parsed = saveTransportRequestsSchema.parse(await req.json())
-  } catch (error) {
-    return NextResponse.json(
-      { error: "Invalid transport request payload", details: error },
-      { status: 400 },
-    )
+    raw = await req.json()
+  } catch {
+    return jsonError("Invalid JSON body", 400)
   }
+
+  const parsedResult = saveTransportRequestsSchema.safeParse(raw)
+  if (!parsedResult.success) return jsonZodError(parsedResult.error, "Invalid transport request payload")
+  const parsed = parsedResult.data
+
+  const { supabase } = auth.value
 
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
@@ -91,13 +81,8 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     .eq("id", id)
     .maybeSingle()
 
-  if (bookingError) {
-    return NextResponse.json({ error: "Failed to validate booking" }, { status: 500 })
-  }
-
-  if (!booking) {
-    return NextResponse.json({ error: "Booking not found" }, { status: 404 })
-  }
+  if (bookingError) return safeSupabaseError("transport-requests:load-booking", bookingError, "Failed to validate booking")
+  if (!booking) return jsonError("Booking not found", 404)
 
   const rows = parsed.transportRequests.map((request, index) => ({
     id: request.id,
@@ -122,29 +107,23 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     .delete()
     .eq("booking_id", id)
 
-  if (deleteError) {
-    return NextResponse.json({ error: "Failed to replace transport requests" }, { status: 500 })
-  }
+  if (deleteError) return safeSupabaseError("transport-requests:replace", deleteError, "Failed to replace transport requests")
 
   if (rows.length > 0) {
     const { error: insertError } = await supabase
       .from("booking_transport_requests")
       .insert(rows)
 
-    if (insertError) {
-      return NextResponse.json({ error: "Failed to save transport requests" }, { status: 500 })
-    }
+    if (insertError) return safeSupabaseError("transport-requests:save", insertError, "Failed to save transport requests")
   }
 
   const { data: savedRows, error: loadError } = await supabase
     .from("booking_transport_requests")
-    .select("*")
+    .select(BOOKING_TRANSPORT_REQUEST_COLUMNS)
     .eq("booking_id", id)
     .order("sort_order", { ascending: true })
 
-  if (loadError) {
-    return NextResponse.json({ error: "Failed to load saved transport requests" }, { status: 500 })
-  }
+  if (loadError) return safeSupabaseError("transport-requests:reload", loadError, "Failed to load saved transport requests")
 
-  return NextResponse.json((savedRows ?? []).map(mapBookingTransportRequest))
+  return Response.json((savedRows ?? []).map(mapBookingTransportRequest))
 }

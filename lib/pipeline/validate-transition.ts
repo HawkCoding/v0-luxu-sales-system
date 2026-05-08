@@ -2,7 +2,11 @@ import type { PipelineStage } from "@/lib/types"
 
 export type GateSeverity = "block" | "confirm"
 
-export type GateAutoFix = "create_invoice_25pct" | "create_invoice_correspondence"
+export type GateAutoFix =
+  | "create_invoice_25pct"
+  | "create_final_invoice"
+  | "create_invoice_correspondence"
+  | "create_voucher_pdf"
 
 export interface GateFailure {
   gateId: string
@@ -39,6 +43,11 @@ export interface TransitionDocument {
   status?: string | null
 }
 
+export interface TransitionInvoice {
+  kind: string
+  status?: string | null
+}
+
 export interface TransitionCorrespondence {
   kind?: string | null
   subject?: string | null
@@ -47,6 +56,7 @@ export interface TransitionCorrespondence {
 
 export interface ManualConfirmations {
   createDepositInvoice?: boolean
+  createFinalInvoice?: boolean
   createInvoiceCorrespondence?: boolean
   depositReceived?: boolean
   finalPaymentReceived?: boolean
@@ -66,6 +76,7 @@ export interface ValidateTransitionInput {
   targetStage: PipelineStage
   quotes?: TransitionQuote[]
   documents?: TransitionDocument[]
+  invoices?: TransitionInvoice[]
   correspondences?: TransitionCorrespondence[]
   manualConfirmations?: ManualConfirmations
   lostContext?: LostContext
@@ -122,6 +133,13 @@ function hasCorrespondence(
       correspondence.kind === kind ||
       subjectIncludes(correspondence, subjectTerms),
   )
+}
+
+function hasSubjectCorrespondence(
+  correspondences: TransitionCorrespondence[],
+  subjectTerms: string[],
+): boolean {
+  return correspondences.some((correspondence) => subjectIncludes(correspondence, subjectTerms))
 }
 
 function customerCompletenessFailure(customer: TransitionCustomer | null): GateFailure | null {
@@ -214,6 +232,7 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
 
   const quotes = input.quotes ?? []
   const documents = input.documents ?? []
+  const invoices = input.invoices ?? []
   const correspondences = input.correspondences ?? []
   const manualConfirmations = input.manualConfirmations ?? {}
   const crossedStages = FORWARD_STAGES.slice(fromIndex + 1, toIndex + 1)
@@ -242,17 +261,20 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
   }
 
   if (crossedStages.includes("deposit_requested")) {
+    const hasDepositInvoice = invoices.some(
+      (invoice) => invoice.kind === "deposit" && invoice.status !== "void",
+    )
     const hasInvoiceDocument = hasDocument(documents, "invoice_pdf")
-    if (!hasInvoiceDocument && !manualConfirmations.createDepositInvoice) {
+    if (!hasDepositInvoice && !hasInvoiceDocument && !manualConfirmations.createDepositInvoice) {
       failures.push({
         gateId: "invoice_document",
-        message: "A deposit invoice document is required before requesting the deposit.",
-        fixHint: "Confirm that the system should create a 25% deposit invoice document and scheduled email.",
+        message: "A deposit invoice is required before requesting the deposit.",
+        fixHint: "Generate the deposit invoice, preview it, and send it to the customer.",
         severity: "confirm",
         autoFixable: "create_invoice_25pct",
       })
     } else if (
-      hasInvoiceDocument &&
+      (hasDepositInvoice || hasInvoiceDocument) &&
       !hasCorrespondence(correspondences, "invoice", ["invoice", "deposit request"]) &&
       !manualConfirmations.createInvoiceCorrespondence
     ) {
@@ -275,6 +297,28 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
     })
   }
 
+  if (crossedStages.includes("final_paid")) {
+    const hasFinalInvoice = invoices.some(
+      (invoice) => invoice.kind === "final" && invoice.status !== "void",
+    )
+    if (!hasFinalInvoice && !manualConfirmations.createFinalInvoice) {
+      failures.push({
+        gateId: "final_invoice",
+        message: "A final invoice is required before marking the booking paid in full.",
+        fixHint: "Generate the final invoice, preview it, and send it to the customer.",
+        severity: "confirm",
+        autoFixable: "create_final_invoice",
+      })
+    } else if (hasFinalInvoice && !hasSubjectCorrespondence(correspondences, ["final invoice"])) {
+      failures.push({
+        gateId: "final_invoice_correspondence",
+        message: "Final invoice correspondence must exist before the booking is paid in full.",
+        fixHint: "Send the final invoice email from the booking before moving to Paid in Full.",
+        severity: "block",
+      })
+    }
+  }
+
   if (crossedStages.includes("final_paid") && !manualConfirmations.finalPaymentReceived) {
     failures.push({
       gateId: "final_payment_confirmation",
@@ -289,8 +333,9 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
       failures.push({
         gateId: "voucher_document",
         message: "A voucher PDF is required before moving to Voucher Sent.",
-        fixHint: "Generate or upload the voucher document from the booking documents tab.",
-        severity: "block",
+        fixHint: "Generate the voucher PDF, preview it, and send it to the customer.",
+        severity: "confirm",
+        autoFixable: "create_voucher_pdf",
       })
     }
 
