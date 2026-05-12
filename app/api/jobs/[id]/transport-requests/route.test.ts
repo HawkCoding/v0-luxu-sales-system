@@ -20,7 +20,7 @@ import { GET, PUT } from "./route"
 const BOOKING_ID = "00000000-0000-4000-8000-00000000aaaa"
 
 function buildSupabase() {
-  const replaceTransportRequests = vi.fn(async () => ({ error: null }))
+  const replaceTransportRequests = vi.fn(async (_args: unknown) => ({ error: null }))
 
   return {
     replaceTransportRequests,
