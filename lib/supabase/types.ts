@@ -539,6 +539,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "bookings_assigned_salesperson_id_fkey"
+            columns: ["assigned_salesperson_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "bookings_customer_id_fkey"
             columns: ["customer_id"]
             isOneToOne: false
@@ -812,6 +819,72 @@ export type Database = {
             columns: ["booking_id"]
             isOneToOne: false
             referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoices: {
+        Row: {
+          amount: number
+          booking_id: string
+          created_at: string
+          created_by: string | null
+          currency: string
+          deposit_percentage: number | null
+          due_date: string | null
+          id: string
+          invoice_number: string
+          kind: string
+          quote_id: string | null
+          sent_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          booking_id: string
+          created_at?: string
+          created_by?: string | null
+          currency?: string
+          deposit_percentage?: number | null
+          due_date?: string | null
+          id?: string
+          invoice_number: string
+          kind: string
+          quote_id?: string | null
+          sent_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          booking_id?: string
+          created_at?: string
+          created_by?: string | null
+          currency?: string
+          deposit_percentage?: number | null
+          due_date?: string | null
+          id?: string
+          invoice_number?: string
+          kind?: string
+          quote_id?: string | null
+          sent_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoices_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoices_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
             referencedColumns: ["id"]
           },
         ]
@@ -1553,6 +1626,13 @@ export type Database = {
           vat?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "quotes_parent_quote_id_fkey"
+            columns: ["parent_quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "quotes_booking_id_fkey"
             columns: ["booking_id"]
