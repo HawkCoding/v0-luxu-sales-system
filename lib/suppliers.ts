@@ -1,6 +1,9 @@
 import type { Database } from "@/lib/supabase/types"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import type {
+  BookingScheduleSupplierKind,
+  BookingSupplierSchedule,
+  BookingVehicleRentalDetails,
   Location,
   Supplier,
   BookingTransportRequest,
@@ -9,16 +12,23 @@ import type {
   SupplierRateCard,
   SupplierRoute,
   SupplierSuiteType,
-  TransportServiceType,
+  TransportRequestServiceType,
+  VehicleRentalRouteDetails,
 } from "@/lib/types"
 
 type BookingTransportRequestRow = Database["public"]["Tables"]["booking_transport_requests"]["Row"]
+type BookingSupplierScheduleRow = Database["public"]["Tables"]["booking_supplier_schedules"]["Row"]
+type BookingVehicleRentalDetailsRow = Database["public"]["Tables"]["booking_vehicle_rental_details"]["Row"]
+type BookingTransportRequestWithRentalDetails = BookingTransportRequestRow & {
+  rental_details?: BookingVehicleRentalDetailsRow | BookingVehicleRentalDetailsRow[] | null
+}
 type LocationRow = Database["public"]["Tables"]["locations"]["Row"]
 type RateCardRow = Database["public"]["Tables"]["rate_cards"]["Row"]
 type RouteRow = Database["public"]["Tables"]["routes"]["Row"]
 type SupplierRow = Database["public"]["Tables"]["suppliers"]["Row"]
 type SupplierEmailRow = Database["public"]["Tables"]["supplier_emails"]["Row"]
 type SuiteTypeRow = Database["public"]["Tables"]["suite_types"]["Row"]
+type VehicleRentalRouteDetailsRow = Database["public"]["Tables"]["vehicle_rental_route_details"]["Row"]
 
 function normalizeSupplierStatus(value: string): Supplier["status"] {
   if (value === "draft" || value === "active" || value === "inactive") {
@@ -27,9 +37,46 @@ function normalizeSupplierStatus(value: string): Supplier["status"] {
   return "inactive"
 }
 
-function normalizeTransportServiceType(value: string | null): TransportServiceType | null {
+function normalizeTransportRequestServiceType(value: string | null): TransportRequestServiceType | null {
   if (value === "transfer" || value === "rental") return value
   return null
+}
+
+function normalizeBookingScheduleSupplierKind(value: string): BookingScheduleSupplierKind | null {
+  if (value === "hotel_property" || value === "train_operator") return value
+  return null
+}
+
+function mapVehicleRentalRouteDetails(
+  row: VehicleRentalRouteDetailsRow | null | undefined,
+): VehicleRentalRouteDetails | null {
+  if (!row) return null
+
+  return {
+    routeId: row.route_id,
+    includedKmPerDay: row.included_km_per_day ?? null,
+    extraKmPrice: row.extra_km_price ?? null,
+    securityDeposit: row.security_deposit ?? null,
+    oneWayFee: row.one_way_fee ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function mapBookingVehicleRentalDetails(
+  row: BookingVehicleRentalDetailsRow | BookingVehicleRentalDetailsRow[] | null | undefined,
+): BookingVehicleRentalDetails | null {
+  const details = Array.isArray(row) ? row[0] : row
+  if (!details) return null
+
+  return {
+    transportRequestId: details.transport_request_id,
+    returnAt: details.return_at ?? null,
+    returnAtDisplay: formatDisplayDateTime(details.return_at),
+    returnCutoffTime: details.return_cutoff_time ?? null,
+    createdAt: details.created_at,
+    updatedAt: details.updated_at,
+  }
 }
 
 export function mapSupplier(row: SupplierRow): Supplier {
@@ -43,7 +90,9 @@ export function mapSupplier(row: SupplierRow): Supplier {
     phone: row.phone,
     website: row.website,
     location: row.location,
+    locationDetail: row.location_detail ?? null,
     locationId: row.location_id ?? null,
+    description: row.description ?? null,
     notes: row.notes,
     active: row.active,
     singleSupplementPct: Number(row.single_supplement_pct ?? 0),
@@ -67,20 +116,19 @@ export function mapLocation(row: LocationRow): Location {
   }
 }
 
-export function mapSupplierRoute(row: RouteRow): SupplierRoute {
+export function mapSupplierRoute(
+  row: RouteRow,
+  vehicleRentalDetails?: VehicleRentalRouteDetailsRow | null,
+): SupplierRoute {
   return {
     id: row.id,
     supplierId: row.supplier_id,
     name: row.name,
     originLocationId: row.origin_location_id ?? null,
     destinationLocationId: row.destination_location_id ?? null,
-    transportServiceType: normalizeTransportServiceType(row.transport_service_type),
     pickupPoint: row.pickup_point ?? null,
     dropoffPoint: row.dropoff_point ?? null,
-    includedKmPerDay: row.included_km_per_day ?? null,
-    extraKmPrice: row.extra_km_price ?? null,
-    securityDeposit: row.security_deposit ?? null,
-    oneWayFee: row.one_way_fee ?? null,
+    vehicleRentalDetails: mapVehicleRentalRouteDetails(vehicleRentalDetails),
     active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -105,11 +153,11 @@ export function mapSupplierSuiteType(row: SuiteTypeRow): SupplierSuiteType {
   }
 }
 
-export function mapBookingTransportRequest(row: BookingTransportRequestRow): BookingTransportRequest {
+export function mapBookingTransportRequest(row: BookingTransportRequestWithRentalDetails): BookingTransportRequest {
   return {
     id: row.id,
     bookingId: row.booking_id,
-    serviceType: normalizeTransportServiceType(row.service_type) ?? "transfer",
+    serviceType: normalizeTransportRequestServiceType(row.service_type) ?? "transfer",
     supplierId: row.supplier_id ?? null,
     routeId: row.route_id ?? null,
     suiteTypeId: row.suite_type_id ?? null,
@@ -117,8 +165,7 @@ export function mapBookingTransportRequest(row: BookingTransportRequestRow): Boo
     dropoffPoint: row.dropoff_point,
     pickupAt: row.pickup_at ?? null,
     pickupAtDisplay: formatDisplayDateTime(row.pickup_at),
-    returnAt: row.return_at ?? null,
-    returnAtDisplay: formatDisplayDateTime(row.return_at),
+    rentalDetails: mapBookingVehicleRentalDetails(row.rental_details),
     passengerCount: row.passenger_count ?? null,
     luggageCount: row.luggage_count ?? null,
     flightNumber: row.flight_number ?? null,
@@ -127,6 +174,28 @@ export function mapBookingTransportRequest(row: BookingTransportRequestRow): Boo
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     createdAtDisplay: formatDisplayDateTime(row.created_at),
+    updatedAtDisplay: formatDisplayDateTime(row.updated_at),
+  }
+}
+
+export function mapBookingSupplierSchedule(row: BookingSupplierScheduleRow): BookingSupplierSchedule {
+  return {
+    id: row.id,
+    bookingId: row.booking_id,
+    supplierId: row.supplier_id ?? null,
+    supplierKind: normalizeBookingScheduleSupplierKind(row.supplier_kind) ?? "train_operator",
+    label: row.label ?? null,
+    dateFrom: row.date_from ?? "",
+    dateFromDisplay: formatDisplayDate(row.date_from),
+    dateTo: row.date_to ?? "",
+    dateToDisplay: formatDisplayDate(row.date_to),
+    timeStart: row.time_start ?? null,
+    timeEnd: row.time_end ?? null,
+    notes: row.notes ?? null,
+    sortOrder: row.sort_order,
+    createdAt: row.created_at,
+    createdAtDisplay: formatDisplayDateTime(row.created_at),
+    updatedAt: row.updated_at,
     updatedAtDisplay: formatDisplayDateTime(row.updated_at),
   }
 }
@@ -167,12 +236,17 @@ export function mapSupplierDetail(
   routes: RouteRow[] = [],
   rateCards: RateCardRow[] = [],
   locations: LocationRow[] = [],
+  vehicleRentalRouteDetails: VehicleRentalRouteDetailsRow[] = [],
 ): SupplierDetail {
+  const detailsByRouteId = new Map(
+    vehicleRentalRouteDetails.map((details) => [details.route_id, details]),
+  )
+
   return {
     ...mapSupplier(supplier),
     emails: emails.map(mapSupplierEmail),
     suiteTypes: suiteTypes.map(mapSupplierSuiteType),
-    routes: routes.map(mapSupplierRoute),
+    routes: routes.map((route) => mapSupplierRoute(route, detailsByRouteId.get(route.id))),
     rateCards: rateCards.map(mapSupplierRateCard),
     locations: locations.map(mapLocation),
   }

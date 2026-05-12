@@ -75,18 +75,19 @@ interface LegSelectionState {
 }
 
 function isOptionalLeg(kind: PackageDetail["legs"][number]["supplierKind"]): boolean {
-  return kind === "hotel_property" || kind === "transfers"
+  return kind === "hotel_property" || kind === "transfers" || kind === "vehicle_rental"
 }
 
 function getRouteLabel(kind: PackageDetail["legs"][number]["supplierKind"]): string {
   if (kind === "hotel_property") return "meal plan"
   if (kind === "transfers") return "transfer"
+  if (kind === "vehicle_rental") return "rental route"
   return "route"
 }
 
 function getSuiteLabel(kind: PackageDetail["legs"][number]["supplierKind"]): string {
   if (kind === "hotel_property") return "room type"
-  if (kind === "transfers") return "vehicle type"
+  if (kind === "transfers" || kind === "vehicle_rental") return "vehicle type"
   if (kind === "airline") return "cabin"
   return "suite type"
 }
@@ -388,7 +389,10 @@ export function ApplyPackageDialog({
 
                     {enabled ? (
                       <div className="grid gap-3 md:grid-cols-2">
-                        {leg.routes.length > 1 || leg.supplierKind === "hotel_property" || leg.supplierKind === "transfers" ? (
+                        {leg.routes.length > 1 ||
+                        leg.supplierKind === "hotel_property" ||
+                        leg.supplierKind === "transfers" ||
+                        leg.supplierKind === "vehicle_rental" ? (
                           <div className="space-y-1.5">
                             <Label className="capitalize">{getRouteLabel(leg.supplierKind)}</Label>
                             <Select

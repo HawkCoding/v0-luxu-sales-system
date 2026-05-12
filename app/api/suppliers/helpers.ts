@@ -250,16 +250,25 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
   }
 
   const routeIds = (routes ?? []).map((route) => route.id)
-  const rateCardResult =
+  const [rateCardResult, vehicleRentalDetailsResult] = await Promise.all([
     routeIds.length > 0
-      ? await supabase
+      ? supabase
           .from("rate_cards")
           .select("*")
           .in("route_id", routeIds)
           .order("valid_from", { ascending: true })
-      : { data: [], error: null }
+      : Promise.resolve({ data: [], error: null }),
+    routeIds.length > 0
+      ? supabase
+          .from("vehicle_rental_route_details")
+          .select("*")
+          .in("route_id", routeIds)
+      : Promise.resolve({ data: [], error: null }),
+  ])
 
   const { data: rateCards, error: rateCardsError } = rateCardResult
+  const { data: vehicleRentalRouteDetails, error: vehicleRentalRouteDetailsError } =
+    vehicleRentalDetailsResult
   if (rateCardsError) {
     console.error("Failed to load supplier rate cards", {
       supplierId,
@@ -269,6 +278,20 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     return {
       error: NextResponse.json(
         { error: "Failed to load supplier rate cards" },
+        { status: 500 },
+      ),
+    }
+  }
+
+  if (vehicleRentalRouteDetailsError) {
+    console.error("Failed to load vehicle rental route details", {
+      supplierId,
+      supplierSlug: slug,
+      error: vehicleRentalRouteDetailsError,
+    })
+    return {
+      error: NextResponse.json(
+        { error: "Failed to load vehicle rental route details" },
         { status: 500 },
       ),
     }
@@ -317,5 +340,6 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     routes: routes ?? [],
     rateCards: rateCards ?? [],
     locations: locations ?? [],
+    vehicleRentalRouteDetails: vehicleRentalRouteDetails ?? [],
   }
 }

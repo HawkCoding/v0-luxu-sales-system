@@ -20,7 +20,10 @@ import { GET, PUT } from "./route"
 const BOOKING_ID = "00000000-0000-4000-8000-00000000aaaa"
 
 function buildSupabase() {
+  const rentalDetailsInsert = vi.fn(async () => ({ error: null }))
+
   return {
+    rentalDetailsInsert,
     from: vi.fn((table: string) => {
       if (table === "booking_transport_requests") {
         return {
@@ -33,6 +36,11 @@ function buildSupabase() {
             eq: vi.fn(async () => ({ error: null })),
           })),
           insert: vi.fn(async () => ({ error: null })),
+        }
+      }
+      if (table === "booking_vehicle_rental_details") {
+        return {
+          insert: rentalDetailsInsert,
         }
       }
       if (table === "bookings") {
@@ -142,5 +150,67 @@ describe("PUT /api/jobs/[id]/transport-requests", () => {
     })
     const res = await PUT(req, { params })
     expect(res.status).toBe(200)
+  })
+
+  it("requires rental details for vehicle rentals", async () => {
+    authMocks.requireRole.mockResolvedValue({
+      ok: true,
+      value: {
+        supabase: buildSupabase(),
+        user: { id: "u1", email: "u@example.com" },
+        profile: { clearanceLevel: "consultant", actorName: "Jane", name: "Jane", surname: "D", email: "u@example.com" },
+      },
+    })
+    const req = new Request("http://localhost", {
+      method: "PUT",
+      body: JSON.stringify({
+        transportRequests: [{
+          serviceType: "rental",
+          pickupPoint: "A",
+          dropoffPoint: "B",
+          pickupAt: "2026-06-01T10:00:00.000Z",
+          rentalDetails: null,
+        }],
+      }),
+      headers: { "Content-Type": "application/json" },
+    })
+    const res = await PUT(req, { params })
+    expect(res.status).toBe(400)
+  })
+
+  it("saves vehicle rental details for rental requests", async () => {
+    const supabase = buildSupabase()
+    authMocks.requireRole.mockResolvedValue({
+      ok: true,
+      value: {
+        supabase,
+        user: { id: "u1", email: "u@example.com" },
+        profile: { clearanceLevel: "consultant", actorName: "Jane", name: "Jane", surname: "D", email: "u@example.com" },
+      },
+    })
+    const req = new Request("http://localhost", {
+      method: "PUT",
+      body: JSON.stringify({
+        transportRequests: [{
+          serviceType: "rental",
+          pickupPoint: "A",
+          dropoffPoint: "B",
+          pickupAt: "2026-06-01T10:00:00.000Z",
+          rentalDetails: {
+            returnAt: "2026-06-03T10:00:00.000Z",
+            returnCutoffTime: "10:00",
+          },
+        }],
+      }),
+      headers: { "Content-Type": "application/json" },
+    })
+    const res = await PUT(req, { params })
+    expect(res.status).toBe(200)
+    expect(supabase.rentalDetailsInsert).toHaveBeenCalledWith([
+      expect.objectContaining({
+        return_at: "2026-06-03T10:00:00.000Z",
+        return_cutoff_time: "10:00",
+      }),
+    ])
   })
 })

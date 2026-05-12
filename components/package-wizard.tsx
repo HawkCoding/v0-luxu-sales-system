@@ -44,6 +44,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { useActiveSuppliers, useLocations } from "@/lib/use-data"
+import { formatRateCardValidityRange } from "@/lib/rate-card-validity"
 import type { Location, Supplier, SupplierDetail, SupplierRateCard, SupplierRoute, SupplierSuiteType } from "@/lib/types"
 import { CURRENCIES, SUPPLIER_KIND_LABELS, getSupplierVocabulary, type SupplierKind } from "@/lib/types"
 
@@ -206,10 +207,6 @@ function getRouteRateCards(
   routeId: string,
 ): EditableSupplierRateCard[] {
   return leg.rateCards.filter((rateCard) => rateCard.routeId === routeId)
-}
-
-function formatDateRange(validFrom: string, validTo: string | null): string {
-  return validTo ? `${validFrom} - ${validTo}` : `from ${validFrom}`
 }
 
 function routeLocationLabel(route: SupplierRoute, locations: Location[]): string | null {
@@ -588,7 +585,7 @@ export function PackageWizard() {
                                           <TableRow key={rateCard.id}>
                                             <TableCell>{suiteType?.name ?? "Unknown"}</TableCell>
                                             <TableCell className="text-muted-foreground">
-                                              {formatDateRange(rateCard.validFrom, rateCard.validTo)}
+                                              {formatRateCardValidityRange(rateCard.validFrom, rateCard.validTo)}
                                             </TableCell>
                                             <TableCell className="text-right font-medium">
                                               {formatMoney(currency, rateCard.pricePerPerson)}

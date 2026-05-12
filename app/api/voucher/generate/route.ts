@@ -23,6 +23,11 @@ type CustomerRecord = {
   title: string | null
 }
 
+type SupplierRecord = {
+  name: string | null
+  description: string | null
+}
+
 type BookingVoucherRecord = {
   id: string
   booking_number: string
@@ -35,7 +40,7 @@ type BookingVoucherRecord = {
   no_of_children: number
   additional_services_details: string | null
   customer: CustomerRecord | CustomerRecord[] | null
-  route: { name: string | null; supplier: { name: string | null } | { name: string | null }[] | null } | null
+  route: { name: string | null; supplier: SupplierRecord | SupplierRecord[] | null } | null
 }
 
 type VoucherTemplateRow = VoucherTemplate & { id?: string }
@@ -93,7 +98,7 @@ export async function POST(req: Request) {
     supabase
       .from("bookings")
       .select(
-        "id, booking_number, stage, invoice_balance, consultant, departure_date, no_of_suites, no_of_adults, no_of_children, additional_services_details, customer:customers(first_name, last_name, email, phone, title), route:routes(name, supplier:suppliers(name))",
+        "id, booking_number, stage, invoice_balance, consultant, departure_date, no_of_suites, no_of_adults, no_of_children, additional_services_details, customer:customers(first_name, last_name, email, phone, title), route:routes(name, supplier:suppliers(name, description))",
       )
       .eq("id", parsed.data.jobId)
       .single(),
@@ -129,7 +134,9 @@ export async function POST(req: Request) {
 
   const consultant = resolveConsultant(booking.consultant)
   const route = booking.route?.name ?? ""
-  const supplier = firstRecord(booking.route?.supplier)?.name ?? "Service provider"
+  const supplierRecord = firstRecord(booking.route?.supplier)
+  const supplier = supplierRecord?.name ?? "Service provider"
+  const supplierDescription = supplierRecord?.description ?? null
   const suiteType = suites?.map((suite) => suite.suite_type_name).filter(Boolean).join(", ") || "Suite"
   const adultTravellers = (travellers ?? []).filter((traveller) => !traveller.is_child)
   const template = normalizeTemplate(templateRaw as VoucherTemplateRow | null)
@@ -139,6 +146,7 @@ export async function POST(req: Request) {
     guestNames: buildGuestNames(customer, adultTravellers),
     consultantName: consultant.name,
     supplierName: supplier,
+    supplierDescription,
     route,
     departure: formatDisplayDateLong(booking.departure_date),
     arrival: "",

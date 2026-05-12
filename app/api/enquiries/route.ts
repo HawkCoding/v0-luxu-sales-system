@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { randomUUID } from "node:crypto"
 import { detectCountryInText, loadCountryAliasMap, normalizeCountry } from "@/lib/countries"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
 import { buildPackageQuoteLineItems, calculateQuoteTotals } from "@/lib/quotes/build-from-package"
@@ -10,6 +11,7 @@ import { loadPackageDetail } from "../packages/[slug]/helpers"
 type ServiceClient = ReturnType<typeof createServiceClient>
 type TransportServiceType = "transfer" | "rental"
 type TransportRequestInsert = {
+  id: string
   booking_id: string
   service_type: TransportServiceType
   supplier_id: string | null
@@ -18,12 +20,21 @@ type TransportRequestInsert = {
   pickup_point: string
   dropoff_point: string
   pickup_at: string | null
-  return_at: string | null
   passenger_count: number | null
   luggage_count: number | null
   flight_number: string | null
   notes: string | null
   sort_order: number
+}
+type VehicleRentalDetailsInsert = {
+  transport_request_id: string
+  return_at: string | null
+  return_cutoff_time: string | null
+}
+
+type SuiteSelection = {
+  suiteTypeId: string | null
+  suiteTypeName: string
 }
 
 function normalizeLookupValue(value: string): string {
@@ -40,6 +51,68 @@ function normalizeNullableText(value: unknown): string | null {
 
 function normalizeNullableNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null
+}
+
+function normalizeSuiteSelections(body: Record<string, unknown>): SuiteSelection[] {
+  const structuredSelections = Array.isArray(body.suiteSelections)
+    ? body.suiteSelections
+        .map((selection: unknown): SuiteSelection | null => {
+          if (!selection || typeof selection !== "object") return null
+
+          const suiteTypeId = normalizeNullableText((selection as Record<string, unknown>).suiteTypeId)
+          const suiteTypeName = normalizeNullableText((selection as Record<string, unknown>).suiteTypeName)
+          if (!suiteTypeName) return null
+
+          return { suiteTypeId, suiteTypeName }
+        })
+        .filter((selection: SuiteSelection | null): selection is SuiteSelection => Boolean(selection))
+    : []
+
+  if (structuredSelections.length > 0) {
+    return structuredSelections
+  }
+
+  return Array.isArray(body.suiteTypes)
+    ? body.suiteTypes
+        .map((suiteName: unknown): SuiteSelection | null => {
+          const suiteTypeName = normalizeNullableText(suiteName)
+          return suiteTypeName ? { suiteTypeId: null, suiteTypeName } : null
+        })
+        .filter((selection: SuiteSelection | null): selection is SuiteSelection => Boolean(selection))
+    : []
+}
+
+async function resolveSuiteSelectionIds(
+  supabase: ServiceClient,
+  supplierId: unknown,
+  selections: SuiteSelection[],
+): Promise<SuiteSelection[]> {
+  const normalizedSupplierId = normalizeNullableText(supplierId)
+  if (!normalizedSupplierId || selections.length === 0) {
+    return selections
+  }
+
+  const unresolvedNames = selections
+    .filter((selection) => !selection.suiteTypeId)
+    .map((selection) => selection.suiteTypeName)
+  if (unresolvedNames.length === 0) {
+    return selections
+  }
+
+  const { data: suiteTypes } = await supabase
+    .from("suite_types")
+    .select("id, name")
+    .eq("supplier_id", normalizedSupplierId)
+    .eq("active", true)
+
+  const suiteTypeByName = new Map(
+    (suiteTypes ?? []).map((suiteType) => [normalizeLookupValue(suiteType.name), suiteType.id]),
+  )
+
+  return selections.map((selection) => ({
+    ...selection,
+    suiteTypeId: selection.suiteTypeId ?? suiteTypeByName.get(normalizeLookupValue(selection.suiteTypeName)) ?? null,
+  }))
 }
 
 function addDaysToDateString(value: string, days: number): string {
@@ -114,7 +187,10 @@ function buildDefaultPackageSelections(packageDetail: PackageDetail, suiteTypeNa
   const normalizedSuiteTypeNames = suiteTypeNames.map(normalizeLookupValue).filter(Boolean)
 
   return packageDetail.legs.map((leg) => {
-    const isOptional = leg.supplierKind === "hotel_property" || leg.supplierKind === "transfers"
+    const isOptional =
+      leg.supplierKind === "hotel_property" ||
+      leg.supplierKind === "transfers" ||
+      leg.supplierKind === "vehicle_rental"
     const activeSuiteTypes = leg.suiteTypes.filter((suiteType) => suiteType.active)
     const matchedSuiteType = activeSuiteTypes.find((suiteType) =>
       normalizedSuiteTypeNames.includes(normalizeLookupValue(suiteType.name)),
@@ -321,6 +397,7 @@ export async function POST(req: Request) {
       routeId,
       packageId,
       hotelSupplierId,
+      supplierId: normalizeNullableText(body.supplierId),
     },
   }
 
@@ -358,12 +435,18 @@ export async function POST(req: Request) {
   }
 
   // --- 3. Insert booking_suites ---
-  const suiteTypes: string[] = Array.isArray(body.suiteTypes) ? body.suiteTypes : []
-  if (suiteTypes.length > 0) {
-    const suiteRows = suiteTypes.map((suiteName, idx) => ({
+  const suiteSelections = await resolveSuiteSelectionIds(
+    supabase,
+    body.supplierId,
+    normalizeSuiteSelections(body),
+  )
+  const suiteTypes = suiteSelections.map((selection) => selection.suiteTypeName)
+  if (suiteSelections.length > 0) {
+    const suiteRows = suiteSelections.map((selection, idx) => ({
       booking_id: booking.id,
       suite_number: idx + 1,
-      suite_type_name: suiteName,
+      suite_type_id: selection.suiteTypeId,
+      suite_type_name: selection.suiteTypeName,
     }))
     await supabase.from("booking_suites").insert(suiteRows)
   }
@@ -413,6 +496,7 @@ export async function POST(req: Request) {
   }
 
   const transportRequests = Array.isArray(body.transportRequests) ? body.transportRequests : []
+  const rentalDetailRows: VehicleRentalDetailsInsert[] = []
   const transportRows: TransportRequestInsert[] = transportRequests
     .map((request: Record<string, unknown>, index: number): TransportRequestInsert | null => {
       const pickupPoint = normalizeNullableText(request.pickupPoint)
@@ -420,7 +504,21 @@ export async function POST(req: Request) {
       if (!pickupPoint || !dropoffPoint) return null
 
       const serviceType = normalizeTransportServiceType(request.serviceType)
+      const id = randomUUID()
+      const rentalDetails =
+        request.rentalDetails && typeof request.rentalDetails === "object" && !Array.isArray(request.rentalDetails)
+          ? request.rentalDetails as Record<string, unknown>
+          : {}
+      if (serviceType === "rental") {
+        rentalDetailRows.push({
+          transport_request_id: id,
+          return_at: normalizeNullableText(rentalDetails.returnAt) ?? normalizeNullableText(request.returnAt),
+          return_cutoff_time: normalizeNullableText(rentalDetails.returnCutoffTime),
+        })
+      }
+
       return {
+        id,
         booking_id: booking.id,
         service_type: serviceType,
         supplier_id: normalizeNullableText(request.supplierId),
@@ -429,7 +527,6 @@ export async function POST(req: Request) {
         pickup_point: pickupPoint,
         dropoff_point: dropoffPoint,
         pickup_at: normalizeNullableText(request.pickupAt),
-        return_at: serviceType === "rental" ? normalizeNullableText(request.returnAt) : null,
         passenger_count: normalizeNullableNumber(request.passengerCount),
         luggage_count: normalizeNullableNumber(request.luggageCount),
         flight_number: normalizeNullableText(request.flightNumber),
@@ -441,6 +538,9 @@ export async function POST(req: Request) {
 
   if (transportRows.length > 0) {
     await supabase.from("booking_transport_requests").insert(transportRows)
+  }
+  if (rentalDetailRows.length > 0) {
+    await supabase.from("booking_vehicle_rental_details").insert(rentalDetailRows)
   }
 
   const draftQuote = await createDraftQuoteForBooking({

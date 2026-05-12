@@ -42,7 +42,7 @@ export default async function PackagesPage() {
       .order("name", { ascending: true }),
     supabase
       .from("package_legs")
-      .select("*, suppliers(name, kind)")
+      .select("*, suppliers(name, description, kind)")
       .order("sort_order", { ascending: true }),
     supabase
       .from("package_leg_routes")
@@ -57,7 +57,11 @@ export default async function PackagesPage() {
 
   const legs = ((legRows ?? []) as Array<
     Omit<PackageLegWithSupplier, "supplierName" | "supplierKind"> & {
-      suppliers: { name: string; kind: PackageLegWithSupplier["supplierKind"] } | null
+      suppliers: {
+        name: string
+        description: string | null
+        kind: PackageLegWithSupplier["supplierKind"]
+      } | null
     }
   >).map((leg) => ({
     id: leg.id,
@@ -67,6 +71,7 @@ export default async function PackagesPage() {
     sort_order: leg.sort_order,
     created_at: leg.created_at,
     supplierName: leg.suppliers?.name ?? "Unknown supplier",
+    supplierDescription: leg.suppliers?.description ?? null,
     supplierKind: leg.suppliers?.kind ?? "train_operator",
   }))
 

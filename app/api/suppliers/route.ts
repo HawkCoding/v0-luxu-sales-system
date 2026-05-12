@@ -47,7 +47,7 @@ async function resolveUniqueSupplierSlug(
 }
 
 const createSupplierSchema = z.object({
-  kind: z.enum(["train_operator", "hotel_property", "transfers", "tour_operator", "airline"]),
+  kind: z.enum(["train_operator", "hotel_property", "transfers", "vehicle_rental", "tour_operator", "airline"]),
   name: z.string().trim().min(2, "Supplier name must be at least 2 characters").max(200),
   email: z
     .string()
@@ -80,6 +80,7 @@ const createSupplierSchema = z.object({
     .refine((value) => value === "" || value.length >= 2, {
       message: "Location must be at least 2 characters",
     }),
+  locationDetail: z.string().trim().max(255).nullable().optional(),
   notes: z.string().trim().max(5000),
   emails: z
     .array(
@@ -192,6 +193,7 @@ export async function POST(req: Request) {
       phone: parsed.phone.trim() || null,
       website: parsed.website.trim() || null,
       location: parsed.location.trim() || null,
+      location_detail: parsed.locationDetail?.trim() || null,
       notes: parsed.notes.trim() || null,
       single_supplement_pct: 0,
       active: false,

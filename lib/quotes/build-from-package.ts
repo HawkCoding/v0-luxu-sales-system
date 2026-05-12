@@ -1,3 +1,4 @@
+import { isOptionalPackageLegKind } from "@/lib/types"
 import type { PackageDetail, QuoteLineItem } from "@/lib/types"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
@@ -16,7 +17,7 @@ interface TransportRequestRow {
   pickup_point: string
   dropoff_point: string
   pickup_at: string | null
-  return_at: string | null
+  rental_details?: { return_at: string | null } | { return_at: string | null }[] | null
 }
 
 interface BuildPackageQuoteLineItemsInput {
@@ -50,7 +51,7 @@ export async function buildPackageQuoteLineItems({
 
   const { data: transportRequests } = await supabase
     .from("booking_transport_requests")
-    .select("service_type, route_id, suite_type_id, pickup_point, dropoff_point, pickup_at, return_at")
+    .select("service_type, route_id, suite_type_id, pickup_point, dropoff_point, pickup_at, rental_details:booking_vehicle_rental_details(return_at)")
     .eq("booking_id", jobId)
     .order("sort_order", { ascending: true })
 
@@ -60,11 +61,12 @@ export async function buildPackageQuoteLineItems({
   const infantCount = childAges.filter((age) => age <= 2).length
   const childCount = Math.max(0, job.no_of_children - infantCount)
 
-  function addLineItem(description: string, qty: number, unitPrice: number) {
+  function addLineItem(description: string, qty: number, unitPrice: number, supplierDescription?: string | null) {
     if (qty <= 0) return
 
     lineItems.push({
       description,
+      supplierDescription: supplierDescription ?? null,
       qty,
       unitPrice,
       total: Math.round(unitPrice * qty * 100) / 100,
@@ -72,7 +74,7 @@ export async function buildPackageQuoteLineItems({
   }
 
   function getLegSelection(leg: PackageDetail["legs"][number]) {
-    const isOptional = leg.supplierKind === "hotel_property" || leg.supplierKind === "transfers"
+    const isOptional = isOptionalPackageLegKind(leg.supplierKind)
     return selectionMap.get(leg.id) ?? { legId: leg.id, selected: !isOptional }
   }
 
@@ -126,10 +128,13 @@ export async function buildPackageQuoteLineItems({
   }
 
   function getBillableRentalDays(request: TransportRequestRow | null): number {
-    if (!request?.pickup_at || !request.return_at) return 1
+    const rentalDetails = Array.isArray(request?.rental_details)
+      ? request?.rental_details[0]
+      : request?.rental_details
+    if (!request?.pickup_at || !rentalDetails?.return_at) return 1
 
     const pickupAt = new Date(request.pickup_at)
-    const returnAt = new Date(request.return_at)
+    const returnAt = new Date(rentalDetails.return_at)
     if (Number.isNaN(pickupAt.getTime()) || Number.isNaN(returnAt.getTime())) return 1
 
     const durationMs = returnAt.getTime() - pickupAt.getTime()
@@ -139,26 +144,33 @@ export async function buildPackageQuoteLineItems({
   }
 
   if (packageDetail.fixedPricePerPerson !== null) {
-    const pricePerLeg = packageDetail.legs.length > 0
-      ? packageDetail.fixedPricePerPerson / packageDetail.legs.length
-      : packageDetail.fixedPricePerPerson
     const travellerCount = job.no_of_adults + job.no_of_children
 
     for (const leg of packageDetail.legs) {
       const selection = getLegSelection(leg)
-      const isOptional = leg.supplierKind === "hotel_property" || leg.supplierKind === "transfers"
-      if (isOptional && !selection.selected) {
-        continue
-      }
-      const unitPrice = Math.round(pricePerLeg * 100) / 100
-      addLineItem(leg.label ?? leg.supplierName, travellerCount, unitPrice)
+      const isOptional = isOptionalPackageLegKind(leg.supplierKind)
+      if (isOptional && !selection.selected) continue
+      lineItems.push({
+        description: leg.label ?? leg.supplierName,
+        supplierDescription: leg.supplierDescription ?? null,
+        qty: travellerCount,
+        unitPrice: 0,
+        total: 0,
+      })
     }
+
+    addLineItem(
+      `${packageDetail.name} — Package Total`,
+      travellerCount,
+      packageDetail.fixedPricePerPerson,
+    )
   } else {
     for (const leg of packageDetail.legs) {
       const selection = getLegSelection(leg)
       const isHotel = leg.supplierKind === "hotel_property"
       const isTransfer = leg.supplierKind === "transfers"
-      const isOptional = isHotel || isTransfer
+      const isVehicleRental = leg.supplierKind === "vehicle_rental"
+      const isOptional = isOptionalPackageLegKind(leg.supplierKind)
 
       if (isOptional && !selection.selected) {
         continue
@@ -195,13 +207,14 @@ export async function buildPackageQuoteLineItems({
       const suiteTypeName = getSuiteTypeName(leg, suiteTypeId)
       const descriptionParts = [legLabel, suiteTypeName, routeName].filter(Boolean)
       const description = descriptionParts.join(" - ")
+      const supplierDescription = leg.supplierDescription ?? null
 
       if (isHotel) {
         const nights = Math.max(1, packageDetail.durationNights ?? 1)
         const qty = Math.max(1, job.no_of_suites) * nights
-        addLineItem(description, qty, validRateCard.pricePerPerson)
-      } else if (isTransfer) {
-        const serviceType = leg.routes.find((route) => route.id === routeId)?.transportServiceType ?? "transfer"
+        addLineItem(description, qty, validRateCard.pricePerPerson, supplierDescription)
+      } else if (isTransfer || isVehicleRental) {
+        const serviceType = isVehicleRental ? "rental" : "transfer"
         const transportRequest = findTransportRequest(serviceType, routeId, suiteTypeId)
         const pointLabel =
           transportRequest
@@ -209,21 +222,23 @@ export async function buildPackageQuoteLineItems({
             : null
         const transportDescription = [description, pointLabel].filter(Boolean).join(" - ")
 
-        if (serviceType === "rental") {
+        if (isVehicleRental) {
           addLineItem(
             transportDescription,
             getBillableRentalDays(transportRequest),
             validRateCard.pricePerPerson,
+            supplierDescription,
           )
         } else {
-          addLineItem(transportDescription, 1, validRateCard.pricePerPerson)
+          addLineItem(transportDescription, 1, validRateCard.pricePerPerson, supplierDescription)
         }
       } else {
-        addLineItem(`${description} - Adult`, job.no_of_adults, validRateCard.pricePerPerson)
+        addLineItem(`${description} - Adult`, job.no_of_adults, validRateCard.pricePerPerson, supplierDescription)
         addLineItem(
           `${description} - Child`,
           childCount,
           validRateCard.childPrice ?? validRateCard.pricePerPerson,
+          supplierDescription,
         )
         addLineItem(
           `${description} - Infant`,
@@ -231,6 +246,7 @@ export async function buildPackageQuoteLineItems({
           validRateCard.infantPrice ??
             validRateCard.childPrice ??
             validRateCard.pricePerPerson,
+          supplierDescription,
         )
       }
     }

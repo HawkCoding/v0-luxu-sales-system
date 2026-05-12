@@ -29,7 +29,7 @@ export async function GET() {
       .order("name", { ascending: true }),
     supabase
       .from("package_legs")
-      .select("*, suppliers(name, kind)")
+      .select("*, suppliers(name, description, kind)")
       .order("sort_order", { ascending: true }),
     supabase.from("package_leg_routes").select("package_leg_id, route_id"),
     supabase.from("routes").select("id, supplier_id, name"),
@@ -41,8 +41,8 @@ export async function GET() {
   }
 
   const legs = ((legRows ?? []) as Array<
-    Omit<PackageLegWithSupplier, "supplierName" | "supplierKind"> & {
-      suppliers: { name: string; kind: PackageLegWithSupplier["supplierKind"] } | null
+    Omit<PackageLegWithSupplier, "supplierName" | "supplierDescription" | "supplierKind"> & {
+      suppliers: { name: string; description: string | null; kind: PackageLegWithSupplier["supplierKind"] } | null
     }
   >).map((leg) => ({
     id: leg.id,
@@ -52,6 +52,7 @@ export async function GET() {
     sort_order: leg.sort_order,
     created_at: leg.created_at,
     supplierName: leg.suppliers?.name ?? "Unknown supplier",
+    supplierDescription: leg.suppliers?.description ?? null,
     supplierKind: leg.suppliers?.kind ?? "train_operator",
   }))
 
@@ -65,12 +66,13 @@ export async function GET() {
       const pkgRouteIds = new Set(
         pkgLegs.flatMap((leg) => {
           const supplierRoutes = routes.filter((route) => route.supplier_id === leg.supplier_id)
-          if (leg.supplierKind === "hotel_property") {
-            return supplierRoutes.map((route) => route.id)
-          }
-          return legRoutes
+          const linkedRouteIds = legRoutes
             .filter((link) => link.package_leg_id === leg.id)
             .map((link) => link.route_id)
+          if (leg.supplierKind === "hotel_property" && linkedRouteIds.length === 0) {
+            return supplierRoutes.map((route) => route.id)
+          }
+          return linkedRouteIds
         }),
       )
       const prices = rateCards

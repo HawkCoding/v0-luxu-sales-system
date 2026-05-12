@@ -18,6 +18,7 @@ import { useState, useEffect, useRef, type ReactNode } from "react"
 import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
 import { ConnectionErrorBanner } from "@/components/connection-error-banner"
+import { SessionTimeoutGuard } from "@/components/session-timeout-guard"
 import { useAllData } from "@/lib/use-data"
 import { useRealtimeSync } from "@/hooks/use-realtime-sync"
 import { APP_VERSION } from "@/lib/version"
@@ -212,6 +213,7 @@ function AppShell({ children }: { children: ReactNode }) {
     <div
       className="flex h-svh overflow-hidden bg-app-canvas"
     >
+      <SessionTimeoutGuard />
       {mobileOpen && (
         <div className="fixed inset-0 bg-foreground/20 z-40 lg:hidden" onClick={() => setMobileOpen(false)} />
       )}

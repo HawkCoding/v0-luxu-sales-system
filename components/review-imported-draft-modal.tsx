@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { DatePicker } from "@/components/ui/date-picker"
@@ -14,6 +14,21 @@ import { Separator } from "@/components/ui/separator"
 import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight } from "lucide-react"
 import { type ParsedDraft, validateDraft, countRequiredComplete } from "@/lib/import/parseEmailDraft"
 import { buildEnquiryImportPayload } from "@/lib/import/enquiry-payload"
+import {
+  applySuiteSelections,
+  getDraftSuiteTypeNames,
+  normalizeDraftSuiteTypes,
+  resizeSuiteTypeNames,
+  updateDraftSuiteCount,
+  updateDraftSuiteTypeAtIndex,
+  type DraftSuiteSelection,
+} from "@/lib/import/suite-selections"
+import { useActiveSuppliers, useSupplierDetail } from "@/lib/use-data"
+import { cn } from "@/lib/utils"
+
+function normalizeLookupValue(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
+}
 
 interface ReviewImportedDraftModalProps {
   open: boolean
@@ -47,9 +62,74 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
 
   useEffect(() => {
     if (parsedDraft) {
-      setDraft({ ...parsedDraft })
+      setDraft(normalizeDraftSuiteTypes(parsedDraft))
     }
   }, [parsedDraft])
+
+  const { data: suppliers = [] } = useActiveSuppliers()
+  const trainSuppliers = useMemo(
+    () => suppliers.filter((supplier) => supplier.kind === "train_operator" && supplier.active),
+    [suppliers],
+  )
+  const selectedSupplier = useMemo(() => {
+    if (!draft) return null
+
+    const supplierId = draft.trip.supplierId
+    const supplierName = normalizeLookupValue(draft.trip.supplier)
+    return trainSuppliers.find((supplier) => supplier.id === supplierId)
+      ?? trainSuppliers.find((supplier) => normalizeLookupValue(supplier.name) === supplierName)
+      ?? null
+  }, [draft, trainSuppliers])
+  const { data: supplierDetailPayload, isLoading: supplierDetailLoading } = useSupplierDetail(selectedSupplier?.slug ?? "")
+  const supplierDetail = supplierDetailPayload && !("error" in supplierDetailPayload) ? supplierDetailPayload : null
+  const activeSuiteTypes = useMemo(
+    () => supplierDetail?.suiteTypes.filter((suiteType) => suiteType.active) ?? [],
+    [supplierDetail],
+  )
+  const suiteTypeNames = draft ? resizeSuiteTypeNames(getDraftSuiteTypeNames(draft), draft.guests.suites) : []
+  const suiteSelections = useMemo<DraftSuiteSelection[]>(() => {
+    const suiteTypeByName = new Map(
+      activeSuiteTypes.map((suiteType) => [normalizeLookupValue(suiteType.name), suiteType]),
+    )
+
+    return suiteTypeNames.flatMap((suiteTypeName) => {
+      const matchedSuiteType = suiteTypeByName.get(normalizeLookupValue(suiteTypeName))
+      if (!matchedSuiteType) return []
+
+      return [{
+        suiteTypeId: matchedSuiteType.id,
+        suiteTypeName: matchedSuiteType.name,
+      }]
+    })
+  }, [activeSuiteTypes, suiteTypeNames])
+  const hasSuiteSelectorData = Boolean(selectedSupplier) && !supplierDetailLoading && activeSuiteTypes.length > 0
+  const suiteCount = draft?.guests.suites ?? 0
+  const hasCompleteSuiteSelections =
+    suiteCount > 0 &&
+    suiteSelections.length === suiteCount &&
+    suiteTypeNames.every((suiteTypeName) => suiteTypeName.trim().length > 0)
+  const suiteSelectionMissing = Boolean(draft) && (!selectedSupplier || !hasCompleteSuiteSelections)
+  const suiteSelectionWarning = selectedSupplier && suiteTypeNames.some((suiteTypeName) => {
+    if (!suiteTypeName.trim()) return false
+    return !activeSuiteTypes.some((suiteType) => normalizeLookupValue(suiteType.name) === normalizeLookupValue(suiteTypeName))
+  })
+
+  useEffect(() => {
+    if (!draft || !selectedSupplier || draft.trip.supplierId === selectedSupplier.id) return
+
+    setDraft((prev) => {
+      if (!prev) return prev
+
+      return {
+        ...prev,
+        trip: {
+          ...prev.trip,
+          supplier: selectedSupplier.name,
+          supplierId: selectedSupplier.id,
+        },
+      }
+    })
+  }, [draft?.trip.supplierId, selectedSupplier])
 
   if (!draft) return null
 
@@ -72,10 +152,12 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
   }
 
   const handleSave = async (openAfterSave: boolean = false) => {
-    if (!validation.isValid) return
+    if (!validation.isValid || suiteSelectionMissing) return
+
+    const draftToSave = applySuiteSelections(draft, suiteSelections)
 
     if (openAfterSave) {
-      onSaveAndOpen(draft)
+      onSaveAndOpen(draftToSave)
       return
     }
 
@@ -85,7 +167,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
       const response = await fetch("/api/enquiries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildEnquiryImportPayload(draft)),
+        body: JSON.stringify(buildEnquiryImportPayload(draftToSave)),
       })
 
       if (response.ok) {
@@ -265,13 +347,35 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                         <Badge variant="outline" className="text-[10px] h-4">Check</Badge>
                       )}
                     </Label>
-                    <Select value={draft.trip.supplier} onValueChange={(v) => updateDraft('trip.supplier', v)}>
+                    <Select
+                      value={selectedSupplier?.slug ?? ""}
+                      onValueChange={(slug) => {
+                        const supplier = trainSuppliers.find((item) => item.slug === slug)
+                        if (!supplier) return
+
+                        setDraft((prev) => {
+                          if (!prev) return prev
+
+                          return {
+                            ...prev,
+                            trip: {
+                              ...prev.trip,
+                              supplier: supplier.name,
+                              supplierId: supplier.id,
+                            },
+                          }
+                        })
+                      }}
+                    >
                       <SelectTrigger className={!draft.trip.supplier ? 'border-destructive' : ''}>
                         <SelectValue placeholder="Select supplier" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="Rovos Rail">Rovos Rail</SelectItem>
-                        <SelectItem value="Blue Train">Blue Train</SelectItem>
+                        {trainSuppliers.map((supplier) => (
+                          <SelectItem key={supplier.id} value={supplier.slug}>
+                            {supplier.name}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -396,32 +500,72 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                       type="number"
                       min="1"
                       value={draft.guests.suites || ''}
-                      onChange={(e) => updateDraft('guests.suites', parseInt(e.target.value) || 0)}
+                      onChange={(e) => {
+                        const suiteCount = parseInt(e.target.value) || 0
+                        setDraft((prev) => prev ? updateDraftSuiteCount(prev, suiteCount) : prev)
+                      }}
                       placeholder="Number of suites"
                       className={!draft.guests.suites ? 'border-destructive' : ''}
                     />
                   </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-sm flex items-center gap-1.5">
-                      Suite Type
-                      {draft.confidence['guests.suiteType'] === 'low' && (
-                        <Badge variant="outline" className="text-[10px] h-4">Check</Badge>
-                      )}
-                    </Label>
-                    <Select value={draft.guests.suiteType} onValueChange={(v) => updateDraft('guests.suiteType', v)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select suite type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Pullman Double Suite">Pullman Double Suite</SelectItem>
-                        <SelectItem value="Pullman Twin Suite">Pullman Twin Suite</SelectItem>
-                        <SelectItem value="Deluxe Double Suite">Deluxe Double Suite</SelectItem>
-                        <SelectItem value="Deluxe Twin Suite">Deluxe Twin Suite</SelectItem>
-                        <SelectItem value="Royal Double Suite">Royal Double Suite</SelectItem>
-                        <SelectItem value="Royal Twin Suite">Royal Twin Suite</SelectItem>
-                        <SelectItem value="Other">Other (specify manually)</SelectItem>
-                      </SelectContent>
-                    </Select>
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <Label className="text-sm flex items-center gap-1.5">
+                        Suite Types <span className="text-destructive">*</span>
+                        {draft.confidence['guests.suiteType'] === 'low' && (
+                          <Badge variant="outline" className="text-[10px] h-4">Check</Badge>
+                        )}
+                      </Label>
+                      {supplierDetailLoading && selectedSupplier ? (
+                        <Badge variant="secondary" className="text-xs">Loading suites</Badge>
+                      ) : null}
+                    </div>
+
+                    {!selectedSupplier ? (
+                      <p className="text-xs text-muted-foreground">Select a supplier before choosing suite types.</p>
+                    ) : !supplierDetailLoading && activeSuiteTypes.length === 0 ? (
+                      <p className="text-xs text-destructive">This supplier has no active suite types configured.</p>
+                    ) : null}
+
+                    {suiteSelectionWarning ? (
+                      <p className="text-xs text-yellow-700">
+                        The imported suite name does not match this supplier. Please choose a configured suite type.
+                      </p>
+                    ) : null}
+
+                    {suiteTypeNames.map((suiteTypeName, index) => {
+                      const selectedSuiteType = activeSuiteTypes.find(
+                        (suiteType) => normalizeLookupValue(suiteType.name) === normalizeLookupValue(suiteTypeName),
+                      )
+
+                      return (
+                        <div key={index} className="space-y-1.5">
+                          <Label className="text-xs text-muted-foreground">Suite {index + 1}</Label>
+                          <Select
+                            value={selectedSuiteType?.name ?? ""}
+                            onValueChange={(value) => {
+                              setDraft((prev) => prev ? updateDraftSuiteTypeAtIndex(prev, index, value) : prev)
+                            }}
+                            disabled={!hasSuiteSelectorData}
+                          >
+                            <SelectTrigger
+                              className={cn(
+                                !selectedSuiteType && selectedSupplier && !supplierDetailLoading ? "border-destructive" : "",
+                              )}
+                            >
+                              <SelectValue placeholder="Select suite type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {activeSuiteTypes.map((suiteType) => (
+                                <SelectItem key={suiteType.id} value={suiteType.name}>
+                                  {suiteType.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )
+                    })}
                   </div>
                 </CardContent>
               )}
@@ -491,6 +635,22 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                   </Card>
                 )}
 
+                {suiteSelectionMissing && (
+                  <Card className="border-destructive/50 bg-destructive/5">
+                    <CardContent className="p-3 space-y-2">
+                      <div className="flex items-center gap-2 text-sm font-medium text-destructive">
+                        <AlertCircle className="w-4 h-4" />
+                        Missing Suite Types
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {selectedSupplier
+                          ? `Choose one active suite type from ${selectedSupplier.name} for each suite.`
+                          : "Choose a supplier, then select one active suite type for each suite."}
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
+
                 {validation.warnings.length > 0 && (
                   <Card className="border-yellow-500/50 bg-yellow-50">
                     <CardContent className="p-3 space-y-2">
@@ -510,7 +670,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                   </Card>
                 )}
 
-                {validation.isValid && validation.warnings.length === 0 && (
+                {validation.isValid && !suiteSelectionMissing && validation.warnings.length === 0 && (
                   <Card className="border-green-500/50 bg-green-50">
                     <CardContent className="p-3">
                       <div className="flex items-center gap-2 text-sm font-medium text-green-700">
@@ -536,10 +696,10 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
             <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={saving}>
               Cancel
             </Button>
-            <Button size="sm" onClick={() => handleSave(false)} disabled={!validation.isValid || saving}>
+            <Button size="sm" onClick={() => handleSave(false)} disabled={!validation.isValid || suiteSelectionMissing || saving}>
               {saving ? "Saving..." : "Save Draft"}
             </Button>
-            <Button size="sm" variant="default" onClick={() => handleSave(true)} disabled={!validation.isValid || saving}>
+            <Button size="sm" variant="default" onClick={() => handleSave(true)} disabled={!validation.isValid || suiteSelectionMissing || saving}>
               {saving ? "Saving..." : "Save & Open"}
             </Button>
           </div>

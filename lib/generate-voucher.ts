@@ -6,6 +6,7 @@ export interface VoucherData {
   guestNames: string
   consultantName: string
   supplierName: string
+  supplierDescription?: string | null
   route: string
   departure: string
   arrival: string
@@ -121,12 +122,16 @@ ${specialRequestsHtml}
 }
 
 function buildServiceProviderSection(data: VoucherData): string {
+  const descriptionHtml = data.supplierDescription
+    ? `<div class="provider-description">${escapeHtml(data.supplierDescription)}</div>`
+    : ""
+
   return `
   <div class="section">
     <div class="section-title">Service Provider</div>
     <div class="provider-box">
       <div class="provider-name">${escapeHtml(data.supplierName)}</div>
-
+${descriptionHtml}
       <div class="info-grid">
         <div class="info-label">Your Reference:</div>
         <div class="info-value">${escapeHtml(data.voucherNumber)}</div>
@@ -269,7 +274,8 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
       padding: 14px;
       background: #fafafa;
     }
-    .provider-name { font-size: 13pt; font-weight: bold; color: ${t.accent_colour}; margin-bottom: 10px; }
+    .provider-name { font-size: 13pt; font-weight: bold; color: ${t.accent_colour}; margin-bottom: 6px; }
+    .provider-description { font-size: 10pt; color: #555; font-style: italic; margin-bottom: 10px; }
 
     .footer-section { margin-top: 30px; padding-top: 14px; border-top: 1px solid #ddd; }
     .footer-contact { text-align: center; font-size: 9pt; color: #666; }

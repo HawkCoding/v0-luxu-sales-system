@@ -24,6 +24,7 @@ const PACKAGE_ID = "33333333-3333-4333-8333-333333333333"
 const TRAIN_LEG_ID = "44444444-4444-4444-8444-444444444444"
 const HOTEL_LEG_ID = "55555555-5555-4555-8555-555555555555"
 const TRANSFER_LEG_ID = "66666666-6666-4666-8666-666666666666"
+const VEHICLE_RENTAL_LEG_ID = "66666666-6666-4666-8666-666666666665"
 const TRAIN_ROUTE_ID = "77777777-7777-4777-8777-777777777777"
 const HOTEL_MEAL_PLAN_ID = "88888888-8888-4888-8888-888888888888"
 const TRANSFER_ROUTE_ID = "99999999-9999-4999-8999-999999999999"
@@ -70,6 +71,7 @@ function buildDetail(): PackageDetail {
         packageId: PACKAGE_ID,
         supplierId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
         supplierName: "Blue Train",
+        supplierDescription: null,
         supplierKind: "train_operator",
         label: "Blue Train",
         sortOrder: 0,
@@ -102,6 +104,7 @@ function buildDetail(): PackageDetail {
         packageId: PACKAGE_ID,
         supplierId: "12121212-1212-4212-8212-121212121212",
         supplierName: "Harbour Hotel",
+        supplierDescription: null,
         supplierKind: "hotel_property",
         label: "Harbour Hotel",
         sortOrder: 1,
@@ -134,6 +137,7 @@ function buildDetail(): PackageDetail {
         packageId: PACKAGE_ID,
         supplierId: "34343434-3434-4434-8434-343434343434",
         supplierName: "Airport Transfers",
+        supplierDescription: null,
         supplierKind: "transfers",
         label: "Airport Transfers",
         sortOrder: 2,
@@ -144,22 +148,8 @@ function buildDetail(): PackageDetail {
             name: "Airport to Hotel",
             originLocationId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
             destinationLocationId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
-            transportServiceType: "transfer",
             pickupPoint: "Airport",
             dropoffPoint: "Hotel",
-            active: true,
-            createdAt: "2026-01-01T00:00:00.000Z",
-            updatedAt: "2026-01-01T00:00:00.000Z",
-          },
-          {
-            id: RENTAL_ROUTE_ID,
-            supplierId: "34343434-3434-4434-8434-343434343434",
-            name: "Three day vehicle rental",
-            originLocationId: null,
-            destinationLocationId: null,
-            transportServiceType: "rental",
-            pickupPoint: "Cape Town Airport",
-            dropoffPoint: "Cape Town Airport",
             active: true,
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
@@ -167,6 +157,51 @@ function buildDetail(): PackageDetail {
         ],
         rateCards: [
           makeRateCard(TRANSFER_ROUTE_ID, TRANSFER_VEHICLE_ID, 300),
+        ],
+        suiteTypes: [
+          {
+            id: TRANSFER_VEHICLE_ID,
+            supplierId: "34343434-3434-4434-8434-343434343434",
+            name: "Sedan",
+            active: true,
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      },
+      {
+        id: VEHICLE_RENTAL_LEG_ID,
+        packageId: PACKAGE_ID,
+        supplierId: "34343434-3434-4434-8434-343434343435",
+        supplierName: "Vehicle Rentals",
+        supplierDescription: null,
+        supplierKind: "vehicle_rental",
+        label: "Vehicle Rentals",
+        sortOrder: 3,
+        routes: [
+          {
+            id: RENTAL_ROUTE_ID,
+            supplierId: "34343434-3434-4434-8434-343434343435",
+            name: "Three day vehicle rental",
+            originLocationId: null,
+            destinationLocationId: null,
+            pickupPoint: "Cape Town Airport",
+            dropoffPoint: "Cape Town Airport",
+            vehicleRentalDetails: {
+              routeId: RENTAL_ROUTE_ID,
+              includedKmPerDay: null,
+              extraKmPrice: null,
+              securityDeposit: null,
+              oneWayFee: null,
+              createdAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+            active: true,
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+        rateCards: [
           makeRateCard(RENTAL_ROUTE_ID, TRANSFER_VEHICLE_ID, 1200),
         ],
         suiteTypes: [
@@ -192,8 +227,15 @@ function createSupabaseMock(
     pickup_point: string
     dropoff_point: string
     pickup_at: string | null
-    return_at: string | null
+    rental_details?: { return_at: string | null } | null
   }> = [],
+  bookingOverrides: Partial<{
+    no_of_adults: number
+    no_of_children: number
+    no_of_suites: number
+    child_ages: number[]
+    departure_date: string
+  }> = {},
 ) {
   return {
     from: vi.fn((table: string) => {
@@ -219,6 +261,7 @@ function createSupabaseMock(
                 no_of_suites: 2,
                 child_ages: [6],
                 departure_date: "2026-06-01",
+                ...bookingOverrides,
               },
               error: null,
             })),
@@ -324,10 +367,61 @@ describe("POST /api/packages/[slug]/apply", () => {
     expect(response.status).toBe(200)
     expect(payload.lineItems).toContainEqual({
       description: "Harbour Hotel - Sea View Room - Full Board",
+      supplierDescription: null,
       qty: 4,
       unitPrice: 500,
       total: 2000,
     })
+  })
+
+  it("keeps mixed train and hotel rate card prices separate", async () => {
+    helperMocks.requireRole.mockResolvedValue({
+      ok: true,
+      response: null,
+      value: {
+        supabase: createSupabaseMock([], {
+          no_of_adults: 2,
+          no_of_children: 0,
+          child_ages: [],
+          no_of_suites: 2,
+        }),
+        user: { id: "abababab-abab-4aba-8aba-abababababab" },
+        profile: {
+          clearanceLevel: "consultant",
+          actorName: "Consultant",
+        },
+      },
+    })
+
+    const response = await postApply({
+      jobId: JOB_ID,
+      quoteId: QUOTE_ID,
+      travelDate: "2026-06-01",
+      selections: [
+        { legId: TRAIN_LEG_ID, selected: true, routeId: TRAIN_ROUTE_ID, suiteTypeId: TRAIN_SUITE_ID },
+        { legId: HOTEL_LEG_ID, selected: true, routeId: HOTEL_MEAL_PLAN_ID, suiteTypeId: HOTEL_ROOM_ID },
+        { legId: TRANSFER_LEG_ID, selected: false },
+      ],
+    })
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(payload.lineItems).toEqual([
+      {
+        description: "Blue Train - Deluxe Suite - Cape Town to Pretoria - Adult",
+        supplierDescription: null,
+        qty: 2,
+        unitPrice: 1000,
+        total: 2000,
+      },
+      {
+        description: "Harbour Hotel - Sea View Room - Full Board",
+        supplierDescription: null,
+        qty: 4,
+        unitPrice: 500,
+        total: 2000,
+      },
+    ])
   })
 
   it("prices selected transfer as one flat service", async () => {
@@ -346,6 +440,7 @@ describe("POST /api/packages/[slug]/apply", () => {
     expect(response.status).toBe(200)
     expect(payload.lineItems).toContainEqual({
       description: "Airport Transfers - Sedan - Airport to Hotel",
+      supplierDescription: null,
       qty: 1,
       unitPrice: 300,
       total: 300,
@@ -365,7 +460,7 @@ describe("POST /api/packages/[slug]/apply", () => {
             pickup_point: "Cape Town Airport",
             dropoff_point: "Cape Town Airport",
             pickup_at: "2026-06-01T10:00:00.000Z",
-            return_at: "2026-06-03T09:00:00.000Z",
+            rental_details: { return_at: "2026-06-03T09:00:00.000Z" },
           },
         ]),
         user: { id: "abababab-abab-4aba-8aba-abababababab" },
@@ -383,14 +478,15 @@ describe("POST /api/packages/[slug]/apply", () => {
       selections: [
         { legId: TRAIN_LEG_ID, selected: true, suiteTypeId: TRAIN_SUITE_ID },
         { legId: HOTEL_LEG_ID, selected: false },
-        { legId: TRANSFER_LEG_ID, selected: true, routeId: RENTAL_ROUTE_ID, suiteTypeId: TRANSFER_VEHICLE_ID },
+        { legId: VEHICLE_RENTAL_LEG_ID, selected: true, routeId: RENTAL_ROUTE_ID, suiteTypeId: TRANSFER_VEHICLE_ID },
       ],
     })
     const payload = await response.json()
 
     expect(response.status).toBe(200)
     expect(payload.lineItems).toContainEqual({
-      description: "Airport Transfers - Sedan - Three day vehicle rental - Cape Town Airport -> Cape Town Airport",
+      description: "Vehicle Rentals - Sedan - Three day vehicle rental - Cape Town Airport -> Cape Town Airport",
+      supplierDescription: null,
       qty: 2,
       unitPrice: 1200,
       total: 2400,

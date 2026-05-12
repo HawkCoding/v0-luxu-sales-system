@@ -4,6 +4,8 @@ import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDateTime } from "@/lib/date-format"
 import { getEmailFromAddress } from "@/lib/email/from"
 import { sendEmail } from "@/lib/email/transport"
+import { applyTransition } from "@/lib/pipeline/apply-transition"
+import type { Json } from "@/lib/supabase/types"
 import type { PipelineStage } from "@/lib/types"
 
 export const runtime = "nodejs"
@@ -86,7 +88,9 @@ export async function POST(req: Request) {
 
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
-    .select("stage, customer:customers(email)")
+    .select(
+      "id, booking_number, stage, source, raw_text, updated_at, customer_id, consultant, customer:customers(email)",
+    )
     .eq("id", bookingId)
     .single()
 
@@ -137,7 +141,18 @@ export async function POST(req: Request) {
 
   if (error || !cor) return safeSupabaseError("correspondence:insert", error)
 
-  if (success && parsed.data.quoteId) {
+  if (!success) {
+    return Response.json(
+      {
+        error: sendResult.error ?? "Email send failed",
+        correspondenceId: cor.id,
+        status: cor.status,
+      },
+      { status: 502 },
+    )
+  }
+
+  if (parsed.data.quoteId) {
     const { error: quoteUpdateError } = await supabase
       .from("quotes")
       .update({ status: "sent", last_sent_at: parsed.data.sentAt ?? now })
@@ -147,48 +162,75 @@ export async function POST(req: Request) {
     if (quoteUpdateError) return safeSupabaseError("correspondence:update-quote", quoteUpdateError)
   }
 
-  if (success && parsed.data.moveStage && booking.stage !== parsed.data.moveStage) {
-    const stageUpdate: Record<string, string> = { stage: parsed.data.moveStage, updated_at: now }
-    if (parsed.data.moveStage === "voucher_sent") stageUpdate.voucher_sent_at = now
+  if (parsed.data.moveStage && booking.stage !== parsed.data.moveStage) {
+    const targetStage = parsed.data.moveStage
+    const fromStage = booking.stage as PipelineStage
 
-    const { error: updateError } = await supabase
-      .from("bookings")
-      .update(stageUpdate)
-      .eq("id", bookingId)
+    const [quotesRes, documentsRes, correspondencesRes] = await Promise.all([
+      supabase.from("quotes").select("id, status, total, created_at").eq("booking_id", bookingId),
+      supabase.from("documents").select("id, kind, status").eq("booking_id", bookingId),
+      supabase
+        .from("correspondences")
+        .select("id, kind, subject, status")
+        .eq("booking_id", bookingId),
+    ])
 
-    if (updateError) return safeSupabaseError("correspondence:update-stage", updateError)
+    if (quotesRes.error) return safeSupabaseError("correspondence:load-quotes", quotesRes.error)
+    if (documentsRes.error) return safeSupabaseError("correspondence:load-documents", documentsRes.error)
+    if (correspondencesRes.error) return safeSupabaseError("correspondence:load-correspondences", correspondencesRes.error)
 
-    if (parsed.data.moveStage === "voucher_sent") {
-      const { error: documentError } = await supabase
-        .from("documents")
-        .update({ status: "sent" })
-        .eq("booking_id", bookingId)
-        .eq("kind", "voucher_pdf")
-
-      if (documentError) return safeSupabaseError("correspondence:update-voucher-document", documentError)
+    try {
+      await applyTransition(supabase, {
+        booking: {
+          id: booking.id,
+          booking_number: booking.booking_number,
+          stage: booking.stage,
+          source: booking.source,
+          raw_text: booking.raw_text,
+          updated_at: booking.updated_at,
+          customer_id: booking.customer_id,
+          consultant: booking.consultant,
+        },
+        targetStage,
+        actorName: profile.actorName,
+        actorUserId: auth.value.user.id,
+        quotes: quotesRes.data ?? [],
+        documents: documentsRes.data ?? [],
+        correspondences: correspondencesRes.data ?? [],
+      })
+    } catch (transitionError) {
+      return safeSupabaseError("correspondence:apply-transition", transitionError)
     }
 
-    await supabase.from("audit_logs").insert({
+    const { error: historyError } = await supabase.from("pipeline_history").insert({
+      booking_id: bookingId,
+      from_stage: fromStage,
+      to_stage: targetStage,
+      moved_by: profile.actorName,
+      moved_by_user_id: auth.value.user.id,
+    })
+    if (historyError) return safeSupabaseError("correspondence:pipeline-history", historyError)
+
+    const { error: auditError } = await supabase.from("audit_logs").insert({
       actor: profile.actorName,
       actor_user_id: auth.value.user.id,
       entity_type: "Booking",
       entity_id: bookingId,
       action: "stage_change",
-      before_json: { stage: booking.stage },
-      after_json: { stage: parsed.data.moveStage },
+      before_json: { stage: fromStage } as Json,
+      after_json: { stage: targetStage } as Json,
     })
+    if (auditError) return safeSupabaseError("correspondence:audit", auditError)
   }
 
-  if (success) {
-    await supabase.from("correspondences").insert({
-      booking_id: bookingId,
-      channel: "email",
-      subject: `Follow-up: ${subject}`,
-      body_html: "<p>Scheduled follow-up</p>",
-      status: "scheduled",
-      scheduled_at: new Date(Date.now() + 48 * 3600000).toISOString(),
-    })
-  }
+  await supabase.from("correspondences").insert({
+    booking_id: bookingId,
+    channel: "email",
+    subject: `Follow-up: ${subject}`,
+    body_html: "<p>Scheduled follow-up</p>",
+    status: "scheduled",
+    scheduled_at: new Date(Date.now() + 48 * 3600000).toISOString(),
+  })
 
   return Response.json({
     id: cor.id,

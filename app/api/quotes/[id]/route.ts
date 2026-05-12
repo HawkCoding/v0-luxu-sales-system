@@ -6,6 +6,7 @@ import type { Json } from "@/lib/supabase/types"
 
 const lineItemSchema = z.object({
   description: z.string().min(1),
+  supplierDescription: z.string().nullable().optional(),
   qty: z.number().int().positive(),
   unitPrice: z.number().nonnegative(),
   total: z.number().nonnegative(),
@@ -54,6 +55,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   const lineItems = parsed.lineItems.map((li, idx) => ({
     description: li.description,
+    supplier_description: li.supplierDescription ?? null,
     qty: li.qty,
     unit_price: li.unitPrice,
     total: li.total,

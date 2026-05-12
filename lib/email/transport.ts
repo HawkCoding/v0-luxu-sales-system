@@ -29,22 +29,44 @@ function normalizeRecipients(to: string | string[]): string[] {
     : to.split(",").map((recipient) => recipient.trim()).filter(Boolean)
 }
 
-function resolveMailpitSmtpUrl(): URL {
-  const rawUrl = process.env.MAILPIT_URL?.trim() || "http://127.0.0.1:54324"
-  const parsed = new URL(rawUrl)
+export interface MailpitSmtpConfig {
+  host: string
+  port: number
+}
 
-  if (parsed.protocol === "smtp:") return parsed
+export function resolveMailpitSmtpConfig(): MailpitSmtpConfig {
+  const explicitUrl = process.env.MAILPIT_SMTP_URL?.trim()
+  if (explicitUrl) {
+    const parsed = new URL(explicitUrl)
+    const port = Number(parsed.port || 1025)
+    if (!Number.isFinite(port)) {
+      throw new Error(`Invalid MAILPIT_SMTP_URL port: ${parsed.port}`)
+    }
+    return { host: parsed.hostname, port }
+  }
 
-  parsed.protocol = "smtp:"
-  return parsed
+  const host = process.env.MAILPIT_SMTP_HOST?.trim()
+  const portRaw = process.env.MAILPIT_SMTP_PORT?.trim()
+  if (host && portRaw) {
+    const port = Number(portRaw)
+    if (!Number.isFinite(port)) {
+      throw new Error(`Invalid MAILPIT_SMTP_PORT: ${portRaw}`)
+    }
+    return { host, port }
+  }
+
+  return { host: "127.0.0.1", port: 1025 }
 }
 
 async function sendWithMailpit(options: SendEmailOptions): Promise<SendEmailResult> {
-  const smtpUrl = resolveMailpitSmtpUrl()
+  const { host, port } = resolveMailpitSmtpConfig()
   const transporter = nodemailer.createTransport({
-    host: smtpUrl.hostname,
-    port: Number(smtpUrl.port || 1025),
-    secure: smtpUrl.protocol === "smtps:",
+    host,
+    port,
+    secure: false,
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 10_000,
   })
 
   try {

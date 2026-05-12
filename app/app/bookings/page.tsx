@@ -9,10 +9,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Search, CalendarCheck, Filter, X } from "lucide-react"
 import Link from "next/link"
 import { useState } from "react"
-import { CONSULTANTS, type ConsultantAbbreviation } from "@/lib/types"
+import { CONSULTANTS, getPipelineStageLabel, type ConsultantAbbreviation } from "@/lib/types"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
 import { formatDisplayDate } from "@/lib/date-format"
+import { isVisibleInBookings } from "@/lib/booking-visibility"
 
 export default function BookingsPage() {
   const { data, isLoading, error, mutate } = useAllData()
@@ -62,11 +63,9 @@ export default function BookingsPage() {
     return null
   }
 
-  // Confirmed bookings: stages where payment has been received
-  const bookingStages = ["deposit_paid", "final_paid", "voucher_sent", "closed"]
-
+  // Bookings list starts once a quote has been sent, excluding enquiry and lost jobs.
   const bookings = data.bookings
-    .filter((b: any) => bookingStages.includes(b.stage))
+    .filter(isVisibleInBookings)
     .map((b: any) => {
       const customer = data.customers.find((c: any) => c.id === b.customerId)
       const payments = data.payments?.filter((p: any) => p.bookingId === b.id) || []
@@ -87,7 +86,9 @@ export default function BookingsPage() {
       const paymentStatus =
         b.stage === "final_paid" || b.stage === "voucher_sent" || b.stage === "closed"
           ? "Full Paid"
-          : "Deposit Paid"
+          : b.stage === "deposit_paid"
+            ? "Deposit Paid"
+            : "Not Paid"
 
       return {
         ...b,
@@ -96,6 +97,7 @@ export default function BookingsPage() {
         customerEmail: customer?.email || "",
         supplier,
         paymentStatus,
+        lifecycleStatus: getPipelineStageLabel(b.stage),
         totalPaid,
         totalQuote,
       }
@@ -167,7 +169,7 @@ export default function BookingsPage() {
         <div>
           <h1 className="text-3xl font-semibold text-foreground tracking-tight">Bookings</h1>
           <p className="text-base text-muted-foreground mt-2">
-            All confirmed bookings with deposit or full payment received
+            Jobs from quote sent onward, excluding open enquiries and lost jobs
           </p>
         </div>
       </div>
@@ -355,11 +357,15 @@ export default function BookingsPage() {
                         )}
                         <Badge
                           variant={
-                            booking.paymentStatus === "Full Paid" ? "default" : "secondary"
+                            booking.paymentStatus === "Full Paid"
+                              ? "default"
+                              : booking.paymentStatus === "Deposit Paid"
+                                ? "secondary"
+                                : "outline"
                           }
                           className="text-xs"
                         >
-                          {booking.paymentStatus}
+                          {booking.lifecycleStatus}
                         </Badge>
                         <Badge variant="outline" className="text-xs">
                           {booking.supplier}
@@ -411,7 +417,7 @@ export default function BookingsPage() {
                 <p className="text-sm text-muted-foreground">
                   {hasActiveFilters
                     ? "Try adjusting your filters to see more results"
-                    : "No confirmed bookings with payment received yet"}
+                    : "No jobs have moved beyond enquiry yet"}
                 </p>
               </div>
             </CardContent>

@@ -21,7 +21,6 @@ import type {
   SupplierRateCard,
   SupplierRoute,
   SupplierSuiteType,
-  TransportServiceType,
 } from "@/lib/types"
 import { SUPPLIER_KIND_LABELS, getSupplierVocabulary } from "@/lib/types"
 
@@ -66,13 +65,9 @@ function createRoute(
     name: "",
     originLocationId: isTransport ? null : origin,
     destinationLocationId: isTransport ? null : destination,
-    transportServiceType: isTransport ? "transfer" : null,
     pickupPoint: "",
     dropoffPoint: "",
-    includedKmPerDay: null,
-    extraKmPrice: null,
-    securityDeposit: null,
-    oneWayFee: null,
+    vehicleRentalDetails: null,
     active: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -109,7 +104,7 @@ export function PackageLegEditor({
   const routePluralLabel = vocab.routePlural
   const showLocations = vocab.routeHasLocations
   const isHotel = leg.supplierKind === "hotel_property"
-  const isTransport = leg.supplierKind === "transfers"
+  const isTransport = leg.supplierKind === "transfers" || leg.supplierKind === "vehicle_rental"
 
   const updateRoute = (
     routeId: string,
@@ -237,30 +232,7 @@ export function PackageLegEditor({
                   <>
                     <div className={packageFieldClass}>
                       <div className={packageLabelClass}>
-                        <Label>Service type</Label>
-                      </div>
-                      <Select
-                        value={route.transportServiceType ?? "transfer"}
-                        onValueChange={(value: TransportServiceType) =>
-                          updateRoute(route.id, "transportServiceType", value)
-                        }
-                        disabled={route.existing}
-                      >
-                        <SelectTrigger
-                          className={compactSelectTriggerClass}
-                          title={route.transportServiceType === "rental" ? "Vehicle rental" : "Transfer"}
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="transfer">Transfer</SelectItem>
-                          <SelectItem value="rental">Vehicle rental</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className={packageFieldClass}>
-                      <div className={packageLabelClass}>
-                        <Label>{route.transportServiceType === "rental" ? "Rental pickup point" : vocab.originLabel}</Label>
+                        <Label>{vocab.originLabel}</Label>
                       </div>
                       <Input
                         title={route.pickupPoint ?? ""}
@@ -271,7 +243,7 @@ export function PackageLegEditor({
                     </div>
                     <div className={packageFieldClass}>
                       <div className={packageLabelClass}>
-                        <Label>{route.transportServiceType === "rental" ? "Return point" : vocab.destinationLabel}</Label>
+                        <Label>{vocab.destinationLabel}</Label>
                       </div>
                       <Input
                         title={route.dropoffPoint ?? ""}
