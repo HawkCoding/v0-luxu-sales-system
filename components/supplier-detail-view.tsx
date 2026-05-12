@@ -3040,7 +3040,7 @@ export function SupplierDetailView({
                     </span>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Visible to clients on quotes and vouchers — describe what makes this supplier special.
+                    Visible to clients - describes the supplier.
                   </p>
                   <BufferedTextarea
                     id="supplier-description"

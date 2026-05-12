@@ -4,6 +4,7 @@ import { requireRole, requireUser } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { mapBookingTransportRequest } from "@/lib/suppliers"
 import { BOOKING_TRANSPORT_REQUEST_COLUMNS } from "@/lib/supabase/columns"
+import type { Json } from "@/lib/supabase/types"
 
 const nullableUuid = z.union([z.string().uuid(), z.literal(""), z.null()]).optional()
 const nullableDateTime = z.union([z.string().datetime({ offset: true }), z.literal(""), z.null()]).optional()
@@ -131,30 +132,13 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     }]
   })
 
-  const { error: deleteError } = await supabase
-    .from("booking_transport_requests")
-    .delete()
-    .eq("booking_id", id)
+  const { error: replaceError } = await supabase.rpc("replace_booking_transport_requests", {
+    p_booking_id: id,
+    p_transport_requests: rows as Json,
+    p_rental_details: rentalRows as Json,
+  })
 
-  if (deleteError) return safeSupabaseError("transport-requests:replace", deleteError, "Failed to replace transport requests")
-
-  if (rows.length > 0) {
-    const { error: insertError } = await supabase
-      .from("booking_transport_requests")
-      .insert(rows)
-
-    if (insertError) return safeSupabaseError("transport-requests:save", insertError, "Failed to save transport requests")
-  }
-
-  if (rentalRows.length > 0) {
-    const { error: rentalInsertError } = await supabase
-      .from("booking_vehicle_rental_details")
-      .insert(rentalRows)
-
-    if (rentalInsertError) {
-      return safeSupabaseError("transport-requests:save-rental-details", rentalInsertError, "Failed to save vehicle rental details")
-    }
-  }
+  if (replaceError) return safeSupabaseError("transport-requests:replace", replaceError, "Failed to replace transport requests")
 
   const { data: savedRows, error: loadError } = await supabase
     .from("booking_transport_requests")

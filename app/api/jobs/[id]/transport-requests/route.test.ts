@@ -20,10 +20,16 @@ import { GET, PUT } from "./route"
 const BOOKING_ID = "00000000-0000-4000-8000-00000000aaaa"
 
 function buildSupabase() {
-  const rentalDetailsInsert = vi.fn(async () => ({ error: null }))
+  const replaceTransportRequests = vi.fn(async () => ({ error: null }))
 
   return {
-    rentalDetailsInsert,
+    replaceTransportRequests,
+    rpc: vi.fn((name: string, args: unknown) => {
+      if (name === "replace_booking_transport_requests") {
+        return replaceTransportRequests(args)
+      }
+      throw new Error(`Unexpected rpc ${name}`)
+    }),
     from: vi.fn((table: string) => {
       if (table === "booking_transport_requests") {
         return {
@@ -32,15 +38,6 @@ function buildSupabase() {
               order: vi.fn(async () => ({ data: [{ id: "tr1" }], error: null })),
             })),
           })),
-          delete: vi.fn(() => ({
-            eq: vi.fn(async () => ({ error: null })),
-          })),
-          insert: vi.fn(async () => ({ error: null })),
-        }
-      }
-      if (table === "booking_vehicle_rental_details") {
-        return {
-          insert: rentalDetailsInsert,
         }
       }
       if (table === "bookings") {
@@ -206,11 +203,21 @@ describe("PUT /api/jobs/[id]/transport-requests", () => {
     })
     const res = await PUT(req, { params })
     expect(res.status).toBe(200)
-    expect(supabase.rentalDetailsInsert).toHaveBeenCalledWith([
-      expect.objectContaining({
-        return_at: "2026-06-03T10:00:00.000Z",
-        return_cutoff_time: "10:00",
-      }),
-    ])
+    expect(supabase.replaceTransportRequests).toHaveBeenCalledWith({
+      p_booking_id: BOOKING_ID,
+      p_transport_requests: [
+        expect.objectContaining({
+          service_type: "rental",
+          pickup_point: "A",
+          dropoff_point: "B",
+        }),
+      ],
+      p_rental_details: [
+        expect.objectContaining({
+          return_at: "2026-06-03T10:00:00.000Z",
+          return_cutoff_time: "10:00",
+        }),
+      ],
+    })
   })
 })

@@ -823,72 +823,6 @@ export type Database = {
           },
         ]
       }
-      invoices: {
-        Row: {
-          amount: number
-          booking_id: string
-          created_at: string
-          created_by: string | null
-          currency: string
-          deposit_percentage: number | null
-          due_date: string | null
-          id: string
-          invoice_number: string
-          kind: string
-          quote_id: string | null
-          sent_at: string | null
-          status: string
-          updated_at: string
-        }
-        Insert: {
-          amount: number
-          booking_id: string
-          created_at?: string
-          created_by?: string | null
-          currency?: string
-          deposit_percentage?: number | null
-          due_date?: string | null
-          id?: string
-          invoice_number: string
-          kind: string
-          quote_id?: string | null
-          sent_at?: string | null
-          status?: string
-          updated_at?: string
-        }
-        Update: {
-          amount?: number
-          booking_id?: string
-          created_at?: string
-          created_by?: string | null
-          currency?: string
-          deposit_percentage?: number | null
-          due_date?: string | null
-          id?: string
-          invoice_number?: string
-          kind?: string
-          quote_id?: string | null
-          sent_at?: string | null
-          status?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "invoices_booking_id_fkey"
-            columns: ["booking_id"]
-            isOneToOne: false
-            referencedRelation: "bookings"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "invoices_quote_id_fkey"
-            columns: ["quote_id"]
-            isOneToOne: false
-            referencedRelation: "quotes"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       hotel_offers: {
         Row: {
           active: boolean
@@ -2270,6 +2204,14 @@ export type Database = {
         Returns: boolean
       }
       custom_access_token_hook: { Args: { event: Json }; Returns: Json }
+      replace_booking_transport_requests: {
+        Args: {
+          p_booking_id: string
+          p_rental_details: Json
+          p_transport_requests: Json
+        }
+        Returns: undefined
+      }
       replace_quote_line_items: {
         Args: {
           p_line_items: Json
