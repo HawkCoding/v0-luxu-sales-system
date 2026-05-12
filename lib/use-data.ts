@@ -4,6 +4,7 @@ import useSWR from "swr"
 import type {
   AuditLog,
   Booking,
+  BookingSupplierSchedule,
   Customer,
   CustomerLinkedAccount,
   Location,
@@ -101,6 +102,14 @@ export function usePipeline() {
 
 export function useJobDetail(id: string) {
   return useSWR(id ? `/api/jobs/${id}` : null, fetcher, swrOptions)
+}
+
+export function useBookingSupplierSchedules(bookingId: string | null | undefined) {
+  return useSWR<BookingSupplierSchedule[]>(
+    bookingId ? `/api/jobs/${bookingId}/supplier-schedules` : null,
+    fetcher,
+    swrOptions,
+  )
 }
 
 export function useTemplates() {

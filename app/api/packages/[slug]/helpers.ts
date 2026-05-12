@@ -18,6 +18,7 @@ type RouteInsert = Database["public"]["Tables"]["routes"]["Insert"]
 
 interface SupplierJoin {
   name: string
+  description: string | null
   kind: SupplierKind
 }
 
@@ -86,6 +87,7 @@ function normalizeLegRows(
     sort_order: row.sort_order,
     created_at: row.created_at,
     supplierName: row.suppliers?.name ?? "Unknown supplier",
+    supplierDescription: row.suppliers?.description ?? null,
     supplierKind: row.suppliers?.kind ?? "train_operator",
   }))
 }
@@ -111,7 +113,7 @@ export async function loadPackageDetail(supabase: SupabaseClient<Database>, slug
 
   const { data: legRows, error: legsError } = await supabase
     .from("package_legs")
-    .select("*, suppliers(name, kind)")
+    .select("*, suppliers(name, description, kind)")
     .eq("package_id", pkg.id)
     .order("sort_order", { ascending: true })
 
@@ -163,16 +165,35 @@ export async function loadPackageDetail(supabase: SupabaseClient<Database>, slug
   }
 
   const routeIds = (routes ?? []).map((route) => route.id)
-  const { data: rateCards, error: rateCardsError } =
+  const [rateCardsResult, vehicleRentalDetailsResult] = await Promise.all([
     routeIds.length > 0
-      ? await supabase
+      ? supabase
           .from("rate_cards")
           .select("*")
           .in("route_id", routeIds)
           .order("valid_from", { ascending: true })
-      : { data: [], error: null }
+      : Promise.resolve({ data: [], error: null }),
+    routeIds.length > 0
+      ? supabase
+          .from("vehicle_rental_route_details")
+          .select("*")
+          .in("route_id", routeIds)
+      : Promise.resolve({ data: [], error: null }),
+  ])
 
+  const { data: rateCards, error: rateCardsError } = rateCardsResult
+  const { data: vehicleRentalRouteDetails, error: vehicleRentalDetailsError } =
+    vehicleRentalDetailsResult
   if (rateCardsError) {
+    return {
+      error: NextResponse.json(
+        { error: "Failed to load package reference data" },
+        { status: 500 },
+      ),
+    }
+  }
+
+  if (vehicleRentalDetailsError) {
     return {
       error: NextResponse.json(
         { error: "Failed to load package reference data" },
@@ -192,6 +213,7 @@ export async function loadPackageDetail(supabase: SupabaseClient<Database>, slug
       packageLegRoutes ?? [],
       rateCards ?? [],
       suiteTypes ?? [],
+      vehicleRentalRouteDetails ?? [],
     ),
   }
 }
@@ -211,13 +233,8 @@ export function normalizePackageChildren(
         name: route.name.trim(),
         origin_location_id: route.originLocationId ?? null,
         destination_location_id: route.destinationLocationId ?? null,
-        transport_service_type: route.transportServiceType ?? null,
         pickup_point: route.pickupPoint?.trim() || null,
         dropoff_point: route.dropoffPoint?.trim() || null,
-        included_km_per_day: route.includedKmPerDay ?? null,
-        extra_km_price: route.extraKmPrice ?? null,
-        security_deposit: route.securityDeposit ?? null,
-        one_way_fee: route.oneWayFee ?? null,
         active: route.active,
         created_at: now,
         updated_at: now,

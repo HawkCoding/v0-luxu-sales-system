@@ -90,7 +90,8 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
       padding: 14px;
       background: #fafafa;
     }
-    .provider-name { font-size: 13pt; font-weight: bold; color: #0B2A3A; margin-bottom: 10px; }
+    .provider-name { font-size: 13pt; font-weight: bold; color: #0B2A3A; margin-bottom: 6px; }
+    .provider-description { font-size: 10pt; color: #555; font-style: italic; margin-bottom: 10px; }
 
     .footer-section { margin-top: 30px; padding-top: 14px; border-top: 1px solid #ddd; }
     .footer-contact { text-align: center; font-size: 9pt; color: #666; }

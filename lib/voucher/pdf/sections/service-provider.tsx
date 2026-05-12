@@ -30,6 +30,11 @@ export function ServiceProvider({ data, styles }: ServiceProviderProps) {
       <Text style={styles.sectionTitle}>Service Provider</Text>
       <View style={styles.providerBox}>
         <Text style={styles.providerName}>{data.supplierName}</Text>
+        {data.supplierDescription ? (
+          <Text style={{ fontSize: 10, color: "#555555", fontStyle: "italic", marginBottom: 8 }}>
+            {data.supplierDescription}
+          </Text>
+        ) : null}
         <InfoRow label="Your Reference:" value={data.voucherNumber} styles={styles} />
         <InfoRow label="Route:" value={data.route} styles={styles} />
         <InfoRow label="Departure Date:" value={data.departure} styles={styles} />

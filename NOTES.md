@@ -2,6 +2,16 @@
 
 ---
 
+## Completed TODO: session timeout and inactive user enforcement
+
+**Date:** 2026-05-11
+
+- Completed: Configurable session timeout in Settings.
+- Completed: Confirm inactive users are blocked when active user enforcement exists.
+- Verification: `pnpm test:ci` and `pnpm build` passed.
+
+---
+
 ## Deferred TODO: dependency freshness follow-up
 
 **Date:** 2026-03-11

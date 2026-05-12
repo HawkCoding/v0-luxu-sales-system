@@ -8,7 +8,7 @@ import type {
   SupplierRateCard,
   SupplierRoute,
   SupplierSuiteType,
-  TransportServiceType,
+  VehicleRentalRouteDetails,
 } from "@/lib/types"
 
 type PackageRow = Database["public"]["Tables"]["packages"]["Row"]
@@ -17,9 +17,11 @@ type PackageLegRouteRow = Database["public"]["Tables"]["package_leg_routes"]["Ro
 type RateCardRow = Database["public"]["Tables"]["rate_cards"]["Row"]
 type RouteRow = Database["public"]["Tables"]["routes"]["Row"]
 type SuiteTypeRow = Database["public"]["Tables"]["suite_types"]["Row"]
+type VehicleRentalRouteDetailsRow = Database["public"]["Tables"]["vehicle_rental_route_details"]["Row"]
 
 export interface PackageLegWithSupplier extends PackageLegRow {
   supplierName: string
+  supplierDescription: string | null
   supplierKind: SupplierKind
 }
 
@@ -33,9 +35,20 @@ export function buildPackageSlugBase(name: string): string {
   return slug || "package"
 }
 
-function normalizeTransportServiceType(value: string | null): TransportServiceType | null {
-  if (value === "transfer" || value === "rental") return value
-  return null
+function mapVehicleRentalRouteDetails(
+  row: VehicleRentalRouteDetailsRow | null | undefined,
+): VehicleRentalRouteDetails | null {
+  if (!row) return null
+
+  return {
+    routeId: row.route_id,
+    includedKmPerDay: row.included_km_per_day ?? null,
+    extraKmPrice: row.extra_km_price ?? null,
+    securityDeposit: row.security_deposit ?? null,
+    oneWayFee: row.one_way_fee ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
 }
 
 export function mapPackageListItem(
@@ -63,20 +76,19 @@ export function mapPackageListItem(
   }
 }
 
-export function mapPackageRoute(row: RouteRow): SupplierRoute {
+export function mapPackageRoute(
+  row: RouteRow,
+  vehicleRentalDetails?: VehicleRentalRouteDetailsRow | null,
+): SupplierRoute {
   return {
     id: row.id,
     supplierId: row.supplier_id,
     name: row.name,
     originLocationId: row.origin_location_id ?? null,
     destinationLocationId: row.destination_location_id ?? null,
-    transportServiceType: normalizeTransportServiceType(row.transport_service_type),
     pickupPoint: row.pickup_point ?? null,
     dropoffPoint: row.dropoff_point ?? null,
-    includedKmPerDay: row.included_km_per_day ?? null,
-    extraKmPrice: row.extra_km_price ?? null,
-    securityDeposit: row.security_deposit ?? null,
-    oneWayFee: row.one_way_fee ?? null,
+    vehicleRentalDetails: mapVehicleRentalRouteDetails(vehicleRentalDetails),
     active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -125,14 +137,19 @@ export function mapPackageLeg(
   packageLegRoutes: PackageLegRouteRow[],
   rateCards: RateCardRow[],
   suiteTypes: SuiteTypeRow[],
+  vehicleRentalRouteDetails: VehicleRentalRouteDetailsRow[] = [],
 ): PackageLeg {
+  const detailsByRouteId = new Map(
+    vehicleRentalRouteDetails.map((details) => [details.route_id, details]),
+  )
   const linkedRouteIds = new Set(
     packageLegRoutes
       .filter((link) => link.package_leg_id === row.id)
       .map((link) => link.route_id),
   )
+  const hasLinkedRoutes = linkedRouteIds.size > 0
   const eligibleRoutes =
-    row.supplierKind === "hotel_property"
+    row.supplierKind === "hotel_property" && !hasLinkedRoutes
       ? routes
       : routes.filter((route) => linkedRouteIds.has(route.id))
   const legRouteIds = new Set(eligibleRoutes.map((route) => route.id))
@@ -142,10 +159,11 @@ export function mapPackageLeg(
     packageId: row.package_id,
     supplierId: row.supplier_id,
     supplierName: row.supplierName,
+    supplierDescription: row.supplierDescription,
     supplierKind: row.supplierKind,
     label: row.label,
     sortOrder: row.sort_order,
-    routes: eligibleRoutes.map(mapPackageRoute),
+    routes: eligibleRoutes.map((route) => mapPackageRoute(route, detailsByRouteId.get(route.id))),
     rateCards: rateCards
       .filter((rateCard) => legRouteIds.has(rateCard.route_id))
       .map(mapPackageRateCard),
@@ -160,6 +178,7 @@ export function mapPackageDetail(
   packageLegRoutes: PackageLegRouteRow[],
   rateCards: RateCardRow[],
   suiteTypes: SuiteTypeRow[],
+  vehicleRentalRouteDetails: VehicleRentalRouteDetailsRow[] = [],
 ): PackageDetail {
   return {
     id: row.id,
@@ -185,6 +204,7 @@ export function mapPackageDetail(
           packageLegRoutes,
           rateCards,
           suiteTypes.filter((suiteType) => suiteType.supplier_id === leg.supplier_id),
+          vehicleRentalRouteDetails,
         ),
       ),
   }

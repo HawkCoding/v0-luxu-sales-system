@@ -43,9 +43,13 @@ import {
 } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import { useRole } from "@/lib/role-context"
+import {
+  MAX_SESSION_TIMEOUT_MINUTES,
+  MIN_SESSION_TIMEOUT_MINUTES,
+} from "@/lib/session-timeout"
 import type { Role } from "@/lib/types"
 import { APP_VERSION } from "@/lib/version"
-import { KeyRound, MoreHorizontal, ShieldCheck, Trash2, Upload, UserCheck, UserPlus, UserX } from "lucide-react"
+import { Clock, KeyRound, MoreHorizontal, ShieldCheck, Trash2, Upload, UserCheck, UserPlus, UserX } from "lucide-react"
 
 interface AppUser {
   userId: string
@@ -884,6 +888,129 @@ function DepositSettingsCard({ canEdit }: { canEdit: boolean }) {
   )
 }
 
+function SessionTimeoutSettingsCard({ canEdit }: { canEdit: boolean }) {
+  const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState("30")
+  const [warningMinutes, setWarningMinutes] = useState(5)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+
+    fetch("/api/settings/session-timeout")
+      .then((response) => response.json())
+      .then((data: { sessionTimeoutMinutes?: number; warningMinutes?: number }) => {
+        if (cancelled) return
+        if (typeof data.sessionTimeoutMinutes === "number") {
+          setSessionTimeoutMinutes(String(data.sessionTimeoutMinutes))
+        }
+        if (typeof data.warningMinutes === "number") {
+          setWarningMinutes(data.warningMinutes)
+        }
+      })
+      .catch(() => {
+        toast.error("Failed to load session timeout settings")
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const numericValue = Number(sessionTimeoutMinutes)
+  const isValidTimeout =
+    sessionTimeoutMinutes.trim() !== "" &&
+    Number.isInteger(numericValue) &&
+    numericValue >= MIN_SESSION_TIMEOUT_MINUTES &&
+    numericValue <= MAX_SESSION_TIMEOUT_MINUTES
+
+  const handleSave = async () => {
+    if (!isValidTimeout) return
+
+    setSaving(true)
+    try {
+      const res = await fetch("/api/settings/session-timeout", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionTimeoutMinutes: numericValue }),
+      })
+      if (!res.ok) throw new Error()
+
+      const data = (await res.json()) as { sessionTimeoutMinutes: number; warningMinutes: number }
+      setSessionTimeoutMinutes(String(data.sessionTimeoutMinutes))
+      setWarningMinutes(data.warningMinutes)
+      toast.success("Session timeout saved")
+    } catch {
+      toast.error("Failed to save session timeout")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card className={!canEdit ? "opacity-80" : undefined}>
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-sm font-medium">
+          <Clock className="h-4 w-4" />
+          Session Security
+        </CardTitle>
+        <CardDescription className="text-xs">
+          Inactive users receive a warning before they are signed out automatically.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        <div className="grid gap-2 sm:max-w-xs">
+          <Label htmlFor="session-timeout-minutes" className="text-xs font-medium text-muted-foreground">
+            Idle Timeout
+          </Label>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Input
+                id="session-timeout-minutes"
+                type="number"
+                min={MIN_SESSION_TIMEOUT_MINUTES}
+                max={MAX_SESSION_TIMEOUT_MINUTES}
+                step={1}
+                inputMode="numeric"
+                value={sessionTimeoutMinutes}
+                onChange={(event) => setSessionTimeoutMinutes(event.target.value)}
+                readOnly={!canEdit}
+                disabled={loading}
+                aria-invalid={!isValidTimeout}
+                className="pr-16"
+              />
+              <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-muted-foreground">
+                min
+              </span>
+            </div>
+            {canEdit && (
+              <Button size="sm" onClick={handleSave} disabled={loading || saving || !isValidTimeout}>
+                {saving ? "Saving..." : "Save"}
+              </Button>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Warning appears {warningMinutes} minute{warningMinutes === 1 ? "" : "s"} before logout.
+          </p>
+          {!canEdit && (
+            <p className="text-xs text-muted-foreground">
+              Only admins can change session timeout settings.
+            </p>
+          )}
+          {!isValidTimeout && (
+            <p className="text-xs text-destructive">
+              Enter a whole number from {MIN_SESSION_TIMEOUT_MINUTES} to {MAX_SESSION_TIMEOUT_MINUTES}.
+            </p>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 export default function SettingsPage() {
   const { can, role } = useRole()
   const canEditSettings = can("edit:settings")
@@ -899,6 +1026,8 @@ export default function SettingsPage() {
       <CompanyInfoCard canEdit={canEditSettings} />
 
       <DepositSettingsCard canEdit={canEditDepositSettings} />
+
+      <SessionTimeoutSettingsCard canEdit={canEditSettings} />
 
       {can("import:customers") && (
         <Card>

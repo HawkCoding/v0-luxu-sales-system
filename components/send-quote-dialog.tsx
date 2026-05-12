@@ -120,18 +120,19 @@ function calculateTotals(lineItems: QuoteLineItem[]) {
 }
 
 function isOptionalLeg(kind: PackageDetail["legs"][number]["supplierKind"]): boolean {
-  return kind === "hotel_property" || kind === "transfers"
+  return kind === "hotel_property" || kind === "transfers" || kind === "vehicle_rental"
 }
 
 function getRouteLabel(kind: PackageDetail["legs"][number]["supplierKind"]): string {
   if (kind === "hotel_property") return "meal plan"
   if (kind === "transfers") return "transfer"
+  if (kind === "vehicle_rental") return "rental route"
   return "route"
 }
 
 function getSuiteLabel(kind: PackageDetail["legs"][number]["supplierKind"]): string {
   if (kind === "hotel_property") return "room type"
-  if (kind === "transfers") return "vehicle type"
+  if (kind === "transfers" || kind === "vehicle_rental") return "vehicle type"
   if (kind === "airline") return "cabin"
   return "suite type"
 }
@@ -181,6 +182,8 @@ export function SendQuoteDialog({
   const [previewing, setPreviewing] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
   const [sendingStepIndex, setSendingStepIndex] = useState(0)
+  const [createdQuoteId, setCreatedQuoteId] = useState<string | null>(null)
+  const [createdQuoteNumber, setCreatedQuoteNumber] = useState<string | null>(null)
 
   const activePackages = packages.filter((pkg) => pkg.active)
   const filteredPackages = activePackages.filter((pkg) =>
@@ -211,6 +214,8 @@ export function SendQuoteDialog({
     setValidityUntil(getValidityDate())
     setSendError(null)
     setSendingStepIndex(0)
+    setCreatedQuoteId(null)
+    setCreatedQuoteNumber(null)
   }
 
   function handleOpenChange(nextOpen: boolean) {
@@ -263,6 +268,8 @@ export function SendQuoteDialog({
     setSelectedPackage(pkg)
     setLoadingDetail(true)
     setSendError(null)
+    setCreatedQuoteId(null)
+    setCreatedQuoteNumber(null)
 
     try {
       const response = await fetch(`/api/packages/${pkg.slug}`)
@@ -304,31 +311,41 @@ export function SendQuoteDialog({
 
     try {
       setSendingStepIndex(0)
-      const quoteResponse = await fetch("/api/quotes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          bookingId,
-          itineraryId: null,
-          status: "sent",
-          validityUntil,
-          subtotal: totals.subtotal,
-          vat: totals.vat,
-          total: totals.total,
-          lineItems: previewLineItems,
-        }),
-      })
+      let quoteId = createdQuoteId
+      let quoteNumber = createdQuoteNumber
 
-      if (!quoteResponse.ok) {
-        const payload = (await quoteResponse.json()) as { error?: string }
-        throw new Error(payload.error ?? "Failed to create quote")
+      if (!quoteId) {
+        const quoteResponse = await fetch("/api/quotes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            bookingId,
+            itineraryId: null,
+            status: "ready",
+            validityUntil,
+            subtotal: totals.subtotal,
+            vat: totals.vat,
+            total: totals.total,
+            lineItems: previewLineItems,
+          }),
+        })
+
+        if (!quoteResponse.ok) {
+          const payload = (await quoteResponse.json()) as { error?: string }
+          throw new Error(payload.error ?? "Failed to create quote")
+        }
+
+        const quotePayload = (await quoteResponse.json()) as { id: string; quoteNumber?: string | null }
+        quoteId = quotePayload.id
+        quoteNumber = quotePayload.quoteNumber ?? null
+        setCreatedQuoteId(quoteId)
+        setCreatedQuoteNumber(quoteNumber)
       }
 
-      const quotePayload = (await quoteResponse.json()) as { id: string; quoteNumber?: string | null }
       setSendingStepIndex(1)
 
-      const subject = `Quote ${quotePayload.quoteNumber ?? bookingNumber} - Luxus Travel & Tours`
-      const previewResponse = await fetch(`/api/quotes/${quotePayload.id}/email-preview`, {
+      const subject = `Quote ${quoteNumber ?? bookingNumber} - Luxus Travel & Tours`
+      const previewResponse = await fetch(`/api/quotes/${quoteId}/email-preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -349,7 +366,7 @@ export function SendQuoteDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           bookingId,
-          quoteId: quotePayload.id,
+          quoteId,
           channel: "email",
           kind: "quote",
           subject,
@@ -507,7 +524,10 @@ export function SendQuoteDialog({
 
                     {enabled ? (
                       <div className="grid gap-3 md:grid-cols-2">
-                        {leg.routes.length > 1 || leg.supplierKind === "hotel_property" || leg.supplierKind === "transfers" ? (
+                        {leg.routes.length > 1 ||
+                        leg.supplierKind === "hotel_property" ||
+                        leg.supplierKind === "transfers" ||
+                        leg.supplierKind === "vehicle_rental" ? (
                           <div className="space-y-1.5">
                             <Label className="capitalize">{getRouteLabel(leg.supplierKind)}</Label>
                             <Select
@@ -616,10 +636,18 @@ export function SendQuoteDialog({
                         {lineItem.qty}
                       </td>
                       <td className="px-3 py-2 text-right text-xs">
-                        {formatPrice(lineItem.unitPrice)}
+                        {lineItem.unitPrice === 0 ? (
+                          <span className="italic text-muted-foreground">Included</span>
+                        ) : (
+                          formatPrice(lineItem.unitPrice)
+                        )}
                       </td>
                       <td className="px-3 py-2 text-right text-xs font-medium">
-                        {formatPrice(lineItem.total)}
+                        {lineItem.total === 0 ? (
+                          <span className="text-muted-foreground">—</span>
+                        ) : (
+                          formatPrice(lineItem.total)
+                        )}
                       </td>
                     </tr>
                   ))}

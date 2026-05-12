@@ -9,6 +9,7 @@ export interface ParsedDraft {
     province: string
   }
   trip: {
+    supplierId?: string
     supplier: string
     route: string
     departureDate: string
@@ -23,6 +24,11 @@ export interface ParsedDraft {
     children: number
     suites: number
     suiteType: string
+    suiteTypes?: string[]
+    suiteSelections?: Array<{
+      suiteTypeId: string
+      suiteTypeName: string
+    }>
   }
   notes: string
   formFields: {

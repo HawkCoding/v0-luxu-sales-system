@@ -205,10 +205,12 @@ export type SupplierKind =
   | "train_operator"
   | "hotel_property"
   | "transfers"
+  | "vehicle_rental"
   | "tour_operator"
   | "airline"
 export type SupplierStatus = "draft" | "active" | "inactive"
-export type TransportServiceType = "transfer" | "rental"
+export type TransportRequestServiceType = "transfer" | "rental"
+export type TransportServiceType = TransportRequestServiceType
 
 export const CURRENCIES: { value: string; label: string }[] = [
   { value: "ZAR", label: "ZAR — South African Rand" },
@@ -222,6 +224,7 @@ export const SUPPLIER_KIND_LABELS: Record<SupplierKind, string> = {
   train_operator: "Train",
   hotel_property: "Hotel",
   transfers: "Transfers",
+  vehicle_rental: "Vehicle Rental",
   tour_operator: "Tours",
   airline: "Airlines",
 }
@@ -242,6 +245,12 @@ export interface SupplierVocabulary {
   originLabel: string
   destinationLabel: string
   durationLabel: string
+  scheduleFields?: {
+    dateFromLabel: string
+    dateToLabel: string
+    timeStartLabel: string
+    timeEndLabel: string
+  }
 }
 
 const JOURNEY_SUPPLIER_VOCABULARY: SupplierVocabulary = {
@@ -261,6 +270,12 @@ const JOURNEY_SUPPLIER_VOCABULARY: SupplierVocabulary = {
   originLabel: "Origin",
   destinationLabel: "Destination",
   durationLabel: "nights",
+  scheduleFields: {
+    dateFromLabel: "Departure date",
+    dateToLabel: "Arrival date",
+    timeStartLabel: "Boarding time",
+    timeEndLabel: "Arrival time",
+  },
 }
 
 export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
@@ -283,6 +298,12 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     originLabel: "Origin",
     destinationLabel: "Destination",
     durationLabel: "nights",
+    scheduleFields: {
+      dateFromLabel: "Check-in date",
+      dateToLabel: "Check-out date",
+      timeStartLabel: "Check-in time",
+      timeEndLabel: "Check-out time",
+    },
   },
 
   transfers: {
@@ -294,7 +315,7 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     routePlural: "Services",
     sectionTitle: "Vehicle Types, Services and Rates",
     sectionDescription:
-      "Manage transfer and rental services, pickup/drop-off points, vehicle types, and period-based rates.",
+      "Manage transfer services, pickup/drop-off points, vehicle types, and period-based rates.",
     priceLabel: "per vehicle",
     routeHasLocations: true,
     showSingleSupplement: false,
@@ -302,6 +323,25 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     originLabel: "Pickup",
     destinationLabel: "Drop-off",
     durationLabel: "nights",
+  },
+
+  vehicle_rental: {
+    suiteType: "Vehicle Type",
+    suiteTypePlural: "Vehicle Types",
+    package: "Rental Service",
+    packagePlural: "Rental Services",
+    route: "Rental Route",
+    routePlural: "Rental Routes",
+    sectionTitle: "Vehicle Types, Rental Services and Rates",
+    sectionDescription:
+      "Manage vehicle types, rental pickup/return points, rental terms, and period-based rates.",
+    priceLabel: "per day",
+    routeHasLocations: true,
+    showSingleSupplement: false,
+    showDurationNights: false,
+    originLabel: "Pickup point",
+    destinationLabel: "Return point",
+    durationLabel: "days",
   },
 
   tour_operator: {
@@ -347,6 +387,14 @@ export function getSupplierVocabulary(kind: SupplierKind): SupplierVocabulary {
   return SUPPLIER_VOCABULARY[kind]
 }
 
+export function isTransportSupplier(kind: SupplierKind): boolean {
+  return kind === "transfers" || kind === "vehicle_rental"
+}
+
+export function isOptionalPackageLegKind(kind: SupplierKind): boolean {
+  return kind === "hotel_property" || kind === "transfers" || kind === "vehicle_rental"
+}
+
 export interface Location {
   id: string
   name: string
@@ -364,18 +412,24 @@ export interface SupplierRoute {
   name: string
   originLocationId: string | null
   destinationLocationId: string | null
-  transportServiceType?: TransportServiceType | null
   pickupPoint?: string | null
   dropoffPoint?: string | null
-  includedKmPerDay?: number | null
-  extraKmPrice?: number | null
-  securityDeposit?: number | null
-  oneWayFee?: number | null
+  vehicleRentalDetails?: VehicleRentalRouteDetails | null
   active: boolean
   createdAt: string
   createdAtDisplay?: string
   updatedAt: string
   updatedAtDisplay?: string
+}
+
+export interface VehicleRentalRouteDetails {
+  routeId: string
+  includedKmPerDay: number | null
+  extraKmPrice: number | null
+  securityDeposit: number | null
+  oneWayFee: number | null
+  createdAt: string
+  updatedAt: string
 }
 
 export interface SupplierSuiteType {
@@ -430,6 +484,7 @@ export interface PackageLeg {
   packageId: string
   supplierId: string
   supplierName: string
+  supplierDescription: string | null
   supplierKind: SupplierKind
   label: string | null
   sortOrder: number
@@ -490,7 +545,9 @@ export interface Supplier {
   phone: string | null
   website: string | null
   location: string | null
+  locationDetail: string | null
   locationId: string | null
+  description: string | null
   notes: string | null
   active: boolean
   singleSupplementPct: number
@@ -511,7 +568,7 @@ export interface SupplierDetail extends Supplier {
 export interface BookingTransportRequest {
   id: string
   bookingId: string
-  serviceType: TransportServiceType
+  serviceType: TransportRequestServiceType
   supplierId: string | null
   routeId: string | null
   suiteTypeId: string | null
@@ -519,11 +576,41 @@ export interface BookingTransportRequest {
   dropoffPoint: string
   pickupAt: string | null
   pickupAtDisplay?: string
-  returnAt: string | null
-  returnAtDisplay?: string
+  rentalDetails: BookingVehicleRentalDetails | null
   passengerCount: number | null
   luggageCount: number | null
   flightNumber: string | null
+  notes: string | null
+  sortOrder: number
+  createdAt: string
+  createdAtDisplay?: string
+  updatedAt: string
+  updatedAtDisplay?: string
+}
+
+export interface BookingVehicleRentalDetails {
+  transportRequestId: string
+  returnAt: string | null
+  returnAtDisplay?: string
+  returnCutoffTime: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type BookingScheduleSupplierKind = "hotel_property" | "train_operator"
+
+export interface BookingSupplierSchedule {
+  id: string
+  bookingId: string
+  supplierId: string | null
+  supplierKind: BookingScheduleSupplierKind
+  label: string | null
+  dateFrom: string
+  dateFromDisplay?: string
+  dateTo: string
+  dateToDisplay?: string
+  timeStart: string | null
+  timeEnd: string | null
   notes: string | null
   sortOrder: number
   createdAt: string
@@ -618,6 +705,7 @@ export type QuoteStatus = "draft" | "pricing_incomplete" | "ready" | "sent" | "a
 
 export interface QuoteLineItem {
   description: string
+  supplierDescription?: string | null
   qty: number
   unitPrice: number
   total: number

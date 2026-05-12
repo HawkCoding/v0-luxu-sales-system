@@ -12,4 +12,17 @@ Luxus Sales System sends customer-facing correspondence through Resend in produc
 
 ## Local Development
 
-When `RESEND_API_KEY` is not set, the app uses the local Mailpit SMTP transport configured by `MAILPIT_URL`. Use Mailpit to test correspondence without sending live email.
+When `RESEND_API_KEY` is not set, the app delivers mail to a local [Mailpit](https://github.com/axllent/mailpit) instance over SMTP. Use Mailpit to inspect correspondence without sending live email.
+
+Mailpit exposes two endpoints, and they are configured separately:
+
+| Purpose | Default | Environment variable(s) |
+| --- | --- | --- |
+| Web UI (read mail in the browser) | `http://127.0.0.1:54324` | `MAILPIT_URL` — **informational only**, not used by the app to send mail |
+| SMTP listener (where the app delivers mail) | `127.0.0.1:54325` | `MAILPIT_SMTP_URL`, **or** `MAILPIT_SMTP_HOST` + `MAILPIT_SMTP_PORT` |
+
+This project's Supabase local stack uses **inbucket** as the email catcher. Its SMTP port (54325) is separate from the web UI port and is enabled via `smtp_port = 54325` in `supabase/config.toml`. Add `MAILPIT_SMTP_PORT=54325` to your `.env.local` to wire the app to it.
+
+The transport defaults to `127.0.0.1:1025` when no SMTP env vars are set (standard standalone MailPit). For this project's local stack you must set the port explicitly.
+
+Nodemailer connection/greeting/socket timeouts are pinned to 10 seconds so a misconfigured or stopped Mailpit fails fast instead of hanging the request.

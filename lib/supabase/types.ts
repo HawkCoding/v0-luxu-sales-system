@@ -184,6 +184,69 @@ export type Database = {
           },
         ]
       }
+      booking_supplier_schedules: {
+        Row: {
+          booking_id: string
+          created_at: string
+          date_from: string | null
+          date_to: string | null
+          id: string
+          label: string | null
+          notes: string | null
+          sort_order: number
+          supplier_id: string | null
+          supplier_kind: Database["public"]["Enums"]["supplier_kind"]
+          time_end: string | null
+          time_start: string | null
+          updated_at: string
+        }
+        Insert: {
+          booking_id: string
+          created_at?: string
+          date_from?: string | null
+          date_to?: string | null
+          id?: string
+          label?: string | null
+          notes?: string | null
+          sort_order?: number
+          supplier_id?: string | null
+          supplier_kind: Database["public"]["Enums"]["supplier_kind"]
+          time_end?: string | null
+          time_start?: string | null
+          updated_at?: string
+        }
+        Update: {
+          booking_id?: string
+          created_at?: string
+          date_from?: string | null
+          date_to?: string | null
+          id?: string
+          label?: string | null
+          notes?: string | null
+          sort_order?: number
+          supplier_id?: string | null
+          supplier_kind?: Database["public"]["Enums"]["supplier_kind"]
+          time_end?: string | null
+          time_start?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "booking_supplier_schedules_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_supplier_schedules_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       booking_transport_requests: {
         Row: {
           booking_id: string
@@ -196,7 +259,6 @@ export type Database = {
           passenger_count: number | null
           pickup_at: string | null
           pickup_point: string
-          return_at: string | null
           route_id: string | null
           service_type: string
           sort_order: number
@@ -215,7 +277,6 @@ export type Database = {
           passenger_count?: number | null
           pickup_at?: string | null
           pickup_point: string
-          return_at?: string | null
           route_id?: string | null
           service_type: string
           sort_order?: number
@@ -234,7 +295,6 @@ export type Database = {
           passenger_count?: number | null
           pickup_at?: string | null
           pickup_point?: string
-          return_at?: string | null
           route_id?: string | null
           service_type?: string
           sort_order?: number
@@ -269,6 +329,38 @@ export type Database = {
             columns: ["supplier_id"]
             isOneToOne: false
             referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      booking_vehicle_rental_details: {
+        Row: {
+          created_at: string
+          return_at: string | null
+          return_cutoff_time: string | null
+          transport_request_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          return_at?: string | null
+          return_cutoff_time?: string | null
+          transport_request_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          return_at?: string | null
+          return_cutoff_time?: string | null
+          transport_request_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "booking_vehicle_rental_details_transport_request_id_fkey"
+            columns: ["transport_request_id"]
+            isOneToOne: true
+            referencedRelation: "booking_transport_requests"
             referencedColumns: ["id"]
           },
         ]
@@ -731,72 +823,6 @@ export type Database = {
           },
         ]
       }
-      invoices: {
-        Row: {
-          amount: number
-          booking_id: string
-          created_at: string
-          created_by: string | null
-          currency: string
-          deposit_percentage: number | null
-          due_date: string | null
-          id: string
-          invoice_number: string
-          kind: string
-          quote_id: string | null
-          sent_at: string | null
-          status: string
-          updated_at: string
-        }
-        Insert: {
-          amount: number
-          booking_id: string
-          created_at?: string
-          created_by?: string | null
-          currency?: string
-          deposit_percentage?: number | null
-          due_date?: string | null
-          id?: string
-          invoice_number: string
-          kind: string
-          quote_id?: string | null
-          sent_at?: string | null
-          status?: string
-          updated_at?: string
-        }
-        Update: {
-          amount?: number
-          booking_id?: string
-          created_at?: string
-          created_by?: string | null
-          currency?: string
-          deposit_percentage?: number | null
-          due_date?: string | null
-          id?: string
-          invoice_number?: string
-          kind?: string
-          quote_id?: string | null
-          sent_at?: string | null
-          status?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "invoices_booking_id_fkey"
-            columns: ["booking_id"]
-            isOneToOne: false
-            referencedRelation: "bookings"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "invoices_quote_id_fkey"
-            columns: ["quote_id"]
-            isOneToOne: false
-            referencedRelation: "quotes"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       hotel_offers: {
         Row: {
           active: boolean
@@ -1070,6 +1096,72 @@ export type Database = {
             columns: ["email_account_id"]
             isOneToOne: false
             referencedRelation: "inbound_email_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      invoices: {
+        Row: {
+          amount: number
+          booking_id: string
+          created_at: string
+          created_by: string | null
+          currency: string
+          deposit_percentage: number | null
+          due_date: string | null
+          id: string
+          invoice_number: string
+          kind: string
+          quote_id: string | null
+          sent_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          booking_id: string
+          created_at?: string
+          created_by?: string | null
+          currency?: string
+          deposit_percentage?: number | null
+          due_date?: string | null
+          id?: string
+          invoice_number: string
+          kind: string
+          quote_id?: string | null
+          sent_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          booking_id?: string
+          created_at?: string
+          created_by?: string | null
+          currency?: string
+          deposit_percentage?: number | null
+          due_date?: string | null
+          id?: string
+          invoice_number?: string
+          kind?: string
+          quote_id?: string | null
+          sent_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invoices_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoices_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
             referencedColumns: ["id"]
           },
         ]
@@ -1376,6 +1468,7 @@ export type Database = {
           qty: number
           quote_id: string
           sort_order: number
+          supplier_description: string | null
           total: number
           unit_price: number
         }
@@ -1386,6 +1479,7 @@ export type Database = {
           qty?: number
           quote_id: string
           sort_order?: number
+          supplier_description?: string | null
           total?: number
           unit_price?: number
         }
@@ -1396,6 +1490,7 @@ export type Database = {
           qty?: number
           quote_id?: string
           sort_order?: number
+          supplier_description?: string | null
           total?: number
           unit_price?: number
         }
@@ -1486,6 +1581,13 @@ export type Database = {
             referencedRelation: "itineraries"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "quotes_parent_quote_id_fkey"
+            columns: ["parent_quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
         ]
       }
       rate_cards: {
@@ -1572,16 +1674,11 @@ export type Database = {
           created_at: string
           destination_location_id: string | null
           dropoff_point: string | null
-          extra_km_price: number | null
           id: string
-          included_km_per_day: number | null
           name: string
-          one_way_fee: number | null
           origin_location_id: string | null
           pickup_point: string | null
-          security_deposit: number | null
           supplier_id: string
-          transport_service_type: string | null
           updated_at: string
         }
         Insert: {
@@ -1589,16 +1686,11 @@ export type Database = {
           created_at?: string
           destination_location_id?: string | null
           dropoff_point?: string | null
-          extra_km_price?: number | null
           id?: string
-          included_km_per_day?: number | null
           name: string
-          one_way_fee?: number | null
           origin_location_id?: string | null
           pickup_point?: string | null
-          security_deposit?: number | null
           supplier_id: string
-          transport_service_type?: string | null
           updated_at?: string
         }
         Update: {
@@ -1606,16 +1698,11 @@ export type Database = {
           created_at?: string
           destination_location_id?: string | null
           dropoff_point?: string | null
-          extra_km_price?: number | null
           id?: string
-          included_km_per_day?: number | null
           name?: string
-          one_way_fee?: number | null
           origin_location_id?: string | null
           pickup_point?: string | null
-          security_deposit?: number | null
           supplier_id?: string
-          transport_service_type?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -1870,10 +1957,12 @@ export type Database = {
         Row: {
           active: boolean
           created_at: string
+          description: string | null
           email: string | null
           id: string
           kind: Database["public"]["Enums"]["supplier_kind"]
           location: string | null
+          location_detail: string | null
           location_id: string | null
           name: string
           notes: string | null
@@ -1887,10 +1976,12 @@ export type Database = {
         Insert: {
           active?: boolean
           created_at?: string
+          description?: string | null
           email?: string | null
           id?: string
           kind: Database["public"]["Enums"]["supplier_kind"]
           location?: string | null
+          location_detail?: string | null
           location_id?: string | null
           name: string
           notes?: string | null
@@ -1904,10 +1995,12 @@ export type Database = {
         Update: {
           active?: boolean
           created_at?: string
+          description?: string | null
           email?: string | null
           id?: string
           kind?: Database["public"]["Enums"]["supplier_kind"]
           location?: string | null
+          location_detail?: string | null
           location_id?: string | null
           name?: string
           notes?: string | null
@@ -2008,6 +2101,44 @@ export type Database = {
           },
         ]
       }
+      vehicle_rental_route_details: {
+        Row: {
+          created_at: string
+          extra_km_price: number | null
+          included_km_per_day: number | null
+          one_way_fee: number | null
+          route_id: string
+          security_deposit: number | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          extra_km_price?: number | null
+          included_km_per_day?: number | null
+          one_way_fee?: number | null
+          route_id: string
+          security_deposit?: number | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          extra_km_price?: number | null
+          included_km_per_day?: number | null
+          one_way_fee?: number | null
+          route_id?: string
+          security_deposit?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vehicle_rental_route_details_route_id_fkey"
+            columns: ["route_id"]
+            isOneToOne: true
+            referencedRelation: "routes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       voucher_template: {
         Row: {
           accent_colour: string
@@ -2073,6 +2204,14 @@ export type Database = {
         Returns: boolean
       }
       custom_access_token_hook: { Args: { event: Json }; Returns: Json }
+      replace_booking_transport_requests: {
+        Args: {
+          p_booking_id: string
+          p_rental_details: Json
+          p_transport_requests: Json
+        }
+        Returns: undefined
+      }
       replace_quote_line_items: {
         Args: {
           p_line_items: Json
@@ -2131,6 +2270,7 @@ export type Database = {
         | "transfers"
         | "tour_operator"
         | "airline"
+        | "vehicle_rental"
       user_role: "admin" | "manager" | "consultant" | "readonly"
     }
     CompositeTypes: {
@@ -2312,6 +2452,7 @@ export const Constants = {
         "transfers",
         "tour_operator",
         "airline",
+        "vehicle_rental",
       ],
       user_role: ["admin", "manager", "consultant", "readonly"],
     },

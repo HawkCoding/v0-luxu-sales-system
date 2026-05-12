@@ -17,6 +17,7 @@ import { toast } from "sonner"
 import { downloadAuditLog } from "@/lib/export-audit"
 import { formatDisplayDate } from "@/lib/date-format"
 import { SendQuoteDialog } from "@/components/send-quote-dialog"
+import { isVisibleInEnquiries } from "@/lib/booking-visibility"
 
 export default function EnquiriesPage() {
   const { data, isLoading, mutate } = useAllData()
@@ -32,7 +33,7 @@ export default function EnquiriesPage() {
 
   // Enquiry intake queue: bookings in "enquiry" stage
   const enquiries = data.bookings
-    .filter((b: any) => b.stage === "enquiry")
+    .filter(isVisibleInEnquiries)
     .map((b: any) => {
       const customer = data.customers.find((c: any) => c.id === b.customerId)
       const quotes = data.quotes?.filter((q: any) => q.bookingId === b.id) || []
@@ -209,7 +210,7 @@ export default function EnquiriesPage() {
                         <Alert className="mt-3 py-2">
                           <AlertCircle className="h-3 w-3" />
                           <AlertDescription className="text-xs">
-                            Open a package to price and send a quote
+                            To proceed with this inquiry, click Send Quote.
                           </AlertDescription>
                         </Alert>
                       )}

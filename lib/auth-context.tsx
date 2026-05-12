@@ -83,9 +83,15 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
     if (jwtRole) {
       const { data: profile } = await supabase
         .from("profiles")
-        .select("name, surname, email")
+        .select("name, surname, email, is_active")
         .eq("user_id", supabaseUser.id)
         .single()
+
+      if (profile?.is_active === false) {
+        await supabase.auth.signOut({ scope: "local" }).catch(() => {})
+        setUser(null)
+        return
+      }
 
       if (profile) {
         const displayName = [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.name
@@ -109,9 +115,15 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
 
     const { data: profile, error } = await supabase
       .from("profiles")
-      .select("name, surname, clearance_level, email")
+      .select("name, surname, clearance_level, email, is_active")
       .eq("user_id", supabaseUser.id)
       .single()
+
+    if (profile?.is_active === false) {
+      await supabase.auth.signOut({ scope: "local" }).catch(() => {})
+      setUser(null)
+      return
+    }
 
     if (profile && isRole(profile.clearance_level)) {
       const displayName = [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.name

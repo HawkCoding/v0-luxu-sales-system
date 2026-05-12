@@ -62,8 +62,10 @@ import {
 import { shortenUrl } from "@/lib/url"
 import { useLocations, useSupplierDetail } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
+import { formatRateCardValidityRange } from "@/lib/rate-card-validity"
 import {
   getSupplierVocabulary,
+  isTransportSupplier,
   SUPPLIER_KIND_LABELS,
   type Location,
   type SupplierDetail,
@@ -71,8 +73,8 @@ import {
   type SupplierPackage,
   type SupplierRateCard,
   type SupplierSuiteType,
-  type TransportServiceType,
   type SupplierVocabulary,
+  type VehicleRentalRouteDetails,
 } from "@/lib/types"
 
 type Presentation = "page" | "modal"
@@ -89,13 +91,9 @@ interface EditableRoute {
   name: string
   originLocationId: string | null
   destinationLocationId: string | null
-  transportServiceType: TransportServiceType | null
   pickupPoint: string | null
   dropoffPoint: string | null
-  includedKmPerDay: number | null
-  extraKmPrice: number | null
-  securityDeposit: number | null
-  oneWayFee: number | null
+  vehicleRentalDetails: Omit<VehicleRentalRouteDetails, "routeId" | "createdAt" | "updatedAt"> | null
   active: boolean
 }
 
@@ -139,7 +137,9 @@ interface SupplierFormState {
   phone: string
   website: string
   location: string
+  locationDetail: string
   locationId: string | null
+  description: string
   notes: string
   active: boolean
   singleSupplementPct: number
@@ -147,14 +147,7 @@ interface SupplierFormState {
   packages: EditablePackage[]
 }
 
-declare global {
-  interface Window {
-    __DISABLE_DRAFT_AUTOSAVE?: boolean
-  }
-}
-
 const DRAFT_AUTOSAVE_DEBOUNCE_MS = 3000
-const DRAFT_AUTOSAVE_STATUS_RESET_MS = 2000
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const REMOVE_ICON_BUTTON_CLASS =
   "border-muted-foreground/25 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30"
@@ -230,20 +223,24 @@ function makeClientId(): string {
 function createEmptyRoute(locations: Location[], kind: SupplierKind): EditableRoute {
   const origin = locations[0]?.id ?? ""
   const destination = locations[1]?.id ?? origin
-  const isTransport = kind === "transfers"
+  const isTransport = isTransportSupplier(kind)
 
   return {
     id: makeClientId(),
     name: "",
     originLocationId: isTransport ? null : origin,
     destinationLocationId: isTransport ? null : destination,
-    transportServiceType: isTransport ? "transfer" : null,
     pickupPoint: "",
     dropoffPoint: "",
-    includedKmPerDay: null,
-    extraKmPrice: null,
-    securityDeposit: null,
-    oneWayFee: null,
+    vehicleRentalDetails:
+      kind === "vehicle_rental"
+        ? {
+            includedKmPerDay: null,
+            extraKmPrice: null,
+            securityDeposit: null,
+            oneWayFee: null,
+          }
+        : null,
     active: true,
   }
 }
@@ -300,7 +297,9 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
     phone: supplier.phone ?? "",
     website: supplier.website ?? "",
     location: supplier.location ?? "",
+    locationDetail: supplier.locationDetail ?? "",
     locationId: supplier.kind === "train_operator" ? null : supplier.locationId ?? null,
+    description: supplier.description ?? "",
     notes: supplier.notes ?? "",
     active: supplier.active,
     singleSupplementPct: supplier.singleSupplementPct,
@@ -320,13 +319,16 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
           name: route.name,
           originLocationId: route.originLocationId,
           destinationLocationId: route.destinationLocationId,
-          transportServiceType: route.transportServiceType ?? null,
           pickupPoint: route.pickupPoint ?? null,
           dropoffPoint: route.dropoffPoint ?? null,
-          includedKmPerDay: route.includedKmPerDay ?? null,
-          extraKmPrice: route.extraKmPrice ?? null,
-          securityDeposit: route.securityDeposit ?? null,
-          oneWayFee: route.oneWayFee ?? null,
+          vehicleRentalDetails: route.vehicleRentalDetails
+            ? {
+                includedKmPerDay: route.vehicleRentalDetails.includedKmPerDay,
+                extraKmPrice: route.vehicleRentalDetails.extraKmPrice,
+                securityDeposit: route.vehicleRentalDetails.securityDeposit,
+                oneWayFee: route.vehicleRentalDetails.oneWayFee,
+              }
+            : null,
           active: route.active,
         })),
         rateCards: supplier.rateCards.map((rateCard) => ({
@@ -349,72 +351,6 @@ function getSupplierLocationId(form: SupplierFormState): string | null {
   return form.kind === "train_operator" ? null : form.locationId ?? null
 }
 
-function buildDraftPayload(form: SupplierFormState) {
-  return {
-    name: form.name.trim(),
-    kind: form.kind,
-    email: "",
-    emails: form.emails.map((entry) => ({
-      id: entry.id,
-      email: entry.email.trim(),
-      label: entry.label.trim() || "General",
-    })),
-    phone: form.phone.trim(),
-    website: form.website.trim(),
-    location: form.location.trim(),
-    locationId: getSupplierLocationId(form),
-    notes: form.notes.trim(),
-    active: form.active,
-    singleSupplementPct: form.singleSupplementPct,
-    suiteTypes: form.suiteTypes.map((suiteType) => ({
-      id: suiteType.id,
-      name: suiteType.name.trim(),
-      passengerCapacity: form.kind === "transfers" ? suiteType.passengerCapacity : null,
-      luggageCapacity: form.kind === "transfers" ? suiteType.luggageCapacity : null,
-      description: form.kind === "transfers" ? suiteType.description?.trim() || null : null,
-      active: suiteType.active,
-    })),
-    routes: (form.packages[0]?.routes ?? []).map((route) => ({
-        id: route.id,
-        name: route.name.trim(),
-        originLocationId: route.originLocationId,
-        destinationLocationId: route.destinationLocationId,
-        transportServiceType: form.kind === "transfers" ? route.transportServiceType ?? "transfer" : null,
-        pickupPoint: form.kind === "transfers" ? route.pickupPoint?.trim() ?? "" : null,
-        dropoffPoint: form.kind === "transfers" ? route.dropoffPoint?.trim() ?? "" : null,
-        includedKmPerDay:
-          form.kind === "transfers" && route.transportServiceType === "rental"
-            ? route.includedKmPerDay
-            : null,
-        extraKmPrice:
-          form.kind === "transfers" && route.transportServiceType === "rental"
-            ? route.extraKmPrice
-            : null,
-        securityDeposit:
-          form.kind === "transfers" && route.transportServiceType === "rental"
-            ? route.securityDeposit
-            : null,
-        oneWayFee:
-          form.kind === "transfers" && route.transportServiceType === "rental"
-            ? route.oneWayFee
-            : null,
-        active: route.active,
-        rateCards: (form.packages[0]?.rateCards ?? [])
-          .filter((rateCard) => rateCard.routeId === route.id)
-          .map((rateCard) => ({
-            id: rateCard.id,
-            routeId: rateCard.routeId,
-            suiteTypeId: rateCard.suiteTypeId,
-            pricePerPerson: rateCard.pricePerPerson,
-            childPrice: rateCard.childPrice,
-            infantPrice: rateCard.infantPrice,
-            currency: rateCard.currency.trim().toUpperCase() || "ZAR",
-            validFrom: rateCard.validFrom,
-            validTo: rateCard.validTo ?? "",
-          })),
-    })),
-  }
-}
 
 function formatCurrency(amount: number, currency: string) {
   try {
@@ -426,12 +362,6 @@ function formatCurrency(amount: number, currency: string) {
   } catch {
     return `${currency} ${amount.toFixed(2)}`
   }
-}
-
-function formatDateRange(validFrom: string, validTo: string | null) {
-  const from = validFrom ? formatDisplayDate(validFrom) : "Open"
-  const to = validTo ? formatDisplayDate(validTo) : "Open ended"
-  return `${from} - ${to}`
 }
 
 function getRatePeriodKey(
@@ -844,7 +774,7 @@ function groupRateCardsByPeriod(rateCards: SupplierRateCard[]): RatePeriodGroup[
 
     groups.set(key, {
       key,
-      label: formatDateRange(rateCard.validFrom, rateCard.validTo),
+      label: formatRateCardValidityRange(rateCard.validFrom, rateCard.validTo, formatDisplayDate),
       currency: rateCard.currency,
       validFrom: rateCard.validFrom,
       validTo: rateCard.validTo,
@@ -1352,9 +1282,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                                   <div className="flex items-center gap-1">
                                     <span className="w-16 shrink-0 text-xs text-muted-foreground">
                                       {isTransport
-                                        ? route.transportServiceType === "rental"
-                                          ? "Daily"
-                                          : "Flat"
+                                        ? "Flat"
                                         : "Adult"}
                                     </span>
                                     <NumericInput
@@ -1557,7 +1485,7 @@ interface RouteEditorRowProps {
     packageIndex: number,
     routeIndex: number,
     key: keyof EditableRoute,
-    value: string | boolean | number | null,
+    value: EditableRoute[keyof EditableRoute],
   ) => void
   onRemoveRoute: (packageIndex: number, routeIndex: number) => void
 }
@@ -1572,7 +1500,23 @@ const RouteEditorRow = memo(function RouteEditorRow({
   onRemoveRoute,
 }: RouteEditorRowProps) {
   const isTransport = vocabulary.suiteType === "Vehicle Type"
-  const isRental = route.transportServiceType === "rental"
+  const isRental = vocabulary.priceLabel === "per day"
+  const rentalDetails =
+    route.vehicleRentalDetails ?? {
+      includedKmPerDay: null,
+      extraKmPrice: null,
+      securityDeposit: null,
+      oneWayFee: null,
+    }
+  const updateRentalDetails = (
+    key: keyof typeof rentalDetails,
+    value: number | null,
+  ) => {
+    onUpdateRoute(packageIndex, routeIndex, "vehicleRentalDetails", {
+      ...rentalDetails,
+      [key]: value,
+    })
+  }
 
   return (
     <div
@@ -1594,24 +1538,7 @@ const RouteEditorRow = memo(function RouteEditorRow({
       {isTransport ? (
         <>
           <div className="min-w-0 space-y-2">
-            <Label>Service type</Label>
-            <Select
-              value={route.transportServiceType ?? "transfer"}
-              onValueChange={(value: TransportServiceType) =>
-                onUpdateRoute(packageIndex, routeIndex, "transportServiceType", value)
-              }
-            >
-              <SelectTrigger className="max-w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="transfer">Transfer</SelectItem>
-                <SelectItem value="rental">Vehicle rental</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="min-w-0 space-y-2">
-            <Label>{isRental ? "Rental pickup point" : vocabulary.originLabel}</Label>
+            <Label>{vocabulary.originLabel}</Label>
             <BufferedInput
               value={route.pickupPoint ?? ""}
               onValueChange={(value) => onUpdateRoute(packageIndex, routeIndex, "pickupPoint", value)}
@@ -1619,7 +1546,7 @@ const RouteEditorRow = memo(function RouteEditorRow({
             />
           </div>
           <div className="min-w-0 space-y-2">
-            <Label>{isRental ? "Return point" : vocabulary.destinationLabel}</Label>
+            <Label>{vocabulary.destinationLabel}</Label>
             <BufferedInput
               value={route.dropoffPoint ?? ""}
               onValueChange={(value) => onUpdateRoute(packageIndex, routeIndex, "dropoffPoint", value)}
@@ -1634,10 +1561,8 @@ const RouteEditorRow = memo(function RouteEditorRow({
                   min="0"
                   step="1"
                   nullable
-                  value={route.includedKmPerDay}
-                  onValueChange={(value) =>
-                    onUpdateRoute(packageIndex, routeIndex, "includedKmPerDay", value)
-                  }
+                  value={rentalDetails.includedKmPerDay}
+                  onValueChange={(value) => updateRentalDetails("includedKmPerDay", value)}
                 />
               </div>
               <div className="min-w-0 space-y-2">
@@ -1646,10 +1571,8 @@ const RouteEditorRow = memo(function RouteEditorRow({
                   min="0"
                   step="0.01"
                   nullable
-                  value={route.extraKmPrice}
-                  onValueChange={(value) =>
-                    onUpdateRoute(packageIndex, routeIndex, "extraKmPrice", value)
-                  }
+                  value={rentalDetails.extraKmPrice}
+                  onValueChange={(value) => updateRentalDetails("extraKmPrice", value)}
                 />
               </div>
               <div className="min-w-0 space-y-2">
@@ -1658,10 +1581,8 @@ const RouteEditorRow = memo(function RouteEditorRow({
                   min="0"
                   step="0.01"
                   nullable
-                  value={route.securityDeposit}
-                  onValueChange={(value) =>
-                    onUpdateRoute(packageIndex, routeIndex, "securityDeposit", value)
-                  }
+                  value={rentalDetails.securityDeposit}
+                  onValueChange={(value) => updateRentalDetails("securityDeposit", value)}
                 />
               </div>
               <div className="min-w-0 space-y-2">
@@ -1670,10 +1591,8 @@ const RouteEditorRow = memo(function RouteEditorRow({
                   min="0"
                   step="0.01"
                   nullable
-                  value={route.oneWayFee}
-                  onValueChange={(value) =>
-                    onUpdateRoute(packageIndex, routeIndex, "oneWayFee", value)
-                  }
+                  value={rentalDetails.oneWayFee}
+                  onValueChange={(value) => updateRentalDetails("oneWayFee", value)}
                 />
               </div>
             </>
@@ -1800,20 +1719,13 @@ export function SupplierDetailView({
   const [isPatchInFlight, setIsPatchInFlight] = useState(false)
   const [staleVersionDialog, setStaleVersionDialog] = useState<StaleVersionDialogState | null>(null)
   const [form, setForm] = useState<SupplierFormState | null>(null)
-  const [draftSaveStatus, setDraftSaveStatus] = useState<"idle" | "saving" | "saved" | "error">(
-    "idle",
-  )
   const [pendingLocalDraft, setPendingLocalDraft] = useState<SupplierFormState | null>(null)
   const baselineSnapshotRef = useRef<string | null>(null)
-  const draftAutosavedSnapshotRef = useRef<string | null>(null)
   const hydratedSupplierIdentityRef = useRef<string | null>(null)
   const expectedUpdatedAtRef = useRef<string | null>(null)
-  const lastDraftConflictSnapshotRef = useRef<string | null>(null)
   const lastOverlapWarningRef = useRef<string | null>(null)
   const lastInvertedDateWarningRef = useRef<string | null>(null)
-  const draftAutosaveInFlightRef = useRef(false)
   const patchWriteLockRef = useRef(new SupplierPatchWriteLock())
-  const draftStatusResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const overlapFieldErrorsCacheRef = useRef<{
     signature: string
     errors: Map<number, Set<string>>
@@ -1870,7 +1782,6 @@ export function SupplierDetailView({
       if (shouldHydrateFromServer) {
         setForm(nextForm)
         baselineSnapshotRef.current = snapshot
-        draftAutosavedSnapshotRef.current = snapshot
         overlapFieldErrorsCacheRef.current = null
       }
       expectedUpdatedAtRef.current = supplier.updatedAt
@@ -1919,13 +1830,6 @@ export function SupplierDetailView({
     }
   }, [canEdit, localDraftStorageKey, supplier])
 
-  useEffect(() => {
-    return () => {
-      if (draftStatusResetTimeoutRef.current) {
-        clearTimeout(draftStatusResetTimeoutRef.current)
-      }
-    }
-  }, [])
 
   const locations = allLocations.length > 0 ? allLocations : supplier?.locations ?? []
 
@@ -1952,6 +1856,23 @@ export function SupplierDetailView({
             ...current,
             kind,
             locationId: kind === "train_operator" ? null : current.locationId,
+            packages: current.packages.map((pkg) => ({
+              ...pkg,
+              routes: pkg.routes.map((route) => ({
+                ...route,
+                originLocationId: isTransportSupplier(kind) ? null : route.originLocationId,
+                destinationLocationId: isTransportSupplier(kind) ? null : route.destinationLocationId,
+                vehicleRentalDetails:
+                  kind === "vehicle_rental"
+                    ? route.vehicleRentalDetails ?? {
+                        includedKmPerDay: null,
+                        extraKmPrice: null,
+                        securityDeposit: null,
+                        oneWayFee: null,
+                      }
+                    : null,
+              })),
+            })),
           }
         : current,
     )
@@ -2128,7 +2049,7 @@ export function SupplierDetailView({
       packageIndex: number,
       routeIndex: number,
       key: keyof EditableRoute,
-      value: string | boolean | number | null,
+      value: EditableRoute[keyof EditableRoute],
     ) => {
       updatePackage(packageIndex, (pkg) => ({
         ...pkg,
@@ -2429,83 +2350,6 @@ export function SupplierDetailView({
 
   useEffect(() => {
     if (!canEdit || !form || !isEditing || isPatchInFlight) return
-    const disableDraftAutosaveFromQuery =
-      new URLSearchParams(window.location.search).get("disableDraftAutosave") === "true"
-    const draftAutosaveDisabled =
-      window.__DISABLE_DRAFT_AUTOSAVE === true || disableDraftAutosaveFromQuery
-
-    if (isDraftSupplier && !draftAutosaveDisabled) {
-      const snapshot = JSON.stringify(form)
-      if (snapshot === draftAutosavedSnapshotRef.current || draftAutosaveInFlightRef.current) {
-        return
-      }
-
-      const timeout = setTimeout(async () => {
-        if (!tryAcquirePatchWriteLock()) {
-          return
-        }
-        draftAutosaveInFlightRef.current = true
-        setDraftSaveStatus("saving")
-
-        try {
-          const draftConflict = findFirstRateCardConflict(form.packages, form.suiteTypes)
-          if (draftConflict) {
-            setDraftSaveStatus("error")
-            if (lastDraftConflictSnapshotRef.current !== snapshot) {
-              toast.error(buildRateCardConflictMessage(draftConflict, getSupplierVocabulary(form.kind)))
-              lastDraftConflictSnapshotRef.current = snapshot
-            }
-            return
-          }
-
-          lastDraftConflictSnapshotRef.current = null
-          const autosaveRequestStartedAt = performance.now()
-          const response = await fetch(`/api/suppliers/${supplierSlug}?draft=true`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              ...buildDraftPayload(form),
-              expectedUpdatedAt: expectedUpdatedAtRef.current ?? supplierUpdatedAt,
-            }),
-          })
-          const payload = (await response.json()) as unknown
-          if (!response.ok) {
-            const staleConflict = parseStaleVersionConflictPayload(payload)
-            if (staleConflict) {
-              expectedUpdatedAtRef.current = staleConflict.currentUpdatedAt
-              setDraftSaveStatus("idle")
-              return
-            }
-            setDraftSaveStatus("error")
-            return
-          }
-          const successPayload = payload as { updatedAt?: string }
-          if (typeof successPayload.updatedAt === "string") {
-            expectedUpdatedAtRef.current = successPayload.updatedAt
-            if (supplier?.id) {
-              hydratedSupplierIdentityRef.current = `${supplier.id}:${successPayload.updatedAt}`
-            }
-          }
-
-          draftAutosavedSnapshotRef.current = snapshot
-          setDraftSaveStatus("saved")
-          if (draftStatusResetTimeoutRef.current) {
-            clearTimeout(draftStatusResetTimeoutRef.current)
-          }
-          draftStatusResetTimeoutRef.current = setTimeout(() => {
-            setDraftSaveStatus("idle")
-          }, DRAFT_AUTOSAVE_STATUS_RESET_MS)
-          await mutate("/api/suppliers?includeDrafts=true")
-        } catch {
-          setDraftSaveStatus("error")
-        } finally {
-          draftAutosaveInFlightRef.current = false
-          releasePatchWriteLock()
-        }
-      }, DRAFT_AUTOSAVE_DEBOUNCE_MS)
-
-      return () => clearTimeout(timeout)
-    }
 
     const timeout = setTimeout(() => {
       const snapshot = JSON.stringify(form)
@@ -2521,16 +2365,9 @@ export function SupplierDetailView({
   }, [
     canEdit,
     form,
-    isDraftSupplier,
     isEditing,
     isPatchInFlight,
     localDraftStorageKey,
-    mutate,
-    mutateDetail,
-    supplierSlug,
-    supplierUpdatedAt,
-    releasePatchWriteLock,
-    tryAcquirePatchWriteLock,
   ])
 
   const restoreLocalDraft = () => {
@@ -2599,9 +2436,9 @@ export function SupplierDetailView({
       .map((suiteType) => ({
         id: suiteType.id,
         name: suiteType.name.trim(),
-        passengerCapacity: form.kind === "transfers" ? suiteType.passengerCapacity : null,
-        luggageCapacity: form.kind === "transfers" ? suiteType.luggageCapacity : null,
-        description: form.kind === "transfers" ? suiteType.description?.trim() || null : null,
+        passengerCapacity: isTransportSupplier(form.kind) ? suiteType.passengerCapacity : null,
+        luggageCapacity: isTransportSupplier(form.kind) ? suiteType.luggageCapacity : null,
+        description: isTransportSupplier(form.kind) ? suiteType.description?.trim() || null : null,
         active: suiteType.active,
       }))
     const suiteTypeIds = new Set(cleanedSuiteTypes.map((suiteType) => suiteType.id))
@@ -2633,7 +2470,7 @@ export function SupplierDetailView({
 
     for (const pkg of meaningfulPackages) {
       for (const route of pkg.routes) {
-        const isTransport = form.kind === "transfers"
+        const isTransport = isTransportSupplier(form.kind)
         const needsLocations = vocabulary.routeHasLocations && !isTransport
         if (
           !route.name.trim() ||
@@ -2642,8 +2479,12 @@ export function SupplierDetailView({
           toast.error(`Complete all ${vocabulary.route.toLowerCase()} fields before saving.`)
           return
         }
-        if (isTransport && (!route.transportServiceType || !route.pickupPoint?.trim() || !route.dropoffPoint?.trim())) {
-          toast.error("Complete service type, pickup point, and drop-off point before saving transport services.")
+        if (isTransport && (!route.pickupPoint?.trim() || !route.dropoffPoint?.trim())) {
+          toast.error("Complete pickup point and drop-off point before saving transport services.")
+          return
+        }
+        if (form.kind === "vehicle_rental" && !route.vehicleRentalDetails) {
+          toast.error("Vehicle rental routes require rental details before saving.")
           return
         }
       }
@@ -2678,24 +2519,16 @@ export function SupplierDetailView({
         name: route.name.trim(),
         originLocationId: route.originLocationId,
         destinationLocationId: route.destinationLocationId,
-        transportServiceType: form.kind === "transfers" ? route.transportServiceType ?? "transfer" : null,
-        pickupPoint: form.kind === "transfers" ? route.pickupPoint?.trim() ?? "" : null,
-        dropoffPoint: form.kind === "transfers" ? route.dropoffPoint?.trim() ?? "" : null,
-        includedKmPerDay:
-          form.kind === "transfers" && route.transportServiceType === "rental"
-            ? route.includedKmPerDay
-            : null,
-        extraKmPrice:
-          form.kind === "transfers" && route.transportServiceType === "rental"
-            ? route.extraKmPrice
-            : null,
-        securityDeposit:
-          form.kind === "transfers" && route.transportServiceType === "rental"
-            ? route.securityDeposit
-            : null,
-        oneWayFee:
-          form.kind === "transfers" && route.transportServiceType === "rental"
-            ? route.oneWayFee
+        pickupPoint: isTransportSupplier(form.kind) ? route.pickupPoint?.trim() ?? "" : null,
+        dropoffPoint: isTransportSupplier(form.kind) ? route.dropoffPoint?.trim() ?? "" : null,
+        vehicleRentalDetails:
+          form.kind === "vehicle_rental"
+            ? route.vehicleRentalDetails ?? {
+                includedKmPerDay: null,
+                extraKmPrice: null,
+                securityDeposit: null,
+                oneWayFee: null,
+              }
             : null,
         active: route.active,
         rateCards: routeRateGroup.rateCards
@@ -2705,8 +2538,8 @@ export function SupplierDetailView({
             routeId: rateCard.routeId,
             suiteTypeId: rateCard.suiteTypeId,
             pricePerPerson: rateCard.pricePerPerson,
-            childPrice: form.kind === "transfers" ? null : rateCard.childPrice,
-            infantPrice: form.kind === "transfers" ? null : rateCard.infantPrice,
+            childPrice: isTransportSupplier(form.kind) ? null : rateCard.childPrice,
+            infantPrice: isTransportSupplier(form.kind) ? null : rateCard.infantPrice,
             currency: rateCard.currency.trim().toUpperCase() || "ZAR",
             validFrom: rateCard.validFrom,
             validTo: rateCard.validTo ?? "",
@@ -2732,7 +2565,9 @@ export function SupplierDetailView({
           phone: form.phone.trim(),
           website: form.website.trim(),
           location: form.location.trim(),
+          locationDetail: form.locationDetail.trim(),
           locationId: getSupplierLocationId(form),
+          description: form.description.trim() || null,
           notes: form.notes.trim(),
           active: form.active,
           singleSupplementPct: form.singleSupplementPct,
@@ -2811,7 +2646,6 @@ export function SupplierDetailView({
       ])
       window.localStorage.removeItem(localDraftStorageKey)
       setPendingLocalDraft(null)
-      setDraftSaveStatus("idle")
       setIsEditing(false)
       setStaleVersionDialog(null)
       toast.success(
@@ -3064,9 +2898,6 @@ export function SupplierDetailView({
           <Card className="border-dashed">
             <CardContent className="p-4 text-sm text-muted-foreground">
               This supplier is in draft mode and is not available in booking or quote flows.
-              {draftSaveStatus === "saving" && " Saving draft..."}
-              {draftSaveStatus === "saved" && " Draft saved."}
-              {draftSaveStatus === "error" && " Draft save failed. Keep editing and try again."}
             </CardContent>
           </Card>
         )}
@@ -3184,6 +3015,15 @@ export function SupplierDetailView({
                       </Select>
                     </div>
                   )}
+
+                  <div className="space-y-2">
+                    <Label htmlFor="supplier-location-detail">Suburb / Area</Label>
+                    <BufferedInput
+                      id="supplier-location-detail"
+                      value={form.locationDetail}
+                      onValueChange={(value) => updateField("locationDetail", value)}
+                    />
+                  </div>
                 </div>
 
                 <SupplierEmailEditor
@@ -3193,7 +3033,33 @@ export function SupplierDetailView({
                 />
 
                 <div className="space-y-2">
-                  <Label htmlFor="supplier-notes">Notes</Label>
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="supplier-description">Description</Label>
+                    <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-700">
+                      External
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Visible to clients - describes the supplier.
+                  </p>
+                  <BufferedTextarea
+                    id="supplier-description"
+                    value={form.description}
+                    onValueChange={(value) => updateField("description", value)}
+                    rows={3}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="supplier-notes">Notes</Label>
+                    <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700">
+                      Internal
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Internal only — not visible to clients.
+                  </p>
                   <BufferedTextarea
                     id="supplier-notes"
                     value={form.notes}
@@ -3221,6 +3087,7 @@ export function SupplierDetailView({
                   <InfoItem label="Phone" value={supplier.phone} />
                   <InfoItem label="Website" value={supplier.website} />
                   <InfoItem label="Location" value={supplier.location} />
+                  <InfoItem label="Suburb / Area" value={supplier.locationDetail} />
                   {!isTrainOperatorSupplier && (
                     <InfoItem
                       label="City"
@@ -3284,8 +3151,29 @@ export function SupplierDetailView({
                   </div>
                 </div>
 
-                <div className="rounded-lg bg-secondary/40 p-4 text-sm text-muted-foreground">
-                  {supplier.notes || "No supplier notes recorded."}
+                <div className="space-y-3">
+                  <div className="rounded-lg border border-emerald-100 bg-emerald-50/50 p-4">
+                    <div className="mb-2 flex items-center gap-2">
+                      <span className="text-xs font-medium text-emerald-800">Description</span>
+                      <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-700">
+                        External
+                      </span>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {supplier.description || "No description added."}
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-secondary/40 p-4">
+                    <div className="mb-2 flex items-center gap-2">
+                      <span className="text-xs font-medium text-foreground">Notes</span>
+                      <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700">
+                        Internal
+                      </span>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {supplier.notes || "No internal notes recorded."}
+                    </p>
+                  </div>
                 </div>
               </>
             )}
@@ -3451,7 +3339,7 @@ export function SupplierDetailView({
                   packageIndex={0}
                   locationsById={locationsById}
                   vocabulary={activeVocabulary}
-                  isTransport={form.kind === "transfers"}
+                  isTransport={isTransportSupplier(form.kind)}
                   onAddPeriod={addRateCardPeriod}
                   onRemovePeriod={removeRateCardPeriod}
                   onUpdatePeriodField={updateRateCardPeriodField}

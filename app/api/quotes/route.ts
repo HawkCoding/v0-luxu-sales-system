@@ -6,6 +6,7 @@ import { buildQuoteNumber } from "@/lib/quotes/quote-number"
 
 const lineItemSchema = z.object({
   description: z.string().min(1),
+  supplierDescription: z.string().nullable().optional(),
   qty: z.number().int().positive().optional(),
   unitPrice: z.number().nonnegative().optional(),
   total: z.number().nonnegative().optional(),
@@ -84,6 +85,7 @@ export async function POST(req: Request) {
       lineItems.map((li, idx) => ({
         quote_id: quote.id,
         description: li.description,
+        supplier_description: li.supplierDescription ?? null,
         qty: li.qty ?? 1,
         unit_price: li.unitPrice ?? 0,
         total: li.total ?? 0,

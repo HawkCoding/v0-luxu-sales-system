@@ -14,10 +14,15 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { useActiveSuppliers, useBookingSupplierSchedules } from "@/lib/use-data"
+import { getSupplierVocabulary } from "@/lib/types"
 import type {
+  BookingScheduleSupplierKind,
+  BookingSupplierSchedule,
   BookingTransportRequest,
   Enquiry,
   Itinerary,
+  Supplier,
   TransportServiceType,
   Traveller,
 } from "@/lib/types"
@@ -27,6 +32,10 @@ import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 
 type EditableTransportRequest = BookingTransportRequest & {
+  isDraft?: boolean
+}
+
+type EditableSupplierSchedule = BookingSupplierSchedule & {
   isDraft?: boolean
 }
 
@@ -62,7 +71,7 @@ function createEmptyTransportRequest(sortOrder: number): EditableTransportReques
     pickupPoint: "",
     dropoffPoint: "",
     pickupAt: null,
-    returnAt: null,
+    rentalDetails: null,
     passengerCount: null,
     luggageCount: null,
     flightNumber: null,
@@ -73,19 +82,59 @@ function createEmptyTransportRequest(sortOrder: number): EditableTransportReques
   }
 }
 
+function createEmptySupplierSchedule(
+  supplierKind: BookingScheduleSupplierKind,
+  sortOrder: number,
+): EditableSupplierSchedule {
+  const now = new Date().toISOString()
+  return {
+    id: crypto.randomUUID(),
+    bookingId: "",
+    supplierId: null,
+    supplierKind,
+    label: null,
+    dateFrom: "",
+    dateTo: "",
+    timeStart: null,
+    timeEnd: null,
+    notes: null,
+    sortOrder,
+    createdAt: now,
+    updatedAt: now,
+    isDraft: true,
+  }
+}
+
 export function JobEnquiryTab({ enquiry, itineraries, onTransportRequestsChange }: JobEnquiryTabProps) {
+  const { data: suppliers = [] } = useActiveSuppliers()
+  const {
+    data: supplierSchedulesData,
+    mutate: mutateSupplierSchedules,
+  } = useBookingSupplierSchedules(enquiry?.jobId)
   const initialTransportRequests = useMemo(
     () => enquiry?.transportRequests ?? [],
     [enquiry?.transportRequests],
   )
+  const initialSupplierSchedules = useMemo(
+    () => supplierSchedulesData ?? [],
+    [supplierSchedulesData],
+  )
   const [transportRequests, setTransportRequests] = useState<EditableTransportRequest[]>(initialTransportRequests)
   const [editingTransportRequestIds, setEditingTransportRequestIds] = useState<Set<string>>(new Set())
   const [isSavingTransport, setIsSavingTransport] = useState(false)
+  const [supplierSchedules, setSupplierSchedules] = useState<EditableSupplierSchedule[]>(initialSupplierSchedules)
+  const [editingSupplierScheduleIds, setEditingSupplierScheduleIds] = useState<Set<string>>(new Set())
+  const [isSavingSupplierSchedules, setIsSavingSupplierSchedules] = useState(false)
 
   useEffect(() => {
     setTransportRequests(initialTransportRequests)
     setEditingTransportRequestIds(new Set())
   }, [initialTransportRequests])
+
+  useEffect(() => {
+    setSupplierSchedules(initialSupplierSchedules)
+    setEditingSupplierScheduleIds(new Set())
+  }, [initialSupplierSchedules])
 
   if (!enquiry) {
     return <div className="text-center py-8 text-sm text-muted-foreground">No enquiry data</div>
@@ -102,9 +151,61 @@ export function JobEnquiryTab({ enquiry, itineraries, onTransportRequestsChange 
           ? {
               ...request,
               [key]: value,
-              returnAt: key === "serviceType" && value === "transfer" ? null : request.returnAt,
+              rentalDetails:
+                key === "serviceType" && value === "transfer"
+                  ? null
+                  : key === "serviceType" && value === "rental" && !request.rentalDetails
+                    ? {
+                        transportRequestId: request.id,
+                        returnAt: null,
+                        returnCutoffTime: null,
+                        createdAt: request.createdAt,
+                        updatedAt: request.updatedAt,
+                      }
+                    : request.rentalDetails,
             }
           : request,
+      ),
+    )
+  }
+
+  const updateRentalDetails = (
+    requestId: string,
+    updates: Partial<NonNullable<EditableTransportRequest["rentalDetails"]>>,
+  ) => {
+    setTransportRequests((current) =>
+      current.map((request) =>
+        request.id === requestId
+          ? {
+              ...request,
+              rentalDetails: {
+                transportRequestId: request.id,
+                returnAt: null,
+                returnCutoffTime: null,
+                createdAt: request.createdAt,
+                updatedAt: request.updatedAt,
+                ...request.rentalDetails,
+                ...updates,
+              },
+            }
+          : request,
+      ),
+    )
+  }
+
+  const updateSupplierSchedule = <K extends keyof EditableSupplierSchedule>(
+    scheduleId: string,
+    key: K,
+    value: EditableSupplierSchedule[K],
+  ) => {
+    setSupplierSchedules((current) =>
+      current.map((schedule) =>
+        schedule.id === scheduleId
+          ? {
+              ...schedule,
+              [key]: value,
+            }
+          : schedule,
       ),
     )
   }
@@ -115,6 +216,13 @@ export function JobEnquiryTab({ enquiry, itineraries, onTransportRequestsChange 
     )
     if (incompleteRequest) {
       toast.error("Complete pickup and drop-off points before saving transport requests.")
+      return
+    }
+    const incompleteRental = transportRequests.find(
+      (request) => request.serviceType === "rental" && !request.rentalDetails?.returnAt,
+    )
+    if (incompleteRental) {
+      toast.error("Complete return date/time before saving vehicle rentals.")
       return
     }
 
@@ -133,7 +241,13 @@ export function JobEnquiryTab({ enquiry, itineraries, onTransportRequestsChange 
             pickupPoint: request.pickupPoint,
             dropoffPoint: request.dropoffPoint,
             pickupAt: request.pickupAt,
-            returnAt: request.serviceType === "rental" ? request.returnAt : null,
+            rentalDetails:
+              request.serviceType === "rental"
+                ? {
+                    returnAt: request.rentalDetails?.returnAt ?? null,
+                    returnCutoffTime: request.rentalDetails?.returnCutoffTime ?? null,
+                  }
+                : null,
             passengerCount: request.passengerCount,
             luggageCount: request.luggageCount,
             flightNumber: request.flightNumber,
@@ -156,6 +270,80 @@ export function JobEnquiryTab({ enquiry, itineraries, onTransportRequestsChange 
       toast.error("Failed to save transport requests")
     } finally {
       setIsSavingTransport(false)
+    }
+  }
+
+  const saveSupplierSchedules = async () => {
+    if (!enquiry) return
+
+    const incompleteSchedule = supplierSchedules.find((schedule) => !schedule.dateFrom || !schedule.dateTo)
+    if (incompleteSchedule) {
+      toast.error("Complete dates before saving supplier schedules.")
+      return
+    }
+
+    const invalidHotelStay = supplierSchedules.find(
+      (schedule) => schedule.supplierKind === "hotel_property" && schedule.dateTo <= schedule.dateFrom,
+    )
+    if (invalidHotelStay) {
+      toast.error("Hotel check-out date must be after check-in date.")
+      return
+    }
+
+    const invalidTrainJourney = supplierSchedules.find(
+      (schedule) => schedule.supplierKind === "train_operator" && schedule.dateTo < schedule.dateFrom,
+    )
+    if (invalidTrainJourney) {
+      toast.error("Train arrival date cannot be before departure date.")
+      return
+    }
+
+    const invalidSameDayTime = supplierSchedules.find(
+      (schedule) =>
+        schedule.dateFrom === schedule.dateTo &&
+        schedule.timeStart &&
+        schedule.timeEnd &&
+        schedule.timeEnd < schedule.timeStart,
+    )
+    if (invalidSameDayTime) {
+      toast.error("End time cannot be before start time on the same date.")
+      return
+    }
+
+    setIsSavingSupplierSchedules(true)
+    try {
+      const response = await fetch(`/api/jobs/${enquiry.jobId}/supplier-schedules`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          schedules: supplierSchedules.map((schedule, index) => ({
+            id: schedule.id,
+            supplierId: schedule.supplierId,
+            supplierKind: schedule.supplierKind,
+            label: schedule.label,
+            dateFrom: schedule.dateFrom,
+            dateTo: schedule.dateTo,
+            timeStart: schedule.timeStart,
+            timeEnd: schedule.timeEnd,
+            notes: schedule.notes,
+            sortOrder: index,
+          })),
+        }),
+      })
+      const payload = await response.json()
+      if (!response.ok) {
+        toast.error(payload.error ?? "Failed to save supplier schedules")
+        return
+      }
+
+      setSupplierSchedules(payload as EditableSupplierSchedule[])
+      setEditingSupplierScheduleIds(new Set())
+      await mutateSupplierSchedules(payload as BookingSupplierSchedule[], { revalidate: false })
+      toast.success("Supplier schedules saved")
+    } catch {
+      toast.error("Failed to save supplier schedules")
+    } finally {
+      setIsSavingSupplierSchedules(false)
     }
   }
 
@@ -374,12 +562,11 @@ export function JobEnquiryTab({ enquiry, itineraries, onTransportRequestsChange 
                         <div className="flex gap-2">
                           <Input
                             type="datetime-local"
-                            value={toDateTimeLocalValue(request.returnAt)}
+                            value={toDateTimeLocalValue(request.rentalDetails?.returnAt)}
                             onChange={(event) =>
-                              updateTransportRequest(
+                              updateRentalDetails(
                                 request.id,
-                                "returnAt",
-                                fromDateTimeLocalValue(event.target.value),
+                                { returnAt: fromDateTimeLocalValue(event.target.value) },
                               )
                             }
                           />
@@ -394,6 +581,23 @@ export function JobEnquiryTab({ enquiry, itineraries, onTransportRequestsChange 
                             <Check className="h-4 w-4" />
                           </Button>
                         </div>
+                      </div>
+                    ) : null}
+                    {request.serviceType === "rental" ? (
+                      <div className="space-y-1.5">
+                        <Label>Return by (time)</Label>
+                        <Input
+                          type="time"
+                          value={request.rentalDetails?.returnCutoffTime ?? ""}
+                          onChange={(event) =>
+                            updateRentalDetails(request.id, {
+                              returnCutoffTime: event.target.value || null,
+                            })
+                          }
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Time after which return counts as next day
+                        </p>
                       </div>
                     ) : null}
                     <div className="space-y-1.5">
@@ -460,6 +664,56 @@ export function JobEnquiryTab({ enquiry, itineraries, onTransportRequestsChange 
           )}
         </CardContent>
       </Card>
+
+      <SupplierScheduleSection
+        title="Hotel Stays"
+        emptyText="No structured hotel stays captured yet."
+        supplierKind="hotel_property"
+        schedules={supplierSchedules.filter((schedule) => schedule.supplierKind === "hotel_property")}
+        suppliers={suppliers}
+        editingIds={editingSupplierScheduleIds}
+        isSaving={isSavingSupplierSchedules}
+        onAdd={() =>
+          setSupplierSchedules((current) => {
+            const schedule = createEmptySupplierSchedule("hotel_property", current.length)
+            setEditingSupplierScheduleIds((editingIds) => new Set(editingIds).add(schedule.id))
+            return [...current, schedule]
+          })
+        }
+        onEdit={(scheduleId) =>
+          setEditingSupplierScheduleIds((editingIds) => new Set(editingIds).add(scheduleId))
+        }
+        onRemove={(scheduleId) =>
+          setSupplierSchedules((current) => current.filter((schedule) => schedule.id !== scheduleId))
+        }
+        onSave={saveSupplierSchedules}
+        onUpdate={updateSupplierSchedule}
+      />
+
+      <SupplierScheduleSection
+        title="Train Journeys"
+        emptyText="No structured train journeys captured yet."
+        supplierKind="train_operator"
+        schedules={supplierSchedules.filter((schedule) => schedule.supplierKind === "train_operator")}
+        suppliers={suppliers}
+        editingIds={editingSupplierScheduleIds}
+        isSaving={isSavingSupplierSchedules}
+        onAdd={() =>
+          setSupplierSchedules((current) => {
+            const schedule = createEmptySupplierSchedule("train_operator", current.length)
+            setEditingSupplierScheduleIds((editingIds) => new Set(editingIds).add(schedule.id))
+            return [...current, schedule]
+          })
+        }
+        onEdit={(scheduleId) =>
+          setEditingSupplierScheduleIds((editingIds) => new Set(editingIds).add(scheduleId))
+        }
+        onRemove={(scheduleId) =>
+          setSupplierSchedules((current) => current.filter((schedule) => schedule.id !== scheduleId))
+        }
+        onSave={saveSupplierSchedules}
+        onUpdate={updateSupplierSchedule}
+      />
 
       {/* Travellers */}
       {enquiry.travellers && enquiry.travellers.length > 0 && (
@@ -542,7 +796,10 @@ function TransportRequestSummary({ request, index, onEdit, onRemove }: Transport
             <Field label={dropoffLabel} value={request.dropoffPoint} />
             <Field label="Pickup date/time" value={request.pickupAtDisplay ?? "Not set"} />
             {request.serviceType === "rental" ? (
-              <Field label="Return date/time" value={request.returnAtDisplay ?? "Not set"} />
+              <Field label="Return date/time" value={request.rentalDetails?.returnAtDisplay ?? "Not set"} />
+            ) : null}
+            {request.serviceType === "rental" ? (
+              <Field label="Return by" value={request.rentalDetails?.returnCutoffTime ?? "Not set"} />
             ) : null}
             <Field label="Passengers" value={request.passengerCount?.toString() ?? "Not set"} />
             <Field label="Luggage" value={request.luggageCount?.toString() ?? "Not set"} />
@@ -568,6 +825,239 @@ function TransportRequestSummary({ request, index, onEdit, onRemove }: Transport
             variant="outline"
             size="icon"
             aria-label={`Remove transport request ${index + 1}`}
+            onClick={onRemove}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+interface SupplierScheduleSectionProps {
+  title: string
+  emptyText: string
+  supplierKind: BookingScheduleSupplierKind
+  schedules: EditableSupplierSchedule[]
+  suppliers: Supplier[]
+  editingIds: Set<string>
+  isSaving: boolean
+  onAdd: () => void
+  onEdit: (scheduleId: string) => void
+  onRemove: (scheduleId: string) => void
+  onSave: () => void
+  onUpdate: <K extends keyof EditableSupplierSchedule>(
+    scheduleId: string,
+    key: K,
+    value: EditableSupplierSchedule[K],
+  ) => void
+}
+
+function SupplierScheduleSection({
+  title,
+  emptyText,
+  supplierKind,
+  schedules,
+  suppliers,
+  editingIds,
+  isSaving,
+  onAdd,
+  onEdit,
+  onRemove,
+  onSave,
+  onUpdate,
+}: SupplierScheduleSectionProps) {
+  const vocabulary = getSupplierVocabulary(supplierKind)
+  const fields = vocabulary.scheduleFields
+  const supplierOptions = suppliers.filter((supplier) => supplier.kind === supplierKind)
+  const supplierNameById = new Map(supplierOptions.map((supplier) => [supplier.id, supplier.name]))
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between gap-3">
+          <CardTitle className="text-sm font-medium">{title}</CardTitle>
+          <div className="flex items-center gap-2">
+            <Button type="button" size="sm" variant="outline" onClick={onAdd}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add
+            </Button>
+            <Button type="button" size="sm" onClick={onSave} disabled={isSaving}>
+              <Save className="mr-2 h-4 w-4" />
+              {isSaving ? "Saving" : "Save"}
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {schedules.length === 0 ? (
+          <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+            {emptyText}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {schedules.map((schedule, index) => {
+              const isEditing = schedule.isDraft || editingIds.has(schedule.id)
+
+              if (!isEditing) {
+                return (
+                  <SupplierScheduleSummary
+                    key={schedule.id}
+                    schedule={schedule}
+                    index={index}
+                    supplierName={schedule.supplierId ? supplierNameById.get(schedule.supplierId) ?? null : null}
+                    fields={fields}
+                    onEdit={() => onEdit(schedule.id)}
+                    onRemove={() => onRemove(schedule.id)}
+                  />
+                )
+              }
+
+              return (
+                <div key={schedule.id} className="grid gap-3 rounded-md border p-3 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="space-y-1.5">
+                    <Label>Supplier</Label>
+                    <Select
+                      value={schedule.supplierId ?? "none"}
+                      onValueChange={(value) =>
+                        onUpdate(schedule.id, "supplierId", value === "none" ? null : value)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">No supplier selected</SelectItem>
+                        {supplierOptions.map((supplier) => (
+                          <SelectItem key={supplier.id} value={supplier.id}>
+                            {supplier.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Label</Label>
+                    <Input
+                      value={schedule.label ?? ""}
+                      onChange={(event) => onUpdate(schedule.id, "label", event.target.value || null)}
+                      placeholder={supplierKind === "hotel_property" ? "Night 1" : "Outbound leg"}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>{fields?.dateFromLabel ?? "Start date"}</Label>
+                    <Input
+                      type="date"
+                      value={schedule.dateFrom}
+                      onChange={(event) => onUpdate(schedule.id, "dateFrom", event.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>{fields?.dateToLabel ?? "End date"}</Label>
+                    <Input
+                      type="date"
+                      value={schedule.dateTo}
+                      onChange={(event) => onUpdate(schedule.id, "dateTo", event.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>{fields?.timeStartLabel ?? "Start time"}</Label>
+                    <Input
+                      type="time"
+                      value={schedule.timeStart ?? ""}
+                      onChange={(event) => onUpdate(schedule.id, "timeStart", event.target.value || null)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>{fields?.timeEndLabel ?? "End time"}</Label>
+                    <Input
+                      type="time"
+                      value={schedule.timeEnd ?? ""}
+                      onChange={(event) => onUpdate(schedule.id, "timeEnd", event.target.value || null)}
+                    />
+                  </div>
+                  <div className="space-y-1.5 md:col-span-2">
+                    <Label>Notes</Label>
+                    <Textarea
+                      value={schedule.notes ?? ""}
+                      onChange={(event) => onUpdate(schedule.id, "notes", event.target.value || null)}
+                    />
+                  </div>
+                  <div className="flex items-end justify-end xl:col-span-4">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      aria-label={`Remove ${title.toLowerCase()} row ${index + 1}`}
+                      onClick={() => onRemove(schedule.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+interface SupplierScheduleSummaryProps {
+  schedule: EditableSupplierSchedule
+  index: number
+  supplierName: string | null
+  fields: ReturnType<typeof getSupplierVocabulary>["scheduleFields"]
+  onEdit: () => void
+  onRemove: () => void
+}
+
+function SupplierScheduleSummary({
+  schedule,
+  index,
+  supplierName,
+  fields,
+  onEdit,
+  onRemove,
+}: SupplierScheduleSummaryProps) {
+  const title = schedule.label || supplierName || "Unlabelled schedule"
+
+  return (
+    <div className="rounded-md border bg-secondary/20 p-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="secondary">{supplierName ?? "No supplier"}</Badge>
+            <p className="text-sm font-medium">{title}</p>
+          </div>
+          <div className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
+            <Field label={fields?.dateFromLabel ?? "Start date"} value={schedule.dateFromDisplay ?? schedule.dateFrom} />
+            <Field label={fields?.dateToLabel ?? "End date"} value={schedule.dateToDisplay ?? schedule.dateTo} />
+            <Field label={fields?.timeStartLabel ?? "Start time"} value={schedule.timeStart ?? "Not set"} />
+            <Field label={fields?.timeEndLabel ?? "End time"} value={schedule.timeEnd ?? "Not set"} />
+          </div>
+          {schedule.notes ? (
+            <p className="text-sm text-muted-foreground">{schedule.notes}</p>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-2 sm:justify-end">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-label={`Edit supplier schedule ${index + 1}`}
+            onClick={onEdit}
+          >
+            <Pencil className="mr-2 h-4 w-4" />
+            Edit
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            aria-label={`Remove supplier schedule ${index + 1}`}
             onClick={onRemove}
           >
             <Trash2 className="h-4 w-4" />

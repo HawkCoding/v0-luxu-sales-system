@@ -21,6 +21,7 @@ const QUOTE_ID = "00000000-0000-4000-8000-00000000dddd"
 
 function buildAuth() {
   const lineInsert = vi.fn(async () => ({ error: null }))
+  const quoteInsertPayload = vi.fn()
   const supabase = {
     from: vi.fn((table: string) => {
       if (table === "bookings") {
@@ -37,25 +38,28 @@ function buildAuth() {
           select: vi.fn(() => ({
             eq: vi.fn(async () => ({ data: [], error: null })),
           })),
-          insert: vi.fn(() => ({
-            select: vi.fn(() => ({
-              single: vi.fn(async () => ({
-                data: {
-                  id: QUOTE_ID,
-                  booking_id: BOOKING_ID,
-                  itinerary_id: null,
-                  status: "draft",
-                  quote_number: "BT-2026-0001-Q1",
-                  parent_quote_id: null,
-                  validity_until: null,
-                  subtotal: 0,
-                  vat: 0,
-                  total: 0,
-                },
-                error: null,
+          insert: vi.fn((payload: unknown) => {
+            quoteInsertPayload(payload)
+            return {
+              select: vi.fn(() => ({
+                single: vi.fn(async () => ({
+                  data: {
+                    id: QUOTE_ID,
+                    booking_id: BOOKING_ID,
+                    itinerary_id: null,
+                    status: "draft",
+                    quote_number: "BT-2026-0001-Q1",
+                    parent_quote_id: null,
+                    validity_until: null,
+                    subtotal: 0,
+                    vat: 0,
+                    total: 0,
+                  },
+                  error: null,
+                })),
               })),
-            })),
-          })),
+            }
+          }),
         }
       }
       if (table === "quote_line_items") {
@@ -74,7 +78,7 @@ function buildAuth() {
     },
   })
 
-  return { lineInsert }
+  return { lineInsert, quoteInsertPayload }
 }
 
 function postJson(body: unknown) {
@@ -129,5 +133,56 @@ describe("POST /api/quotes", () => {
     const body = await res.json()
     expect(body).toMatchObject({ id: QUOTE_ID, quoteNumber: "BT-2026-0001-Q1" })
     expect(lineInsert).toHaveBeenCalled()
+  })
+
+  it("accepts and forwards status: 'ready'", async () => {
+    const { quoteInsertPayload } = buildAuth()
+    const res = await POST(postJson({ bookingId: BOOKING_ID, status: "ready" }))
+    expect(res.status).toBe(200)
+    expect(quoteInsertPayload).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: "ready" }),
+    )
+  })
+
+  it("persists preview line item prices without recalculating them", async () => {
+    const { lineInsert } = buildAuth()
+    const lineItems = [
+      {
+        description: "Blue Train - Deluxe Suite - Cape Town to Pretoria - Adult",
+        qty: 2,
+        unitPrice: 1000,
+        total: 2000,
+      },
+      {
+        description: "Harbour Hotel - Sea View Room - Full Board",
+        qty: 4,
+        unitPrice: 500,
+        total: 2000,
+      },
+    ]
+
+    const res = await POST(postJson({ bookingId: BOOKING_ID, lineItems }))
+
+    expect(res.status).toBe(200)
+    expect(lineInsert).toHaveBeenCalledWith([
+      {
+        quote_id: QUOTE_ID,
+        description: lineItems[0].description,
+        supplier_description: null,
+        qty: 2,
+        unit_price: 1000,
+        total: 2000,
+        sort_order: 0,
+      },
+      {
+        quote_id: QUOTE_ID,
+        description: lineItems[1].description,
+        supplier_description: null,
+        qty: 4,
+        unit_price: 500,
+        total: 2000,
+        sort_order: 1,
+      },
+    ])
   })
 })

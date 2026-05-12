@@ -184,13 +184,9 @@ export function PackageDetailView({ packageDetail }: PackageDetailViewProps) {
               name: route.name.trim(),
               originLocationId: route.originLocationId,
               destinationLocationId: route.destinationLocationId,
-              transportServiceType: route.transportServiceType,
               pickupPoint: route.pickupPoint,
               dropoffPoint: route.dropoffPoint,
-              includedKmPerDay: route.includedKmPerDay,
-              extraKmPrice: route.extraKmPrice,
-              securityDeposit: route.securityDeposit,
-              oneWayFee: route.oneWayFee,
+              vehicleRentalDetails: route.vehicleRentalDetails,
               active: route.active,
               existing: Boolean(route.existing),
             })),
@@ -224,6 +220,7 @@ export function PackageDetailView({ packageDetail }: PackageDetailViewProps) {
       (leg) =>
         leg.supplierKind !== "hotel_property" &&
         leg.supplierKind !== "transfers" &&
+        leg.supplierKind !== "vehicle_rental" &&
         leg.selectedRouteIds.length === 0,
     )
     if (legWithoutRoute) {

@@ -4,6 +4,7 @@ import type { Role } from "@/lib/types"
 
 export interface ApiAuthProfile {
   clearanceLevel: string
+  isActive: boolean
   name: string | null
   surname: string | null
   email: string | null
@@ -38,11 +39,11 @@ export async function requireUser(): Promise<ApiAuthResult> {
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
-    .select("clearance_level, name, surname, email")
+    .select("clearance_level, is_active, name, surname, email")
     .eq("user_id", user.id)
     .single()
 
-  if (profileError || !profile) {
+  if (profileError || !profile || profile.is_active === false) {
     return { ok: false, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) }
   }
 
@@ -53,6 +54,7 @@ export async function requireUser(): Promise<ApiAuthResult> {
       user: { id: user.id, email: user.email ?? undefined },
       profile: {
         clearanceLevel: profile.clearance_level,
+        isActive: profile.is_active ?? true,
         name: profile.name,
         surname: profile.surname,
         email: profile.email,

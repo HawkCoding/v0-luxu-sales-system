@@ -24,9 +24,13 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   if (jwtRole) {
     const { data: profile } = await supabase
       .from("profiles")
-      .select("name, surname, email")
+      .select("name, surname, email, is_active")
       .eq("user_id", user.id)
       .single()
+
+    if (!profile || profile.is_active === false) {
+      redirect("/login")
+    }
 
     role = jwtRole
     displayName = profile
@@ -36,11 +40,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   } else {
     const { data: profile } = await supabase
       .from("profiles")
-      .select("name, surname, clearance_level, email")
+      .select("name, surname, clearance_level, email, is_active")
       .eq("user_id", user.id)
       .single()
 
-    if (!profile || !isRole(profile.clearance_level)) {
+    if (!profile || profile.is_active === false || !isRole(profile.clearance_level)) {
       redirect("/login")
     }
 
