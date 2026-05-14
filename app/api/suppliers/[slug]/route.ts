@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { staleVersionResponse } from "@/lib/concurrency"
 import { mapSupplierDetail } from "@/lib/suppliers"
 import {
   allowedRoles,
@@ -16,20 +17,27 @@ import {
   type SupplierDraftSaveInput,
   type SupplierSaveInput,
 } from "../schemas"
-
-interface StaleVersionConflictPayload {
-  error: string
-  code: "STALE_VERSION"
-  currentUpdatedAt: string
-}
+import { isTransportSupplier } from "@/lib/types"
 
 interface NormalizedRoute {
   id: string
   supplier_id: string
   name: string
-  origin_location_id: string
-  destination_location_id: string
+  origin_location_id: string | null
+  destination_location_id: string | null
+  pickup_point: string | null
+  dropoff_point: string | null
   active: boolean
+  created_at: string
+  updated_at: string
+}
+
+interface NormalizedVehicleRentalRouteDetails {
+  route_id: string
+  included_km_per_day: number | null
+  extra_km_price: number | null
+  security_deposit: number | null
+  one_way_fee: number | null
   created_at: string
   updated_at: string
 }
@@ -82,6 +90,15 @@ function getRateCardBusinessKey(rateCard: {
   valid_from: string
 }) {
   return [rateCard.route_id, rateCard.suite_type_id, rateCard.valid_from].join("|")
+}
+
+function normalizeOptionalText(value: string | null | undefined): string | null {
+  const normalized = value?.trim()
+  return normalized ? normalized : null
+}
+
+function normalizeOptionalUuid(value: string | null | undefined): string | null {
+  return value && value.length > 0 ? value : null
 }
 
 function areRateCardDateRangesOverlapping(
@@ -164,6 +181,7 @@ export async function GET(
       detail.routes,
       detail.rateCards,
       detail.locations,
+      detail.vehicleRentalRouteDetails,
     ),
   )
 }
@@ -284,13 +302,7 @@ export async function PATCH(
   const supplierId = existingDetail.supplier.id
   const expectedUpdatedAt = parsed.expectedUpdatedAt
   if (typeof expectedUpdatedAt === "string" && expectedUpdatedAt !== existingDetail.supplier.updated_at) {
-    const staleVersionConflict: StaleVersionConflictPayload = {
-      error:
-        "This supplier was modified by another user since you started editing. Please refresh and try again.",
-      code: "STALE_VERSION",
-      currentUpdatedAt: existingDetail.supplier.updated_at,
-    }
-    return NextResponse.json(staleVersionConflict, { status: 409 })
+    return staleVersionResponse("supplier", existingDetail.supplier.updated_at)
   }
 
   const parsedEmailRows = parsed.emails
@@ -326,11 +338,15 @@ export async function PATCH(
   })
 
   const now = new Date().toISOString()
+  const isTransport = isTransportSupplier(parsed.kind)
   const normalizedSuiteTypes = parsed.suiteTypes
     .map((suiteType) => ({
       id: suiteType.id ?? makeUuid(),
       supplier_id: supplierId,
       name: suiteType.name.trim(),
+      passenger_capacity: isTransport ? (suiteType.passengerCapacity ?? null) : null,
+      luggage_capacity: isTransport ? (suiteType.luggageCapacity ?? null) : null,
+      description: isTransport ? normalizeOptionalText(suiteType.description) : null,
       active: suiteType.active,
       created_at: now,
       updated_at: now,
@@ -342,19 +358,41 @@ export async function PATCH(
       id: route.id ?? makeUuid(),
       supplier_id: supplierId,
       name: route.name.trim(),
-      origin_location_id: route.originLocationId,
-      destination_location_id: route.destinationLocationId,
+      origin_location_id: isTransport ? null : normalizeOptionalUuid(route.originLocationId),
+      destination_location_id: isTransport ? null : normalizeOptionalUuid(route.destinationLocationId),
+      pickup_point: isTransport ? normalizeOptionalText(route.pickupPoint) : null,
+      dropoff_point: isTransport ? normalizeOptionalText(route.dropoffPoint) : null,
       active: route.active,
       created_at: now,
       updated_at: now,
     }))
     .filter((route) =>
       isDraftSave
-        ? route.name.length > 0 && route.origin_location_id.length > 0 && route.destination_location_id.length > 0
+        ? isTransport
+          ? route.name.length > 0 && Boolean(route.pickup_point) && Boolean(route.dropoff_point)
+          : route.name.length > 0 && Boolean(route.origin_location_id) && Boolean(route.destination_location_id)
         : true,
     )
 
   const routeIds = new Set(normalizedRoutes.map((route) => route.id))
+  const normalizedVehicleRentalDetails: NormalizedVehicleRentalRouteDetails[] =
+    parsed.kind === "vehicle_rental"
+      ? parsed.routes.flatMap((route) => {
+          const routeId = route.id ?? normalizedRoutes.find((candidate) => candidate.name === route.name.trim())?.id
+          if (!routeId || !routeIds.has(routeId)) return []
+          const details = route.vehicleRentalDetails ?? {}
+          return [{
+            route_id: routeId,
+            included_km_per_day: details.includedKmPerDay ?? null,
+            extra_km_price: details.extraKmPrice ?? null,
+            security_deposit: details.securityDeposit ?? null,
+            one_way_fee: details.oneWayFee ?? null,
+            created_at: now,
+            updated_at: now,
+          }]
+        })
+      : []
+
   const suiteTypeIds = new Set(normalizedSuiteTypes.map((suiteType) => suiteType.id))
   const existingRateCardByBusinessKey = new Map(
     existingDetail.rateCards.map((rateCard) => [getRateCardBusinessKey(rateCard), rateCard]),
@@ -387,8 +425,8 @@ export async function PATCH(
           route_id: routeId,
           suite_type_id: rateCard.suiteTypeId,
           price_per_person: rateCard.pricePerPerson,
-          child_price: rateCard.childPrice,
-          infant_price: rateCard.infantPrice,
+          child_price: isTransport ? null : rateCard.childPrice,
+          infant_price: isTransport ? null : rateCard.infantPrice,
           currency: rateCard.currency.trim().toUpperCase() || "ZAR",
           valid_from: rateCard.validFrom,
           valid_to: normalizeNullableDate(rateCard.validTo),
@@ -537,8 +575,14 @@ export async function PATCH(
     phone: parsed.phone || null,
     website: parsed.website || null,
     location: parsed.location || null,
+    location_detail: parsed.locationDetail?.trim() || null,
     location_id: parsed.locationId ?? null,
+    location_area_id: parsed.locationAreaId ?? null,
+    description: parsed.description?.trim() || null,
     notes: parsed.notes || null,
+    single_supplement_pct: parsed.singleSupplementPct,
+    default_time_start: parsed.defaultTimeStart ?? null,
+    default_time_end: parsed.defaultTimeEnd ?? null,
     active: isDraftSave ? false : parsed.active,
   }
 
@@ -563,13 +607,10 @@ export async function PATCH(
       .eq("id", supplierId)
       .maybeSingle()
 
-    const staleVersionConflict: StaleVersionConflictPayload = {
-      error:
-        "This supplier was modified by another user since you started editing. Please refresh and try again.",
-      code: "STALE_VERSION",
-      currentUpdatedAt: latestSupplierSnapshot?.updated_at ?? existingDetail.supplier.updated_at,
-    }
-    return NextResponse.json(staleVersionConflict, { status: 409 })
+    return staleVersionResponse(
+      "supplier",
+      latestSupplierSnapshot?.updated_at ?? existingDetail.supplier.updated_at,
+    )
   }
 
   if (normalizedEmails.length > 0) {
@@ -611,6 +652,38 @@ export async function PATCH(
         { error: "Failed to update supplier routes" },
         { status: 500 },
       )
+    }
+  }
+
+  if (parsed.kind === "vehicle_rental") {
+    if (normalizedVehicleRentalDetails.length > 0) {
+      const { error: vehicleRentalDetailsError } = await supabase
+        .from("vehicle_rental_route_details")
+        .upsert(normalizedVehicleRentalDetails, { onConflict: "route_id" })
+
+      if (vehicleRentalDetailsError) {
+        logSupplierMutationError("vehicle-rental-details-upsert", supplierId, vehicleRentalDetailsError)
+        return NextResponse.json(
+          { error: "Failed to update vehicle rental route details" },
+          { status: 500 },
+        )
+      }
+    }
+  } else {
+    const routeIdsForSupplier = existingDetail.routes.map((route) => route.id)
+    if (routeIdsForSupplier.length > 0) {
+      const { error: deleteRentalDetailsError } = await supabase
+        .from("vehicle_rental_route_details")
+        .delete()
+        .in("route_id", routeIdsForSupplier)
+
+      if (deleteRentalDetailsError) {
+        logSupplierMutationError("vehicle-rental-details-delete", supplierId, deleteRentalDetailsError)
+        return NextResponse.json(
+          { error: "Failed to remove vehicle rental route details" },
+          { status: 500 },
+        )
+      }
     }
   }
 
@@ -723,6 +796,7 @@ export async function PATCH(
       updatedDetail.routes,
       updatedDetail.rateCards,
       updatedDetail.locations,
+      updatedDetail.vehicleRentalRouteDetails,
     ),
   )
 }

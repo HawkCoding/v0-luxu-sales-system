@@ -8,9 +8,17 @@ export const dateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD")
 
+const nullableTimeSchema = z
+  .union([z.string().regex(/^\d{2}:\d{2}$/), z.literal(""), z.null()])
+  .optional()
+  .transform((value) => (value && value.length > 0 ? value : null))
+
 export const suiteTypeSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().trim().min(1, "Suite type name is required"),
+  passengerCapacity: z.number().int().nonnegative().nullable().optional(),
+  luggageCapacity: z.number().int().nonnegative().nullable().optional(),
+  description: z.string().trim().max(1000).nullable().optional(),
   active: z.boolean(),
 })
 
@@ -26,11 +34,30 @@ export const rateCardSchema = z.object({
   validTo: z.union([dateSchema, z.literal(""), z.null()]),
 })
 
+const supplierKindSchema = z.enum([
+  "train_operator",
+  "hotel_property",
+  "transfers",
+  "vehicle_rental",
+  "tour_operator",
+  "airline",
+])
+
+const vehicleRentalRouteDetailsSchema = z.object({
+  includedKmPerDay: z.number().finite().nonnegative().nullable().optional(),
+  extraKmPrice: z.number().finite().nonnegative().nullable().optional(),
+  securityDeposit: z.number().finite().nonnegative().nullable().optional(),
+  oneWayFee: z.number().finite().nonnegative().nullable().optional(),
+})
+
 export const routeSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().trim().min(1, "Route name is required"),
-  originLocationId: z.string().uuid(),
-  destinationLocationId: z.string().uuid(),
+  originLocationId: z.string().uuid().nullable().optional(),
+  destinationLocationId: z.string().uuid().nullable().optional(),
+  pickupPoint: z.string().trim().max(500).nullable().optional(),
+  dropoffPoint: z.string().trim().max(500).nullable().optional(),
+  vehicleRentalDetails: vehicleRentalRouteDetailsSchema.nullable().optional(),
   active: z.boolean(),
   rateCards: z.array(rateCardSchema).default([]),
 })
@@ -62,7 +89,7 @@ export const draftSupplierEmailSchema = z.object({
 
 export const supplierSaveSchema = z.object({
   name: z.string().trim().min(2, "Supplier name must be at least 2 characters").max(200),
-  kind: z.enum(["train_operator", "hotel_property", "transfers", "tour_operator", "airline"]),
+  kind: supplierKindSchema,
   email: z
     .string()
     .trim()
@@ -94,13 +121,64 @@ export const supplierSaveSchema = z.object({
     .refine((value) => value === "" || value.length >= 2, {
       message: "Location must be at least 2 characters",
     }),
+  locationDetail: z.string().trim().max(255).nullable().optional(),
   locationId: z.string().uuid().nullable().optional(),
+  locationAreaId: z.string().uuid().nullable().optional(),
+  description: z.string().trim().max(2000).nullable().optional(),
   notes: z.string().trim().max(5000),
+  singleSupplementPct: z.number().finite().min(0).max(1000).default(0),
+  defaultTimeStart: nullableTimeSchema,
+  defaultTimeEnd: nullableTimeSchema,
   active: z.boolean(),
   emails: z.array(supplierEmailSchema).default([]),
   suiteTypes: z.array(suiteTypeSchema),
   routes: z.array(routeSchema).default([]),
   expectedUpdatedAt: z.string().optional(),
+}).superRefine((value, ctx) => {
+  for (const [index, route] of value.routes.entries()) {
+    if (value.kind === "transfers" || value.kind === "vehicle_rental") {
+      if (!route.pickupPoint?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["routes", index, "pickupPoint"],
+          message: "Pickup point is required",
+        })
+      }
+      if (!route.dropoffPoint?.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["routes", index, "dropoffPoint"],
+          message: "Drop-off point is required",
+        })
+      }
+      if (value.kind === "vehicle_rental" && route.vehicleRentalDetails === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["routes", index, "vehicleRentalDetails"],
+          message: "Vehicle rental details are required",
+        })
+      }
+      if (value.kind === "transfers" && route.vehicleRentalDetails) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["routes", index, "vehicleRentalDetails"],
+          message: "Transfer routes cannot include vehicle rental details",
+        })
+      }
+      continue
+    }
+
+    if (
+      (value.kind === "train_operator" || value.kind === "airline") &&
+      (!route.originLocationId || !route.destinationLocationId)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["routes", index],
+        message: "Origin and destination are required for this supplier category",
+      })
+    }
+  }
 })
 
 export type SupplierSaveInput = z.infer<typeof supplierSaveSchema>
@@ -108,6 +186,9 @@ export type SupplierSaveInput = z.infer<typeof supplierSaveSchema>
 export const draftSuiteTypeSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().trim().max(200).default(""),
+  passengerCapacity: z.number().int().nonnegative().nullable().default(null),
+  luggageCapacity: z.number().int().nonnegative().nullable().default(null),
+  description: z.string().trim().max(1000).nullable().default(null),
   active: z.boolean().default(true),
 })
 
@@ -126,15 +207,18 @@ export const draftRateCardSchema = z.object({
 export const draftRouteSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().trim().max(200).default(""),
-  originLocationId: z.union([z.string().uuid(), z.literal("")]).default(""),
-  destinationLocationId: z.union([z.string().uuid(), z.literal("")]).default(""),
+  originLocationId: z.union([z.string().uuid(), z.literal(""), z.null()]).default(""),
+  destinationLocationId: z.union([z.string().uuid(), z.literal(""), z.null()]).default(""),
+  pickupPoint: z.string().trim().max(500).nullable().default(null),
+  dropoffPoint: z.string().trim().max(500).nullable().default(null),
+  vehicleRentalDetails: vehicleRentalRouteDetailsSchema.nullable().default(null),
   active: z.boolean().default(true),
   rateCards: z.array(draftRateCardSchema).default([]),
 })
 
 export const supplierDraftSaveSchema = z.object({
   name: z.string().trim().max(200).default(""),
-  kind: z.enum(["train_operator", "hotel_property", "transfers", "tour_operator", "airline"]),
+  kind: supplierKindSchema,
   email: z
     .string()
     .trim()
@@ -160,8 +244,14 @@ export const supplierDraftSaveSchema = z.object({
     })
     .default(""),
   location: z.string().trim().max(255).default(""),
+  locationDetail: z.string().trim().max(255).nullable().default(null),
   locationId: z.string().uuid().nullable().optional(),
+  locationAreaId: z.string().uuid().nullable().optional(),
+  description: z.string().trim().max(2000).nullable().default(null),
   notes: z.string().trim().max(5000).default(""),
+  singleSupplementPct: z.number().finite().min(0).max(1000).default(0),
+  defaultTimeStart: nullableTimeSchema,
+  defaultTimeEnd: nullableTimeSchema,
   active: z.boolean().default(true),
   emails: z.array(draftSupplierEmailSchema).default([]),
   suiteTypes: z.array(draftSuiteTypeSchema).default([]),

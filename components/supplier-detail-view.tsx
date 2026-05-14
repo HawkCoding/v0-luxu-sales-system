@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSWRConfig } from "swr"
 import {
   ArrowLeft,
@@ -33,6 +33,7 @@ import { BufferedInput } from "@/components/ui/buffered-input"
 import { BufferedTextarea } from "@/components/ui/buffered-textarea"
 import { ContentTransition } from "@/components/ui/content-transition"
 import { DatePicker } from "@/components/ui/date-picker"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { NumericInput } from "@/components/ui/numeric-input"
 import {
@@ -62,8 +63,10 @@ import {
 import { shortenUrl } from "@/lib/url"
 import { useLocations, useSupplierDetail } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
+import { formatRateCardValidityRange } from "@/lib/rate-card-validity"
 import {
   getSupplierVocabulary,
+  isTransportSupplier,
   SUPPLIER_KIND_LABELS,
   type Location,
   type SupplierDetail,
@@ -72,6 +75,7 @@ import {
   type SupplierRateCard,
   type SupplierSuiteType,
   type SupplierVocabulary,
+  type VehicleRentalRouteDetails,
 } from "@/lib/types"
 
 type Presentation = "page" | "modal"
@@ -86,14 +90,20 @@ interface SupplierDetailViewProps {
 interface EditableRoute {
   id: string
   name: string
-  originLocationId: string
-  destinationLocationId: string
+  originLocationId: string | null
+  destinationLocationId: string | null
+  pickupPoint: string | null
+  dropoffPoint: string | null
+  vehicleRentalDetails: Omit<VehicleRentalRouteDetails, "routeId" | "createdAt" | "updatedAt"> | null
   active: boolean
 }
 
 interface EditableSuiteType {
   id: string
   name: string
+  passengerCapacity: number | null
+  luggageCapacity: number | null
+  description: string | null
   active: boolean
 }
 
@@ -128,21 +138,20 @@ interface SupplierFormState {
   phone: string
   website: string
   location: string
+  locationDetail: string
   locationId: string | null
+  locationAreaId: string | null
+  description: string
   notes: string
   active: boolean
+  singleSupplementPct: number
+  defaultTimeStart: string
+  defaultTimeEnd: string
   suiteTypes: EditableSuiteType[]
   packages: EditablePackage[]
 }
 
-declare global {
-  interface Window {
-    __DISABLE_DRAFT_AUTOSAVE?: boolean
-  }
-}
-
 const DRAFT_AUTOSAVE_DEBOUNCE_MS = 3000
-const DRAFT_AUTOSAVE_STATUS_RESET_MS = 2000
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const REMOVE_ICON_BUTTON_CLASS =
   "border-muted-foreground/25 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30"
@@ -215,15 +224,27 @@ function makeClientId(): string {
   return crypto.randomUUID()
 }
 
-function createEmptyRoute(locations: Location[]): EditableRoute {
+function createEmptyRoute(locations: Location[], kind: SupplierKind): EditableRoute {
   const origin = locations[0]?.id ?? ""
   const destination = locations[1]?.id ?? origin
+  const isTransport = isTransportSupplier(kind)
 
   return {
     id: makeClientId(),
     name: "",
-    originLocationId: origin,
-    destinationLocationId: destination,
+    originLocationId: isTransport ? null : origin,
+    destinationLocationId: isTransport ? null : destination,
+    pickupPoint: "",
+    dropoffPoint: "",
+    vehicleRentalDetails:
+      kind === "vehicle_rental"
+        ? {
+            includedKmPerDay: null,
+            extraKmPrice: null,
+            securityDeposit: null,
+            oneWayFee: null,
+          }
+        : null,
     active: true,
   }
 }
@@ -232,6 +253,9 @@ function createEmptySuiteType(): EditableSuiteType {
   return {
     id: makeClientId(),
     name: "",
+    passengerCapacity: null,
+    luggageCapacity: null,
+    description: null,
     active: true,
   }
 }
@@ -277,12 +301,21 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
     phone: supplier.phone ?? "",
     website: supplier.website ?? "",
     location: supplier.location ?? "",
-    locationId: supplier.locationId ?? null,
+    locationDetail: supplier.locationDetail ?? "",
+    locationId: supplier.kind === "train_operator" ? null : supplier.locationId ?? null,
+    locationAreaId: supplier.kind === "train_operator" ? null : supplier.locationAreaId ?? null,
+    description: supplier.description ?? "",
     notes: supplier.notes ?? "",
     active: supplier.active,
+    singleSupplementPct: supplier.singleSupplementPct,
+    defaultTimeStart: supplier.defaultTimeStart ?? "",
+    defaultTimeEnd: supplier.defaultTimeEnd ?? "",
     suiteTypes: supplier.suiteTypes.map((suiteType) => ({
       id: suiteType.id,
       name: suiteType.name,
+      passengerCapacity: suiteType.passengerCapacity ?? null,
+      luggageCapacity: suiteType.luggageCapacity ?? null,
+      description: suiteType.description ?? null,
       active: suiteType.active,
     })),
     packages: [
@@ -293,6 +326,16 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
           name: route.name,
           originLocationId: route.originLocationId,
           destinationLocationId: route.destinationLocationId,
+          pickupPoint: route.pickupPoint ?? null,
+          dropoffPoint: route.dropoffPoint ?? null,
+          vehicleRentalDetails: route.vehicleRentalDetails
+            ? {
+                includedKmPerDay: route.vehicleRentalDetails.includedKmPerDay,
+                extraKmPrice: route.vehicleRentalDetails.extraKmPrice,
+                securityDeposit: route.vehicleRentalDetails.securityDeposit,
+                oneWayFee: route.vehicleRentalDetails.oneWayFee,
+              }
+            : null,
           active: route.active,
         })),
         rateCards: supplier.rateCards.map((rateCard) => ({
@@ -311,49 +354,14 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
   }
 }
 
-function buildDraftPayload(form: SupplierFormState) {
-  return {
-    name: form.name.trim(),
-    kind: form.kind,
-    email: "",
-    emails: form.emails.map((entry) => ({
-      id: entry.id,
-      email: entry.email.trim(),
-      label: entry.label.trim() || "General",
-    })),
-    phone: form.phone.trim(),
-    website: form.website.trim(),
-    location: form.location.trim(),
-    locationId: form.locationId ?? null,
-    notes: form.notes.trim(),
-    active: form.active,
-    suiteTypes: form.suiteTypes.map((suiteType) => ({
-      id: suiteType.id,
-      name: suiteType.name.trim(),
-      active: suiteType.active,
-    })),
-    routes: (form.packages[0]?.routes ?? []).map((route) => ({
-        id: route.id,
-        name: route.name.trim(),
-        originLocationId: route.originLocationId,
-        destinationLocationId: route.destinationLocationId,
-        active: route.active,
-        rateCards: (form.packages[0]?.rateCards ?? [])
-          .filter((rateCard) => rateCard.routeId === route.id)
-          .map((rateCard) => ({
-            id: rateCard.id,
-            routeId: rateCard.routeId,
-            suiteTypeId: rateCard.suiteTypeId,
-            pricePerPerson: rateCard.pricePerPerson,
-            childPrice: rateCard.childPrice,
-            infantPrice: rateCard.infantPrice,
-            currency: rateCard.currency.trim().toUpperCase() || "ZAR",
-            validFrom: rateCard.validFrom,
-            validTo: rateCard.validTo ?? "",
-          })),
-    })),
-  }
+function getSupplierLocationId(form: SupplierFormState): string | null {
+  return form.kind === "train_operator" ? null : form.locationId ?? null
 }
+
+function getSupplierLocationAreaId(form: SupplierFormState): string | null {
+  return form.kind === "train_operator" ? null : form.locationAreaId ?? null
+}
+
 
 function formatCurrency(amount: number, currency: string) {
   try {
@@ -365,12 +373,6 @@ function formatCurrency(amount: number, currency: string) {
   } catch {
     return `${currency} ${amount.toFixed(2)}`
   }
-}
-
-function formatDateRange(validFrom: string, validTo: string | null) {
-  const from = validFrom ? formatDisplayDate(validFrom) : "Open"
-  const to = validTo ? formatDisplayDate(validTo) : "Open ended"
-  return `${from} - ${to}`
 }
 
 function getRatePeriodKey(
@@ -783,7 +785,7 @@ function groupRateCardsByPeriod(rateCards: SupplierRateCard[]): RatePeriodGroup[
 
     groups.set(key, {
       key,
-      label: formatDateRange(rateCard.validFrom, rateCard.validTo),
+      label: formatRateCardValidityRange(rateCard.validFrom, rateCard.validTo, formatDisplayDate),
       currency: rateCard.currency,
       validFrom: rateCard.validFrom,
       validTo: rateCard.validTo,
@@ -825,12 +827,19 @@ function getContainerClass(presentation: Presentation) {
     : "max-h-[80vh] overflow-y-auto p-6 space-y-6"
 }
 
-function getLocationName(locationsById: Record<string, Location>, id: string) {
+function getLocationName(locationsById: Record<string, Location>, id: string | null) {
+  if (!id) return "Unknown location"
   return locationsById[id]?.name ?? "Unknown location"
 }
 
 function getRouteLabel(
-  route: { name: string; originLocationId: string; destinationLocationId: string },
+  route: {
+    name: string
+    originLocationId: string | null
+    destinationLocationId: string | null
+    pickupPoint?: string | null
+    dropoffPoint?: string | null
+  },
   locationsById: Record<string, Location>,
   vocabulary: SupplierVocabulary,
 ) {
@@ -840,6 +849,10 @@ function getRouteLabel(
 
   if (!vocabulary.routeHasLocations) {
     return route.name || `Unnamed ${vocabulary.route.toLowerCase()}`
+  }
+
+  if (route.pickupPoint || route.dropoffPoint) {
+    return `${route.pickupPoint || "Pickup"} -> ${route.dropoffPoint || "Drop-off"}`
   }
 
   return `${getLocationName(locationsById, route.originLocationId)} -> ${getLocationName(
@@ -872,16 +885,18 @@ function PackageRateCardMatrix({
   pkg,
   suiteTypes,
   locationsById,
-  selectedRouteId,
   vocabulary,
 }: {
   pkg: SupplierPackage
   suiteTypes: SupplierSuiteType[]
   locationsById: Record<string, Location>
-  selectedRouteId?: string | null
   vocabulary: SupplierVocabulary
 }) {
-  const periodGroups = groupRateCardsByPeriod(pkg.rateCards)
+  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null)
+  const effectiveSelectedRouteId =
+    selectedRouteId && pkg.routes.some((route) => route.id === selectedRouteId)
+      ? selectedRouteId
+      : pkg.routes[0]?.id ?? null
 
   if (pkg.routes.length === 0) {
     return (
@@ -891,99 +906,129 @@ function PackageRateCardMatrix({
     )
   }
 
-  if (periodGroups.length === 0 || suiteTypes.length === 0) {
-    return (
-      <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-        No rates have been configured for this supplier yet.
-      </div>
-    )
-  }
+  const routeColumns = effectiveSelectedRouteId
+    ? pkg.routes.filter((route) => route.id === effectiveSelectedRouteId)
+    : pkg.routes
+  const visibleRateCards = effectiveSelectedRouteId
+    ? pkg.rateCards.filter((rateCard) => rateCard.routeId === effectiveSelectedRouteId)
+    : pkg.rateCards
+  const periodGroups = groupRateCardsByPeriod(visibleRateCards)
 
   return (
     <div className="space-y-4">
-      {periodGroups.map((period) => {
-        const routeColumns = selectedRouteId
-          ? pkg.routes.filter((route) => route.id === selectedRouteId)
-          : pkg.routes
+      {pkg.routes.length > 1 ? (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {vocabulary.routePlural}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {pkg.routes.map((route) => {
+              const routeLabel = getRouteLabel(route, locationsById, vocabulary)
+              const isSelected = effectiveSelectedRouteId === route.id
 
-        return (
-          <div key={period.key} className="rounded-lg border overflow-hidden">
-            <div className="flex items-center justify-between gap-2 bg-secondary/40 px-4 py-3">
-              <div>
-                <p className="text-sm font-medium text-foreground">{period.label}</p>
-                <p className="text-xs text-muted-foreground">
-                  {vocabulary.showSingleSupplement
-                    ? `${period.currency} ${vocabulary.priceLabel} (single: +${pkg.singleSupplementPct.toFixed(
-                        0,
-                      )}%)`
-                    : `${period.currency} ${vocabulary.priceLabel}`}
-                </p>
-              </div>
-              <Badge variant="outline">{period.currency}</Badge>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="bg-secondary/20">
-                  <tr className="border-b">
-                    <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      {vocabulary.suiteType}
-                    </th>
-                    {routeColumns.map((route) => (
-                      <th
-                        key={route.id}
-                        className="whitespace-nowrap px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-                      >
-                        {getRouteLabel(route, locationsById, vocabulary)}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {suiteTypes.map((suiteType) => (
-                    <tr key={suiteType.id} className="border-b last:border-0">
-                      <td className="px-4 py-3 font-medium text-foreground">{suiteType.name}</td>
-                      {routeColumns.map((route) => {
-                        const match =
-                          period.items.find(
-                            (item) =>
-                              item.suiteTypeId === suiteType.id && item.routeId === route.id,
-                          )
-
-                        return (
-                          <td
-                            key={`${suiteType.id}-${route.id}`}
-                            className="px-4 py-3 text-muted-foreground"
-                          >
-                            {match ? (
-                              <div className="space-y-1">
-                                <p className="font-medium text-foreground">
-                                  {formatCurrency(match.pricePerPerson, match.currency)}
-                                </p>
-                                {vocabulary.showSingleSupplement ? (
-                                  <p className="text-xs">
-                                    Single:{" "}
-                                    {formatCurrency(
-                                      match.pricePerPerson * (1 + pkg.singleSupplementPct / 100),
-                                      match.currency,
-                                    )}
-                                  </p>
-                                ) : null}
-                              </div>
-                            ) : (
-                              "-"
-                            )}
-                          </td>
-                        )
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+              return (
+                <Button
+                  key={route.id}
+                  type="button"
+                  size="sm"
+                  variant={isSelected ? "default" : "outline"}
+                  className="h-7 rounded-full px-3 text-xs"
+                  aria-pressed={isSelected}
+                  onClick={() => setSelectedRouteId(route.id)}
+                >
+                  {routeLabel}
+                </Button>
+              )
+            })}
           </div>
-        )
-      })}
+        </div>
+      ) : null}
+
+      {periodGroups.length === 0 || suiteTypes.length === 0 ? (
+        <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+          No rates have been configured for this supplier yet.
+        </div>
+      ) : (
+        periodGroups.map((period) => {
+          return (
+            <div key={period.key} className="rounded-lg border overflow-hidden">
+              <div className="flex items-center justify-between gap-2 bg-secondary/40 px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">{period.label}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {vocabulary.showSingleSupplement
+                      ? `${period.currency} ${vocabulary.priceLabel} (single: +${pkg.singleSupplementPct.toFixed(
+                          0,
+                        )}%)`
+                      : `${period.currency} ${vocabulary.priceLabel}`}
+                  </p>
+                </div>
+                <Badge variant="outline">{period.currency}</Badge>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-secondary/20">
+                    <tr className="border-b">
+                      <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        {vocabulary.suiteType}
+                      </th>
+                      {routeColumns.map((route) => (
+                        <th
+                          key={route.id}
+                          className="whitespace-nowrap px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                        >
+                          {getRouteLabel(route, locationsById, vocabulary)}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {suiteTypes.map((suiteType) => (
+                      <tr key={suiteType.id} className="border-b last:border-0">
+                        <td className="px-4 py-3 font-medium text-foreground">{suiteType.name}</td>
+                        {routeColumns.map((route) => {
+                          const match =
+                            period.items.find(
+                              (item) =>
+                                item.suiteTypeId === suiteType.id && item.routeId === route.id,
+                            )
+
+                          return (
+                            <td
+                              key={`${suiteType.id}-${route.id}`}
+                              className="px-4 py-3 text-muted-foreground"
+                            >
+                              {match ? (
+                                <div className="space-y-1">
+                                  <p className="font-medium text-foreground">
+                                    {formatCurrency(match.pricePerPerson, match.currency)}
+                                  </p>
+                                  {vocabulary.showSingleSupplement ? (
+                                    <p className="text-xs">
+                                      Single:{" "}
+                                      {formatCurrency(
+                                        match.pricePerPerson * (1 + pkg.singleSupplementPct / 100),
+                                        match.currency,
+                                      )}
+                                    </p>
+                                  ) : null}
+                                </div>
+                              ) : (
+                                "-"
+                              )}
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )
+        })
+      )}
     </div>
   )
 }
@@ -995,6 +1040,7 @@ interface RateCardMatrixEditorProps {
   packageIndex: number
   locationsById: Record<string, Location>
   vocabulary: SupplierVocabulary
+  isTransport: boolean
   onAddPeriod: (packageIndex: number, routeId: string) => void
   onRemovePeriod: (packageIndex: number, routeId: string, periodKey: string) => void
   onUpdatePeriodField: (
@@ -1032,6 +1078,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
   packageIndex,
   locationsById,
   vocabulary,
+  isTransport,
   onAddPeriod,
   onRemovePeriod,
   onUpdatePeriodField,
@@ -1243,40 +1290,51 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                             <td key={`${suiteType.id}-${routeId}`} className="px-4 py-3">
                               {match ? (
                                 <div className="flex flex-col gap-1.5">
-                                  <NumericInput
-                                    min="0"
-                                    step="0.01"
-                                    value={match.pricePerPerson}
-                                    onValueChange={(value) =>
-                                      onUpdateCellPrice(packageIndex, match.id, value ?? 0)
-                                    }
-                                  />
                                   <div className="flex items-center gap-1">
-                                    <span className="w-10 shrink-0 text-xs text-muted-foreground">Child</span>
+                                    <span className="w-16 shrink-0 text-xs text-muted-foreground">
+                                      {isTransport
+                                        ? "Flat"
+                                        : "Adult"}
+                                    </span>
                                     <NumericInput
                                       min="0"
                                       step="0.01"
-                                      nullable
-                                      placeholder="—"
-                                      value={match.childPrice}
+                                      value={match.pricePerPerson}
                                       onValueChange={(value) =>
-                                        onUpdateCellField(packageIndex, match.id, "childPrice", value)
+                                        onUpdateCellPrice(packageIndex, match.id, value ?? 0)
                                       }
                                     />
                                   </div>
-                                  <div className="flex items-center gap-1">
-                                    <span className="w-10 shrink-0 text-xs text-muted-foreground">Infant</span>
-                                    <NumericInput
-                                      min="0"
-                                      step="0.01"
-                                      nullable
-                                      placeholder="—"
-                                      value={match.infantPrice}
-                                      onValueChange={(value) =>
-                                        onUpdateCellField(packageIndex, match.id, "infantPrice", value)
-                                      }
-                                    />
-                                  </div>
+                                  {!isTransport ? (
+                                    <>
+                                      <div className="flex items-center gap-1">
+                                        <span className="w-16 shrink-0 text-xs text-muted-foreground">Child</span>
+                                        <NumericInput
+                                          min="0"
+                                          step="0.01"
+                                          nullable
+                                          nullDisplayValue="0"
+                                          value={match.childPrice}
+                                          onValueChange={(value) =>
+                                            onUpdateCellField(packageIndex, match.id, "childPrice", value)
+                                          }
+                                        />
+                                      </div>
+                                      <div className="flex items-center gap-1">
+                                        <span className="w-16 shrink-0 text-xs text-muted-foreground">Infant</span>
+                                        <NumericInput
+                                          min="0"
+                                          step="0.01"
+                                          nullable
+                                          nullDisplayValue="0"
+                                          value={match.infantPrice}
+                                          onValueChange={(value) =>
+                                            onUpdateCellField(packageIndex, match.id, "infantPrice", value)
+                                          }
+                                        />
+                                      </div>
+                                    </>
+                                  ) : null}
                                   <Button
                                     type="button"
                                     size="icon"
@@ -1343,7 +1401,7 @@ interface SuiteTypeEditorRowProps {
   onUpdateSuiteType: (
     suiteTypeIndex: number,
     key: keyof EditableSuiteType,
-    value: string | boolean,
+    value: string | boolean | number | null,
   ) => void
   onRemoveSuiteType: (suiteTypeIndex: number) => void
 }
@@ -1355,8 +1413,16 @@ const SuiteTypeEditorRow = memo(function SuiteTypeEditorRow({
   onUpdateSuiteType,
   onRemoveSuiteType,
 }: SuiteTypeEditorRowProps) {
+  const isTransport = vocabulary.suiteType === "Vehicle Type"
+
   return (
-    <div className="grid gap-4 rounded-lg border p-3 md:grid-cols-[1fr_auto_auto]">
+    <div
+      className={
+        isTransport
+          ? "grid gap-4 rounded-lg border p-3 md:grid-cols-2 xl:grid-cols-[1fr_10rem_10rem_1fr_auto_auto]"
+          : "grid gap-4 rounded-lg border p-3 md:grid-cols-[1fr_auto_auto]"
+      }
+    >
       <div className="space-y-2">
         <Label>{`${vocabulary.suiteType} name`}</Label>
         <BufferedInput
@@ -1364,6 +1430,41 @@ const SuiteTypeEditorRow = memo(function SuiteTypeEditorRow({
           onValueChange={(value) => onUpdateSuiteType(suiteTypeIndex, "name", value)}
         />
       </div>
+      {isTransport ? (
+        <>
+          <div className="space-y-2">
+            <Label>Passengers</Label>
+            <NumericInput
+              min="0"
+              step="1"
+              nullable
+              value={suiteType.passengerCapacity}
+              onValueChange={(value) =>
+                onUpdateSuiteType(suiteTypeIndex, "passengerCapacity", value)
+              }
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Luggage</Label>
+            <NumericInput
+              min="0"
+              step="1"
+              nullable
+              value={suiteType.luggageCapacity}
+              onValueChange={(value) =>
+                onUpdateSuiteType(suiteTypeIndex, "luggageCapacity", value)
+              }
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Description</Label>
+            <BufferedInput
+              value={suiteType.description ?? ""}
+              onValueChange={(value) => onUpdateSuiteType(suiteTypeIndex, "description", value)}
+            />
+          </div>
+        </>
+      ) : null}
       <div className="flex items-end gap-2">
         <Switch
           checked={suiteType.active}
@@ -1395,7 +1496,7 @@ interface RouteEditorRowProps {
     packageIndex: number,
     routeIndex: number,
     key: keyof EditableRoute,
-    value: string | boolean,
+    value: EditableRoute[keyof EditableRoute],
   ) => void
   onRemoveRoute: (packageIndex: number, routeIndex: number) => void
 }
@@ -1409,10 +1510,33 @@ const RouteEditorRow = memo(function RouteEditorRow({
   onUpdateRoute,
   onRemoveRoute,
 }: RouteEditorRowProps) {
+  const isTransport = vocabulary.suiteType === "Vehicle Type"
+  const isRental = vocabulary.priceLabel === "per day"
+  const rentalDetails =
+    route.vehicleRentalDetails ?? {
+      includedKmPerDay: null,
+      extraKmPrice: null,
+      securityDeposit: null,
+      oneWayFee: null,
+    }
+  const updateRentalDetails = (
+    key: keyof typeof rentalDetails,
+    value: number | null,
+  ) => {
+    onUpdateRoute(packageIndex, routeIndex, "vehicleRentalDetails", {
+      ...rentalDetails,
+      [key]: value,
+    })
+  }
+
   return (
     <div
       className={`grid min-w-0 gap-4 overflow-hidden rounded-lg border p-3 ${
-        vocabulary.routeHasLocations ? "md:grid-cols-2 xl:grid-cols-5" : "md:grid-cols-[1fr_auto]"
+        isTransport
+          ? "md:grid-cols-2 xl:grid-cols-4"
+          : vocabulary.routeHasLocations
+            ? "md:grid-cols-2 xl:grid-cols-5"
+            : "md:grid-cols-[1fr_auto]"
       }`}
     >
       <div className={`space-y-2 ${vocabulary.routeHasLocations ? "xl:col-span-2" : ""}`}>
@@ -1422,7 +1546,70 @@ const RouteEditorRow = memo(function RouteEditorRow({
           onValueChange={(value) => onUpdateRoute(packageIndex, routeIndex, "name", value)}
         />
       </div>
-      {vocabulary.routeHasLocations ? (
+      {isTransport ? (
+        <>
+          <div className="min-w-0 space-y-2">
+            <Label>{vocabulary.originLabel}</Label>
+            <BufferedInput
+              value={route.pickupPoint ?? ""}
+              onValueChange={(value) => onUpdateRoute(packageIndex, routeIndex, "pickupPoint", value)}
+              placeholder="Airport, hotel, address..."
+            />
+          </div>
+          <div className="min-w-0 space-y-2">
+            <Label>{vocabulary.destinationLabel}</Label>
+            <BufferedInput
+              value={route.dropoffPoint ?? ""}
+              onValueChange={(value) => onUpdateRoute(packageIndex, routeIndex, "dropoffPoint", value)}
+              placeholder="Airport, hotel, address..."
+            />
+          </div>
+          {isRental ? (
+            <>
+              <div className="min-w-0 space-y-2">
+                <Label>Included km/day</Label>
+                <NumericInput
+                  min="0"
+                  step="1"
+                  nullable
+                  value={rentalDetails.includedKmPerDay}
+                  onValueChange={(value) => updateRentalDetails("includedKmPerDay", value)}
+                />
+              </div>
+              <div className="min-w-0 space-y-2">
+                <Label>Extra km price</Label>
+                <NumericInput
+                  min="0"
+                  step="0.01"
+                  nullable
+                  value={rentalDetails.extraKmPrice}
+                  onValueChange={(value) => updateRentalDetails("extraKmPrice", value)}
+                />
+              </div>
+              <div className="min-w-0 space-y-2">
+                <Label>Security deposit</Label>
+                <NumericInput
+                  min="0"
+                  step="0.01"
+                  nullable
+                  value={rentalDetails.securityDeposit}
+                  onValueChange={(value) => updateRentalDetails("securityDeposit", value)}
+                />
+              </div>
+              <div className="min-w-0 space-y-2">
+                <Label>One-way fee</Label>
+                <NumericInput
+                  min="0"
+                  step="0.01"
+                  nullable
+                  value={rentalDetails.oneWayFee}
+                  onValueChange={(value) => updateRentalDetails("oneWayFee", value)}
+                />
+              </div>
+            </>
+          ) : null}
+        </>
+      ) : vocabulary.routeHasLocations ? (
         <>
           <div className="min-w-0 space-y-2">
             <Label>{vocabulary.originLabel}</Label>
@@ -1543,20 +1730,13 @@ export function SupplierDetailView({
   const [isPatchInFlight, setIsPatchInFlight] = useState(false)
   const [staleVersionDialog, setStaleVersionDialog] = useState<StaleVersionDialogState | null>(null)
   const [form, setForm] = useState<SupplierFormState | null>(null)
-  const [draftSaveStatus, setDraftSaveStatus] = useState<"idle" | "saving" | "saved" | "error">(
-    "idle",
-  )
   const [pendingLocalDraft, setPendingLocalDraft] = useState<SupplierFormState | null>(null)
   const baselineSnapshotRef = useRef<string | null>(null)
-  const draftAutosavedSnapshotRef = useRef<string | null>(null)
   const hydratedSupplierIdentityRef = useRef<string | null>(null)
   const expectedUpdatedAtRef = useRef<string | null>(null)
-  const lastDraftConflictSnapshotRef = useRef<string | null>(null)
   const lastOverlapWarningRef = useRef<string | null>(null)
   const lastInvertedDateWarningRef = useRef<string | null>(null)
-  const draftAutosaveInFlightRef = useRef(false)
   const patchWriteLockRef = useRef(new SupplierPatchWriteLock())
-  const draftStatusResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const overlapFieldErrorsCacheRef = useRef<{
     signature: string
     errors: Map<number, Set<string>>
@@ -1613,7 +1793,6 @@ export function SupplierDetailView({
       if (shouldHydrateFromServer) {
         setForm(nextForm)
         baselineSnapshotRef.current = snapshot
-        draftAutosavedSnapshotRef.current = snapshot
         overlapFieldErrorsCacheRef.current = null
       }
       expectedUpdatedAtRef.current = supplier.updatedAt
@@ -1662,13 +1841,6 @@ export function SupplierDetailView({
     }
   }, [canEdit, localDraftStorageKey, supplier])
 
-  useEffect(() => {
-    return () => {
-      if (draftStatusResetTimeoutRef.current) {
-        clearTimeout(draftStatusResetTimeoutRef.current)
-      }
-    }
-  }, [])
 
   const locations = allLocations.length > 0 ? allLocations : supplier?.locations ?? []
 
@@ -1681,22 +1853,58 @@ export function SupplierDetailView({
     [locations],
   )
 
+  const cityLocations = useMemo(
+    () => locations.filter((loc) => loc.parentLocationId === null),
+    [locations],
+  )
+
+  const areaLocationsForCity = useMemo(
+    () => locations.filter((loc) => loc.parentLocationId === form?.locationId),
+    [locations, form?.locationId],
+  )
+
   const updateField = <K extends keyof SupplierFormState>(
     key: K,
     value: SupplierFormState[K],
   ) => {
-    startTransition(() => {
-      setForm((current) => (current ? { ...current, [key]: value } : current))
-    })
+    setForm((current) => (current ? { ...current, [key]: value } : current))
+  }
+
+  const updateSupplierKind = (kind: SupplierKind) => {
+    setForm((current) =>
+      current
+        ? {
+            ...current,
+            kind,
+            locationId: kind === "train_operator" ? null : current.locationId,
+            locationAreaId: kind === "train_operator" ? null : current.locationAreaId,
+            packages: current.packages.map((pkg) => ({
+              ...pkg,
+              routes: pkg.routes.map((route) => ({
+                ...route,
+                originLocationId: isTransportSupplier(kind) ? null : route.originLocationId,
+                destinationLocationId: isTransportSupplier(kind) ? null : route.destinationLocationId,
+                vehicleRentalDetails:
+                  kind === "vehicle_rental"
+                    ? route.vehicleRentalDetails ?? {
+                        includedKmPerDay: null,
+                        extraKmPrice: null,
+                        securityDeposit: null,
+                        oneWayFee: null,
+                      }
+                    : null,
+              })),
+            })),
+          }
+        : current,
+    )
   }
 
   const updateSuiteTypes = useCallback(
     (updater: (suiteTypes: EditableSuiteType[]) => EditableSuiteType[]) => {
-      startTransition(() => {
-        setForm((current) =>
-          current ? { ...current, suiteTypes: updater(current.suiteTypes) } : current,
-        )
-      })
+      setForm((current) =>
+        current ? { ...current, suiteTypes: updater(current.suiteTypes) } : current,
+      )
     },
     [],
   )
@@ -1709,7 +1917,7 @@ export function SupplierDetailView({
     (
       suiteTypeIndex: number,
       key: keyof EditableSuiteType,
-      value: string | boolean,
+      value: string | boolean | number | null,
     ) => {
       updateSuiteTypes((suiteTypes) =>
         suiteTypes.map((suiteType, index) =>
@@ -1737,11 +1945,9 @@ export function SupplierDetailView({
 
   const updatePackages = useCallback(
     (updater: (packages: EditablePackage[]) => EditablePackage[]) => {
-      startTransition(() => {
-        setForm((current) =>
-          current ? { ...current, packages: updater(current.packages) } : current,
-        )
-      })
+      setForm((current) =>
+        current ? { ...current, packages: updater(current.packages) } : current,
+      )
     },
     [],
   )
@@ -1849,9 +2055,12 @@ export function SupplierDetailView({
 
   const addRoute = useCallback(
     (packageIndex: number) => {
+      const currentForm = formRef.current
+      if (!currentForm) return
+
       updatePackage(packageIndex, (pkg) => ({
         ...pkg,
-        routes: [...pkg.routes, createEmptyRoute(locations)],
+        routes: [...pkg.routes, createEmptyRoute(locations, currentForm.kind)],
       }))
     },
     [locations, updatePackage],
@@ -1862,7 +2071,7 @@ export function SupplierDetailView({
       packageIndex: number,
       routeIndex: number,
       key: keyof EditableRoute,
-      value: string | boolean,
+      value: EditableRoute[keyof EditableRoute],
     ) => {
       updatePackage(packageIndex, (pkg) => ({
         ...pkg,
@@ -2085,14 +2294,12 @@ export function SupplierDetailView({
 
   const updateRateCardPrice = useCallback(
     (packageIndex: number, rateCardId: string, value: number) => {
-      startTransition(() => {
-        updatePackage(packageIndex, (pkg) => ({
-          ...pkg,
-          rateCards: pkg.rateCards.map((rateCard) =>
-            rateCard.id === rateCardId ? { ...rateCard, pricePerPerson: value } : rateCard,
-          ),
-        }))
-      })
+      updatePackage(packageIndex, (pkg) => ({
+        ...pkg,
+        rateCards: pkg.rateCards.map((rateCard) =>
+          rateCard.id === rateCardId ? { ...rateCard, pricePerPerson: value } : rateCard,
+        ),
+      }))
     },
     [updatePackage],
   )
@@ -2104,14 +2311,12 @@ export function SupplierDetailView({
       field: "childPrice" | "infantPrice",
       value: number | null,
     ) => {
-      startTransition(() => {
-        updatePackage(packageIndex, (pkg) => ({
-          ...pkg,
-          rateCards: pkg.rateCards.map((rateCard) =>
-            rateCard.id === rateCardId ? { ...rateCard, [field]: value } : rateCard,
-          ),
-        }))
-      })
+      updatePackage(packageIndex, (pkg) => ({
+        ...pkg,
+        rateCards: pkg.rateCards.map((rateCard) =>
+          rateCard.id === rateCardId ? { ...rateCard, [field]: value } : rateCard,
+        ),
+      }))
     },
     [updatePackage],
   )
@@ -2167,83 +2372,6 @@ export function SupplierDetailView({
 
   useEffect(() => {
     if (!canEdit || !form || !isEditing || isPatchInFlight) return
-    const disableDraftAutosaveFromQuery =
-      new URLSearchParams(window.location.search).get("disableDraftAutosave") === "true"
-    const draftAutosaveDisabled =
-      window.__DISABLE_DRAFT_AUTOSAVE === true || disableDraftAutosaveFromQuery
-
-    if (isDraftSupplier && !draftAutosaveDisabled) {
-      const snapshot = JSON.stringify(form)
-      if (snapshot === draftAutosavedSnapshotRef.current || draftAutosaveInFlightRef.current) {
-        return
-      }
-
-      const timeout = setTimeout(async () => {
-        if (!tryAcquirePatchWriteLock()) {
-          return
-        }
-        draftAutosaveInFlightRef.current = true
-        setDraftSaveStatus("saving")
-
-        try {
-          const draftConflict = findFirstRateCardConflict(form.packages, form.suiteTypes)
-          if (draftConflict) {
-            setDraftSaveStatus("error")
-            if (lastDraftConflictSnapshotRef.current !== snapshot) {
-              toast.error(buildRateCardConflictMessage(draftConflict, getSupplierVocabulary(form.kind)))
-              lastDraftConflictSnapshotRef.current = snapshot
-            }
-            return
-          }
-
-          lastDraftConflictSnapshotRef.current = null
-          const autosaveRequestStartedAt = performance.now()
-          const response = await fetch(`/api/suppliers/${supplierSlug}?draft=true`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              ...buildDraftPayload(form),
-              expectedUpdatedAt: expectedUpdatedAtRef.current ?? supplierUpdatedAt,
-            }),
-          })
-          const payload = (await response.json()) as unknown
-          if (!response.ok) {
-            const staleConflict = parseStaleVersionConflictPayload(payload)
-            if (staleConflict) {
-              expectedUpdatedAtRef.current = staleConflict.currentUpdatedAt
-              setDraftSaveStatus("idle")
-              return
-            }
-            setDraftSaveStatus("error")
-            return
-          }
-          const successPayload = payload as { updatedAt?: string }
-          if (typeof successPayload.updatedAt === "string") {
-            expectedUpdatedAtRef.current = successPayload.updatedAt
-            if (supplier?.id) {
-              hydratedSupplierIdentityRef.current = `${supplier.id}:${successPayload.updatedAt}`
-            }
-          }
-
-          draftAutosavedSnapshotRef.current = snapshot
-          setDraftSaveStatus("saved")
-          if (draftStatusResetTimeoutRef.current) {
-            clearTimeout(draftStatusResetTimeoutRef.current)
-          }
-          draftStatusResetTimeoutRef.current = setTimeout(() => {
-            setDraftSaveStatus("idle")
-          }, DRAFT_AUTOSAVE_STATUS_RESET_MS)
-          await mutate("/api/suppliers?includeDrafts=true")
-        } catch {
-          setDraftSaveStatus("error")
-        } finally {
-          draftAutosaveInFlightRef.current = false
-          releasePatchWriteLock()
-        }
-      }, DRAFT_AUTOSAVE_DEBOUNCE_MS)
-
-      return () => clearTimeout(timeout)
-    }
 
     const timeout = setTimeout(() => {
       const snapshot = JSON.stringify(form)
@@ -2259,16 +2387,9 @@ export function SupplierDetailView({
   }, [
     canEdit,
     form,
-    isDraftSupplier,
     isEditing,
     isPatchInFlight,
     localDraftStorageKey,
-    mutate,
-    mutateDetail,
-    supplierSlug,
-    supplierUpdatedAt,
-    releasePatchWriteLock,
-    tryAcquirePatchWriteLock,
   ])
 
   const restoreLocalDraft = () => {
@@ -2337,6 +2458,9 @@ export function SupplierDetailView({
       .map((suiteType) => ({
         id: suiteType.id,
         name: suiteType.name.trim(),
+        passengerCapacity: isTransportSupplier(form.kind) ? suiteType.passengerCapacity : null,
+        luggageCapacity: isTransportSupplier(form.kind) ? suiteType.luggageCapacity : null,
+        description: isTransportSupplier(form.kind) ? suiteType.description?.trim() || null : null,
         active: suiteType.active,
       }))
     const suiteTypeIds = new Set(cleanedSuiteTypes.map((suiteType) => suiteType.id))
@@ -2350,6 +2474,8 @@ export function SupplierDetailView({
             route.name.trim() ||
             route.originLocationId ||
             route.destinationLocationId ||
+            route.pickupPoint ||
+            route.dropoffPoint ||
             routeRateGroup.rateCards.some((rateCard) => rateCard.routeId === route.id),
         ),
         rateCards: routeRateGroup.rateCards,
@@ -2366,12 +2492,21 @@ export function SupplierDetailView({
 
     for (const pkg of meaningfulPackages) {
       for (const route of pkg.routes) {
-        const needsLocations = vocabulary.routeHasLocations
+        const isTransport = isTransportSupplier(form.kind)
+        const needsLocations = vocabulary.routeHasLocations && !isTransport
         if (
           !route.name.trim() ||
           (needsLocations && (!route.originLocationId || !route.destinationLocationId))
         ) {
           toast.error(`Complete all ${vocabulary.route.toLowerCase()} fields before saving.`)
+          return
+        }
+        if (isTransport && (!route.pickupPoint?.trim() || !route.dropoffPoint?.trim())) {
+          toast.error("Complete pickup point and drop-off point before saving transport services.")
+          return
+        }
+        if (form.kind === "vehicle_rental" && !route.vehicleRentalDetails) {
+          toast.error("Vehicle rental routes require rental details before saving.")
           return
         }
       }
@@ -2406,6 +2541,17 @@ export function SupplierDetailView({
         name: route.name.trim(),
         originLocationId: route.originLocationId,
         destinationLocationId: route.destinationLocationId,
+        pickupPoint: isTransportSupplier(form.kind) ? route.pickupPoint?.trim() ?? "" : null,
+        dropoffPoint: isTransportSupplier(form.kind) ? route.dropoffPoint?.trim() ?? "" : null,
+        vehicleRentalDetails:
+          form.kind === "vehicle_rental"
+            ? route.vehicleRentalDetails ?? {
+                includedKmPerDay: null,
+                extraKmPrice: null,
+                securityDeposit: null,
+                oneWayFee: null,
+              }
+            : null,
         active: route.active,
         rateCards: routeRateGroup.rateCards
           .filter((rateCard) => rateCard.routeId === route.id)
@@ -2414,8 +2560,8 @@ export function SupplierDetailView({
             routeId: rateCard.routeId,
             suiteTypeId: rateCard.suiteTypeId,
             pricePerPerson: rateCard.pricePerPerson,
-            childPrice: rateCard.childPrice,
-            infantPrice: rateCard.infantPrice,
+            childPrice: isTransportSupplier(form.kind) ? null : rateCard.childPrice,
+            infantPrice: isTransportSupplier(form.kind) ? null : rateCard.infantPrice,
             currency: rateCard.currency.trim().toUpperCase() || "ZAR",
             validFrom: rateCard.validFrom,
             validTo: rateCard.validTo ?? "",
@@ -2441,9 +2587,15 @@ export function SupplierDetailView({
           phone: form.phone.trim(),
           website: form.website.trim(),
           location: form.location.trim(),
-          locationId: form.locationId ?? null,
+          locationDetail: form.locationDetail.trim(),
+          locationId: getSupplierLocationId(form),
+          locationAreaId: getSupplierLocationAreaId(form),
+          description: form.description.trim() || null,
           notes: form.notes.trim(),
           active: form.active,
+          singleSupplementPct: form.singleSupplementPct,
+          defaultTimeStart: form.defaultTimeStart || null,
+          defaultTimeEnd: form.defaultTimeEnd || null,
           suiteTypes: cleanedSuiteTypes,
           routes: cleanedRoutes,
           expectedUpdatedAt:
@@ -2519,7 +2671,6 @@ export function SupplierDetailView({
       ])
       window.localStorage.removeItem(localDraftStorageKey)
       setPendingLocalDraft(null)
-      setDraftSaveStatus("idle")
       setIsEditing(false)
       setStaleVersionDialog(null)
       toast.success(
@@ -2619,6 +2770,8 @@ export function SupplierDetailView({
   }
 
   const activeVocabulary = getSupplierVocabulary(isEditing ? form.kind : supplier.kind)
+  const isTrainOperatorForm = form.kind === "train_operator"
+  const isTrainOperatorSupplier = supplier.kind === "train_operator"
   const routeRateGroup = form?.packages[0] ?? createRoutesRateGroup()
   const supplierRouteRatePackage: SupplierPackage = {
     id: "supplier-routes-and-rates",
@@ -2626,7 +2779,7 @@ export function SupplierDetailView({
     name: "Routes and Rates",
     description: null,
     durationNights: null,
-    singleSupplementPct: 0,
+    singleSupplementPct: supplier.singleSupplementPct,
     currency: "ZAR",
     active: true,
     createdAt: supplier.createdAt,
@@ -2770,9 +2923,6 @@ export function SupplierDetailView({
           <Card className="border-dashed">
             <CardContent className="p-4 text-sm text-muted-foreground">
               This supplier is in draft mode and is not available in booking or quote flows.
-              {draftSaveStatus === "saving" && " Saving draft..."}
-              {draftSaveStatus === "saved" && " Draft saved."}
-              {draftSaveStatus === "error" && " Draft save failed. Keep editing and try again."}
             </CardContent>
           </Card>
         )}
@@ -2824,7 +2974,7 @@ export function SupplierDetailView({
                     <Label htmlFor="supplier-kind">Category</Label>
                     <Select
                       value={form.kind}
-                      onValueChange={(value: SupplierKind) => updateField("kind", value)}
+                      onValueChange={(value: SupplierKind) => updateSupplierKind(value)}
                     >
                       <SelectTrigger id="supplier-kind">
                         <SelectValue />
@@ -2859,7 +3009,7 @@ export function SupplierDetailView({
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="supplier-location">Location (text)</Label>
+                    <Label htmlFor="supplier-location">Location</Label>
                     <BufferedInput
                       id="supplier-location"
                       value={form.location}
@@ -2867,27 +3017,69 @@ export function SupplierDetailView({
                     />
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="supplier-location-city">City</Label>
-                    <Select
-                      value={form.locationId ?? "none"}
-                      onValueChange={(value) =>
-                        updateField("locationId", value === "none" ? null : value)
-                      }
-                    >
-                      <SelectTrigger id="supplier-location-city">
-                        <SelectValue placeholder="Select city" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">— None —</SelectItem>
-                        {locations.map((loc) => (
-                          <SelectItem key={loc.id} value={loc.id}>
-                            {loc.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  {!isTrainOperatorForm && (
+                    <div className="space-y-2">
+                      <Label htmlFor="supplier-location-city">City</Label>
+                      <Select
+                        value={form.locationId ?? "none"}
+                        onValueChange={(value) => {
+                          updateField("locationId", value === "none" ? null : value)
+                          updateField("locationAreaId", null)
+                        }}
+                      >
+                        <SelectTrigger id="supplier-location-city">
+                          <SelectValue placeholder="Select city" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">— None —</SelectItem>
+                          {cityLocations.map((loc) => (
+                            <SelectItem key={loc.id} value={loc.id}>
+                              {loc.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+
+                  {!isTrainOperatorForm &&
+                  (form.kind === "vehicle_rental" || form.kind === "hotel_property") ? (
+                    <div className="space-y-2">
+                      <Label htmlFor="supplier-location-area">Suburb / Area</Label>
+                      <Select
+                        value={form.locationAreaId ?? "none"}
+                        onValueChange={(value) =>
+                          updateField("locationAreaId", value === "none" ? null : value)
+                        }
+                        disabled={!form.locationId}
+                      >
+                        <SelectTrigger id="supplier-location-area">
+                          <SelectValue
+                            placeholder={
+                              form.locationId ? "Select area" : "Select a city first"
+                            }
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">— None —</SelectItem>
+                          {areaLocationsForCity.map((loc) => (
+                            <SelectItem key={loc.id} value={loc.id}>
+                              {loc.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <Label htmlFor="supplier-location-detail">Suburb / Area</Label>
+                      <BufferedInput
+                        id="supplier-location-detail"
+                        value={form.locationDetail}
+                        onValueChange={(value) => updateField("locationDetail", value)}
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <SupplierEmailEditor
@@ -2897,7 +3089,33 @@ export function SupplierDetailView({
                 />
 
                 <div className="space-y-2">
-                  <Label htmlFor="supplier-notes">Notes</Label>
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="supplier-description">Description</Label>
+                    <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-700">
+                      External
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Visible to clients - describes the supplier.
+                  </p>
+                  <BufferedTextarea
+                    id="supplier-description"
+                    value={form.description}
+                    onValueChange={(value) => updateField("description", value)}
+                    rows={3}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="supplier-notes">Notes</Label>
+                    <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700">
+                      Internal
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Internal only — not visible to clients.
+                  </p>
                   <BufferedTextarea
                     id="supplier-notes"
                     value={form.notes}
@@ -2925,14 +3143,29 @@ export function SupplierDetailView({
                   <InfoItem label="Phone" value={supplier.phone} />
                   <InfoItem label="Website" value={supplier.website} />
                   <InfoItem label="Location" value={supplier.location} />
-                  <InfoItem
-                    label="City"
-                    value={
-                      supplier.locationId
-                        ? (locations.find((loc) => loc.id === supplier.locationId)?.name ?? null)
-                        : null
-                    }
-                  />
+                  {!isTrainOperatorSupplier &&
+                  (supplier.kind === "vehicle_rental" || supplier.kind === "hotel_property") ? (
+                    <InfoItem
+                      label="Suburb / Area"
+                      value={
+                        supplier.locationAreaId
+                          ? (locations.find((loc) => loc.id === supplier.locationAreaId)?.name ?? null)
+                          : null
+                      }
+                    />
+                  ) : (
+                    <InfoItem label="Suburb / Area" value={supplier.locationDetail} />
+                  )}
+                  {!isTrainOperatorSupplier && (
+                    <InfoItem
+                      label="City"
+                      value={
+                        supplier.locationId
+                          ? (locations.find((loc) => loc.id === supplier.locationId)?.name ?? null)
+                          : null
+                      }
+                    />
+                  )}
                   <InfoItem
                     label="Last updated"
                     value={formatDisplayDate(supplier.updatedAt)}
@@ -2986,8 +3219,29 @@ export function SupplierDetailView({
                   </div>
                 </div>
 
-                <div className="rounded-lg bg-secondary/40 p-4 text-sm text-muted-foreground">
-                  {supplier.notes || "No supplier notes recorded."}
+                <div className="space-y-3">
+                  <div className="rounded-lg border border-emerald-100 bg-emerald-50/50 p-4">
+                    <div className="mb-2 flex items-center gap-2">
+                      <span className="text-xs font-medium text-emerald-800">Description</span>
+                      <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-700">
+                        External
+                      </span>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {supplier.description || "No description added."}
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-secondary/40 p-4">
+                    <div className="mb-2 flex items-center gap-2">
+                      <span className="text-xs font-medium text-foreground">Notes</span>
+                      <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700">
+                        Internal
+                      </span>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {supplier.notes || "No internal notes recorded."}
+                    </p>
+                  </div>
                 </div>
               </>
             )}
@@ -3003,15 +3257,104 @@ export function SupplierDetailView({
                     {activeVocabulary.sectionDescription}
                   </p>
                 </div>
-                {isEditing && (
-                  <Button variant="outline" size="sm" onClick={() => addRoute(0)}>
-                    <Plus className="mr-2 h-4 w-4" />
-                    {`Add ${activeVocabulary.route.toLowerCase()}`}
-                  </Button>
-                )}
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
+              {activeVocabulary.showSingleSupplement ? (
+                <div className="rounded-lg border p-4">
+                  {isEditing ? (
+                    <div className="grid gap-3 sm:grid-cols-[minmax(0,16rem)_1fr] sm:items-end">
+                      <div className="space-y-2">
+                        <Label htmlFor="supplier-single-supplement">
+                          Single supplement %
+                        </Label>
+                        <NumericInput
+                          id="supplier-single-supplement"
+                          min="0"
+                          step="0.01"
+                          value={form.singleSupplementPct}
+                          onValueChange={(value) =>
+                            updateField("singleSupplementPct", value ?? 0)
+                          }
+                        />
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Added to the per-person sharing rate when a traveller occupies a suite alone.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">
+                          Single supplement
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Added when a traveller occupies a suite alone.
+                        </p>
+                      </div>
+                      <Badge variant="outline">
+                        +{supplier.singleSupplementPct.toFixed(2)}%
+                      </Badge>
+                    </div>
+                  )}
+                </div>
+              ) : null}
+
+              {activeVocabulary.scheduleFields ? (
+                <div className="rounded-lg border p-4">
+                  {isEditing ? (
+                    <div className="space-y-3">
+                      <p className="text-sm font-semibold text-foreground">Default schedule times</p>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="space-y-1.5">
+                          <Label htmlFor="supplier-default-time-start">
+                            Default {activeVocabulary.scheduleFields.timeStartLabel.toLowerCase()}
+                          </Label>
+                          <Input
+                            id="supplier-default-time-start"
+                            type="time"
+                            value={form.defaultTimeStart}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateField("defaultTimeStart", e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="supplier-default-time-end">
+                            Default {activeVocabulary.scheduleFields.timeEndLabel.toLowerCase()}
+                          </Label>
+                          <Input
+                            id="supplier-default-time-end"
+                            type="time"
+                            value={form.defaultTimeEnd}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateField("defaultTimeEnd", e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ) : (supplier.defaultTimeStart || supplier.defaultTimeEnd) ? (
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">Default schedule times</p>
+                        <p className="text-xs text-muted-foreground">
+                          Auto-fills time fields when this supplier is selected on a booking.
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        {supplier.defaultTimeStart && (
+                          <Badge variant="outline">
+                            {activeVocabulary.scheduleFields.timeStartLabel}: {supplier.defaultTimeStart}
+                          </Badge>
+                        )}
+                        {supplier.defaultTimeEnd && (
+                          <Badge variant="outline">
+                            {activeVocabulary.scheduleFields.timeEndLabel}: {supplier.defaultTimeEnd}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
               <div className="rounded-lg border p-4 space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -3119,6 +3462,7 @@ export function SupplierDetailView({
                   packageIndex={0}
                   locationsById={locationsById}
                   vocabulary={activeVocabulary}
+                  isTransport={isTransportSupplier(form.kind)}
                   onAddPeriod={addRateCardPeriod}
                   onRemovePeriod={removeRateCardPeriod}
                   onUpdatePeriodField={updateRateCardPeriodField}
@@ -3132,7 +3476,6 @@ export function SupplierDetailView({
                   pkg={supplierRouteRatePackage}
                   suiteTypes={supplier.suiteTypes}
                   locationsById={locationsById}
-                  selectedRouteId={supplier.routes[0]?.id ?? null}
                   vocabulary={activeVocabulary}
                 />
               )}

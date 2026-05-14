@@ -153,9 +153,11 @@ export async function checkDeletionDependencies(
 }
 
 export async function loadSupplierDetail(supabase: SessionClient, slug: string) {
+  const supplierColumns = "id, slug, kind, status, name, email, phone, website, location, location_detail, location_id, location_area_id, description, notes, active, single_supplement_pct, default_time_start, default_time_end, created_at, updated_at"
+
   const slugLookup = await supabase
     .from("suppliers")
-    .select("*")
+    .select(supplierColumns)
     .eq("slug", slug)
     .single()
 
@@ -168,7 +170,7 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
 
   let supplier = slugLookup.data
   if (!supplier && isUuid(slug)) {
-    const idLookup = await supabase.from("suppliers").select("*").eq("id", slug).single()
+    const idLookup = await supabase.from("suppliers").select(supplierColumns).eq("id", slug).single()
     if (idLookup.error && !isNoRowsError(idLookup.error)) {
       console.error("Failed to load supplier by legacy id", {
         supplierId: slug,
@@ -195,18 +197,18 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
   ] = await Promise.all([
     supabase
       .from("suite_types")
-      .select("*")
+      .select("id, supplier_id, name, passenger_capacity, luggage_capacity, description, active, created_at, updated_at")
       .eq("supplier_id", supplierId)
       .order("name", { ascending: true }),
     supabase
       .from("supplier_emails")
-      .select("*")
+      .select("id, supplier_id, email, label, created_at")
       .eq("supplier_id", supplierId)
       .order("label", { ascending: true })
       .order("email", { ascending: true }),
     supabase
       .from("routes")
-      .select("*")
+      .select("id, supplier_id, name, origin_location_id, destination_location_id, pickup_point, dropoff_point, active, created_at, updated_at")
       .eq("supplier_id", supplierId)
       .order("name", { ascending: true }),
   ])
@@ -250,16 +252,25 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
   }
 
   const routeIds = (routes ?? []).map((route) => route.id)
-  const rateCardResult =
+  const [rateCardResult, vehicleRentalDetailsResult] = await Promise.all([
     routeIds.length > 0
-      ? await supabase
+      ? supabase
           .from("rate_cards")
-          .select("*")
+          .select("id, route_id, suite_type_id, price_per_person, child_price, infant_price, currency, valid_from, valid_to, created_at")
           .in("route_id", routeIds)
           .order("valid_from", { ascending: true })
-      : { data: [], error: null }
+      : Promise.resolve({ data: [], error: null }),
+    routeIds.length > 0
+      ? supabase
+          .from("vehicle_rental_route_details")
+          .select("route_id, included_km_per_day, extra_km_price, security_deposit, one_way_fee, created_at, updated_at")
+          .in("route_id", routeIds)
+      : Promise.resolve({ data: [], error: null }),
+  ])
 
   const { data: rateCards, error: rateCardsError } = rateCardResult
+  const { data: vehicleRentalRouteDetails, error: vehicleRentalRouteDetailsError } =
+    vehicleRentalDetailsResult
   if (rateCardsError) {
     console.error("Failed to load supplier rate cards", {
       supplierId,
@@ -274,6 +285,20 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     }
   }
 
+  if (vehicleRentalRouteDetailsError) {
+    console.error("Failed to load vehicle rental route details", {
+      supplierId,
+      supplierSlug: slug,
+      error: vehicleRentalRouteDetailsError,
+    })
+    return {
+      error: NextResponse.json(
+        { error: "Failed to load vehicle rental route details" },
+        { status: 500 },
+      ),
+    }
+  }
+
   const locationIds = Array.from(
     new Set(
       (routes ?? []).flatMap((route) => [
@@ -281,7 +306,7 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
         route.destination_location_id,
       ]),
     ),
-  )
+  ).filter((locationId): locationId is string => Boolean(locationId))
 
   const locationResult:
     | { data: LocationRow[]; error: null }
@@ -289,7 +314,7 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     locationIds.length > 0
       ? await supabase
           .from("locations")
-          .select("*")
+          .select("id, name, country, parent_location_id, region_code, created_at, updated_at")
           .in("id", locationIds)
           .order("name", { ascending: true })
       : { data: [], error: null }
@@ -317,5 +342,6 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     routes: routes ?? [],
     rateCards: rateCards ?? [],
     locations: locations ?? [],
+    vehicleRentalRouteDetails: vehicleRentalRouteDetails ?? [],
   }
 }
