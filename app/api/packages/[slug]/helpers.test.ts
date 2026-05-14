@@ -20,6 +20,7 @@ function buildInput(): UpsertPackageInput {
     durationNights: 3,
     currency: "ZAR",
     singleSupplementPct: 50,
+    markupPct: 0,
     fixedPricePerPerson: null,
     active: true,
     legs: [

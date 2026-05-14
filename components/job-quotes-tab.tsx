@@ -13,14 +13,17 @@ import { ApplyPackageDialog } from "@/components/apply-package-dialog"
 import { SendQuoteDialog } from "@/components/send-quote-dialog"
 import { CreateQuoteDialog } from "@/components/create-quote-dialog"
 import { QuotePreviewSendDialog } from "@/components/quote-preview-send-dialog"
-import { RotateCcw, Send } from "lucide-react"
+import { FileDown, Link2, Loader2, RotateCcw, Send, X } from "lucide-react"
 
-const STATUS_BADGE: Record<string, { variant: "default" | "secondary" | "outline" | "destructive"; label: string }> = {
+const STATUS_BADGE: Record<string, { variant: "default" | "secondary" | "outline" | "destructive"; label: string; className?: string }> = {
   draft: { variant: "secondary", label: "Draft" },
   pricing_incomplete: { variant: "outline", label: "Pricing Incomplete" },
   ready: { variant: "default", label: "Ready" },
   sent: { variant: "default", label: "Sent" },
   accepted: { variant: "default", label: "Accepted" },
+  expired: { variant: "outline", label: "Expired", className: "border-amber-400 text-amber-600 bg-amber-50" },
+  superseded: { variant: "secondary", label: "Superseded" },
+  cancelled: { variant: "destructive", label: "Cancelled" },
 }
 
 interface JobQuotesTabProps {
@@ -51,6 +54,9 @@ export function JobQuotesTab({
   const { can } = useRole()
   const [sendQuoteOpen, setSendQuoteOpen] = useState(false)
   const [revisingQuoteId, setRevisingQuoteId] = useState<string | null>(null)
+  const [cancellingQuoteId, setCancellingQuoteId] = useState<string | null>(null)
+  const [generatingLinkForId, setGeneratingLinkForId] = useState<string | null>(null)
+  const [generatingPdfForId, setGeneratingPdfForId] = useState<string | null>(null)
   const sendQuoteDialog = (
     <SendQuoteDialog
       open={sendQuoteOpen}
@@ -87,6 +93,54 @@ export function JobQuotesTab({
       toast.error(message)
     } finally {
       setRevisingQuoteId(null)
+    }
+  }
+
+  async function cancelQuote(quoteId: string) {
+    setCancellingQuoteId(quoteId)
+    try {
+      const response = await fetch(`/api/quotes/${quoteId}/cancel`, { method: "POST" })
+      const payload = (await response.json().catch(() => ({}))) as { error?: string }
+      if (!response.ok) throw new Error(payload.error ?? "Failed to cancel quote")
+      mutate()
+      toast.success("Quote cancelled.")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to cancel quote")
+    } finally {
+      setCancellingQuoteId(null)
+    }
+  }
+
+  async function generateAcceptanceLink(quoteId: string) {
+    setGeneratingLinkForId(quoteId)
+    try {
+      const response = await fetch(`/api/quotes/${quoteId}/acceptance-link`, { method: "POST" })
+      const payload = (await response.json().catch(() => ({}))) as { url?: string; error?: string }
+      if (!response.ok) throw new Error(payload.error ?? "Failed to generate link")
+      if (payload.url) {
+        await navigator.clipboard.writeText(payload.url)
+        toast.success("Acceptance link copied to clipboard.")
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to generate acceptance link")
+    } finally {
+      setGeneratingLinkForId(null)
+    }
+  }
+
+  async function downloadPdf(quoteId: string) {
+    setGeneratingPdfForId(quoteId)
+    try {
+      const response = await fetch(`/api/quotes/${quoteId}/pdf`, { method: "POST" })
+      const payload = (await response.json().catch(() => ({}))) as { url?: string; error?: string }
+      if (!response.ok) throw new Error(payload.error ?? "Failed to generate PDF")
+      if (payload.url) {
+        window.open(payload.url, "_blank", "noopener,noreferrer")
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to generate quote PDF")
+    } finally {
+      setGeneratingPdfForId(null)
     }
   }
 
@@ -131,7 +185,7 @@ export function JobQuotesTab({
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div className="flex items-center gap-2">
                   <CardTitle className="text-sm font-medium">{q.quoteNumber || it?.name || "Quote"}</CardTitle>
-                  <Badge variant={badge.variant} className="text-[10px]">{badge.label}</Badge>
+                  <Badge variant={badge.variant} className={`text-[10px] ${badge.className ?? ""}`}>{badge.label}</Badge>
                   {hasIncomplete && <Badge variant="destructive" className="text-[10px]">Missing pricing</Badge>}
                 </div>
                 <div className="flex items-center gap-2">
@@ -145,17 +199,64 @@ export function JobQuotesTab({
                         emailImportNeedsReview={emailImportNeedsReview}
                         onSent={mutate}
                       />
-                      {(q.status === "sent" || q.status === "accepted") && (
+                      {(q.status === "sent" || q.status === "accepted" || q.status === "expired") && (
                         <Button
                           size="sm"
                           variant="outline"
                           disabled={revisingQuoteId === q.id}
                           onClick={() => void reviseQuote(q.id)}
                         >
-                          <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-                          Revise Quote
+                          {revisingQuoteId === q.id ? (
+                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                          )}
+                          Revise
                         </Button>
                       )}
+                      {q.status === "sent" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={generatingLinkForId === q.id}
+                          onClick={() => void generateAcceptanceLink(q.id)}
+                        >
+                          {generatingLinkForId === q.id ? (
+                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Link2 className="mr-1.5 h-3.5 w-3.5" />
+                          )}
+                          Acceptance Link
+                        </Button>
+                      )}
+                      {["draft", "pricing_incomplete", "ready", "sent"].includes(q.status) && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={cancellingQuoteId === q.id}
+                          onClick={() => void cancelQuote(q.id)}
+                        >
+                          {cancellingQuoteId === q.id ? (
+                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <X className="mr-1.5 h-3.5 w-3.5" />
+                          )}
+                          Cancel
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={generatingPdfForId === q.id}
+                        onClick={() => void downloadPdf(q.id)}
+                      >
+                        {generatingPdfForId === q.id ? (
+                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <FileDown className="mr-1.5 h-3.5 w-3.5" />
+                        )}
+                        PDF
+                      </Button>
                       <ApplyPackageDialog
                         jobId={jobId}
                         quoteId={q.id}

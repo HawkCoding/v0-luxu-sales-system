@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server"
-import { mapPackageListItem, type PackageLegWithSupplier } from "@/lib/packages"
+import { mapPackageListItem, packageDetailForRole, type PackageLegWithSupplier } from "@/lib/packages"
 import { createPackageSchema } from "./schemas"
 import {
-  hasPackageWriteAccess,
+  getPackageWriteRole,
+  isPackageMarkupVisible,
   loadPackageDetail,
   normalizePackageChildren,
   resolveUniquePackageSlug,
@@ -16,6 +17,7 @@ export async function GET() {
   }
 
   const { supabase } = auth
+  const showMarkup = await isPackageMarkupVisible(supabase, auth.user.id)
   const [
     { data: packages, error: packagesError },
     { data: legRows, error: legsError },
@@ -89,7 +91,9 @@ export async function GET() {
       const trainRoute = trainLeg
         ? routes.find((route) => trainRouteIds.has(route.id))
         : null
-      return mapPackageListItem(pkg, pkgLegs, prices, trainRoute?.name ?? null)
+      return mapPackageListItem(pkg, pkgLegs, prices, trainRoute?.name ?? null, {
+        includeMarkupPct: showMarkup,
+      })
     }),
   )
 }
@@ -101,7 +105,8 @@ export async function POST(req: Request) {
   }
 
   const { supabase, user } = auth
-  if (!(await hasPackageWriteAccess(supabase, user.id))) {
+  const writeRole = await getPackageWriteRole(supabase, user.id)
+  if (!writeRole) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
@@ -127,6 +132,7 @@ export async function POST(req: Request) {
       description: parsed.description?.trim() || null,
       duration_nights: parsed.durationNights ?? null,
       single_supplement_pct: parsed.singleSupplementPct,
+      markup_pct: writeRole === "admin" ? parsed.markupPct : 0,
       fixed_price_per_person: parsed.fixedPricePerPerson ?? null,
       currency: parsed.currency.trim().toUpperCase() || "ZAR",
       active: parsed.active,
@@ -186,6 +192,18 @@ export async function POST(req: Request) {
 
   if (rateCardsError) {
     await supabase.from("packages").delete().eq("id", pkg.id)
+    if (rateCardsError.code === "23P01") {
+      return NextResponse.json(
+        { error: "Overlapping rate card periods are not allowed for the same route and suite type." },
+        { status: 409 },
+      )
+    }
+    if (rateCardsError.code === "23505") {
+      return NextResponse.json(
+        { error: "Duplicate rate cards are not allowed for the same route, suite type, and start date." },
+        { status: 409 },
+      )
+    }
     return NextResponse.json({ error: "Failed to create package rates" }, { status: 500 })
   }
 
@@ -194,5 +212,7 @@ export async function POST(req: Request) {
     return detail.error!
   }
 
-  return NextResponse.json(detail.detail, { status: 201 })
+  return NextResponse.json(packageDetailForRole(detail.detail, { includeMarkupPct: writeRole === "admin" }), {
+    status: 201,
+  })
 }

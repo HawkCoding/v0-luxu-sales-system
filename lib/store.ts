@@ -32,7 +32,7 @@ let jobCounter = 13
 export function nextJobNumber(): string {
   const num = jobCounter++
   const year = new Date().getFullYear()
-  return `LUX-${year}-${String(num).padStart(6, "0")}`
+  return `REV-${year}-${String(num).padStart(4, "0")}`
 }
 
 let idCounter = 100

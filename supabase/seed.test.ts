@@ -30,4 +30,13 @@ describe("local Supabase seed", () => {
     expect(seedSql).toContain("on conflict (user_id) do update")
     expect(seedSql).toContain("is_active = excluded.is_active")
   })
+
+  it("uses product-year job numbers and seeds product counters", () => {
+    expect(seedSql).not.toContain("LUX-")
+    expect(seedSql).not.toContain("booking_number_seq")
+    expect(seedSql).toContain("'Blue Train', 'blue-train', 'train_operator'")
+    expect(seedSql).toContain("'RR-2025-0001'")
+    expect(seedSql).toContain("insert into public.job_number_counters")
+    expect(seedSql).toContain("('RR', 2025, 24)")
+  })
 })

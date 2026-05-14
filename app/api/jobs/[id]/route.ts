@@ -156,6 +156,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     cancelReason: booking.cancel_reason ?? null,
     cancelledAt: booking.cancelled_at ?? null,
     cancelledAtDisplay: formatDisplayDateTime(booking.cancelled_at),
+    depositPaid: booking.deposit_paid ?? false,
+    invoiceBalance: booking.invoice_balance !== null ? Number(booking.invoice_balance) : null,
   }
 
   // Map customer
@@ -269,9 +271,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       .filter((li) => li.quote_id === q.id)
       .map((li) => ({
         description: li.description,
+        supplierDescription: li.supplier_description,
         qty: li.qty,
         unitPrice: li.unit_price,
         total: li.total,
+        pricingSnapshot: li.pricing_snapshot,
       })),
   }))
 
@@ -285,6 +289,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     method: p.method ?? "",
     reference: p.reference ?? "",
     notes: p.notes ?? "",
+    proofStoragePath: (p as Record<string, unknown>).proof_storage_path as string | null ?? null,
   }))
 
   const invoices = (invoicesData ?? []).map((invoice) => ({
@@ -390,12 +395,23 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const { data: booking } = await supabase
     .from("bookings")
     .select(
-      "id, stage, booking_number, customer_id, consultant, assigned_salesperson_id, source, raw_text, email_import_needs_review, email_import_review_resolved_at, updated_at",
+      "id, stage, booking_number, customer_id, consultant, assigned_salesperson_id, source, raw_text, email_import_needs_review, email_import_review_resolved_at, updated_at, departure_date, duration_nights, deposit_paid, invoice_balance",
     )
     .eq("id", id)
     .single()
 
   if (!booking) return NextResponse.json({ error: "Not found" }, { status: 404 })
+
+  const { data: patchActorProfile } = await supabase
+    .from("profiles")
+    .select("clearance_level")
+    .eq("user_id", user.id)
+    .maybeSingle()
+
+  const patchActorRole = extractRoleFromJwt(user) ?? patchActorProfile?.clearance_level ?? null
+  if (!["admin", "manager", "consultant"].includes(patchActorRole ?? "")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
 
   if (body.expectedUpdatedAt && body.expectedUpdatedAt !== booking.updated_at) {
     return staleVersionResponse("booking", booking.updated_at)
@@ -404,6 +420,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
 
   if (body.resolveEmailImportReview === true) {
+    const { data: actorProfile } = await supabase
+      .from("profiles")
+      .select("clearance_level")
+      .eq("user_id", user.id)
+      .maybeSingle()
+
+    const role = extractRoleFromJwt(user) ?? actorProfile?.clearance_level ?? null
+    if (role !== "manager" && role !== "admin") {
+      return NextResponse.json({ error: "Manager access required to clear import review" }, { status: 403 })
+    }
+
     updates.email_import_needs_review = false
     updates.email_import_review_resolved_at = new Date().toISOString()
     updates.email_import_review_resolved_by = user?.id ?? null
@@ -484,6 +511,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         body.resolveEmailImportReview === true
           ? new Date().toISOString()
           : booking.email_import_review_resolved_at,
+      deposit_paid: booking.deposit_paid,
+      invoice_balance: booking.invoice_balance !== null ? Number(booking.invoice_balance) : null,
+      departure_date: booking.departure_date,
     }
     const failures = validateTransition({
       booking: validationBooking,
@@ -524,6 +554,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
           customer_id: booking.customer_id,
           consultant: booking.consultant,
         },
+        departureDate: booking.departure_date,
+        durationNights: booking.duration_nights,
         targetStage,
         actorName,
         actorUserId: user.id,
@@ -611,9 +643,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       if (reopenAudit.error) return NextResponse.json({ error: reopenAudit.error.message }, { status: 500 })
     }
   }
-
-  if (body.ownerUser) updates.consultant = body.ownerUser
-  if (body.consultant) updates.consultant = body.consultant
 
   if (body.assignedSalespersonId !== undefined) {
     const { data: actorProfile } = await supabase

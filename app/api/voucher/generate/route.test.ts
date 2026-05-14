@@ -32,6 +32,7 @@ function postJson(body: unknown) {
 interface BookingOpts {
   stage: string
   invoiceBalance: number | null
+  existingDocumentId?: string
 }
 
 function createSelectResult(data: unknown) {
@@ -51,10 +52,10 @@ function createSelectResult(data: unknown) {
   }
 }
 
-function buildAuth({ stage, invoiceBalance }: BookingOpts) {
+function buildAuth({ stage, invoiceBalance, existingDocumentId }: BookingOpts) {
   const documentWrite = {
     data: {
-      id: "document-1",
+      id: existingDocumentId ?? "document-1",
       booking_id: BOOKING_ID,
       kind: "voucher_pdf",
       status: "generated",
@@ -63,6 +64,8 @@ function buildAuth({ stage, invoiceBalance }: BookingOpts) {
     },
     error: null,
   }
+
+  const auditInsertMock = vi.fn(async () => ({ error: null }))
 
   const supabase = {
     storage: {
@@ -91,16 +94,17 @@ function buildAuth({ stage, invoiceBalance }: BookingOpts) {
       if (table === "booking_suites") return createSelectResult([{ suite_type_name: "Luxury" }])
       if (table === "travellers") return createSelectResult([])
       if (table === "voucher_template") return createSelectResult(null)
-      if (table === "audit_logs") return { insert: vi.fn(async () => ({ error: null })) }
+      if (table === "audit_logs") return { insert: auditInsertMock }
 
       if (table === "documents") {
+        const existingDoc = existingDocumentId ? { id: existingDocumentId } : null
         return {
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
               eq: vi.fn(() => ({
                 order: vi.fn(() => ({
                   limit: vi.fn(() => ({
-                    maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+                    maybeSingle: vi.fn(async () => ({ data: existingDoc, error: null })),
                   })),
                 })),
               })),
@@ -109,6 +113,13 @@ function buildAuth({ stage, invoiceBalance }: BookingOpts) {
           insert: vi.fn(() => ({
             select: vi.fn(() => ({
               single: vi.fn(async () => documentWrite),
+            })),
+          })),
+          update: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              select: vi.fn(() => ({
+                single: vi.fn(async () => documentWrite),
+              })),
             })),
           })),
         }
@@ -126,6 +137,8 @@ function buildAuth({ stage, invoiceBalance }: BookingOpts) {
       profile: { clearanceLevel: "consultant", actorName: "Jane" },
     },
   })
+
+  return { auditInsertMock }
 }
 
 describe("POST /api/voucher/generate", () => {
@@ -140,7 +153,7 @@ describe("POST /api/voucher/generate", () => {
     const res = await POST(postJson({ jobId: BOOKING_ID }))
 
     expect(res.status).toBe(422)
-    expect(await res.json()).toMatchObject({ error: "Booking must be paid in full before generating a voucher" })
+    expect(await res.json()).toMatchObject({ error: "The invoice balance must be zero before generating a voucher." })
     expect(renderVoucherPdf).not.toHaveBeenCalled()
   })
 
@@ -150,7 +163,7 @@ describe("POST /api/voucher/generate", () => {
     const res = await POST(postJson({ jobId: BOOKING_ID }))
 
     expect(res.status).toBe(422)
-    expect(await res.json()).toMatchObject({ error: "Booking must be paid in full before generating a voucher" })
+    expect(await res.json()).toMatchObject({ error: "The booking must be in Paid in Full, Voucher Sent, or Closed stage." })
     expect(renderVoucherPdf).not.toHaveBeenCalled()
   })
 
@@ -161,5 +174,31 @@ describe("POST /api/voucher/generate", () => {
 
     expect(res.status).toBe(200)
     expect(renderVoucherPdf).toHaveBeenCalled()
+  })
+
+  it("logs voucher_pdf_regenerated when a document already exists", async () => {
+    const { auditInsertMock } = buildAuth({
+      stage: "final_paid",
+      invoiceBalance: 0,
+      existingDocumentId: "existing-doc-1",
+    })
+
+    const res = await POST(postJson({ jobId: BOOKING_ID }))
+
+    expect(res.status).toBe(200)
+    expect(auditInsertMock).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "voucher_pdf_regenerated" }),
+    )
+  })
+
+  it("logs voucher_pdf_generated when no document exists yet", async () => {
+    const { auditInsertMock } = buildAuth({ stage: "final_paid", invoiceBalance: 0 })
+
+    const res = await POST(postJson({ jobId: BOOKING_ID }))
+
+    expect(res.status).toBe(200)
+    expect(auditInsertMock).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "voucher_pdf_generated" }),
+    )
   })
 })

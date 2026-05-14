@@ -44,6 +44,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { useActiveSuppliers, useLocations } from "@/lib/use-data"
+import { useRole } from "@/lib/role-context"
 import { formatRateCardValidityRange } from "@/lib/rate-card-validity"
 import type { Location, Supplier, SupplierDetail, SupplierRateCard, SupplierRoute, SupplierSuiteType } from "@/lib/types"
 import { CURRENCIES, SUPPLIER_KIND_LABELS, getSupplierVocabulary, type SupplierKind } from "@/lib/types"
@@ -56,6 +57,7 @@ interface WizardState {
   durationNights: number | null
   currency: string
   singleSupplementPct: number
+  markupPct: number
   fixedPricePerPerson: number | null
   active: boolean
   legs: PackageWizardLeg[]
@@ -75,6 +77,7 @@ const initialState: WizardState = {
   durationNights: null,
   currency: "ZAR",
   singleSupplementPct: 50,
+  markupPct: 0,
   fixedPricePerPerson: null,
   active: true,
   legs: [],
@@ -125,6 +128,7 @@ function payloadFromState(state: WizardState) {
     durationNights: state.durationNights,
     currency: state.currency.trim().toUpperCase() || "ZAR",
     singleSupplementPct: state.singleSupplementPct,
+    markupPct: state.markupPct,
     fixedPricePerPerson: state.fixedPricePerPerson,
     active: state.active,
     legs: state.legs.map((leg, index) => {
@@ -226,6 +230,7 @@ function routeLocationLabel(route: SupplierRoute, locations: Location[]): string
 
 export function PackageWizard() {
   const router = useRouter()
+  const { role } = useRole()
   const { data: suppliers = [] } = useActiveSuppliers()
   const { data: locations = [] } = useLocations()
   const [state, dispatch] = useReducer(reducer, initialState)
@@ -239,6 +244,7 @@ export function PackageWizard() {
   const selectedSupplier = suppliers.find((supplier) => supplier.id === selectedSupplierId)
   const hasAnySelection =
     state.legs.length > 0 && state.legs.every((leg) => legHasRequiredSelection(leg))
+  const canSeeMarkup = role === "admin"
   const isNextDisabled =
     step === 5 ||
     (step === 2 && state.legs.length === 0) ||
@@ -396,6 +402,19 @@ export function PackageWizard() {
                     }
                   />
                 </div>
+                {canSeeMarkup ? (
+                  <div className="space-y-2">
+                    <Label>Package markup %</Label>
+                    <NumericInput
+                      min="0"
+                      step="0.01"
+                      value={state.markupPct}
+                      onValueChange={(value) =>
+                        dispatch({ type: "field", field: "markupPct", value: value ?? 0 })
+                      }
+                    />
+                  </div>
+                ) : null}
                 <div className="space-y-2">
                   <Label>Fixed price per person (optional)</Label>
                   <NumericInput

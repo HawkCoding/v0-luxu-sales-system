@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
-import { Search, Globe, Filter, X, UserPlus } from "lucide-react"
+import { Search, Globe, Filter, X, UserPlus, Star } from "lucide-react"
 import { useEffect, useState } from "react"
 import { CONSULTANTS, type ConsultantAbbreviation } from "@/lib/types"
 import { formatDisplayDate } from "@/lib/date-format"
@@ -357,6 +357,17 @@ export default function CustomersPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 mb-1">
                         <p className="text-sm font-medium text-foreground">{c.firstName} {c.lastName}</p>
+                        {c.vipStatus ? (
+                          <Badge variant="secondary" className="text-[10px] h-4 px-1.5 gap-1">
+                            <Star className="w-2.5 h-2.5" />
+                            VIP
+                          </Badge>
+                        ) : null}
+                        {c.isRepeatClient ? (
+                          <Badge variant="outline" className="text-[10px] h-4 px-1.5">
+                            Repeat
+                          </Badge>
+                        ) : null}
                         {c.consultants.length > 0 && (
                           <div className="flex items-center gap-1">
                             {c.consultants.map((cons: string) => (

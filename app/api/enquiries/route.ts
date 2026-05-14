@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server"
 import { randomUUID } from "node:crypto"
 import { detectCountryInText, loadCountryAliasMap, normalizeCountry } from "@/lib/countries"
+import { addJobNumberingMetadata, allocateJobNumberForBooking, type JobNumberAllocation } from "@/lib/job-numbering"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
 import { buildPackageQuoteLineItems, calculateQuoteTotals } from "@/lib/quotes/build-from-package"
 import { buildQuoteNumber } from "@/lib/quotes/quote-number"
 import type { PackageDetail, QuoteLineItem } from "@/lib/types"
 import { createServiceClient, createSessionClient } from "@/lib/supabase/server"
+import type { Json } from "@/lib/supabase/types"
 import { loadPackageDetail } from "../packages/[slug]/helpers"
 
 type ServiceClient = ReturnType<typeof createServiceClient>
@@ -53,7 +55,7 @@ function normalizeNullableNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null
 }
 
-function normalizeSuiteSelections(body: Record<string, unknown>): SuiteSelection[] {
+export function normalizeSuiteSelections(body: Record<string, unknown>): SuiteSelection[] {
   const structuredSelections = Array.isArray(body.suiteSelections)
     ? body.suiteSelections
         .map((selection: unknown): SuiteSelection | null => {
@@ -82,7 +84,7 @@ function normalizeSuiteSelections(body: Record<string, unknown>): SuiteSelection
     : []
 }
 
-async function resolveSuiteSelectionIds(
+export async function resolveSuiteSelectionIds(
   supabase: ServiceClient,
   supplierId: unknown,
   selections: SuiteSelection[],
@@ -328,46 +330,18 @@ export async function POST(req: Request) {
   )
 
   // --- 1. Upsert customer (match on email) ---
-  const { data: existingCustomer } = await supabase
-    .from("customers")
-    .select("id")
-    .eq("email", normalizedEmail)
-    .maybeSingle()
+  const { customerId, customerIsRepeatClient } = await resolveEnquiryCustomer(supabase, {
+    normalizedEmail,
+    firstName: normalizedCustomerFirstName,
+    lastName: normalizedCustomerLastName,
+    phone: body.contactNumber || null,
+    country: normalizedCountry,
+    title: body.title || null,
+    nowIso: new Date().toISOString(),
+  })
 
-  let customerId: string
-
-  if (existingCustomer) {
-    customerId = existingCustomer.id
-    // Update contact details in case they changed
-    await supabase
-      .from("customers")
-      .update({
-        first_name: normalizedCustomerFirstName,
-        last_name: normalizedCustomerLastName,
-        phone: body.contactNumber || null,
-        country: normalizedCountry,
-        title: body.title || null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", customerId)
-  } else {
-    const { data: newCustomer, error: customerError } = await supabase
-      .from("customers")
-      .insert({
-        first_name: normalizedCustomerFirstName,
-        last_name: normalizedCustomerLastName,
-        email: normalizedEmail,
-        phone: body.contactNumber || null,
-        country: normalizedCountry,
-        title: body.title || null,
-      })
-      .select("id")
-      .single()
-
-    if (customerError || !newCustomer) {
-      return NextResponse.json({ error: "Failed to create customer" }, { status: 500 })
-    }
-    customerId = newCustomer.id
+  if (!customerId) {
+    return NextResponse.json({ error: "Failed to create customer" }, { status: 500 })
   }
 
   // --- 2. Insert booking ---
@@ -375,6 +349,23 @@ export async function POST(req: Request) {
   const routeId = await findRouteId(supabase, body.direction)
   const packageId = await findPackageId(supabase, body.packageOption)
   const hotelSupplierId = await findHotelSupplierId(supabase, body.hotelOption)
+  let jobNumberAllocation: JobNumberAllocation
+  try {
+    jobNumberAllocation = await allocateJobNumberForBooking(supabase, {
+      supplierId: normalizeNullableText(body.supplierId),
+      parsedSupplier: normalizeNullableText(body.supplier),
+      routeId,
+      routeName: normalizeNullableText(body.direction),
+      packageId,
+      packageName: normalizeNullableText(body.packageOption),
+      rawText: normalizeNullableText(body.rawText),
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to allocate job number" },
+      { status: 500 },
+    )
+  }
   const existingExtractedJson =
     body.extractedJson && typeof body.extractedJson === "object" && !Array.isArray(body.extractedJson)
       ? body.extractedJson as Record<string, unknown>
@@ -383,7 +374,7 @@ export async function POST(req: Request) {
     existingExtractedJson.formFields && typeof existingExtractedJson.formFields === "object" && !Array.isArray(existingExtractedJson.formFields)
       ? existingExtractedJson.formFields as Record<string, unknown>
       : {}
-  const extractedJson = {
+  const extractedJson = addJobNumberingMetadata({
     ...existingExtractedJson,
     formFields: {
       ...existingFormFields,
@@ -399,13 +390,15 @@ export async function POST(req: Request) {
       hotelSupplierId,
       supplierId: normalizeNullableText(body.supplierId),
     },
-  }
+  }, jobNumberAllocation.resolution)
 
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
     .insert({
+      booking_number: jobNumberAllocation.bookingNumber,
       customer_id: customerId,
       assigned_salesperson_id: user?.id ?? null,
+      // owner_user_id is the immutable original creator; reassignment uses assigned_salesperson_id.
       owner_user_id: user?.id ?? null,
       purpose: body.purpose || "quote",
       source,
@@ -419,7 +412,7 @@ export async function POST(req: Request) {
       no_of_suites: body.noOfSuites ?? 1,
       child_ages: body.childAges || null,
       raw_text: body.rawText || null,
-      extracted_json: extractedJson,
+      extracted_json: extractedJson as Json,
       terms_accepted: body.termsAccepted ?? false,
       extend_stay: body.extendStay === "yes" || body.extendStay === true || false,
       extra_nights: body.extraNights ? Number(body.extraNights) : null,
@@ -566,6 +559,21 @@ export async function POST(req: Request) {
     },
   })
 
+  if (jobNumberAllocation.resolution.needsReview) {
+    await supabase.from("audit_logs").insert({
+      actor: user?.email ?? (body.rawText ? "consultant" : "system"),
+      actor_user_id: user?.id ?? null,
+      entity_type: "Booking",
+      entity_id: booking.id,
+      action: "job_number_product_needs_review",
+      meta_json: {
+        booking_number: booking.booking_number,
+        reason: jobNumberAllocation.resolution.reason,
+        sources: jobNumberAllocation.resolution.sources,
+      },
+    })
+  }
+
   return NextResponse.json({
     bookingNumber: booking.booking_number,
     bookingId: booking.id,
@@ -574,6 +582,73 @@ export async function POST(req: Request) {
     jobId: booking.id,
     quoteId: draftQuote.quoteId,
     quoteWarning: draftQuote.warning,
-    needsReview: false,
+    customerId,
+    customerIsRepeatClient,
+    needsReview: jobNumberAllocation.resolution.needsReview,
   })
+}
+
+interface ResolveEnquiryCustomerInput {
+  normalizedEmail: string
+  firstName: string
+  lastName: string
+  phone: string | null
+  country: string | null
+  title: string | null
+  nowIso: string
+}
+
+export async function resolveEnquiryCustomer(
+  supabase: ServiceClient,
+  input: ResolveEnquiryCustomerInput,
+): Promise<{ customerId: string | null; customerIsRepeatClient: boolean }> {
+  const { data: existingCustomer } = await supabase
+    .from("customers")
+    .select("id")
+    .eq("email", input.normalizedEmail)
+    .maybeSingle()
+
+  if (existingCustomer) {
+    const { data: priorCompletedBookings } = await supabase
+      .from("bookings")
+      .select("id")
+      .eq("customer_id", existingCustomer.id)
+      .in("stage", ["voucher_sent", "closed"])
+      .limit(1)
+    const customerIsRepeatClient = (priorCompletedBookings ?? []).length > 0
+
+    await supabase
+      .from("customers")
+      .update({
+        first_name: input.firstName,
+        last_name: input.lastName,
+        phone: input.phone,
+        country: input.country,
+        title: input.title,
+        ...(customerIsRepeatClient ? { is_repeat_client: true } : {}),
+        updated_at: input.nowIso,
+      })
+      .eq("id", existingCustomer.id)
+
+    return { customerId: existingCustomer.id, customerIsRepeatClient }
+  }
+
+  const { data: newCustomer, error: customerError } = await supabase
+    .from("customers")
+    .insert({
+      first_name: input.firstName,
+      last_name: input.lastName,
+      email: input.normalizedEmail,
+      phone: input.phone,
+      country: input.country,
+      title: input.title,
+    })
+    .select("id")
+    .single()
+
+  if (customerError || !newCustomer) {
+    return { customerId: null, customerIsRepeatClient: false }
+  }
+
+  return { customerId: newCustomer.id, customerIsRepeatClient: false }
 }

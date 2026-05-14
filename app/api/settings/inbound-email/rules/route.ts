@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
+import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 import { jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { requireAdminSettingsAccess } from "@/lib/settings-access"
 
@@ -73,6 +74,17 @@ export async function POST(request: Request) {
     action: "inbound_email_rule_created",
     meta_json: { name: data.name, subject_pattern: data.subject_pattern },
   })
+
+  const auditResult = await writeAuditLog(auth.value.supabase, {
+    actor: auth.value.actorName,
+    actorUserId: auth.value.userId,
+    entityType: "Settings",
+    entityId: "inbound_email_rules",
+    action: "settings_changed",
+    after: { rule_id: data.id, name: data.name, subject_pattern: data.subject_pattern },
+    meta: { ...settingAuditMeta("inbound_email_rules"), operation: "create" },
+  })
+  if (auditResult.error) return safeSupabaseError("inbound-email-rules:audit-settings", auditResult.error)
 
   return NextResponse.json({ rule: mapRule(data) }, { status: 201 })
 }

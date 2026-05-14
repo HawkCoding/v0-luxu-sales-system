@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server"
-import { z } from "zod"
+import { z, ZodError } from "zod"
 import { extractRoleFromJwt } from "@/lib/role-utils"
 import { createSessionClient } from "@/lib/supabase/server"
 import type { PipelineStage } from "@/lib/types"
 import { validateTransition } from "@/lib/pipeline/validate-transition"
+import { flattenZod } from "@/lib/api/responses"
 
 const pipelineStageSchema = z.enum([
   "enquiry",
@@ -55,13 +56,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   try {
     body = validateMoveSchema.parse(await req.json())
   } catch (error) {
-    return NextResponse.json({ error: "Invalid request payload", details: error }, { status: 400 })
+    return NextResponse.json(
+      { error: "Invalid request payload", details: error instanceof ZodError ? flattenZod(error) : undefined },
+      { status: 400 },
+    )
   }
 
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
     .select(
-      "id, stage, source, customer_id, email_import_needs_review, email_import_review_resolved_at",
+      "id, stage, source, customer_id, email_import_needs_review, email_import_review_resolved_at, deposit_paid, invoice_balance, departure_date",
     )
     .eq("id", id)
     .single()
@@ -101,6 +105,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       source: booking.source,
       email_import_needs_review: booking.email_import_needs_review,
       email_import_review_resolved_at: booking.email_import_review_resolved_at,
+      deposit_paid: booking.deposit_paid,
+      invoice_balance: booking.invoice_balance !== null ? Number(booking.invoice_balance) : null,
+      departure_date: booking.departure_date,
     },
     customer,
     targetStage: body.targetStage as PipelineStage,

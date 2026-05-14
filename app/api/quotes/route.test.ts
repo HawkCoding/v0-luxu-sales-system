@@ -21,6 +21,7 @@ const QUOTE_ID = "00000000-0000-4000-8000-00000000dddd"
 
 function buildAuth() {
   const lineInsert = vi.fn(async () => ({ error: null }))
+  const auditInsert = vi.fn(async () => ({ error: null }))
   const quoteInsertPayload = vi.fn()
   const supabase = {
     from: vi.fn((table: string) => {
@@ -65,6 +66,9 @@ function buildAuth() {
       if (table === "quote_line_items") {
         return { insert: lineInsert }
       }
+      if (table === "audit_logs") {
+        return { insert: auditInsert }
+      }
       throw new Error(`Unexpected table ${table}`)
     }),
   }
@@ -78,7 +82,7 @@ function buildAuth() {
     },
   })
 
-  return { lineInsert, quoteInsertPayload }
+  return { lineInsert, quoteInsertPayload, auditInsert }
 }
 
 function postJson(body: unknown) {
@@ -122,7 +126,7 @@ describe("POST /api/quotes", () => {
   })
 
   it("creates the quote and inserts line items", async () => {
-    const { lineInsert } = buildAuth()
+    const { lineInsert, auditInsert } = buildAuth()
     const res = await POST(
       postJson({
         bookingId: BOOKING_ID,
@@ -133,6 +137,9 @@ describe("POST /api/quotes", () => {
     const body = await res.json()
     expect(body).toMatchObject({ id: QUOTE_ID, quoteNumber: "BT-2026-0001-Q1" })
     expect(lineInsert).toHaveBeenCalled()
+    expect(auditInsert).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "quote_generated", entity_id: QUOTE_ID }),
+    )
   })
 
   it("accepts and forwards status: 'ready'", async () => {
@@ -173,6 +180,7 @@ describe("POST /api/quotes", () => {
         unit_price: 1000,
         total: 2000,
         sort_order: 0,
+        pricing_snapshot: null,
       },
       {
         quote_id: QUOTE_ID,
@@ -182,6 +190,7 @@ describe("POST /api/quotes", () => {
         unit_price: 500,
         total: 2000,
         sort_order: 1,
+        pricing_snapshot: null,
       },
     ])
   })

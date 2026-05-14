@@ -428,7 +428,7 @@ export type Database = {
           additional_services?: boolean
           additional_services_details?: string | null
           assigned_salesperson_id?: string | null
-          booking_number?: string
+          booking_number: string
           cancel_reason?: string | null
           cancelled_at?: string | null
           child_ages?: number[] | null
@@ -538,13 +538,6 @@ export type Database = {
           voucher_sent_at?: string | null
         }
         Relationships: [
-          {
-            foreignKeyName: "bookings_assigned_salesperson_id_fkey"
-            columns: ["assigned_salesperson_id"]
-            isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "bookings_customer_id_fkey"
             columns: ["customer_id"]
@@ -751,40 +744,64 @@ export type Database = {
       }
       customers: {
         Row: {
+          communication_preferences: string | null
           country: string | null
           created_at: string
+          date_of_birth: string | null
           email: string
           first_name: string
+          first_travel_date: string | null
           id: string
+          is_repeat_client: boolean
           last_name: string
+          last_travel_date: string | null
           notes: string | null
           phone: string | null
+          preferences: string | null
+          province: string | null
           title: string | null
           updated_at: string
+          vip_status: boolean
         }
         Insert: {
+          communication_preferences?: string | null
           country?: string | null
           created_at?: string
+          date_of_birth?: string | null
           email: string
           first_name: string
+          first_travel_date?: string | null
           id?: string
+          is_repeat_client?: boolean
           last_name: string
+          last_travel_date?: string | null
           notes?: string | null
           phone?: string | null
+          preferences?: string | null
+          province?: string | null
           title?: string | null
           updated_at?: string
+          vip_status?: boolean
         }
         Update: {
+          communication_preferences?: string | null
           country?: string | null
           created_at?: string
+          date_of_birth?: string | null
           email?: string
           first_name?: string
+          first_travel_date?: string | null
           id?: string
+          is_repeat_client?: boolean
           last_name?: string
+          last_travel_date?: string | null
           notes?: string | null
           phone?: string | null
+          preferences?: string | null
+          province?: string | null
           title?: string | null
           updated_at?: string
+          vip_status?: boolean
         }
         Relationships: []
       }
@@ -1166,6 +1183,30 @@ export type Database = {
           },
         ]
       }
+      job_number_counters: {
+        Row: {
+          created_at: string
+          next_number: number
+          number_year: number
+          product_prefix: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          next_number?: number
+          number_year: number
+          product_prefix: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          next_number?: number
+          number_year?: number
+          product_prefix?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       itineraries: {
         Row: {
           accepted_at: string | null
@@ -1210,6 +1251,7 @@ export type Database = {
           created_at: string
           id: string
           name: string
+          parent_location_id: string | null
           region_code: string | null
           updated_at: string
         }
@@ -1218,6 +1260,7 @@ export type Database = {
           created_at?: string
           id?: string
           name: string
+          parent_location_id?: string | null
           region_code?: string | null
           updated_at?: string
         }
@@ -1226,10 +1269,19 @@ export type Database = {
           created_at?: string
           id?: string
           name?: string
+          parent_location_id?: string | null
           region_code?: string | null
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "locations_parent_location_id_fkey"
+            columns: ["parent_location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       package_leg_routes: {
         Row: {
@@ -1315,6 +1367,7 @@ export type Database = {
           duration_nights: number | null
           fixed_price_per_person: number | null
           id: string
+          markup_pct: number
           name: string
           single_supplement_pct: number
           slug: string
@@ -1328,6 +1381,7 @@ export type Database = {
           duration_nights?: number | null
           fixed_price_per_person?: number | null
           id?: string
+          markup_pct?: number
           name: string
           single_supplement_pct?: number
           slug: string
@@ -1341,6 +1395,7 @@ export type Database = {
           duration_nights?: number | null
           fixed_price_per_person?: number | null
           id?: string
+          markup_pct?: number
           name?: string
           single_supplement_pct?: number
           slug?: string
@@ -1356,6 +1411,7 @@ export type Database = {
           id: string
           method: string | null
           notes: string | null
+          proof_storage_path: string | null
           received_at: string
           reference: string | null
         }
@@ -1366,6 +1422,7 @@ export type Database = {
           id?: string
           method?: string | null
           notes?: string | null
+          proof_storage_path?: string | null
           received_at?: string
           reference?: string | null
         }
@@ -1376,6 +1433,7 @@ export type Database = {
           id?: string
           method?: string | null
           notes?: string | null
+          proof_storage_path?: string | null
           received_at?: string
           reference?: string | null
         }
@@ -1460,11 +1518,53 @@ export type Database = {
         }
         Relationships: []
       }
+      quote_acceptance_tokens: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          expires_at: string
+          id: string
+          quote_id: string
+          token: string
+          used_at: string | null
+          used_by_ip: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          expires_at: string
+          id?: string
+          quote_id: string
+          token?: string
+          used_at?: string | null
+          used_by_ip?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          expires_at?: string
+          id?: string
+          quote_id?: string
+          token?: string
+          used_at?: string | null
+          used_by_ip?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_acceptance_tokens_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       quote_line_items: {
         Row: {
           created_at: string
           description: string
           id: string
+          pricing_snapshot: Json | null
           qty: number
           quote_id: string
           sort_order: number
@@ -1476,6 +1576,7 @@ export type Database = {
           created_at?: string
           description: string
           id?: string
+          pricing_snapshot?: Json | null
           qty?: number
           quote_id: string
           sort_order?: number
@@ -1487,6 +1588,7 @@ export type Database = {
           created_at?: string
           description?: string
           id?: string
+          pricing_snapshot?: Json | null
           qty?: number
           quote_id?: string
           sort_order?: number
@@ -1560,13 +1662,6 @@ export type Database = {
           vat?: number
         }
         Relationships: [
-          {
-            foreignKeyName: "quotes_parent_quote_id_fkey"
-            columns: ["parent_quote_id"]
-            isOneToOne: false
-            referencedRelation: "quotes"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "quotes_booking_id_fkey"
             columns: ["booking_id"]
@@ -1957,11 +2052,14 @@ export type Database = {
         Row: {
           active: boolean
           created_at: string
+          default_time_end: string | null
+          default_time_start: string | null
           description: string | null
           email: string | null
           id: string
           kind: Database["public"]["Enums"]["supplier_kind"]
           location: string | null
+          location_area_id: string | null
           location_detail: string | null
           location_id: string | null
           name: string
@@ -1976,11 +2074,14 @@ export type Database = {
         Insert: {
           active?: boolean
           created_at?: string
+          default_time_end?: string | null
+          default_time_start?: string | null
           description?: string | null
           email?: string | null
           id?: string
           kind: Database["public"]["Enums"]["supplier_kind"]
           location?: string | null
+          location_area_id?: string | null
           location_detail?: string | null
           location_id?: string | null
           name: string
@@ -1995,11 +2096,14 @@ export type Database = {
         Update: {
           active?: boolean
           created_at?: string
+          default_time_end?: string | null
+          default_time_start?: string | null
           description?: string | null
           email?: string | null
           id?: string
           kind?: Database["public"]["Enums"]["supplier_kind"]
           location?: string | null
+          location_area_id?: string | null
           location_detail?: string | null
           location_id?: string | null
           name?: string
@@ -2012,6 +2116,13 @@ export type Database = {
           website?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "suppliers_location_area_id_fkey"
+            columns: ["location_area_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "suppliers_location_id_fkey"
             columns: ["location_id"]
@@ -2203,6 +2314,10 @@ export type Database = {
         Args: { required_roles: Database["public"]["Enums"]["user_role"][] }
         Returns: boolean
       }
+      allocate_job_number: {
+        Args: { p_number_year?: number; p_product_prefix: string }
+        Returns: string
+      }
       custom_access_token_hook: { Args: { event: Json }; Returns: Json }
       replace_booking_transport_requests: {
         Args: {
@@ -2254,6 +2369,9 @@ export type Database = {
         | "ready"
         | "sent"
         | "accepted"
+        | "expired"
+        | "superseded"
+        | "cancelled"
       source_kind:
         | "web_form"
         | "paste_import"
@@ -2434,6 +2552,9 @@ export const Constants = {
         "ready",
         "sent",
         "accepted",
+        "expired",
+        "superseded",
+        "cancelled",
       ],
       source_kind: [
         "web_form",

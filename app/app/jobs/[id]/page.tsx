@@ -28,6 +28,7 @@ import {
   type PipelineStage,
 } from "@/lib/types"
 import { useRole } from "@/lib/role-context"
+import { useAuth } from "@/lib/auth-context"
 import { AlertCircle, ArrowLeft, CheckCircle2, ChevronRight, ChevronLeft as ChevronLeftIcon, UserRound, XCircle } from "lucide-react"
 import Link from "next/link"
 import { JobEnquiryTab } from "@/components/job-enquiry-tab"
@@ -139,6 +140,7 @@ export default function JobDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { data, isLoading, error, mutate } = useJobDetail(id)
   const { can, role } = useRole()
+  const { user: currentUser } = useAuth()
   const { others, setEditing } = useRecordPresence("job", id)
   const hasLoadError = Boolean(error)
   const [cancelOpen, setCancelOpen] = useState(false)
@@ -155,6 +157,7 @@ export default function JobDetailPage() {
   const [customerResults, setCustomerResults] = useState<Array<{ id: string; firstName: string; lastName: string; email: string }>>([])
   const [changingCustomer, setChangingCustomer] = useState(false)
   const [reassigningSalesperson, setReassigningSalesperson] = useState(false)
+  const [resolvingImportReview, setResolvingImportReview] = useState(false)
   const [lastJobPayload, setLastJobPayload] = useState<Record<string, unknown> | null>(null)
   const [activeTab, setActiveTab] = useState<JobDetailTab>(() => parseJobDetailTab(searchParams.get("tab")))
   const {
@@ -208,6 +211,10 @@ export default function JobDetailPage() {
   const consultantName = CONSULTANTS.find((consultant) => consultant.key === job.consultant)?.name ?? job.consultant ?? undefined
   const needsEmailReview = Boolean(enquiry?.emailImportNeedsReview)
   const canReassignSalesperson = role === "manager" || role === "admin"
+  const canOwnBooking = role === "consultant" || role === "manager" || role === "admin"
+  const canClaimBooking = canOwnBooking && job.assignedSalespersonId === null
+  const canReleaseOwnBooking =
+    role === "consultant" && Boolean(currentUser?.id) && job.assignedSalespersonId === currentUser?.id
   const assignedSalespersonName = job.assignedSalespersonName ?? "Unassigned"
   const hasNoPackageMatchQuote = quotes.some((quote: { noPackageMatch?: boolean }) => quote.noPackageMatch)
   const hasSentDepositInvoice = invoices.some(
@@ -324,7 +331,20 @@ export default function JobDetailPage() {
   }
 
   const resolveEmailReview = async () => {
-    await saveJobPatch({ resolveEmailImportReview: true })
+    setResolvingImportReview(true)
+    try {
+      const response = await fetch(`/api/jobs/${id}/clear-import-review`, { method: "POST" })
+      const payload = (await response.json().catch(() => ({}))) as { error?: string }
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Could not resolve import review")
+      }
+      await mutate()
+      toast.success("Import review cleared")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not resolve import review")
+    } finally {
+      setResolvingImportReview(false)
+    }
   }
 
   const searchCustomers = async () => {
@@ -352,12 +372,44 @@ export default function JobDetailPage() {
   const reassignSalesperson = async (salespersonId: string) => {
     setReassigningSalesperson(true)
     try {
-      const saved = await saveJobPatch({
-        assignedSalespersonId: salespersonId === "__unassigned" ? null : salespersonId,
+      const response = await fetch(`/api/jobs/${id}/ownership`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          salespersonId === "__unassigned"
+            ? { action: "release" }
+            : { action: "assign", userId: salespersonId },
+        ),
       })
-      if (saved) {
-        toast.success("Salesperson reassigned")
+      const payload = (await response.json().catch(() => ({}))) as { error?: string }
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Could not update salesperson")
       }
+      await mutate()
+      toast.success("Salesperson reassigned")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update salesperson")
+    } finally {
+      setReassigningSalesperson(false)
+    }
+  }
+
+  const updateOwnership = async (action: "claim" | "release") => {
+    setReassigningSalesperson(true)
+    try {
+      const response = await fetch(`/api/jobs/${id}/ownership`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      })
+      const payload = (await response.json().catch(() => ({}))) as { error?: string }
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Could not update ownership")
+      }
+      await mutate()
+      toast.success(action === "claim" ? "Booking claimed" : "Booking released")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update ownership")
     } finally {
       setReassigningSalesperson(false)
     }
@@ -405,6 +457,31 @@ export default function JobDetailPage() {
                 </Select>
               ) : (
                 <span>{assignedSalespersonName}</span>
+              )}
+              {canClaimBooking && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8"
+                  disabled={reassigningSalesperson}
+                  onClick={() => void updateOwnership("claim")}
+                >
+                  <UserRound className="mr-1.5 h-3.5 w-3.5" />
+                  Claim
+                </Button>
+              )}
+              {canReleaseOwnBooking && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8"
+                  disabled={reassigningSalesperson}
+                  onClick={() => void updateOwnership("release")}
+                >
+                  Release
+                </Button>
               )}
             </div>
           </div>
@@ -496,9 +573,9 @@ export default function JobDetailPage() {
                 Change customer
               </Button>
               {needsEmailReview && (
-                <Button size="sm" onClick={resolveEmailReview} disabled={isSavingJob}>
+                <Button size="sm" onClick={resolveEmailReview} disabled={resolvingImportReview}>
                   <CheckCircle2 className="w-4 h-4 mr-1.5" />
-                  Resolve review
+                  {resolvingImportReview ? "Resolving" : "Resolve review"}
                 </Button>
               )}
             </div>
@@ -575,7 +652,17 @@ export default function JobDetailPage() {
         </TabsList>
 
         <TabsContent value="enquiry">
-          <JobEnquiryTab enquiry={enquiry} itineraries={itineraries} onTransportRequestsChange={mutate} />
+          <JobEnquiryTab
+            enquiry={enquiry}
+            itineraries={itineraries}
+            stage={job.stage}
+            hasDraftQuotes={quotes.some((quote: { status: string }) => quote.status === "draft")}
+            onQuoteStarted={async () => {
+              await mutate()
+              setActiveTab("quotes")
+            }}
+            onTransportRequestsChange={mutate}
+          />
         </TabsContent>
         <TabsContent value="quotes">
           <JobQuotesTab
@@ -592,7 +679,13 @@ export default function JobDetailPage() {
           />
         </TabsContent>
         <TabsContent value="payments">
-          <JobPaymentsTab payments={payments} jobId={id} mutate={mutate} />
+          <JobPaymentsTab
+            payments={payments}
+            jobId={id}
+            depositPaid={job.depositPaid ?? false}
+            invoiceBalance={job.invoiceBalance ?? null}
+            mutate={mutate}
+          />
         </TabsContent>
         <TabsContent value="correspondence">
           <JobCorrespondenceTab correspondence={correspondence} jobId={id} mutate={mutate} />

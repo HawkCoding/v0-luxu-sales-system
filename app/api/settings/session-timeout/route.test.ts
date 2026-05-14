@@ -27,6 +27,7 @@ function createSupabase({
   settingValue = null,
   upsertError = null,
 }: MockOptions = {}) {
+  const auditInsert = vi.fn(async () => ({ error: null }))
   return {
     auth: {
       getUser: vi.fn(async () => ({ data: { user }, error: null })),
@@ -37,7 +38,7 @@ function createSupabase({
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
               single: vi.fn(async () => ({
-                data: user ? { clearance_level: role, is_active: isActive } : null,
+                data: user ? { clearance_level: role, is_active: isActive, name: "Admin", surname: "User", email: "admin@example.com" } : null,
                 error: null,
               })),
             })),
@@ -59,8 +60,13 @@ function createSupabase({
         }
       }
 
+      if (table === "audit_logs") {
+        return { insert: auditInsert }
+      }
+
       throw new Error(`Unexpected table ${table}`)
     }),
+    auditInsert,
   }
 }
 
@@ -139,5 +145,8 @@ describe("/api/settings/session-timeout", () => {
       sessionTimeoutMinutes: 45,
       warningMinutes: 5,
     })
+    expect(supabase.auditInsert).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "settings_changed", entity_id: "session_timeout_minutes" }),
+    )
   })
 })

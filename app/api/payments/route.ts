@@ -2,6 +2,7 @@ import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDateTime } from "@/lib/date-format"
+import { syncBookingPaymentState } from "@/lib/invoices/sync-booking-payment-state"
 
 const paymentSchema = z
   .object({
@@ -53,14 +54,20 @@ export async function POST(req: Request) {
 
   if (error || !payment) return safeSupabaseError("payments:insert", error)
 
-  await supabase.from("audit_logs").insert({
-    actor: profile.actorName,
-    actor_user_id: user.id,
-    entity_type: "Payment",
-    entity_id: payment.id,
-    action: "payment_recorded",
-    after_json: { amount: payment.amount, method: payment.method, booking_id: payment.booking_id },
-  })
+  await Promise.all([
+    supabase.from("audit_logs").insert({
+      actor: profile.actorName,
+      actor_user_id: user.id,
+      entity_type: "Payment",
+      entity_id: payment.id,
+      action: "payment_recorded",
+      after_json: { amount: payment.amount, method: payment.method, booking_id: payment.booking_id },
+    }),
+    syncBookingPaymentState(supabase, bookingId, {
+      actorName: profile.actorName,
+      actorUserId: user.id,
+    }),
+  ])
 
   return Response.json({
     id: payment.id,

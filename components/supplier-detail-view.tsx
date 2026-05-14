@@ -33,6 +33,7 @@ import { BufferedInput } from "@/components/ui/buffered-input"
 import { BufferedTextarea } from "@/components/ui/buffered-textarea"
 import { ContentTransition } from "@/components/ui/content-transition"
 import { DatePicker } from "@/components/ui/date-picker"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { NumericInput } from "@/components/ui/numeric-input"
 import {
@@ -139,10 +140,13 @@ interface SupplierFormState {
   location: string
   locationDetail: string
   locationId: string | null
+  locationAreaId: string | null
   description: string
   notes: string
   active: boolean
   singleSupplementPct: number
+  defaultTimeStart: string
+  defaultTimeEnd: string
   suiteTypes: EditableSuiteType[]
   packages: EditablePackage[]
 }
@@ -299,10 +303,13 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
     location: supplier.location ?? "",
     locationDetail: supplier.locationDetail ?? "",
     locationId: supplier.kind === "train_operator" ? null : supplier.locationId ?? null,
+    locationAreaId: supplier.kind === "train_operator" ? null : supplier.locationAreaId ?? null,
     description: supplier.description ?? "",
     notes: supplier.notes ?? "",
     active: supplier.active,
     singleSupplementPct: supplier.singleSupplementPct,
+    defaultTimeStart: supplier.defaultTimeStart ?? "",
+    defaultTimeEnd: supplier.defaultTimeEnd ?? "",
     suiteTypes: supplier.suiteTypes.map((suiteType) => ({
       id: suiteType.id,
       name: suiteType.name,
@@ -349,6 +356,10 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
 
 function getSupplierLocationId(form: SupplierFormState): string | null {
   return form.kind === "train_operator" ? null : form.locationId ?? null
+}
+
+function getSupplierLocationAreaId(form: SupplierFormState): string | null {
+  return form.kind === "train_operator" ? null : form.locationAreaId ?? null
 }
 
 
@@ -1842,6 +1853,16 @@ export function SupplierDetailView({
     [locations],
   )
 
+  const cityLocations = useMemo(
+    () => locations.filter((loc) => loc.parentLocationId === null),
+    [locations],
+  )
+
+  const areaLocationsForCity = useMemo(
+    () => locations.filter((loc) => loc.parentLocationId === form?.locationId),
+    [locations, form?.locationId],
+  )
+
   const updateField = <K extends keyof SupplierFormState>(
     key: K,
     value: SupplierFormState[K],
@@ -1856,6 +1877,7 @@ export function SupplierDetailView({
             ...current,
             kind,
             locationId: kind === "train_operator" ? null : current.locationId,
+            locationAreaId: kind === "train_operator" ? null : current.locationAreaId,
             packages: current.packages.map((pkg) => ({
               ...pkg,
               routes: pkg.routes.map((route) => ({
@@ -2567,10 +2589,13 @@ export function SupplierDetailView({
           location: form.location.trim(),
           locationDetail: form.locationDetail.trim(),
           locationId: getSupplierLocationId(form),
+          locationAreaId: getSupplierLocationAreaId(form),
           description: form.description.trim() || null,
           notes: form.notes.trim(),
           active: form.active,
           singleSupplementPct: form.singleSupplementPct,
+          defaultTimeStart: form.defaultTimeStart || null,
+          defaultTimeEnd: form.defaultTimeEnd || null,
           suiteTypes: cleanedSuiteTypes,
           routes: cleanedRoutes,
           expectedUpdatedAt:
@@ -2997,16 +3022,17 @@ export function SupplierDetailView({
                       <Label htmlFor="supplier-location-city">City</Label>
                       <Select
                         value={form.locationId ?? "none"}
-                        onValueChange={(value) =>
+                        onValueChange={(value) => {
                           updateField("locationId", value === "none" ? null : value)
-                        }
+                          updateField("locationAreaId", null)
+                        }}
                       >
                         <SelectTrigger id="supplier-location-city">
                           <SelectValue placeholder="Select city" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">— None —</SelectItem>
-                          {locations.map((loc) => (
+                          {cityLocations.map((loc) => (
                             <SelectItem key={loc.id} value={loc.id}>
                               {loc.name}
                             </SelectItem>
@@ -3016,14 +3042,44 @@ export function SupplierDetailView({
                     </div>
                   )}
 
-                  <div className="space-y-2">
-                    <Label htmlFor="supplier-location-detail">Suburb / Area</Label>
-                    <BufferedInput
-                      id="supplier-location-detail"
-                      value={form.locationDetail}
-                      onValueChange={(value) => updateField("locationDetail", value)}
-                    />
-                  </div>
+                  {!isTrainOperatorForm &&
+                  (form.kind === "vehicle_rental" || form.kind === "hotel_property") ? (
+                    <div className="space-y-2">
+                      <Label htmlFor="supplier-location-area">Suburb / Area</Label>
+                      <Select
+                        value={form.locationAreaId ?? "none"}
+                        onValueChange={(value) =>
+                          updateField("locationAreaId", value === "none" ? null : value)
+                        }
+                        disabled={!form.locationId}
+                      >
+                        <SelectTrigger id="supplier-location-area">
+                          <SelectValue
+                            placeholder={
+                              form.locationId ? "Select area" : "Select a city first"
+                            }
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">— None —</SelectItem>
+                          {areaLocationsForCity.map((loc) => (
+                            <SelectItem key={loc.id} value={loc.id}>
+                              {loc.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <Label htmlFor="supplier-location-detail">Suburb / Area</Label>
+                      <BufferedInput
+                        id="supplier-location-detail"
+                        value={form.locationDetail}
+                        onValueChange={(value) => updateField("locationDetail", value)}
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <SupplierEmailEditor
@@ -3087,7 +3143,19 @@ export function SupplierDetailView({
                   <InfoItem label="Phone" value={supplier.phone} />
                   <InfoItem label="Website" value={supplier.website} />
                   <InfoItem label="Location" value={supplier.location} />
-                  <InfoItem label="Suburb / Area" value={supplier.locationDetail} />
+                  {!isTrainOperatorSupplier &&
+                  (supplier.kind === "vehicle_rental" || supplier.kind === "hotel_property") ? (
+                    <InfoItem
+                      label="Suburb / Area"
+                      value={
+                        supplier.locationAreaId
+                          ? (locations.find((loc) => loc.id === supplier.locationAreaId)?.name ?? null)
+                          : null
+                      }
+                    />
+                  ) : (
+                    <InfoItem label="Suburb / Area" value={supplier.locationDetail} />
+                  )}
                   {!isTrainOperatorSupplier && (
                     <InfoItem
                       label="City"
@@ -3229,6 +3297,61 @@ export function SupplierDetailView({
                       </Badge>
                     </div>
                   )}
+                </div>
+              ) : null}
+
+              {activeVocabulary.scheduleFields ? (
+                <div className="rounded-lg border p-4">
+                  {isEditing ? (
+                    <div className="space-y-3">
+                      <p className="text-sm font-semibold text-foreground">Default schedule times</p>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="space-y-1.5">
+                          <Label htmlFor="supplier-default-time-start">
+                            Default {activeVocabulary.scheduleFields.timeStartLabel.toLowerCase()}
+                          </Label>
+                          <Input
+                            id="supplier-default-time-start"
+                            type="time"
+                            value={form.defaultTimeStart}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateField("defaultTimeStart", e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="supplier-default-time-end">
+                            Default {activeVocabulary.scheduleFields.timeEndLabel.toLowerCase()}
+                          </Label>
+                          <Input
+                            id="supplier-default-time-end"
+                            type="time"
+                            value={form.defaultTimeEnd}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => updateField("defaultTimeEnd", e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ) : (supplier.defaultTimeStart || supplier.defaultTimeEnd) ? (
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">Default schedule times</p>
+                        <p className="text-xs text-muted-foreground">
+                          Auto-fills time fields when this supplier is selected on a booking.
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        {supplier.defaultTimeStart && (
+                          <Badge variant="outline">
+                            {activeVocabulary.scheduleFields.timeStartLabel}: {supplier.defaultTimeStart}
+                          </Badge>
+                        )}
+                        {supplier.defaultTimeEnd && (
+                          <Badge variant="outline">
+                            {activeVocabulary.scheduleFields.timeEndLabel}: {supplier.defaultTimeEnd}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 

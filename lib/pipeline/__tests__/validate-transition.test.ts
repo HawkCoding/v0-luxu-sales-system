@@ -241,7 +241,12 @@ describe("validateTransition", () => {
   it("requires voucher document and correspondence before voucher sent", () => {
     const failures = validateTransition({
       ...baseInput,
-      booking: { ...baseInput.booking, stage: "final_paid" },
+      booking: {
+        ...baseInput.booking,
+        stage: "final_paid",
+        invoice_balance: 0,
+        departure_date: "2026-06-01",
+      },
       targetStage: "voucher_sent",
     })
 
@@ -256,6 +261,100 @@ describe("validateTransition", () => {
         autoFixable: "create_voucher_pdf",
       }),
     )
+  })
+
+  it("blocks voucher sent when invoice balance is not zero", () => {
+    const failures = validateTransition({
+      ...baseInput,
+      booking: {
+        ...baseInput.booking,
+        stage: "final_paid",
+        invoice_balance: 100,
+        departure_date: "2026-06-01",
+      },
+      targetStage: "voucher_sent",
+      documents: [{ kind: "voucher_pdf", status: "generated" }],
+      correspondences: [{ kind: "voucher", subject: "Travel voucher BT-2026-0001", status: "sent" }],
+    })
+
+    expect(failures).toContainEqual(
+      expect.objectContaining({ gateId: "voucher_balance_zero", severity: "block" }),
+    )
+  })
+
+  it("blocks voucher sent when invoice balance is unknown", () => {
+    const failures = validateTransition({
+      ...baseInput,
+      booking: {
+        ...baseInput.booking,
+        stage: "final_paid",
+        invoice_balance: null,
+        departure_date: "2026-06-01",
+      },
+      targetStage: "voucher_sent",
+      documents: [{ kind: "voucher_pdf", status: "generated" }],
+      correspondences: [{ kind: "voucher", subject: "Travel voucher BT-2026-0001", status: "sent" }],
+    })
+
+    expect(failures).toContainEqual(
+      expect.objectContaining({ gateId: "voucher_balance_zero", severity: "block" }),
+    )
+  })
+
+  it("blocks voucher sent when departure date is missing", () => {
+    const failures = validateTransition({
+      ...baseInput,
+      booking: {
+        ...baseInput.booking,
+        stage: "final_paid",
+        invoice_balance: 0,
+        departure_date: null,
+      },
+      targetStage: "voucher_sent",
+      documents: [{ kind: "voucher_pdf", status: "generated" }],
+      correspondences: [{ kind: "voucher", subject: "Travel voucher BT-2026-0001", status: "sent" }],
+    })
+
+    expect(failures).toContainEqual(
+      expect.objectContaining({ gateId: "voucher_departure_date", severity: "block" }),
+    )
+  })
+
+  it("blocks voucher sent when customer email is missing", () => {
+    const failures = validateTransition({
+      ...baseInput,
+      booking: {
+        ...baseInput.booking,
+        stage: "final_paid",
+        invoice_balance: 0,
+        departure_date: "2026-06-01",
+      },
+      customer: { ...baseInput.customer, email: "" },
+      targetStage: "voucher_sent",
+      documents: [{ kind: "voucher_pdf", status: "generated" }],
+      correspondences: [{ kind: "voucher", subject: "Travel voucher BT-2026-0001", status: "sent" }],
+    })
+
+    expect(failures).toContainEqual(
+      expect.objectContaining({ gateId: "voucher_customer_email", severity: "block" }),
+    )
+  })
+
+  it("allows voucher sent when voucher readiness, document, and correspondence are complete", () => {
+    const failures = validateTransition({
+      ...baseInput,
+      booking: {
+        ...baseInput.booking,
+        stage: "final_paid",
+        invoice_balance: 0,
+        departure_date: "2026-06-01",
+      },
+      targetStage: "voucher_sent",
+      documents: [{ kind: "voucher_pdf", status: "generated" }],
+      correspondences: [{ kind: "voucher", subject: "Travel voucher BT-2026-0001", status: "sent" }],
+    })
+
+    expect(failures).toEqual([])
   })
 
   it("requires cancellation and refund capture from paid stages", () => {
@@ -279,5 +378,65 @@ describe("validateTransition", () => {
     })
 
     expect(failures).toContainEqual(expect.objectContaining({ gateId: "customer_complete" }))
+  })
+
+  describe("quote_expired gate", () => {
+    const pastDate = "2000-01-01"
+    const futureDate = "2099-12-31"
+
+    it("blocks acceptance when the sent quote is past validity", () => {
+      const failures = validateTransition({
+        ...baseInput,
+        booking: { ...baseInput.booking, stage: "quote_sent" },
+        targetStage: "accepted",
+        quotes: [{ status: "sent", total: 1000, validity_until: pastDate }],
+      })
+
+      expect(failures).toContainEqual(
+        expect.objectContaining({
+          gateId: "quote_expired",
+          severity: "block",
+        }),
+      )
+    })
+
+    it("does not block when the sent quote is within validity", () => {
+      const failures = validateTransition({
+        ...baseInput,
+        booking: { ...baseInput.booking, stage: "quote_sent" },
+        targetStage: "accepted",
+        quotes: [{ status: "sent", total: 1000, validity_until: futureDate }],
+      })
+
+      expect(failures).not.toContainEqual(
+        expect.objectContaining({ gateId: "quote_expired" }),
+      )
+    })
+
+    it("does not block when quote has no validity_until set", () => {
+      const failures = validateTransition({
+        ...baseInput,
+        booking: { ...baseInput.booking, stage: "quote_sent" },
+        targetStage: "accepted",
+        quotes: [{ status: "sent", total: 1000, validity_until: null }],
+      })
+
+      expect(failures).not.toContainEqual(
+        expect.objectContaining({ gateId: "quote_expired" }),
+      )
+    })
+
+    it("does not fire when transition does not cross accepted stage", () => {
+      const failures = validateTransition({
+        ...baseInput,
+        booking: { ...baseInput.booking, stage: "enquiry" },
+        targetStage: "quote_sent",
+        quotes: [{ status: "sent", total: 1000, validity_until: pastDate }],
+      })
+
+      expect(failures).not.toContainEqual(
+        expect.objectContaining({ gateId: "quote_expired" }),
+      )
+    })
   })
 })

@@ -2,7 +2,7 @@
 // Avoid select("*") so schema drift never silently widens API payloads.
 
 export const CUSTOMER_COLUMNS =
-  "id, first_name, last_name, email, phone, country, title, notes, created_at, updated_at"
+  "id, first_name, last_name, email, phone, country, province, title, notes, date_of_birth, vip_status, preferences, communication_preferences, first_travel_date, last_travel_date, is_repeat_client, created_at, updated_at"
 
 export const BOOKING_COLUMNS =
   "id, booking_number, customer_id, stage, purpose, source, consultant, owner_user_id, assigned_salesperson_id, departure_date, duration_nights, email_import_needs_review, email_import_review_resolved_at, email_import_missing_fields, email_import_warnings, email_import_source_message_id, email_import_duplicate_of_booking_id, email_import_subject, email_import_mailbox, email_import_received_at, email_import_raw_preview, no_of_adults, no_of_children, no_of_suites, child_ages, route_id, raw_text, extracted_json, terms_accepted, additional_services, additional_services_details, promotion_code, extend_stay, extra_nights, hotel_phase, hotel_supplier_id, created_at, updated_at, quote_sent_at, accepted_at, deposit_requested_at, deposit_paid_at, final_paid_at, voucher_sent_at, closed_at, deposit_paid, invoice_balance, cancel_reason, cancelled_at, refund_status, refund_amount, refund_reference, refunded_at"
@@ -21,13 +21,13 @@ export const BOOKING_SUPPLIER_SCHEDULE_COLUMNS =
   "id, booking_id, supplier_id, supplier_kind, label, date_from, date_to, time_start, time_end, notes, sort_order, created_at, updated_at"
 
 export const PAYMENT_COLUMNS =
-  "id, booking_id, amount, received_at, method, reference, notes, created_at"
+  "id, booking_id, amount, received_at, method, reference, notes, proof_storage_path, created_at"
 
 export const QUOTE_COLUMNS =
   "id, booking_id, itinerary_id, status, quote_number, parent_quote_id, validity_until, subtotal, vat, total, last_sent_at, override_pin, override_reason, no_package_match, created_at, updated_at"
 
 export const QUOTE_LINE_ITEM_COLUMNS =
-  "id, quote_id, description, qty, unit_price, total, sort_order"
+  "id, quote_id, description, supplier_description, qty, unit_price, total, sort_order, pricing_snapshot"
 
 export const ITINERARY_COLUMNS =
   "id, booking_id, name, notes, accepted_at, created_at, updated_at"

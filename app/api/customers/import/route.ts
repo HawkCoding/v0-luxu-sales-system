@@ -1,8 +1,15 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { loadCountryAliasMap, normalizeCountry } from "@/lib/countries"
+import {
+  addJobNumberingMetadata,
+  allocateJobNumber,
+  resolveJobNumberProduct,
+  type JobNumberResolution,
+} from "@/lib/job-numbering"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
 import { createSessionClient } from "@/lib/supabase/server"
+import type { Json } from "@/lib/supabase/types"
 import { importRowSchema, payloadSchema } from "./schemas"
 
 const allowedRoles = new Set(["admin", "manager"])
@@ -17,6 +24,7 @@ type ImportPhase =
   | "validate_supplier_route"
   | "enrich_existing_customers"
   | "check_existing_bookings"
+  | "allocate_job_numbers"
   | "insert_customers"
   | "build_booking_rows"
   | "insert_bookings"
@@ -474,6 +482,7 @@ export async function POST(req: Request) {
   }
 
   let bookingRows: Array<{
+    booking_number: string
     customer_id: string
     owner_user_id: string
     purpose: "reservation"
@@ -481,56 +490,71 @@ export async function POST(req: Request) {
     route_id: string | null
     hotel_supplier_id: string | null
     terms_accepted: boolean
-    extracted_json: {
-      historical_import: {
-        imported_via: "supplier_csv"
-        imported_at: string
-        supplier_id: string | null
-        route_id: string | null
-        source_row_id: string | null
-        source_label: "blank"
-        source_value: null
-      }
-    }
+    extracted_json: Json
   }>
-  let skippedDuplicates = 0
+  let jobNumberResolution: JobNumberResolution
   try {
-    bookingRows = bookingImportRows.flatMap((row) => {
-      if (row.sourceRowId && existingSourceRowIds.has(row.sourceRowId)) {
-        skippedDuplicates += 1
-        return []
-      }
-      if (parsed.routeId && customerIdsWithHistoricalRouteBookings.has(row.customerId)) {
-        skippedDuplicates += 1
-        return []
-      }
-
-      return [{
-        customer_id: row.customerId,
-        owner_user_id: user.id,
-        purpose: "reservation" as const,
-        stage: "closed" as const,
-        route_id: parsed.routeId ?? null,
-        hotel_supplier_id: parsed.supplierId ?? null,
-        terms_accepted: false,
-        extracted_json: {
-          historical_import: {
-            imported_via: "supplier_csv",
-            imported_at: new Date().toISOString(),
-            supplier_id: parsed.supplierId ?? null,
-            route_id: parsed.routeId ?? null,
-            source_row_id: row.sourceRowId,
-            source_label: "blank",
-            source_value: null,
-          },
-        },
-      }]
+    jobNumberResolution = await resolveJobNumberProduct(supabase, {
+      supplierId: parsed.supplierId ?? null,
+      routeId: parsed.routeId ?? null,
     })
   } catch (error) {
     return buildImportErrorResponse({
       traceId,
-      phase: "build_booking_rows",
-      error: "Failed to prepare booking rows for import",
+      phase: "allocate_job_numbers",
+      error: "Failed to resolve train product for historical bookings",
+      status: 500,
+      cause: error,
+      context: {
+        supplierId: parsed.supplierId,
+        routeId: parsed.routeId,
+      },
+    })
+  }
+
+  let skippedDuplicates = 0
+  try {
+    bookingRows = []
+    for (const row of bookingImportRows) {
+      if (row.sourceRowId && existingSourceRowIds.has(row.sourceRowId)) {
+        skippedDuplicates += 1
+        continue
+      }
+      if (parsed.routeId && customerIdsWithHistoricalRouteBookings.has(row.customerId)) {
+        skippedDuplicates += 1
+        continue
+      }
+
+      const bookingNumber = await allocateJobNumber(supabase, jobNumberResolution.prefix)
+      const extractedJson = addJobNumberingMetadata({
+        historical_import: {
+          imported_via: "supplier_csv",
+          imported_at: new Date().toISOString(),
+          supplier_id: parsed.supplierId ?? null,
+          route_id: parsed.routeId ?? null,
+          source_row_id: row.sourceRowId,
+          source_label: "blank",
+          source_value: null,
+        },
+      }, jobNumberResolution) as Json
+
+      bookingRows.push({
+        booking_number: bookingNumber,
+        customer_id: row.customerId,
+        owner_user_id: user.id,
+        purpose: "reservation",
+        stage: "closed",
+        route_id: parsed.routeId ?? null,
+        hotel_supplier_id: parsed.supplierId ?? null,
+        terms_accepted: false,
+        extracted_json: extractedJson,
+      })
+    }
+  } catch (error) {
+    return buildImportErrorResponse({
+      traceId,
+      phase: "allocate_job_numbers",
+      error: "Failed to allocate job numbers for historical bookings",
       status: 500,
       cause: error,
       context: {
@@ -559,6 +583,35 @@ export async function POST(req: Request) {
       })
     }
     insertedBookings = newBookings
+
+    if (jobNumberResolution.needsReview) {
+      const { error: reviewAuditError } = await supabase.from("audit_logs").insert(
+        insertedBookings.map((booking) => ({
+          actor: actorLabel,
+          actor_user_id: user.id,
+          entity_type: "Booking",
+          entity_id: booking.id,
+          action: "job_number_product_needs_review",
+          meta_json: {
+            reason: jobNumberResolution.reason,
+            sources: jobNumberResolution.sources,
+          },
+        })),
+      )
+
+      if (reviewAuditError) {
+        return buildImportErrorResponse({
+          traceId,
+          phase: "write_audit_log",
+          error: "Import succeeded but writing job-number review audit logs failed",
+          status: 500,
+          cause: reviewAuditError,
+          context: {
+            importedBookings: insertedBookings.length,
+          },
+        })
+      }
+    }
   }
 
   const createdCustomers = customersToInsert.length

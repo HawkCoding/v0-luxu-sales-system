@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { LoadingState } from "@/components/ui/loading-state"
 import { Spinner } from "@/components/ui/spinner"
+import { LuxusLogo } from "@/components/luxus-logo"
 
 const loginPageClassName = "min-h-screen bg-background flex items-center justify-center p-4"
 // DEV_QUICK_LOGIN_START
@@ -259,9 +260,7 @@ function LoginForm() {
     <LoginShell>
       <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="text-center pb-6">
-          <div className="mx-auto w-16 h-16 rounded-full bg-primary flex items-center justify-center mb-4">
-            <span className="text-2xl font-bold text-primary-foreground">LT</span>
-          </div>
+          <LuxusLogo className="mx-auto mb-4 h-16 w-16" size={64} />
           <CardTitle className="text-3xl">Welcome Back</CardTitle>
           <CardDescription className="text-base mt-2">Sign in to Luxus Sales Operations</CardDescription>
         </CardHeader>

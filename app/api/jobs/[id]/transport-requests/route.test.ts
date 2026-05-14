@@ -21,9 +21,11 @@ const BOOKING_ID = "00000000-0000-4000-8000-00000000aaaa"
 
 function buildSupabase() {
   const replaceTransportRequests = vi.fn(async (_args: unknown) => ({ error: null }))
+  const auditInsert = vi.fn(async () => ({ error: null }))
 
   return {
     replaceTransportRequests,
+    auditInsert,
     rpc: vi.fn((name: string, args: unknown) => {
       if (name === "replace_booking_transport_requests") {
         return replaceTransportRequests(args)
@@ -34,9 +36,17 @@ function buildSupabase() {
       if (table === "booking_transport_requests") {
         return {
           select: vi.fn(() => ({
-            eq: vi.fn(() => ({
-              order: vi.fn(async () => ({ data: [{ id: "tr1" }], error: null })),
-            })),
+            eq: vi.fn(() => {
+              const result = {
+                data: [],
+                error: null,
+                order: vi.fn(async () => ({ data: [{ id: "tr1" }], error: null })),
+              }
+              return Object.assign(result, {
+                then: (resolve: (value: { data: unknown[]; error: null }) => void) =>
+                  resolve({ data: [], error: null }),
+              })
+            }),
           })),
         }
       }
@@ -48,6 +58,9 @@ function buildSupabase() {
             })),
           })),
         }
+      }
+      if (table === "audit_logs") {
+        return { insert: auditInsert }
       }
       throw new Error(`Unexpected table ${table}`)
     }),
@@ -219,5 +232,36 @@ describe("PUT /api/jobs/[id]/transport-requests", () => {
         }),
       ],
     })
+    expect(supabase.auditInsert).not.toHaveBeenCalled()
+  })
+
+  it("logs supplier reference capture when request references are saved", async () => {
+    const supabase = buildSupabase()
+    const supplierId = "00000000-0000-4000-8000-00000000c001"
+    authMocks.requireRole.mockResolvedValue({
+      ok: true,
+      value: {
+        supabase,
+        user: { id: "u1", email: "u@example.com" },
+        profile: { clearanceLevel: "consultant", actorName: "Jane", name: "Jane", surname: "D", email: "u@example.com" },
+      },
+    })
+    const req = new Request("http://localhost", {
+      method: "PUT",
+      body: JSON.stringify({
+        transportRequests: [{
+          serviceType: "transfer",
+          supplierId,
+          pickupPoint: "Station",
+          dropoffPoint: "Hotel",
+        }],
+      }),
+      headers: { "Content-Type": "application/json" },
+    })
+    const res = await PUT(req, { params })
+    expect(res.status).toBe(200)
+    expect(supabase.auditInsert).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "supplier_reference_captured", entity_id: BOOKING_ID }),
+    )
   })
 })

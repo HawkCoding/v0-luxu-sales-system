@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { randomUUID } from "node:crypto"
+import { writeAuditLog } from "@/lib/audit-write"
 import { requireRole, requireUser } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { mapBookingTransportRequest } from "@/lib/suppliers"
@@ -61,6 +62,21 @@ function normalizeNullableDateTime(value: string | null | undefined): string | n
 
 function normalizeNullableTime(value: string | null | undefined): string | null {
   return value && value.length > 0 ? value : null
+}
+
+function hasTransportReferenceChange(
+  beforeRows: Array<{ id: string; supplier_id: string | null; route_id: string | null; suite_type_id: string | null }>,
+  afterRows: Array<{ id: string; supplier_id: string | null; route_id: string | null; suite_type_id: string | null }>,
+): boolean {
+  const beforeById = new Map(beforeRows.map((row) => [row.id, row]))
+  return afterRows.some((row) => {
+    const before = beforeById.get(row.id)
+    return Boolean(
+      (row.supplier_id && row.supplier_id !== before?.supplier_id) ||
+        (row.route_id && row.route_id !== before?.route_id) ||
+        (row.suite_type_id && row.suite_type_id !== before?.suite_type_id),
+    )
+  })
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -132,6 +148,13 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     }]
   })
 
+  const { data: existingRows, error: existingRowsError } = await supabase
+    .from("booking_transport_requests")
+    .select("id, supplier_id, route_id, suite_type_id")
+    .eq("booking_id", id)
+
+  if (existingRowsError) return safeSupabaseError("transport-requests:load-existing", existingRowsError, "Failed to load existing transport requests")
+
   const { error: replaceError } = await supabase.rpc("replace_booking_transport_requests", {
     p_booking_id: id,
     p_transport_requests: rows as Json,
@@ -147,6 +170,23 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     .order("sort_order", { ascending: true })
 
   if (loadError) return safeSupabaseError("transport-requests:reload", loadError, "Failed to load saved transport requests")
+
+  if (hasTransportReferenceChange(existingRows ?? [], rows)) {
+    const auditResult = await writeAuditLog(supabase, {
+      actor: auth.value.profile.actorName,
+      actorUserId: auth.value.user.id,
+      entityType: "Booking",
+      entityId: id,
+      action: "supplier_reference_captured",
+      meta: {
+        source: "transport_requests",
+        supplier_ids: rows.map((row) => row.supplier_id).filter(Boolean),
+        route_ids: rows.map((row) => row.route_id).filter(Boolean),
+        suite_type_ids: rows.map((row) => row.suite_type_id).filter(Boolean),
+      },
+    })
+    if (auditResult.error) return safeSupabaseError("transport-requests:audit-reference", auditResult.error)
+  }
 
   return Response.json((savedRows ?? []).map(mapBookingTransportRequest))
 }

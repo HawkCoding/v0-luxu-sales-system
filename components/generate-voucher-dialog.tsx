@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { FileOutput } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -14,6 +14,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { PreviewAndSendDialog } from "@/components/preview-and-send-dialog"
+import type { VoucherReadinessResult } from "@/lib/voucher/check-readiness"
 import type { DocRecord } from "@/lib/types"
 
 interface GenerateVoucherDialogProps {
@@ -59,8 +60,21 @@ export function GenerateVoucherDialog({
   const [generating, setGenerating] = useState(false)
   const [generated, setGenerated] = useState<GenerateVoucherResponse | null>(null)
   const [previewSendOpen, setPreviewSendOpen] = useState(false)
+  const [readiness, setReadiness] = useState<VoucherReadinessResult | null>(null)
+  const [checkingReadiness, setCheckingReadiness] = useState(false)
   const dialogOpen = open ?? internalOpen
   const setDialogOpen = onOpenChange ?? setInternalOpen
+
+  useEffect(() => {
+    if (!dialogOpen) return
+    setReadiness(null)
+    setCheckingReadiness(true)
+    fetch(`/api/voucher/readiness?jobId=${jobId}`)
+      .then((r) => r.json() as Promise<VoucherReadinessResult>)
+      .then(setReadiness)
+      .catch(() => setReadiness(null))
+      .finally(() => setCheckingReadiness(false))
+  }, [dialogOpen, jobId])
 
   async function generateVoucher() {
     setGenerating(true)
@@ -110,6 +124,22 @@ export function GenerateVoucherDialog({
             </DialogDescription>
           </DialogHeader>
 
+          {readiness && !readiness.ready ? (
+            <div className="rounded-md border border-destructive/50 bg-destructive/10 p-4 space-y-1">
+              <p className="text-sm font-medium text-destructive">
+                This booking is not ready for voucher generation:
+              </p>
+              <ul className="text-sm text-destructive/80 space-y-1 list-disc list-inside">
+                {readiness.failures.map((f) => (
+                  <li key={f.code}>
+                    {f.message}{" "}
+                    <span className="text-xs text-muted-foreground">— {f.fixHint}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           <div className="min-h-[420px] overflow-hidden rounded-md border bg-muted">
             {generated ? (
               <iframe
@@ -128,7 +158,10 @@ export function GenerateVoucherDialog({
             <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={generating}>
               Close
             </Button>
-            <Button onClick={generateVoucher} disabled={generating || disabled}>
+            <Button
+              onClick={generateVoucher}
+              disabled={generating || disabled || checkingReadiness || (readiness !== null && !readiness.ready)}
+            >
               {generating ? "Generating..." : generated ? "Regenerate PDF" : "Generate PDF"}
             </Button>
             <Button

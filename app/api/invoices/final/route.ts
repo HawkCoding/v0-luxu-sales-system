@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { writeAuditLog } from "@/lib/audit-write"
 import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDate } from "@/lib/date-format"
@@ -201,7 +202,18 @@ export async function PATCH(req: Request) {
   if (!parsed.success) return jsonZodError(parsed.error)
 
   const now = new Date().toISOString()
-  const { data: invoice, error } = await auth.value.supabase
+  const { supabase, profile, user } = auth.value
+
+  const { data: beforeInvoice, error: beforeError } = await supabase
+    .from("invoices")
+    .select("id, booking_id, status, invoice_number")
+    .eq("id", parsed.data.invoiceId)
+    .eq("kind", "final")
+    .single()
+
+  if (beforeError || !beforeInvoice) return safeSupabaseError("final-invoice:load-before-update", beforeError)
+
+  const { data: invoice, error } = await supabase
     .from("invoices")
     .update({
       status: parsed.data.status,
@@ -214,6 +226,20 @@ export async function PATCH(req: Request) {
     .single()
 
   if (error || !invoice) return safeSupabaseError("final-invoice:update", error)
+
+  if (beforeInvoice.status !== "sent" && invoice.status === "sent") {
+    const auditResult = await writeAuditLog(supabase, {
+      actor: profile.actorName,
+      actorUserId: user.id,
+      entityType: "Booking",
+      entityId: beforeInvoice.booking_id,
+      action: "final_invoice_sent",
+      before: { invoice_id: invoice.id, status: beforeInvoice.status },
+      after: { invoice_id: invoice.id, status: invoice.status, sent_at: invoice.sent_at },
+      meta: { invoice_number: beforeInvoice.invoice_number },
+    })
+    if (auditResult.error) return safeSupabaseError("final-invoice:audit-sent", auditResult.error)
+  }
 
   return Response.json({
     id: invoice.id,

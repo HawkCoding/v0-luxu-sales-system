@@ -313,4 +313,41 @@ describe("POST /api/correspondence", () => {
     expect(mocks.pipelineHistoryInsert).not.toHaveBeenCalled()
     expect(mocks.quoteUpdate).toHaveBeenCalled()
   })
+
+  it("sends a voucher email and applies the voucher_sent transition", async () => {
+    const mocks = buildAuth({ bookingStage: "final_paid" })
+    const res = await POST(
+      postJson({
+        bookingId: BOOKING_ID,
+        subject: "Travel voucher BT-2026-0001",
+        kind: "voucher",
+        moveStage: "voucher_sent",
+        attachments: [
+          {
+            filename: "voucher.pdf",
+            contentBase64: Buffer.from("pdf").toString("base64"),
+            contentType: "application/pdf",
+          },
+        ],
+      }),
+    )
+
+    expect(res.status).toBe(200)
+    expect(emailMocks.sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subject: "Travel voucher BT-2026-0001",
+        attachments: [expect.objectContaining({ filename: "voucher.pdf" })],
+      }),
+    )
+    expect(transitionMocks.applyTransition).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        targetStage: "voucher_sent",
+        booking: expect.objectContaining({ id: BOOKING_ID, stage: "final_paid" }),
+      }),
+    )
+    expect(mocks.pipelineHistoryInsert).toHaveBeenCalledWith(
+      expect.objectContaining({ from_stage: "final_paid", to_stage: "voucher_sent" }),
+    )
+  })
 })

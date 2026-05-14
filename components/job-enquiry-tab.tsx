@@ -3,6 +3,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { NumericInput } from "@/components/ui/numeric-input"
@@ -15,6 +16,7 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { useActiveSuppliers, useBookingSupplierSchedules } from "@/lib/use-data"
+import { useRole } from "@/lib/role-context"
 import { getSupplierVocabulary } from "@/lib/types"
 import type {
   BookingScheduleSupplierKind,
@@ -22,10 +24,12 @@ import type {
   BookingTransportRequest,
   Enquiry,
   Itinerary,
+  PipelineStage,
   Supplier,
   TransportServiceType,
   Traveller,
 } from "@/lib/types"
+import type { GateFailure } from "@/lib/pipeline/validate-transition"
 import { formatDisplayDate } from "@/lib/date-format"
 import { Check, Pencil, Plus, Save, Trash2 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
@@ -42,6 +46,9 @@ type EditableSupplierSchedule = BookingSupplierSchedule & {
 interface JobEnquiryTabProps {
   enquiry: Enquiry | null
   itineraries: Itinerary[]
+  stage: PipelineStage
+  hasDraftQuotes: boolean
+  onQuoteStarted?: () => Promise<void> | void
   onTransportRequestsChange?: () => void
 }
 
@@ -105,7 +112,15 @@ function createEmptySupplierSchedule(
   }
 }
 
-export function JobEnquiryTab({ enquiry, itineraries, onTransportRequestsChange }: JobEnquiryTabProps) {
+export function JobEnquiryTab({
+  enquiry,
+  itineraries,
+  stage,
+  hasDraftQuotes,
+  onQuoteStarted,
+  onTransportRequestsChange,
+}: JobEnquiryTabProps) {
+  const { can } = useRole()
   const { data: suppliers = [] } = useActiveSuppliers()
   const {
     data: supplierSchedulesData,
@@ -125,6 +140,8 @@ export function JobEnquiryTab({ enquiry, itineraries, onTransportRequestsChange 
   const [supplierSchedules, setSupplierSchedules] = useState<EditableSupplierSchedule[]>(initialSupplierSchedules)
   const [editingSupplierScheduleIds, setEditingSupplierScheduleIds] = useState<Set<string>>(new Set())
   const [isSavingSupplierSchedules, setIsSavingSupplierSchedules] = useState(false)
+  const [isStartingQuote, setIsStartingQuote] = useState(false)
+  const [startQuoteFailures, setStartQuoteFailures] = useState<GateFailure[]>([])
 
   useEffect(() => {
     setTransportRequests(initialTransportRequests)
@@ -138,6 +155,36 @@ export function JobEnquiryTab({ enquiry, itineraries, onTransportRequestsChange 
 
   if (!enquiry) {
     return <div className="text-center py-8 text-sm text-muted-foreground">No enquiry data</div>
+  }
+
+  const canStartQuote = can("edit:quotes") && stage === "enquiry" && !hasDraftQuotes
+
+  const startQuote = async () => {
+    setIsStartingQuote(true)
+    setStartQuoteFailures([])
+    try {
+      const response = await fetch(`/api/jobs/${enquiry.jobId}/start-quote`, { method: "POST" })
+      const payload = (await response.json().catch(() => ({}))) as {
+        failures?: GateFailure[]
+        error?: string
+      }
+
+      if (response.status === 422 && Array.isArray(payload.failures)) {
+        setStartQuoteFailures(payload.failures)
+        return
+      }
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Could not start quote")
+      }
+
+      await onQuoteStarted?.()
+      toast.success("Draft quote created")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not start quote")
+    } finally {
+      setIsStartingQuote(false)
+    }
   }
 
   const updateTransportRequest = <K extends keyof EditableTransportRequest>(
@@ -199,14 +246,20 @@ export function JobEnquiryTab({ enquiry, itineraries, onTransportRequestsChange 
     value: EditableSupplierSchedule[K],
   ) => {
     setSupplierSchedules((current) =>
-      current.map((schedule) =>
-        schedule.id === scheduleId
-          ? {
-              ...schedule,
-              [key]: value,
-            }
-          : schedule,
-      ),
+      current.map((schedule) => {
+        if (schedule.id !== scheduleId) return schedule
+        const updated = { ...schedule, [key]: value }
+        if (key === "supplierId" && value) {
+          const supplier = suppliers.find((s) => s.id === value)
+          if (supplier?.defaultTimeStart && !schedule.timeStart) {
+            updated.timeStart = supplier.defaultTimeStart
+          }
+          if (supplier?.defaultTimeEnd && !schedule.timeEnd) {
+            updated.timeEnd = supplier.defaultTimeEnd
+          }
+        }
+        return updated
+      }),
     )
   }
 
@@ -298,6 +351,14 @@ export function JobEnquiryTab({ enquiry, itineraries, onTransportRequestsChange 
       return
     }
 
+    const invalidVehicleRental = supplierSchedules.find(
+      (schedule) => schedule.supplierKind === "vehicle_rental" && schedule.dateTo < schedule.dateFrom,
+    )
+    if (invalidVehicleRental) {
+      toast.error("Vehicle rental return date cannot be before pickup date.")
+      return
+    }
+
     const invalidSameDayTime = supplierSchedules.find(
       (schedule) =>
         schedule.dateFrom === schedule.dateTo &&
@@ -349,6 +410,36 @@ export function JobEnquiryTab({ enquiry, itineraries, onTransportRequestsChange 
 
   return (
     <div className="space-y-4">
+      {canStartQuote && (
+        <Card>
+          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-medium text-foreground">Ready to quote</p>
+              <p className="text-sm text-muted-foreground">Create a draft quote once the enquiry details are complete.</p>
+            </div>
+            <Button type="button" size="sm" onClick={startQuote} disabled={isStartingQuote}>
+              <Plus className="mr-2 h-4 w-4" />
+              {isStartingQuote ? "Starting" : "Start Quote"}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {startQuoteFailures.length > 0 && (
+        <Alert>
+          <AlertTitle>Quote cannot start yet</AlertTitle>
+          <AlertDescription>
+            <ul className="mt-2 list-disc space-y-1 pl-4">
+              {startQuoteFailures.map((failure) => (
+                <li key={failure.gateId}>
+                  {failure.message} {failure.fixHint ? <span>{failure.fixHint}</span> : null}
+                </li>
+              ))}
+            </ul>
+          </AlertDescription>
+        </Alert>
+      )}
+
       {enquiry.source === "email" && (
         <Card>
           <CardHeader className="pb-2">
@@ -701,6 +792,31 @@ export function JobEnquiryTab({ enquiry, itineraries, onTransportRequestsChange 
         onAdd={() =>
           setSupplierSchedules((current) => {
             const schedule = createEmptySupplierSchedule("train_operator", current.length)
+            setEditingSupplierScheduleIds((editingIds) => new Set(editingIds).add(schedule.id))
+            return [...current, schedule]
+          })
+        }
+        onEdit={(scheduleId) =>
+          setEditingSupplierScheduleIds((editingIds) => new Set(editingIds).add(scheduleId))
+        }
+        onRemove={(scheduleId) =>
+          setSupplierSchedules((current) => current.filter((schedule) => schedule.id !== scheduleId))
+        }
+        onSave={saveSupplierSchedules}
+        onUpdate={updateSupplierSchedule}
+      />
+
+      <SupplierScheduleSection
+        title="Vehicle Rentals"
+        emptyText="No structured vehicle rentals captured yet."
+        supplierKind="vehicle_rental"
+        schedules={supplierSchedules.filter((schedule) => schedule.supplierKind === "vehicle_rental")}
+        suppliers={suppliers}
+        editingIds={editingSupplierScheduleIds}
+        isSaving={isSavingSupplierSchedules}
+        onAdd={() =>
+          setSupplierSchedules((current) => {
+            const schedule = createEmptySupplierSchedule("vehicle_rental", current.length)
             setEditingSupplierScheduleIds((editingIds) => new Set(editingIds).add(schedule.id))
             return [...current, schedule]
           })

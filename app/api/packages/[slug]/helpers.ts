@@ -35,13 +35,34 @@ export function normalizeNullableDate(value: string | null): string | null {
 }
 
 export async function hasPackageWriteAccess(supabase: SessionClient, userId: string) {
+  return (await getPackageWriteRole(supabase, userId)) !== null
+}
+
+export async function getPackageWriteRole(
+  supabase: SessionClient,
+  userId: string,
+): Promise<"admin" | "manager" | null> {
   const { data: profile, error } = await supabase
     .from("profiles")
     .select("clearance_level")
     .eq("user_id", userId)
     .single()
 
-  return !error && Boolean(profile && ["admin", "manager"].includes(profile.clearance_level))
+  if (error || !profile) return null
+  if (profile.clearance_level === "admin" || profile.clearance_level === "manager") {
+    return profile.clearance_level
+  }
+  return null
+}
+
+export async function isPackageMarkupVisible(supabase: SessionClient, userId: string): Promise<boolean> {
+  const { data: profile, error } = await supabase
+    .from("profiles")
+    .select("clearance_level")
+    .eq("user_id", userId)
+    .single()
+
+  return !error && profile?.clearance_level === "admin"
 }
 
 export async function resolveUniquePackageSlug(

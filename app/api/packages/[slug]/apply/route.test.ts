@@ -59,7 +59,8 @@ function buildDetail(): PackageDetail {
     slug: "ocean-safari",
     description: null,
     durationNights: 2,
-    singleSupplementPct: 50,
+    singleSupplementPct: 0,
+    markupPct: 0,
     fixedPricePerPerson: null,
     currency: "ZAR",
     active: true,
@@ -365,13 +366,13 @@ describe("POST /api/packages/[slug]/apply", () => {
     const payload = await response.json()
 
     expect(response.status).toBe(200)
-    expect(payload.lineItems).toContainEqual({
+    expect(payload.lineItems).toContainEqual(expect.objectContaining({
       description: "Harbour Hotel - Sea View Room - Full Board",
       supplierDescription: null,
       qty: 4,
       unitPrice: 500,
       total: 2000,
-    })
+    }))
   })
 
   it("keeps mixed train and hotel rate card prices separate", async () => {
@@ -407,20 +408,20 @@ describe("POST /api/packages/[slug]/apply", () => {
 
     expect(response.status).toBe(200)
     expect(payload.lineItems).toEqual([
-      {
+      expect.objectContaining({
         description: "Blue Train - Deluxe Suite - Cape Town to Pretoria - Adult",
         supplierDescription: null,
         qty: 2,
         unitPrice: 1000,
         total: 2000,
-      },
-      {
+      }),
+      expect.objectContaining({
         description: "Harbour Hotel - Sea View Room - Full Board",
         supplierDescription: null,
         qty: 4,
         unitPrice: 500,
         total: 2000,
-      },
+      }),
     ])
   })
 
@@ -438,13 +439,13 @@ describe("POST /api/packages/[slug]/apply", () => {
     const payload = await response.json()
 
     expect(response.status).toBe(200)
-    expect(payload.lineItems).toContainEqual({
+    expect(payload.lineItems).toContainEqual(expect.objectContaining({
       description: "Airport Transfers - Sedan - Airport to Hotel",
       supplierDescription: null,
       qty: 1,
       unitPrice: 300,
       total: 300,
-    })
+    }))
   })
 
   it("prices selected rental by billable days from the booking transport request", async () => {
@@ -484,12 +485,44 @@ describe("POST /api/packages/[slug]/apply", () => {
     const payload = await response.json()
 
     expect(response.status).toBe(200)
-    expect(payload.lineItems).toContainEqual({
+    expect(payload.lineItems).toContainEqual(expect.objectContaining({
       description: "Vehicle Rentals - Sedan - Three day vehicle rental - Cape Town Airport -> Cape Town Airport",
       supplierDescription: null,
       qty: 2,
       unitPrice: 1200,
       total: 2400,
+    }))
+  })
+
+  it("returns markup-applied pricing snapshots from the pricing engine", async () => {
+    helperMocks.loadPackageDetail.mockResolvedValue({
+      detail: {
+        ...buildDetail(),
+        markupPct: 10,
+      },
+    })
+
+    const response = await postApply({
+      jobId: JOB_ID,
+      quoteId: QUOTE_ID,
+      travelDate: "2026-06-01",
+      selections: [
+        { legId: TRAIN_LEG_ID, selected: true, suiteTypeId: TRAIN_SUITE_ID },
+        { legId: HOTEL_LEG_ID, selected: false },
+        { legId: TRANSFER_LEG_ID, selected: false },
+      ],
+    })
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(payload.lineItems[0]).toMatchObject({
+      description: "Blue Train - Deluxe Suite - Cape Town to Pretoria - Adult",
+      unitPrice: 1100,
+      pricingSnapshot: {
+        source: "pricing_engine",
+        baseUnitPrice: 1000,
+        markupPct: 10,
+      },
     })
   })
 

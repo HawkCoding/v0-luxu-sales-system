@@ -30,12 +30,18 @@ export default async function PackagesPage() {
   }
 
   const [
+    { data: profile },
     { data: packages },
     { data: legRows },
     { data: legRouteRows },
     { data: routeRows },
     { data: rateCardRows },
   ] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("clearance_level")
+      .eq("user_id", user.id)
+      .single(),
     supabase
       .from("packages")
       .select("*")
@@ -79,6 +85,7 @@ export default async function PackagesPage() {
   const rateCards = rateCardRows ?? []
   const legRoutes = legRouteRows ?? []
 
+  const showMarkup = profile?.clearance_level === "admin"
   const list = (packages ?? []).map((pkg) => {
     const pkgLegs = legs.filter((leg) => leg.package_id === pkg.id)
     const pkgRouteIds = new Set(
@@ -108,7 +115,9 @@ export default async function PackagesPage() {
       ? routes.find((route) => trainRouteIds.has(route.id))
       : null
 
-    return mapPackageListItem(pkg, pkgLegs, prices, trainRoute?.name ?? null)
+    return mapPackageListItem(pkg, pkgLegs, prices, trainRoute?.name ?? null, {
+      includeMarkupPct: showMarkup,
+    })
   })
 
   return (

@@ -49,6 +49,7 @@ export const createPackageSchema = z.object({
   durationNights: z.number().int().nonnegative().nullable().optional(),
   currency: z.string().trim().min(1).max(10).default("ZAR"),
   singleSupplementPct: z.number().finite().min(0).max(1000).default(50),
+  markupPct: z.number().finite().min(0).max(1000).default(0),
   fixedPricePerPerson: z.number().positive().nullable().optional(),
   active: z.boolean().default(true),
   legs: z.array(packageLegSchema).default([]),

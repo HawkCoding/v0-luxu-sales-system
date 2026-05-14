@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
+import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 import {
   DEFAULT_DEPOSIT_PERCENTAGE_SETTING_KEY,
   parseDepositPercentage,
@@ -28,7 +29,7 @@ async function getAuthenticatedContext() {
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
-    .select("clearance_level")
+    .select("clearance_level, name, surname, email")
     .eq("user_id", user.id)
     .single()
 
@@ -44,6 +45,8 @@ async function getAuthenticatedContext() {
     value: {
       supabase,
       canEdit: allowedRoles.has(profile.clearance_level),
+      userId: user.id,
+      actorName: [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.email || user.email || "system",
     },
   }
 }
@@ -81,6 +84,14 @@ export async function PATCH(req: Request) {
   }
 
   const value = String(parseDepositPercentage(parsed.data.defaultDepositPercentage))
+  const { data: existingSetting, error: existingError } = await context.value.supabase
+    .from("app_settings")
+    .select("value")
+    .eq("key", DEFAULT_DEPOSIT_PERCENTAGE_SETTING_KEY)
+    .maybeSingle()
+
+  if (existingError) return NextResponse.json({ error: existingError.message }, { status: 500 })
+
   const { error } = await context.value.supabase
     .from("app_settings")
     .upsert({
@@ -90,6 +101,18 @@ export async function PATCH(req: Request) {
     })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  const auditResult = await writeAuditLog(context.value.supabase, {
+    actor: context.value.actorName,
+    actorUserId: context.value.userId,
+    entityType: "Settings",
+    entityId: DEFAULT_DEPOSIT_PERCENTAGE_SETTING_KEY,
+    action: "settings_changed",
+    before: { value: existingSetting?.value ?? null },
+    after: { value },
+    meta: settingAuditMeta(DEFAULT_DEPOSIT_PERCENTAGE_SETTING_KEY),
+  })
+  if (auditResult.error) return NextResponse.json({ error: "Failed to write settings audit log" }, { status: 500 })
 
   return NextResponse.json({ defaultDepositPercentage: Number(value) })
 }

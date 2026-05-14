@@ -1,4 +1,5 @@
 import type { PipelineStage } from "@/lib/types"
+import { checkVoucherReadiness } from "@/lib/voucher/check-readiness"
 
 export type GateSeverity = "block" | "confirm"
 
@@ -22,6 +23,9 @@ export interface TransitionBooking {
   source?: string | null
   email_import_needs_review?: boolean | null
   email_import_review_resolved_at?: string | null
+  deposit_paid?: boolean | null
+  invoice_balance?: number | null
+  departure_date?: string | null
 }
 
 export interface TransitionCustomer {
@@ -36,6 +40,7 @@ export interface TransitionQuote {
   status: string
   total?: number | null
   created_at?: string | null
+  validity_until?: string | null
 }
 
 export interface TransitionDocument {
@@ -161,6 +166,50 @@ function customerCompletenessFailure(customer: TransitionCustomer | null): GateF
   }
 }
 
+function voucherReadinessFailures(
+  booking: TransitionBooking,
+  customer: TransitionCustomer | null,
+  targetStage: PipelineStage,
+): GateFailure[] {
+  return checkVoucherReadiness({
+    stage: targetStage,
+    invoiceBalance: booking.invoice_balance ?? null,
+    departureDate: booking.departure_date ?? null,
+    customerEmail: customer?.email ?? null,
+  }).failures
+    .map((failure): GateFailure | null => {
+      if (failure.code === "balance_not_zero") {
+        return {
+          gateId: "voucher_balance_zero",
+          message: failure.message,
+          fixHint: failure.fixHint,
+          severity: "block",
+        }
+      }
+
+      if (failure.code === "departure_date_missing") {
+        return {
+          gateId: "voucher_departure_date",
+          message: failure.message,
+          fixHint: failure.fixHint,
+          severity: "block",
+        }
+      }
+
+      if (failure.code === "customer_email_missing") {
+        return {
+          gateId: "voucher_customer_email",
+          message: failure.message,
+          fixHint: failure.fixHint,
+          severity: "block",
+        }
+      }
+
+      return null
+    })
+    .filter((failure): failure is GateFailure => failure !== null)
+}
+
 function lostFailures(input: ValidateTransitionInput): GateFailure[] {
   const failures: GateFailure[] = []
   const fromStage = canonicalStage(input.booking.stage)
@@ -260,6 +309,21 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
     })
   }
 
+  if (crossedStages.includes("accepted")) {
+    const today = new Date().toISOString().slice(0, 10)
+    const activeSentQuote = quotes.find(
+      (q) => (q.status === "sent" || q.status === "accepted") && q.validity_until,
+    )
+    if (activeSentQuote && activeSentQuote.validity_until && activeSentQuote.validity_until < today) {
+      failures.push({
+        gateId: "quote_expired",
+        message: "The quote has expired and can no longer be accepted.",
+        fixHint: "Revise the quote to generate a new version with a fresh validity date, then re-send it.",
+        severity: "block",
+      })
+    }
+  }
+
   if (crossedStages.includes("deposit_requested")) {
     const hasDepositInvoice = invoices.some(
       (invoice) => invoice.kind === "deposit" && invoice.status !== "void",
@@ -288,11 +352,14 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
     }
   }
 
-  if (crossedStages.includes("deposit_paid") && !manualConfirmations.depositReceived) {
+  if (crossedStages.includes("deposit_paid") && !manualConfirmations.depositReceived && !input.booking.deposit_paid) {
     failures.push({
       gateId: "deposit_received_confirmation",
       message: "Confirm the deposit has been received before marking Deposit Paid.",
-      fixHint: "Tick the deposit received confirmation in the transition modal.",
+      fixHint:
+        input.booking.invoice_balance !== null && input.booking.invoice_balance !== undefined
+          ? "Payments recorded do not yet cover the deposit amount — or tick the confirmation below to proceed manually."
+          : "Tick the deposit received confirmation in the transition modal.",
       severity: "confirm",
     })
   }
@@ -329,6 +396,8 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
   }
 
   if (crossedStages.includes("voucher_sent")) {
+    failures.push(...voucherReadinessFailures(input.booking, input.customer, targetStage))
+
     if (!hasDocument(documents, "voucher_pdf")) {
       failures.push({
         gateId: "voucher_document",

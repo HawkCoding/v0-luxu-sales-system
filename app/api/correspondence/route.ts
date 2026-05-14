@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { writeAuditLog } from "@/lib/audit-write"
 import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDateTime } from "@/lib/date-format"
@@ -69,6 +70,13 @@ const correspondenceSchema = z
     path: ["bookingId"],
   })
 
+function correspondenceSentAuditAction(kind: string | null | undefined, moveStage: PipelineStage | undefined): string | null {
+  if (kind === "quote") return "quote_sent"
+  if (kind === "voucher" || moveStage === "voucher_sent") return "voucher_sent"
+  if (kind === "invoice" && moveStage === "deposit_requested") return "deposit_invoice_sent"
+  return null
+}
+
 export async function POST(req: Request) {
   const auth = await requireRole(["admin", "manager", "consultant"])
   if (!auth.ok) return auth.response
@@ -89,7 +97,7 @@ export async function POST(req: Request) {
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
     .select(
-      "id, booking_number, stage, source, raw_text, updated_at, customer_id, consultant, customer:customers(email)",
+      "id, booking_number, stage, source, raw_text, updated_at, customer_id, consultant, departure_date, duration_nights, customer:customers(email)",
     )
     .eq("id", bookingId)
     .single()
@@ -160,6 +168,47 @@ export async function POST(req: Request) {
       .eq("booking_id", bookingId)
 
     if (quoteUpdateError) return safeSupabaseError("correspondence:update-quote", quoteUpdateError)
+
+    await writeAuditLog(supabase, {
+      actor: profile.actorName,
+      actorUserId: auth.value.user.id,
+      entityType: "Quote",
+      entityId: parsed.data.quoteId,
+      action: "quote_sent",
+      after: { status: "sent", sent_at: parsed.data.sentAt ?? now } as Json,
+    })
+  }
+
+  const sentAction = correspondenceSentAuditAction(parsed.data.kind, parsed.data.moveStage)
+  if (sentAction && sentAction !== "quote_sent") {
+    await writeAuditLog(supabase, {
+      actor: profile.actorName,
+      actorUserId: auth.value.user.id,
+      entityType: "Booking",
+      entityId: bookingId,
+      action: sentAction,
+      after: {
+        correspondence_id: cor.id,
+        kind: parsed.data.kind ?? null,
+        subject,
+        sent_at: cor.sent_at,
+      },
+    })
+  }
+
+  if ((parsed.data.attachments?.length ?? 0) > 0) {
+    await writeAuditLog(supabase, {
+      actor: profile.actorName,
+      actorUserId: auth.value.user.id,
+      entityType: "Booking",
+      entityId: bookingId,
+      action: "attachment_uploaded",
+      meta: {
+        correspondence_id: cor.id,
+        attachment_count: parsed.data.attachments?.length ?? 0,
+        filenames: parsed.data.attachments?.map((attachment) => attachment.filename) ?? [],
+      },
+    })
   }
 
   if (parsed.data.moveStage && booking.stage !== parsed.data.moveStage) {
@@ -191,6 +240,8 @@ export async function POST(req: Request) {
           customer_id: booking.customer_id,
           consultant: booking.consultant,
         },
+        departureDate: booking.departure_date,
+        durationNights: booking.duration_nights,
         targetStage,
         actorName: profile.actorName,
         actorUserId: auth.value.user.id,
@@ -211,14 +262,14 @@ export async function POST(req: Request) {
     })
     if (historyError) return safeSupabaseError("correspondence:pipeline-history", historyError)
 
-    const { error: auditError } = await supabase.from("audit_logs").insert({
+    const { error: auditError } = await writeAuditLog(supabase, {
       actor: profile.actorName,
-      actor_user_id: auth.value.user.id,
-      entity_type: "Booking",
-      entity_id: bookingId,
+      actorUserId: auth.value.user.id,
+      entityType: "Booking",
+      entityId: bookingId,
       action: "stage_change",
-      before_json: { stage: fromStage } as Json,
-      after_json: { stage: targetStage } as Json,
+      before: { stage: fromStage } as Json,
+      after: { stage: targetStage } as Json,
     })
     if (auditError) return safeSupabaseError("correspondence:audit", auditError)
   }

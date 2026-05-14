@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
+import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 import { jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { encryptCredential } from "@/lib/inbound-email/crypto"
 import { requireAdminSettingsAccess } from "@/lib/settings-access"
@@ -56,6 +57,17 @@ export async function PATCH(
     action: "inbound_email_account_updated",
   })
 
+  const auditResult = await writeAuditLog(auth.value.supabase, {
+    actor: auth.value.actorName,
+    actorUserId: auth.value.userId,
+    entityType: "Settings",
+    entityId: "inbound_email_accounts",
+    action: "settings_changed",
+    after: { account_id: id, changed_fields: Object.keys(updates) },
+    meta: { ...settingAuditMeta("inbound_email_accounts"), operation: "update" },
+  })
+  if (auditResult.error) return safeSupabaseError("inbound-email-accounts:audit-settings", auditResult.error)
+
   return NextResponse.json({ ok: true })
 }
 
@@ -81,6 +93,17 @@ export async function DELETE(
     entity_id: id,
     action: "inbound_email_account_deleted",
   })
+
+  const auditResult = await writeAuditLog(auth.value.supabase, {
+    actor: auth.value.actorName,
+    actorUserId: auth.value.userId,
+    entityType: "Settings",
+    entityId: "inbound_email_accounts",
+    action: "settings_changed",
+    before: { account_id: id },
+    meta: { ...settingAuditMeta("inbound_email_accounts"), operation: "delete" },
+  })
+  if (auditResult.error) return safeSupabaseError("inbound-email-accounts:audit-settings", auditResult.error)
 
   return NextResponse.json({ ok: true })
 }

@@ -10,6 +10,14 @@ vi.mock("@/lib/api/auth", () => ({
   requireUser: vi.fn(),
 }))
 
+const syncMocks = vi.hoisted(() => ({
+  syncBookingPaymentState: vi.fn().mockResolvedValue(null),
+}))
+
+vi.mock("@/lib/invoices/sync-booking-payment-state", () => ({
+  syncBookingPaymentState: syncMocks.syncBookingPaymentState,
+}))
+
 import { POST } from "./route"
 
 const USER_ID = "00000000-0000-4000-8000-000000000001"
@@ -112,6 +120,17 @@ describe("POST /api/payments", () => {
     expect(body).toMatchObject({ id: PAYMENT_ID, bookingId: BOOKING_ID, amount: 1000 })
     expect(auditInsert).toHaveBeenCalledWith(
       expect.objectContaining({ actor: "Jane Doe", actor_user_id: USER_ID, entity_type: "Payment" }),
+    )
+  })
+
+  it("calls syncBookingPaymentState with the booking id after successful insert", async () => {
+    syncMocks.syncBookingPaymentState.mockClear()
+    mockSuccessAuth()
+    await POST(postJson({ bookingId: BOOKING_ID, amount: 1000, method: "eft" }))
+    expect(syncMocks.syncBookingPaymentState).toHaveBeenCalledWith(
+      expect.anything(),
+      BOOKING_ID,
+      expect.objectContaining({ actorName: "Jane Doe", actorUserId: USER_ID }),
     )
   })
 })

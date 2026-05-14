@@ -10,6 +10,7 @@ import type {
   SupplierSuiteType,
   VehicleRentalRouteDetails,
 } from "@/lib/types"
+import { applyMarkup } from "@/lib/quotes/pricing-engine"
 
 type PackageRow = Database["public"]["Tables"]["packages"]["Row"]
 type PackageLegRow = Database["public"]["Tables"]["package_legs"]["Row"]
@@ -56,9 +57,12 @@ export function mapPackageListItem(
   legs: PackageLegWithSupplier[],
   prices: number[],
   trainRouteName: string | null,
+  options: { includeMarkupPct?: boolean } = {},
 ): Package {
-  const priceFrom = prices.length > 0 ? Math.min(...prices) : null
-  const priceTo = prices.length > 0 ? Math.max(...prices) : null
+  const markupPct = row.markup_pct ?? 0
+  const markedUpPrices = prices.map((price) => applyMarkup(price, markupPct))
+  const priceFrom = markedUpPrices.length > 0 ? Math.min(...markedUpPrices) : null
+  const priceTo = markedUpPrices.length > 0 ? Math.max(...markedUpPrices) : null
   return {
     id: row.id,
     name: row.name,
@@ -72,7 +76,11 @@ export function mapPackageListItem(
     priceFrom: priceFrom === priceTo ? null : priceFrom,
     priceTo: priceFrom === priceTo ? priceFrom : priceTo,
     trainRouteName,
-    fixedPricePerPerson: row.fixed_price_per_person ?? null,
+    fixedPricePerPerson:
+      row.fixed_price_per_person === null
+        ? null
+        : applyMarkup(row.fixed_price_per_person, markupPct),
+    ...(options.includeMarkupPct ? { markupPct } : {}),
   }
 }
 
@@ -187,6 +195,7 @@ export function mapPackageDetail(
     description: row.description,
     durationNights: row.duration_nights,
     singleSupplementPct: row.single_supplement_pct,
+    markupPct: row.markup_pct ?? 0,
     fixedPricePerPerson: row.fixed_price_per_person ?? null,
     currency: row.currency,
     active: row.active,
@@ -207,5 +216,34 @@ export function mapPackageDetail(
           vehicleRentalRouteDetails,
         ),
       ),
+  }
+}
+
+export function packageDetailForRole(
+  detail: PackageDetail,
+  options: { includeMarkupPct: boolean },
+): PackageDetail {
+  if (options.includeMarkupPct) return detail
+
+  const markupPct = detail.markupPct ?? 0
+  const { markupPct: _hiddenMarkupPct, ...publicDetail } = detail
+
+  return {
+    ...publicDetail,
+    fixedPricePerPerson:
+      detail.fixedPricePerPerson === null
+        ? null
+        : applyMarkup(detail.fixedPricePerPerson, markupPct),
+    legs: detail.legs.map((leg) => ({
+      ...leg,
+      rateCards: leg.rateCards.map((rateCard) => ({
+        ...rateCard,
+        pricePerPerson: applyMarkup(rateCard.pricePerPerson, markupPct),
+        childPrice:
+          rateCard.childPrice === null ? null : applyMarkup(rateCard.childPrice, markupPct),
+        infantPrice:
+          rateCard.infantPrice === null ? null : applyMarkup(rateCard.infantPrice, markupPct),
+      })),
+    })),
   }
 }

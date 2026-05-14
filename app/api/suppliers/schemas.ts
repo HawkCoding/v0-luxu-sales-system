@@ -8,6 +8,11 @@ export const dateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD")
 
+const nullableTimeSchema = z
+  .union([z.string().regex(/^\d{2}:\d{2}$/), z.literal(""), z.null()])
+  .optional()
+  .transform((value) => (value && value.length > 0 ? value : null))
+
 export const suiteTypeSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().trim().min(1, "Suite type name is required"),
@@ -118,9 +123,12 @@ export const supplierSaveSchema = z.object({
     }),
   locationDetail: z.string().trim().max(255).nullable().optional(),
   locationId: z.string().uuid().nullable().optional(),
+  locationAreaId: z.string().uuid().nullable().optional(),
   description: z.string().trim().max(2000).nullable().optional(),
   notes: z.string().trim().max(5000),
   singleSupplementPct: z.number().finite().min(0).max(1000).default(0),
+  defaultTimeStart: nullableTimeSchema,
+  defaultTimeEnd: nullableTimeSchema,
   active: z.boolean(),
   emails: z.array(supplierEmailSchema).default([]),
   suiteTypes: z.array(suiteTypeSchema),
@@ -238,9 +246,12 @@ export const supplierDraftSaveSchema = z.object({
   location: z.string().trim().max(255).default(""),
   locationDetail: z.string().trim().max(255).nullable().default(null),
   locationId: z.string().uuid().nullable().optional(),
+  locationAreaId: z.string().uuid().nullable().optional(),
   description: z.string().trim().max(2000).nullable().default(null),
   notes: z.string().trim().max(5000).default(""),
   singleSupplementPct: z.number().finite().min(0).max(1000).default(0),
+  defaultTimeStart: nullableTimeSchema,
+  defaultTimeEnd: nullableTimeSchema,
   active: z.boolean().default(true),
   emails: z.array(draftSupplierEmailSchema).default([]),
   suiteTypes: z.array(draftSuiteTypeSchema).default([]),

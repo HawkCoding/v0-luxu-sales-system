@@ -37,17 +37,27 @@ function buildAuthValue(supabase = buildSupabase()) {
 
 function buildSupabase() {
   const scheduleInsert = vi.fn(async () => ({ error: null }))
+  const auditInsert = vi.fn(async () => ({ error: null }))
 
   return {
     scheduleInsert,
+    auditInsert,
     from: vi.fn((table: string) => {
       if (table === "booking_supplier_schedules") {
         return {
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
-              in: vi.fn(() => ({
-                order: vi.fn(async () => ({ data: [{ id: "schedule-1" }], error: null })),
-              })),
+              in: vi.fn(() => {
+                const result = {
+                  data: [],
+                  error: null,
+                  order: vi.fn(async () => ({ data: [{ id: "schedule-1" }], error: null })),
+                }
+                return Object.assign(result, {
+                  then: (resolve: (value: { data: unknown[]; error: null }) => void) =>
+                    resolve({ data: [], error: null }),
+                })
+              }),
             })),
           })),
           delete: vi.fn(() => ({
@@ -79,6 +89,9 @@ function buildSupabase() {
             })),
           })),
         }
+      }
+      if (table === "audit_logs") {
+        return { insert: auditInsert }
       }
       throw new Error(`Unexpected table ${table}`)
     }),
@@ -225,5 +238,8 @@ describe("PUT /api/jobs/[id]/supplier-schedules", () => {
         date_to: "2026-06-02",
       }),
     ])
+    expect(supabase.auditInsert).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "supplier_reference_captured", entity_id: BOOKING_ID }),
+    )
   })
 })

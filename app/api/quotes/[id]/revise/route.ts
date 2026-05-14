@@ -19,7 +19,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
   const { id } = await params
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
-    .select("*, booking:bookings(booking_number)")
+    .select("id, booking_id, itinerary_id, status, validity_until, subtotal, vat, total, no_package_match, quote_number, booking:bookings(booking_number)")
     .eq("id", id)
     .single()
 
@@ -27,9 +27,10 @@ export async function POST(_req: Request, { params }: RouteParams) {
     return NextResponse.json({ error: "Quote not found" }, { status: 404 })
   }
 
-  if (quote.status !== "sent" && quote.status !== "accepted") {
+  const revisableStatuses = ["sent", "accepted", "expired"]
+  if (!revisableStatuses.includes(quote.status)) {
     return NextResponse.json(
-      { error: "Only sent or accepted quotes can be revised" },
+      { error: "Only sent, accepted, or expired quotes can be revised" },
       { status: 400 },
     )
   }
@@ -60,14 +61,11 @@ export async function POST(_req: Request, { params }: RouteParams) {
       quote_number: quoteNumber,
       parent_quote_id: quote.id,
     })
-    .select()
+    .select("id, booking_id, status, quote_number, parent_quote_id")
     .single()
 
   if (insertError || !revisedQuote) {
-    return NextResponse.json(
-      { error: insertError?.message ?? "Failed to revise quote" },
-      { status: 500 },
-    )
+    return NextResponse.json({ error: "Failed to revise quote" }, { status: 500 })
   }
 
   if (lineItems && lineItems.length > 0) {
@@ -87,14 +85,22 @@ export async function POST(_req: Request, { params }: RouteParams) {
     }
   }
 
+  // Mark parent as superseded now that a new version exists
+  await supabase.from("quotes").update({ status: "superseded" }).eq("id", id)
+
+  // Audit entry on the parent quote (version created)
   await supabase.from("audit_logs").insert({
     actor: user.email ?? "System",
     actor_user_id: user.id,
     entity_type: "Quote",
-    entity_id: revisedQuote.id,
-    action: "quote_revised",
-    before_json: { parent_quote_id: quote.id, quote_number: quote.quote_number },
-    after_json: { quote_number: quoteNumber },
+    entity_id: id,
+    action: "quote_version_created",
+    before_json: { status: quote.status, quote_number: quote.quote_number },
+    after_json: {
+      status: "superseded",
+      successor_id: revisedQuote.id,
+      successor_number: quoteNumber,
+    },
   })
 
   return NextResponse.json({

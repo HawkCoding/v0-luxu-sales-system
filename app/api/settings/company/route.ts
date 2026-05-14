@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 import { requireRole, requireUser } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 
@@ -34,6 +35,14 @@ export async function PATCH(req: Request) {
   const parsed = patchSchema.safeParse(raw)
   if (!parsed.success) return jsonZodError(parsed.error, "Invalid input")
 
+  const { data: existingSetting, error: existingError } = await auth.value.supabase
+    .from("app_settings")
+    .select("value")
+    .eq("key", "business_name")
+    .maybeSingle()
+
+  if (existingError) return safeSupabaseError("settings-company:load-existing", existingError)
+
   const { error } = await auth.value.supabase
     .from("app_settings")
     .upsert({
@@ -43,6 +52,18 @@ export async function PATCH(req: Request) {
     })
 
   if (error) return safeSupabaseError("settings-company:upsert", error)
+
+  const auditResult = await writeAuditLog(auth.value.supabase, {
+    actor: auth.value.profile.actorName,
+    actorUserId: auth.value.user.id,
+    entityType: "Settings",
+    entityId: "business_name",
+    action: "settings_changed",
+    before: { value: existingSetting?.value ?? null },
+    after: { value: parsed.data.business_name },
+    meta: settingAuditMeta("business_name"),
+  })
+  if (auditResult.error) return safeSupabaseError("settings-company:audit", auditResult.error)
 
   return Response.json({ business_name: parsed.data.business_name })
 }

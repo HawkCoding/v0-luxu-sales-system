@@ -33,6 +33,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { PackageLegSelector, type SelectablePackageLeg } from "@/components/package-leg-selector"
 import { parseStaleVersionConflictPayload } from "@/lib/supplier-save-guard"
 import { useActiveSuppliers, useLocations } from "@/lib/use-data"
+import { useRole } from "@/lib/role-context"
 import type { PackageDetail, Supplier, SupplierDetail } from "@/lib/types"
 import { CURRENCIES, SUPPLIER_KIND_LABELS, type SupplierKind } from "@/lib/types"
 
@@ -70,6 +71,7 @@ async function loadSupplierContext(supplier: Supplier) {
 
 export function PackageDetailView({ packageDetail }: PackageDetailViewProps) {
   const router = useRouter()
+  const { role } = useRole()
   const { data: locations = [] } = useLocations()
   const { data: allSuppliers = [] } = useActiveSuppliers()
 
@@ -78,6 +80,7 @@ export function PackageDetailView({ packageDetail }: PackageDetailViewProps) {
   const [durationNights, setDurationNights] = useState(packageDetail.durationNights)
   const [currency, setCurrency] = useState(packageDetail.currency)
   const [singleSupplementPct, setSingleSupplementPct] = useState(packageDetail.singleSupplementPct)
+  const [markupPct, setMarkupPct] = useState(packageDetail.markupPct ?? 0)
   const [fixedPricePerPerson, setFixedPricePerPerson] = useState<number | null>(packageDetail.fixedPricePerPerson)
   const [active, setActive] = useState(packageDetail.active)
   const [legs, setLegs] = useState(() => buildLegState(packageDetail))
@@ -98,10 +101,19 @@ export function PackageDetailView({ packageDetail }: PackageDetailViewProps) {
     () => Array.from(new Set(legs.map((leg) => leg.supplierKind))),
     [legs],
   )
+  const canSeeMarkup = role === "admin"
 
   const markDirty = () => setIsDirty(true)
 
   useEffect(() => {
+    setName(packageDetail.name)
+    setDescription(packageDetail.description ?? "")
+    setDurationNights(packageDetail.durationNights)
+    setCurrency(packageDetail.currency)
+    setSingleSupplementPct(packageDetail.singleSupplementPct)
+    setMarkupPct(packageDetail.markupPct ?? 0)
+    setFixedPricePerPerson(packageDetail.fixedPricePerPerson)
+    setActive(packageDetail.active)
     setLegs(buildLegState(packageDetail))
     setHydratedSupplierIds(new Set())
     setIsDirty(false)
@@ -166,6 +178,7 @@ export function PackageDetailView({ packageDetail }: PackageDetailViewProps) {
     durationNights,
     currency: currency.trim().toUpperCase() || "ZAR",
     singleSupplementPct,
+    ...(canSeeMarkup ? { markupPct } : {}),
     fixedPricePerPerson,
     active,
     expectedUpdatedAt: packageDetail.updatedAt,
@@ -407,6 +420,17 @@ export function PackageDetailView({ packageDetail }: PackageDetailViewProps) {
               onValueChange={(value) => { setSingleSupplementPct(value ?? 0); markDirty() }}
             />
           </div>
+          {canSeeMarkup ? (
+            <div className="space-y-2">
+              <Label>Package markup %</Label>
+              <NumericInput
+                min="0"
+                step="0.01"
+                value={markupPct}
+                onValueChange={(value) => { setMarkupPct(value ?? 0); markDirty() }}
+              />
+            </div>
+          ) : null}
           <div className="space-y-2">
             <Label>Fixed price per person (optional)</Label>
             <NumericInput

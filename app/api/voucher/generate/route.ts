@@ -3,6 +3,7 @@ import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDateLong } from "@/lib/date-format"
 import type { VoucherData } from "@/lib/generate-voucher"
+import { checkVoucherReadiness } from "@/lib/voucher/check-readiness"
 import { renderVoucherEmail } from "@/lib/voucher/render-voucher-email"
 import { renderVoucherPdf } from "@/lib/voucher/render-pdf"
 import { CONSULTANTS, VOUCHER_TEMPLATE_DEFAULTS, type ConsultantAbbreviation, type VoucherTemplate } from "@/lib/types"
@@ -124,13 +125,21 @@ export async function POST(req: Request) {
   if (travellersError) return safeSupabaseError("voucher:travellers", travellersError)
 
   const booking = bookingRaw as unknown as BookingVoucherRecord
-  const paidInFullStages = new Set(["final_paid", "voucher_sent", "closed"])
-  if (!paidInFullStages.has(booking.stage ?? "") || Number(booking.invoice_balance ?? NaN) !== 0) {
-    return jsonError("Booking must be paid in full before generating a voucher", 422)
+  const customer = firstRecord(booking.customer)
+
+  const readiness = checkVoucherReadiness({
+    stage: booking.stage,
+    invoiceBalance: booking.invoice_balance,
+    departureDate: booking.departure_date,
+    customerEmail: customer?.email ?? null,
+  })
+  if (!readiness.ready) {
+    return jsonError(readiness.failures[0]?.message ?? "Booking is not ready for voucher generation", 422)
   }
 
-  const customer = firstRecord(booking.customer)
-  if (!customer?.email) return jsonError("Customer email is required before generating a voucher", 422)
+  if (!customer) {
+    return jsonError("Customer data is missing from booking", 422)
+  }
 
   const consultant = resolveConsultant(booking.consultant)
   const route = booking.route?.name ?? ""
@@ -237,7 +246,7 @@ export async function POST(req: Request) {
     actor_user_id: user.id,
     entity_type: "Booking",
     entity_id: booking.id,
-    action: "voucher_pdf_generated",
+    action: existingDocument ? "voucher_pdf_regenerated" : "voucher_pdf_generated",
     meta_json: { document_id: documentWrite.data.id, storage_path: documentPayload.storage_path },
   })
 

@@ -101,8 +101,18 @@ export interface Customer {
   email: string
   phone: string | null
   country: string | null
+  province?: string | null
   title?: string | null
   notes?: string | null
+  dateOfBirth?: string | null
+  vipStatus?: boolean
+  preferences?: string | null
+  communicationPreferences?: string | null
+  firstTravelDate?: string | null
+  firstTravelDateDisplay?: string
+  lastTravelDate?: string | null
+  lastTravelDateDisplay?: string
+  isRepeatClient?: boolean
   createdAt: string
   createdAtDisplay?: string
   updatedAt?: string
@@ -273,7 +283,7 @@ const JOURNEY_SUPPLIER_VOCABULARY: SupplierVocabulary = {
   scheduleFields: {
     dateFromLabel: "Departure date",
     dateToLabel: "Arrival date",
-    timeStartLabel: "Boarding time",
+    timeStartLabel: "Departure time",
     timeEndLabel: "Arrival time",
   },
 }
@@ -342,6 +352,12 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     originLabel: "Pickup point",
     destinationLabel: "Return point",
     durationLabel: "days",
+    scheduleFields: {
+      dateFromLabel: "Pickup date",
+      dateToLabel: "Return date",
+      timeStartLabel: "Pickup time",
+      timeEndLabel: "Return time",
+    },
   },
 
   tour_operator: {
@@ -399,6 +415,7 @@ export interface Location {
   id: string
   name: string
   country: string
+  parentLocationId: string | null
   regionCode: string | null
   createdAt: string
   createdAtDisplay?: string
@@ -462,6 +479,29 @@ export interface SupplierRateCard {
   createdAtDisplay?: string
 }
 
+export interface PricingSnapshot {
+  source: "pricing_engine"
+  pricingMode: "rate_card" | "fixed_package"
+  packageId: string
+  packageName: string
+  legId: string | null
+  legLabel: string | null
+  supplierId: string | null
+  supplierName: string | null
+  supplierKind: SupplierKind | null
+  routeId: string | null
+  routeName: string | null
+  suiteTypeId: string | null
+  suiteTypeName: string | null
+  rateCardId: string | null
+  travelDate: string
+  passengerKind: "adult" | "child" | "infant" | "single_supplement" | "service" | "included"
+  baseUnitPrice: number
+  markupPct: number
+  singleSupplementPct: number | null
+  serviceType: "transfer" | "rental" | null
+}
+
 export interface SupplierPackage {
   id: string
   slug: string
@@ -500,6 +540,7 @@ export interface PackageDetail {
   description: string | null
   durationNights: number | null
   singleSupplementPct: number
+  markupPct?: number
   fixedPricePerPerson: number | null
   currency: string
   active: boolean
@@ -524,6 +565,7 @@ export interface Package {
   priceTo: number | null
   trainRouteName: string | null
   fixedPricePerPerson: number | null
+  markupPct?: number
 }
 
 export interface SupplierEmail {
@@ -547,10 +589,13 @@ export interface Supplier {
   location: string | null
   locationDetail: string | null
   locationId: string | null
+  locationAreaId: string | null
   description: string | null
   notes: string | null
   active: boolean
   singleSupplementPct: number
+  defaultTimeStart: string | null
+  defaultTimeEnd: string | null
   createdAt: string
   createdAtDisplay?: string
   updatedAt: string
@@ -597,7 +642,7 @@ export interface BookingVehicleRentalDetails {
   updatedAt: string
 }
 
-export type BookingScheduleSupplierKind = "hotel_property" | "train_operator"
+export type BookingScheduleSupplierKind = "hotel_property" | "train_operator" | "vehicle_rental"
 
 export interface BookingSupplierSchedule {
   id: string
@@ -635,6 +680,11 @@ export interface Job {
   createdAtDisplay?: string
   updatedAt: string
   updatedAtDisplay?: string
+  depositPaid?: boolean | null
+  invoiceBalance?: number | null
+  cancelReason?: string | null
+  cancelledAt?: string | null
+  cancelledAtDisplay?: string
 }
 
 export interface Enquiry {
@@ -701,7 +751,15 @@ export interface Itinerary {
   acceptedAtDisplay?: string
 }
 
-export type QuoteStatus = "draft" | "pricing_incomplete" | "ready" | "sent" | "accepted"
+export type QuoteStatus =
+  | "draft"
+  | "pricing_incomplete"
+  | "ready"
+  | "sent"
+  | "accepted"
+  | "expired"
+  | "superseded"
+  | "cancelled"
 
 export interface QuoteLineItem {
   description: string
@@ -709,6 +767,7 @@ export interface QuoteLineItem {
   qty: number
   unitPrice: number
   total: number
+  pricingSnapshot?: PricingSnapshot | null
 }
 
 export interface Quote {
@@ -742,6 +801,7 @@ export interface Payment {
   method: string
   reference: string
   notes: string
+  proofStoragePath?: string | null
 }
 
 export type InvoiceKind = "deposit" | "final"

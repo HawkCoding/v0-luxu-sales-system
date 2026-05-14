@@ -577,9 +577,12 @@ export async function PATCH(
     location: parsed.location || null,
     location_detail: parsed.locationDetail?.trim() || null,
     location_id: parsed.locationId ?? null,
+    location_area_id: parsed.locationAreaId ?? null,
     description: parsed.description?.trim() || null,
     notes: parsed.notes || null,
     single_supplement_pct: parsed.singleSupplementPct,
+    default_time_start: parsed.defaultTimeStart ?? null,
+    default_time_end: parsed.defaultTimeEnd ?? null,
     active: isDraftSave ? false : parsed.active,
   }
 

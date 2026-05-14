@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { writeAuditLog } from "@/lib/audit-write"
 import type { Database } from "@/lib/supabase/types"
 import type { PipelineStage } from "@/lib/types"
 import { calculateDepositAmount, getDefaultDepositPercentage } from "./constants"
@@ -22,6 +23,8 @@ export interface ApplyTransitionInput {
     | "customer_id"
     | "consultant"
   >
+  departureDate?: string | null
+  durationNights?: number | null
   targetStage: PipelineStage
   actorName: string
   actorUserId: string | null
@@ -130,6 +133,18 @@ export async function applyTransition(
     if (quoteError) throw new Error(quoteError.message)
   }
 
+  if (crossedStages.includes("deposit_paid")) {
+    await writeAuditLog(supabase, {
+      actor: input.actorName,
+      actorUserId: input.actorUserId,
+      entityType: "Booking",
+      entityId: input.booking.id,
+      action: "booking_confirmed",
+      before: { stage: input.booking.stage, deposit_paid: false },
+      after: { stage: input.targetStage, deposit_paid: true, deposit_paid_at: updates.deposit_paid_at ?? nowIso },
+    })
+  }
+
   let createdInvoiceDocument = false
   let scheduledDepositCorrespondence = false
 
@@ -190,6 +205,35 @@ export async function applyTransition(
       .eq("kind", "voucher_pdf")
 
     if (voucherError) throw new Error(voucherError.message)
+
+    if (input.booking.customer_id) {
+      const { data: completedBookings, error: completedBookingsError } = await supabase
+        .from("bookings")
+        .select("departure_date")
+        .eq("customer_id", input.booking.customer_id)
+        .in("stage", ["voucher_sent", "closed"])
+        .not("departure_date", "is", null)
+
+      if (completedBookingsError) throw new Error(completedBookingsError.message)
+
+      const travelDates = (completedBookings ?? [])
+        .map((booking) => booking.departure_date)
+        .filter((departureDate): departureDate is string => Boolean(departureDate))
+        .sort()
+
+      if (travelDates.length > 0) {
+        const { error: customerError } = await supabase
+          .from("customers")
+          .update({
+            first_travel_date: travelDates[0],
+            last_travel_date: travelDates[travelDates.length - 1],
+            is_repeat_client: travelDates.length >= 2,
+          })
+          .eq("id", input.booking.customer_id)
+
+        if (customerError) throw new Error(customerError.message)
+      }
+    }
   }
 
   return {

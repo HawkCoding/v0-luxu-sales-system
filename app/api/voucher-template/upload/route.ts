@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server"
+import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 import { createSessionClient } from "@/lib/supabase/server"
+import type { Json } from "@/lib/supabase/types"
 import { MAX_IMAGE_BYTES, MAX_IMAGE_MB } from "@/lib/upload-limits"
 
 const ALLOWED_KINDS = ["logo", "banner"] as const
@@ -33,7 +35,7 @@ export async function POST(req: Request) {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("clearance_level")
+    .select("clearance_level, name, surname, email")
     .eq("user_id", user.id)
     .single()
 
@@ -90,7 +92,7 @@ export async function POST(req: Request) {
   const column = kind === "logo" ? "logo_url" : "banner_url"
   const { data: existing, error: templateLookupError } = await supabase
     .from("voucher_template")
-    .select("id")
+    .select(`id, ${column}`)
     .limit(1)
     .single()
 
@@ -105,6 +107,27 @@ export async function POST(req: Request) {
 
   if (templateUpdateError) {
     return NextResponse.json({ error: templateUpdateError.message }, { status: 500 })
+  }
+
+  const actorName = [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.email || user.email || "system"
+  const previousUrl = ((existing as Record<string, unknown>)[column] ?? null) as Json
+  const auditResult = await writeAuditLog(supabase, {
+    actor: actorName,
+    actorUserId: user.id,
+    entityType: "Settings",
+    entityId: "voucher_template",
+    action: "settings_changed",
+    before: { [column]: previousUrl },
+    after: { [column]: url },
+    meta: {
+      ...settingAuditMeta("voucher_template"),
+      asset_kind: kind,
+      file_name: file.name,
+      file_size: file.size,
+    },
+  })
+  if (auditResult.error) {
+    return NextResponse.json({ error: "Failed to write settings audit log" }, { status: 500 })
   }
 
   return NextResponse.json({ url })

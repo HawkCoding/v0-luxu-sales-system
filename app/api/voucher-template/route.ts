@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
+import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 import { createSessionClient } from "@/lib/supabase/server"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
 
@@ -44,7 +45,7 @@ export async function PATCH(req: Request) {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("clearance_level")
+    .select("clearance_level, name, surname, email")
     .eq("user_id", user.id)
     .single()
 
@@ -60,7 +61,7 @@ export async function PATCH(req: Request) {
 
   const { data: existing } = await supabase
     .from("voucher_template")
-    .select("id")
+    .select("id, logo_url, banner_url, header_text, product_line, accent_colour, section_bg, font_family, section_order, hidden_sections, footer_company, footer_phone, footer_email, guidance_text")
     .limit(1)
     .single()
 
@@ -75,6 +76,21 @@ export async function PATCH(req: Request) {
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  const actorName = [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.email || user.email || "system"
+  const auditResult = await writeAuditLog(supabase, {
+    actor: actorName,
+    actorUserId: user.id,
+    entityType: "Settings",
+    entityId: "voucher_template",
+    action: "settings_changed",
+    before: existing,
+    after: parsed.data,
+    meta: settingAuditMeta("voucher_template"),
+  })
+  if (auditResult.error) {
+    return NextResponse.json({ error: "Failed to write settings audit log" }, { status: 500 })
   }
 
   return NextResponse.json({ success: true })

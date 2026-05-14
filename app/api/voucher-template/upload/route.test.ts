@@ -50,6 +50,7 @@ function createSupabase({
 } = {}) {
   const uploads: UploadedFile[] = []
   const updates: Array<Record<string, unknown>> = []
+  const auditInsert = vi.fn(async () => ({ error: null }))
 
   const supabase = {
     uploads,
@@ -77,7 +78,7 @@ function createSupabase({
           select: () => ({
             eq: () => ({
               single: async () => ({
-                data: user ? { clearance_level: role } : null,
+                data: user ? { clearance_level: role, name: "Admin", surname: "User", email: "admin@example.com" } : null,
                 error: null,
               }),
             }),
@@ -90,7 +91,7 @@ function createSupabase({
           select: () => ({
             limit: () => ({
               single: async () => ({
-                data: templateMissing ? null : { id: "template-1" },
+                data: templateMissing ? null : { id: "template-1", logo_url: null, banner_url: null },
                 error: templateLookupError,
               }),
             }),
@@ -104,8 +105,13 @@ function createSupabase({
         }
       }
 
+      if (table === "audit_logs") {
+        return { insert: auditInsert }
+      }
+
       throw new Error(`Unexpected table ${table}`)
     }),
+    auditInsert,
   }
 
   return supabase
@@ -188,6 +194,9 @@ describe("POST /api/voucher-template/upload", () => {
     expect(supabase.updates[0]).toMatchObject({
       banner_url: expect.stringContaining("/voucher-assets/banner.webp?t="),
     })
+    expect(supabase.auditInsert).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "settings_changed", entity_id: "voucher_template" }),
+    )
   })
 
   it("returns 500 when the uploaded URL cannot be saved", async () => {
@@ -224,5 +233,8 @@ describe("POST /api/voucher-template/upload", () => {
     expect(supabase.updates[0]).toMatchObject({
       logo_url: expect.stringContaining("/voucher-assets/logo.svg?t="),
     })
+    expect(supabase.auditInsert).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "settings_changed", entity_id: "voucher_template" }),
+    )
   })
 })

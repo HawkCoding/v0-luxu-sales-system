@@ -1,6 +1,11 @@
 import { detectCountryInText, loadCountryAliasMap, normalizeCountry } from "@/lib/countries"
 import { buildEnquiryImportPayload } from "@/lib/import/enquiry-payload"
 import { type ParsedDraft } from "@/lib/import/parseEmailDraft"
+import {
+  addJobNumberingMetadata,
+  allocateJobNumberForBooking,
+  getTrainProductReviewWarning,
+} from "@/lib/job-numbering"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
 import { createServiceClient } from "@/lib/supabase/server"
 import { createRawEmailPreview } from "@/lib/inbound-email/html"
@@ -210,7 +215,19 @@ export async function createEmailBookingFromParsedDraft(
   const packageId = await findPackageId(supabase, payload.packageOption)
   const hotelSupplierId = await findHotelSupplierId(supabase, payload.hotelOption)
   const rawPreview = createRawEmailPreview(context.rawText)
-  const extractedJson = {
+  const jobNumberAllocation = await allocateJobNumberForBooking(supabase, {
+    supplierId: payload.supplierId ?? null,
+    parsedSupplier: parsed.trip.supplier,
+    routeId,
+    routeName: payload.direction,
+    packageId,
+    packageName: payload.packageOption ?? null,
+    rawText: context.rawText,
+  })
+  const emailImportWarnings = jobNumberAllocation.resolution.needsReview
+    ? Array.from(new Set([...context.warnings, getTrainProductReviewWarning()]))
+    : context.warnings
+  const extractedJson = addJobNumberingMetadata({
     ...payload.extractedJson,
     parsedFrom: "inbound_email",
     emailImport: {
@@ -219,7 +236,7 @@ export async function createEmailBookingFromParsedDraft(
       subject: context.subject,
       receivedAt: context.receivedAt,
       missingFields: context.missingFields,
-      warnings: context.warnings,
+      warnings: emailImportWarnings,
     },
     formFields: {
       ...payload.extractedJson.formFields,
@@ -234,9 +251,10 @@ export async function createEmailBookingFromParsedDraft(
       packageId,
       hotelSupplierId,
     },
-  } satisfies Json
+  }, jobNumberAllocation.resolution) as Json
 
   const bookingInsert: BookingInsert = {
+    booking_number: jobNumberAllocation.bookingNumber,
     customer_id: customerId,
     purpose: payload.purpose,
     source: "email",
@@ -251,9 +269,9 @@ export async function createEmailBookingFromParsedDraft(
     raw_text: context.rawText,
     extracted_json: extractedJson,
     terms_accepted: true,
-    email_import_needs_review: context.missingFields.length > 0 || context.warnings.length > 0,
+    email_import_needs_review: context.missingFields.length > 0 || emailImportWarnings.length > 0,
     email_import_missing_fields: context.missingFields,
-    email_import_warnings: context.warnings,
+    email_import_warnings: emailImportWarnings,
     email_import_duplicate_of_booking_id: duplicateOfBookingId,
     email_import_subject: context.subject,
     email_import_mailbox: context.mailboxEmail,
@@ -301,6 +319,20 @@ export async function createEmailBookingFromParsedDraft(
       entity_id: booking.id,
       action: "possible_duplicate_email_import",
       meta_json: { duplicate_of_booking_id: duplicateOfBookingId },
+    })
+  }
+
+  if (jobNumberAllocation.resolution.needsReview) {
+    await supabase.from("audit_logs").insert({
+      actor: "system",
+      entity_type: "Booking",
+      entity_id: booking.id,
+      action: "job_number_product_needs_review",
+      meta_json: {
+        booking_number: booking.booking_number,
+        reason: jobNumberAllocation.resolution.reason,
+        sources: jobNumberAllocation.resolution.sources,
+      },
     })
   }
 
