@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server"
 import { upsertPackageSchema, type UpsertPackageInput } from "../schemas"
+import { packageDetailForRole } from "@/lib/packages"
 import { requireAuthenticatedUser } from "../../suppliers/helpers"
 import {
+  getPackageWriteRole,
   hasPackageWriteAccess,
+  isPackageMarkupVisible,
   loadPackageDetail,
   normalizePackageChildren,
   resolveUniquePackageSlug,
@@ -29,7 +32,8 @@ export async function GET(
     return detail.error!
   }
 
-  return NextResponse.json(detail.detail)
+  const showMarkup = await isPackageMarkupVisible(auth.supabase, auth.user.id)
+  return NextResponse.json(packageDetailForRole(detail.detail, { includeMarkupPct: showMarkup }))
 }
 
 export async function PATCH(
@@ -42,7 +46,8 @@ export async function PATCH(
   }
 
   const { supabase, user } = auth
-  if (!(await hasPackageWriteAccess(supabase, user.id))) {
+  const writeRole = await getPackageWriteRole(supabase, user.id)
+  if (!writeRole) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
@@ -99,7 +104,11 @@ export async function PATCH(
       description: parsed.description?.trim() || null,
       duration_nights: parsed.durationNights ?? null,
       single_supplement_pct: parsed.singleSupplementPct,
-      fixed_price_per_person: parsed.fixedPricePerPerson ?? null,
+      markup_pct: writeRole === "admin" ? parsed.markupPct : existing.packageRow.markup_pct,
+      fixed_price_per_person:
+        writeRole === "admin" || parsed.fixedPricePerPerson === null || parsed.fixedPricePerPerson === undefined
+          ? parsed.fixedPricePerPerson ?? null
+          : parsed.fixedPricePerPerson / (1 + (existing.packageRow.markup_pct ?? 0) / 100),
       currency: parsed.currency.trim().toUpperCase() || "ZAR",
       active: parsed.active,
     })
@@ -134,16 +143,7 @@ export async function PATCH(
   }
 
   const incomingLegIds = new Set(children.legs.map((leg) => leg.id).filter(Boolean))
-  const incomingRouteIds = new Set(children.routes.map((route) => route.id).filter(Boolean))
-  const incomingRateCardIds = new Set(children.rateCards.map((rateCard) => rateCard.id).filter(Boolean))
   const existingLegIds = existing.legs.map((leg) => leg.id)
-  const existingRouteIds = existing.detail.legs.flatMap((leg) => leg.routes.map((route) => route.id))
-  const existingRateCardIds = existing.detail.legs.flatMap((leg) =>
-    leg.rateCards.map((rateCard) => rateCard.id),
-  )
-
-  const rateCardIdsToDelete = existingRateCardIds.filter((id) => !incomingRateCardIds.has(id))
-  const routeIdsToDelete = existingRouteIds.filter((id) => !incomingRouteIds.has(id))
   const legIdsToDelete = existingLegIds.filter((id) => !incomingLegIds.has(id))
 
   if (children.legs.length > 0) {
@@ -164,27 +164,43 @@ export async function PATCH(
     }
   }
 
+  if (existingLegIds.length > 0) {
+    const { error } = await supabase
+      .from("package_leg_routes")
+      .delete()
+      .in("package_leg_id", existingLegIds)
+    if (error) {
+      return NextResponse.json({ error: "Failed to update package route selections" }, { status: 500 })
+    }
+  }
+
+  if (children.routeLinks.length > 0) {
+    const { error } = await supabase
+      .from("package_leg_routes")
+      .insert(children.routeLinks)
+    if (error) {
+      return NextResponse.json({ error: "Failed to update package route selections" }, { status: 500 })
+    }
+  }
+
   if (children.rateCards.length > 0) {
     const { error } = await supabase
       .from("rate_cards")
       .upsert(children.rateCards, { onConflict: "id" })
     if (error) {
-      const status = error.code === "23505" || error.code === "23P01" ? 409 : 500
-      return NextResponse.json({ error: "Failed to update package rates" }, { status })
-    }
-  }
-
-  if (rateCardIdsToDelete.length > 0) {
-    const { error } = await supabase.from("rate_cards").delete().in("id", rateCardIdsToDelete)
-    if (error) {
-      return NextResponse.json({ error: "Failed to remove old package rates" }, { status: 500 })
-    }
-  }
-
-  if (routeIdsToDelete.length > 0) {
-    const { error } = await supabase.from("routes").delete().in("id", routeIdsToDelete)
-    if (error) {
-      return NextResponse.json({ error: "Failed to remove old package routes" }, { status: 500 })
+      if (error.code === "23P01") {
+        return NextResponse.json(
+          { error: "Overlapping rate card periods are not allowed for the same route and suite type." },
+          { status: 409 },
+        )
+      }
+      if (error.code === "23505") {
+        return NextResponse.json(
+          { error: "Duplicate rate cards are not allowed for the same route, suite type, and start date." },
+          { status: 409 },
+        )
+      }
+      return NextResponse.json({ error: "Failed to update package rates" }, { status: 500 })
     }
   }
 
@@ -200,7 +216,7 @@ export async function PATCH(
     return detail.error!
   }
 
-  return NextResponse.json(detail.detail)
+  return NextResponse.json(packageDetailForRole(detail.detail, { includeMarkupPct: writeRole === "admin" }))
 }
 
 export async function DELETE(

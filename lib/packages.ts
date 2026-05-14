@@ -8,16 +8,21 @@ import type {
   SupplierRateCard,
   SupplierRoute,
   SupplierSuiteType,
+  VehicleRentalRouteDetails,
 } from "@/lib/types"
+import { applyMarkup } from "@/lib/quotes/pricing-engine"
 
 type PackageRow = Database["public"]["Tables"]["packages"]["Row"]
 type PackageLegRow = Database["public"]["Tables"]["package_legs"]["Row"]
+type PackageLegRouteRow = Database["public"]["Tables"]["package_leg_routes"]["Row"]
 type RateCardRow = Database["public"]["Tables"]["rate_cards"]["Row"]
 type RouteRow = Database["public"]["Tables"]["routes"]["Row"]
 type SuiteTypeRow = Database["public"]["Tables"]["suite_types"]["Row"]
+type VehicleRentalRouteDetailsRow = Database["public"]["Tables"]["vehicle_rental_route_details"]["Row"]
 
 export interface PackageLegWithSupplier extends PackageLegRow {
   supplierName: string
+  supplierDescription: string | null
   supplierKind: SupplierKind
 }
 
@@ -31,14 +36,33 @@ export function buildPackageSlugBase(name: string): string {
   return slug || "package"
 }
 
+function mapVehicleRentalRouteDetails(
+  row: VehicleRentalRouteDetailsRow | null | undefined,
+): VehicleRentalRouteDetails | null {
+  if (!row) return null
+
+  return {
+    routeId: row.route_id,
+    includedKmPerDay: row.included_km_per_day ?? null,
+    extraKmPrice: row.extra_km_price ?? null,
+    securityDeposit: row.security_deposit ?? null,
+    oneWayFee: row.one_way_fee ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
 export function mapPackageListItem(
   row: PackageRow,
   legs: PackageLegWithSupplier[],
   prices: number[],
   trainRouteName: string | null,
+  options: { includeMarkupPct?: boolean } = {},
 ): Package {
-  const priceFrom = prices.length > 0 ? Math.min(...prices) : null
-  const priceTo = prices.length > 0 ? Math.max(...prices) : null
+  const markupPct = row.markup_pct ?? 0
+  const markedUpPrices = prices.map((price) => applyMarkup(price, markupPct))
+  const priceFrom = markedUpPrices.length > 0 ? Math.min(...markedUpPrices) : null
+  const priceTo = markedUpPrices.length > 0 ? Math.max(...markedUpPrices) : null
   return {
     id: row.id,
     name: row.name,
@@ -52,17 +76,27 @@ export function mapPackageListItem(
     priceFrom: priceFrom === priceTo ? null : priceFrom,
     priceTo: priceFrom === priceTo ? priceFrom : priceTo,
     trainRouteName,
-    fixedPricePerPerson: row.fixed_price_per_person ?? null,
+    fixedPricePerPerson:
+      row.fixed_price_per_person === null
+        ? null
+        : applyMarkup(row.fixed_price_per_person, markupPct),
+    ...(options.includeMarkupPct ? { markupPct } : {}),
   }
 }
 
-export function mapPackageRoute(row: RouteRow): SupplierRoute {
+export function mapPackageRoute(
+  row: RouteRow,
+  vehicleRentalDetails?: VehicleRentalRouteDetailsRow | null,
+): SupplierRoute {
   return {
     id: row.id,
     supplierId: row.supplier_id,
     name: row.name,
-    originLocationId: row.origin_location_id,
-    destinationLocationId: row.destination_location_id,
+    originLocationId: row.origin_location_id ?? null,
+    destinationLocationId: row.destination_location_id ?? null,
+    pickupPoint: row.pickup_point ?? null,
+    dropoffPoint: row.dropoff_point ?? null,
+    vehicleRentalDetails: mapVehicleRentalRouteDetails(vehicleRentalDetails),
     active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -94,6 +128,9 @@ export function mapPackageSuiteType(row: SuiteTypeRow): SupplierSuiteType {
     id: row.id,
     supplierId: row.supplier_id,
     name: row.name,
+    passengerCapacity: row.passenger_capacity ?? null,
+    luggageCapacity: row.luggage_capacity ?? null,
+    description: row.description ?? null,
     active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -105,20 +142,36 @@ export function mapPackageSuiteType(row: SuiteTypeRow): SupplierSuiteType {
 export function mapPackageLeg(
   row: PackageLegWithSupplier,
   routes: RouteRow[],
+  packageLegRoutes: PackageLegRouteRow[],
   rateCards: RateCardRow[],
   suiteTypes: SuiteTypeRow[],
+  vehicleRentalRouteDetails: VehicleRentalRouteDetailsRow[] = [],
 ): PackageLeg {
-  const legRouteIds = new Set(routes.map((route) => route.id))
+  const detailsByRouteId = new Map(
+    vehicleRentalRouteDetails.map((details) => [details.route_id, details]),
+  )
+  const linkedRouteIds = new Set(
+    packageLegRoutes
+      .filter((link) => link.package_leg_id === row.id)
+      .map((link) => link.route_id),
+  )
+  const hasLinkedRoutes = linkedRouteIds.size > 0
+  const eligibleRoutes =
+    row.supplierKind === "hotel_property" && !hasLinkedRoutes
+      ? routes
+      : routes.filter((route) => linkedRouteIds.has(route.id))
+  const legRouteIds = new Set(eligibleRoutes.map((route) => route.id))
 
   return {
     id: row.id,
     packageId: row.package_id,
     supplierId: row.supplier_id,
     supplierName: row.supplierName,
+    supplierDescription: row.supplierDescription,
     supplierKind: row.supplierKind,
     label: row.label,
     sortOrder: row.sort_order,
-    routes: routes.map(mapPackageRoute),
+    routes: eligibleRoutes.map((route) => mapPackageRoute(route, detailsByRouteId.get(route.id))),
     rateCards: rateCards
       .filter((rateCard) => legRouteIds.has(rateCard.route_id))
       .map(mapPackageRateCard),
@@ -130,8 +183,10 @@ export function mapPackageDetail(
   row: PackageRow,
   legs: PackageLegWithSupplier[],
   routes: RouteRow[],
+  packageLegRoutes: PackageLegRouteRow[],
   rateCards: RateCardRow[],
   suiteTypes: SuiteTypeRow[],
+  vehicleRentalRouteDetails: VehicleRentalRouteDetailsRow[] = [],
 ): PackageDetail {
   return {
     id: row.id,
@@ -140,6 +195,7 @@ export function mapPackageDetail(
     description: row.description,
     durationNights: row.duration_nights,
     singleSupplementPct: row.single_supplement_pct,
+    markupPct: row.markup_pct ?? 0,
     fixedPricePerPerson: row.fixed_price_per_person ?? null,
     currency: row.currency,
     active: row.active,
@@ -154,9 +210,40 @@ export function mapPackageDetail(
         mapPackageLeg(
           leg,
           routes.filter((route) => route.supplier_id === leg.supplier_id),
+          packageLegRoutes,
           rateCards,
           suiteTypes.filter((suiteType) => suiteType.supplier_id === leg.supplier_id),
+          vehicleRentalRouteDetails,
         ),
       ),
+  }
+}
+
+export function packageDetailForRole(
+  detail: PackageDetail,
+  options: { includeMarkupPct: boolean },
+): PackageDetail {
+  if (options.includeMarkupPct) return detail
+
+  const markupPct = detail.markupPct ?? 0
+  const { markupPct: _hiddenMarkupPct, ...publicDetail } = detail
+
+  return {
+    ...publicDetail,
+    fixedPricePerPerson:
+      detail.fixedPricePerPerson === null
+        ? null
+        : applyMarkup(detail.fixedPricePerPerson, markupPct),
+    legs: detail.legs.map((leg) => ({
+      ...leg,
+      rateCards: leg.rateCards.map((rateCard) => ({
+        ...rateCard,
+        pricePerPerson: applyMarkup(rateCard.pricePerPerson, markupPct),
+        childPrice:
+          rateCard.childPrice === null ? null : applyMarkup(rateCard.childPrice, markupPct),
+        infantPrice:
+          rateCard.infantPrice === null ? null : applyMarkup(rateCard.infantPrice, markupPct),
+      })),
+    })),
   }
 }

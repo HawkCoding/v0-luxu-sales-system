@@ -25,10 +25,31 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet"
 import { Textarea } from "@/components/ui/textarea"
-import { PackageLegEditor, type EditablePackageLeg } from "@/components/package-leg-editor"
+import { PackageLegSelector } from "@/components/package-leg-selector"
+import type { SelectablePackageLeg } from "@/components/package-leg-selector"
+import type { EditableSupplierRateCard } from "@/components/package-leg-editor"
+import {
+  formatMoney,
+  formatRange,
+  getCurrencyRanges,
+  getPackageCurrencyRanges,
+  getSelectedRateCards,
+} from "@/components/package-wizard-pricing"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { useActiveSuppliers, useLocations } from "@/lib/use-data"
-import type { Supplier, SupplierDetail } from "@/lib/types"
-import { SUPPLIER_KIND_LABELS, type SupplierKind } from "@/lib/types"
+import { useRole } from "@/lib/role-context"
+import { formatRateCardValidityRange } from "@/lib/rate-card-validity"
+import type { Location, Supplier, SupplierDetail, SupplierRateCard, SupplierRoute, SupplierSuiteType } from "@/lib/types"
+import { CURRENCIES, SUPPLIER_KIND_LABELS, getSupplierVocabulary, type SupplierKind } from "@/lib/types"
+
+type PackageWizardLeg = SelectablePackageLeg
 
 interface WizardState {
   name: string
@@ -36,15 +57,17 @@ interface WizardState {
   durationNights: number | null
   currency: string
   singleSupplementPct: number
+  markupPct: number
   fixedPricePerPerson: number | null
   active: boolean
-  legs: EditablePackageLeg[]
+  legs: PackageWizardLeg[]
 }
 
 type WizardAction =
   | { type: "field"; field: keyof Omit<WizardState, "legs">; value: string | number | boolean | null }
-  | { type: "addLeg"; leg: EditablePackageLeg }
-  | { type: "updateLeg"; index: number; leg: EditablePackageLeg }
+  | { type: "addLeg"; leg: PackageWizardLeg }
+  | { type: "updateLeg"; index: number; leg: PackageWizardLeg }
+  | { type: "toggleRoute"; legIndex: number; routeId: string }
   | { type: "removeLeg"; index: number }
   | { type: "reset" }
 
@@ -54,6 +77,7 @@ const initialState: WizardState = {
   durationNights: null,
   currency: "ZAR",
   singleSupplementPct: 50,
+  markupPct: 0,
   fixedPricePerPerson: null,
   active: true,
   legs: [],
@@ -69,6 +93,24 @@ function reducer(state: WizardState, action: WizardAction): WizardState {
       return {
         ...state,
         legs: state.legs.map((leg, index) => (index === action.index ? action.leg : leg)),
+      }
+    case "toggleRoute":
+      return {
+        ...state,
+        legs: state.legs.map((leg, index) => {
+          if (index !== action.legIndex) {
+            return leg
+          }
+
+          const routeIds = new Set(leg.selectedRouteIds)
+          if (routeIds.has(action.routeId)) {
+            routeIds.delete(action.routeId)
+          } else {
+            routeIds.add(action.routeId)
+          }
+
+          return { ...leg, selectedRouteIds: Array.from(routeIds) }
+        }),
       }
     case "removeLeg":
       return { ...state, legs: state.legs.filter((_leg, index) => index !== action.index) }
@@ -86,44 +128,109 @@ function payloadFromState(state: WizardState) {
     durationNights: state.durationNights,
     currency: state.currency.trim().toUpperCase() || "ZAR",
     singleSupplementPct: state.singleSupplementPct,
+    markupPct: state.markupPct,
     fixedPricePerPerson: state.fixedPricePerPerson,
     active: state.active,
-    legs: state.legs.map((leg, index) => ({
-      id: leg.id,
-      supplierId: leg.supplierId,
-      label: leg.label.trim() || null,
-      sortOrder: leg.sortOrder ?? index,
-      routes: leg.routes.map((route) => ({
-        id: route.id,
-        name: route.name.trim(),
-        originLocationId: route.originLocationId,
-        destinationLocationId: route.destinationLocationId,
-        active: route.active,
-      })),
-      rateCards: leg.rateCards.map((rateCard) => ({
-        id: rateCard.id,
-        routeId: rateCard.routeId,
-        suiteTypeId: rateCard.suiteTypeId,
-        pricePerPerson: rateCard.pricePerPerson,
-        childPrice: rateCard.childPrice,
-        infantPrice: rateCard.infantPrice,
-        currency: rateCard.currency.trim().toUpperCase() || state.currency.trim().toUpperCase() || "ZAR",
-        validFrom: rateCard.validFrom,
-        validTo: rateCard.validTo ?? "",
-      })),
-    })),
+    legs: state.legs.map((leg, index) => {
+      const selectedRouteIds = new Set(leg.selectedRouteIds)
+      return {
+        id: leg.id,
+        supplierId: leg.supplierId,
+        label: leg.label.trim() || null,
+        sortOrder: leg.sortOrder ?? index,
+        routes:
+          leg.supplierKind === "hotel_property"
+            ? []
+            : leg.routes.filter((route) => selectedRouteIds.has(route.id)).map((route) => ({
+                id: route.id,
+                name: route.name.trim(),
+                originLocationId: route.originLocationId,
+                destinationLocationId: route.destinationLocationId,
+                active: route.active,
+                existing: Boolean(route.existing),
+              })),
+        rateCards:
+          leg.supplierKind === "hotel_property"
+            ? []
+            : leg.rateCards
+                .filter((rateCard) => selectedRouteIds.has(rateCard.routeId))
+                .map((rateCard) => ({
+                  id: rateCard.id,
+                  routeId: rateCard.routeId,
+                  suiteTypeId: rateCard.suiteTypeId,
+                  pricePerPerson: rateCard.pricePerPerson,
+                  childPrice: rateCard.childPrice,
+                  infantPrice: rateCard.infantPrice,
+                  currency: rateCard.currency.trim().toUpperCase() || state.currency.trim().toUpperCase() || "ZAR",
+                  validFrom: rateCard.validFrom,
+                  validTo: rateCard.validTo ?? "",
+                  existing: Boolean(rateCard.existing),
+                })),
+      }
+    }),
   }
 }
 
-async function loadSupplierSuiteTypes(supplier: Supplier) {
+interface SupplierContext {
+  suiteTypes: SupplierSuiteType[]
+  routes: SupplierRoute[]
+  rateCards: SupplierRateCard[]
+}
+
+async function loadSupplierContext(supplier: Supplier): Promise<SupplierContext> {
   const response = await fetch(`/api/suppliers/${supplier.slug}`)
-  if (!response.ok) return []
+  if (!response.ok) {
+    return { suiteTypes: [], routes: [], rateCards: [] }
+  }
   const detail = (await response.json()) as SupplierDetail
-  return detail.suiteTypes
+  return {
+    suiteTypes: detail.suiteTypes ?? [],
+    routes: detail.routes ?? [],
+    rateCards: detail.rateCards ?? [],
+  }
+}
+
+function selectedRouteCount(legs: PackageWizardLeg[]): number {
+  return legs.reduce(
+    (total, leg) => total + (leg.supplierKind === "hotel_property" ? 0 : leg.selectedRouteIds.length),
+    0,
+  )
+}
+
+function legHasRequiredSelection(leg: PackageWizardLeg): boolean {
+  return leg.supplierKind === "hotel_property" || leg.selectedRouteIds.length > 0
+}
+
+function getSelectedRoutes(leg: PackageWizardLeg): SupplierRoute[] {
+  const selectedRouteIds = new Set(leg.selectedRouteIds)
+  return leg.routes.filter((route) => selectedRouteIds.has(route.id))
+}
+
+function getRouteRateCards(
+  leg: PackageWizardLeg,
+  routeId: string,
+): EditableSupplierRateCard[] {
+  return leg.rateCards.filter((rateCard) => rateCard.routeId === routeId)
+}
+
+function routeLocationLabel(route: SupplierRoute, locations: Location[]): string | null {
+  if (route.pickupPoint || route.dropoffPoint) {
+    return `${route.pickupPoint || "Pickup"} -> ${route.dropoffPoint || "Drop-off"}`
+  }
+  const locationsById = new Map(locations.map((location) => [location.id, location.name]))
+  const origin = route.originLocationId ? locationsById.get(route.originLocationId) : null
+  const destination = route.destinationLocationId ? locationsById.get(route.destinationLocationId) : null
+
+  if (!origin && !destination) {
+    return null
+  }
+
+  return `${origin ?? "Unknown"} -> ${destination ?? "Unknown"}`
 }
 
 export function PackageWizard() {
   const router = useRouter()
+  const { role } = useRole()
   const { data: suppliers = [] } = useActiveSuppliers()
   const { data: locations = [] } = useLocations()
   const [state, dispatch] = useReducer(reducer, initialState)
@@ -135,10 +242,18 @@ export function PackageWizard() {
 
   const filteredSuppliers = suppliers.filter((supplier) => supplier.kind === supplierKind)
   const selectedSupplier = suppliers.find((supplier) => supplier.id === selectedSupplierId)
+  const hasAnySelection =
+    state.legs.length > 0 && state.legs.every((leg) => legHasRequiredSelection(leg))
+  const canSeeMarkup = role === "admin"
+  const isNextDisabled =
+    step === 5 ||
+    (step === 2 && state.legs.length === 0) ||
+    (step === 3 && !hasAnySelection)
 
   const addSelectedSupplier = async () => {
     if (!selectedSupplier) return
-    const suiteTypes = await loadSupplierSuiteTypes(selectedSupplier)
+    const { suiteTypes, routes, rateCards } = await loadSupplierContext(selectedSupplier)
+    const supplierRouteIds = new Set(routes.map((route) => route.id))
     dispatch({
       type: "addLeg",
       leg: {
@@ -148,9 +263,12 @@ export function PackageWizard() {
         supplierKind: selectedSupplier.kind,
         label: selectedSupplier.name,
         sortOrder: state.legs.length,
-        routes: [],
-        rateCards: [],
+        routes: routes.map((route) => ({ ...route, existing: true })),
+        rateCards: rateCards
+          .filter((rateCard) => supplierRouteIds.has(rateCard.routeId))
+          .map((rateCard) => ({ ...rateCard, existing: true })),
         suiteTypes,
+        selectedRouteIds: [],
       },
     })
     setSelectedSupplierId("")
@@ -159,6 +277,12 @@ export function PackageWizard() {
   const savePackage = async () => {
     if (!state.name.trim()) {
       toast.error("Package name is required")
+      return
+    }
+    const legWithoutSelection = state.legs.find((leg) => !legHasRequiredSelection(leg))
+    if (legWithoutSelection) {
+      const vocab = getSupplierVocabulary(legWithoutSelection.supplierKind)
+      toast.error(`Each leg needs at least one selected ${vocab.route.toLowerCase()}`)
       return
     }
 
@@ -200,7 +324,7 @@ export function PackageWizard() {
 
         <div className="mt-6 space-y-6">
           <div className="flex flex-wrap gap-2">
-            {["Details", "Add Legs", "Configure", "Review", "Save"].map((label, index) => (
+            {["Details", "Add Legs", "Routes & Rates", "Review", "Save"].map((label, index) => (
               <Button
                 key={label}
                 type="button"
@@ -251,12 +375,21 @@ export function PackageWizard() {
                 </div>
                 <div className="space-y-2">
                   <Label>Currency</Label>
-                  <Input
+                  <Select
                     value={state.currency}
-                    onChange={(event) =>
-                      dispatch({ type: "field", field: "currency", value: event.target.value })
-                    }
-                  />
+                    onValueChange={(value) => dispatch({ type: "field", field: "currency", value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CURRENCIES.map((c) => (
+                        <SelectItem key={c.value} value={c.value}>
+                          {c.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label>Single supplement %</Label>
@@ -269,6 +402,19 @@ export function PackageWizard() {
                     }
                   />
                 </div>
+                {canSeeMarkup ? (
+                  <div className="space-y-2">
+                    <Label>Package markup %</Label>
+                    <NumericInput
+                      min="0"
+                      step="0.01"
+                      value={state.markupPct}
+                      onValueChange={(value) =>
+                        dispatch({ type: "field", field: "markupPct", value: value ?? 0 })
+                      }
+                    />
+                  </div>
+                ) : null}
                 <div className="space-y-2">
                   <Label>Fixed price per person (optional)</Label>
                   <NumericInput
@@ -349,11 +495,19 @@ export function PackageWizard() {
           {step === 3 ? (
             <div className="space-y-4">
               {state.legs.map((leg, index) => (
-                <PackageLegEditor
+                <PackageLegSelector
                   key={leg.id}
                   leg={leg}
                   locations={locations}
-                  onChange={(nextLeg) => dispatch({ type: "updateLeg", index, leg: nextLeg })}
+                  selectedRouteIds={leg.selectedRouteIds}
+                  onChange={(nextLeg) =>
+                    dispatch({
+                      type: "updateLeg",
+                      index,
+                      leg: nextLeg,
+                    })
+                  }
+                  onToggleRoute={(routeId) => dispatch({ type: "toggleRoute", legIndex: index, routeId })}
                   onRemove={() => dispatch({ type: "removeLeg", index })}
                 />
               ))}
@@ -365,17 +519,179 @@ export function PackageWizard() {
               <CardHeader>
                 <CardTitle className="text-base">Review</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-3">
-                <p className="font-medium">{state.name || "Unnamed package"}</p>
-                <p className="text-sm text-muted-foreground">{state.legs.length} legs configured</p>
-                {state.legs.map((leg) => (
-                  <div key={leg.id} className="rounded-lg border p-3 text-sm">
-                    <p className="font-medium">{leg.label || leg.supplierName}</p>
-                    <p className="text-muted-foreground">
-                      {leg.routes.length} routes, {leg.rateCards.length} rates
-                    </p>
-                  </div>
-                ))}
+              <CardContent className="space-y-4">
+                <div>
+                  <p className="font-medium">{state.name || "Unnamed package"}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {state.legs.length} supplier legs, {selectedRouteCount(state.legs)} selected routes
+                  </p>
+                </div>
+                {(() => {
+                  const packageCurrency = state.currency.trim().toUpperCase() || "ZAR"
+                  const selectedRates = state.legs.flatMap((leg) => getSelectedRateCards(leg))
+                  const selectedCurrencies = new Set(
+                    selectedRates.map(
+                      (rate) => rate.currency.trim().toUpperCase() || packageCurrency,
+                    ),
+                  )
+                  const hasCurrencyMismatch =
+                    Array.from(selectedCurrencies).some((currency) => currency !== packageCurrency)
+
+                  return hasCurrencyMismatch ? (
+                    <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+                      Some selected rates use different currencies than the package default ({packageCurrency}).
+                      They will be saved as-is and are not converted.
+                    </div>
+                  ) : null
+                })()}
+                {state.legs.map((leg) => {
+                  const packageCurrency = state.currency.trim().toUpperCase() || "ZAR"
+                  const vocab = getSupplierVocabulary(leg.supplierKind)
+                  const selectedRoutes = getSelectedRoutes(leg)
+                  const selectedRateCards = getSelectedRateCards(leg)
+                  const legRanges = getCurrencyRanges(selectedRateCards, packageCurrency)
+                  const isHotel = leg.supplierKind === "hotel_property"
+
+                  return (
+                    <div key={leg.id} className="space-y-3 rounded-lg border p-3 text-sm">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="font-medium">{leg.label || leg.supplierName}</p>
+                        <Badge variant="secondary">{SUPPLIER_KIND_LABELS[leg.supplierKind]}</Badge>
+                      </div>
+                      {isHotel ? (
+                        <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+                          Included as a hotel option. Room type and meal plan will be chosen when applying the package.
+                        </div>
+                      ) : selectedRoutes.length === 0 ? (
+                        <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+                          Select a {vocab.route.toLowerCase()} to include this leg in the price range.
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {selectedRoutes.map((route) => {
+                            const routeRateCards = getRouteRateCards(leg, route.id)
+                            const routeRanges = getCurrencyRanges(routeRateCards, packageCurrency)
+                            const locationLabel = routeLocationLabel(route, locations)
+
+                            return (
+                              <div key={route.id} className="space-y-3 rounded-lg border bg-muted/20 p-3">
+                                <div>
+                                  <p className="font-medium">
+                                    {route.name || `Unnamed ${vocab.route.toLowerCase()}`}
+                                  </p>
+                                  {vocab.routeHasLocations && locationLabel ? (
+                                    <p className="text-xs text-muted-foreground">{locationLabel}</p>
+                                  ) : null}
+                                </div>
+                                {routeRateCards.length > 0 ? (
+                                  <Table>
+                                    <TableHeader>
+                                      <TableRow>
+                                        <TableHead>{vocab.suiteType}</TableHead>
+                                        <TableHead>Validity</TableHead>
+                                        <TableHead className="text-right">Price pp</TableHead>
+                                      </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                      {routeRateCards.map((rateCard) => {
+                                        const suiteType = leg.suiteTypes.find(
+                                          (suite) => suite.id === rateCard.suiteTypeId,
+                                        )
+                                        const currency =
+                                          rateCard.currency.trim().toUpperCase() || packageCurrency
+
+                                        return (
+                                          <TableRow key={rateCard.id}>
+                                            <TableCell>{suiteType?.name ?? "Unknown"}</TableCell>
+                                            <TableCell className="text-muted-foreground">
+                                              {formatRateCardValidityRange(rateCard.validFrom, rateCard.validTo)}
+                                            </TableCell>
+                                            <TableCell className="text-right font-medium">
+                                              {formatMoney(currency, rateCard.pricePerPerson)}
+                                            </TableCell>
+                                          </TableRow>
+                                        )
+                                      })}
+                                    </TableBody>
+                                  </Table>
+                                ) : (
+                                  <p className="text-xs text-muted-foreground">
+                                    No rate cards found for this {vocab.route.toLowerCase()}.
+                                  </p>
+                                )}
+                                {routeRanges.length > 0 ? (
+                                  <p className="text-xs font-medium">
+                                    Range: {routeRanges.map((range) => formatRange(range)).join("; ")} pp
+                                  </p>
+                                ) : null}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                      {legRanges.length > 0 ? (
+                        <p className="text-sm font-medium">
+                          Leg range: {legRanges.map((range) => formatRange(range)).join("; ")} pp
+                        </p>
+                      ) : null}
+                    </div>
+                  )
+                })}
+                {(() => {
+                  const packageCurrency = state.currency.trim().toUpperCase() || "ZAR"
+                  const packageRanges = getPackageCurrencyRanges(state.legs, packageCurrency)
+                  const singleMultiplier = 1 + state.singleSupplementPct / 100
+                  const pct = state.singleSupplementPct
+                  const pctLabel = Number.isInteger(pct) ? pct.toString() : pct.toFixed(2)
+
+                  return (
+                    <div className="space-y-2 rounded-lg border bg-muted/30 p-4">
+                      <div>
+                        <p className="font-semibold">Indicative per-person range</p>
+                        <p className="text-xs text-muted-foreground">
+                          Actual quote price depends on travel dates and pax at quote time.
+                        </p>
+                      </div>
+                      {packageRanges.length > 0 ? (
+                        <div className="space-y-1 text-sm">
+                          {packageRanges.map((range) => (
+                            <p key={range.currency} className="font-medium">
+                              {range.min === range.max
+                                ? `${formatMoney(range.currency, range.min)} per person`
+                                : `From ${formatMoney(range.currency, range.min)} to ${formatMoney(
+                                    range.currency,
+                                    range.max,
+                                  )} per person`}
+                            </p>
+                          ))}
+                          <p className="text-muted-foreground">
+                            Single supplement: +{pctLabel}%
+                          </p>
+                          {packageRanges.map((range) => {
+                            const singleMin = range.min * singleMultiplier
+                            const singleMax = range.max * singleMultiplier
+
+                            return (
+                              <p key={`${range.currency}-single`} className="text-muted-foreground">
+                                Single traveller:{" "}
+                                {singleMin === singleMax
+                                  ? formatMoney(range.currency, singleMin)
+                                  : `${formatMoney(range.currency, singleMin)} - ${formatMoney(
+                                      range.currency,
+                                      singleMax,
+                                    )}`}
+                              </p>
+                            )
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">
+                          Select at least one route with rate cards to calculate a package range.
+                        </p>
+                      )}
+                    </div>
+                  )
+                })()}
               </CardContent>
             </Card>
           ) : null}
@@ -387,7 +703,8 @@ export function PackageWizard() {
               </CardHeader>
               <CardContent className="flex items-center justify-between gap-3">
                 <p className="text-sm text-muted-foreground">
-                  Create this package with {state.legs.length} supplier legs.
+                  Create this package with {state.legs.length} supplier legs and{" "}
+                  {selectedRouteCount(state.legs)} selected routes.
                 </p>
                 <Button type="button" onClick={savePackage} disabled={isSaving}>
                   {isSaving ? "Saving..." : "Save package"}
@@ -407,7 +724,7 @@ export function PackageWizard() {
             </Button>
             <Button
               type="button"
-              disabled={step === 5}
+              disabled={isNextDisabled}
               onClick={() => setStep((current) => Math.min(5, current + 1))}
             >
               Next

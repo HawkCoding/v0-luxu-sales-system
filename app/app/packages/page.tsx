@@ -30,19 +30,29 @@ export default async function PackagesPage() {
   }
 
   const [
+    { data: profile },
     { data: packages },
     { data: legRows },
+    { data: legRouteRows },
     { data: routeRows },
     { data: rateCardRows },
   ] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("clearance_level")
+      .eq("user_id", user.id)
+      .single(),
     supabase
       .from("packages")
       .select("*")
       .order("name", { ascending: true }),
     supabase
       .from("package_legs")
-      .select("*, suppliers(name, kind)")
+      .select("*, suppliers(name, description, kind)")
       .order("sort_order", { ascending: true }),
+    supabase
+      .from("package_leg_routes")
+      .select("package_leg_id, route_id"),
     supabase
       .from("routes")
       .select("id, supplier_id, name"),
@@ -53,7 +63,11 @@ export default async function PackagesPage() {
 
   const legs = ((legRows ?? []) as Array<
     Omit<PackageLegWithSupplier, "supplierName" | "supplierKind"> & {
-      suppliers: { name: string; kind: PackageLegWithSupplier["supplierKind"] } | null
+      suppliers: {
+        name: string
+        description: string | null
+        kind: PackageLegWithSupplier["supplierKind"]
+      } | null
     }
   >).map((leg) => ({
     id: leg.id,
@@ -63,27 +77,47 @@ export default async function PackagesPage() {
     sort_order: leg.sort_order,
     created_at: leg.created_at,
     supplierName: leg.suppliers?.name ?? "Unknown supplier",
+    supplierDescription: leg.suppliers?.description ?? null,
     supplierKind: leg.suppliers?.kind ?? "train_operator",
   }))
 
   const routes = routeRows ?? []
   const rateCards = rateCardRows ?? []
+  const legRoutes = legRouteRows ?? []
 
+  const showMarkup = profile?.clearance_level === "admin"
   const list = (packages ?? []).map((pkg) => {
     const pkgLegs = legs.filter((leg) => leg.package_id === pkg.id)
-    const supplierIds = new Set(pkgLegs.map((leg) => leg.supplier_id))
-    const pkgRoutes = routes.filter((route) => supplierIds.has(route.supplier_id))
-    const pkgRouteIds = new Set(pkgRoutes.map((route) => route.id))
+    const pkgRouteIds = new Set(
+      pkgLegs.flatMap((leg) => {
+        const supplierRoutes = routes.filter((route) => route.supplier_id === leg.supplier_id)
+        if (leg.supplierKind === "hotel_property") {
+          return supplierRoutes.map((route) => route.id)
+        }
+        return legRoutes
+          .filter((link) => link.package_leg_id === leg.id)
+          .map((link) => link.route_id)
+      }),
+    )
     const prices = rateCards
       .filter((rc) => pkgRouteIds.has(rc.route_id))
       .map((rc) => rc.price_per_person)
 
     const trainLeg = pkgLegs.find((leg) => leg.supplierKind === "train_operator")
+    const trainRouteIds = new Set(
+      trainLeg
+        ? legRoutes
+            .filter((link) => link.package_leg_id === trainLeg.id)
+            .map((link) => link.route_id)
+        : [],
+    )
     const trainRoute = trainLeg
-      ? pkgRoutes.find((route) => route.supplier_id === trainLeg.supplier_id)
+      ? routes.find((route) => trainRouteIds.has(route.id))
       : null
 
-    return mapPackageListItem(pkg, pkgLegs, prices, trainRoute?.name ?? null)
+    return mapPackageListItem(pkg, pkgLegs, prices, trainRoute?.name ?? null, {
+      includeMarkupPct: showMarkup,
+    })
   })
 
   return (
@@ -172,9 +206,10 @@ export default async function PackagesPage() {
           <CardContent className="p-12 text-center">
             <Boxes className="mx-auto h-12 w-12 text-muted-foreground/40" />
             <p className="mt-3 text-base font-medium">No packages yet</p>
-            <p className="text-sm text-muted-foreground">
+            <p className="mb-6 text-sm text-muted-foreground">
               Create a package to combine legs from multiple suppliers.
             </p>
+            <PackageWizard />
           </CardContent>
         </Card>
       ) : null}
