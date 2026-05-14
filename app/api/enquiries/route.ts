@@ -1,12 +1,131 @@
 import { NextResponse } from "next/server"
+import { randomUUID } from "node:crypto"
 import { detectCountryInText, loadCountryAliasMap, normalizeCountry } from "@/lib/countries"
+import { addJobNumberingMetadata, allocateJobNumberForBooking, type JobNumberAllocation } from "@/lib/job-numbering"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
-import { createServiceClient } from "@/lib/supabase/server"
+import { buildPackageQuoteLineItems, calculateQuoteTotals } from "@/lib/quotes/build-from-package"
+import { buildQuoteNumber } from "@/lib/quotes/quote-number"
+import type { PackageDetail, QuoteLineItem } from "@/lib/types"
+import { createServiceClient, createSessionClient } from "@/lib/supabase/server"
+import type { Json } from "@/lib/supabase/types"
+import { loadPackageDetail } from "../packages/[slug]/helpers"
 
 type ServiceClient = ReturnType<typeof createServiceClient>
+type TransportServiceType = "transfer" | "rental"
+type TransportRequestInsert = {
+  id: string
+  booking_id: string
+  service_type: TransportServiceType
+  supplier_id: string | null
+  route_id: string | null
+  suite_type_id: string | null
+  pickup_point: string
+  dropoff_point: string
+  pickup_at: string | null
+  passenger_count: number | null
+  luggage_count: number | null
+  flight_number: string | null
+  notes: string | null
+  sort_order: number
+}
+type VehicleRentalDetailsInsert = {
+  transport_request_id: string
+  return_at: string | null
+  return_cutoff_time: string | null
+}
+
+type SuiteSelection = {
+  suiteTypeId: string | null
+  suiteTypeName: string
+}
 
 function normalizeLookupValue(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
+}
+
+function normalizeTransportServiceType(value: unknown): TransportServiceType {
+  return value === "rental" ? "rental" : "transfer"
+}
+
+function normalizeNullableText(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null
+}
+
+function normalizeNullableNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null
+}
+
+export function normalizeSuiteSelections(body: Record<string, unknown>): SuiteSelection[] {
+  const structuredSelections = Array.isArray(body.suiteSelections)
+    ? body.suiteSelections
+        .map((selection: unknown): SuiteSelection | null => {
+          if (!selection || typeof selection !== "object") return null
+
+          const suiteTypeId = normalizeNullableText((selection as Record<string, unknown>).suiteTypeId)
+          const suiteTypeName = normalizeNullableText((selection as Record<string, unknown>).suiteTypeName)
+          if (!suiteTypeName) return null
+
+          return { suiteTypeId, suiteTypeName }
+        })
+        .filter((selection: SuiteSelection | null): selection is SuiteSelection => Boolean(selection))
+    : []
+
+  if (structuredSelections.length > 0) {
+    return structuredSelections
+  }
+
+  return Array.isArray(body.suiteTypes)
+    ? body.suiteTypes
+        .map((suiteName: unknown): SuiteSelection | null => {
+          const suiteTypeName = normalizeNullableText(suiteName)
+          return suiteTypeName ? { suiteTypeId: null, suiteTypeName } : null
+        })
+        .filter((selection: SuiteSelection | null): selection is SuiteSelection => Boolean(selection))
+    : []
+}
+
+export async function resolveSuiteSelectionIds(
+  supabase: ServiceClient,
+  supplierId: unknown,
+  selections: SuiteSelection[],
+): Promise<SuiteSelection[]> {
+  const normalizedSupplierId = normalizeNullableText(supplierId)
+  if (!normalizedSupplierId || selections.length === 0) {
+    return selections
+  }
+
+  const unresolvedNames = selections
+    .filter((selection) => !selection.suiteTypeId)
+    .map((selection) => selection.suiteTypeName)
+  if (unresolvedNames.length === 0) {
+    return selections
+  }
+
+  const { data: suiteTypes } = await supabase
+    .from("suite_types")
+    .select("id, name")
+    .eq("supplier_id", normalizedSupplierId)
+    .eq("active", true)
+
+  const suiteTypeByName = new Map(
+    (suiteTypes ?? []).map((suiteType) => [normalizeLookupValue(suiteType.name), suiteType.id]),
+  )
+
+  return selections.map((selection) => ({
+    ...selection,
+    suiteTypeId: selection.suiteTypeId ?? suiteTypeByName.get(normalizeLookupValue(selection.suiteTypeName)) ?? null,
+  }))
+}
+
+function addDaysToDateString(value: string, days: number): string {
+  const [year = "1970", month = "1", day = "1"] = value.split("-")
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)))
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
+function getDefaultQuoteValidityDate(): string {
+  return addDaysToDateString(new Date().toISOString().slice(0, 10), 14)
 }
 
 async function findRouteId(supabase: ServiceClient, direction: unknown): Promise<string | null> {
@@ -38,6 +157,16 @@ async function findPackageId(supabase: ServiceClient, packageOption: unknown): P
   return match?.id ?? null
 }
 
+async function findPackageSlugById(supabase: ServiceClient, packageId: string): Promise<string | null> {
+  const { data } = await supabase
+    .from("packages")
+    .select("slug")
+    .eq("id", packageId)
+    .maybeSingle()
+
+  return data?.slug ?? null
+}
+
 async function findHotelSupplierId(supabase: ServiceClient, hotelOption: unknown): Promise<string | null> {
   if (typeof hotelOption !== "string" || !hotelOption.trim()) return null
 
@@ -56,12 +185,131 @@ async function findHotelSupplierId(supabase: ServiceClient, hotelOption: unknown
   return match?.id ?? null
 }
 
+function buildDefaultPackageSelections(packageDetail: PackageDetail, suiteTypeNames: string[]) {
+  const normalizedSuiteTypeNames = suiteTypeNames.map(normalizeLookupValue).filter(Boolean)
+
+  return packageDetail.legs.map((leg) => {
+    const isOptional =
+      leg.supplierKind === "hotel_property" ||
+      leg.supplierKind === "transfers" ||
+      leg.supplierKind === "vehicle_rental"
+    const activeSuiteTypes = leg.suiteTypes.filter((suiteType) => suiteType.active)
+    const matchedSuiteType = activeSuiteTypes.find((suiteType) =>
+      normalizedSuiteTypeNames.includes(normalizeLookupValue(suiteType.name)),
+    )
+
+    return {
+      legId: leg.id,
+      selected: !isOptional,
+      routeId: leg.routes.length === 1 ? leg.routes[0].id : undefined,
+      suiteTypeId: matchedSuiteType?.id ?? (activeSuiteTypes.length === 1 ? activeSuiteTypes[0].id : undefined),
+    }
+  })
+}
+
+async function createDraftQuoteForBooking({
+  supabase,
+  bookingId,
+  bookingNumber,
+  packageId,
+  travelDate,
+  suiteTypes,
+}: {
+  supabase: ServiceClient
+  bookingId: string
+  bookingNumber: string
+  packageId: string | null
+  travelDate: string | null
+  suiteTypes: string[]
+}): Promise<{ quoteId: string | null; warning: string | null }> {
+  let lineItems: QuoteLineItem[] = []
+  let status: "draft" | "pricing_incomplete" = "pricing_incomplete"
+  let noPackageMatch = true
+  let warning: string | null = null
+
+  if (packageId) {
+    noPackageMatch = false
+    const packageSlug = await findPackageSlugById(supabase, packageId)
+
+    if (packageSlug) {
+      const packageDetailResult = await loadPackageDetail(supabase, packageSlug)
+
+      const packageDetail = "detail" in packageDetailResult ? packageDetailResult.detail : undefined
+
+      if (packageDetail) {
+        try {
+          const built = await buildPackageQuoteLineItems({
+            supabase,
+            packageDetail,
+            jobId: bookingId,
+            travelDate: travelDate ?? new Date().toISOString().slice(0, 10),
+            selections: buildDefaultPackageSelections(packageDetail, suiteTypes),
+          })
+          lineItems = built.lineItems
+          status = lineItems.length > 0 ? "draft" : "pricing_incomplete"
+        } catch (error) {
+          warning = error instanceof Error ? error.message : "Package matched, but pricing could not be pre-filled."
+        }
+      } else {
+        warning = "Package matched, but package details could not be loaded."
+      }
+    } else {
+      warning = "Package matched, but package details could not be loaded."
+    }
+  } else {
+    warning = "No package was matched from the enquiry."
+  }
+
+  const totals = calculateQuoteTotals(lineItems)
+  const { data: quote, error: quoteError } = await supabase
+    .from("quotes")
+    .insert({
+      booking_id: bookingId,
+      status,
+      validity_until: getDefaultQuoteValidityDate(),
+      subtotal: totals.subtotal,
+      vat: totals.vat,
+      total: totals.total,
+      no_package_match: noPackageMatch,
+      quote_number: buildQuoteNumber(bookingNumber, []),
+    })
+    .select("id")
+    .single()
+
+  if (quoteError || !quote) {
+    return { quoteId: null, warning: "Booking was created, but the draft quote could not be created." }
+  }
+
+  if (lineItems.length > 0) {
+    const { error: lineItemsError } = await supabase.from("quote_line_items").insert(
+      lineItems.map((lineItem, index) => ({
+        quote_id: quote.id,
+        description: lineItem.description,
+        qty: lineItem.qty,
+        unit_price: lineItem.unitPrice,
+        total: lineItem.total,
+        sort_order: index,
+      })),
+    )
+
+    if (lineItemsError) {
+      warning = "Draft quote was created, but line items could not be saved."
+    }
+  }
+
+  return { quoteId: quote.id, warning }
+}
+
 export async function POST(req: Request) {
   const body = await req.json()
 
   // Use the service-role client — this route is public (web form & paste import)
   // so there is no authenticated user session to rely on.
   const supabase = createServiceClient()
+  const sessionClient = await createSessionClient()
+  const {
+    data: { user },
+  } = await sessionClient.auth.getUser()
 
   const normalizedEmail = body.email?.toLowerCase().trim()
   const normalizedCustomerFirstName =
@@ -82,46 +330,18 @@ export async function POST(req: Request) {
   )
 
   // --- 1. Upsert customer (match on email) ---
-  const { data: existingCustomer } = await supabase
-    .from("customers")
-    .select("id")
-    .eq("email", normalizedEmail)
-    .maybeSingle()
+  const { customerId, customerIsRepeatClient } = await resolveEnquiryCustomer(supabase, {
+    normalizedEmail,
+    firstName: normalizedCustomerFirstName,
+    lastName: normalizedCustomerLastName,
+    phone: body.contactNumber || null,
+    country: normalizedCountry,
+    title: body.title || null,
+    nowIso: new Date().toISOString(),
+  })
 
-  let customerId: string
-
-  if (existingCustomer) {
-    customerId = existingCustomer.id
-    // Update contact details in case they changed
-    await supabase
-      .from("customers")
-      .update({
-        first_name: normalizedCustomerFirstName,
-        last_name: normalizedCustomerLastName,
-        phone: body.contactNumber || null,
-        country: normalizedCountry,
-        title: body.title || null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", customerId)
-  } else {
-    const { data: newCustomer, error: customerError } = await supabase
-      .from("customers")
-      .insert({
-        first_name: normalizedCustomerFirstName,
-        last_name: normalizedCustomerLastName,
-        email: normalizedEmail,
-        phone: body.contactNumber || null,
-        country: normalizedCountry,
-        title: body.title || null,
-      })
-      .select("id")
-      .single()
-
-    if (customerError || !newCustomer) {
-      return NextResponse.json({ error: "Failed to create customer" }, { status: 500 })
-    }
-    customerId = newCustomer.id
+  if (!customerId) {
+    return NextResponse.json({ error: "Failed to create customer" }, { status: 500 })
   }
 
   // --- 2. Insert booking ---
@@ -129,6 +349,23 @@ export async function POST(req: Request) {
   const routeId = await findRouteId(supabase, body.direction)
   const packageId = await findPackageId(supabase, body.packageOption)
   const hotelSupplierId = await findHotelSupplierId(supabase, body.hotelOption)
+  let jobNumberAllocation: JobNumberAllocation
+  try {
+    jobNumberAllocation = await allocateJobNumberForBooking(supabase, {
+      supplierId: normalizeNullableText(body.supplierId),
+      parsedSupplier: normalizeNullableText(body.supplier),
+      routeId,
+      routeName: normalizeNullableText(body.direction),
+      packageId,
+      packageName: normalizeNullableText(body.packageOption),
+      rawText: normalizeNullableText(body.rawText),
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to allocate job number" },
+      { status: 500 },
+    )
+  }
   const existingExtractedJson =
     body.extractedJson && typeof body.extractedJson === "object" && !Array.isArray(body.extractedJson)
       ? body.extractedJson as Record<string, unknown>
@@ -137,7 +374,7 @@ export async function POST(req: Request) {
     existingExtractedJson.formFields && typeof existingExtractedJson.formFields === "object" && !Array.isArray(existingExtractedJson.formFields)
       ? existingExtractedJson.formFields as Record<string, unknown>
       : {}
-  const extractedJson = {
+  const extractedJson = addJobNumberingMetadata({
     ...existingExtractedJson,
     formFields: {
       ...existingFormFields,
@@ -151,13 +388,18 @@ export async function POST(req: Request) {
       routeId,
       packageId,
       hotelSupplierId,
+      supplierId: normalizeNullableText(body.supplierId),
     },
-  }
+  }, jobNumberAllocation.resolution)
 
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
     .insert({
+      booking_number: jobNumberAllocation.bookingNumber,
       customer_id: customerId,
+      assigned_salesperson_id: user?.id ?? null,
+      // owner_user_id is the immutable original creator; reassignment uses assigned_salesperson_id.
+      owner_user_id: user?.id ?? null,
       purpose: body.purpose || "quote",
       source,
       stage: "enquiry",
@@ -170,7 +412,7 @@ export async function POST(req: Request) {
       no_of_suites: body.noOfSuites ?? 1,
       child_ages: body.childAges || null,
       raw_text: body.rawText || null,
-      extracted_json: extractedJson,
+      extracted_json: extractedJson as Json,
       terms_accepted: body.termsAccepted ?? false,
       extend_stay: body.extendStay === "yes" || body.extendStay === true || false,
       extra_nights: body.extraNights ? Number(body.extraNights) : null,
@@ -186,12 +428,18 @@ export async function POST(req: Request) {
   }
 
   // --- 3. Insert booking_suites ---
-  const suiteTypes: string[] = Array.isArray(body.suiteTypes) ? body.suiteTypes : []
-  if (suiteTypes.length > 0) {
-    const suiteRows = suiteTypes.map((suiteName, idx) => ({
+  const suiteSelections = await resolveSuiteSelectionIds(
+    supabase,
+    body.supplierId,
+    normalizeSuiteSelections(body),
+  )
+  const suiteTypes = suiteSelections.map((selection) => selection.suiteTypeName)
+  if (suiteSelections.length > 0) {
+    const suiteRows = suiteSelections.map((selection, idx) => ({
       booking_id: booking.id,
       suite_number: idx + 1,
-      suite_type_name: suiteName,
+      suite_type_id: selection.suiteTypeId,
+      suite_type_name: selection.suiteTypeName,
     }))
     await supabase.from("booking_suites").insert(suiteRows)
   }
@@ -240,13 +488,91 @@ export async function POST(req: Request) {
     await supabase.from("travellers").insert(travellerRows)
   }
 
+  const transportRequests = Array.isArray(body.transportRequests) ? body.transportRequests : []
+  const rentalDetailRows: VehicleRentalDetailsInsert[] = []
+  const transportRows: TransportRequestInsert[] = transportRequests
+    .map((request: Record<string, unknown>, index: number): TransportRequestInsert | null => {
+      const pickupPoint = normalizeNullableText(request.pickupPoint)
+      const dropoffPoint = normalizeNullableText(request.dropoffPoint)
+      if (!pickupPoint || !dropoffPoint) return null
+
+      const serviceType = normalizeTransportServiceType(request.serviceType)
+      const id = randomUUID()
+      const rentalDetails =
+        request.rentalDetails && typeof request.rentalDetails === "object" && !Array.isArray(request.rentalDetails)
+          ? request.rentalDetails as Record<string, unknown>
+          : {}
+      if (serviceType === "rental") {
+        rentalDetailRows.push({
+          transport_request_id: id,
+          return_at: normalizeNullableText(rentalDetails.returnAt) ?? normalizeNullableText(request.returnAt),
+          return_cutoff_time: normalizeNullableText(rentalDetails.returnCutoffTime),
+        })
+      }
+
+      return {
+        id,
+        booking_id: booking.id,
+        service_type: serviceType,
+        supplier_id: normalizeNullableText(request.supplierId),
+        route_id: normalizeNullableText(request.routeId),
+        suite_type_id: normalizeNullableText(request.suiteTypeId),
+        pickup_point: pickupPoint,
+        dropoff_point: dropoffPoint,
+        pickup_at: normalizeNullableText(request.pickupAt),
+        passenger_count: normalizeNullableNumber(request.passengerCount),
+        luggage_count: normalizeNullableNumber(request.luggageCount),
+        flight_number: normalizeNullableText(request.flightNumber),
+        notes: normalizeNullableText(request.notes),
+        sort_order: index,
+      }
+    })
+    .filter((row: TransportRequestInsert | null): row is TransportRequestInsert => Boolean(row))
+
+  if (transportRows.length > 0) {
+    await supabase.from("booking_transport_requests").insert(transportRows)
+  }
+  if (rentalDetailRows.length > 0) {
+    await supabase.from("booking_vehicle_rental_details").insert(rentalDetailRows)
+  }
+
+  const draftQuote = await createDraftQuoteForBooking({
+    supabase,
+    bookingId: booking.id,
+    bookingNumber: booking.booking_number,
+    packageId,
+    travelDate: body.departureDate || null,
+    suiteTypes,
+  })
+
   // --- 5. Audit log ---
   await supabase.from("audit_logs").insert({
-    actor: body.rawText ? "consultant" : "system",
+    actor: user?.email ?? (body.rawText ? "consultant" : "system"),
+    actor_user_id: user?.id ?? null,
     entity_type: "Booking",
     entity_id: booking.id,
     action: body.rawText ? "created_from_paste_import" : "created_from_web_form",
+    meta_json: {
+      draft_quote_id: draftQuote.quoteId,
+      draft_quote_warning: draftQuote.warning,
+      assigned_salesperson_id: user?.id ?? null,
+    },
   })
+
+  if (jobNumberAllocation.resolution.needsReview) {
+    await supabase.from("audit_logs").insert({
+      actor: user?.email ?? (body.rawText ? "consultant" : "system"),
+      actor_user_id: user?.id ?? null,
+      entity_type: "Booking",
+      entity_id: booking.id,
+      action: "job_number_product_needs_review",
+      meta_json: {
+        booking_number: booking.booking_number,
+        reason: jobNumberAllocation.resolution.reason,
+        sources: jobNumberAllocation.resolution.sources,
+      },
+    })
+  }
 
   return NextResponse.json({
     bookingNumber: booking.booking_number,
@@ -254,6 +580,75 @@ export async function POST(req: Request) {
     // Legacy field names kept so the public form still works
     jobNumber: booking.booking_number,
     jobId: booking.id,
-    needsReview: false,
+    quoteId: draftQuote.quoteId,
+    quoteWarning: draftQuote.warning,
+    customerId,
+    customerIsRepeatClient,
+    needsReview: jobNumberAllocation.resolution.needsReview,
   })
+}
+
+interface ResolveEnquiryCustomerInput {
+  normalizedEmail: string
+  firstName: string
+  lastName: string
+  phone: string | null
+  country: string | null
+  title: string | null
+  nowIso: string
+}
+
+export async function resolveEnquiryCustomer(
+  supabase: ServiceClient,
+  input: ResolveEnquiryCustomerInput,
+): Promise<{ customerId: string | null; customerIsRepeatClient: boolean }> {
+  const { data: existingCustomer } = await supabase
+    .from("customers")
+    .select("id")
+    .eq("email", input.normalizedEmail)
+    .maybeSingle()
+
+  if (existingCustomer) {
+    const { data: priorCompletedBookings } = await supabase
+      .from("bookings")
+      .select("id")
+      .eq("customer_id", existingCustomer.id)
+      .in("stage", ["voucher_sent", "closed"])
+      .limit(1)
+    const customerIsRepeatClient = (priorCompletedBookings ?? []).length > 0
+
+    await supabase
+      .from("customers")
+      .update({
+        first_name: input.firstName,
+        last_name: input.lastName,
+        phone: input.phone,
+        country: input.country,
+        title: input.title,
+        ...(customerIsRepeatClient ? { is_repeat_client: true } : {}),
+        updated_at: input.nowIso,
+      })
+      .eq("id", existingCustomer.id)
+
+    return { customerId: existingCustomer.id, customerIsRepeatClient }
+  }
+
+  const { data: newCustomer, error: customerError } = await supabase
+    .from("customers")
+    .insert({
+      first_name: input.firstName,
+      last_name: input.lastName,
+      email: input.normalizedEmail,
+      phone: input.phone,
+      country: input.country,
+      title: input.title,
+    })
+    .select("id")
+    .single()
+
+  if (customerError || !newCustomer) {
+    return { customerId: null, customerIsRepeatClient: false }
+  }
+
+  return { customerId: newCustomer.id, customerIsRepeatClient: false }
 }

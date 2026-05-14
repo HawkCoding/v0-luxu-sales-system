@@ -1,7 +1,78 @@
 import { NextResponse } from "next/server"
+import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
+import {
+  AUDIT_LOG_COLUMNS,
+  BOOKING_SUITE_COLUMNS,
+  BOOKING_TRANSPORT_REQUEST_COLUMNS,
+  BOOKING_WITH_ROUTE_COLUMNS,
+  CORRESPONDENCE_COLUMNS,
+  CUSTOMER_COLUMNS,
+  DOCUMENT_COLUMNS,
+  INVOICE_COLUMNS,
+  ITINERARY_COLUMNS,
+  PAYMENT_COLUMNS,
+  QUOTE_COLUMNS,
+  QUOTE_LINE_ITEM_COLUMNS,
+  TRAVELLER_COLUMNS,
+} from "@/lib/supabase/columns"
+import type { Json } from "@/lib/supabase/types"
+import { staleVersionResponse } from "@/lib/concurrency"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import type { PipelineStage } from "@/lib/types"
+import { extractRoleFromJwt } from "@/lib/role-utils"
+import { applyTransition } from "@/lib/pipeline/apply-transition"
+import { validateTransition } from "@/lib/pipeline/validate-transition"
+import { mapBookingTransportRequest } from "@/lib/suppliers"
+import { getDefaultDepositPercentage } from "@/lib/pipeline/constants"
+
+const pipelineStageSchema = z.enum([
+  "enquiry",
+  "quoted",
+  "quote_sent",
+  "accepted",
+  "form_done",
+  "deposit_requested",
+  "payment_schedule",
+  "deposit_paid",
+  "final_paid",
+  "voucher_sent",
+  "trip_active",
+  "closed",
+  "lost",
+])
+
+const patchJobSchema = z.object({
+  resolveEmailImportReview: z.boolean().optional(),
+  stage: pipelineStageSchema.optional(),
+  override: z.boolean().optional(),
+  overrideReason: z.string().optional(),
+  closedReopenReason: z.string().optional(),
+  cancelReason: z.string().optional(),
+  manualConfirmations: z
+    .object({
+      createDepositInvoice: z.boolean().optional(),
+      createFinalInvoice: z.boolean().optional(),
+      createInvoiceCorrespondence: z.boolean().optional(),
+      depositReceived: z.boolean().optional(),
+      finalPaymentReceived: z.boolean().optional(),
+    })
+    .optional(),
+  lostContext: z
+    .object({
+      cancelReason: z.string().nullable().optional(),
+      refundStatus: z.enum(["refunded", "not_refunded"]).nullable().optional(),
+      refundAmount: z.number().nullable().optional(),
+      refundReference: z.string().nullable().optional(),
+      refundedAt: z.string().nullable().optional(),
+    })
+    .optional(),
+  ownerUser: z.string().optional(),
+  consultant: z.string().optional(),
+  assignedSalespersonId: z.string().uuid().nullable().optional(),
+  customerId: z.string().optional(),
+  expectedUpdatedAt: z.string().datetime({ offset: true }).optional(),
+}).passthrough()
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -9,37 +80,64 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   const { data: booking } = await supabase
     .from("bookings")
-    .select("*, route:routes(id, name)")
+    .select(BOOKING_WITH_ROUTE_COLUMNS)
     .eq("id", id)
     .single()
 
   if (!booking) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
   const [
+    defaultDepositPercentage,
     { data: customer },
+    { data: profiles },
     { data: bookingSuites },
     { data: travellers },
+    { data: transportRequestsData },
     { data: itinerariesData },
     { data: quotesData },
     { data: quoteLineItemsData },
     { data: paymentsData },
+    { data: invoicesData },
     { data: documentsData },
     { data: correspondenceData },
     { data: auditData },
   ] = await Promise.all([
-    supabase.from("customers").select("*").eq("id", booking.customer_id).single(),
-    supabase.from("booking_suites").select("*").eq("booking_id", id),
-    supabase.from("travellers").select("*").eq("booking_id", id).order("sort_order"),
-    supabase.from("itineraries").select("*").eq("booking_id", id).order("created_at"),
-    supabase.from("quotes").select("*").eq("booking_id", id).order("created_at"),
-    supabase.from("quote_line_items").select("*").order("sort_order"),
-    supabase.from("payments").select("*").eq("booking_id", id).order("received_at"),
-    supabase.from("documents").select("*").eq("booking_id", id).order("created_at"),
-    supabase.from("correspondences").select("*").eq("booking_id", id).order("created_at"),
-    supabase.from("audit_logs").select("*").eq("entity_id", id).order("created_at", { ascending: false }),
+    getDefaultDepositPercentage(supabase),
+    supabase.from("customers").select(CUSTOMER_COLUMNS).eq("id", booking.customer_id).single(),
+    supabase.from("profiles").select("user_id, name, surname, email, clearance_level, is_active").order("name"),
+    supabase.from("booking_suites").select(BOOKING_SUITE_COLUMNS).eq("booking_id", id),
+    supabase.from("travellers").select(TRAVELLER_COLUMNS).eq("booking_id", id).order("sort_order"),
+    supabase
+      .from("booking_transport_requests")
+      .select(BOOKING_TRANSPORT_REQUEST_COLUMNS)
+      .eq("booking_id", id)
+      .order("sort_order"),
+    supabase.from("itineraries").select(ITINERARY_COLUMNS).eq("booking_id", id).order("created_at"),
+    supabase.from("quotes").select(QUOTE_COLUMNS).eq("booking_id", id).order("created_at"),
+    supabase.from("quote_line_items").select(QUOTE_LINE_ITEM_COLUMNS).order("sort_order"),
+    supabase.from("payments").select(PAYMENT_COLUMNS).eq("booking_id", id).order("received_at"),
+    supabase.from("invoices").select(INVOICE_COLUMNS).eq("booking_id", id).order("created_at", { ascending: false }),
+    supabase.from("documents").select(DOCUMENT_COLUMNS).eq("booking_id", id).order("created_at"),
+    supabase.from("correspondences").select(CORRESPONDENCE_COLUMNS).eq("booking_id", id).order("created_at"),
+    supabase.from("audit_logs").select(AUDIT_LOG_COLUMNS).eq("entity_id", id).order("created_at", { ascending: false }),
   ])
 
   // Map booking → shape matching the existing Job interface so page components are unchanged
+  const salespeople = (profiles ?? [])
+    .filter((profile) =>
+      ["admin", "manager", "consultant"].includes(profile.clearance_level) &&
+      (profile.is_active ?? true),
+    )
+    .map((profile) => ({
+      id: profile.user_id,
+      name: [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.email,
+      email: profile.email,
+      clearanceLevel: profile.clearance_level,
+    }))
+  const assignedSalesperson = booking.assigned_salesperson_id
+    ? salespeople.find((profile) => profile.id === booking.assigned_salesperson_id) ?? null
+    : null
+
   const job = {
     id: booking.id,
     jobNumber: booking.booking_number,
@@ -49,6 +147,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     source: booking.source,
     ownerUser: booking.consultant ?? "consultant",
     consultant: booking.consultant,
+    assignedSalespersonId: booking.assigned_salesperson_id ?? null,
+    assignedSalespersonName: assignedSalesperson?.name ?? null,
     createdAt: booking.created_at,
     updatedAt: booking.updated_at,
     createdAtDisplay: formatDisplayDateTime(booking.created_at),
@@ -56,6 +156,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     cancelReason: booking.cancel_reason ?? null,
     cancelledAt: booking.cancelled_at ?? null,
     cancelledAtDisplay: formatDisplayDateTime(booking.cancelled_at),
+    depositPaid: booking.deposit_paid ?? false,
+    invoiceBalance: booking.invoice_balance !== null ? Number(booking.invoice_balance) : null,
   }
 
   // Map customer
@@ -85,6 +187,15 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     purpose: booking.purpose,
     rawText: booking.raw_text ?? undefined,
     extractedJson: booking.extracted_json ?? undefined,
+    emailImportNeedsReview: booking.email_import_needs_review,
+    emailImportMissingFields: booking.email_import_missing_fields,
+    emailImportWarnings: booking.email_import_warnings,
+    emailImportDuplicateOfBookingId: booking.email_import_duplicate_of_booking_id,
+    emailImportSubject: booking.email_import_subject,
+    emailImportMailbox: booking.email_import_mailbox,
+    emailImportReceivedAt: booking.email_import_received_at,
+    emailImportReceivedAtDisplay: formatDisplayDateTime(booking.email_import_received_at),
+    emailImportRawPreview: booking.email_import_raw_preview,
     title: customer?.title ?? "",
     name: customer?.first_name ?? "",
     surname: customer?.last_name ?? "",
@@ -104,6 +215,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     additionalServices: booking.additional_services ? "Yes" : undefined,
     additionalServicesDetails: booking.additional_services_details ?? undefined,
     promotionCode: booking.promotion_code ?? undefined,
+    transportRequests: (transportRequestsData ?? []).map(mapBookingTransportRequest),
     termsAccepted: booking.terms_accepted,
     createdAt: booking.created_at,
     createdAtDisplay: formatDisplayDateTime(booking.created_at),
@@ -141,22 +253,29 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     itineraryId: q.itinerary_id ?? "",
     jobId: q.booking_id,
     status: q.status,
+    quoteNumber: q.quote_number,
+    parentQuoteId: q.parent_quote_id,
     validityUntil: q.validity_until ?? "",
     validityUntilDisplay: formatDisplayDate(q.validity_until),
     subtotal: q.subtotal,
     vat: q.vat,
     total: q.total,
+    updatedAt: q.updated_at,
+    updatedAtDisplay: formatDisplayDateTime(q.updated_at),
     lastSentAt: q.last_sent_at ?? undefined,
     lastSentAtDisplay: formatDisplayDateTime(q.last_sent_at),
     overridePin: q.override_pin ?? undefined,
     overrideReason: q.override_reason ?? undefined,
+    noPackageMatch: q.no_package_match,
     lineItems: (quoteLineItemsData ?? [])
       .filter((li) => li.quote_id === q.id)
       .map((li) => ({
         description: li.description,
+        supplierDescription: li.supplier_description,
         qty: li.qty,
         unitPrice: li.unit_price,
         total: li.total,
+        pricingSnapshot: li.pricing_snapshot,
       })),
   }))
 
@@ -170,6 +289,30 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     method: p.method ?? "",
     reference: p.reference ?? "",
     notes: p.notes ?? "",
+    proofStoragePath: (p as Record<string, unknown>).proof_storage_path as string | null ?? null,
+  }))
+
+  const invoices = (invoicesData ?? []).map((invoice) => ({
+    id: invoice.id,
+    jobId: invoice.booking_id,
+    quoteId: invoice.quote_id,
+    kind: invoice.kind,
+    status: invoice.status,
+    invoiceNumber: invoice.invoice_number,
+    depositPercentage: invoice.deposit_percentage,
+    amount: invoice.amount,
+    amountDisplay: new Intl.NumberFormat("en-ZA", {
+      style: "currency",
+      currency: invoice.currency,
+      maximumFractionDigits: 2,
+    }).format(invoice.amount),
+    currency: invoice.currency,
+    dueDate: invoice.due_date,
+    dueDateDisplay: formatDisplayDate(invoice.due_date),
+    sentAt: invoice.sent_at,
+    sentAtDisplay: formatDisplayDateTime(invoice.sent_at),
+    createdAt: invoice.created_at,
+    createdAtDisplay: formatDisplayDateTime(invoice.created_at),
   }))
 
   // Map documents
@@ -189,6 +332,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     id: c.id,
     jobId: c.booking_id,
     channel: c.channel,
+    kind: c.kind,
     subject: c.subject,
     bodyHtml: c.body_html ?? "",
     status: c.status,
@@ -197,6 +341,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     scheduledAt: c.scheduled_at ?? undefined,
     scheduledAtDisplay: formatDisplayDateTime(c.scheduled_at),
     error: c.error ?? undefined,
+    providerMessageId: c.provider_message_id,
   }))
 
   // Map audit logs
@@ -220,88 +365,390 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     itineraries,
     quotes,
     payments,
+    invoices,
     documents,
     correspondence,
     auditLogs,
+    salespeople,
+    settings: {
+      defaultDepositPercentage,
+    },
   })
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const body = await req.json()
   const supabase = await createSessionClient()
   const {
     data: { user },
   } = await supabase.auth.getUser()
 
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
+  let body: z.infer<typeof patchJobSchema>
+  try {
+    body = patchJobSchema.parse(await req.json())
+  } catch {
+    return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
+  }
+
   const { data: booking } = await supabase
     .from("bookings")
-    .select("stage, booking_number")
+    .select(
+      "id, stage, booking_number, customer_id, consultant, assigned_salesperson_id, source, raw_text, email_import_needs_review, email_import_review_resolved_at, updated_at, departure_date, duration_nights, deposit_paid, invoice_balance",
+    )
     .eq("id", id)
     .single()
 
   if (!booking) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
+  const { data: patchActorProfile } = await supabase
+    .from("profiles")
+    .select("clearance_level")
+    .eq("user_id", user.id)
+    .maybeSingle()
+
+  const patchActorRole = extractRoleFromJwt(user) ?? patchActorProfile?.clearance_level ?? null
+  if (!["admin", "manager", "consultant"].includes(patchActorRole ?? "")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
+
+  if (body.expectedUpdatedAt && body.expectedUpdatedAt !== booking.updated_at) {
+    return staleVersionResponse("booking", booking.updated_at)
+  }
+
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
 
-  if (body.stage) {
-    const fromStage = booking.stage
-    let actorName = user?.email ?? "System"
+  if (body.resolveEmailImportReview === true) {
+    const { data: actorProfile } = await supabase
+      .from("profiles")
+      .select("clearance_level")
+      .eq("user_id", user.id)
+      .maybeSingle()
 
-    if (user) {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("name, surname")
-        .eq("user_id", user.id)
-        .maybeSingle()
-
-      const profileName = [profile?.name, profile?.surname].filter(Boolean).join(" ").trim()
-      if (profileName) actorName = profileName
+    const role = extractRoleFromJwt(user) ?? actorProfile?.clearance_level ?? null
+    if (role !== "manager" && role !== "admin") {
+      return NextResponse.json({ error: "Manager access required to clear import review" }, { status: 403 })
     }
 
-    // Record pipeline history
-    await supabase.from("pipeline_history").insert({
-      booking_id: id,
-      from_stage: fromStage,
-      to_stage: body.stage as PipelineStage,
-      moved_by: actorName,
-      moved_by_user_id: user?.id ?? null,
+    updates.email_import_needs_review = false
+    updates.email_import_review_resolved_at = new Date().toISOString()
+    updates.email_import_review_resolved_by = user?.id ?? null
+
+    await supabase.from("audit_logs").insert({
+      actor: user?.email ?? "System",
+      actor_user_id: user?.id ?? null,
+      entity_type: "Booking",
+      entity_id: id,
+      action: "email_import_review_resolved",
+      before_json: { email_import_needs_review: booking.email_import_needs_review },
+      after_json: { email_import_needs_review: false },
+    })
+  }
+
+  let stageUpdated:
+    | {
+        id: string
+        booking_number: string
+        stage: string
+        consultant: string | null
+        cancel_reason: string | null
+        cancelled_at: string | null
+        updated_at: string
+      }
+    | null = null
+
+  if (body.stage) {
+    const fromStage = booking.stage as PipelineStage
+    const targetStage = body.stage as PipelineStage
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("name, surname, clearance_level")
+      .eq("user_id", user.id)
+      .maybeSingle()
+
+    const profileName = [profile?.name, profile?.surname].filter(Boolean).join(" ").trim()
+    const actorName = profileName || user.email || "System"
+    const role = extractRoleFromJwt(user) ?? profile?.clearance_level ?? null
+    const isManager = role === "manager" || role === "admin"
+    const overrideReason = body.overrideReason?.trim() ?? ""
+    const lostContext = {
+      ...body.lostContext,
+      cancelReason: body.lostContext?.cancelReason ?? body.cancelReason ?? null,
+    }
+
+    const [
+      { data: customer },
+      { data: quotes },
+      { data: documents },
+      { data: invoices },
+      { data: correspondences },
+      { data: payments },
+    ] = await Promise.all([
+      supabase
+        .from("customers")
+        .select("first_name, last_name, email, phone, country")
+        .eq("id", booking.customer_id)
+        .maybeSingle(),
+      supabase
+        .from("quotes")
+        .select("id, status, total, created_at")
+        .eq("booking_id", id)
+        .order("created_at", { ascending: false }),
+      supabase.from("documents").select("id, kind, status").eq("booking_id", id),
+      supabase.from("invoices").select("id, kind, status").eq("booking_id", id),
+      supabase.from("correspondences").select("id, kind, subject, status").eq("booking_id", id),
+      supabase.from("payments").select("amount").eq("booking_id", id),
+    ])
+
+    const validationBooking = {
+      id: booking.id,
+      stage: fromStage,
+      source: booking.source,
+      email_import_needs_review:
+        body.resolveEmailImportReview === true ? false : booking.email_import_needs_review,
+      email_import_review_resolved_at:
+        body.resolveEmailImportReview === true
+          ? new Date().toISOString()
+          : booking.email_import_review_resolved_at,
+      deposit_paid: booking.deposit_paid,
+      invoice_balance: booking.invoice_balance !== null ? Number(booking.invoice_balance) : null,
+      departure_date: booking.departure_date,
+    }
+    const failures = validateTransition({
+      booking: validationBooking,
+      customer,
+      targetStage,
+      quotes: quotes ?? [],
+      documents: documents ?? [],
+      invoices: invoices ?? [],
+      correspondences: correspondences ?? [],
+      manualConfirmations: body.manualConfirmations,
+      lostContext,
     })
 
-    // Persist cancel reason when moving to lost
-    const cancelReason =
-      body.stage === "lost" && typeof body.cancelReason === "string" && body.cancelReason.trim()
-        ? body.cancelReason.trim()
-        : undefined
-
-    if (cancelReason) {
-      updates.cancel_reason = cancelReason
-      updates.cancelled_at = new Date().toISOString()
+    if (body.override === true) {
+      if (!isManager) {
+        return NextResponse.json({ error: "Manager access required for override" }, { status: 403 })
+      }
+      if (!overrideReason) {
+        return NextResponse.json({ error: "Override reason is required" }, { status: 400 })
+      }
+    } else if (failures.length > 0) {
+      return NextResponse.json({ failures, isManager }, { status: 422 })
     }
 
-    // Audit log
-    await supabase.from("audit_logs").insert({
+    if (fromStage === "closed" && targetStage !== "closed" && !body.closedReopenReason?.trim()) {
+      return NextResponse.json({ error: "Reason required when reopening a closed booking" }, { status: 400 })
+    }
+
+    try {
+      const transition = await applyTransition(supabase, {
+        booking: {
+          id: booking.id,
+          booking_number: booking.booking_number,
+          stage: booking.stage,
+          source: booking.source,
+          raw_text: booking.raw_text,
+          updated_at: booking.updated_at,
+          customer_id: booking.customer_id,
+          consultant: booking.consultant,
+        },
+        departureDate: booking.departure_date,
+        durationNights: booking.duration_nights,
+        targetStage,
+        actorName,
+        actorUserId: user.id,
+        expectedUpdatedAt: body.expectedUpdatedAt,
+        manualConfirmations: body.manualConfirmations,
+        lostContext,
+        quotes: quotes ?? [],
+        documents: documents ?? [],
+        correspondences: correspondences ?? [],
+      })
+
+      stageUpdated = transition.updated
+      if (body.expectedUpdatedAt) {
+        body.expectedUpdatedAt = transition.updated.updated_at
+      }
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Stage update failed" },
+        { status: 500 },
+      )
+    }
+
+    const historyInsert = await supabase.from("pipeline_history").insert({
+      booking_id: id,
+      from_stage: fromStage,
+      to_stage: targetStage,
+      moved_by: actorName,
+      moved_by_user_id: user.id,
+    })
+    if (historyInsert.error) return NextResponse.json({ error: historyInsert.error.message }, { status: 500 })
+
+    const stageAudit = await supabase.from("audit_logs").insert({
       actor: actorName,
-      actor_user_id: user?.id ?? null,
+      actor_user_id: user.id,
       entity_type: "Booking",
       entity_id: id,
       action: "stage_change",
       before_json: { stage: fromStage },
-      after_json: { stage: body.stage, ...(cancelReason ? { cancel_reason: cancelReason } : {}) },
+      after_json: {
+        stage: targetStage,
+        ...(lostContext.cancelReason ? { cancel_reason: lostContext.cancelReason } : {}),
+      },
+      meta_json: {
+        payments_seen: payments?.length ?? 0,
+        manual_confirmations: body.manualConfirmations ?? null,
+      } as Json,
     })
+    if (stageAudit.error) return NextResponse.json({ error: stageAudit.error.message }, { status: 500 })
 
-    updates.stage = body.stage
+    if (body.override === true) {
+      const overrideAudit = await supabase.from("audit_logs").insert({
+        actor: actorName,
+        actor_user_id: user.id,
+        entity_type: "Booking",
+        entity_id: id,
+        action: "stage_change_override",
+        before_json: { stage: fromStage, gates_failed: failures.map((failure) => failure.gateId) },
+        after_json: { stage: targetStage },
+        override_reason: overrideReason,
+        overridden_by: user.id,
+        meta_json: {
+          failures: failures.map((failure) => ({
+            gateId: failure.gateId,
+            message: failure.message,
+            fixHint: failure.fixHint,
+            severity: failure.severity,
+            autoFixable: failure.autoFixable ?? null,
+          })),
+        } as Json,
+      })
+      if (overrideAudit.error) return NextResponse.json({ error: overrideAudit.error.message }, { status: 500 })
+    }
+
+    if (fromStage === "closed" && targetStage !== "closed") {
+      const reopenAudit = await supabase.from("audit_logs").insert({
+        actor: actorName,
+        actor_user_id: user.id,
+        entity_type: "Booking",
+        entity_id: id,
+        action: "closed_booking_reopened",
+        before_json: { stage: fromStage },
+        after_json: { stage: targetStage },
+        meta_json: { reason: body.closedReopenReason?.trim() },
+      })
+      if (reopenAudit.error) return NextResponse.json({ error: reopenAudit.error.message }, { status: 500 })
+    }
   }
 
-  if (body.ownerUser) updates.consultant = body.ownerUser
-  if (body.consultant) updates.consultant = body.consultant
+  if (body.assignedSalespersonId !== undefined) {
+    const { data: actorProfile } = await supabase
+      .from("profiles")
+      .select("name, surname, email, clearance_level")
+      .eq("user_id", user.id)
+      .maybeSingle()
 
-  const { data: updated, error } = await supabase
+    const role = extractRoleFromJwt(user) ?? actorProfile?.clearance_level ?? null
+    if (role !== "manager" && role !== "admin") {
+      return NextResponse.json({ error: "Manager access required to reassign salesperson" }, { status: 403 })
+    }
+
+    if (body.assignedSalespersonId) {
+      const { data: targetProfile } = await supabase
+        .from("profiles")
+        .select("user_id, clearance_level, is_active")
+        .eq("user_id", body.assignedSalespersonId)
+        .maybeSingle()
+
+      if (
+        !targetProfile ||
+        !["admin", "manager", "consultant"].includes(targetProfile.clearance_level) ||
+        targetProfile.is_active === false
+      ) {
+        return NextResponse.json({ error: "Assigned salesperson not found" }, { status: 404 })
+      }
+    }
+
+    updates.assigned_salesperson_id = body.assignedSalespersonId
+
+    await supabase.from("audit_logs").insert({
+      actor: [actorProfile?.name, actorProfile?.surname].filter(Boolean).join(" ").trim() || actorProfile?.email || user.email || "System",
+      actor_user_id: user.id,
+      entity_type: "Booking",
+      entity_id: id,
+      action: "salesperson_reassigned",
+      before_json: { assigned_salesperson_id: booking.assigned_salesperson_id },
+      after_json: { assigned_salesperson_id: body.assignedSalespersonId },
+    })
+  }
+
+  if (typeof body.customerId === "string" && body.customerId.trim() && body.customerId !== booking.customer_id) {
+    const { data: targetCustomer } = await supabase
+      .from("customers")
+      .select("id")
+      .eq("id", body.customerId)
+      .maybeSingle()
+
+    if (!targetCustomer) {
+      return NextResponse.json({ error: "Customer not found" }, { status: 404 })
+    }
+
+    updates.customer_id = targetCustomer.id
+
+    await supabase.from("audit_logs").insert({
+      actor: user?.email ?? "System",
+      actor_user_id: user?.id ?? null,
+      entity_type: "Booking",
+      entity_id: id,
+      action: "customer_reassigned",
+      before_json: { customer_id: booking.customer_id },
+      after_json: { customer_id: targetCustomer.id },
+    })
+  }
+
+  if (stageUpdated && Object.keys(updates).length === 1) {
+    return NextResponse.json({
+      id: stageUpdated.id,
+      jobNumber: stageUpdated.booking_number,
+      stage: stageUpdated.stage,
+      consultant: stageUpdated.consultant,
+      assignedSalespersonId: booking.assigned_salesperson_id ?? null,
+      cancelReason: stageUpdated.cancel_reason ?? null,
+      cancelledAt: stageUpdated.cancelled_at ?? null,
+      updatedAt: stageUpdated.updated_at,
+      updatedAtDisplay: formatDisplayDateTime(stageUpdated.updated_at),
+    })
+  }
+
+  if (stageUpdated) {
+    updates.updated_at = new Date().toISOString()
+  }
+
+  let updateQuery = supabase
     .from("bookings")
     .update(updates)
     .eq("id", id)
+
+  if (body.expectedUpdatedAt) {
+    updateQuery = updateQuery.eq("updated_at", body.expectedUpdatedAt)
+  }
+
+  const { data: updated, error } = await updateQuery
     .select()
     .single()
+
+  if (!updated && body.expectedUpdatedAt) {
+    const { data: current } = await supabase
+      .from("bookings")
+      .select("updated_at")
+      .eq("id", id)
+      .maybeSingle()
+
+    return staleVersionResponse("booking", current?.updated_at ?? booking.updated_at)
+  }
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
@@ -310,9 +757,49 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     jobNumber: updated.booking_number,
     stage: updated.stage,
     consultant: updated.consultant,
+    assignedSalespersonId: updated.assigned_salesperson_id ?? null,
     cancelReason: updated.cancel_reason ?? null,
     cancelledAt: updated.cancelled_at ?? null,
     updatedAt: updated.updated_at,
     updatedAtDisplay: formatDisplayDateTime(updated.updated_at),
   })
+}
+
+export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+  const supabase = await createSessionClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
+  const { data: booking } = await supabase
+    .from("bookings")
+    .select("id, booking_number, source, stage")
+    .eq("id", id)
+    .single()
+
+  if (!booking) return NextResponse.json({ error: "Not found" }, { status: 404 })
+
+  if (booking.source !== "email" || booking.stage !== "enquiry") {
+    return NextResponse.json(
+      { error: "Only email-imported enquiries can be rejected from this action" },
+      { status: 400 },
+    )
+  }
+
+  await supabase.from("audit_logs").insert({
+    actor: user.email ?? "System",
+    actor_user_id: user.id,
+    entity_type: "Booking",
+    entity_id: id,
+    action: "email_import_rejected_deleted",
+    meta_json: { booking_number: booking.booking_number },
+  })
+
+  const { error } = await supabase.from("bookings").delete().eq("id", id)
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  return NextResponse.json({ ok: true })
 }
