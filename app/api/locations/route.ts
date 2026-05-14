@@ -12,6 +12,7 @@ const createLocationSchema = z.object({
     .union([z.string().trim().max(20), z.null()])
     .optional()
     .transform((value) => value ?? ""),
+  parentLocationId: z.string().uuid().nullable().optional(),
 })
 
 const deleteLocationSchema = z.object({
@@ -45,7 +46,7 @@ export async function GET() {
 
   const { data: locations, error } = await supabase
     .from("locations")
-    .select("*")
+    .select("id, name, country, parent_location_id, region_code, created_at, updated_at")
     .order("name", { ascending: true })
 
   if (error) {
@@ -102,8 +103,9 @@ export async function POST(req: Request) {
       name: parsed.name.trim(),
       country: normalizedCountry,
       region_code: normalizedRegionCode,
+      parent_location_id: parsed.parentLocationId ?? null,
     })
-    .select("*")
+    .select("id, name, country, parent_location_id, region_code, created_at, updated_at")
     .single()
 
   if (error || !location) {
@@ -156,15 +158,39 @@ export async function DELETE(req: Request) {
 
   const { id } = parsedResult.data
 
-  const { count: linkedRoutes, error: routeCheckError } = await supabase
-    .from("routes")
-    .select("id", { count: "exact", head: true })
-    .or(`origin_location_id.eq.${id},destination_location_id.eq.${id}`)
+  const [
+    { count: linkedRoutes, error: routeCheckError },
+    { count: childAreas, error: childAreaCheckError },
+    { count: linkedSupplierAreas, error: supplierAreaCheckError },
+  ] = await Promise.all([
+    supabase
+      .from("routes")
+      .select("id", { count: "exact", head: true })
+      .or(`origin_location_id.eq.${id},destination_location_id.eq.${id}`),
+    supabase
+      .from("locations")
+      .select("id", { count: "exact", head: true })
+      .eq("parent_location_id", id),
+    supabase
+      .from("suppliers")
+      .select("id", { count: "exact", head: true })
+      .eq("location_area_id", id),
+  ])
 
-  if (routeCheckError) {
+  if (routeCheckError || childAreaCheckError || supplierAreaCheckError) {
     return NextResponse.json(
       { error: "Failed to validate location deletion" },
       { status: 500 },
+    )
+  }
+
+  if ((childAreas ?? 0) > 0) {
+    return NextResponse.json(
+      {
+        error:
+          "Cannot delete this city because it has sub-areas. Remove the sub-areas first.",
+      },
+      { status: 409 },
     )
   }
 
@@ -173,6 +199,16 @@ export async function DELETE(req: Request) {
       {
         error:
           "Cannot delete this location because it is used by one or more supplier routes.",
+      },
+      { status: 409 },
+    )
+  }
+
+  if ((linkedSupplierAreas ?? 0) > 0) {
+    return NextResponse.json(
+      {
+        error:
+          "Cannot delete this area because it is assigned to one or more suppliers.",
       },
       { status: 409 },
     )

@@ -2,26 +2,54 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useSWRConfig } from "swr"
-import { ArrowLeft, CalendarDays, Globe, Link2, Mail, Pencil, Phone, Save, Trash2 } from "lucide-react"
+import { AlertCircle, ArrowLeft, CalendarDays, Globe, Link2, Mail, Pencil, Phone, Save, Star, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { LinkedAccountForm, type LinkedAccountFormValue } from "@/components/linked-account-form"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { CustomerActivitySummary } from "@/components/customer-activity-summary"
+import { PresenceAvatars } from "@/components/presence-avatars"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { useRole } from "@/lib/role-context"
 import { getPipelineStageLabel, PIPELINE_STAGES } from "@/lib/types"
 import { useCustomerDetail } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
+import { useRecordPresence } from "@/hooks/use-record-presence"
+import { useVersionedSave } from "@/hooks/use-versioned-save"
 
 type Presentation = "page" | "modal"
+
+interface CustomerPatchPayload {
+  notes: string
+  email: string
+  phone: string | null
+  province: string | null
+  date_of_birth: string | null
+  vip_status: boolean
+  preferences: string | null
+  communication_preferences: string | null
+}
+
+interface CustomerPatchResponse {
+  notes: string | null
+  email: string
+  phone: string | null
+  province: string | null
+  dateOfBirth: string | null
+  vipStatus: boolean
+  preferences: string | null
+  communicationPreferences: string | null
+  updatedAt: string
+}
 
 interface CustomerDetailViewProps {
   customerId: string
@@ -38,12 +66,20 @@ export function CustomerDetailView({
   const { data, isLoading, error, mutate } = useCustomerDetail(customerId)
   const { mutate: mutateGlobal } = useSWRConfig()
   const { can } = useRole()
+  const { others, setEditing: setPresenceEditing } = useRecordPresence("customer", customerId)
   const canEditCustomers = can("edit:customers")
   const [emailDraft, setEmailDraft] = useState("")
   const [phoneDraft, setPhoneDraft] = useState("")
   const [notesDraft, setNotesDraft] = useState("")
+  const [provinceDraft, setProvinceDraft] = useState("")
+  const [dateOfBirthDraft, setDateOfBirthDraft] = useState("")
+  const [vipStatusDraft, setVipStatusDraft] = useState(false)
+  const [preferencesDraft, setPreferencesDraft] = useState("")
+  const [communicationPreferencesDraft, setCommunicationPreferencesDraft] = useState("")
   const [isEditing, setIsEditing] = useState(false)
-  const [isSaving, setIsSaving] = useState(false)
+  const [editingStartedUpdatedAt, setEditingStartedUpdatedAt] = useState<string | undefined>(undefined)
+  const [hasExternalUpdate, setHasExternalUpdate] = useState(false)
+  const [lastCustomerPayload, setLastCustomerPayload] = useState<CustomerPatchPayload | null>(null)
   const [isAddingLinkedAccount, setIsAddingLinkedAccount] = useState(false)
   const [editingLinkedAccountId, setEditingLinkedAccountId] = useState<string | null>(null)
   const [isSavingLinkedAccount, setIsSavingLinkedAccount] = useState(false)
@@ -52,14 +88,47 @@ export function CustomerDetailView({
     undefined,
   )
   const hasLoadError = Boolean(error)
+  const lastSeenCustomerUpdatedAtRef = useRef<string | undefined>(undefined)
+  const customerUpdatedAt = data && "customer" in data ? data.customer.updatedAt : undefined
+  const {
+    save: saveCustomer,
+    isSaving,
+    conflict: customerConflict,
+    clearConflict: clearCustomerConflict,
+  } = useVersionedSave<CustomerPatchPayload, CustomerPatchResponse>({
+    url: `/api/customers/${customerId}`,
+    method: "PATCH",
+    entity: "customer",
+    recordId: customerId,
+    expectedUpdatedAt: isEditing ? editingStartedUpdatedAt : customerUpdatedAt,
+  })
 
   useEffect(() => {
     if (data && "customer" in data) {
-      setEmailDraft(data.customer.email)
-      setPhoneDraft(data.customer.phone ?? "")
-      setNotesDraft(data.customer.notes ?? "")
+      const previousUpdatedAt = lastSeenCustomerUpdatedAtRef.current
+      const nextUpdatedAt = data.customer.updatedAt
+
+      if (isEditing && previousUpdatedAt && nextUpdatedAt && previousUpdatedAt !== nextUpdatedAt) {
+        setHasExternalUpdate(true)
+        lastSeenCustomerUpdatedAtRef.current = nextUpdatedAt
+        return
+      }
+
+      if (!isEditing) {
+        setEmailDraft(data.customer.email)
+        setPhoneDraft(data.customer.phone ?? "")
+        setNotesDraft(data.customer.notes ?? "")
+        setProvinceDraft(data.customer.province ?? "")
+        setDateOfBirthDraft(data.customer.dateOfBirth ?? "")
+        setVipStatusDraft(data.customer.vipStatus ?? false)
+        setPreferencesDraft(data.customer.preferences ?? "")
+        setCommunicationPreferencesDraft(data.customer.communicationPreferences ?? "")
+        setEditingStartedUpdatedAt(undefined)
+      }
+
+      lastSeenCustomerUpdatedAtRef.current = nextUpdatedAt
     }
-  }, [data])
+  }, [data, isEditing])
 
   useEffect(() => {
     if (!hasLoadError) {
@@ -67,6 +136,10 @@ export function CustomerDetailView({
     }
     router.replace("/app/customers")
   }, [hasLoadError, router])
+
+  useEffect(() => {
+    setPresenceEditing(isEditing || isAddingLinkedAccount || editingLinkedAccountId !== null)
+  }, [editingLinkedAccountId, isAddingLinkedAccount, isEditing, setPresenceEditing])
 
   const contentClassName =
     presentation === "modal"
@@ -103,47 +176,62 @@ export function CustomerDetailView({
   const fullName = `${customer.firstName} ${customer.lastName}`.trim()
   const initials = `${customer.firstName?.[0] ?? ""}${customer.lastName?.[0] ?? ""}`.toUpperCase()
   const linkedAccountsCount = linkedAccounts.length
+  const completedBookings = bookings.filter(
+    (booking) => booking.stage === "voucher_sent" || booking.stage === "closed",
+  ).length
+  const isRepeatClient = (customer.isRepeatClient ?? false) || completedBookings >= 2
   const hasChanges =
     emailDraft !== customer.email ||
     phoneDraft !== (customer.phone ?? "") ||
-    notesDraft !== (customer.notes ?? "")
+    notesDraft !== (customer.notes ?? "") ||
+    provinceDraft !== (customer.province ?? "") ||
+    dateOfBirthDraft !== (customer.dateOfBirth ?? "") ||
+    vipStatusDraft !== (customer.vipStatus ?? false) ||
+    preferencesDraft !== (customer.preferences ?? "") ||
+    communicationPreferencesDraft !== (customer.communicationPreferences ?? "")
+
+  function getCustomerPatchPayload(): CustomerPatchPayload {
+    return {
+      notes: notesDraft,
+      email: emailDraft,
+      phone: phoneDraft || null,
+      province: provinceDraft || null,
+      date_of_birth: dateOfBirthDraft || null,
+      vip_status: vipStatusDraft,
+      preferences: preferencesDraft || null,
+      communication_preferences: communicationPreferencesDraft || null,
+    }
+  }
+
+  async function persistCustomer(
+    payload: CustomerPatchPayload,
+    options?: { ignoreExpectedUpdatedAt?: boolean },
+  ): Promise<boolean> {
+    setLastCustomerPayload(payload)
+
+    try {
+      const updated = await saveCustomer(payload, options)
+      await mutate()
+      await mutateGlobal("/api/data")
+      setIsEditing(false)
+      setEditingStartedUpdatedAt(updated.updatedAt)
+      setHasExternalUpdate(false)
+      clearCustomerConflict()
+      toast.success("Customer saved")
+      return true
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not save customer"
+      toast.error(message)
+      return false
+    }
+  }
 
   async function saveNotes() {
     if (!canEditCustomers || !isEditing || !hasChanges || isSaving) {
       return
     }
 
-    setIsSaving(true)
-    try {
-      const response = await fetch(`/api/customers/${customerId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          notes: notesDraft,
-          email: emailDraft,
-          phone: phoneDraft || null,
-        }),
-      })
-
-      if (!response.ok) {
-        const errorPayload = (await response.json().catch(() => null)) as
-          | { error?: string }
-          | null
-        throw new Error(errorPayload?.error ?? "Failed to save customer")
-      }
-
-      await mutate()
-      await mutateGlobal("/api/data")
-      setIsEditing(false)
-      toast.success("Customer saved")
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not save customer"
-      toast.error(message)
-    } finally {
-      setIsSaving(false)
-    }
+    await persistCustomer(getCustomerPatchPayload())
   }
 
   async function createLinkedAccount(payload: LinkedAccountFormValue) {
@@ -252,9 +340,19 @@ export function CustomerDetailView({
               </span>
             </div>
             <div>
-              <h1 className="text-2xl font-semibold text-foreground tracking-tight">{fullName}</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-2xl font-semibold text-foreground tracking-tight">{fullName}</h1>
+                <PresenceAvatars users={others} />
+              </div>
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground mt-1">
                 {customer.title && <Badge variant="outline">{customer.title}</Badge>}
+                {customer.vipStatus ? (
+                  <Badge variant="secondary" className="gap-1">
+                    <Star className="w-3 h-3" />
+                    VIP
+                  </Badge>
+                ) : null}
+                {isRepeatClient ? <Badge variant="outline">Repeat Client</Badge> : null}
                 <span className="inline-flex items-center gap-1">
                   <CalendarDays className="w-3 h-3" />
                   Customer since {formatDisplayDate(customer.createdAt)}
@@ -270,7 +368,15 @@ export function CustomerDetailView({
               }`}
             >
               {!isEditing ? (
-                <Button variant="secondary" onClick={() => setIsEditing(true)}>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setEditingStartedUpdatedAt(customer.updatedAt)
+                    setHasExternalUpdate(false)
+                    clearCustomerConflict()
+                    setIsEditing(true)
+                  }}
+                >
                   <Pencil className="mr-2 h-4 w-4" />
                   Edit
                 </Button>
@@ -281,7 +387,14 @@ export function CustomerDetailView({
                       setEmailDraft(customer.email)
                       setPhoneDraft(customer.phone ?? "")
                       setNotesDraft(customer.notes ?? "")
+                      setProvinceDraft(customer.province ?? "")
+                      setDateOfBirthDraft(customer.dateOfBirth ?? "")
+                      setVipStatusDraft(customer.vipStatus ?? false)
+                      setPreferencesDraft(customer.preferences ?? "")
+                      setCommunicationPreferencesDraft(customer.communicationPreferences ?? "")
                       setIsEditing(false)
+                      setHasExternalUpdate(false)
+                      clearCustomerConflict()
                     }}
                     variant="outline"
                     disabled={isSaving}
@@ -298,6 +411,46 @@ export function CustomerDetailView({
           )}
         </div>
       </div>
+
+      {(customerConflict || hasExternalUpdate) && (
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>This customer changed elsewhere</AlertTitle>
+          <AlertDescription>
+            <p>
+              {customerConflict?.error ??
+                "Another user just updated this customer. Refresh to load their changes or save anyway to attempt your current edits."}
+            </p>
+            <div className="mt-2 flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  clearCustomerConflict()
+                  setHasExternalUpdate(false)
+                  setIsEditing(false)
+                  void mutate()
+                }}
+              >
+                Refresh
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => {
+                  void persistCustomer(lastCustomerPayload ?? getCustomerPatchPayload(), {
+                    ignoreExpectedUpdatedAt: true,
+                  })
+                }}
+                disabled={isSaving}
+              >
+                Save anyway
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      )}
 
       <Card>
         <CardHeader>
@@ -341,6 +494,101 @@ export function CustomerDetailView({
                 <Globe className="w-3 h-3" />
                 {customer.country ?? "Not provided"}
               </Badge>
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Province</Label>
+              <Input
+                value={provinceDraft}
+                onChange={(event) => setProvinceDraft(event.target.value)}
+                readOnly={!canEditCustomers || !isEditing}
+                disabled={isSaving}
+                placeholder={isEditing ? "Enter province" : "Not provided"}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Birthday / Date of Birth</Label>
+              <Input
+                type={isEditing ? "date" : "text"}
+                value={
+                  isEditing
+                    ? dateOfBirthDraft
+                    : customer.dateOfBirth
+                      ? formatDisplayDate(customer.dateOfBirth)
+                      : "Not provided"
+                }
+                onChange={(event) => setDateOfBirthDraft(event.target.value)}
+                readOnly={!canEditCustomers || !isEditing}
+                disabled={isSaving}
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="space-y-2">
+              <Label>VIP Status</Label>
+              <div className="flex h-10 items-center gap-2 rounded-md border px-3">
+                <Switch
+                  checked={vipStatusDraft}
+                  onCheckedChange={setVipStatusDraft}
+                  disabled={!canEditCustomers || !isEditing || isSaving}
+                  aria-label="VIP status"
+                />
+                <span className="text-sm text-muted-foreground">
+                  {vipStatusDraft ? "VIP client" : "Standard client"}
+                </span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>First Travel Date</Label>
+              <Input
+                value={
+                  customer.firstTravelDate
+                    ? formatDisplayDate(customer.firstTravelDate)
+                    : "Not recorded"
+                }
+                readOnly
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Last Travel Date</Label>
+              <Input
+                value={
+                  customer.lastTravelDate
+                    ? formatDisplayDate(customer.lastTravelDate)
+                    : "Not recorded"
+                }
+                readOnly
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Preferences</Label>
+              <Textarea
+                value={preferencesDraft}
+                onChange={(event) => setPreferencesDraft(event.target.value)}
+                maxLength={2000}
+                className="min-h-24"
+                disabled={!canEditCustomers || !isEditing || isSaving}
+                readOnly={!canEditCustomers || !isEditing}
+                placeholder={isEditing ? "Service, suite, dietary, or journey preferences..." : "Not provided"}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Communication Preferences</Label>
+              <Textarea
+                value={communicationPreferencesDraft}
+                onChange={(event) => setCommunicationPreferencesDraft(event.target.value)}
+                maxLength={1000}
+                className="min-h-24"
+                disabled={!canEditCustomers || !isEditing || isSaving}
+                readOnly={!canEditCustomers || !isEditing}
+                placeholder={isEditing ? "Preferred channels, timing, or contact notes..." : "Not provided"}
+              />
             </div>
           </div>
         </CardContent>

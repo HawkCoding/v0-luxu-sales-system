@@ -1,14 +1,23 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
+import { CUSTOMER_COLUMNS } from "@/lib/supabase/columns"
+import { staleVersionResponse } from "@/lib/concurrency"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 
-const allowedRoles = new Set(["admin", "manager"])
+const allowedRoles = new Set(["admin", "manager", "consultant"])
 
 const patchCustomerSchema = z.object({
   notes: z.string().max(5000),
-  email: z.string().email().max(255),
+  email: z.string().trim().toLowerCase().email().max(255),
   phone: z.string().max(50).nullable(),
+  province: z.string().trim().max(100).nullable().optional(),
+  date_of_birth: z.string().date().nullable().optional(),
+  vip_status: z.boolean().optional(),
+  preferences: z.string().trim().max(2000).nullable().optional(),
+  communication_preferences: z.string().trim().max(1000).nullable().optional(),
+  is_repeat_client: z.boolean().optional(),
+  expectedUpdatedAt: z.string().datetime({ offset: true }).optional(),
 })
 
 export async function GET(
@@ -32,11 +41,11 @@ export async function GET(
     { data: linkedAccounts, error: linkedAccountsError },
   ] =
     await Promise.all([
-      supabase.from("customers").select("*").eq("id", id).single(),
+      supabase.from("customers").select(CUSTOMER_COLUMNS).eq("id", id).single(),
       supabase
         .from("bookings")
         .select(
-          "id, booking_number, stage, consultant, departure_date, created_at, route:routes(name), package:packages(name, supplier:suppliers(id, name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(id, name), extracted_json",
+          "id, booking_number, stage, consultant, departure_date, created_at, route:routes(name, supplier:suppliers(id, name)), package:packages(name), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(id, name), extracted_json",
         )
         .eq("customer_id", id)
         .order("created_at", { ascending: false }),
@@ -91,11 +100,11 @@ export async function GET(
     new Set(
       (bookings ?? [])
         .map((booking) => {
-          const packageInfo = booking.package as
+          const routeInfo = booking.route as
             | { supplier?: { name?: string | null } | null }
             | null
           const hotelSupplier = booking.hotel_supplier as { name?: string | null } | null
-          if (packageInfo?.supplier?.name || hotelSupplier?.name) return null
+          if (routeInfo?.supplier?.name || hotelSupplier?.name) return null
 
           const historicalSupplierId = (
             booking.extracted_json as { historical_import?: { supplier_id?: unknown } } | null
@@ -132,17 +141,28 @@ export async function GET(
       email: customer.email,
       phone: customer.phone,
       country: customer.country,
+      province: customer.province,
       title: customer.title,
       notes: customer.notes,
+      dateOfBirth: customer.date_of_birth,
+      vipStatus: customer.vip_status,
+      preferences: customer.preferences,
+      communicationPreferences: customer.communication_preferences,
+      firstTravelDate: customer.first_travel_date,
+      firstTravelDateDisplay: formatDisplayDate(customer.first_travel_date),
+      lastTravelDate: customer.last_travel_date,
+      lastTravelDateDisplay: formatDisplayDate(customer.last_travel_date),
+      isRepeatClient: customer.is_repeat_client,
       createdAt: customer.created_at,
       updatedAt: customer.updated_at,
       createdAtDisplay: formatDisplayDateTime(customer.created_at),
       updatedAtDisplay: formatDisplayDateTime(customer.updated_at),
     },
     bookings: (bookings ?? []).map((booking) => {
-      const packageInfo = booking.package as
+      const routeInfo = booking.route as
         | { name?: string | null; supplier?: { id?: string; name?: string | null } | null }
         | null
+      const packageInfo = booking.package as { name?: string | null } | null
       const hotelSupplier = booking.hotel_supplier as { id?: string; name?: string | null } | null
       const historicalSupplierId = (
         booking.extracted_json as { historical_import?: { supplier_id?: string } } | null
@@ -160,10 +180,10 @@ export async function GET(
         departureDate: booking.departure_date,
         departureDateDisplay: formatDisplayDate(booking.departure_date),
         direction:
-          (booking.route as { name?: string } | null)?.name ??
+          routeInfo?.name ??
           ((booking.extracted_json as { historical_import?: { route?: string } } | null)
             ?.historical_import?.route ?? null),
-        supplierName: packageInfo?.supplier?.name ?? hotelSupplier?.name ?? historicalSupplierName,
+        supplierName: routeInfo?.supplier?.name ?? hotelSupplier?.name ?? historicalSupplierName,
         packageName: packageInfo?.name ?? null,
         createdAt: booking.created_at,
         createdAtDisplay: formatDisplayDateTime(booking.created_at),
@@ -222,21 +242,66 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
   }
 
-  const normalizedNotes = parsed.notes.trim()
-  const normalizedEmail = parsed.email.trim()
-  const normalizedPhone = parsed.phone?.trim()
+  const { data: existingCustomer, error: existingCustomerError } = await supabase
+    .from("customers")
+    .select("updated_at")
+    .eq("id", id)
+    .single()
 
-  const { data: updated, error: updateError } = await supabase
+  if (existingCustomerError || !existingCustomer) {
+    return NextResponse.json({ error: "Customer not found" }, { status: 404 })
+  }
+
+  if (parsed.expectedUpdatedAt && parsed.expectedUpdatedAt !== existingCustomer.updated_at) {
+    return staleVersionResponse("customer", existingCustomer.updated_at)
+  }
+
+  const normalizedNotes = parsed.notes.trim()
+  const normalizedEmail = parsed.email.trim().toLowerCase()
+  const normalizedPhone = parsed.phone?.trim()
+  const normalizedProvince = parsed.province?.trim()
+  const normalizedPreferences = parsed.preferences?.trim()
+  const normalizedCommunicationPreferences = parsed.communication_preferences?.trim()
+
+  let updateQuery = supabase
     .from("customers")
     .update({
       notes: normalizedNotes ? normalizedNotes : null,
       email: normalizedEmail,
       phone: normalizedPhone ? normalizedPhone : null,
+      province: normalizedProvince ? normalizedProvince : null,
+      date_of_birth: parsed.date_of_birth ?? null,
+      vip_status: parsed.vip_status ?? false,
+      preferences: normalizedPreferences ? normalizedPreferences : null,
+      communication_preferences: normalizedCommunicationPreferences
+        ? normalizedCommunicationPreferences
+        : null,
+      ...(parsed.is_repeat_client === undefined
+        ? {}
+        : { is_repeat_client: parsed.is_repeat_client }),
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)
-    .select("id, notes, email, phone, updated_at")
+
+  if (parsed.expectedUpdatedAt) {
+    updateQuery = updateQuery.eq("updated_at", parsed.expectedUpdatedAt)
+  }
+
+  const { data: updated, error: updateError } = await updateQuery
+    .select(
+      "id, notes, email, phone, province, date_of_birth, vip_status, preferences, communication_preferences, first_travel_date, last_travel_date, is_repeat_client, updated_at",
+    )
     .single()
+
+  if (!updated && parsed.expectedUpdatedAt) {
+    const { data: currentCustomer } = await supabase
+      .from("customers")
+      .select("updated_at")
+      .eq("id", id)
+      .maybeSingle()
+
+    return staleVersionResponse("customer", currentCustomer?.updated_at ?? existingCustomer.updated_at)
+  }
 
   if (updateError || !updated) {
     return NextResponse.json({ error: "Failed to update customer" }, { status: 500 })
@@ -246,6 +311,16 @@ export async function PATCH(
     notes: updated.notes,
     email: updated.email,
     phone: updated.phone,
+    province: updated.province,
+    dateOfBirth: updated.date_of_birth,
+    vipStatus: updated.vip_status,
+    preferences: updated.preferences,
+    communicationPreferences: updated.communication_preferences,
+    firstTravelDate: updated.first_travel_date,
+    firstTravelDateDisplay: formatDisplayDate(updated.first_travel_date),
+    lastTravelDate: updated.last_travel_date,
+    lastTravelDateDisplay: formatDisplayDate(updated.last_travel_date),
+    isRepeatClient: updated.is_repeat_client,
     updatedAt: updated.updated_at,
     updatedAtDisplay: formatDisplayDateTime(updated.updated_at),
   })
