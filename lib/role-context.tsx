@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useState, type ReactNode } from "react"
 import type { Role } from "./types"
 
 interface RoleContextValue {
@@ -21,12 +21,13 @@ export const permissions: Record<string, Role[]> = {
   "view:jobs": ["admin", "manager", "consultant", "readonly"],
   "edit:jobs": ["admin", "manager", "consultant"],
   "view:customers": ["admin", "manager", "consultant", "readonly"],
-  "edit:customers": ["admin", "manager"],
+  "edit:customers": ["admin", "manager", "consultant"],
   "import:customers": ["admin", "manager"],
   "view:quotes": ["admin", "manager", "consultant", "readonly"],
   "edit:quotes": ["admin", "manager", "consultant"],
   "view:payments": ["admin", "manager", "consultant", "readonly"],
   "edit:payments": ["admin", "manager", "consultant"],
+  "delete:payments": ["admin", "manager"],
   "view:documents": ["admin", "manager", "consultant", "readonly"],
   "view:correspondence": ["admin", "manager", "consultant", "readonly"],
   "send:correspondence": ["admin", "manager", "consultant"],
@@ -42,35 +43,27 @@ export const permissions: Record<string, Role[]> = {
   "export:reporting": ["manager"],
   "view:audit": ["admin", "manager"],
   "view:full_audit": ["manager"],
-  "view:settings": ["admin", "manager"],
+  "view:settings": ["admin", "manager", "consultant"],
   "edit:settings": ["admin"],
   "manage:users": ["admin"],
 }
-
-const ROLE_STORAGE_KEY = "luxu_user_role"
 
 export function canRolePerform(role: Role, action: string) {
   const allowed = permissions[action]
   return allowed ? allowed.includes(role) : false
 }
 
-export function RoleProvider({ children }: { children: ReactNode }) {
-  // Initialize from localStorage, fallback to consultant
-  const [role, setRoleState] = useState<Role>(() => {
-    if (typeof window !== "undefined") {
-      const stored = localStorage.getItem(ROLE_STORAGE_KEY) as Role | null
-      return stored || "consultant"
-    }
-    return "consultant"
-  })
+interface RoleProviderProps {
+  children: ReactNode
+  initialRole?: Role
+}
 
-  // Persist role changes to localStorage
-  const setRole = (newRole: Role) => {
+export function RoleProvider({ children, initialRole = "consultant" }: RoleProviderProps) {
+  const [role, setRoleState] = useState<Role>(initialRole)
+
+  const setRole = useCallback((newRole: Role) => {
     setRoleState(newRole)
-    if (typeof window !== "undefined") {
-      localStorage.setItem(ROLE_STORAGE_KEY, newRole)
-    }
-  }
+  }, [])
 
   const can = (action: string) => canRolePerform(role, action)
 

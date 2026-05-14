@@ -9,11 +9,18 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { LoadingState } from "@/components/ui/loading-state"
 import { Spinner } from "@/components/ui/spinner"
+import { LuxusLogo } from "@/components/luxus-logo"
 
 const loginPageClassName = "min-h-screen bg-background flex items-center justify-center p-4"
 // DEV_QUICK_LOGIN_START
 const canUseDevQuickLogin = process.env.NODE_ENV === "development"
-const defaultDevQuickLoginEmail = "carmen@luxustravel.co.za"
+const defaultDevQuickLoginEmails = [
+  "carmen@luxustravel.co.za",
+  "dirk@luxustravel.co.za",
+  "leonie@luxustravel.co.za",
+  "monade@luxustravel.co.za",
+  "douwlien@luxustravel.co.za",
+]
 const defaultDevQuickLoginPasswords = ["password123"]
 
 interface DevQuickLoginCandidates {
@@ -63,7 +70,7 @@ function getDevQuickLoginCandidates() {
 
   const candidateEmails = dedupeValues([
     ...splitCommaSeparatedValues(configuredEmail).map((email) => email.toLowerCase()),
-    defaultDevQuickLoginEmail,
+    ...defaultDevQuickLoginEmails,
   ])
   const candidatePasswords = dedupeValues([
     ...splitCommaSeparatedValues(rawPasswords),
@@ -92,6 +99,14 @@ function getDevQuickLoginAttempts(candidates: DevQuickLoginCandidates[]) {
   return attempts
 }
 // DEV_QUICK_LOGIN_END
+
+function getLoginRequestErrorMessage(error: unknown) {
+  if (error instanceof TypeError && error.message === "Failed to fetch") {
+    return "Unable to reach local Supabase. Start the local Supabase stack, then try signing in again."
+  }
+
+  return "Sign in failed. Please try again."
+}
 
 function LoginShell({ children }: { children: React.ReactNode }) {
   return <div className={loginPageClassName}>{children}</div>
@@ -164,6 +179,8 @@ function LoginForm() {
         setError("Invalid email or password. Check your credentials or use Forgot password.")
         setPassword("")
       }
+    } catch (error) {
+      setError(getLoginRequestErrorMessage(error))
     } finally {
       setSubmitting(false)
     }
@@ -216,6 +233,8 @@ function LoginForm() {
       }
 
       setError("Dev quick login failed with configured credentials.")
+    } catch (error) {
+      setError(getLoginRequestErrorMessage(error))
     } finally {
       setSubmitting(false)
     }
@@ -241,9 +260,7 @@ function LoginForm() {
     <LoginShell>
       <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="text-center pb-6">
-          <div className="mx-auto w-16 h-16 rounded-full bg-primary flex items-center justify-center mb-4">
-            <span className="text-2xl font-bold text-primary-foreground">LT</span>
-          </div>
+          <LuxusLogo className="mx-auto mb-4 h-16 w-16" size={64} />
           <CardTitle className="text-3xl">Welcome Back</CardTitle>
           <CardDescription className="text-base mt-2">Sign in to Luxus Sales Operations</CardDescription>
         </CardHeader>

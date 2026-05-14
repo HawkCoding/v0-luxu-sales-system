@@ -14,6 +14,10 @@ export type Source =
 
 export type ConsultantAbbreviation = "LB" | "CDJ" | "DR" | "MVE" | "DL"
 
+export interface AppSettings {
+  defaultDepositPercentage: number
+}
+
 export const CONSULTANTS: { key: ConsultantAbbreviation; name: string }[] = [
   { key: "LB", name: "Leonie" },
   { key: "CDJ", name: "Carmen" },
@@ -97,8 +101,18 @@ export interface Customer {
   email: string
   phone: string | null
   country: string | null
+  province?: string | null
   title?: string | null
   notes?: string | null
+  dateOfBirth?: string | null
+  vipStatus?: boolean
+  preferences?: string | null
+  communicationPreferences?: string | null
+  firstTravelDate?: string | null
+  firstTravelDateDisplay?: string
+  lastTravelDate?: string | null
+  lastTravelDateDisplay?: string
+  isRepeatClient?: boolean
   createdAt: string
   createdAtDisplay?: string
   updatedAt?: string
@@ -129,9 +143,25 @@ export interface Booking {
   source: Source
   consultant: string | null
   ownerUserId: string | null
+  assignedSalespersonId: string | null
+  assignedSalespersonName?: string | null
   departureDate: string | null
   departureDateDisplay?: string
   durationNights: number | null
+  tripEndDate?: string | null
+  thankYouScheduledAt?: string | null
+  emailImportNeedsReview: boolean
+  emailImportReviewResolvedAt: string | null
+  emailImportReviewResolvedAtDisplay?: string
+  emailImportMissingFields: string[]
+  emailImportWarnings: string[]
+  emailImportSourceMessageId: string | null
+  emailImportDuplicateOfBookingId: string | null
+  emailImportSubject: string | null
+  emailImportMailbox: string | null
+  emailImportReceivedAt: string | null
+  emailImportReceivedAtDisplay?: string
+  emailImportRawPreview: string | null
   noOfAdults: number
   noOfChildren: number
   noOfSuites: number
@@ -152,9 +182,22 @@ export interface Booking {
   createdAtDisplay?: string
   updatedAt: string
   updatedAtDisplay?: string
+  quoteSentAt: string | null
+  acceptedAt: string | null
+  depositRequestedAt: string | null
+  depositPaidAt: string | null
+  finalPaidAt: string | null
+  voucherSentAt: string | null
+  closedAt: string | null
+  depositPaid: boolean
+  invoiceBalance: number | null
   cancelReason: string | null
   cancelledAt: string | null
   cancelledAtDisplay?: string
+  refundStatus: "refunded" | "not_refunded" | null
+  refundAmount: number | null
+  refundReference: string | null
+  refundedAt: string | null
 }
 
 export const CANCEL_REASONS = [
@@ -172,14 +215,26 @@ export type SupplierKind =
   | "train_operator"
   | "hotel_property"
   | "transfers"
+  | "vehicle_rental"
   | "tour_operator"
   | "airline"
 export type SupplierStatus = "draft" | "active" | "inactive"
+export type TransportRequestServiceType = "transfer" | "rental"
+export type TransportServiceType = TransportRequestServiceType
+
+export const CURRENCIES: { value: string; label: string }[] = [
+  { value: "ZAR", label: "ZAR — South African Rand" },
+  { value: "USD", label: "USD — US Dollar" },
+  { value: "EUR", label: "EUR — Euro" },
+  { value: "GBP", label: "GBP — British Pound" },
+  { value: "AUD", label: "AUD — Australian Dollar" },
+]
 
 export const SUPPLIER_KIND_LABELS: Record<SupplierKind, string> = {
   train_operator: "Train",
   hotel_property: "Hotel",
   transfers: "Transfers",
+  vehicle_rental: "Vehicle Rental",
   tour_operator: "Tours",
   airline: "Airlines",
 }
@@ -200,6 +255,12 @@ export interface SupplierVocabulary {
   originLabel: string
   destinationLabel: string
   durationLabel: string
+  scheduleFields?: {
+    dateFromLabel: string
+    dateToLabel: string
+    timeStartLabel: string
+    timeEndLabel: string
+  }
 }
 
 const JOURNEY_SUPPLIER_VOCABULARY: SupplierVocabulary = {
@@ -219,6 +280,12 @@ const JOURNEY_SUPPLIER_VOCABULARY: SupplierVocabulary = {
   originLabel: "Origin",
   destinationLabel: "Destination",
   durationLabel: "nights",
+  scheduleFields: {
+    dateFromLabel: "Departure date",
+    dateToLabel: "Arrival date",
+    timeStartLabel: "Departure time",
+    timeEndLabel: "Arrival time",
+  },
 }
 
 export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
@@ -241,6 +308,12 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     originLabel: "Origin",
     destinationLabel: "Destination",
     durationLabel: "nights",
+    scheduleFields: {
+      dateFromLabel: "Check-in date",
+      dateToLabel: "Check-out date",
+      timeStartLabel: "Check-in time",
+      timeEndLabel: "Check-out time",
+    },
   },
 
   transfers: {
@@ -248,18 +321,43 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     suiteTypePlural: "Vehicle Types",
     package: "Service",
     packagePlural: "Services",
-    route: "Route",
-    routePlural: "Routes",
-    sectionTitle: "Vehicle Types, Routes and Rates",
+    route: "Service",
+    routePlural: "Services",
+    sectionTitle: "Vehicle Types, Services and Rates",
     sectionDescription:
-      "Manage the transfers this supplier offers, routes covered, vehicle types, and period-based rates.",
-    priceLabel: "flat per transfer",
+      "Manage transfer services, pickup/drop-off points, vehicle types, and period-based rates.",
+    priceLabel: "per vehicle",
     routeHasLocations: true,
     showSingleSupplement: false,
     showDurationNights: false,
     originLabel: "Pickup",
     destinationLabel: "Drop-off",
     durationLabel: "nights",
+  },
+
+  vehicle_rental: {
+    suiteType: "Vehicle Type",
+    suiteTypePlural: "Vehicle Types",
+    package: "Rental Service",
+    packagePlural: "Rental Services",
+    route: "Rental Route",
+    routePlural: "Rental Routes",
+    sectionTitle: "Vehicle Types, Rental Services and Rates",
+    sectionDescription:
+      "Manage vehicle types, rental pickup/return points, rental terms, and period-based rates.",
+    priceLabel: "per day",
+    routeHasLocations: true,
+    showSingleSupplement: false,
+    showDurationNights: false,
+    originLabel: "Pickup point",
+    destinationLabel: "Return point",
+    durationLabel: "days",
+    scheduleFields: {
+      dateFromLabel: "Pickup date",
+      dateToLabel: "Return date",
+      timeStartLabel: "Pickup time",
+      timeEndLabel: "Return time",
+    },
   },
 
   tour_operator: {
@@ -305,10 +403,19 @@ export function getSupplierVocabulary(kind: SupplierKind): SupplierVocabulary {
   return SUPPLIER_VOCABULARY[kind]
 }
 
+export function isTransportSupplier(kind: SupplierKind): boolean {
+  return kind === "transfers" || kind === "vehicle_rental"
+}
+
+export function isOptionalPackageLegKind(kind: SupplierKind): boolean {
+  return kind === "hotel_property" || kind === "transfers" || kind === "vehicle_rental"
+}
+
 export interface Location {
   id: string
   name: string
   country: string
+  parentLocationId: string | null
   regionCode: string | null
   createdAt: string
   createdAtDisplay?: string
@@ -320,8 +427,11 @@ export interface SupplierRoute {
   id: string
   supplierId: string
   name: string
-  originLocationId: string
-  destinationLocationId: string
+  originLocationId: string | null
+  destinationLocationId: string | null
+  pickupPoint?: string | null
+  dropoffPoint?: string | null
+  vehicleRentalDetails?: VehicleRentalRouteDetails | null
   active: boolean
   createdAt: string
   createdAtDisplay?: string
@@ -329,10 +439,23 @@ export interface SupplierRoute {
   updatedAtDisplay?: string
 }
 
+export interface VehicleRentalRouteDetails {
+  routeId: string
+  includedKmPerDay: number | null
+  extraKmPrice: number | null
+  securityDeposit: number | null
+  oneWayFee: number | null
+  createdAt: string
+  updatedAt: string
+}
+
 export interface SupplierSuiteType {
   id: string
   supplierId: string
   name: string
+  passengerCapacity?: number | null
+  luggageCapacity?: number | null
+  description?: string | null
   active: boolean
   createdAt: string
   createdAtDisplay?: string
@@ -354,6 +477,29 @@ export interface SupplierRateCard {
   validToDisplay?: string
   createdAt: string
   createdAtDisplay?: string
+}
+
+export interface PricingSnapshot {
+  source: "pricing_engine"
+  pricingMode: "rate_card" | "fixed_package"
+  packageId: string
+  packageName: string
+  legId: string | null
+  legLabel: string | null
+  supplierId: string | null
+  supplierName: string | null
+  supplierKind: SupplierKind | null
+  routeId: string | null
+  routeName: string | null
+  suiteTypeId: string | null
+  suiteTypeName: string | null
+  rateCardId: string | null
+  travelDate: string
+  passengerKind: "adult" | "child" | "infant" | "single_supplement" | "service" | "included"
+  baseUnitPrice: number
+  markupPct: number
+  singleSupplementPct: number | null
+  serviceType: "transfer" | "rental" | null
 }
 
 export interface SupplierPackage {
@@ -378,6 +524,7 @@ export interface PackageLeg {
   packageId: string
   supplierId: string
   supplierName: string
+  supplierDescription: string | null
   supplierKind: SupplierKind
   label: string | null
   sortOrder: number
@@ -393,6 +540,7 @@ export interface PackageDetail {
   description: string | null
   durationNights: number | null
   singleSupplementPct: number
+  markupPct?: number
   fixedPricePerPerson: number | null
   currency: string
   active: boolean
@@ -417,6 +565,7 @@ export interface Package {
   priceTo: number | null
   trainRouteName: string | null
   fixedPricePerPerson: number | null
+  markupPct?: number
 }
 
 export interface SupplierEmail {
@@ -438,9 +587,15 @@ export interface Supplier {
   phone: string | null
   website: string | null
   location: string | null
+  locationDetail: string | null
   locationId: string | null
+  locationAreaId: string | null
+  description: string | null
   notes: string | null
   active: boolean
+  singleSupplementPct: number
+  defaultTimeStart: string | null
+  defaultTimeEnd: string | null
   createdAt: string
   createdAtDisplay?: string
   updatedAt: string
@@ -455,11 +610,67 @@ export interface SupplierDetail extends Supplier {
   locations: Location[]
 }
 
+export interface BookingTransportRequest {
+  id: string
+  bookingId: string
+  serviceType: TransportRequestServiceType
+  supplierId: string | null
+  routeId: string | null
+  suiteTypeId: string | null
+  pickupPoint: string
+  dropoffPoint: string
+  pickupAt: string | null
+  pickupAtDisplay?: string
+  rentalDetails: BookingVehicleRentalDetails | null
+  passengerCount: number | null
+  luggageCount: number | null
+  flightNumber: string | null
+  notes: string | null
+  sortOrder: number
+  createdAt: string
+  createdAtDisplay?: string
+  updatedAt: string
+  updatedAtDisplay?: string
+}
+
+export interface BookingVehicleRentalDetails {
+  transportRequestId: string
+  returnAt: string | null
+  returnAtDisplay?: string
+  returnCutoffTime: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type BookingScheduleSupplierKind = "hotel_property" | "train_operator" | "vehicle_rental"
+
+export interface BookingSupplierSchedule {
+  id: string
+  bookingId: string
+  supplierId: string | null
+  supplierKind: BookingScheduleSupplierKind
+  label: string | null
+  dateFrom: string
+  dateFromDisplay?: string
+  dateTo: string
+  dateToDisplay?: string
+  timeStart: string | null
+  timeEnd: string | null
+  notes: string | null
+  sortOrder: number
+  createdAt: string
+  createdAtDisplay?: string
+  updatedAt: string
+  updatedAtDisplay?: string
+}
+
 // Legacy alias — kept so existing components that reference Job still compile
 export interface Job {
   id: string
   jobNumber: string
   ownerUser: string
+  assignedSalespersonId?: string | null
+  assignedSalespersonName?: string | null
   customerId: string
   consultant: ConsultantAbbreviation
   purpose: Purpose
@@ -469,6 +680,11 @@ export interface Job {
   createdAtDisplay?: string
   updatedAt: string
   updatedAtDisplay?: string
+  depositPaid?: boolean | null
+  invoiceBalance?: number | null
+  cancelReason?: string | null
+  cancelledAt?: string | null
+  cancelledAtDisplay?: string
 }
 
 export interface Enquiry {
@@ -478,6 +694,15 @@ export interface Enquiry {
   purpose: Purpose
   rawText?: string
   extractedJson?: Record<string, unknown>
+  emailImportNeedsReview?: boolean
+  emailImportMissingFields?: string[]
+  emailImportWarnings?: string[]
+  emailImportDuplicateOfBookingId?: string | null
+  emailImportSubject?: string | null
+  emailImportMailbox?: string | null
+  emailImportReceivedAt?: string | null
+  emailImportReceivedAtDisplay?: string
+  emailImportRawPreview?: string | null
   title: string
   name: string
   surname: string
@@ -502,6 +727,7 @@ export interface Enquiry {
   additionalServices?: string
   additionalServicesDetails?: string
   promotionCode?: string
+  transportRequests?: BookingTransportRequest[]
   termsAccepted: boolean
   createdAt: string
   createdAtDisplay?: string
@@ -525,13 +751,23 @@ export interface Itinerary {
   acceptedAtDisplay?: string
 }
 
-export type QuoteStatus = "draft" | "pricing_incomplete" | "ready" | "sent" | "accepted"
+export type QuoteStatus =
+  | "draft"
+  | "pricing_incomplete"
+  | "ready"
+  | "sent"
+  | "accepted"
+  | "expired"
+  | "superseded"
+  | "cancelled"
 
 export interface QuoteLineItem {
   description: string
+  supplierDescription?: string | null
   qty: number
   unitPrice: number
   total: number
+  pricingSnapshot?: PricingSnapshot | null
 }
 
 export interface Quote {
@@ -539,8 +775,12 @@ export interface Quote {
   itineraryId: string
   jobId: string
   status: QuoteStatus
+  quoteNumber?: string | null
+  parentQuoteId?: string | null
   validityUntil: string
   validityUntilDisplay?: string
+  updatedAt?: string
+  updatedAtDisplay?: string
   lineItems: QuoteLineItem[]
   subtotal: number
   vat: number
@@ -549,6 +789,7 @@ export interface Quote {
   lastSentAtDisplay?: string
   overridePin?: string
   overrideReason?: string
+  noPackageMatch?: boolean
 }
 
 export interface Payment {
@@ -560,14 +801,38 @@ export interface Payment {
   method: string
   reference: string
   notes: string
+  proofStoragePath?: string | null
 }
 
-export type DocumentKind = "quote_pdf" | "voucher_pdf"
+export type InvoiceKind = "deposit" | "final"
+export type InvoiceStatus = "draft" | "sent" | "paid" | "void"
+
+export interface Invoice {
+  id: string
+  jobId: string
+  quoteId: string | null
+  kind: InvoiceKind
+  status: InvoiceStatus
+  invoiceNumber: string
+  depositPercentage: number | null
+  amount: number
+  amountDisplay?: string
+  currency: string
+  dueDate: string | null
+  dueDateDisplay?: string
+  sentAt: string | null
+  sentAtDisplay?: string
+  createdAt: string
+  createdAtDisplay?: string
+}
+
+export type DocumentKind = "quote_pdf" | "invoice_pdf" | "voucher_pdf" | "summary_pdf" | "other"
 
 export interface DocRecord {
   id: string
   jobId: string
   kind: DocumentKind
+  status?: "required" | "received" | "generated" | "sent"
   generatedAt: string
   generatedAtDisplay?: string
   urlOrBlobRef: string
@@ -586,6 +851,7 @@ export interface Correspondence {
   id: string
   jobId: string
   channel: "email"
+  kind?: string | null
   subject: string
   bodyHtml: string
   status: "sent" | "failed" | "scheduled"
@@ -594,6 +860,7 @@ export interface Correspondence {
   scheduledAt?: string
   scheduledAtDisplay?: string
   error?: string
+  providerMessageId?: string | null
 }
 
 export interface AuditLog {
@@ -627,4 +894,40 @@ export interface PipelineHistory {
   movedBy: string
   movedAt: string
   movedAtDisplay?: string
+}
+
+export type VoucherSectionKey = "guest_info" | "service_provider" | "footer"
+
+export interface VoucherTemplate {
+  id?: string
+  logo_url: string | null
+  banner_url: string | null
+  header_text: string
+  product_line: string
+  accent_colour: string
+  section_bg: string
+  font_family: string
+  section_order: VoucherSectionKey[]
+  hidden_sections: VoucherSectionKey[]
+  footer_company: string
+  footer_phone: string
+  footer_email: string
+  guidance_text: string
+}
+
+export const VOUCHER_TEMPLATE_DEFAULTS: VoucherTemplate = {
+  logo_url: null,
+  banner_url: null,
+  header_text: "A division of Luxus Travel & Tours",
+  product_line: "THE BLUE TRAIN • ROVOS RAIL • KRUGER SHALATI",
+  accent_colour: "#0B2A3A",
+  section_bg: "#1a3a4a",
+  font_family: "Georgia, serif",
+  section_order: ["guest_info", "service_provider", "footer"],
+  hidden_sections: [],
+  footer_company: "Luxus Travel & Tours",
+  footer_phone: "",
+  footer_email: "",
+  guidance_text:
+    "Please hand to your service provider. Pre-payment was made by Luxus Travel & Tours for all services mentioned below. Guests must settle extras direct with the service providers.",
 }

@@ -53,6 +53,19 @@ const ACTION_TITLES: Record<string, string> = {
   record_updated: "Record updated",
   record_deleted: "Record deleted",
   stage_change: "Booking stage changed",
+  salesperson_reassigned: "Salesperson assigned",
+  email_import_review_resolved: "Import review cleared",
+  attachment_uploaded: "Attachment uploaded",
+  booking_confirmed: "Booking confirmed",
+  deposit_invoice_sent: "Deposit invoice sent",
+  deposit_marked_paid: "Deposit marked paid",
+  final_invoice_sent: "Final invoice sent",
+  invoice_marked_paid: "Invoice marked paid",
+  quote_generated: "Quote generated",
+  quote_sent: "Quote sent",
+  settings_changed: "Settings changed",
+  supplier_reference_captured: "Supplier reference captured",
+  voucher_sent: "Voucher sent",
 }
 
 const GENERIC_ACTORS = new Set(["consultant", "system", "unknown"])
