@@ -199,8 +199,9 @@ Reference files: `lib/utils.ts`, `components/ui/button.tsx`, `app/globals.css`
 
 ## PR Workflow
 
-- **Base branch is `main`**
-- Use `gh pr create --base main`
+- **Base branch is `dev`** — feature branches always target `dev`, never `main` directly
+- Use `gh pr create --base dev`
+- To promote to production: open a PR from `dev` → `main`
 - Commit pending changes before pushing (exclude `.env` and secret files)
 - Push with `git push -u origin HEAD`
 - Generate PR title and body from `git log` and `git diff`
