@@ -21,6 +21,7 @@
   },
   "scripts": {
     "preinstall": "npx only-allow pnpm",
+    "postinstall": "node scripts/install-hooks.mjs",
     "dev": "node scripts/start-next-dev.mjs",
     "local:start": "node scripts/dev-local.mjs",
     "build": "next build",
