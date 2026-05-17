@@ -8,6 +8,7 @@
 
 - [ ] Verified in Vercel dev preview (dev Supabase)
 - [ ] No regressions on existing features
+- [ ] *(dev → main only)* CI passed on `dev` before this promotion PR was opened
 
 ---
 
