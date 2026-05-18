@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useSWRConfig } from "swr"
+import useSWR, { useSWRConfig } from "swr"
 import {
   ArrowLeft,
   Mail,
@@ -59,6 +59,12 @@ import {
   getOverlapValidationSignature,
   shouldHydrateFormFromServer,
 } from "@/lib/supplier-editor-utils"
+import {
+  computeChildPrice,
+  DEFAULT_TRAIN_CHILD_PRICE_RATIO,
+  shouldAutoFillChild,
+  shouldPromptChildUpdate,
+} from "@/lib/suppliers/auto-child-price"
 import { shortenUrl } from "@/lib/url"
 import { useLocations, useSupplierDetail } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
@@ -1030,6 +1036,8 @@ interface RateCardMatrixEditorProps {
   locationsById: Record<string, Location>
   vocabulary: SupplierVocabulary
   isTransport: boolean
+  supplierKind: SupplierKind
+  trainChildPriceRatio: number
   onAddPeriod: (packageIndex: number, routeId: string) => void
   onRemovePeriod: (packageIndex: number, routeId: string, periodKey: string) => void
   onUpdatePeriodField: (
@@ -1060,6 +1068,178 @@ interface RateCardMatrixEditorProps {
   periodFieldErrors: Set<string>
 }
 
+interface RateCardPricingCellProps {
+  match: EditableRateCard
+  packageIndex: number
+  isTransport: boolean
+  supplierKind: SupplierKind
+  trainChildPriceRatio: number
+  onUpdateCellPrice: (
+    packageIndex: number,
+    rateCardId: string,
+    value: number,
+  ) => void
+  onUpdateCellField: (
+    packageIndex: number,
+    rateCardId: string,
+    field: "childPrice" | "infantPrice",
+    value: number | null,
+  ) => void
+}
+
+function RateCardPricingCell({
+  match,
+  packageIndex,
+  isTransport,
+  supplierKind,
+  trainChildPriceRatio,
+  onUpdateCellPrice,
+  onUpdateCellField,
+}: RateCardPricingCellProps) {
+  const lastCommittedAdultRef = useRef<number>(match.pricePerPerson)
+  const [pendingChildSuggestion, setPendingChildSuggestion] = useState<number | null>(null)
+
+  const handleAdultBlur = useCallback(() => {
+    const adult = match.pricePerPerson
+    if (adult === lastCommittedAdultRef.current) return
+
+    lastCommittedAdultRef.current = adult
+
+    if (
+      shouldAutoFillChild({
+        kind: supplierKind,
+        currentChild: match.childPrice,
+        newAdult: adult,
+      })
+    ) {
+      onUpdateCellField(
+        packageIndex,
+        match.id,
+        "childPrice",
+        computeChildPrice(adult, trainChildPriceRatio),
+      )
+      setPendingChildSuggestion(null)
+      return
+    }
+
+    if (
+      shouldPromptChildUpdate({
+        kind: supplierKind,
+        currentChild: match.childPrice,
+        newAdult: adult,
+        ratio: trainChildPriceRatio,
+      })
+    ) {
+      setPendingChildSuggestion(computeChildPrice(adult, trainChildPriceRatio))
+    } else {
+      setPendingChildSuggestion(null)
+    }
+  }, [
+    match.pricePerPerson,
+    match.childPrice,
+    match.id,
+    packageIndex,
+    supplierKind,
+    trainChildPriceRatio,
+    onUpdateCellField,
+  ])
+
+  const acceptSuggestion = useCallback(() => {
+    if (pendingChildSuggestion === null) return
+    onUpdateCellField(packageIndex, match.id, "childPrice", pendingChildSuggestion)
+    setPendingChildSuggestion(null)
+  }, [pendingChildSuggestion, packageIndex, match.id, onUpdateCellField])
+
+  const dismissSuggestion = useCallback(() => {
+    setPendingChildSuggestion(null)
+  }, [])
+
+  const formattedSuggestion = useMemo(() => {
+    if (pendingChildSuggestion === null) return ""
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: match.currency || "ZAR",
+      currencyDisplay: "narrowSymbol",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(pendingChildSuggestion)
+  }, [pendingChildSuggestion, match.currency])
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-1">
+        <span className="w-16 shrink-0 text-xs text-muted-foreground">
+          {isTransport ? "Flat" : "Adult"}
+        </span>
+        <NumericInput
+          min="0"
+          step="0.01"
+          value={match.pricePerPerson}
+          onValueChange={(value) =>
+            onUpdateCellPrice(packageIndex, match.id, value ?? 0)
+          }
+          onBlur={handleAdultBlur}
+        />
+      </div>
+      {!isTransport ? (
+        <>
+          <div className="flex items-center gap-1">
+            <span className="w-16 shrink-0 text-xs text-muted-foreground">Child</span>
+            <NumericInput
+              min="0"
+              step="0.01"
+              nullable
+              nullDisplayValue="0"
+              value={match.childPrice}
+              onValueChange={(value) =>
+                onUpdateCellField(packageIndex, match.id, "childPrice", value)
+              }
+            />
+          </div>
+          {pendingChildSuggestion !== null ? (
+            <div className="flex items-center gap-2 rounded-md bg-secondary/40 px-2 py-1 text-xs">
+              <span className="text-muted-foreground">
+                Update Child to {formattedSuggestion}?
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-6 px-2 text-xs"
+                onClick={acceptSuggestion}
+              >
+                Yes
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-6 px-2 text-xs text-muted-foreground"
+                onClick={dismissSuggestion}
+              >
+                Dismiss
+              </Button>
+            </div>
+          ) : null}
+          <div className="flex items-center gap-1">
+            <span className="w-16 shrink-0 text-xs text-muted-foreground">Infant</span>
+            <NumericInput
+              min="0"
+              step="0.01"
+              nullable
+              nullDisplayValue="0"
+              value={match.infantPrice}
+              onValueChange={(value) =>
+                onUpdateCellField(packageIndex, match.id, "infantPrice", value)
+              }
+            />
+          </div>
+        </>
+      ) : null}
+    </div>
+  )
+}
+
 const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
   routes,
   rateCards,
@@ -1068,6 +1248,8 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
   locationsById,
   vocabulary,
   isTransport,
+  supplierKind,
+  trainChildPriceRatio,
   onAddPeriod,
   onRemovePeriod,
   onUpdatePeriodField,
@@ -1279,51 +1461,15 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                             <td key={`${suiteType.id}-${routeId}`} className="px-4 py-3">
                               {match ? (
                                 <div className="flex flex-col gap-1.5">
-                                  <div className="flex items-center gap-1">
-                                    <span className="w-16 shrink-0 text-xs text-muted-foreground">
-                                      {isTransport
-                                        ? "Flat"
-                                        : "Adult"}
-                                    </span>
-                                    <NumericInput
-                                      min="0"
-                                      step="0.01"
-                                      value={match.pricePerPerson}
-                                      onValueChange={(value) =>
-                                        onUpdateCellPrice(packageIndex, match.id, value ?? 0)
-                                      }
-                                    />
-                                  </div>
-                                  {!isTransport ? (
-                                    <>
-                                      <div className="flex items-center gap-1">
-                                        <span className="w-16 shrink-0 text-xs text-muted-foreground">Child</span>
-                                        <NumericInput
-                                          min="0"
-                                          step="0.01"
-                                          nullable
-                                          nullDisplayValue="0"
-                                          value={match.childPrice}
-                                          onValueChange={(value) =>
-                                            onUpdateCellField(packageIndex, match.id, "childPrice", value)
-                                          }
-                                        />
-                                      </div>
-                                      <div className="flex items-center gap-1">
-                                        <span className="w-16 shrink-0 text-xs text-muted-foreground">Infant</span>
-                                        <NumericInput
-                                          min="0"
-                                          step="0.01"
-                                          nullable
-                                          nullDisplayValue="0"
-                                          value={match.infantPrice}
-                                          onValueChange={(value) =>
-                                            onUpdateCellField(packageIndex, match.id, "infantPrice", value)
-                                          }
-                                        />
-                                      </div>
-                                    </>
-                                  ) : null}
+                                  <RateCardPricingCell
+                                    match={match}
+                                    packageIndex={packageIndex}
+                                    isTransport={isTransport}
+                                    supplierKind={supplierKind}
+                                    trainChildPriceRatio={trainChildPriceRatio}
+                                    onUpdateCellPrice={onUpdateCellPrice}
+                                    onUpdateCellField={onUpdateCellField}
+                                  />
                                   <Button
                                     type="button"
                                     size="icon"
@@ -1709,6 +1855,15 @@ export function SupplierDetailView({
   const router = useRouter()
   const { data, isLoading, error, mutate: mutateDetail } = useSupplierDetail(supplierSlug)
   const { data: allLocations = [] } = useLocations()
+  const { data: trainRatioData } = useSWR<{ ratio: number }>(
+    "/api/settings/train-child-price-ratio",
+    async (url: string) => {
+      const res = await fetch(url)
+      if (!res.ok) throw new Error("Failed to load")
+      return res.json()
+    },
+  )
+  const trainChildPriceRatio = trainRatioData?.ratio ?? DEFAULT_TRAIN_CHILD_PRICE_RATIO
   const { mutate } = useSWRConfig()
   const { can } = useRole()
   const canEdit = can("edit:suppliers")
@@ -3340,6 +3495,8 @@ export function SupplierDetailView({
                   locationsById={locationsById}
                   vocabulary={activeVocabulary}
                   isTransport={isTransportSupplier(form.kind)}
+                  supplierKind={form.kind}
+                  trainChildPriceRatio={trainChildPriceRatio}
                   onAddPeriod={addRateCardPeriod}
                   onRemovePeriod={removeRateCardPeriod}
                   onUpdatePeriodField={updateRateCardPeriodField}
