@@ -108,29 +108,40 @@ CREATE POLICY attachments_delete ON storage.objects
 
 -- ---------------------------------------------------------------
 -- 6. Backfill existing payment proofs into documents table.
---    Storage blobs stay in the payment-proofs bucket until the
---    `scripts/migrate-payment-proofs.ts` storage-copy script runs.
---    payments.proof_storage_path is preserved as a read-fallback.
+--    Only runs if payments.proof_storage_path exists in this DB
+--    (some envs use proof_url or have no proof column at all).
 -- ---------------------------------------------------------------
-INSERT INTO public.documents (
-  id, booking_id, kind, status, storage_path, file_name, uploaded_by, payment_id, created_at
-)
-SELECT
-  gen_random_uuid(),
-  p.booking_id,
-  'proof_of_payment'::public.document_kind,
-  'received'::public.document_status,
-  p.proof_storage_path,
-  regexp_replace(p.proof_storage_path, '.*/', ''),
-  NULL,
-  p.id,
-  now()
-FROM public.payments p
-WHERE p.proof_storage_path IS NOT NULL
-  AND NOT EXISTS (
-    SELECT 1 FROM public.documents d
-    WHERE d.payment_id = p.id AND d.kind = 'proof_of_payment'
-  );
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'payments'
+      AND column_name = 'proof_storage_path'
+  ) THEN
+    EXECUTE $sql$
+      INSERT INTO public.documents (
+        id, booking_id, kind, status, storage_path, file_name, uploaded_by, payment_id, created_at
+      )
+      SELECT
+        gen_random_uuid(),
+        p.booking_id,
+        'proof_of_payment'::public.document_kind,
+        'received'::public.document_status,
+        p.proof_storage_path,
+        regexp_replace(p.proof_storage_path, '.*/', ''),
+        NULL,
+        p.id,
+        now()
+      FROM public.payments p
+      WHERE p.proof_storage_path IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM public.documents d
+          WHERE d.payment_id = p.id AND d.kind = 'proof_of_payment'
+        )
+    $sql$;
+  END IF;
+END $$;
 
 -- ---------------------------------------------------------------
 -- 7. Settings keys for general attachment limits.
