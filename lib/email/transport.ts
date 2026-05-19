@@ -21,6 +21,7 @@ export interface SendEmailResult {
   provider: "resend" | "mailpit"
   providerMessageId: string | null
   error: string | null
+  dry_run?: boolean
 }
 
 function normalizeRecipients(to: string | string[]): string[] {
@@ -160,5 +161,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<SendEmailRes
   const apiKey = process.env.RESEND_API_KEY?.trim()
   if (apiKey) return sendWithResend({ ...options, to: recipients }, apiKey)
 
-  return sendWithMailpit({ ...options, to: recipients })
+  // No API key → dry-run: log intent and skip all network calls
+  console.log("[dry-run] would have sent:", { to: recipients, subject: options.subject })
+  return { success: true, provider: "mailpit", providerMessageId: null, error: null, dry_run: true }
 }

@@ -682,4 +682,28 @@ values
 
 select setval('public.booking_number_seq', 23, true);
 
+-- Demo inbound email account (disabled — used only as a FK reference by the replay route)
+insert into public.inbound_email_accounts (
+  id, email, host, port, tls_mode, username, password_encrypted,
+  inbox_folder, processed_folder, needs_review_folder, enabled,
+  last_seen_uid, first_sync_completed, created_at, updated_at
+) values (
+  '00000000-0000-0000-0000-00000000ea01',
+  'enquiries@luxustravel.co.za',
+  'mail.luxustravel.co.za', 993, 'ssl_tls',
+  'enquiries@luxustravel.co.za', 'demo-placeholder-not-real',
+  'INBOX', 'Processed', 'Needs Review', false,
+  0, false,
+  '2025-08-01T08:00:00Z', '2025-08-01T08:00:00Z'
+) on conflict (id) do nothing;
+
+-- Inbound subject rule matching the demo fixture subject
+insert into public.inbound_email_rules (
+  id, name, subject_pattern, match_type, active, created_at, updated_at
+) values (
+  '00000000-0000-0000-0000-00000000eb01',
+  'Website enquiry form', 'New enquiry from website', 'contains', true,
+  '2025-08-01T08:00:00Z', '2025-08-01T08:00:00Z'
+) on conflict (id) do nothing;
+
 commit;
