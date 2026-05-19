@@ -5,7 +5,7 @@ import { applyTransition } from "../apply-transition"
 
 interface Operation {
   table: string
-  action: "update" | "insert"
+  action: "update" | "insert" | "select"
   payload: unknown
   filters: Record<string, unknown>
 }
@@ -21,6 +21,18 @@ class FakeQuery {
 
   eq(column: string, value: unknown): FakeQuery {
     this.filters[column] = value
+    this.operation.filters = this.filters
+    return this
+  }
+
+  in(column: string, value: unknown): FakeQuery {
+    this.filters[column] = value
+    this.operation.filters = this.filters
+    return this
+  }
+
+  not(column: string, operator: string, value: unknown): FakeQuery {
+    this.filters[column] = { operator, value }
     this.operation.filters = this.filters
     return this
   }
@@ -44,7 +56,7 @@ class FakeQuery {
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
   ): Promise<TResult1 | TResult2> {
     const value = {
-      data: this.returnsSingle ? this.updatedRow : null,
+      data: this.updatedRow,
       error: null,
     }
 
@@ -52,7 +64,10 @@ class FakeQuery {
   }
 }
 
-function createFakeSupabase(updatedRow: unknown): {
+function createFakeSupabase(
+  updatedRow: unknown,
+  options: { completedBookings?: Array<{ departure_date: string | null }> } = {},
+): {
   client: SupabaseClient<Database>
   operations: Operation[]
 } {
@@ -71,8 +86,9 @@ function createFakeSupabase(updatedRow: unknown): {
           return new FakeQuery(operation, updatedRow)
         },
         select() {
-          const operation: Operation = { table, action: "update", payload: null, filters: {} }
-          return new FakeQuery(operation, { value: "25" })
+          const operation: Operation = { table, action: "select", payload: null, filters: {} }
+          const result = table === "bookings" ? (options.completedBookings ?? []) : { value: "25" }
+          return new FakeQuery(operation, result)
         },
       }
     },
@@ -233,5 +249,185 @@ describe("applyTransition", () => {
         }),
       }),
     )
+  })
+
+  it("sets first and last travel date on first voucher sent", async () => {
+    const now = new Date("2026-05-01T10:00:00.000Z")
+    const { client, operations } = createFakeSupabase(
+      {
+        id: "booking-4",
+        stage: "voucher_sent",
+      },
+      { completedBookings: [{ departure_date: "2026-06-10" }] },
+    )
+
+    await applyTransition(client, {
+      booking: {
+        id: "booking-4",
+        booking_number: "BT-2026-0004",
+        stage: "final_paid",
+        source: "web_form",
+        raw_text: null,
+        updated_at: "2026-05-01T09:00:00.000Z",
+        customer_id: "customer-4",
+        consultant: "LB",
+      },
+      targetStage: "voucher_sent",
+      actorName: "Leonie",
+      actorUserId: "user-1",
+      now,
+    })
+
+    expect(operations).toContainEqual(
+      expect.objectContaining({
+        table: "customers",
+        action: "update",
+        payload: {
+          first_travel_date: "2026-06-10",
+          last_travel_date: "2026-06-10",
+        },
+        filters: expect.objectContaining({ id: "customer-4" }),
+      }),
+    )
+  })
+
+  it("moves first travel date back when an earlier second voucher is sent", async () => {
+    const { client, operations } = createFakeSupabase(
+      {
+        id: "booking-5",
+        stage: "voucher_sent",
+      },
+      {
+        completedBookings: [
+          { departure_date: "2026-07-01" },
+          { departure_date: "2026-06-01" },
+        ],
+      },
+    )
+
+    await applyTransition(client, {
+      booking: {
+        id: "booking-5",
+        booking_number: "BT-2026-0005",
+        stage: "final_paid",
+        source: "web_form",
+        raw_text: null,
+        updated_at: "2026-05-01T09:00:00.000Z",
+        customer_id: "customer-5",
+        consultant: "LB",
+      },
+      targetStage: "voucher_sent",
+      actorName: "Leonie",
+      actorUserId: "user-1",
+    })
+
+    const customerOp = operations.find((op) => op.table === "customers" && op.action === "update")
+    expect(customerOp).toBeDefined()
+    expect(customerOp?.payload).toEqual({
+      first_travel_date: "2026-06-01",
+      last_travel_date: "2026-07-01",
+    })
+  })
+
+  it("moves last travel date forward when a later second voucher is sent", async () => {
+    const { client, operations } = createFakeSupabase(
+      {
+        id: "booking-6",
+        stage: "voucher_sent",
+      },
+      {
+        completedBookings: [
+          { departure_date: "2026-06-01" },
+          { departure_date: "2026-08-01" },
+        ],
+      },
+    )
+
+    await applyTransition(client, {
+      booking: {
+        id: "booking-6",
+        booking_number: "BT-2026-0006",
+        stage: "final_paid",
+        source: "web_form",
+        raw_text: null,
+        updated_at: "2026-05-01T09:00:00.000Z",
+        customer_id: "customer-6",
+        consultant: "LB",
+      },
+      targetStage: "voucher_sent",
+      actorName: "Leonie",
+      actorUserId: "user-1",
+    })
+
+    const customerOp = operations.find((op) => op.table === "customers" && op.action === "update")
+    expect(customerOp?.payload).toEqual({
+      first_travel_date: "2026-06-01",
+      last_travel_date: "2026-08-01",
+    })
+  })
+
+  it("excludes bookings with null departure dates from date calculations", async () => {
+    const { client, operations } = createFakeSupabase(
+      {
+        id: "booking-7",
+        stage: "voucher_sent",
+      },
+      {
+        completedBookings: [
+          { departure_date: null },
+          { departure_date: "2026-07-15" },
+        ],
+      },
+    )
+
+    await applyTransition(client, {
+      booking: {
+        id: "booking-7",
+        booking_number: "BT-2026-0007",
+        stage: "final_paid",
+        source: "web_form",
+        raw_text: null,
+        updated_at: "2026-05-01T09:00:00.000Z",
+        customer_id: "customer-7",
+        consultant: "LB",
+      },
+      targetStage: "voucher_sent",
+      actorName: "Leonie",
+      actorUserId: "user-1",
+    })
+
+    const customerOp = operations.find((op) => op.table === "customers" && op.action === "update")
+    expect(customerOp?.payload).toEqual({
+      first_travel_date: "2026-07-15",
+      last_travel_date: "2026-07-15",
+    })
+  })
+
+  it("skips customer travel date update when no completed bookings have departure dates", async () => {
+    const { client, operations } = createFakeSupabase(
+      {
+        id: "booking-8",
+        stage: "voucher_sent",
+      },
+      { completedBookings: [] },
+    )
+
+    await applyTransition(client, {
+      booking: {
+        id: "booking-8",
+        booking_number: "BT-2026-0008",
+        stage: "final_paid",
+        source: "web_form",
+        raw_text: null,
+        updated_at: "2026-05-01T09:00:00.000Z",
+        customer_id: "customer-8",
+        consultant: "LB",
+      },
+      targetStage: "voucher_sent",
+      actorName: "Leonie",
+      actorUserId: "user-1",
+    })
+
+    expect(operations.some((op) => op.table === "customers")).toBe(false)
   })
 })

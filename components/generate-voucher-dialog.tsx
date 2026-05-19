@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog"
 import { PreviewAndSendDialog } from "@/components/preview-and-send-dialog"
 import type { DocRecord } from "@/lib/types"
+import { SendVoucherButton } from "@/components/booking-package-section"
 
 interface GenerateVoucherDialogProps {
   open?: boolean
@@ -30,6 +31,13 @@ interface GenerateVoucherDialogProps {
 interface GenerateVoucherResponse {
   document: DocRecord & {
     storagePath?: string | null
+  }
+  voucherRecord?: {
+    id: string
+    voucherNumber: string
+    generatedAt: string | null
+    sentAt: string | null
+    serviceBlockCount: number
   }
   voucher: {
     filename: string
@@ -140,6 +148,15 @@ export function GenerateVoucherDialog({
             >
               Preview & Send
             </Button>
+            <SendVoucherButton
+              voucherId={generated?.voucherRecord?.id ?? null}
+              bookingNumber={bookingNumber}
+              disabled={generating}
+              onSent={async () => {
+                setDialogOpen(false)
+                await handleSent()
+              }}
+            />
           </DialogFooter>
         </DialogContent>
       </Dialog>

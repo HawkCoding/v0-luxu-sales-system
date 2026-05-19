@@ -16,6 +16,7 @@ import {
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { getAuditCutoffDate } from "@/lib/audit"
 import { getDefaultDepositPercentage } from "@/lib/pipeline/constants"
+import { buildRepeatCustomerIdSet } from "@/lib/customer-repeat-status"
 
 function addDaysToDateString(value: string, days: number): string {
   const [year = "1970", month = "1", day = "1"] = value.split("-")
@@ -94,6 +95,8 @@ export async function GET() {
     ]),
   )
 
+  const repeatCustomerIds = buildRepeatCustomerIdSet(bookings ?? [])
+
   const quotesWithLines = (quotes ?? []).map((q) => ({
     id: q.id,
     bookingId: q.booking_id,
@@ -120,9 +123,11 @@ export async function GET() {
       .map((li) => ({
         id: li.id,
         description: li.description,
+        supplierDescription: li.supplier_description,
         qty: li.qty,
         unitPrice: li.unit_price,
         total: li.total,
+        pricingSnapshot: li.pricing_snapshot,
         sortOrder: li.sort_order,
       })),
   }))
@@ -139,8 +144,18 @@ export async function GET() {
       email: c.email,
       phone: c.phone,
       country: c.country,
+      province: c.province,
       title: c.title,
       notes: c.notes,
+      dateOfBirth: c.date_of_birth,
+      vipStatus: c.vip_status,
+      preferences: c.preferences,
+      communicationPreferences: c.communication_preferences,
+      firstTravelDate: c.first_travel_date,
+      firstTravelDateDisplay: formatDisplayDate(c.first_travel_date),
+      lastTravelDate: c.last_travel_date,
+      lastTravelDateDisplay: formatDisplayDate(c.last_travel_date),
+      isRepeatClient: repeatCustomerIds.has(c.id),
       createdAt: c.created_at,
       updatedAt: c.updated_at,
       createdAtDisplay: formatDisplayDateTime(c.created_at),
@@ -157,6 +172,7 @@ export async function GET() {
       consultant: b.consultant,
       ownerUserId: b.owner_user_id,
       assignedSalespersonId: b.assigned_salesperson_id,
+      isRepeatClientAtCreation: b.is_repeat_client_at_creation,
       assignedSalespersonName: b.assigned_salesperson_id
         ? profileByUserId.get(b.assigned_salesperson_id)?.name ?? null
         : null,
@@ -210,7 +226,6 @@ export async function GET() {
       closedAt: b.closed_at,
       depositPaid: b.deposit_paid,
       invoiceBalance: b.invoice_balance,
-      cancelReason: b.cancel_reason,
       cancelledAt: b.cancelled_at,
       cancelledAtDisplay: formatDisplayDateTime(b.cancelled_at),
       refundStatus: b.refund_status,

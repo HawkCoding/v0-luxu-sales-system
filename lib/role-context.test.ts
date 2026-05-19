@@ -44,6 +44,7 @@ describe("canRolePerform", () => {
       "view:quotes",
       "view:payments",
       "view:documents",
+      "view:notes",
       "view:correspondence",
       "view:suppliers",
       "view:packages",

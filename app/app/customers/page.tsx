@@ -2,13 +2,14 @@
 
 import { useAllData } from "@/lib/use-data"
 import { Card, CardContent } from "@/components/ui/card"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
-import { Search, Globe, Filter, X, UserPlus } from "lucide-react"
+import { AlertCircle, Search, Globe, Filter, X, UserPlus, Star } from "lucide-react"
 import { useEffect, useState } from "react"
 import { CONSULTANTS, type ConsultantAbbreviation } from "@/lib/types"
 import { formatDisplayDate } from "@/lib/date-format"
@@ -42,7 +43,7 @@ function getCustomerIdFromPath(pathname: string): string | null {
 }
 
 export default function CustomersPage() {
-  const { data, isLoading, mutate } = useAllData()
+  const { data, isLoading, error, mutate } = useAllData()
   const { can } = useRole()
   const searchParams = useSearchParams()
   const [search, setSearch] = useState("")
@@ -161,6 +162,20 @@ export default function CustomersPage() {
   const handleCustomerCreated = (customerId: string) => {
     mutate()
     openCustomerModal(customerId)
+  }
+
+  if (error) {
+    return (
+      <div className="p-6 max-w-3xl">
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Could not load customers</AlertTitle>
+          <AlertDescription>
+            Refresh the page or try again later.
+          </AlertDescription>
+        </Alert>
+      </div>
+    )
   }
 
   if (isLoading || !data) {
@@ -357,6 +372,17 @@ export default function CustomersPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 mb-1">
                         <p className="text-sm font-medium text-foreground">{c.firstName} {c.lastName}</p>
+                        {c.vipStatus ? (
+                          <Badge variant="secondary" className="text-[10px] h-4 px-1.5 gap-1">
+                            <Star className="w-2.5 h-2.5" />
+                            VIP
+                          </Badge>
+                        ) : null}
+                        {c.isRepeatClient ? (
+                          <Badge variant="outline" className="text-[10px] h-4 px-1.5">
+                            Repeat
+                          </Badge>
+                        ) : null}
                         {c.consultants.length > 0 && (
                           <div className="flex items-center gap-1">
                             {c.consultants.map((cons: string) => (

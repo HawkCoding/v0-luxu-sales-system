@@ -4,13 +4,22 @@ import { createSessionClient } from "@/lib/supabase/server"
 import { CUSTOMER_COLUMNS } from "@/lib/supabase/columns"
 import { staleVersionResponse } from "@/lib/concurrency"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
+import {
+  COMPLETED_REPEAT_BOOKING_STAGES,
+  isCompletedRepeatBookingStage,
+} from "@/lib/customer-repeat-status"
 
 const allowedRoles = new Set(["admin", "manager", "consultant"])
 
 const patchCustomerSchema = z.object({
   notes: z.string().max(5000),
-  email: z.string().email().max(255),
+  email: z.string().trim().toLowerCase().email().max(255),
   phone: z.string().max(50).nullable(),
+  province: z.string().trim().max(100).nullable().optional(),
+  date_of_birth: z.string().date().nullable().optional(),
+  vip_status: z.boolean().optional(),
+  preferences: z.string().trim().max(2000).nullable().optional(),
+  communication_preferences: z.string().trim().max(1000).nullable().optional(),
   expectedUpdatedAt: z.string().datetime({ offset: true }).optional(),
 })
 
@@ -90,6 +99,10 @@ export async function GET(
     })
   }
 
+  const isRepeatClient = (bookings ?? []).some((booking) =>
+    isCompletedRepeatBookingStage(booking.stage),
+  )
+
   const historicalSupplierIds = Array.from(
     new Set(
       (bookings ?? [])
@@ -135,8 +148,18 @@ export async function GET(
       email: customer.email,
       phone: customer.phone,
       country: customer.country,
+      province: customer.province,
       title: customer.title,
       notes: customer.notes,
+      dateOfBirth: customer.date_of_birth,
+      vipStatus: customer.vip_status,
+      preferences: customer.preferences,
+      communicationPreferences: customer.communication_preferences,
+      firstTravelDate: customer.first_travel_date,
+      firstTravelDateDisplay: formatDisplayDate(customer.first_travel_date),
+      lastTravelDate: customer.last_travel_date,
+      lastTravelDateDisplay: formatDisplayDate(customer.last_travel_date),
+      isRepeatClient,
       createdAt: customer.created_at,
       updatedAt: customer.updated_at,
       createdAtDisplay: formatDisplayDateTime(customer.created_at),
@@ -241,8 +264,11 @@ export async function PATCH(
   }
 
   const normalizedNotes = parsed.notes.trim()
-  const normalizedEmail = parsed.email.trim()
+  const normalizedEmail = parsed.email.trim().toLowerCase()
   const normalizedPhone = parsed.phone?.trim()
+  const normalizedProvince = parsed.province?.trim()
+  const normalizedPreferences = parsed.preferences?.trim()
+  const normalizedCommunicationPreferences = parsed.communication_preferences?.trim()
 
   let updateQuery = supabase
     .from("customers")
@@ -250,6 +276,13 @@ export async function PATCH(
       notes: normalizedNotes ? normalizedNotes : null,
       email: normalizedEmail,
       phone: normalizedPhone ? normalizedPhone : null,
+      province: normalizedProvince ? normalizedProvince : null,
+      date_of_birth: parsed.date_of_birth ?? null,
+      vip_status: parsed.vip_status ?? false,
+      preferences: normalizedPreferences ? normalizedPreferences : null,
+      communication_preferences: normalizedCommunicationPreferences
+        ? normalizedCommunicationPreferences
+        : null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)
@@ -259,7 +292,9 @@ export async function PATCH(
   }
 
   const { data: updated, error: updateError } = await updateQuery
-    .select("id, notes, email, phone, updated_at")
+    .select(
+      "id, notes, email, phone, province, date_of_birth, vip_status, preferences, communication_preferences, first_travel_date, last_travel_date, updated_at",
+    )
     .single()
 
   if (!updated && parsed.expectedUpdatedAt) {
@@ -276,10 +311,31 @@ export async function PATCH(
     return NextResponse.json({ error: "Failed to update customer" }, { status: 500 })
   }
 
+  const { data: completedBookings, error: completedBookingsError } = await supabase
+    .from("bookings")
+    .select("id")
+    .eq("customer_id", id)
+    .in("stage", COMPLETED_REPEAT_BOOKING_STAGES)
+    .limit(1)
+
+  if (completedBookingsError) {
+    return NextResponse.json({ error: "Failed to load customer repeat status" }, { status: 500 })
+  }
+
   return NextResponse.json({
     notes: updated.notes,
     email: updated.email,
     phone: updated.phone,
+    province: updated.province,
+    dateOfBirth: updated.date_of_birth,
+    vipStatus: updated.vip_status,
+    preferences: updated.preferences,
+    communicationPreferences: updated.communication_preferences,
+    firstTravelDate: updated.first_travel_date,
+    firstTravelDateDisplay: formatDisplayDate(updated.first_travel_date),
+    lastTravelDate: updated.last_travel_date,
+    lastTravelDateDisplay: formatDisplayDate(updated.last_travel_date),
+    isRepeatClient: (completedBookings ?? []).length > 0,
     updatedAt: updated.updated_at,
     updatedAtDisplay: formatDisplayDateTime(updated.updated_at),
   })

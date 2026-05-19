@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { writeAuditLog } from "@/lib/audit-write"
 import type { Database } from "@/lib/supabase/types"
 import type { PipelineStage } from "@/lib/types"
 import { calculateDepositAmount, getDefaultDepositPercentage } from "./constants"
@@ -22,6 +23,8 @@ export interface ApplyTransitionInput {
     | "customer_id"
     | "consultant"
   >
+  departureDate?: string | null
+  durationNights?: number | null
   targetStage: PipelineStage
   actorName: string
   actorUserId: string | null
@@ -83,12 +86,16 @@ function buildBookingUpdates(input: ApplyTransitionInput, nowIso: string): Booki
     updates.final_paid_at = nowIso
     updates.invoice_balance = 0
   }
-  if (crossedStages.includes("voucher_sent")) updates.voucher_sent_at = nowIso
+  if (crossedStages.includes("voucher_sent")) {
+    updates.voucher_sent_at = nowIso
+    // Auto-set outcome to Won when voucher is sent (booking is complete)
+    updates.outcome = "Won"
+    updates.outcome_set_at = nowIso
+  }
   if (crossedStages.includes("closed")) updates.closed_at = nowIso
 
   if (input.targetStage === "lost") {
     updates.cancelled_at = nowIso
-    updates.cancel_reason = input.lostContext?.cancelReason?.trim() ?? null
     updates.refund_status = input.lostContext?.refundStatus ?? null
     updates.refund_amount = input.lostContext?.refundAmount ?? null
     updates.refund_reference = input.lostContext?.refundReference?.trim() || null
@@ -128,6 +135,18 @@ export async function applyTransition(
       .eq("id", latestQuote.id)
 
     if (quoteError) throw new Error(quoteError.message)
+  }
+
+  if (crossedStages.includes("deposit_paid")) {
+    await writeAuditLog(supabase, {
+      actor: input.actorName,
+      actorUserId: input.actorUserId,
+      entityType: "Booking",
+      entityId: input.booking.id,
+      action: "booking_confirmed",
+      before: { stage: input.booking.stage, deposit_paid: false },
+      after: { stage: input.targetStage, deposit_paid: true, deposit_paid_at: updates.deposit_paid_at ?? nowIso },
+    })
   }
 
   let createdInvoiceDocument = false
@@ -190,6 +209,44 @@ export async function applyTransition(
       .eq("kind", "voucher_pdf")
 
     if (voucherError) throw new Error(voucherError.message)
+
+    await writeAuditLog(supabase, {
+      actor: input.actorName,
+      actorUserId: input.actorUserId,
+      entityType: "Booking",
+      entityId: input.booking.id,
+      action: "outcome_auto_set_won",
+      before: { outcome: "Open" },
+      after: { outcome: "Won", outcome_set_at: nowIso },
+    })
+
+    if (input.booking.customer_id) {
+      const { data: completedBookings, error: completedBookingsError } = await supabase
+        .from("bookings")
+        .select("departure_date")
+        .eq("customer_id", input.booking.customer_id)
+        .in("stage", ["voucher_sent", "closed"])
+        .not("departure_date", "is", null)
+
+      if (completedBookingsError) throw new Error(completedBookingsError.message)
+
+      const travelDates = (completedBookings ?? [])
+        .map((booking) => booking.departure_date)
+        .filter((departureDate): departureDate is string => Boolean(departureDate))
+        .sort()
+
+      if (travelDates.length > 0) {
+        const { error: customerError } = await supabase
+          .from("customers")
+          .update({
+            first_travel_date: travelDates[0],
+            last_travel_date: travelDates[travelDates.length - 1],
+          })
+          .eq("id", input.booking.customer_id)
+
+        if (customerError) throw new Error(customerError.message)
+      }
+    }
   }
 
   return {

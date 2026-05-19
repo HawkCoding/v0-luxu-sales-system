@@ -21,11 +21,15 @@ export function parseStageTransitionFailurePayload(payload: unknown): StageTrans
   if (!payload || typeof payload !== "object") return null
 
   const candidate = payload as Record<string, unknown>
-  if (!Array.isArray(candidate.failures) || !candidate.failures.every(isGateFailure)) return null
+  const details = candidate.details && typeof candidate.details === "object"
+    ? (candidate.details as Record<string, unknown>)
+    : null
+  const failureSource = details ?? candidate
+  if (!Array.isArray(failureSource.failures) || !failureSource.failures.every(isGateFailure)) return null
 
   return {
-    failures: candidate.failures,
-    isManager: Boolean(candidate.isManager),
+    failures: failureSource.failures,
+    isManager: Boolean(failureSource.isManager),
   }
 }
 

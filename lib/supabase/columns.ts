@@ -5,7 +5,7 @@ export const CUSTOMER_COLUMNS =
   "id, first_name, last_name, email, phone, country, title, notes, created_at, updated_at"
 
 export const BOOKING_COLUMNS =
-  "id, booking_number, customer_id, stage, purpose, source, consultant, owner_user_id, assigned_salesperson_id, departure_date, duration_nights, email_import_needs_review, email_import_review_resolved_at, email_import_missing_fields, email_import_warnings, email_import_source_message_id, email_import_duplicate_of_booking_id, email_import_subject, email_import_mailbox, email_import_received_at, email_import_raw_preview, no_of_adults, no_of_children, no_of_suites, child_ages, route_id, raw_text, extracted_json, terms_accepted, additional_services, additional_services_details, promotion_code, extend_stay, extra_nights, hotel_phase, hotel_supplier_id, created_at, updated_at, quote_sent_at, accepted_at, deposit_requested_at, deposit_paid_at, final_paid_at, voucher_sent_at, closed_at, deposit_paid, invoice_balance, cancel_reason, cancelled_at, refund_status, refund_amount, refund_reference, refunded_at"
+  "id, booking_number, customer_id, stage, purpose, source, consultant, owner_user_id, assigned_salesperson_id, is_repeat_client_at_creation, departure_date, duration_nights, email_import_needs_review, email_import_review_resolved_at, email_import_missing_fields, email_import_warnings, email_import_source_message_id, email_import_duplicate_of_booking_id, email_import_subject, email_import_mailbox, email_import_received_at, email_import_raw_preview, no_of_adults, no_of_children, no_of_suites, child_ages, route_id, raw_text, extracted_json, terms_accepted, additional_services, additional_services_details, promotion_code, extend_stay, extra_nights, hotel_phase, hotel_supplier_id, supplier_reference, created_at, updated_at, quote_sent_at, accepted_at, deposit_requested_at, deposit_paid_at, final_paid_at, voucher_sent_at, closed_at, deposit_paid, invoice_balance, cancelled_at, refund_status, refund_amount, refund_reference, refunded_at, outcome, outcome_reason_id, outcome_notes, outcome_set_at, outcome_set_by"
 
 export const BOOKING_WITH_ROUTE_COLUMNS = `${BOOKING_COLUMNS}, route:routes(id, name)`
 
@@ -35,7 +35,8 @@ export const ITINERARY_COLUMNS =
 export const INVOICE_COLUMNS =
   "id, booking_id, quote_id, kind, status, invoice_number, deposit_percentage, amount, currency, due_date, sent_at, created_at"
 
-export const DOCUMENT_COLUMNS = "id, booking_id, kind, status, storage_path, created_at"
+export const DOCUMENT_COLUMNS =
+  "id, booking_id, kind, status, storage_path, file_name, uploaded_by, payment_id, created_at"
 
 export const CORRESPONDENCE_COLUMNS =
   "id, booking_id, channel, kind, subject, body_html, status, sent_at, scheduled_at, error, provider_message_id, created_at"

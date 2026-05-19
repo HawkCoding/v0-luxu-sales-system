@@ -30,6 +30,7 @@ import { downloadAuditLog } from "@/lib/export-audit"
 import { toast } from "sonner"
 import { StageTransitionModal } from "@/components/stage-transition-modal"
 import type { GateFailure, ManualConfirmations } from "@/lib/pipeline/validate-transition"
+import { parseStageTransitionFailurePayload } from "@/lib/pipeline/stage-transition-response"
 import { useRouter } from "next/navigation"
 
 interface PipelineJob {
@@ -73,6 +74,8 @@ function isPastOrToday(dateString: string | null): boolean {
 }
 
 export default function PipelinePage() {
+  // Keyboard model: pointer users can drag cards; keyboard users tab through the card link,
+  // stage selector, and audit button. The selector uses the same gated transition flow.
   const router = useRouter()
   const { data: jobs, isLoading: loadingJobs, error: jobsError, mutate: mutateJobs } = usePipeline()
   const { data, isLoading: loadingAll, error: allDataError, mutate: mutateAll } = useAllData()
@@ -148,9 +151,10 @@ export default function PipelinePage() {
       })
 
       const payload = await response.json().catch(() => null)
-      if (response.status === 422 && payload?.failures) {
-        setTransitionFailures(payload.failures)
-        setTransitionIsManager(Boolean(payload.isManager))
+      const stageGatePayload = response.status === 400 ? parseStageTransitionFailurePayload(payload) : null
+      if (stageGatePayload) {
+        setTransitionFailures(stageGatePayload.failures)
+        setTransitionIsManager(stageGatePayload.isManager)
         setPendingJobId(jobId)
         setPendingToStage(toStage)
         setTransitionModalOpen(true)
@@ -420,7 +424,12 @@ export default function PipelinePage() {
                 const isOver = dragOverStage === stage.key
                 const acceptDropStage = stage.includes[0]
                 return (
-                  <div key={stage.key} className="flex w-64 flex-shrink-0 flex-col h-full">
+                  <div
+                    key={stage.key}
+                    role="region"
+                    aria-label={`${stage.label} stage column`}
+                    className="flex w-64 flex-shrink-0 flex-col h-full"
+                  >
                     <div
                       className={`flex-shrink-0 flex items-center justify-between rounded-t-lg border-b border-border px-3 py-3 transition-colors ${
                         isOver ? "bg-primary/10" : "bg-secondary"
@@ -448,6 +457,7 @@ export default function PipelinePage() {
                           isDragging={draggedJob === job.id}
                           canDrag={can("edit:pipeline")}
                           onDragStart={handleDragStart}
+                          onMoveStage={(jobId, toStage) => moveJob(jobId, toStage)}
                           auditLogs={data.auditLogs || []}
                         />
                       ))}
@@ -527,12 +537,14 @@ function PipelineCard({
   isDragging,
   canDrag,
   onDragStart,
+  onMoveStage,
   auditLogs,
 }: {
   job: PipelineJob
   isDragging: boolean
   canDrag: boolean
   onDragStart: (e: React.DragEvent, id: string) => void
+  onMoveStage: (id: string, toStage: PipelineStage) => void | Promise<void>
   auditLogs: any[]
 }) {
   const paymentDotClass = PAYMENT_COLORS[job.paymentColor] || "bg-muted-foreground"
@@ -589,9 +601,35 @@ function PipelineCard({
             {job.thankYouScheduledAt ? "Thank-you scheduled" : "Trip Complete - Follow up"}
           </Badge>
         )}
+        {canDrag && (
+          <div className="mt-2 pr-6">
+            <Select
+              value={job.stage}
+              onValueChange={(value) => {
+                if (value === job.stage) return
+                void onMoveStage(job.id, value as PipelineStage)
+              }}
+            >
+              <SelectTrigger
+                aria-label={`Move ${job.bookingNumber} to stage`}
+                className="h-7 w-full text-[11px]"
+              >
+                <SelectValue placeholder="Move to" />
+              </SelectTrigger>
+              <SelectContent>
+                {KANBAN_STAGES.map((stage) => (
+                  <SelectItem key={stage.key} value={stage.key}>
+                    {stage.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
         <button
           onClick={(e) => handleDownloadAudit(e, auditLogs)}
-          className="absolute bottom-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-secondary rounded"
+          className="absolute bottom-1.5 right-1.5 opacity-0 transition-opacity p-1 hover:bg-secondary rounded group-hover:opacity-100 focus:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+          aria-label={`Download audit log for ${job.bookingNumber}`}
           title="Download audit log"
         >
           <Download className="w-3 h-3 text-muted-foreground" />
