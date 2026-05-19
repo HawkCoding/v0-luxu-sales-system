@@ -850,6 +850,7 @@ export default function JobDetailPage() {
             payments={payments}
             jobId={id}
             mutate={mutate}
+            stage={currentStage}
           />
         </TabsContent>
         <TabsContent value="correspondence">

@@ -1,22 +1,45 @@
 "use client"
 
+// Gating contract: "Record Payment" is hidden when the user lacks `edit:payments`,
+// and rendered as disabled-with-reason until the booking reaches `deposit_requested`
+// (i.e. after the deposit invoice has been sent).
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog"
-import type { Payment } from "@/lib/types"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import type { Payment, PipelineStage } from "@/lib/types"
 import { useRole } from "@/lib/role-context"
 import { useState } from "react"
 import { Plus } from "lucide-react"
 import { formatDisplayDate } from "@/lib/date-format"
 
-export function JobPaymentsTab({ payments, jobId, mutate }: { payments: Payment[]; jobId: string; mutate: () => void }) {
+const PAYMENT_ENABLED_STAGES: ReadonlySet<PipelineStage> = new Set([
+  "deposit_requested",
+  "payment_schedule",
+  "deposit_paid",
+  "final_paid",
+  "voucher_sent",
+  "trip_active",
+  "closed",
+])
+
+interface JobPaymentsTabProps {
+  payments: Payment[]
+  jobId: string
+  mutate: () => void
+  stage?: PipelineStage
+}
+
+export function JobPaymentsTab({ payments, jobId, mutate, stage }: JobPaymentsTabProps) {
   const { can } = useRole()
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState({ amount: "", method: "EFT", reference: "", notes: "" })
   const [saving, setSaving] = useState(false)
+  const canRecordPayment = can("edit:payments")
+  const stageAllowsRecording = stage ? PAYMENT_ENABLED_STAGES.has(stage) : true
 
   const totalPaid = payments.reduce((s, p) => s + p.amount, 0)
 
@@ -44,10 +67,23 @@ export function JobPaymentsTab({ payments, jobId, mutate }: { payments: Payment[
             Total Received: <span className={totalPaid >= 0 ? "text-payment-green" : "text-payment-red"}>R {totalPaid.toLocaleString()}</span>
           </p>
         </div>
-        {can("edit:payments") && (
-          <Dialog open={open} onOpenChange={setOpen}>
+        {canRecordPayment && (
+          <Dialog open={open && stageAllowsRecording} onOpenChange={(next) => setOpen(next && stageAllowsRecording)}>
             <DialogTrigger asChild>
-              <Button size="sm"><Plus className="w-4 h-4 mr-1" /> Record Payment</Button>
+              {stageAllowsRecording ? (
+                <Button size="sm"><Plus className="w-4 h-4 mr-1" /> Record Payment</Button>
+              ) : (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex">
+                      <Button size="sm" disabled aria-disabled="true">
+                        <Plus className="w-4 h-4 mr-1" /> Record Payment
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>Available after sending the deposit invoice</TooltipContent>
+                </Tooltip>
+              )}
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
