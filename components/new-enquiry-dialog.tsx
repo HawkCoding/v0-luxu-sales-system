@@ -11,10 +11,22 @@ import { buildEnquiryImportPayload } from "@/lib/import/enquiry-payload"
 import { ReviewImportedDraftModal } from "@/components/review-imported-draft-modal"
 import { ProgressDialog } from "@/components/progress-dialog"
 
+interface PresetCustomer {
+  id: string
+  title?: string | null
+  firstName: string
+  lastName: string
+  email: string
+  phone?: string | null
+  country?: string | null
+  province?: string | null
+}
+
 interface NewEnquiryDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSaved: (jobId: string) => void
+  presetCustomer?: PresetCustomer
 }
 
 const ENQUIRY_SAVE_STEPS = [
@@ -38,9 +50,32 @@ function emptyDraft(): ParsedDraft {
   }
 }
 
+function draftFromPresetCustomer(preset: PresetCustomer): ParsedDraft {
+  const base = emptyDraft()
+  return {
+    ...base,
+    customer: {
+      title: preset.title ?? "",
+      firstName: preset.firstName ?? "",
+      surname: preset.lastName ?? "",
+      email: preset.email ?? "",
+      phone: preset.phone ?? "",
+      country: preset.country ?? "",
+      province: preset.province ?? "",
+    },
+    formFields: {
+      ...base.formFields,
+      title: preset.title ?? "",
+      country: preset.country ?? "",
+      province: preset.province ?? "",
+    },
+    linkedCustomerId: preset.id,
+  }
+}
+
 type Screen = "tabs" | "review" | "saving"
 
-export function NewEnquiryDialog({ open, onOpenChange, onSaved }: NewEnquiryDialogProps) {
+export function NewEnquiryDialog({ open, onOpenChange, onSaved, presetCustomer }: NewEnquiryDialogProps) {
   const [screen, setScreen] = useState<Screen>("tabs")
   const [activeTab, setActiveTab] = useState<"paste" | "manual">("paste")
   const [pasteText, setPasteText] = useState("")
@@ -51,8 +86,14 @@ export function NewEnquiryDialog({ open, onOpenChange, onSaved }: NewEnquiryDial
   const [failedDraft, setFailedDraft] = useState<ParsedDraft | null>(null)
 
   useEffect(() => {
-    if (open) setScreen("tabs")
-  }, [open])
+    if (!open) return
+    if (presetCustomer) {
+      setParsedDraft(draftFromPresetCustomer(presetCustomer))
+      setScreen("review")
+    } else {
+      setScreen("tabs")
+    }
+  }, [open, presetCustomer])
 
   useEffect(() => {
     if (screen !== "saving" || saveError) return
@@ -89,6 +130,10 @@ export function NewEnquiryDialog({ open, onOpenChange, onSaved }: NewEnquiryDial
   }
 
   const handleBackFromReview = () => {
+    if (presetCustomer) {
+      resetAndClose()
+      return
+    }
     setScreen("tabs")
   }
 

@@ -53,17 +53,18 @@ export function CreateQuoteDialog({ jobId, itineraries, onCreated }: CreateQuote
   }
 
   async function handleSubmit() {
-    if (!itineraryId) {
-      setError("Please select an itinerary.")
-      return
-    }
     setSaving(true)
     setError(null)
 
     const res = await fetch("/api/quotes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jobId, itineraryId, validityUntil, status: "draft" }),
+      body: JSON.stringify({
+        jobId,
+        itineraryId: itineraryId || null,
+        validityUntil,
+        status: "draft",
+      }),
     })
 
     setSaving(false)
@@ -82,7 +83,7 @@ export function CreateQuoteDialog({ jobId, itineraries, onCreated }: CreateQuote
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
+        <Button variant="outline" size="sm" data-testid="create-quote-button">
           <PlusCircle className="h-4 w-4 mr-1.5" />
           Create Quote
         </Button>
@@ -97,7 +98,7 @@ export function CreateQuoteDialog({ jobId, itineraries, onCreated }: CreateQuote
 
         <div className="space-y-4 py-2">
           <div className="space-y-1.5">
-            <Label htmlFor="itinerary">Itinerary</Label>
+            <Label htmlFor="itinerary">Itinerary (optional)</Label>
             <Select value={itineraryId} onValueChange={setItineraryId}>
               <SelectTrigger id="itinerary">
                 <SelectValue placeholder="Select itinerary…" />
@@ -108,6 +109,9 @@ export function CreateQuoteDialog({ jobId, itineraries, onCreated }: CreateQuote
                 ))}
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground">
+              You can attach an itinerary later by applying a package.
+            </p>
           </div>
 
           <div className="space-y-1.5">
