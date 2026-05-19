@@ -849,8 +849,6 @@ export default function JobDetailPage() {
           <JobPaymentsTab
             payments={payments}
             jobId={id}
-            depositPaid={job.depositPaid ?? false}
-            invoiceBalance={job.invoiceBalance ?? null}
             mutate={mutate}
           />
         </TabsContent>

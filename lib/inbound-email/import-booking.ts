@@ -3,6 +3,7 @@ import { buildEnquiryImportPayload } from "@/lib/import/enquiry-payload"
 import { type ParsedDraft } from "@/lib/import/parseEmailDraft"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
 import { createServiceClient } from "@/lib/supabase/server"
+import { allocateJobNumberForBooking } from "@/lib/job-numbering"
 import { createRawEmailPreview } from "@/lib/inbound-email/html"
 import type { Database, Json } from "@/lib/supabase/types"
 import { COMPLETED_REPEAT_BOOKING_STAGES } from "@/lib/customer-repeat-status"
@@ -246,7 +247,13 @@ export async function createEmailBookingFromParsedDraft(
     },
   } satisfies Json
 
+  const { bookingNumber: allocatedBookingNumber } = await allocateJobNumberForBooking(supabase, {
+    routeId,
+    packageId,
+  })
+
   const bookingInsert: BookingInsert = {
+    booking_number: allocatedBookingNumber,
     customer_id: customerId,
     is_repeat_client_at_creation: customerIsRepeatClient,
     purpose: payload.purpose,

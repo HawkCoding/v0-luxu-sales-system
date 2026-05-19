@@ -232,6 +232,12 @@ export async function GET() {
       refundAmount: b.refund_amount,
       refundReference: b.refund_reference,
       refundedAt: b.refunded_at,
+      outcome: b.outcome ?? "Open",
+      outcomeReasonId: b.outcome_reason_id,
+      outcomeNotes: b.outcome_notes,
+      outcomeSetAt: b.outcome_set_at,
+      outcomeSetAtDisplay: formatDisplayDateTime(b.outcome_set_at),
+      outcomeSetBy: b.outcome_set_by,
     })),
 
     bookingSuites: (bookingSuites ?? []).map((s) => ({
