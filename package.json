@@ -26,6 +26,9 @@
     "local:start": "node scripts/dev-local.mjs",
     "build": "next build",
     "start": "next start",
+    "qa": "playwright test --config qa/playwright.config.ts",
+    "qa:headed": "playwright test --config qa/playwright.config.ts --headed",
+    "qa:phase": "playwright test --config qa/playwright.config.ts --grep",
     "app:version:bump": "node scripts/bump-app-version.mjs",
     "db:start": "npx supabase start",
     "db:stop": "npx supabase stop",
@@ -110,6 +113,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4.1.13",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",

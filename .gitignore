@@ -27,3 +27,13 @@ tmp-db-sync/
 .mcp.json
 .vscode/mcp.json
 .claude/settings.local.json
+
+# QA browser runs
+qa/.auth/
+qa/.run-state.json
+qa/.playwright-libs/
+qa/reports/
+qa/screenshots/
+qa/playwright-report/
+qa/**/playwright-report/
+test-results/
