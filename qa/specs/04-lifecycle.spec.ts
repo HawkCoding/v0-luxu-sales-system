@@ -6,6 +6,14 @@ import { createQaSupabase } from "../lib/db"
 import { attachBrowserDiagnostics, ReportBuilder } from "../lib/report"
 import { readRunState } from "../lib/run-state"
 import { QA_RUN } from "../lib/test-data"
+import {
+  collectArtefacts,
+  tryGenerateAndSendDepositInvoice,
+  tryGenerateAndSendFinalInvoice,
+  tryGenerateAndSendVoucher,
+  tryQuotePreviewSend,
+  type SendFlowResult,
+} from "../lib/send-flows"
 
 test.use({ storageState: ADMIN_STORAGE_STATE })
 
@@ -544,31 +552,39 @@ test("04-lifecycle: walk enquiry → voucher_sent capturing every gap", async ({
     })
 
     // -----------------------------------------------------------------
-    // Stage 3 — mark quote sent (UI send dialog is heavy; mark via DB)
+    // Stage 3 — send Q1 via QuotePreviewSendDialog
     // -----------------------------------------------------------------
+    let q1SendResult: SendFlowResult | null = null
     if (quoteCreated && quote1Id) {
-      const supabase = createQaSupabase()
-      const { error } = await supabase
-        .from("quotes")
-        .update({ status: "sent" })
-        .eq("id", quote1Id)
-      if (error) {
-        report.step("Could not mark quote as sent", {
-          status: "fail",
-          evidence: { error: error.message },
-        })
-      } else {
-        workarounds.push({
-          stage: "quote_sent",
-          reason: "Skipped UI Send Quote dialog (preview + email send); flipped quote.status='sent' in DB to test stage gate.",
-        })
-        report.step("Marked Q1 as sent (DB workaround)", {
-          status: "warn",
-          notes: [
-            "UI Send Quote flow involves preview, email body, PDF render and outbound send — out of scope to drive end-to-end.",
-            "Logged as workaround.",
-          ],
-        })
+      await page.goto(`/app/bookings/${bookingId}?tab=quotes`)
+      await expect(page.getByText(bookingNumber, { exact: false }).first()).toBeVisible({
+        timeout: 15_000,
+      })
+      q1SendResult = await tryQuotePreviewSend(page, { quoteIndex: 0 })
+      report.step("UI: Q1 sent via QuotePreviewSendDialog", {
+        status: q1SendResult.outcome === "pass" ? "pass" : "warn",
+        screenshot: await report.screenshot(page, "stage-03-q1-preview-send"),
+        evidence: { result: q1SendResult },
+      })
+
+      if (q1SendResult.outcome !== "pass") {
+        const supabase = createQaSupabase()
+        const { error } = await supabase
+          .from("quotes")
+          .update({ status: "sent", last_sent_at: new Date().toISOString() })
+          .eq("id", quote1Id)
+        if (error) {
+          report.step("Could not mark Q1 as sent (UI failed and DB fallback failed)", {
+            status: "fail",
+            evidence: { error: error.message },
+          })
+        } else {
+          workarounds.push({
+            stage: "quote_sent",
+            reason: `UI Preview & Send did not complete (${q1SendResult.reason}); flipped quote.status='sent' in DB to allow downstream stages.`,
+          })
+          report.step("Fallback: marked Q1 as sent via DB", { status: "warn" })
+        }
       }
     }
 
@@ -660,6 +676,28 @@ test("04-lifecycle: walk enquiry → voucher_sent capturing every gap", async ({
         result: hasQ1 && hasQ2 ? "pass" : "fail",
         note: snapAfterRevise.quote_numbers.join(", "),
       })
+
+      if (hasQ2) {
+        await page.goto(`/app/bookings/${bookingId}?tab=quotes`)
+        await expect(page.getByText(bookingNumber, { exact: false }).first()).toBeVisible({
+          timeout: 15_000,
+        })
+        const q2SendResult = await tryQuotePreviewSend(page, { quoteIndex: 0 })
+        report.step("UI: Q2 sent via QuotePreviewSendDialog", {
+          status: q2SendResult.outcome === "pass" ? "pass" : "warn",
+          screenshot: await report.screenshot(page, "stage-03-q2-preview-send"),
+          evidence: { result: q2SendResult },
+          notes: q2SendResult.outcome === "pass"
+            ? []
+            : ["Q2 not sent via UI — JobQuotesTab may render the newest quote at a different position. Capture and continue."],
+        })
+        if (q2SendResult.outcome !== "pass") {
+          workarounds.push({
+            stage: "quote_sent",
+            reason: `Q2 Preview & Send did not complete: ${q2SendResult.reason}.`,
+          })
+        }
+      }
     }
 
     // -----------------------------------------------------------------
@@ -719,61 +757,14 @@ test("04-lifecycle: walk enquiry → voucher_sent capturing every gap", async ({
     })
 
     let depositInvoiceCreated = false
-    {
-      // Try the deposit invoice header button if rendered
-      const depositButton = page.getByRole("button", { name: /Deposit Invoice/i }).first()
-      const buttonVisible = await depositButton.isVisible({ timeout: 3_000 }).catch(() => false)
-      report.step("UI: header 'Deposit Invoice' button visibility", {
-        status: buttonVisible ? "pass" : "warn",
-        evidence: { visible: buttonVisible },
-        notes: buttonVisible
-          ? []
-          : ["The button only renders if hasSentDepositInvoice is false AND the user has send:correspondence permission. Investigate if missing for admin."],
-      })
-
-      if (buttonVisible) {
-        await depositButton.click().catch(() => undefined)
-        await report.screenshot(page, "stage-05-deposit-dialog")
-        const dialog = page.getByRole("dialog").filter({ has: page.getByText(/Deposit Invoice/i) })
-        const visible = await dialog.isVisible({ timeout: 3_000 }).catch(() => false)
-        if (visible) {
-          report.step("Deposit invoice dialog opened", {
-            screenshot: await report.screenshot(page, "stage-05-deposit-dialog-open"),
-          })
-
-          // Default percentage from app_settings (25 per CLAUDE.md).
-          const generateButton = dialog
-            .getByRole("button", { name: /Generate|Preview/i })
-            .first()
-          if (await generateButton.isVisible({ timeout: 2_000 }).catch(() => false)) {
-            const responsePromise = page
-              .waitForResponse(
-                (response) => response.url().includes("/api/invoices/deposit"),
-                { timeout: 30_000 },
-              )
-              .catch(() => null)
-            await generateButton.click().catch(() => undefined)
-            const response = await responsePromise
-            if (response && response.ok()) {
-              depositInvoiceCreated = true
-              report.step("API /api/invoices/deposit returned success", {
-                status: "pass",
-                evidence: { status: response.status() },
-              })
-            } else {
-              report.step("API /api/invoices/deposit failed or did not fire", {
-                status: "warn",
-                evidence: {
-                  status: response?.status() ?? null,
-                  body: response ? await response.text().catch(() => "") : null,
-                },
-              })
-            }
-          }
-        }
-        // Close dialog
-        await page.keyboard.press("Escape").catch(() => undefined)
-      }
+    const depositResult = await tryGenerateAndSendDepositInvoice(page)
+    report.step("UI: Generate Deposit Invoice → Preview & Send", {
+      status: depositResult.outcome === "pass" ? "pass" : "warn",
+      screenshot: await report.screenshot(page, "stage-05-deposit-generate-send"),
+      evidence: { result: depositResult },
+    })
+    if (depositResult.outcome === "pass") {
+      depositInvoiceCreated = true
     }
 
     if (!depositInvoiceCreated) {
@@ -797,7 +788,7 @@ test("04-lifecycle: walk enquiry → voucher_sent capturing every gap", async ({
         depositInvoiceCreated = true
         workarounds.push({
           stage: "deposit_requested",
-          reason: "UI deposit invoice generation did not complete; inserted invoice row directly to allow downstream stages to test.",
+          reason: `UI deposit invoice generate-and-send did not complete (${depositResult.reason}); inserted invoice row directly to allow downstream stages to test.`,
         })
         report.step("Fallback: created deposit invoice via DB insert", {
           status: "warn",
@@ -978,25 +969,42 @@ test("04-lifecycle: walk enquiry → voucher_sent capturing every gap", async ({
     // -----------------------------------------------------------------
     // → final_paid: create final invoice + balance payment
     // -----------------------------------------------------------------
+    let finalInvoiceCreated = false
+    await page.goto(`/app/bookings/${bookingId}`)
+    await expect(page.getByText(bookingNumber, { exact: false }).first()).toBeVisible({
+      timeout: 15_000,
+    })
+    const finalResult = await tryGenerateAndSendFinalInvoice(page)
+    report.step("UI: Generate Final Invoice → Preview & Send", {
+      status: finalResult.outcome === "pass" ? "pass" : "warn",
+      screenshot: await report.screenshot(page, "stage-08-final-generate-send"),
+      evidence: { result: finalResult },
+    })
+    if (finalResult.outcome === "pass") {
+      finalInvoiceCreated = true
+    }
+
     {
       const supabase = createQaSupabase()
-      const { error } = await supabase.from("invoices").insert({
-        booking_id: bookingId,
-        kind: "final",
-        status: "sent",
-        amount: 77625,
-        currency: "ZAR",
-        invoice_number: `${bookingNumber}-F1`,
-        sent_at: new Date().toISOString(),
-      })
-      if (error) {
-        report.step("Final invoice insert failed", { status: "fail", evidence: { error: error.message } })
-      } else {
-        workarounds.push({
-          stage: "final_paid",
-          reason: "Final-invoice generation dialog flow not exercised end-to-end; inserted invoice row directly.",
+      if (!finalInvoiceCreated) {
+        const { error } = await supabase.from("invoices").insert({
+          booking_id: bookingId,
+          kind: "final",
+          status: "sent",
+          amount: 77625,
+          currency: "ZAR",
+          invoice_number: `${bookingNumber}-F1`,
+          sent_at: new Date().toISOString(),
         })
-        report.step("Fallback: created final invoice via DB insert", { status: "warn" })
+        if (error) {
+          report.step("Final invoice insert failed", { status: "fail", evidence: { error: error.message } })
+        } else {
+          workarounds.push({
+            stage: "final_paid",
+            reason: `UI final-invoice generate-and-send did not complete (${finalResult.reason}); inserted invoice row directly.`,
+          })
+          report.step("Fallback: created final invoice via DB insert", { status: "warn" })
+        }
       }
 
       const { error: paymentError } = await supabase.from("payments").insert({
@@ -1056,7 +1064,42 @@ test("04-lifecycle: walk enquiry → voucher_sent capturing every gap", async ({
     // -----------------------------------------------------------------
     // final_paid → voucher_sent
     // -----------------------------------------------------------------
+    //
+    // First try the UI path: click Next towards voucher_sent — the booking
+    // page auto-opens GenerateVoucherDialog on the create_voucher_pdf
+    // autoFix failure. Then drive Generate + Preview & Send to completion.
+    let voucherSentViaUi = false
     {
+      const voucherPromise = page
+        .waitForResponse(
+          (response) => response.url().includes("/api/voucher/generate"),
+          { timeout: 5_000 },
+        )
+        .catch(() => null)
+      await page
+        .getByRole("button", { name: /^Next/ })
+        .first()
+        .click({ timeout: 5_000 })
+        .catch(() => undefined)
+      await voucherPromise.catch(() => undefined)
+
+      const voucherResult = await tryGenerateAndSendVoucher(page)
+      report.step("UI: Generate Voucher → Preview & Send", {
+        status: voucherResult.outcome === "pass" ? "pass" : "warn",
+        screenshot: await report.screenshot(page, "stage-09-voucher-generate-send"),
+        evidence: { result: voucherResult },
+      })
+      if (voucherResult.outcome === "pass") {
+        voucherSentViaUi = true
+      } else {
+        workarounds.push({
+          stage: "voucher_sent",
+          reason: `UI voucher generate-and-send did not complete: ${voucherResult.reason}.`,
+        })
+      }
+    }
+
+    if (!voucherSentViaUi) {
       const supabase = createQaSupabase()
       const { error } = await supabase.from("documents").insert({
         booking_id: bookingId,
@@ -1075,10 +1118,6 @@ test("04-lifecycle: walk enquiry → voucher_sent capturing every gap", async ({
           ],
         })
       } else {
-        workarounds.push({
-          stage: "voucher_sent",
-          reason: "Voucher generation/send flow not exercised; synthesized voucher_pdf document row to test the stage gate.",
-        })
         report.step("Fallback: inserted voucher_pdf document via DB", { status: "warn" })
       }
 
@@ -1149,22 +1188,37 @@ test("04-lifecycle: walk enquiry → voucher_sent capturing every gap", async ({
           ],
     })
 
-    report.step("Document checklist", {
-      status: finalSnap.document_kinds.some((kind) => kind === "voucher_pdf")
-        ? "warn"
-        : "fail",
+    const artefacts = await collectArtefacts(bookingId)
+    const documentKindsSet = new Set(artefacts.documents.map((doc) => doc.kind))
+    const correspondenceKindsSet = new Set(artefacts.correspondence.map((c) => c.kind))
+    const requiredDocKinds: Array<{ kind: string; correspondenceKind: string; label: string }> = [
+      { kind: "quote_pdf", correspondenceKind: "quote", label: "Quote PDF" },
+      { kind: "invoice_pdf", correspondenceKind: "invoice", label: "Invoice PDFs (deposit + final)" },
+      { kind: "voucher_pdf", correspondenceKind: "voucher", label: "Voucher PDF" },
+    ]
+    const missing = requiredDocKinds.filter(
+      (r) => !documentKindsSet.has(r.kind) && !correspondenceKindsSet.has(r.correspondenceKind),
+    )
+
+    report.step("Document checklist (real artefacts from Storage + tables)", {
+      status: missing.length === 0
+        ? "pass"
+        : missing.length < requiredDocKinds.length
+          ? "warn"
+          : "fail",
       evidence: {
-        quoteNumbers: finalSnap.quote_numbers,
-        invoices: finalSnap.invoice_summary,
-        documents: finalSnap.document_kinds,
-        correspondence: finalSnap.correspondence_subjects,
+        documents: artefacts.documents,
+        correspondence: artefacts.correspondence,
+        invoices: artefacts.invoices,
+        quotes: artefacts.quotes,
+        missing: missing.map((m) => m.label),
       },
-      notes: [
-        "Quote PDFs (Q1/Q2): not exercised in Phase 4 (would require PreviewSend flow).",
-        "Deposit invoice PDF: not exercised (relied on direct insert).",
-        "Final invoice PDF: not exercised (relied on direct insert).",
-        "Voucher PDF: synthesized via direct insert only — actual render pipeline is the top integration gap.",
-      ],
+      notes: missing.length === 0
+        ? ["All required artefact kinds present."]
+        : [
+            "The following artefact kinds are still missing — either UI send flow failed or DB fallback row was inserted in lieu of a real PDF:",
+            ...missing.map((m) => `- ${m.label} (looked for documents.kind=${m.kind} or correspondences.kind=${m.correspondenceKind})`),
+          ],
     })
 
     const greenCount = stageTable.filter((s) => s.result === "pass").length

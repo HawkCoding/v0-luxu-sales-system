@@ -60,6 +60,10 @@ vi.mock("@/components/linked-account-form", () => ({
   LinkedAccountForm: () => null,
 }))
 
+vi.mock("@/components/new-enquiry-dialog", () => ({
+  NewEnquiryDialog: () => null,
+}))
+
 vi.mock("@/components/ui/accordion", () => ({
   Accordion: ({ children }: { children: React.ReactNode }) => children,
   AccordionItem: ({ children }: { children: React.ReactNode }) => children,
