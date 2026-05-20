@@ -268,6 +268,60 @@ async function attemptStageForward(
   }
 }
 
+// If a stage advance opens the stage-transition modal with only
+// confirm-severity failures (e.g. deposit_received_confirmation,
+// final_payment_confirmation, or an autoFixable like
+// create_invoice_correspondence), tick every "Confirm this action"
+// checkbox and click "Confirm and move". This exercises the real UI path
+// the salesperson uses, rather than falling back to forceAdvanceStage.
+//
+// Returns null when no modal is open or there's no enabled Proceed button
+// (e.g. blocking failures present); callers should fall back accordingly.
+async function tryConfirmAndProceed(
+  page: Page,
+  bookingId: string,
+): Promise<{ ok: boolean; status: number | null; ticked: number } | null> {
+  const dialog = page.getByRole("dialog").filter({ hasText: /Stage move needs attention/i })
+  if (!(await dialog.isVisible({ timeout: 1_500 }).catch(() => false))) {
+    return null
+  }
+
+  const checkboxes = dialog.getByRole("checkbox", { name: /confirm this action/i })
+  const checkboxCount = await checkboxes.count().catch(() => 0)
+  for (let index = 0; index < checkboxCount; index += 1) {
+    const checkbox = checkboxes.nth(index)
+    const isChecked = await checkbox.isChecked().catch(() => false)
+    if (!isChecked) {
+      await checkbox.click({ timeout: 2_000 }).catch(() => undefined)
+    }
+  }
+
+  const proceedButton = dialog.getByRole("button", { name: /confirm and move/i })
+  if (!(await proceedButton.isVisible({ timeout: 1_000 }).catch(() => false))) {
+    return { ok: false, status: null, ticked: checkboxCount }
+  }
+  if (await proceedButton.isDisabled().catch(() => true)) {
+    return { ok: false, status: null, ticked: checkboxCount }
+  }
+
+  const responsePromise = page
+    .waitForResponse(
+      (response) =>
+        response.url().includes(`/api/jobs/${bookingId}`) &&
+        response.request().method() === "PATCH",
+      { timeout: 15_000 },
+    )
+    .catch(() => null)
+
+  await proceedButton.click({ timeout: 5_000 }).catch(() => undefined)
+  const response = await responsePromise
+  if (!response) {
+    return { ok: false, status: null, ticked: checkboxCount }
+  }
+
+  return { ok: response.ok(), status: response.status(), ticked: checkboxCount }
+}
+
 // ---------------------------------------------------------------------------
 // Test
 // ---------------------------------------------------------------------------
@@ -808,23 +862,41 @@ test("04-lifecycle: walk enquiry → voucher_sent capturing every gap", async ({
         note: "ok",
       })
     } else {
-      report.step("UI: could not advance to deposit_requested", {
-        status: "warn",
-        evidence: {
-          status: moveDepReq.status,
-          failures: moveDepReq.failures,
-          body: moveDepReq.responseBody,
-        },
-      })
-      await page.keyboard.press("Escape").catch(() => undefined)
-      await forceAdvanceStage(bookingId, "deposit_requested", "Phase 4: blocked moving to deposit_requested")
-      workarounds.push({ stage: "deposit_requested", reason: "Next gate failure on deposit_requested." })
-      stageTable.push({
-        stage: "deposit_requested",
-        expected: "advance via UI Next",
-        result: "warn",
-        note: "force-advanced",
-      })
+      // Try resolving the gate via the stage-transition modal's
+      // confirm/autoFix checkboxes (createInvoiceCorrespondence here)
+      // before falling back to force-advance.
+      const confirmResult = await tryConfirmAndProceed(page, bookingId)
+      if (confirmResult?.ok) {
+        report.step("UI: stage advanced to deposit_requested via confirm modal", {
+          screenshot: await report.screenshot(page, "stage-05-deposit-requested-confirm"),
+          evidence: { ticked: confirmResult.ticked, status: confirmResult.status },
+        })
+        stageTable.push({
+          stage: "deposit_requested",
+          expected: "advance via UI Next after deposit invoice exists",
+          result: "pass",
+          note: "ok (resolved via confirm modal)",
+        })
+      } else {
+        report.step("UI: could not advance to deposit_requested", {
+          status: "warn",
+          evidence: {
+            status: moveDepReq.status,
+            failures: moveDepReq.failures,
+            body: moveDepReq.responseBody,
+            confirmModalResolved: confirmResult ?? null,
+          },
+        })
+        await page.keyboard.press("Escape").catch(() => undefined)
+        await forceAdvanceStage(bookingId, "deposit_requested", "Phase 4: blocked moving to deposit_requested")
+        workarounds.push({ stage: "deposit_requested", reason: "Next gate failure on deposit_requested." })
+        stageTable.push({
+          stage: "deposit_requested",
+          expected: "advance via UI Next",
+          result: "warn",
+          note: "force-advanced",
+        })
+      }
     }
 
     // -----------------------------------------------------------------
@@ -913,27 +985,44 @@ test("04-lifecycle: walk enquiry → voucher_sent capturing every gap", async ({
         note: "ok",
       })
     } else {
-      report.step("UI: could not advance to deposit_paid", {
-        status: "warn",
-        evidence: {
-          status: moveDepPaid.status,
-          failures: moveDepPaid.failures,
-          body: moveDepPaid.responseBody,
-        },
-        notes: [
-          "Per CLAUDE.md the system requires deposit_paid=TRUE before moving past this stage. Confirmed it was set.",
-          "If the stage gate still blocks, capture the failure reason for triage.",
-        ],
-      })
-      await page.keyboard.press("Escape").catch(() => undefined)
-      await forceAdvanceStage(bookingId, "deposit_paid", "Phase 4: blocked moving to deposit_paid even with deposit_paid=true")
-      workarounds.push({ stage: "deposit_paid", reason: "Next gate failure on deposit_paid." })
-      stageTable.push({
-        stage: "deposit_paid",
-        expected: "advance via UI Next",
-        result: "warn",
-        note: "force-advanced",
-      })
+      // Tick the depositReceived confirm checkbox in the stage-transition
+      // modal before falling back to force-advance.
+      const confirmResult = await tryConfirmAndProceed(page, bookingId)
+      if (confirmResult?.ok) {
+        report.step("UI: stage advanced to deposit_paid via confirm modal", {
+          screenshot: await report.screenshot(page, "stage-06-deposit-paid-confirm"),
+          evidence: { ticked: confirmResult.ticked, status: confirmResult.status },
+        })
+        stageTable.push({
+          stage: "deposit_paid",
+          expected: "advance via UI Next with payment recorded",
+          result: "pass",
+          note: "ok (resolved via confirm modal)",
+        })
+      } else {
+        report.step("UI: could not advance to deposit_paid", {
+          status: "warn",
+          evidence: {
+            status: moveDepPaid.status,
+            failures: moveDepPaid.failures,
+            body: moveDepPaid.responseBody,
+            confirmModalResolved: confirmResult ?? null,
+          },
+          notes: [
+            "Per CLAUDE.md the system requires deposit_paid=TRUE before moving past this stage. Confirmed it was set.",
+            "If the stage gate still blocks, capture the failure reason for triage.",
+          ],
+        })
+        await page.keyboard.press("Escape").catch(() => undefined)
+        await forceAdvanceStage(bookingId, "deposit_paid", "Phase 4: blocked moving to deposit_paid even with deposit_paid=true")
+        workarounds.push({ stage: "deposit_paid", reason: "Next gate failure on deposit_paid." })
+        stageTable.push({
+          stage: "deposit_paid",
+          expected: "advance via UI Next",
+          result: "warn",
+          note: "force-advanced",
+        })
+      }
     }
 
     // -----------------------------------------------------------------
@@ -1042,23 +1131,40 @@ test("04-lifecycle: walk enquiry → voucher_sent capturing every gap", async ({
         note: "ok",
       })
     } else {
-      report.step("UI: could not advance to final_paid", {
-        status: "warn",
-        evidence: {
-          status: moveFinal.status,
-          failures: moveFinal.failures,
-          body: moveFinal.responseBody,
-        },
-      })
-      await page.keyboard.press("Escape").catch(() => undefined)
-      await forceAdvanceStage(bookingId, "final_paid", "Phase 4: blocked moving to final_paid")
-      workarounds.push({ stage: "final_paid", reason: "Next gate failure on final_paid." })
-      stageTable.push({
-        stage: "final_paid",
-        expected: "advance via UI Next",
-        result: "warn",
-        note: "force-advanced",
-      })
+      // Tick the finalPaymentReceived confirm checkbox in the
+      // stage-transition modal before falling back to force-advance.
+      const confirmResult = await tryConfirmAndProceed(page, bookingId)
+      if (confirmResult?.ok) {
+        report.step("UI: stage advanced to final_paid via confirm modal", {
+          screenshot: await report.screenshot(page, "stage-08-final-paid-confirm"),
+          evidence: { ticked: confirmResult.ticked, status: confirmResult.status },
+        })
+        stageTable.push({
+          stage: "final_paid",
+          expected: "advance via UI Next with final invoice + balance payment",
+          result: "pass",
+          note: "ok (resolved via confirm modal)",
+        })
+      } else {
+        report.step("UI: could not advance to final_paid", {
+          status: "warn",
+          evidence: {
+            status: moveFinal.status,
+            failures: moveFinal.failures,
+            body: moveFinal.responseBody,
+            confirmModalResolved: confirmResult ?? null,
+          },
+        })
+        await page.keyboard.press("Escape").catch(() => undefined)
+        await forceAdvanceStage(bookingId, "final_paid", "Phase 4: blocked moving to final_paid")
+        workarounds.push({ stage: "final_paid", reason: "Next gate failure on final_paid." })
+        stageTable.push({
+          stage: "final_paid",
+          expected: "advance via UI Next",
+          result: "warn",
+          note: "force-advanced",
+        })
+      }
     }
 
     // -----------------------------------------------------------------
