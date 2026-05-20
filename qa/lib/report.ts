@@ -22,6 +22,7 @@ interface ReportStep {
 export interface BrowserDiagnostics {
   consoleErrors: string[]
   failedResponses: string[]
+  [key: string]: unknown
 }
 
 const STATUS_ICON: Record<StepStatus, string> = {

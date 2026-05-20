@@ -33,6 +33,7 @@
     "db:start": "npx supabase start",
     "db:stop": "npx supabase stop",
     "db:reset": "npx supabase db reset",
+    "db:seed:demo": "node scripts/seed-demo.mjs",
     "db:push": "npx supabase db push",
     "db:pull": "npx supabase db pull --schema public",
     "db:remote:compare": "powershell -ExecutionPolicy Bypass -File ./scripts/sync-remote-databases.ps1 -Mode compare",
@@ -113,6 +114,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.3",
     "@playwright/test": "^1.60.0",
     "@tailwindcss/postcss": "^4.1.13",
     "@testing-library/jest-dom": "^6.9.1",

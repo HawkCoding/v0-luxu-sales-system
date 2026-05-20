@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useMemo, useState } from "react"
-import { AlertTriangle, CheckCircle2, FileText, ShieldAlert } from "lucide-react"
+import { AlertTriangle, CheckCircle2, FileText, ShieldAlert, Wand2 } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -171,7 +171,30 @@ export function StageTransitionModal({
                         </Button>
                       </div>
                     </div>
-                    {confirmationKey && (
+                    {confirmationKey && failure.autoFixable && (
+                      <div className="flex items-center gap-2">
+                        {confirmations[confirmationKey] === true ? (
+                          <div
+                            className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400"
+                            data-testid={`autofix-${failure.gateId}-satisfied`}
+                          >
+                            <CheckCircle2 className="h-4 w-4" />
+                            <span>Will fix on confirm</span>
+                          </div>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="default"
+                            onClick={() => handleConfirmationChange(failure, true)}
+                            data-testid={`autofix-${failure.gateId}`}
+                          >
+                            <Wand2 data-icon="inline-start" />
+                            Fix and continue
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                    {confirmationKey && !failure.autoFixable && (
                       <div className="flex items-center gap-2">
                         <Checkbox
                           id={`${failure.gateId}-confirm`}
