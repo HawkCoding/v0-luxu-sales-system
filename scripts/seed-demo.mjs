@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /**
- * Applies supabase/seed-demo.sql against the local Supabase database via the
- * Supabase CLI's `db query --local --file` subcommand.
+ * Applies supabase/seed-demo.sql against the local Supabase database by
+ * piping the SQL into psql inside the running Supabase Postgres container.
  *
  * The standard `supabase db reset` re-runs seed.sql but does not pick up
- * additional files. We layer seed-demo.sql on top via this script. The CLI
- * shells to a psql session inside the local Supabase Docker container, so
- * no host-level psql install is required.
+ * additional files. `supabase db query --file` rejects multi-statement SQL
+ * (it uses a single prepared statement), so we shell to docker exec
+ * directly. This requires the local Supabase stack to be running — start
+ * with `pnpm db:start` if it isn't.
  *
  * Local-only by design: refuses to run if NEXT_PUBLIC_SUPABASE_URL points
  * at anything other than 127.0.0.1 / localhost. Production seeding belongs
@@ -40,6 +41,12 @@ function loadEnvFile(filePath) {
   }
 }
 
+function resolveContainerName() {
+  if (process.env.SUPABASE_DB_CONTAINER) return process.env.SUPABASE_DB_CONTAINER
+  const project = process.env.SUPABASE_PROJECT_ID ?? "luxus-sales-system"
+  return `supabase_db_${project}`
+}
+
 function main() {
   loadEnvFile(path.join(repoRoot, ".env.local"))
 
@@ -61,19 +68,27 @@ function main() {
     throw new Error(`Demo seed file not found at ${SEED_FILE}`)
   }
 
-  console.log(`[seed-demo] applying ${path.relative(repoRoot, SEED_FILE)} via supabase db query --local`)
+  const sql = readFileSync(SEED_FILE, "utf8")
+  const container = resolveContainerName()
 
-  // Windows-friendly invocation: spawn npx with shell:true so PATH lookups
-  // resolve npx.cmd on Windows without us hard-coding extensions.
+  console.log(`[seed-demo] applying ${path.relative(repoRoot, SEED_FILE)} via docker exec ${container}`)
+
   const result = spawnSync(
-    "npx",
-    ["supabase", "db", "query", "--local", "--file", SEED_FILE],
-    { stdio: "inherit", shell: true, cwd: repoRoot },
+    "docker",
+    ["exec", "-i", container, "psql", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-q"],
+    { input: sql, encoding: "utf8", shell: true },
   )
-  if (result.error) throw result.error
+  if (result.error) {
+    throw new Error(
+      `Failed to spawn docker: ${result.error.message}. ` +
+        `Is Docker Desktop running? Is the local Supabase stack up (\`pnpm db:start\`)?`,
+    )
+  }
+  if (result.stdout) process.stdout.write(result.stdout)
+  if (result.stderr) process.stderr.write(result.stderr)
   if (result.status !== 0) {
     throw new Error(
-      `supabase db query exited ${result.status}. ` +
+      `docker exec psql exited ${result.status}. ` +
         `Is the local Supabase stack running? Try \`pnpm db:start\` then re-run.`,
     )
   }
