@@ -11,6 +11,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -20,8 +25,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
-import { Loader2 } from "lucide-react"
+import { ChevronDown, Loader2 } from "lucide-react"
 import { TITLES, COUNTRIES } from "@/lib/form-data"
 
 interface CreateCustomerDialogProps {
@@ -38,16 +44,37 @@ interface FormState {
   phone: string
   country: string
   notes: string
+  province: string
+  dateOfBirth: string
+  vipStatus: boolean
+  preferences: string
+  communicationPreferences: string
 }
 
-type FormField = keyof Omit<FormState, "notes">
+type FormField = keyof Omit<
+  FormState,
+  "notes" | "province" | "dateOfBirth" | "vipStatus" | "preferences" | "communicationPreferences"
+>
 type FormErrors = Record<FormField, string | null>
 type FormTouched = Partial<Record<FormField, boolean>>
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 function getInitialForm(): FormState {
-  return { title: "", firstName: "", lastName: "", email: "", phone: "", country: "", notes: "" }
+  return {
+    title: "",
+    firstName: "",
+    lastName: "",
+    email: "",
+    phone: "",
+    country: "",
+    notes: "",
+    province: "",
+    dateOfBirth: "",
+    vipStatus: false,
+    preferences: "",
+    communicationPreferences: "",
+  }
 }
 
 function validateForm(form: FormState): FormErrors {
@@ -71,6 +98,7 @@ export function CreateCustomerDialog({ open, onOpenChange, onSuccess }: CreateCu
   const [touched, setTouched] = useState<FormTouched>({})
   const [isSaving, setIsSaving] = useState(false)
   const [emailConflictError, setEmailConflictError] = useState<string | null>(null)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
 
   const errors = useMemo(() => validateForm(form), [form])
   const hasErrors = useMemo(() => Object.values(errors).some((e) => e !== null), [errors])
@@ -93,6 +121,7 @@ export function CreateCustomerDialog({ open, onOpenChange, onSuccess }: CreateCu
         setTouched({})
         setEmailConflictError(null)
         setIsSaving(false)
+        setAdvancedOpen(false)
       }, 300)
     }
   }
@@ -122,6 +151,13 @@ export function CreateCustomerDialog({ open, onOpenChange, onSuccess }: CreateCu
           phone: form.phone || null,
           country: form.country || null,
           notes: form.notes || null,
+          province: form.province.trim() ? form.province.trim() : null,
+          date_of_birth: form.dateOfBirth || null,
+          vip_status: form.vipStatus,
+          preferences: form.preferences.trim() ? form.preferences.trim() : null,
+          communication_preferences: form.communicationPreferences.trim()
+            ? form.communicationPreferences.trim()
+            : null,
         }),
       })
 
@@ -284,6 +320,94 @@ export function CreateCustomerDialog({ open, onOpenChange, onSuccess }: CreateCu
             {form.notes.length > 4800 && (
               <p className="text-xs text-muted-foreground text-right">{form.notes.length}/5000</p>
             )}
+          </div>
+
+          {/* Advanced (optional) */}
+          <div className="col-span-2">
+            <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+              <CollapsibleTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="flex w-full items-center justify-between px-2"
+                  aria-expanded={advancedOpen}
+                  aria-controls="create-customer-advanced"
+                >
+                  <span className="text-sm font-medium">Advanced (optional)</span>
+                  <ChevronDown
+                    aria-hidden
+                    className={`h-4 w-4 transition-transform ${advancedOpen ? "rotate-180" : ""}`}
+                  />
+                </Button>
+              </CollapsibleTrigger>
+              <CollapsibleContent id="create-customer-advanced" className="pt-3">
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Province */}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="province">Province</Label>
+                    <Input
+                      id="province"
+                      value={form.province}
+                      onChange={(e) => setField("province", e.target.value)}
+                      placeholder="Enter province"
+                    />
+                  </div>
+
+                  {/* Date of Birth */}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="dateOfBirth">Date of birth</Label>
+                    <Input
+                      id="dateOfBirth"
+                      type="date"
+                      value={form.dateOfBirth}
+                      onChange={(e) => setField("dateOfBirth", e.target.value)}
+                    />
+                  </div>
+
+                  {/* VIP Status */}
+                  <div className="col-span-2 space-y-1.5">
+                    <Label htmlFor="vipStatus">VIP status</Label>
+                    <div className="flex h-10 items-center gap-2 rounded-md border px-3">
+                      <Switch
+                        id="vipStatus"
+                        checked={form.vipStatus}
+                        onCheckedChange={(checked) => setField("vipStatus", checked)}
+                        aria-label="VIP status"
+                      />
+                      <span className="text-sm text-muted-foreground">
+                        {form.vipStatus ? "VIP client" : "Standard client"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Preferences */}
+                  <div className="col-span-2 space-y-1.5">
+                    <Label htmlFor="preferences">Preferences</Label>
+                    <Textarea
+                      id="preferences"
+                      value={form.preferences}
+                      onChange={(e) => setField("preferences", e.target.value)}
+                      placeholder="Service, suite, dietary, or journey preferences..."
+                      rows={3}
+                      maxLength={2000}
+                    />
+                  </div>
+
+                  {/* Communication Preferences */}
+                  <div className="col-span-2 space-y-1.5">
+                    <Label htmlFor="communicationPreferences">Communication preferences</Label>
+                    <Textarea
+                      id="communicationPreferences"
+                      value={form.communicationPreferences}
+                      onChange={(e) => setField("communicationPreferences", e.target.value)}
+                      placeholder="Preferred channels, timing, or contact notes..."
+                      rows={3}
+                      maxLength={1000}
+                    />
+                  </div>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
           </div>
         </div>
 
