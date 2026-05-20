@@ -359,7 +359,7 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
           <Button variant="outline" onClick={() => handleOpenChange(false)} disabled={isSaving}>
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={isSaving || !canSubmit}>
+          <Button onClick={handleSubmit} disabled={isSaving}>
             {isSaving ? "Creating..." : "Create Supplier"}
           </Button>
         </DialogFooter>
