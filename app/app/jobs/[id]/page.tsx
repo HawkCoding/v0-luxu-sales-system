@@ -933,6 +933,9 @@ export default function JobDetailPage() {
           if (!pendingStage) return
           await moveStageTo(pendingStage, { overrideReason })
         }}
+        onSendFinalInvoice={() => {
+          setFinalInvoiceOpen(true)
+        }}
       />
 
       <GenerateDepositInvoiceDialog
