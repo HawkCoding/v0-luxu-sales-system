@@ -38,8 +38,8 @@ export function BookingStageStepper({ currentStage, className }: BookingStageSte
               <div
                 className={cn(
                   "flex h-7 w-7 items-center justify-center rounded-full border-2 transition-colors",
-                  isCompleted && "border-brand-gold bg-brand-gold text-card",
-                  isCurrent && "border-brand-gold bg-card text-brand-gold ring-2 ring-brand-gold/30",
+                  isCompleted && "border-success bg-success text-white",
+                  isCurrent && "border-accent bg-card text-accent ring-2 ring-accent/30",
                   isUpcoming && "border-muted-foreground/30 bg-card text-muted-foreground/50",
                 )}
                 title={stage.label}
@@ -57,7 +57,7 @@ export function BookingStageStepper({ currentStage, className }: BookingStageSte
                 className={cn(
                   "whitespace-nowrap text-[10px] font-medium",
                   isCompleted && "text-foreground",
-                  isCurrent && "text-brand-gold",
+                  isCurrent && "text-accent",
                   isUpcoming && "text-muted-foreground",
                 )}
                 style={{ fontFamily: "var(--font-inter)" }}
@@ -69,7 +69,7 @@ export function BookingStageStepper({ currentStage, className }: BookingStageSte
               <div
                 className={cn(
                   "mx-2 h-px w-8 transition-colors",
-                  isCompleted ? "bg-brand-gold" : "bg-muted-foreground/20",
+                  isCompleted ? "bg-success" : "bg-muted-foreground/20",
                 )}
                 aria-hidden="true"
               />
