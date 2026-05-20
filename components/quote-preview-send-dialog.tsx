@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { Loader2, Mail, RotateCcw, Send } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { useOptimisticSend } from "@/hooks/use-optimistic-send"
 import {
   Dialog,
   DialogContent,
@@ -51,6 +52,7 @@ export function QuotePreviewSendDialog({
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const optimisticSend = useOptimisticSend()
 
   async function loadPreview(nextIntroText = introText, nextSubject = subject) {
     setLoadingPreview(true)
@@ -111,35 +113,40 @@ export function QuotePreviewSendDialog({
     setSending(true)
     setError(null)
 
-    try {
-      const response = await fetch("/api/correspondence", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          bookingId: quote.jobId,
-          quoteId: quote.id,
-          channel: "email",
-          kind: "quote",
-          subject,
-          bodyHtml: html,
-          moveStage: "quote_sent",
-        }),
-      })
-      const payload = (await response.json()) as { error?: string }
+    const capturedSubject = subject
+    const capturedHtml = html
+    // Close dialog immediately for Gmail-style undo flow.
+    setOpen(false)
+    setSending(false)
 
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Failed to send quote")
-      }
+    const result = await optimisticSend({
+      pendingLabel: `Sending quote ${quote.quoteNumber || bookingNumber}...`,
+      successLabel: "Quote sent",
+      cancelledLabel: "Send cancelled",
+      perform: async () => {
+        const response = await fetch("/api/correspondence", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            bookingId: quote.jobId,
+            quoteId: quote.id,
+            channel: "email",
+            kind: "quote",
+            subject: capturedSubject,
+            bodyHtml: capturedHtml,
+            moveStage: "quote_sent",
+          }),
+        })
+        const payload = (await response.json()) as { error?: string }
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Failed to send quote")
+        }
+        return payload
+      },
+    })
 
-      toast.success("Quote sent")
-      setOpen(false)
+    if (result.ok) {
       onSent()
-    } catch (sendError) {
-      const message = sendError instanceof Error ? sendError.message : "Failed to send quote"
-      setError(message)
-      toast.error(message)
-    } finally {
-      setSending(false)
     }
   }
 

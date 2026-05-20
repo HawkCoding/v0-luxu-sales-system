@@ -7,6 +7,7 @@ export default defineConfig({
     globals: true,
     environment: "jsdom",
     setupFiles: ["./vitest.setup.ts"],
-    exclude: ["**/node_modules/**", "qa/specs/**"],
+    // qa/specs/ is Playwright-driven (pnpm qa); keep vitest out of it.
+    exclude: ["**/node_modules/**", "**/.next/**", "qa/**"],
   },
 })

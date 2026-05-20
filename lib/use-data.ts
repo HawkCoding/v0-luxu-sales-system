@@ -64,7 +64,9 @@ const fetcher = async (url: string) => {
 }
 
 const swrOptions = {
-  revalidateOnFocus: false,
+  revalidateOnFocus: true,
+  focusThrottleInterval: 30_000,
+  dedupingInterval: 2_000,
   onErrorRetry: (
     error: ApiError,
     _key: string,

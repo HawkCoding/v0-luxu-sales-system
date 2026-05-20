@@ -269,11 +269,12 @@ async function attemptStageForward(
 }
 
 // If a stage advance opens the stage-transition modal with only
-// confirm-severity failures (e.g. deposit_received_confirmation,
-// final_payment_confirmation, or an autoFixable like
-// create_invoice_correspondence), tick every "Confirm this action"
-// checkbox and click "Confirm and move". This exercises the real UI path
-// the salesperson uses, rather than falling back to forceAdvanceStage.
+// confirm-severity failures, satisfy each one and click "Confirm and move".
+//
+// Phase 5.1 replaced the "Confirm this action" checkbox with a "Fix and
+// continue" button for autoFixable confirms. The legacy checkbox is still
+// used for confirm-severity failures without an autoFix (depositReceived,
+// finalPaymentReceived). This helper handles both.
 //
 // Returns null when no modal is open or there's no enabled Proceed button
 // (e.g. blocking failures present); callers should fall back accordingly.
@@ -286,6 +287,17 @@ async function tryConfirmAndProceed(
     return null
   }
 
+  // Phase 5.1: click every "Fix and continue" button (autoFixable confirms).
+  const autoFixButtons = dialog.getByRole("button", { name: /fix and continue/i })
+  const autoFixCount = await autoFixButtons.count().catch(() => 0)
+  for (let index = 0; index < autoFixCount; index += 1) {
+    const button = autoFixButtons.first()
+    if (await button.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      await button.click({ timeout: 2_000 }).catch(() => undefined)
+    }
+  }
+
+  // Legacy: tick every "Confirm this action" checkbox (non-autoFixable confirms).
   const checkboxes = dialog.getByRole("checkbox", { name: /confirm this action/i })
   const checkboxCount = await checkboxes.count().catch(() => 0)
   for (let index = 0; index < checkboxCount; index += 1) {
@@ -295,13 +307,14 @@ async function tryConfirmAndProceed(
       await checkbox.click({ timeout: 2_000 }).catch(() => undefined)
     }
   }
+  const totalSatisfied = autoFixCount + checkboxCount
 
   const proceedButton = dialog.getByRole("button", { name: /confirm and move/i })
   if (!(await proceedButton.isVisible({ timeout: 1_000 }).catch(() => false))) {
-    return { ok: false, status: null, ticked: checkboxCount }
+    return { ok: false, status: null, ticked: totalSatisfied }
   }
   if (await proceedButton.isDisabled().catch(() => true)) {
-    return { ok: false, status: null, ticked: checkboxCount }
+    return { ok: false, status: null, ticked: totalSatisfied }
   }
 
   const responsePromise = page
@@ -316,10 +329,10 @@ async function tryConfirmAndProceed(
   await proceedButton.click({ timeout: 5_000 }).catch(() => undefined)
   const response = await responsePromise
   if (!response) {
-    return { ok: false, status: null, ticked: checkboxCount }
+    return { ok: false, status: null, ticked: totalSatisfied }
   }
 
-  return { ok: response.ok(), status: response.status(), ticked: checkboxCount }
+  return { ok: response.ok(), status: response.status(), ticked: totalSatisfied }
 }
 
 // ---------------------------------------------------------------------------

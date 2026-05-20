@@ -9,6 +9,21 @@ export interface RenderVoucherPdfInput {
   template?: VoucherTemplate | null
 }
 
+const SLOW_RENDER_THRESHOLD_MS = 2_000
+
 export async function renderVoucherPdf(input: RenderVoucherPdfInput): Promise<Buffer> {
-  return renderToBuffer(createElement(VoucherDocument, input) as unknown as Parameters<typeof renderToBuffer>[0])
+  const startedAt = performance.now()
+  const buffer = await renderToBuffer(
+    createElement(VoucherDocument, input) as unknown as Parameters<typeof renderToBuffer>[0],
+  )
+  const elapsedMs = performance.now() - startedAt
+  const voucherNumber = input.data?.voucherNumber ?? "unknown"
+  if (elapsedMs >= SLOW_RENDER_THRESHOLD_MS) {
+    console.warn(
+      `[voucher-pdf] slow render: voucher=${voucherNumber} duration=${elapsedMs.toFixed(0)}ms threshold=${SLOW_RENDER_THRESHOLD_MS}ms`,
+    )
+  } else {
+    console.log(`[voucher-pdf] rendered voucher=${voucherNumber} duration=${elapsedMs.toFixed(0)}ms`)
+  }
+  return buffer
 }
