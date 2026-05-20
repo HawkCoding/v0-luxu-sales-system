@@ -83,7 +83,7 @@ function buildSupabase(opts: BuildOpts = {}) {
       }
     : null
 
-  const correspondenceInsert = vi.fn(async () => ({ error: null }))
+  const correspondenceInsert = vi.fn(async (..._args: unknown[]) => ({ error: null }))
   const voucherUpdate = vi.fn(async () => ({ error: null }))
   const bookingUpdate = vi.fn(async () => ({ error: null }))
   const documentUpdate = vi.fn(async () => ({ error: null }))

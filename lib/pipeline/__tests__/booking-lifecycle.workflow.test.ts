@@ -243,7 +243,7 @@ describe("booking lifecycle workflow regression", () => {
         booking: { id: BOOKING_ID, stage: "quote_sent", source: "web_form" },
         customer,
         targetStage: "accepted",
-        quotes: [{ status: "sent", total: 1000, validity_until: "2099-12-31" }],
+        quotes: [{ status: "sent", total: 1000 }],
       }),
     ).toEqual([])
 
@@ -260,7 +260,7 @@ describe("booking lifecycle workflow regression", () => {
 
     expect(
       validateTransition({
-        booking: { id: BOOKING_ID, stage: "deposit_requested", source: "web_form", deposit_paid: true },
+        booking: { id: BOOKING_ID, stage: "deposit_requested", source: "web_form" },
         customer,
         targetStage: "deposit_paid",
         manualConfirmations: { depositReceived: true },
@@ -269,7 +269,7 @@ describe("booking lifecycle workflow regression", () => {
 
     expect(
       validateTransition({
-        booking: { id: BOOKING_ID, stage: "deposit_paid", source: "web_form", invoice_balance: 0 },
+        booking: { id: BOOKING_ID, stage: "deposit_paid", source: "web_form" },
         customer,
         targetStage: "final_paid",
         quotes: [{ status: "accepted", total: 1000 }],
@@ -285,8 +285,6 @@ describe("booking lifecycle workflow regression", () => {
           id: BOOKING_ID,
           stage: "final_paid",
           source: "web_form",
-          invoice_balance: 0,
-          departure_date: "2026-06-01",
         },
         customer,
         targetStage: "voucher_sent",
@@ -297,7 +295,7 @@ describe("booking lifecycle workflow regression", () => {
 
     expect(
       validateTransition({
-        booking: { id: BOOKING_ID, stage: "voucher_sent", source: "web_form", invoice_balance: 0 },
+        booking: { id: BOOKING_ID, stage: "voucher_sent", source: "web_form" },
         customer,
         targetStage: "closed",
       }),
@@ -410,7 +408,7 @@ describe("booking lifecycle workflow regression", () => {
 
     expect(
       validateTransition({
-        booking: { id: BOOKING_ID, stage: "deposit_requested", source: "web_form", deposit_paid: false },
+        booking: { id: BOOKING_ID, stage: "deposit_requested", source: "web_form" },
         customer,
         targetStage: "deposit_paid",
       }),
@@ -418,7 +416,7 @@ describe("booking lifecycle workflow regression", () => {
 
     expect(
       validateTransition({
-        booking: { id: BOOKING_ID, stage: "deposit_paid", source: "web_form", invoice_balance: 500 },
+        booking: { id: BOOKING_ID, stage: "deposit_paid", source: "web_form" },
         customer,
         targetStage: "final_paid",
         quotes: [{ status: "accepted", total: 1000 }],

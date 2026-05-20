@@ -14,15 +14,15 @@
 -- ------------------------------------------------------------
 -- Clean up prior demo state (idempotent)
 -- ------------------------------------------------------------
-delete from public.quote_line_items where quote_id = '00000000-0000-0000-0000-00000000dem0';
-delete from public.quotes where booking_id = '00000000-0000-0000-0000-00000000d3m0';
-delete from public.payments where booking_id = '00000000-0000-0000-0000-00000000d3m0';
-delete from public.invoices where booking_id = '00000000-0000-0000-0000-00000000d3m0';
-delete from public.correspondences where booking_id = '00000000-0000-0000-0000-00000000d3m0';
-delete from public.documents where booking_id = '00000000-0000-0000-0000-00000000d3m0';
-delete from public.booking_notes where booking_id = '00000000-0000-0000-0000-00000000d3m0';
-delete from public.bookings where id = '00000000-0000-0000-0000-00000000d3m0';
-delete from public.customers where id = '00000000-0000-0000-0000-00000000cusd';
+delete from public.quote_line_items where quote_id = '00000000-0000-0000-0000-00000000dd01';
+delete from public.quotes where booking_id = '00000000-0000-0000-0000-0000000099d0';
+delete from public.payments where booking_id = '00000000-0000-0000-0000-0000000099d0';
+delete from public.invoices where booking_id = '00000000-0000-0000-0000-0000000099d0';
+delete from public.correspondences where booking_id = '00000000-0000-0000-0000-0000000099d0';
+delete from public.documents where booking_id = '00000000-0000-0000-0000-0000000099d0';
+delete from public.booking_notes where booking_id = '00000000-0000-0000-0000-0000000099d0';
+delete from public.bookings where id = '00000000-0000-0000-0000-0000000099d0';
+delete from public.customers where id = '00000000-0000-0000-0000-0000000088d0';
 
 -- ------------------------------------------------------------
 -- Demo customer
@@ -32,7 +32,7 @@ insert into public.customers (
   notes, vip_status, preferences, communication_preferences,
   is_repeat_client, created_at, updated_at
 ) values (
-  '00000000-0000-0000-0000-00000000cusd',
+  '00000000-0000-0000-0000-0000000088d0',
   'Mr', 'Demo', 'Presenter', 'demo.presenter@luxustravel.co.za',
   '+27820000000', 'South Africa', 'Gauteng',
   'Synthetic demo customer for sales demonstrations. Safe to delete.',
@@ -58,9 +58,9 @@ insert into public.bookings (
   quote_sent_at, accepted_at,
   created_at, updated_at
 ) values (
-  '00000000-0000-0000-0000-00000000d3m0',
+  '00000000-0000-0000-0000-0000000099d0',
   'DEMO-2026-0001',
-  '00000000-0000-0000-0000-00000000cusd',
+  '00000000-0000-0000-0000-0000000088d0',
   '00000000-0000-0000-0000-000000003001', -- cape-town-classic
   '00000000-0000-0000-0000-000000004001', -- existing route from seed
   'reservation', 'web_form', 'accepted', 'CDJ',
@@ -86,8 +86,8 @@ insert into public.quotes (
   subtotal, vat, total,
   last_sent_at, created_at, updated_at
 ) values (
-  '00000000-0000-0000-0000-00000000dem0',
-  '00000000-0000-0000-0000-00000000d3m0',
+  '00000000-0000-0000-0000-00000000dd01',
+  '00000000-0000-0000-0000-0000000099d0',
   null,
   'DEMO-2026-0001-Q1',
   'accepted',
@@ -101,8 +101,8 @@ insert into public.quotes (
 insert into public.quote_line_items (
   id, quote_id, description, qty, unit_price, total, sort_order, created_at
 ) values (
-  '00000000-0000-0000-0000-00000000lin1',
-  '00000000-0000-0000-0000-00000000dem0',
+  '00000000-0000-0000-0000-00000000ed01',
+  '00000000-0000-0000-0000-00000000dd01',
   'Royal Double Suite (2 pax) - Cape Town Classic',
   1, 124000.00, 124000.00, 1, now() - interval '5 days'
 );

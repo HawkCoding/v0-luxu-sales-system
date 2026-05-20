@@ -3,7 +3,8 @@
 import { useCallback } from "react"
 import { toast } from "sonner"
 
-const DEFAULT_DELAY_MS = 5_000
+const DEFAULT_DELAY_MS =
+  Number(process.env.NEXT_PUBLIC_OPTIMISTIC_SEND_DELAY_MS) || 5_000
 
 export interface OptimisticSendOptions<T> {
   pendingLabel: string
