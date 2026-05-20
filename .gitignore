@@ -36,5 +36,5 @@ qa/reports/
 qa/screenshots/
 qa/playwright-report/
 qa/**/playwright-report/
-qa-phase*-output.log
+qa-phase*-output*.log
 test-results/
