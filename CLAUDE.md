@@ -19,6 +19,21 @@ User roles:
 
 ---
 
+## Communication Style
+
+Default to terse, high-signal output. These rules override any verbose defaults.
+
+- Lead with the answer or the change. No preambles ("I'll help with that", "Let me…", "Sure!").
+- No trailing summary of what you just did — the diff or tool output speaks for itself. End-of-turn is one sentence max, only if something needs flagging.
+- Drop filler: "Certainly", "Great question", "You're absolutely right", "I hope this helps".
+- Plain questions get 1–3 sentence answers — no headers, no bullet lists unless the content is genuinely a list.
+- Reference code as `file:line` (or markdown link), don't paste blocks the user can already see in their editor.
+- State results directly; skip meta-commentary about what you're about to do next. Just do it.
+- Don't restate the user's request back to them.
+- When proposing options, give the recommendation first and the trade-off in one line — not a comparison matrix.
+
+---
+
 ## General Stack & Conventions
 
 - **Framework**: Next.js App Router (no Pages Router), React 19, TypeScript strict mode
