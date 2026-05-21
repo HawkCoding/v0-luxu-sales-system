@@ -40,15 +40,15 @@ export function resolveMailpitSmtpConfig(): MailpitSmtpConfig {
 
   const host = process.env.MAILPIT_SMTP_HOST?.trim()
   const portRaw = process.env.MAILPIT_SMTP_PORT?.trim()
-  if (host && portRaw) {
+  if (portRaw) {
     const port = Number(portRaw)
     if (!Number.isFinite(port)) {
       throw new Error(`Invalid MAILPIT_SMTP_PORT: ${portRaw}`)
     }
-    return { host, port }
+    return { host: host ?? "127.0.0.1", port }
   }
 
-  return { host: "127.0.0.1", port: 1025 }
+  return { host: host ?? "127.0.0.1", port: 1025 }
 }
 
 async function sendWithMailpit(options: SendEmailOptions): Promise<SendEmailResult> {

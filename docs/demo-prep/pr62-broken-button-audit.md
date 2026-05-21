@@ -154,6 +154,23 @@ Test 3 (clear-import-review): FIX | DELETE | SKIP — <reason>
 
 ---
 
+## 2026-05-21 Audit Results
+
+```
+VERDICTS
+Test 1 (start-quote):         FIX   — only quote-creation entry point; demo runbook step 5 depends on it
+Test 2 (ownership):           DELETE — single-user demo; no team workflow in runbook; one active consultant in seed
+Test 3 (clear-import-review): FIX   — inbound-email is demoed in runbook step 4; Resolve button required after replay
+```
+
+**Implemented 2026-05-21:**
+- `app/api/jobs/[id]/start-quote/route.ts` — restored from `origin/feature/pipeline-job-workflow`
+- `app/api/jobs/[id]/clear-import-review/route.ts` — restored from `origin/feature/pipeline-job-workflow`
+- `app/api/jobs/[id]/ownership/` — route NOT restored (DELETE verdict)
+- `app/app/jobs/[id]/page.tsx` — removed `reassignSalesperson`, `updateOwnership`, `reassigningSalesperson` state, `canReassignSalesperson/canOwnBooking/canClaimBooking/canReleaseOwnBooking` derived vars, salesperson Select dropdown, Claim/Release buttons; salesperson now displays as static text
+
+---
+
 ## After the audit returns
 
 Bring the verdicts back here. The follow-up implementation pass will:

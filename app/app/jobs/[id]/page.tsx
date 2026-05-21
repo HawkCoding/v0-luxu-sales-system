@@ -29,7 +29,6 @@ import {
   type PipelineStage,
 } from "@/lib/types"
 import { useRole } from "@/lib/role-context"
-import { useAuth } from "@/lib/auth-context"
 import { AlertCircle, ArrowLeft, CheckCircle2, ChevronRight, ChevronLeft as ChevronLeftIcon, UserRound, XCircle, Target } from "lucide-react"
 import type { Outcome, OutcomeReason } from "@/lib/types"
 import Link from "next/link"
@@ -159,7 +158,6 @@ export default function JobDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { data, isLoading, error, mutate } = useJobDetail(id)
   const { can, role } = useRole()
-  const { user: currentUser } = useAuth()
   const { others, setEditing } = useRecordPresence("job", id)
   const hasLoadError = Boolean(error)
   const [cancelOpen, setCancelOpen] = useState(false)
@@ -175,7 +173,6 @@ export default function JobDetailPage() {
   const [customerSearch, setCustomerSearch] = useState("")
   const [customerResults, setCustomerResults] = useState<Array<{ id: string; firstName: string; lastName: string; email: string }>>([])
   const [changingCustomer, setChangingCustomer] = useState(false)
-  const [reassigningSalesperson, setReassigningSalesperson] = useState(false)
   const [resolvingImportReview, setResolvingImportReview] = useState(false)
   const [lastJobPayload, setLastJobPayload] = useState<Record<string, unknown> | null>(null)
   const [activeTab, setActiveTab] = useState<JobDetailTab>(() => parseJobDetailTab(searchParams.get("tab")))
@@ -240,7 +237,6 @@ export default function JobDetailPage() {
     documents,
     correspondence,
     auditLogs,
-    salespeople = [],
     outcomeReasons = [],
     settings,
   } = data
@@ -248,11 +244,6 @@ export default function JobDetailPage() {
   const currentStageIdx = PIPELINE_STAGES.findIndex(s => s.key === currentStage)
   const consultantName = CONSULTANTS.find((consultant) => consultant.key === job.consultant)?.name ?? job.consultant ?? undefined
   const needsEmailReview = Boolean(enquiry?.emailImportNeedsReview)
-  const canReassignSalesperson = role === "manager" || role === "admin"
-  const canOwnBooking = role === "consultant" || role === "manager" || role === "admin"
-  const canClaimBooking = canOwnBooking && job.assignedSalespersonId === null
-  const canReleaseOwnBooking =
-    role === "consultant" && Boolean(currentUser?.id) && job.assignedSalespersonId === currentUser?.id
   const assignedSalespersonName = job.assignedSalespersonName ?? "Unassigned"
   const hasNoPackageMatchQuote = quotes.some((quote: { noPackageMatch?: boolean }) => quote.noPackageMatch)
   const hasSentDepositInvoice = invoices.some(
@@ -435,31 +426,6 @@ export default function JobDetailPage() {
     }
   }
 
-  const reassignSalesperson = async (salespersonId: string) => {
-    setReassigningSalesperson(true)
-    try {
-      const response = await fetch(`/api/jobs/${id}/ownership`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          salespersonId === "__unassigned"
-            ? { action: "release" }
-            : { action: "assign", userId: salespersonId },
-        ),
-      })
-      const payload = (await response.json().catch(() => ({}))) as { error?: string }
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Could not update salesperson")
-      }
-      await mutate()
-      toast.success("Salesperson reassigned")
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not update salesperson")
-    } finally {
-      setReassigningSalesperson(false)
-    }
-  }
-
   const setOutcome = async () => {
     setOutcomeSubmitting(true)
     try {
@@ -482,27 +448,6 @@ export default function JobDetailPage() {
       toast.error(error instanceof Error ? error.message : "Could not update outcome")
     } finally {
       setOutcomeSubmitting(false)
-    }
-  }
-
-  const updateOwnership = async (action: "claim" | "release") => {
-    setReassigningSalesperson(true)
-    try {
-      const response = await fetch(`/api/jobs/${id}/ownership`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
-      })
-      const payload = (await response.json().catch(() => ({}))) as { error?: string }
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Could not update ownership")
-      }
-      await mutate()
-      toast.success(action === "claim" ? "Booking claimed" : "Booking released")
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not update ownership")
-    } finally {
-      setReassigningSalesperson(false)
     }
   }
 
@@ -560,52 +505,7 @@ export default function JobDetailPage() {
               <span>{(job as Record<string, unknown>).ownerName as string ?? "Unassigned"}</span>
               <span className="text-muted-foreground/40">·</span>
               <span className="font-medium text-foreground">Salesperson</span>
-              {canReassignSalesperson ? (
-                <Select
-                  value={job.assignedSalespersonId ?? "__unassigned"}
-                  onValueChange={(value) => void reassignSalesperson(value)}
-                  disabled={reassigningSalesperson || isSavingJob}
-                >
-                  <SelectTrigger size="sm" className="h-8 w-56 bg-background">
-                    <SelectValue placeholder="Assign salesperson" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__unassigned">Unassigned</SelectItem>
-                    {salespeople.map((salesperson: { id: string; name: string; email: string }) => (
-                      <SelectItem key={salesperson.id} value={salesperson.id}>
-                        {salesperson.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <span>{assignedSalespersonName}</span>
-              )}
-              {canClaimBooking && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-8"
-                  disabled={reassigningSalesperson}
-                  onClick={() => void updateOwnership("claim")}
-                >
-                  <UserRound className="mr-1.5 h-3.5 w-3.5" />
-                  Claim
-                </Button>
-              )}
-              {canReleaseOwnBooking && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-8"
-                  disabled={reassigningSalesperson}
-                  onClick={() => void updateOwnership("release")}
-                >
-                  Release
-                </Button>
-              )}
+              <span>{assignedSalespersonName}</span>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <Label htmlFor="booking-supplier-reference" className="font-medium text-foreground">
