@@ -45,6 +45,12 @@ describe("resolveMailpitSmtpConfig", () => {
     expect(resolveMailpitSmtpConfig()).toEqual({ host: "smtp.internal", port: 2500 })
   })
 
+  it("defaults host to 127.0.0.1 when only MAILPIT_SMTP_PORT is set", () => {
+    process.env.MAILPIT_SMTP_PORT = "54325"
+
+    expect(resolveMailpitSmtpConfig()).toEqual({ host: "127.0.0.1", port: 54325 })
+  })
+
   it("throws when MAILPIT_SMTP_PORT is not numeric", () => {
     process.env.MAILPIT_SMTP_HOST = "smtp.internal"
     process.env.MAILPIT_SMTP_PORT = "not-a-port"
