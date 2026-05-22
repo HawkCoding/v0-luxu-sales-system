@@ -15,12 +15,31 @@ export const suiteTypeSchema = z.object({
   luggageCapacity: z.number().int().nonnegative().nullable().optional(),
   description: z.string().trim().max(1000).nullable().optional(),
   active: z.boolean(),
+  sortOrder: z.number().int().nonnegative().default(0),
+  bedroomTypeIds: z.array(z.string().uuid()).default([]),
+  bedroomLayoutIds: z.array(z.string().uuid()).default([]),
+  bathroomTypeIds: z.array(z.string().uuid()).default([]),
+})
+
+const variantValueSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().trim().min(1, "Name is required").max(200),
+  sortOrder: z.number().int().nonnegative().default(0),
+  archivedAt: z.string().nullable().optional(),
+})
+
+const draftVariantValueSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().trim().max(200).default(""),
+  sortOrder: z.number().int().nonnegative().default(0),
+  archivedAt: z.string().nullable().optional(),
 })
 
 export const rateCardSchema = z.object({
   id: z.string().uuid().optional(),
   routeId: z.string().uuid(),
   suiteTypeId: z.string().uuid(),
+  rateTypeId: z.string().uuid().optional(),
   pricePerPerson: z.number().finite().nonnegative(),
   childPrice: z.number().finite().nonnegative().nullable(),
   infantPrice: z.number().finite().nonnegative().nullable(),
@@ -45,6 +64,10 @@ const vehicleRentalRouteDetailsSchema = z.object({
   oneWayFee: z.number().finite().nonnegative().nullable().optional(),
 })
 
+const routeDirectionModeSchema = z.enum(["one_way", "round_trip", "loop"])
+
+const commissionKindSchema = z.enum(["percent", "per_person"])
+
 export const routeSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().trim().min(1, "Route name is required"),
@@ -53,6 +76,9 @@ export const routeSchema = z.object({
   pickupPoint: z.string().trim().max(500).nullable().optional(),
   dropoffPoint: z.string().trim().max(500).nullable().optional(),
   vehicleRentalDetails: vehicleRentalRouteDetailsSchema.nullable().optional(),
+  directionMode: routeDirectionModeSchema.default("one_way"),
+  commissionType: commissionKindSchema.nullable().optional(),
+  commissionValue: z.number().finite().nonnegative().nullable().optional(),
   active: z.boolean(),
   rateCards: z.array(rateCardSchema).default([]),
 })
@@ -121,10 +147,17 @@ export const supplierSaveSchema = z.object({
   description: z.string().trim().max(2000).nullable().optional(),
   notes: z.string().trim().max(5000),
   singleSupplementPct: z.number().finite().min(0).max(1000).default(0),
+  infantMaxAge: z.number().int().min(0).max(17).nullable().optional(),
+  childMaxAge: z.number().int().min(0).max(17).nullable().optional(),
+  defaultCommissionType: commissionKindSchema.nullable().optional(),
+  defaultCommissionValue: z.number().finite().nonnegative().nullable().optional(),
   active: z.boolean(),
   emails: z.array(supplierEmailSchema).default([]),
   suiteTypes: z.array(suiteTypeSchema),
   routes: z.array(routeSchema).default([]),
+  bedroomTypes: z.array(variantValueSchema).default([]),
+  bedroomLayouts: z.array(variantValueSchema).default([]),
+  bathroomTypes: z.array(variantValueSchema).default([]),
   expectedUpdatedAt: z.string().optional(),
 }).superRefine((value, ctx) => {
   for (const [index, route] of value.routes.entries()) {
@@ -182,12 +215,17 @@ export const draftSuiteTypeSchema = z.object({
   luggageCapacity: z.number().int().nonnegative().nullable().default(null),
   description: z.string().trim().max(1000).nullable().default(null),
   active: z.boolean().default(true),
+  sortOrder: z.number().int().nonnegative().default(0),
+  bedroomTypeIds: z.array(z.string().uuid()).default([]),
+  bedroomLayoutIds: z.array(z.string().uuid()).default([]),
+  bathroomTypeIds: z.array(z.string().uuid()).default([]),
 })
 
 export const draftRateCardSchema = z.object({
   id: z.string().uuid().optional(),
   routeId: z.union([z.string().uuid(), z.literal("")]).default(""),
   suiteTypeId: z.union([z.string().uuid(), z.literal("")]).default(""),
+  rateTypeId: z.union([z.string().uuid(), z.literal("")]).optional().default(""),
   pricePerPerson: z.number().finite().nonnegative().default(0),
   childPrice: z.number().finite().nonnegative().nullable().default(null),
   infantPrice: z.number().finite().nonnegative().nullable().default(null),
@@ -204,6 +242,9 @@ export const draftRouteSchema = z.object({
   pickupPoint: z.string().trim().max(500).nullable().default(null),
   dropoffPoint: z.string().trim().max(500).nullable().default(null),
   vehicleRentalDetails: vehicleRentalRouteDetailsSchema.nullable().default(null),
+  directionMode: routeDirectionModeSchema.default("one_way"),
+  commissionType: commissionKindSchema.nullable().optional(),
+  commissionValue: z.number().finite().nonnegative().nullable().optional(),
   active: z.boolean().default(true),
   rateCards: z.array(draftRateCardSchema).default([]),
 })
@@ -241,10 +282,17 @@ export const supplierDraftSaveSchema = z.object({
   description: z.string().trim().max(2000).nullable().default(null),
   notes: z.string().trim().max(5000).default(""),
   singleSupplementPct: z.number().finite().min(0).max(1000).default(0),
+  infantMaxAge: z.number().int().min(0).max(17).nullable().optional(),
+  childMaxAge: z.number().int().min(0).max(17).nullable().optional(),
+  defaultCommissionType: commissionKindSchema.nullable().optional(),
+  defaultCommissionValue: z.number().finite().nonnegative().nullable().optional(),
   active: z.boolean().default(true),
   emails: z.array(draftSupplierEmailSchema).default([]),
   suiteTypes: z.array(draftSuiteTypeSchema).default([]),
   routes: z.array(draftRouteSchema).default([]),
+  bedroomTypes: z.array(draftVariantValueSchema).default([]),
+  bedroomLayouts: z.array(draftVariantValueSchema).default([]),
+  bathroomTypes: z.array(draftVariantValueSchema).default([]),
   expectedUpdatedAt: z.string().optional(),
 })
 

@@ -22,6 +22,9 @@ const ROVOS_SUITE_ID = "00000000-0000-4000-8000-000000000022"
 const HOTEL_SUITE_ID = "00000000-0000-4000-8000-000000000023"
 const VEHICLE_ID = "00000000-0000-4000-8000-000000000024"
 
+const RAC_RATE_TYPE_ID = "00000000-0000-4000-8000-000000000091"
+const STO_RATE_TYPE_ID = "00000000-0000-4000-8000-000000000092"
+
 function rateCard(
   id: string,
   routeId: string,
@@ -29,11 +32,13 @@ function rateCard(
   pricePerPerson: number,
   childPrice: number | null = null,
   infantPrice: number | null = null,
+  rateTypeId: string = RAC_RATE_TYPE_ID,
 ) {
   return {
     id,
     routeId,
     suiteTypeId,
+    rateTypeId,
     pricePerPerson,
     childPrice,
     infantPrice,
@@ -344,5 +349,45 @@ describe("pricing engine", () => {
         ],
       }),
     ).toThrow(/No pricing available/)
+  })
+
+  it("selects the requested rate type when multiple coexist", () => {
+    const detail = packageDetail({
+      legs: [
+        {
+          ...packageDetail().legs[0],
+          rateCards: [
+            rateCard("rate-blue-rac", BLUE_ROUTE_ID, SUITE_ID, 10000, 6000, 1000, RAC_RATE_TYPE_ID),
+            rateCard("rate-blue-sto", BLUE_ROUTE_ID, SUITE_ID, 8000, 5000, 800, STO_RATE_TYPE_ID),
+          ],
+        },
+      ],
+    })
+
+    const racLines = buildPackagePricing({
+      packageDetail: detail,
+      booking: { noOfAdults: 2, noOfChildren: 0, noOfSuites: 1, childAges: [] },
+      travelDate: "2026-06-01",
+      selections: [
+        { legId: BLUE_TRAIN_LEG_ID, routeId: BLUE_ROUTE_ID, suiteTypeId: SUITE_ID, rateTypeId: RAC_RATE_TYPE_ID },
+      ],
+    })
+    const racAdult = racLines.find((line) => line.description.endsWith("Adult"))
+    expect(racAdult?.pricingSnapshot?.rateCardId).toBe("rate-blue-rac")
+    expect(racAdult?.pricingSnapshot?.rateTypeId).toBe(RAC_RATE_TYPE_ID)
+    expect(racAdult?.pricingSnapshot?.baseUnitPrice).toBe(10000)
+
+    const stoLines = buildPackagePricing({
+      packageDetail: detail,
+      booking: { noOfAdults: 2, noOfChildren: 0, noOfSuites: 1, childAges: [] },
+      travelDate: "2026-06-01",
+      selections: [
+        { legId: BLUE_TRAIN_LEG_ID, routeId: BLUE_ROUTE_ID, suiteTypeId: SUITE_ID, rateTypeId: STO_RATE_TYPE_ID },
+      ],
+    })
+    const stoAdult = stoLines.find((line) => line.description.endsWith("Adult"))
+    expect(stoAdult?.pricingSnapshot?.rateCardId).toBe("rate-blue-sto")
+    expect(stoAdult?.pricingSnapshot?.rateTypeId).toBe(STO_RATE_TYPE_ID)
+    expect(stoAdult?.pricingSnapshot?.baseUnitPrice).toBe(8000)
   })
 })

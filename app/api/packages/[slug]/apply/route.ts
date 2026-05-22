@@ -14,6 +14,14 @@ const applyPackageSchema = z.object({
       selected: z.boolean().default(true),
       routeId: z.string().uuid().optional(),
       suiteTypeId: z.string().uuid().optional(),
+      direction: z.enum(["outbound", "return", "round_trip"]).optional(),
+      commissionOverride: z
+        .object({
+          type: z.enum(["percent", "per_person"]),
+          value: z.number().finite().nonnegative(),
+        })
+        .nullable()
+        .optional(),
     }),
   ).default([]),
 })
