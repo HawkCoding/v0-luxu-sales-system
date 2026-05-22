@@ -436,7 +436,11 @@ export async function POST(req: Request) {
     countryAliasMap,
   )
 
-  // --- 1. Upsert customer (match on email) ---
+  // --- 1. Upsert customer (match on email, or use linkedCustomerId when set) ---
+  const linkedCustomerId =
+    typeof body.linkedCustomerId === "string" && body.linkedCustomerId.trim().length > 0
+      ? body.linkedCustomerId.trim()
+      : null
   const { customerId, customerIsRepeatClient } = await resolveEnquiryCustomer(supabase, {
     normalizedEmail,
     firstName: normalizedCustomerFirstName,
@@ -445,6 +449,7 @@ export async function POST(req: Request) {
     country: normalizedCountry,
     title: body.title || null,
     nowIso: new Date().toISOString(),
+    existingCustomerId: linkedCustomerId,
   })
 
   if (!customerId) {
@@ -704,12 +709,34 @@ interface ResolveEnquiryCustomerInput {
   country: string | null
   title: string | null
   nowIso: string
+  existingCustomerId?: string | null
 }
 
 export async function resolveEnquiryCustomer(
   supabase: ServiceClient,
   input: ResolveEnquiryCustomerInput,
 ): Promise<{ customerId: string | null; customerIsRepeatClient: boolean }> {
+  if (input.existingCustomerId) {
+    const { data: presetCustomer } = await supabase
+      .from("customers")
+      .select("id")
+      .eq("id", input.existingCustomerId)
+      .maybeSingle()
+
+    if (presetCustomer) {
+      const { data: priorCompletedBookings } = await supabase
+        .from("bookings")
+        .select("id")
+        .eq("customer_id", presetCustomer.id)
+        .in("stage", COMPLETED_REPEAT_BOOKING_STAGES)
+        .limit(1)
+      return {
+        customerId: presetCustomer.id,
+        customerIsRepeatClient: (priorCompletedBookings ?? []).length > 0,
+      }
+    }
+  }
+
   const { data: existingCustomer } = await supabase
     .from("customers")
     .select("id")

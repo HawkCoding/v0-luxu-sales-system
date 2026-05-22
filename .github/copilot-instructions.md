@@ -3,7 +3,9 @@
 ## Project Overview
 
 Luxus Sales System manages the full lifecycle of luxury train travel bookings:
-**New Enquiry → Quote Sent → Quote Accepted → Deposit Invoice Sent → Deposit Paid → Booking Made → Final Invoice Sent → Paid in Full → Voucher Sent → Closed**
+**New Enquiry → Quote Sent → Quote Accepted → Deposit Invoice Sent → Deposit Paid → Final Invoice Sent → Paid in Full → Voucher Sent → Closed**
+
+The supplier booking step is captured by the `deposit_paid` stage + the suppliers tab on the booking; there is no separate `booking_made` enum value. Stage transitions are enforced by `lib/pipeline/validate-transition.ts`.
 
 Key domain rules:
 - Quotes are valid 14 days and versioned (e.g. `BT-2026-0001-Q1`)

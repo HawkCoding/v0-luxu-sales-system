@@ -64,7 +64,14 @@ const fetcher = async (url: string) => {
 }
 
 const swrOptions = {
+  // Phase 5.4 originally enabled focus revalidation here, but it raced the
+  // Supabase session refresh under Playwright (the 03-customer spec hit 403s
+  // on customer PATCH because focus events fired during navigation). Holding
+  // off until we have a session-refresh-safe story. focusThrottleInterval
+  // and dedupingInterval are still useful for hot endpoints.
   revalidateOnFocus: false,
+  focusThrottleInterval: 30_000,
+  dedupingInterval: 2_000,
   onErrorRetry: (
     error: ApiError,
     _key: string,

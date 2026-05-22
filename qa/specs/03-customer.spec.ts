@@ -279,6 +279,12 @@ test("03-customer manual create flow with duplicate detection", async ({ page, b
       await dialog.getByLabel(/^Last Name/i).fill(fixture.lastName)
       await dialog.getByLabel("Email", { exact: false }).first().fill(fixture.email)
 
+      // Snapshot diagnostics before the duplicate POST so we can filter out
+      // the expected 409 + its companion console error after the step
+      // completes. The 409 is the assertion of this step, not a defect.
+      const consoleErrorsBefore = diagnostics.consoleErrors.length
+      const failedResponsesBefore = diagnostics.failedResponses.length
+
       const dupResponsePromise = page.waitForResponse(
         (response) => response.url().includes("/api/customers") && response.request().method() === "POST",
       )
@@ -303,6 +309,31 @@ test("03-customer manual create flow with duplicate detection", async ({ page, b
             ? []
             : ["Expected: HTTP 409 + inline 'A customer with this email address already exists.' message."],
       })
+
+      // Filter out the expected 409 and any console errors emitted by it.
+      // We only touch entries that appeared during this step so unrelated
+      // 409s elsewhere still surface.
+      if (dupStatus === 409 && conflictShown) {
+        const isExpectedFailedResponse = (entry: string): boolean =>
+          /^409\s.*\/api\/customers/.test(entry)
+        const isExpectedConsoleError = (entry: string): boolean =>
+          /409/.test(entry) || /already exists/i.test(entry)
+
+        diagnostics.failedResponses.splice(
+          failedResponsesBefore,
+          diagnostics.failedResponses.length - failedResponsesBefore,
+          ...diagnostics.failedResponses
+            .slice(failedResponsesBefore)
+            .filter((entry) => !isExpectedFailedResponse(entry)),
+        )
+        diagnostics.consoleErrors.splice(
+          consoleErrorsBefore,
+          diagnostics.consoleErrors.length - consoleErrorsBefore,
+          ...diagnostics.consoleErrors
+            .slice(consoleErrorsBefore)
+            .filter((entry) => !isExpectedConsoleError(entry)),
+        )
+      }
 
       await dialog.getByRole("button", { name: /^Cancel$/ }).click()
     }

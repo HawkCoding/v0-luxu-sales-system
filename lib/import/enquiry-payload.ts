@@ -26,6 +26,7 @@ export interface EnquiryImportPayload {
   flightBooking?: string
   flightDepartureDate?: string
   province?: string
+  linkedCustomerId?: string
   extractedJson: {
     parsedFrom: "email_draft"
     formFields: ParsedDraft["formFields"]
@@ -63,6 +64,7 @@ export function buildEnquiryImportPayload(draft: ParsedDraft): EnquiryImportPayl
     flightBooking: draft.trip.flightBooking || undefined,
     flightDepartureDate: draft.trip.flightDepartureDate || undefined,
     province: draft.customer.province || undefined,
+    linkedCustomerId: draft.linkedCustomerId || undefined,
     extractedJson: {
       parsedFrom: "email_draft",
       formFields: draft.formFields,

@@ -41,6 +41,7 @@ import { JobDocumentsTab } from "@/components/job-documents-tab"
 import { JobAttachmentsTab } from "@/components/job-attachments-tab"
 import { JobInternalNotesTab } from "@/components/job-internal-notes-tab"
 import { JobAuditTab } from "@/components/job-audit-tab"
+import { BookingStageStepper } from "@/components/booking-stage-stepper"
 import { CancelBookingDialog } from "@/components/cancel-booking-dialog"
 import { StageTransitionModal } from "@/components/stage-transition-modal"
 import { GenerateDepositInvoiceDialog } from "@/components/generate-deposit-invoice-dialog"
@@ -647,17 +648,22 @@ export default function JobDetailPage() {
           </div>
         </div>
         {can("edit:pipeline") && (
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" disabled={currentStageIdx <= 0 || transitionSubmitting} onClick={() => moveStage("back")}>
-              <ChevronLeftIcon className="w-4 h-4 mr-1" /> Back
-            </Button>
-            <Button size="sm" disabled={currentStageIdx >= PIPELINE_STAGES.length - 1 || needsEmailReview || isSavingJob || transitionSubmitting} onClick={() => moveStage("forward")}>
-              Next <ChevronRight className="w-4 h-4 ml-1" />
-            </Button>
-            {can("cancel:booking") && job.stage !== "lost" && job.stage !== "closed" && (
-              <Button variant="destructive" size="sm" onClick={() => setCancelOpen(true)}>
-                <XCircle className="w-4 h-4 mr-1" /> Cancel Booking
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" disabled={currentStageIdx <= 0 || transitionSubmitting} onClick={() => moveStage("back")}>
+                <ChevronLeftIcon className="w-4 h-4 mr-1" /> Back
               </Button>
+              <Button size="sm" disabled={currentStageIdx >= PIPELINE_STAGES.length - 1 || needsEmailReview || isSavingJob || transitionSubmitting} onClick={() => moveStage("forward")}>
+                Next <ChevronRight className="w-4 h-4 ml-1" />
+              </Button>
+              {can("cancel:booking") && job.stage !== "lost" && job.stage !== "closed" && (
+                <Button variant="destructive" size="sm" onClick={() => setCancelOpen(true)}>
+                  <XCircle className="w-4 h-4 mr-1" /> Cancel Booking
+                </Button>
+              )}
+            </div>
+            {needsEmailReview && (
+              <p className="text-[11px] text-muted-foreground">Resolve email review to advance</p>
             )}
           </div>
         )}
@@ -699,23 +705,7 @@ export default function JobDetailPage() {
       )}
 
       {/* Stage Progress */}
-      <div className="flex items-center gap-1 overflow-x-auto pb-1">
-        {PIPELINE_STAGES.map((s, i) => (
-          <div
-            key={s.key}
-            className={`px-2.5 py-1 rounded text-[10px] font-medium whitespace-nowrap transition-colors ${
-              i === currentStageIdx
-                ? "bg-brand-gold text-card"
-                : i < currentStageIdx
-                  ? "bg-secondary text-foreground"
-                  : "bg-secondary/50 text-muted-foreground"
-            }`}
-            style={{ fontFamily: "var(--font-inter)" }}
-          >
-            {s.label}
-          </div>
-        ))}
-      </div>
+      <BookingStageStepper currentStage={job.stage as PipelineStage} />
 
       {/* Customer Info */}
       <Card>
@@ -850,6 +840,7 @@ export default function JobDetailPage() {
             payments={payments}
             jobId={id}
             mutate={mutate}
+            stage={currentStage}
           />
         </TabsContent>
         <TabsContent value="correspondence">
@@ -931,6 +922,9 @@ export default function JobDetailPage() {
         onOverride={async (overrideReason) => {
           if (!pendingStage) return
           await moveStageTo(pendingStage, { overrideReason })
+        }}
+        onSendFinalInvoice={() => {
+          setFinalInvoiceOpen(true)
         }}
       />
 
