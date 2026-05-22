@@ -27,6 +27,9 @@ interface NormalizedRoute {
   destination_location_id: string | null
   pickup_point: string | null
   dropoff_point: string | null
+  direction_mode: "one_way" | "round_trip" | "loop"
+  commission_type: "percent" | "per_person" | null
+  commission_value: number | null
   active: boolean
   created_at: string
   updated_at: string
@@ -46,6 +49,7 @@ interface NormalizedRateCard {
   id: string
   route_id: string
   suite_type_id: string
+  rate_type_id: string
   price_per_person: number
   child_price: number | null
   infant_price: number | null
@@ -87,9 +91,10 @@ async function hasSupplierWriteAccess(
 function getRateCardBusinessKey(rateCard: {
   route_id: string
   suite_type_id: string
+  rate_type_id: string
   valid_from: string
 }) {
-  return [rateCard.route_id, rateCard.suite_type_id, rateCard.valid_from].join("|")
+  return [rateCard.rate_type_id, rateCard.route_id, rateCard.suite_type_id, rateCard.valid_from].join("|")
 }
 
 function normalizeOptionalText(value: string | null | undefined): string | null {
@@ -116,7 +121,7 @@ function checkRateCardOverlaps(rateCards: NormalizedRateCard[]) {
   const groupedRateCards = new Map<string, NormalizedRateCard[]>()
 
   for (const rateCard of rateCards) {
-    const groupKey = [rateCard.route_id, rateCard.suite_type_id].join("|")
+    const groupKey = [rateCard.rate_type_id, rateCard.route_id, rateCard.suite_type_id].join("|")
     const nextGroup = groupedRateCards.get(groupKey) ?? []
     nextGroup.push(rateCard)
     groupedRateCards.set(groupKey, nextGroup)
@@ -182,6 +187,15 @@ export async function GET(
       detail.rateCards,
       detail.locations,
       detail.vehicleRentalRouteDetails,
+      {
+        bedroomTypes: detail.bedroomTypes,
+        bedroomLayouts: detail.bedroomLayouts,
+        bathroomTypes: detail.bathroomTypes,
+        suiteTypeBedroomTypes: detail.suiteTypeBedroomTypes,
+        suiteTypeBedroomLayouts: detail.suiteTypeBedroomLayouts,
+        suiteTypeBathroomTypes: detail.suiteTypeBathroomTypes,
+        rateTypes: detail.rateTypes,
+      },
     ),
   )
 }
@@ -340,7 +354,7 @@ export async function PATCH(
   const now = new Date().toISOString()
   const isTransport = isTransportSupplier(parsed.kind)
   const normalizedSuiteTypes = parsed.suiteTypes
-    .map((suiteType) => ({
+    .map((suiteType, index) => ({
       id: suiteType.id ?? makeUuid(),
       supplier_id: supplierId,
       name: suiteType.name.trim(),
@@ -348,24 +362,68 @@ export async function PATCH(
       luggage_capacity: isTransport ? (suiteType.luggageCapacity ?? null) : null,
       description: isTransport ? normalizeOptionalText(suiteType.description) : null,
       active: suiteType.active,
+      sort_order: suiteType.sortOrder ?? index,
+      bedroomTypeIds: suiteType.bedroomTypeIds ?? [],
+      bedroomLayoutIds: suiteType.bedroomLayoutIds ?? [],
+      bathroomTypeIds: suiteType.bathroomTypeIds ?? [],
       created_at: now,
       updated_at: now,
     }))
     .filter((suiteType) => !isDraftSave || suiteType.name.length > 0)
 
+  function normalizeVariantList<T extends { id?: string; name: string; sortOrder?: number; archivedAt?: string | null }>(
+    entries: T[],
+  ) {
+    return entries
+      .map((entry, index) => ({
+        id: entry.id ?? makeUuid(),
+        supplier_id: supplierId,
+        name: entry.name.trim(),
+        sort_order: entry.sortOrder ?? index,
+        archived_at: entry.archivedAt ?? null,
+        created_at: now,
+        updated_at: now,
+      }))
+      .filter((entry) => entry.name.length > 0)
+  }
+
+  const normalizedBedroomTypes = normalizeVariantList(parsed.bedroomTypes ?? [])
+  const normalizedBedroomLayouts = normalizeVariantList(parsed.bedroomLayouts ?? [])
+  const normalizedBathroomTypes = normalizeVariantList(parsed.bathroomTypes ?? [])
+
+  const allowedBedroomTypeIds = new Set(normalizedBedroomTypes.map((row) => row.id))
+  const allowedBedroomLayoutIds = new Set(normalizedBedroomLayouts.map((row) => row.id))
+  const allowedBathroomTypeIds = new Set(normalizedBathroomTypes.map((row) => row.id))
+
+  function pairCommission(
+    type: "percent" | "per_person" | null | undefined,
+    value: number | null | undefined,
+  ): { type: "percent" | "per_person" | null; value: number | null } {
+    if (type && value !== null && value !== undefined && Number.isFinite(value) && value >= 0) {
+      return { type, value }
+    }
+    return { type: null, value: null }
+  }
+
   const normalizedRoutes: NormalizedRoute[] = parsed.routes
-    .map((route) => ({
-      id: route.id ?? makeUuid(),
-      supplier_id: supplierId,
-      name: route.name.trim(),
-      origin_location_id: isTransport ? null : normalizeOptionalUuid(route.originLocationId),
-      destination_location_id: isTransport ? null : normalizeOptionalUuid(route.destinationLocationId),
-      pickup_point: isTransport ? normalizeOptionalText(route.pickupPoint) : null,
-      dropoff_point: isTransport ? normalizeOptionalText(route.dropoffPoint) : null,
-      active: route.active,
-      created_at: now,
-      updated_at: now,
-    }))
+    .map((route) => {
+      const commission = pairCommission(route.commissionType, route.commissionValue)
+      return {
+        id: route.id ?? makeUuid(),
+        supplier_id: supplierId,
+        name: route.name.trim(),
+        origin_location_id: isTransport ? null : normalizeOptionalUuid(route.originLocationId),
+        destination_location_id: isTransport ? null : normalizeOptionalUuid(route.destinationLocationId),
+        pickup_point: isTransport ? normalizeOptionalText(route.pickupPoint) : null,
+        dropoff_point: isTransport ? normalizeOptionalText(route.dropoffPoint) : null,
+        direction_mode: route.directionMode ?? "one_way",
+        commission_type: commission.type,
+        commission_value: commission.value,
+        active: route.active,
+        created_at: now,
+        updated_at: now,
+      }
+    })
     .filter((route) =>
       isDraftSave
         ? isTransport
@@ -394,6 +452,13 @@ export async function PATCH(
       : []
 
   const suiteTypeIds = new Set(normalizedSuiteTypes.map((suiteType) => suiteType.id))
+  const activeRateTypeIds = new Set(
+    (existingDetail.rateTypes ?? []).filter((row) => !row.archived_at).map((row) => row.id),
+  )
+  const defaultRateTypeId =
+    (existingDetail.rateTypes ?? []).find((row) => row.is_default && !row.archived_at)?.id
+    ?? (existingDetail.rateTypes ?? []).find((row) => !row.archived_at)?.id
+    ?? null
   const existingRateCardByBusinessKey = new Map(
     existingDetail.rateCards.map((rateCard) => [getRateCardBusinessKey(rateCard), rateCard]),
   )
@@ -420,18 +485,26 @@ export async function PATCH(
       }
 
       return route.rateCards
-        .map((rateCard) => ({
-          id: rateCard.id ?? makeUuid(),
-          route_id: routeId,
-          suite_type_id: rateCard.suiteTypeId,
-          price_per_person: rateCard.pricePerPerson,
-          child_price: isTransport ? null : rateCard.childPrice,
-          infant_price: isTransport ? null : rateCard.infantPrice,
-          currency: rateCard.currency.trim().toUpperCase() || "ZAR",
-          valid_from: rateCard.validFrom,
-          valid_to: normalizeNullableDate(rateCard.validTo),
-          created_at: now,
-        }))
+        .map((rateCard) => {
+          const requestedRateTypeId =
+            "rateTypeId" in rateCard && typeof rateCard.rateTypeId === "string" && rateCard.rateTypeId.length > 0
+              ? rateCard.rateTypeId
+              : null
+          const resolvedRateTypeId = requestedRateTypeId ?? defaultRateTypeId ?? ""
+          return {
+            id: rateCard.id ?? makeUuid(),
+            route_id: routeId,
+            suite_type_id: rateCard.suiteTypeId,
+            rate_type_id: resolvedRateTypeId,
+            price_per_person: rateCard.pricePerPerson,
+            child_price: isTransport ? null : rateCard.childPrice,
+            infant_price: isTransport ? null : rateCard.infantPrice,
+            currency: rateCard.currency.trim().toUpperCase() || "ZAR",
+            valid_from: rateCard.validFrom,
+            valid_to: normalizeNullableDate(rateCard.validTo),
+            created_at: now,
+          }
+        })
         .filter((rateCard) => {
           if (!isDraftSave) return true
           return (
@@ -448,6 +521,12 @@ export async function PATCH(
       }
       if (!suiteTypeIds.has(rateCard.suite_type_id)) {
         throw new Error("Each rate card must reference a suite type from this supplier.")
+      }
+      if (!rateCard.rate_type_id) {
+        throw new Error("No rate type is configured. Add one in Settings → Rate Types and try again.")
+      }
+      if (!activeRateTypeIds.has(rateCard.rate_type_id)) {
+        throw new Error("Each rate card must reference an active rate type.")
       }
       if (rateCard.valid_to && rateCard.valid_to < rateCard.valid_from) {
         throw new Error("Rate card Valid to must be after Valid from.")
@@ -568,6 +647,7 @@ export async function PATCH(
     )
   }
 
+  const supplierCommission = pairCommission(parsed.defaultCommissionType, parsed.defaultCommissionValue)
   const supplierUpdatePayload = {
     name: parsed.name.trim(),
     kind: parsed.kind,
@@ -580,6 +660,10 @@ export async function PATCH(
     description: parsed.description?.trim() || null,
     notes: parsed.notes || null,
     single_supplement_pct: parsed.singleSupplementPct,
+    infant_max_age: parsed.infantMaxAge ?? null,
+    child_max_age: parsed.childMaxAge ?? null,
+    default_commission_type: supplierCommission.type,
+    default_commission_value: supplierCommission.value,
     active: isDraftSave ? false : parsed.active,
   }
 
@@ -624,10 +708,87 @@ export async function PATCH(
     }
   }
 
+  // Upsert vocabulary tables BEFORE suite_types so the M:N joins can resolve.
+  if (normalizedBedroomTypes.length > 0) {
+    const { error: bedroomTypesError } = await supabase
+      .from("bedroom_types")
+      .upsert(
+        normalizedBedroomTypes.map(({ id, supplier_id, name, sort_order, archived_at }) => ({
+          id,
+          supplier_id,
+          name,
+          sort_order,
+          archived_at,
+        })),
+        { onConflict: "id" },
+      )
+    if (bedroomTypesError) {
+      logSupplierMutationError("bedroom-types-upsert", supplierId, bedroomTypesError)
+      return NextResponse.json(
+        { error: "Failed to update bedroom types" },
+        { status: 500 },
+      )
+    }
+  }
+  if (normalizedBedroomLayouts.length > 0) {
+    const { error: bedroomLayoutsError } = await supabase
+      .from("bedroom_layouts")
+      .upsert(
+        normalizedBedroomLayouts.map(({ id, supplier_id, name, sort_order, archived_at }) => ({
+          id,
+          supplier_id,
+          name,
+          sort_order,
+          archived_at,
+        })),
+        { onConflict: "id" },
+      )
+    if (bedroomLayoutsError) {
+      logSupplierMutationError("bedroom-layouts-upsert", supplierId, bedroomLayoutsError)
+      return NextResponse.json(
+        { error: "Failed to update bedroom layouts" },
+        { status: 500 },
+      )
+    }
+  }
+  if (normalizedBathroomTypes.length > 0) {
+    const { error: bathroomTypesError } = await supabase
+      .from("bathroom_types")
+      .upsert(
+        normalizedBathroomTypes.map(({ id, supplier_id, name, sort_order, archived_at }) => ({
+          id,
+          supplier_id,
+          name,
+          sort_order,
+          archived_at,
+        })),
+        { onConflict: "id" },
+      )
+    if (bathroomTypesError) {
+      logSupplierMutationError("bathroom-types-upsert", supplierId, bathroomTypesError)
+      return NextResponse.json(
+        { error: "Failed to update bathroom types" },
+        { status: 500 },
+      )
+    }
+  }
+
   if (normalizedSuiteTypes.length > 0) {
+    const suiteTypeRowsForUpsert = normalizedSuiteTypes.map((suiteType) => ({
+      id: suiteType.id,
+      supplier_id: suiteType.supplier_id,
+      name: suiteType.name,
+      passenger_capacity: suiteType.passenger_capacity,
+      luggage_capacity: suiteType.luggage_capacity,
+      description: suiteType.description,
+      active: suiteType.active,
+      sort_order: suiteType.sort_order,
+      created_at: suiteType.created_at,
+      updated_at: suiteType.updated_at,
+    }))
     const { error: suiteTypesError } = await supabase
       .from("suite_types")
-      .upsert(normalizedSuiteTypes, { onConflict: "id" })
+      .upsert(suiteTypeRowsForUpsert, { onConflict: "id" })
 
     if (suiteTypesError) {
       logSupplierMutationError("suite-types-upsert", supplierId, suiteTypesError)
@@ -635,6 +796,81 @@ export async function PATCH(
         { error: "Failed to update supplier suite types" },
         { status: 500 },
       )
+    }
+
+    // Replace M:N memberships for each suite type (delete then insert).
+    const suiteTypeIds = normalizedSuiteTypes.map((suiteType) => suiteType.id)
+    const [
+      { error: deleteBedroomTypeLinksError },
+      { error: deleteBedroomLayoutLinksError },
+      { error: deleteBathroomTypeLinksError },
+    ] = await Promise.all([
+      supabase.from("suite_type_bedroom_types").delete().in("suite_type_id", suiteTypeIds),
+      supabase.from("suite_type_bedroom_layouts").delete().in("suite_type_id", suiteTypeIds),
+      supabase.from("suite_type_bathroom_types").delete().in("suite_type_id", suiteTypeIds),
+    ])
+
+    const deleteLinksError =
+      deleteBedroomTypeLinksError ?? deleteBedroomLayoutLinksError ?? deleteBathroomTypeLinksError
+    if (deleteLinksError) {
+      logSupplierMutationError("suite-type-variant-links-delete", supplierId, deleteLinksError)
+      return NextResponse.json(
+        { error: "Failed to update suite type variants" },
+        { status: 500 },
+      )
+    }
+
+    const bedroomTypeLinks = normalizedSuiteTypes.flatMap((suiteType) =>
+      suiteType.bedroomTypeIds
+        .filter((id) => allowedBedroomTypeIds.has(id))
+        .map((id) => ({ suite_type_id: suiteType.id, bedroom_type_id: id })),
+    )
+    const bedroomLayoutLinks = normalizedSuiteTypes.flatMap((suiteType) =>
+      suiteType.bedroomLayoutIds
+        .filter((id) => allowedBedroomLayoutIds.has(id))
+        .map((id) => ({ suite_type_id: suiteType.id, bedroom_layout_id: id })),
+    )
+    const bathroomTypeLinks = normalizedSuiteTypes.flatMap((suiteType) =>
+      suiteType.bathroomTypeIds
+        .filter((id) => allowedBathroomTypeIds.has(id))
+        .map((id) => ({ suite_type_id: suiteType.id, bathroom_type_id: id })),
+    )
+
+    if (bedroomTypeLinks.length > 0) {
+      const { error: bedroomTypeLinksError } = await supabase
+        .from("suite_type_bedroom_types")
+        .insert(bedroomTypeLinks)
+      if (bedroomTypeLinksError) {
+        logSupplierMutationError("suite-type-bedroom-types-insert", supplierId, bedroomTypeLinksError)
+        return NextResponse.json(
+          { error: "Failed to update suite type bedroom types" },
+          { status: 500 },
+        )
+      }
+    }
+    if (bedroomLayoutLinks.length > 0) {
+      const { error: bedroomLayoutLinksError } = await supabase
+        .from("suite_type_bedroom_layouts")
+        .insert(bedroomLayoutLinks)
+      if (bedroomLayoutLinksError) {
+        logSupplierMutationError("suite-type-bedroom-layouts-insert", supplierId, bedroomLayoutLinksError)
+        return NextResponse.json(
+          { error: "Failed to update suite type bedroom layouts" },
+          { status: 500 },
+        )
+      }
+    }
+    if (bathroomTypeLinks.length > 0) {
+      const { error: bathroomTypeLinksError } = await supabase
+        .from("suite_type_bathroom_types")
+        .insert(bathroomTypeLinks)
+      if (bathroomTypeLinksError) {
+        logSupplierMutationError("suite-type-bathroom-types-insert", supplierId, bathroomTypeLinksError)
+        return NextResponse.json(
+          { error: "Failed to update suite type bathroom types" },
+          { status: 500 },
+        )
+      }
     }
   }
 
@@ -780,6 +1016,52 @@ export async function PATCH(
     }
   }
 
+  // Delete removed vocabulary rows at the end (cascade removes any leftover join rows).
+  const incomingBedroomTypeIds = new Set(normalizedBedroomTypes.map((row) => row.id))
+  const incomingBedroomLayoutIds = new Set(normalizedBedroomLayouts.map((row) => row.id))
+  const incomingBathroomTypeIds = new Set(normalizedBathroomTypes.map((row) => row.id))
+
+  const bedroomTypeIdsToDelete = existingDetail.bedroomTypes
+    .map((row) => row.id)
+    .filter((id) => !incomingBedroomTypeIds.has(id))
+  const bedroomLayoutIdsToDelete = existingDetail.bedroomLayouts
+    .map((row) => row.id)
+    .filter((id) => !incomingBedroomLayoutIds.has(id))
+  const bathroomTypeIdsToDelete = existingDetail.bathroomTypes
+    .map((row) => row.id)
+    .filter((id) => !incomingBathroomTypeIds.has(id))
+
+  if (bedroomTypeIdsToDelete.length > 0) {
+    const { error } = await deleteInChunks(supabase, "bedroom_types", bedroomTypeIdsToDelete)
+    if (error) {
+      logSupplierMutationError("bedroom-types-delete", supplierId, error)
+      return NextResponse.json(
+        { error: "Failed to remove bedroom types" },
+        { status: 500 },
+      )
+    }
+  }
+  if (bedroomLayoutIdsToDelete.length > 0) {
+    const { error } = await deleteInChunks(supabase, "bedroom_layouts", bedroomLayoutIdsToDelete)
+    if (error) {
+      logSupplierMutationError("bedroom-layouts-delete", supplierId, error)
+      return NextResponse.json(
+        { error: "Failed to remove bedroom layouts" },
+        { status: 500 },
+      )
+    }
+  }
+  if (bathroomTypeIdsToDelete.length > 0) {
+    const { error } = await deleteInChunks(supabase, "bathroom_types", bathroomTypeIdsToDelete)
+    if (error) {
+      logSupplierMutationError("bathroom-types-delete", supplierId, error)
+      return NextResponse.json(
+        { error: "Failed to remove bathroom types" },
+        { status: 500 },
+      )
+    }
+  }
+
   const updatedDetail = await loadSupplierDetail(supabase, slug)
   if ("error" in updatedDetail) {
     return updatedDetail.error!
@@ -794,6 +1076,14 @@ export async function PATCH(
       updatedDetail.rateCards,
       updatedDetail.locations,
       updatedDetail.vehicleRentalRouteDetails,
+      {
+        bedroomTypes: updatedDetail.bedroomTypes,
+        bedroomLayouts: updatedDetail.bedroomLayouts,
+        bathroomTypes: updatedDetail.bathroomTypes,
+        suiteTypeBedroomTypes: updatedDetail.suiteTypeBedroomTypes,
+        suiteTypeBedroomLayouts: updatedDetail.suiteTypeBedroomLayouts,
+        suiteTypeBathroomTypes: updatedDetail.suiteTypeBathroomTypes,
+      },
     ),
   )
 }

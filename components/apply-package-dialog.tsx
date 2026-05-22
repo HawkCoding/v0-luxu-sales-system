@@ -25,11 +25,13 @@ import {
 } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { useActivePackages } from "@/lib/use-data"
-import type { Package, PackageDetail, QuoteLineItem } from "@/lib/types"
+import type { Package, PackageDetail, QuoteLineItem, RouteDirection } from "@/lib/types"
 import { SUPPLIER_KIND_LABELS } from "@/lib/types"
 import { PresenceAvatars } from "@/components/presence-avatars"
 import { useRecordPresence } from "@/hooks/use-record-presence"
 import { useVersionedSave } from "@/hooks/use-versioned-save"
+import { CommissionControl, type CommissionControlValue } from "@/components/supplier/commission-control"
+import { CommissionBadge } from "@/components/quotes/commission-badge"
 
 interface ApplyPackageDialogProps {
   jobId: string
@@ -72,7 +74,16 @@ interface LegSelectionState {
   selected: boolean
   routeId: string
   suiteTypeId: string
+  direction?: RouteDirection
+  commissionOverride?: CommissionControlValue
+  showCommissionOverride?: boolean
 }
+
+const DIRECTION_OPTIONS: { key: RouteDirection; label: string }[] = [
+  { key: "outbound", label: "Outbound" },
+  { key: "return", label: "Return" },
+  { key: "round_trip", label: "Round trip" },
+]
 
 function isOptionalLeg(kind: PackageDetail["legs"][number]["supplierKind"]): boolean {
   return kind === "hotel_property" || kind === "transfers" || kind === "vehicle_rental"
@@ -92,16 +103,27 @@ function getSuiteLabel(kind: PackageDetail["legs"][number]["supplierKind"]): str
   return "suite type"
 }
 
+function defaultDirectionForRoute(
+  route: PackageDetail["legs"][number]["routes"][number] | undefined,
+): RouteDirection | undefined {
+  if (!route) return undefined
+  return route.directionMode === "round_trip" ? "round_trip" : undefined
+}
+
 function buildDefaultSelections(detail: PackageDetail): Record<string, LegSelectionState> {
   return Object.fromEntries(
     detail.legs.map((leg) => {
       const activeSuiteTypes = leg.suiteTypes.filter((suiteType) => suiteType.active)
+      const onlyRoute = leg.routes.length === 1 ? leg.routes[0] : undefined
       return [
         leg.id,
         {
           selected: !isOptionalLeg(leg.supplierKind),
-          routeId: leg.routes.length === 1 ? leg.routes[0].id : "",
+          routeId: onlyRoute ? onlyRoute.id : "",
           suiteTypeId: activeSuiteTypes.length === 1 ? activeSuiteTypes[0].id : "",
+          direction: defaultDirectionForRoute(onlyRoute),
+          commissionOverride: { type: null, value: null },
+          showCommissionOverride: false,
         },
       ]
     }),
@@ -109,7 +131,13 @@ function buildDefaultSelections(detail: PackageDetail): Record<string, LegSelect
 }
 
 function getEmptySelection(selected: boolean): LegSelectionState {
-  return { selected, routeId: "", suiteTypeId: "" }
+  return {
+    selected,
+    routeId: "",
+    suiteTypeId: "",
+    commissionOverride: { type: null, value: null },
+    showCommissionOverride: false,
+  }
 }
 
 export function ApplyPackageDialog({
@@ -198,12 +226,22 @@ export function ApplyPackageDialog({
     setValidating(true)
     setApplyError(null)
 
-    const selections = packageDetail.legs.map((leg) => ({
-      legId: leg.id,
-      selected: legSelections[leg.id]?.selected ?? !isOptionalLeg(leg.supplierKind),
-      routeId: legSelections[leg.id]?.routeId || undefined,
-      suiteTypeId: legSelections[leg.id]?.suiteTypeId || undefined,
-    }))
+    const selections = packageDetail.legs.map((leg) => {
+      const state = legSelections[leg.id]
+      const override = state?.commissionOverride
+      const commissionOverride =
+        override && override.type !== null && override.value !== null && Number.isFinite(override.value)
+          ? { type: override.type, value: override.value }
+          : undefined
+      return {
+        legId: leg.id,
+        selected: state?.selected ?? !isOptionalLeg(leg.supplierKind),
+        routeId: state?.routeId || undefined,
+        suiteTypeId: state?.suiteTypeId || undefined,
+        direction: state?.direction,
+        commissionOverride,
+      }
+    })
 
     try {
       const res = await fetch(`/api/packages/${selectedPackage.slug}/apply`, {
@@ -360,6 +398,12 @@ export function ApplyPackageDialog({
                 const optional = isOptionalLeg(leg.supplierKind)
                 const enabled = selection?.selected ?? !optional
                 const activeSuiteTypes = leg.suiteTypes.filter((st) => st.active)
+                const selectedRoute = leg.routes.find((r) => r.id === selection?.routeId)
+                const isRoundTripRoute = selectedRoute?.directionMode === "round_trip"
+                const routeCommissionInherited =
+                  selectedRoute?.commissionType && selectedRoute.commissionValue != null
+                    ? { type: selectedRoute.commissionType, value: selectedRoute.commissionValue as number }
+                    : null
 
                 return (
                   <div key={leg.id} className="space-y-3 rounded-md border p-3">
@@ -388,61 +432,155 @@ export function ApplyPackageDialog({
                     </div>
 
                     {enabled ? (
-                      <div className="grid gap-3 md:grid-cols-2">
-                        {leg.routes.length > 1 ||
-                        leg.supplierKind === "hotel_property" ||
-                        leg.supplierKind === "transfers" ||
-                        leg.supplierKind === "vehicle_rental" ? (
+                      <div className="space-y-3">
+                        <div className="grid gap-3 md:grid-cols-2">
+                          {leg.routes.length > 1 ||
+                          leg.supplierKind === "hotel_property" ||
+                          leg.supplierKind === "transfers" ||
+                          leg.supplierKind === "vehicle_rental" ? (
+                            <div className="space-y-1.5">
+                              <Label className="capitalize">{getRouteLabel(leg.supplierKind)}</Label>
+                              <Select
+                                value={selection?.routeId ?? ""}
+                                onValueChange={(value) => {
+                                  const newRoute = leg.routes.find((r) => r.id === value)
+                                  setLegSelections((prev) => ({
+                                    ...prev,
+                                    [leg.id]: {
+                                      ...(prev[leg.id] ?? getEmptySelection(!optional)),
+                                      routeId: value,
+                                      direction: defaultDirectionForRoute(newRoute),
+                                    },
+                                  }))
+                                }}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder={`Select ${getRouteLabel(leg.supplierKind)}`} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {leg.routes.map((route) => (
+                                    <SelectItem key={route.id} value={route.id}>
+                                      {route.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          ) : null}
+
                           <div className="space-y-1.5">
-                            <Label className="capitalize">{getRouteLabel(leg.supplierKind)}</Label>
-                            <Select
-                              value={selection?.routeId ?? ""}
-                              onValueChange={(value) =>
-                                setLegSelections((prev) => ({
-                                  ...prev,
-                                  [leg.id]: { ...(prev[leg.id] ?? getEmptySelection(!optional)), routeId: value },
-                                }))
-                              }
+                            <Label className="capitalize">{getSuiteLabel(leg.supplierKind)}</Label>
+                            {activeSuiteTypes.length === 0 ? (
+                              <p className="text-xs text-muted-foreground">No {getSuiteLabel(leg.supplierKind)} configured</p>
+                            ) : (
+                              <Select
+                                value={selection?.suiteTypeId ?? ""}
+                                onValueChange={(value) =>
+                                  setLegSelections((prev) => ({
+                                    ...prev,
+                                    [leg.id]: { ...(prev[leg.id] ?? getEmptySelection(!optional)), suiteTypeId: value },
+                                  }))
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder={`Select ${getSuiteLabel(leg.supplierKind)}`} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {activeSuiteTypes.map((st) => (
+                                    <SelectItem key={st.id} value={st.id}>
+                                      {st.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            )}
+                          </div>
+                        </div>
+
+                        {isRoundTripRoute ? (
+                          <div className="space-y-1.5">
+                            <Label>Direction</Label>
+                            <div
+                              role="radiogroup"
+                              aria-label="Route direction"
+                              className="inline-flex rounded-md border bg-muted p-0.5"
                             >
-                              <SelectTrigger>
-                                <SelectValue placeholder={`Select ${getRouteLabel(leg.supplierKind)}`} />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {leg.routes.map((route) => (
-                                  <SelectItem key={route.id} value={route.id}>
-                                    {route.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                              {DIRECTION_OPTIONS.map((opt) => {
+                                const selected = (selection?.direction ?? "round_trip") === opt.key
+                                return (
+                                  <button
+                                    key={opt.key}
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={selected}
+                                    onClick={() =>
+                                      setLegSelections((prev) => ({
+                                        ...prev,
+                                        [leg.id]: {
+                                          ...(prev[leg.id] ?? getEmptySelection(!optional)),
+                                          direction: opt.key,
+                                        },
+                                      }))
+                                    }
+                                    className={`px-2.5 py-1 text-xs rounded-sm transition-colors ${
+                                      selected
+                                        ? "bg-background text-foreground shadow-sm"
+                                        : "text-muted-foreground hover:text-foreground"
+                                    }`}
+                                  >
+                                    {opt.label}
+                                  </button>
+                                )
+                              })}
+                            </div>
                           </div>
                         ) : null}
 
-                        <div className="space-y-1.5">
-                          <Label className="capitalize">{getSuiteLabel(leg.supplierKind)}</Label>
-                          {activeSuiteTypes.length === 0 ? (
-                            <p className="text-xs text-muted-foreground">No {getSuiteLabel(leg.supplierKind)} configured</p>
-                          ) : (
-                            <Select
-                              value={selection?.suiteTypeId ?? ""}
-                              onValueChange={(value) =>
+                        <div>
+                          {selection?.showCommissionOverride ? (
+                            <CommissionControl
+                              value={selection.commissionOverride ?? { type: null, value: null }}
+                              onChange={(next) =>
                                 setLegSelections((prev) => ({
                                   ...prev,
-                                  [leg.id]: { ...(prev[leg.id] ?? getEmptySelection(!optional)), suiteTypeId: value },
+                                  [leg.id]: {
+                                    ...(prev[leg.id] ?? getEmptySelection(!optional)),
+                                    commissionOverride: next,
+                                  },
+                                }))
+                              }
+                              isEditing
+                              label="Commission Override"
+                              inherited={routeCommissionInherited}
+                              inheritedSourceLabel={routeCommissionInherited ? "route" : undefined}
+                              onClear={() =>
+                                setLegSelections((prev) => ({
+                                  ...prev,
+                                  [leg.id]: {
+                                    ...(prev[leg.id] ?? getEmptySelection(!optional)),
+                                    commissionOverride: { type: null, value: null },
+                                    showCommissionOverride: false,
+                                  },
+                                }))
+                              }
+                              clearLabel="Remove"
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+                              onClick={() =>
+                                setLegSelections((prev) => ({
+                                  ...prev,
+                                  [leg.id]: {
+                                    ...(prev[leg.id] ?? getEmptySelection(!optional)),
+                                    showCommissionOverride: true,
+                                  },
                                 }))
                               }
                             >
-                              <SelectTrigger>
-                                <SelectValue placeholder={`Select ${getSuiteLabel(leg.supplierKind)}`} />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {activeSuiteTypes.map((st) => (
-                                  <SelectItem key={st.id} value={st.id}>
-                                    {st.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                              + Override commission
+                            </button>
                           )}
                         </div>
                       </div>
@@ -499,7 +637,13 @@ export function ApplyPackageDialog({
                 <tbody>
                   {previewLineItems.map((li, i) => (
                     <tr key={i} className="border-b last:border-0">
-                      <td className="px-3 py-2 text-xs">{li.description}</td>
+                      <td className="px-3 py-2 text-xs">
+                        <div>{li.description}</div>
+                        <CommissionBadge
+                          commission={li.pricingSnapshot?.commission ?? null}
+                          currency={packageDetail?.currency ?? "ZAR"}
+                        />
+                      </td>
                       <td className="px-3 py-2 text-right text-xs text-muted-foreground">{li.qty}</td>
                       <td className="px-3 py-2 text-right text-xs">R {li.unitPrice.toLocaleString()}</td>
                       <td className="px-3 py-2 text-right text-xs font-medium">R {li.total.toLocaleString()}</td>

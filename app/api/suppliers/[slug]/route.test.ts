@@ -59,6 +59,7 @@ function mockSupplierDetail(overrides: Partial<typeof supplierRow> = {}) {
         supplier_id: SUPPLIER_ID,
         name: "Suite",
         active: true,
+        sort_order: 0,
         created_at: "2026-01-01T00:00:00.000Z",
         updated_at: "2026-01-01T00:00:00.000Z",
       },
@@ -75,6 +76,13 @@ function mockSupplierDetail(overrides: Partial<typeof supplierRow> = {}) {
     routes: [],
     rateCards: [],
     locations: [],
+    bedroomTypes: [],
+    bedroomLayouts: [],
+    bathroomTypes: [],
+    suiteTypeBedroomTypes: [],
+    suiteTypeBedroomLayouts: [],
+    suiteTypeBathroomTypes: [],
+    rateTypes: [],
   })
 }
 
@@ -287,6 +295,16 @@ describe("PATCH /api/suppliers/[slug]", () => {
           upsert: suiteTypeUpsert,
         }
       }
+      if (
+        table === "suite_type_bedroom_types" ||
+        table === "suite_type_bedroom_layouts" ||
+        table === "suite_type_bathroom_types"
+      ) {
+        return {
+          delete: () => ({ in: async () => ({ error: null }) }),
+          insert: async () => ({ error: null }),
+        }
+      }
       throw new Error(`Unexpected table ${table}`)
     })
 
@@ -318,5 +336,139 @@ describe("PATCH /api/suppliers/[slug]", () => {
     })
     expect(emailUpsert).toHaveBeenCalled()
     expect(suiteTypeUpsert).toHaveBeenCalled()
+  })
+
+  it("accepts vocabulary + suite_type variant memberships round-trip", async () => {
+    const BEDROOM_TYPE_ID = "00000000-0000-4000-8000-0000000000a1"
+    const BEDROOM_LAYOUT_ID = "00000000-0000-4000-8000-0000000000a2"
+    const BATHROOM_TYPE_ID = "00000000-0000-4000-8000-0000000000a3"
+
+    const supplierMaybeSingle = vi.fn(async () => ({
+      data: { updated_at: "2026-01-03T00:00:00.000Z" },
+      error: null,
+    }))
+    const supplierEqMock = vi.fn()
+    const supplierUpdateQuery = {
+      eq: supplierEqMock,
+      select: () => ({ maybeSingle: supplierMaybeSingle }),
+    }
+    supplierEqMock.mockReturnValue(supplierUpdateQuery)
+
+    const emailUpsert = vi.fn(async () => ({ error: null }))
+    const suiteTypeUpsertPayloads: Array<unknown> = []
+    const suiteTypeUpsert = vi.fn(async (payload: unknown) => {
+      suiteTypeUpsertPayloads.push(payload)
+      return { error: null }
+    })
+    const bedroomTypeUpsert = vi.fn(async () => ({ error: null }))
+    const bedroomLayoutUpsert = vi.fn(async () => ({ error: null }))
+    const bathroomTypeUpsert = vi.fn(async () => ({ error: null }))
+    const bedroomTypeLinkInsertPayloads: Array<unknown> = []
+    const bedroomTypeLinkInsert = vi.fn(async (payload: unknown) => {
+      bedroomTypeLinkInsertPayloads.push(payload)
+      return { error: null }
+    })
+    const bedroomLayoutLinkInsert = vi.fn(async () => ({ error: null }))
+    const bathroomTypeLinkInsert = vi.fn(async () => ({ error: null }))
+
+    const linkDeleteFactory = () => ({
+      delete: () => ({
+        in: async () => ({ error: null }),
+      }),
+    })
+
+    mockAuth()
+    mockSupplierDetail()
+    helperMocks.supabaseFrom.mockImplementation((table: string) => {
+      if (table === "profiles") return profileQuery("manager")
+      if (table === "suppliers") {
+        return {
+          update: () => supplierUpdateQuery,
+        }
+      }
+      if (table === "supplier_emails") {
+        return { upsert: emailUpsert }
+      }
+      if (table === "suite_types") {
+        return { upsert: suiteTypeUpsert }
+      }
+      if (table === "bedroom_types") {
+        return { upsert: bedroomTypeUpsert }
+      }
+      if (table === "bedroom_layouts") {
+        return { upsert: bedroomLayoutUpsert }
+      }
+      if (table === "bathroom_types") {
+        return { upsert: bathroomTypeUpsert }
+      }
+      if (table === "suite_type_bedroom_types") {
+        return { ...linkDeleteFactory(), insert: bedroomTypeLinkInsert }
+      }
+      if (table === "suite_type_bedroom_layouts") {
+        return { ...linkDeleteFactory(), insert: bedroomLayoutLinkInsert }
+      }
+      if (table === "suite_type_bathroom_types") {
+        return { ...linkDeleteFactory(), insert: bathroomTypeLinkInsert }
+      }
+      throw new Error(`Unexpected table ${table}`)
+    })
+
+    const response = await PATCH(
+      new Request("http://localhost/api/suppliers/test", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Supplier Updated",
+          kind: "train_operator",
+          email: "ops@example.com",
+          phone: "",
+          website: "",
+          location: "",
+          notes: "",
+          singleSupplementPct: 0,
+          active: true,
+          emails: [{ id: EMAIL_ID, email: "ops@example.com", label: "General" }],
+          suiteTypes: [
+            {
+              id: SUITE_TYPE_ID,
+              name: "Deluxe",
+              active: true,
+              sortOrder: 0,
+              bedroomTypeIds: [BEDROOM_TYPE_ID],
+              bedroomLayoutIds: [BEDROOM_LAYOUT_ID],
+              bathroomTypeIds: [BATHROOM_TYPE_ID],
+            },
+          ],
+          bedroomTypes: [
+            { id: BEDROOM_TYPE_ID, name: "Twin", sortOrder: 0 },
+          ],
+          bedroomLayouts: [
+            { id: BEDROOM_LAYOUT_ID, name: "L-Shape", sortOrder: 0 },
+          ],
+          bathroomTypes: [
+            { id: BATHROOM_TYPE_ID, name: "Both", sortOrder: 0 },
+          ],
+          expectedUpdatedAt: "2026-01-02T00:00:00.000Z",
+        }),
+      }),
+      { params: Promise.resolve({ slug: "test" }) },
+    )
+
+    expect(response.status).toBe(200)
+    expect(bedroomTypeUpsert).toHaveBeenCalled()
+    expect(bedroomLayoutUpsert).toHaveBeenCalled()
+    expect(bathroomTypeUpsert).toHaveBeenCalled()
+    expect(suiteTypeUpsert).toHaveBeenCalled()
+    const suiteTypeRows = suiteTypeUpsertPayloads[0] as Array<{ sort_order: number }>
+    expect(suiteTypeRows[0].sort_order).toBe(0)
+    expect(bedroomTypeLinkInsert).toHaveBeenCalled()
+    const linkRows = bedroomTypeLinkInsertPayloads[0] as Array<{
+      suite_type_id: string
+      bedroom_type_id: string
+    }>
+    expect(linkRows[0]).toMatchObject({
+      suite_type_id: SUITE_TYPE_ID,
+      bedroom_type_id: BEDROOM_TYPE_ID,
+    })
   })
 })

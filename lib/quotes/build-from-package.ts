@@ -1,13 +1,42 @@
 import { isOptionalPackageLegKind } from "@/lib/types"
-import type { PackageDetail, QuoteLineItem } from "@/lib/types"
+import type {
+  CommissionBreakdown,
+  CommissionKind,
+  PackageDetail,
+  QuoteLineItem,
+  ResolvedCommission,
+  RouteDirection,
+  RouteDirectionMode,
+} from "@/lib/types"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
+import { fetchDefaultAgeBuckets, resolveAgeBuckets, type AgeBuckets } from "@/lib/pricing/age-buckets"
+import {
+  buildCommissionBreakdown,
+  calculateCommissionAmount,
+  resolveCommission,
+} from "@/lib/pricing/commission"
 
 export interface PackageLegSelection {
   legId: string
   selected?: boolean
   routeId?: string
   suiteTypeId?: string
+  rateTypeId?: string
+  direction?: RouteDirection
+  commissionOverride?: {
+    type: CommissionKind
+    value: number
+  } | null
+}
+
+function getDirectionMultiplier(directionMode: RouteDirectionMode, direction: RouteDirection): number {
+  if (directionMode !== "round_trip") return 1
+  return direction === "round_trip" ? 2 : 1
+}
+
+function defaultDirectionFor(directionMode: RouteDirectionMode): RouteDirection {
+  return directionMode === "round_trip" ? "round_trip" : "outbound"
 }
 
 interface TransportRequestRow {
@@ -55,22 +84,251 @@ export async function buildPackageQuoteLineItems({
     .eq("booking_id", jobId)
     .order("sort_order", { ascending: true })
 
+  // Load variant snapshots for all suite types in this package — used for line description suffixes.
+  const suiteTypeIds = packageDetail.legs.flatMap((leg) =>
+    leg.suiteTypes.map((suiteType) => suiteType.id),
+  )
+  const variantSnapshotBySuiteTypeId = new Map<string, { label: string; values: string[] }[]>()
+  if (suiteTypeIds.length > 0) {
+    const [bedroomTypesResult, bedroomLayoutsResult, bathroomTypesResult] = await Promise.all([
+      supabase
+        .from("suite_type_bedroom_types")
+        .select("suite_type_id, bedroom_types(name, sort_order)")
+        .in("suite_type_id", suiteTypeIds),
+      supabase
+        .from("suite_type_bedroom_layouts")
+        .select("suite_type_id, bedroom_layouts(name, sort_order)")
+        .in("suite_type_id", suiteTypeIds),
+      supabase
+        .from("suite_type_bathroom_types")
+        .select("suite_type_id, bathroom_types(name, sort_order)")
+        .in("suite_type_id", suiteTypeIds),
+    ])
+
+    function collectVariantNames<TKey extends string>(
+      rows: { suite_type_id: string }[] | null | undefined,
+      key: TKey,
+    ) {
+      const result = new Map<string, { name: string; sortOrder: number }[]>()
+      for (const row of rows ?? []) {
+        const value = (row as unknown as Record<TKey, { name: string; sort_order: number } | null>)[key]
+        if (!value || !value.name) continue
+        const list = result.get(row.suite_type_id) ?? []
+        list.push({ name: value.name, sortOrder: value.sort_order ?? 0 })
+        result.set(row.suite_type_id, list)
+      }
+      return result
+    }
+
+    const bedroomTypesBySuiteType = collectVariantNames(
+      bedroomTypesResult.data,
+      "bedroom_types",
+    )
+    const bedroomLayoutsBySuiteType = collectVariantNames(
+      bedroomLayoutsResult.data,
+      "bedroom_layouts",
+    )
+    const bathroomTypesBySuiteType = collectVariantNames(
+      bathroomTypesResult.data,
+      "bathroom_types",
+    )
+
+    for (const suiteTypeId of suiteTypeIds) {
+      const groups: { label: string; values: string[] }[] = []
+      const bedroomTypes = bedroomTypesBySuiteType.get(suiteTypeId)
+      if (bedroomTypes && bedroomTypes.length > 0) {
+        groups.push({
+          label: "Bedroom Type",
+          values: [...bedroomTypes].sort((a, b) => a.sortOrder - b.sortOrder).map((v) => v.name),
+        })
+      }
+      const bedroomLayouts = bedroomLayoutsBySuiteType.get(suiteTypeId)
+      if (bedroomLayouts && bedroomLayouts.length > 0) {
+        groups.push({
+          label: "Bedroom Layout",
+          values: [...bedroomLayouts].sort((a, b) => a.sortOrder - b.sortOrder).map((v) => v.name),
+        })
+      }
+      const bathroomTypes = bathroomTypesBySuiteType.get(suiteTypeId)
+      if (bathroomTypes && bathroomTypes.length > 0) {
+        groups.push({
+          label: "Bathroom Type",
+          values: [...bathroomTypes].sort((a, b) => a.sortOrder - b.sortOrder).map((v) => v.name),
+        })
+      }
+      if (groups.length > 0) {
+        variantSnapshotBySuiteTypeId.set(suiteTypeId, groups)
+      }
+    }
+  }
+
+  function formatVariantSuffix(suiteTypeId: string | null | undefined): string {
+    if (!suiteTypeId) return ""
+    const groups = variantSnapshotBySuiteTypeId.get(suiteTypeId)
+    if (!groups || groups.length === 0) return ""
+    const flatValues = groups.flatMap((group) => group.values)
+    return flatValues.length > 0 ? ` — ${flatValues.join(", ")}` : ""
+  }
+
   const selectionMap = new Map(selections.map((entry) => [entry.legId, entry]))
   const lineItems: QuoteLineItem[] = []
   const childAges = job.child_ages ?? []
-  const infantCount = childAges.filter((age) => age <= 2).length
-  const childCount = Math.max(0, job.no_of_children - infantCount)
 
-  function addLineItem(description: string, qty: number, unitPrice: number, supplierDescription?: string | null) {
+  const defaultBuckets = await fetchDefaultAgeBuckets(supabase)
+  const supplierIds = Array.from(
+    new Set(packageDetail.legs.map((leg) => leg.supplierId).filter((id): id is string => Boolean(id))),
+  )
+  const supplierOverridesById = new Map<string, { infantMaxAge: number | null; childMaxAge: number | null }>()
+  const supplierCommissionDefaultsById = new Map<
+    string,
+    { type: CommissionKind | null; value: number | null }
+  >()
+  if (supplierIds.length > 0) {
+    const { data: supplierAgeRows } = await supabase
+      .from("suppliers")
+      .select("id, infant_max_age, child_max_age, default_commission_type, default_commission_value")
+      .in("id", supplierIds)
+    for (const row of supplierAgeRows ?? []) {
+      supplierOverridesById.set(row.id, {
+        infantMaxAge: row.infant_max_age ?? null,
+        childMaxAge: row.child_max_age ?? null,
+      })
+      const rawType = row.default_commission_type
+      const rawValue = row.default_commission_value
+      const type =
+        rawType === "percent" || rawType === "per_person" ? rawType : null
+      const value =
+        rawValue === null || rawValue === undefined ? null : Number(rawValue)
+      supplierCommissionDefaultsById.set(row.id, { type, value })
+    }
+  }
+
+  const routeIdsForCommission = Array.from(
+    new Set(packageDetail.legs.flatMap((leg) => leg.routes.map((route) => route.id))),
+  )
+  const routeCommissionOverridesById = new Map<
+    string,
+    { type: CommissionKind | null; value: number | null }
+  >()
+  if (routeIdsForCommission.length > 0) {
+    const { data: routeCommissionRows } = await supabase
+      .from("routes")
+      .select("id, commission_type, commission_value")
+      .in("id", routeIdsForCommission)
+    for (const row of routeCommissionRows ?? []) {
+      const rawType = row.commission_type
+      const rawValue = row.commission_value
+      const type =
+        rawType === "percent" || rawType === "per_person" ? rawType : null
+      const value =
+        rawValue === null || rawValue === undefined ? null : Number(rawValue)
+      routeCommissionOverridesById.set(row.id, { type, value })
+    }
+  }
+
+  function commissionFor(
+    leg: PackageDetail["legs"][number],
+    routeId: string | null,
+    lineOverride?: { type: CommissionKind; value: number } | null,
+  ): ResolvedCommission {
+    if (lineOverride) {
+      return { type: lineOverride.type, value: lineOverride.value, source: "line" }
+    }
+    const supplierDefault = leg.supplierId
+      ? supplierCommissionDefaultsById.get(leg.supplierId) ?? null
+      : null
+    const routeOverride = routeId
+      ? routeCommissionOverridesById.get(routeId) ?? null
+      : null
+    return resolveCommission({ supplierDefault, routeOverride })
+  }
+
+  function bucketsForLeg(leg: PackageDetail["legs"][number]): AgeBuckets {
+    const override = leg.supplierId ? supplierOverridesById.get(leg.supplierId) : null
+    return resolveAgeBuckets(defaultBuckets, override)
+  }
+
+  const bookingForCounts = job
+  function countsForBuckets(buckets: AgeBuckets) {
+    const infantCount = childAges.filter((age) => age <= buckets.infantMax).length
+    const adultPromotedCount = childAges.filter((age) => age > buckets.childMax).length
+    const childCount = Math.max(0, bookingForCounts.no_of_children - infantCount - adultPromotedCount)
+    const adultCount = bookingForCounts.no_of_adults + adultPromotedCount
+    return { adultCount, childCount, infantCount }
+  }
+
+  interface AddLineItemOptions {
+    description: string
+    qty: number
+    unitPrice: number
+    supplierDescription?: string | null
+    suiteTypeId?: string | null
+    commission?: ResolvedCommission | null
+  }
+
+  function addLineItem({
+    description,
+    qty,
+    unitPrice,
+    supplierDescription,
+    suiteTypeId,
+    commission,
+  }: AddLineItemOptions) {
     if (qty <= 0) return
 
-    lineItems.push({
-      description,
+    const variantSuffix = formatVariantSuffix(suiteTypeId ?? null)
+    const suiteVariants = suiteTypeId ? variantSnapshotBySuiteTypeId.get(suiteTypeId) : undefined
+    const lineSubtotal = Math.round(unitPrice * qty * 100) / 100
+
+    let commissionBreakdown: CommissionBreakdown | null = null
+    let commissionAmount = 0
+    if (commission && commission.type !== null) {
+      commissionAmount = calculateCommissionAmount({
+        amountAfterMarkup: lineSubtotal,
+        passengerCount: qty,
+        resolved: commission,
+      })
+      commissionBreakdown = buildCommissionBreakdown(commission, commissionAmount)
+    }
+
+    const total = Math.round((lineSubtotal + commissionAmount) * 100) / 100
+
+    const lineItem: QuoteLineItem = {
+      description: `${description}${variantSuffix}`,
       supplierDescription: supplierDescription ?? null,
       qty,
       unitPrice,
-      total: Math.round(unitPrice * qty * 100) / 100,
-    })
+      total,
+    }
+
+    if ((suiteVariants && suiteVariants.length > 0) || commissionBreakdown) {
+      lineItem.pricingSnapshot = {
+        source: "pricing_engine",
+        pricingMode: "rate_card",
+        packageId: packageDetail.id,
+        packageName: packageDetail.name,
+        legId: null,
+        legLabel: null,
+        supplierId: null,
+        supplierName: null,
+        supplierKind: null,
+        routeId: null,
+        routeName: null,
+        suiteTypeId: suiteTypeId ?? null,
+        suiteTypeName: null,
+        rateCardId: null,
+        travelDate,
+        passengerKind: "adult",
+        baseUnitPrice: unitPrice,
+        markupPct: 0,
+        singleSupplementPct: null,
+        serviceType: null,
+        suiteVariants,
+        commission: commissionBreakdown,
+      }
+    }
+
+    lineItems.push(lineItem)
   }
 
   function getLegSelection(leg: PackageDetail["legs"][number]) {
@@ -95,11 +353,13 @@ export async function buildPackageQuoteLineItems({
     leg: PackageDetail["legs"][number],
     routeId: string,
     suiteTypeId: string,
+    rateTypeId?: string | null,
   ) {
     return leg.rateCards.find(
       (rc) =>
         rc.routeId === routeId &&
         rc.suiteTypeId === suiteTypeId &&
+        (!rateTypeId || rc.rateTypeId === rateTypeId) &&
         rc.validFrom <= travelDate &&
         (rc.validTo === null || rc.validTo >= travelDate),
     )
@@ -159,11 +419,11 @@ export async function buildPackageQuoteLineItems({
       })
     }
 
-    addLineItem(
-      `${packageDetail.name} — Package Total`,
-      travellerCount,
-      packageDetail.fixedPricePerPerson,
-    )
+    addLineItem({
+      description: `${packageDetail.name} — Package Total`,
+      qty: travellerCount,
+      unitPrice: packageDetail.fixedPricePerPerson,
+    })
   } else {
     for (const leg of packageDetail.legs) {
       const selection = getLegSelection(leg)
@@ -196,7 +456,7 @@ export async function buildPackageQuoteLineItems({
         throw new Error(`Selected type is not available for leg: ${leg.label ?? leg.supplierName}`)
       }
 
-      const validRateCard = getValidRateCard(leg, routeId, suiteTypeId)
+      const validRateCard = getValidRateCard(leg, routeId, suiteTypeId, selection.rateTypeId)
       if (!validRateCard) {
         const legLabel = leg.label ?? leg.supplierName
         throw new Error(`No pricing available for "${legLabel}" on ${travelDate}. Update the package rate cards first.`)
@@ -209,10 +469,19 @@ export async function buildPackageQuoteLineItems({
       const description = descriptionParts.join(" - ")
       const supplierDescription = leg.supplierDescription ?? null
 
+      const commission = commissionFor(leg, routeId, selection.commissionOverride ?? null)
+
       if (isHotel) {
         const nights = Math.max(1, packageDetail.durationNights ?? 1)
         const qty = Math.max(1, job.no_of_suites) * nights
-        addLineItem(description, qty, validRateCard.pricePerPerson, supplierDescription)
+        addLineItem({
+          description,
+          qty,
+          unitPrice: validRateCard.pricePerPerson,
+          supplierDescription,
+          suiteTypeId,
+          commission,
+        })
       } else if (isTransfer || isVehicleRental) {
         const serviceType = isVehicleRental ? "rental" : "transfer"
         const transportRequest = findTransportRequest(serviceType, routeId, suiteTypeId)
@@ -223,31 +492,57 @@ export async function buildPackageQuoteLineItems({
         const transportDescription = [description, pointLabel].filter(Boolean).join(" - ")
 
         if (isVehicleRental) {
-          addLineItem(
-            transportDescription,
-            getBillableRentalDays(transportRequest),
-            validRateCard.pricePerPerson,
+          addLineItem({
+            description: transportDescription,
+            qty: getBillableRentalDays(transportRequest),
+            unitPrice: validRateCard.pricePerPerson,
             supplierDescription,
-          )
+            suiteTypeId,
+            commission,
+          })
         } else {
-          addLineItem(transportDescription, 1, validRateCard.pricePerPerson, supplierDescription)
+          addLineItem({
+            description: transportDescription,
+            qty: 1,
+            unitPrice: validRateCard.pricePerPerson,
+            supplierDescription,
+            suiteTypeId,
+            commission,
+          })
         }
       } else {
-        addLineItem(`${description} - Adult`, job.no_of_adults, validRateCard.pricePerPerson, supplierDescription)
-        addLineItem(
-          `${description} - Child`,
-          childCount,
-          validRateCard.childPrice ?? validRateCard.pricePerPerson,
+        const routeMeta = leg.routes.find((route) => route.id === routeId) ?? null
+        const directionMode: RouteDirectionMode = routeMeta?.directionMode ?? "one_way"
+        const direction: RouteDirection = selection.direction ?? defaultDirectionFor(directionMode)
+        const multiplier = getDirectionMultiplier(directionMode, direction)
+        const { adultCount, childCount, infantCount } = countsForBuckets(bucketsForLeg(leg))
+        addLineItem({
+          description: `${description} - Adult`,
+          qty: adultCount,
+          unitPrice: validRateCard.pricePerPerson * multiplier,
           supplierDescription,
-        )
-        addLineItem(
-          `${description} - Infant`,
-          infantCount,
-          validRateCard.infantPrice ??
-            validRateCard.childPrice ??
-            validRateCard.pricePerPerson,
+          suiteTypeId,
+          commission,
+        })
+        addLineItem({
+          description: `${description} - Child`,
+          qty: childCount,
+          unitPrice: (validRateCard.childPrice ?? validRateCard.pricePerPerson) * multiplier,
           supplierDescription,
-        )
+          suiteTypeId,
+          commission,
+        })
+        addLineItem({
+          description: `${description} - Infant`,
+          qty: infantCount,
+          unitPrice:
+            (validRateCard.infantPrice ??
+              validRateCard.childPrice ??
+              validRateCard.pricePerPerson) * multiplier,
+          supplierDescription,
+          suiteTypeId,
+          commission,
+        })
       }
     }
   }

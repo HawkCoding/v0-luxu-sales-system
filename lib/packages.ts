@@ -89,6 +89,12 @@ export function mapPackageRoute(
     pickupPoint: row.pickup_point ?? null,
     dropoffPoint: row.dropoff_point ?? null,
     vehicleRentalDetails: mapVehicleRentalRouteDetails(vehicleRentalDetails),
+    directionMode: row.direction_mode ?? "one_way",
+    commissionType: row.commission_type ?? null,
+    commissionValue:
+      row.commission_value === null || row.commission_value === undefined
+        ? null
+        : Number(row.commission_value),
     active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -102,6 +108,7 @@ export function mapPackageRateCard(row: RateCardRow): SupplierRateCard {
     id: row.id,
     routeId: row.route_id,
     suiteTypeId: row.suite_type_id,
+    rateTypeId: row.rate_type_id,
     pricePerPerson: row.price_per_person,
     childPrice: row.child_price,
     infantPrice: row.infant_price,

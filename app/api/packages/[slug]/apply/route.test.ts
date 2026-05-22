@@ -42,6 +42,7 @@ function makeRateCard(routeId: string, suiteTypeId: string, pricePerPerson: numb
     id: crypto.randomUUID(),
     routeId,
     suiteTypeId,
+    rateTypeId: "00000000-0000-4000-8000-000000000099",
     pricePerPerson,
     childPrice: null,
     infantPrice: null,
@@ -245,6 +246,42 @@ function createSupabaseMock(
             eq: vi.fn(() => ({
               order: vi.fn(async () => ({ data: transportRequests, error: null })),
             })),
+          })),
+        }
+      }
+
+      if (
+        table === "suite_type_bedroom_types" ||
+        table === "suite_type_bedroom_layouts" ||
+        table === "suite_type_bathroom_types"
+      ) {
+        return {
+          select: vi.fn(() => ({
+            in: vi.fn(async () => ({ data: [], error: null })),
+          })),
+        }
+      }
+
+      if (table === "app_settings") {
+        return {
+          select: vi.fn(() => ({
+            in: vi.fn(async () => ({ data: [], error: null })),
+          })),
+        }
+      }
+
+      if (table === "suppliers") {
+        return {
+          select: vi.fn(() => ({
+            in: vi.fn(async () => ({ data: [], error: null })),
+          })),
+        }
+      }
+
+      if (table === "routes") {
+        return {
+          select: vi.fn(() => ({
+            in: vi.fn(async () => ({ data: [], error: null })),
           })),
         }
       }
