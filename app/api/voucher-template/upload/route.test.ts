@@ -18,21 +18,32 @@ interface UploadedFile {
 
 type UploadOptions = Omit<UploadedFile, "path">
 
+interface TestUploadFile {
+  file: File
+}
+
 function createUploadRequest({
   kind,
   file,
 }: {
   kind?: string
-  file?: File
+  file?: TestUploadFile
 }): Request {
-  const formData = new FormData()
-  if (kind) formData.set("kind", kind)
-  if (file) formData.set("file", file)
+  return {
+    formData: async () => ({
+      get: (key: string) => {
+        if (key === "kind") return kind ?? null
+        if (key === "file") return file?.file ?? null
+        return null
+      },
+    }),
+  } as Request
+}
 
-  return new Request("http://localhost/api/voucher-template/upload", {
-    method: "POST",
-    body: formData,
-  })
+function makeFile(name: string, type: string, content = name): TestUploadFile {
+  return {
+    file: new File([content], name, { type }),
+  }
 }
 
 function createSupabase({
@@ -122,7 +133,7 @@ describe("POST /api/voucher-template/upload", () => {
     const response = await POST(
       createUploadRequest({
         kind: "banner",
-        file: new File(["banner"], "banner.webp", { type: "image/webp" }),
+        file: makeFile("banner.webp", "image/webp", "banner"),
       }),
     )
 
@@ -135,7 +146,7 @@ describe("POST /api/voucher-template/upload", () => {
     const response = await POST(
       createUploadRequest({
         kind: "banner",
-        file: new File(["banner"], "banner.webp", { type: "image/webp" }),
+        file: makeFile("banner.webp", "image/webp", "banner"),
       }),
     )
 
@@ -148,7 +159,7 @@ describe("POST /api/voucher-template/upload", () => {
     const response = await POST(
       createUploadRequest({
         kind: "hero",
-        file: new File(["banner"], "banner.webp", { type: "image/webp" }),
+        file: makeFile("banner.webp", "image/webp", "banner"),
       }),
     )
 
@@ -161,7 +172,7 @@ describe("POST /api/voucher-template/upload", () => {
     const response = await POST(
       createUploadRequest({
         kind: "banner",
-        file: new File(["banner"], "banner.jpg", { type: "image/jpeg" }),
+        file: makeFile("banner.jpg", "image/jpeg", "banner"),
       }),
     )
 
@@ -175,7 +186,7 @@ describe("POST /api/voucher-template/upload", () => {
     const response = await POST(
       createUploadRequest({
         kind: "banner",
-        file: new File(["banner"], "voucher-banner.webp", { type: "image/webp" }),
+        file: makeFile("voucher-banner.webp", "image/webp", "banner"),
       }),
     )
     const payload = await response.json()
@@ -197,7 +208,7 @@ describe("POST /api/voucher-template/upload", () => {
     const response = await POST(
       createUploadRequest({
         kind: "banner",
-        file: new File(["banner"], "voucher-banner.webp", { type: "image/webp" }),
+        file: makeFile("voucher-banner.webp", "image/webp", "banner"),
       }),
     )
     const payload = await response.json()
@@ -213,7 +224,7 @@ describe("POST /api/voucher-template/upload", () => {
     const response = await POST(
       createUploadRequest({
         kind: "logo",
-        file: new File(["<svg />"], "logo.svg", { type: "image/svg+xml" }),
+        file: makeFile("logo.svg", "image/svg+xml", "<svg />"),
       }),
     )
 

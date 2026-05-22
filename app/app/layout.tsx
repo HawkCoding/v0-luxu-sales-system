@@ -54,6 +54,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   }
 
   const initialUser = { id: user.id, name: displayName, email, role }
+  const demoMode = !process.env.RESEND_API_KEY || process.env.DEMO_MODE === "1"
 
-  return <AppClientLayout initialUser={initialUser}>{children}</AppClientLayout>
+  return (
+    <AppClientLayout initialUser={initialUser} demoMode={demoMode}>
+      {children}
+    </AppClientLayout>
+  )
 }

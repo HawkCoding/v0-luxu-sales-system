@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
+import { COMPLETED_REPEAT_BOOKING_STAGES } from "@/lib/customer-repeat-status"
 
 const allowedRoles = new Set(["admin", "manager", "consultant"])
 
@@ -12,7 +13,12 @@ const createCustomerSchema = z.object({
   email: z.string().trim().toLowerCase().email("Must be a valid email address").max(255),
   phone: z.string().trim().max(50).nullable().optional(),
   country: z.string().trim().max(100).nullable().optional(),
+  province: z.string().trim().max(100).nullable().optional(),
   notes: z.string().trim().max(5000).nullable().optional(),
+  date_of_birth: z.string().date().nullable().optional(),
+  vip_status: z.boolean().optional().default(false),
+  preferences: z.string().trim().max(2000).nullable().optional(),
+  communication_preferences: z.string().trim().max(1000).nullable().optional(),
 })
 
 export async function GET(request: Request) {
@@ -31,7 +37,7 @@ export async function GET(request: Request) {
 
   let customerQuery = supabase
     .from("customers")
-    .select("id, first_name, last_name, email, phone")
+    .select("id, first_name, last_name, email, phone, vip_status, is_repeat_client")
     .order("updated_at", { ascending: false })
     .limit(25)
 
@@ -48,6 +54,24 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Failed to load customers" }, { status: 500 })
   }
 
+  const customerIds = (data ?? []).map((customer) => customer.id)
+  const repeatCustomerIds = new Set<string>()
+  if (customerIds.length > 0) {
+    const { data: completedBookings, error: completedBookingsError } = await supabase
+      .from("bookings")
+      .select("customer_id")
+      .in("customer_id", customerIds)
+      .in("stage", COMPLETED_REPEAT_BOOKING_STAGES)
+
+    if (completedBookingsError) {
+      return NextResponse.json({ error: "Failed to load customer repeat status" }, { status: 500 })
+    }
+
+    ;(completedBookings ?? []).forEach((booking) => {
+      if (booking.customer_id) repeatCustomerIds.add(booking.customer_id)
+    })
+  }
+
   return NextResponse.json({
     customers: (data ?? []).map((customer) => ({
       id: customer.id,
@@ -55,6 +79,8 @@ export async function GET(request: Request) {
       lastName: customer.last_name,
       email: customer.email,
       phone: customer.phone,
+      vipStatus: customer.vip_status,
+      isRepeatClient: repeatCustomerIds.has(customer.id),
     })),
   })
 }
@@ -111,10 +137,17 @@ export async function POST(request: Request) {
       email: parsed.email,
       phone: parsed.phone ?? null,
       country: parsed.country ?? null,
+      province: parsed.province ?? null,
       title: parsed.title ?? null,
       notes: parsed.notes ?? null,
+      date_of_birth: parsed.date_of_birth ?? null,
+      vip_status: parsed.vip_status,
+      preferences: parsed.preferences ?? null,
+      communication_preferences: parsed.communication_preferences ?? null,
     })
-    .select("id, first_name, last_name, email, phone, country, title, notes, created_at, updated_at")
+    .select(
+      "id, first_name, last_name, email, phone, country, province, title, notes, date_of_birth, vip_status, preferences, communication_preferences, first_travel_date, last_travel_date, is_repeat_client, created_at, updated_at",
+    )
     .single()
 
   if (insertError) {
@@ -135,8 +168,16 @@ export async function POST(request: Request) {
       email: customer.email,
       phone: customer.phone,
       country: customer.country,
+      province: customer.province,
       title: customer.title,
       notes: customer.notes,
+      dateOfBirth: customer.date_of_birth,
+      vipStatus: customer.vip_status,
+      preferences: customer.preferences,
+      communicationPreferences: customer.communication_preferences,
+      firstTravelDate: customer.first_travel_date,
+      lastTravelDate: customer.last_travel_date,
+      isRepeatClient: false,
       createdAt: customer.created_at,
       updatedAt: customer.updated_at,
     },

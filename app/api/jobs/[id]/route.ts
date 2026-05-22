@@ -25,6 +25,7 @@ import { applyTransition } from "@/lib/pipeline/apply-transition"
 import { validateTransition } from "@/lib/pipeline/validate-transition"
 import { mapBookingTransportRequest } from "@/lib/suppliers"
 import { getDefaultDepositPercentage } from "@/lib/pipeline/constants"
+import { updateSupplierReference } from "@/lib/bookings/supplier-reference"
 
 const pipelineStageSchema = z.enum([
   "enquiry",
@@ -48,7 +49,6 @@ const patchJobSchema = z.object({
   override: z.boolean().optional(),
   overrideReason: z.string().optional(),
   closedReopenReason: z.string().optional(),
-  cancelReason: z.string().optional(),
   manualConfirmations: z
     .object({
       createDepositInvoice: z.boolean().optional(),
@@ -60,7 +60,6 @@ const patchJobSchema = z.object({
     .optional(),
   lostContext: z
     .object({
-      cancelReason: z.string().nullable().optional(),
       refundStatus: z.enum(["refunded", "not_refunded"]).nullable().optional(),
       refundAmount: z.number().nullable().optional(),
       refundReference: z.string().nullable().optional(),
@@ -71,7 +70,16 @@ const patchJobSchema = z.object({
   consultant: z.string().optional(),
   assignedSalespersonId: z.string().uuid().nullable().optional(),
   customerId: z.string().optional(),
+  supplierReference: z.string().trim().max(120).nullable().optional(),
   expectedUpdatedAt: z.string().datetime({ offset: true }).optional(),
+  parsedFieldEdits: z
+    .object({
+      noOfAdults: z.number().int().min(0).optional(),
+      noOfChildren: z.number().int().min(0).optional(),
+      noOfSuites: z.number().int().min(1).optional(),
+      departureDate: z.string().nullable().optional(),
+    })
+    .optional(),
 }).passthrough()
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -90,6 +98,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     defaultDepositPercentage,
     { data: customer },
     { data: profiles },
+    { data: outcomeReasonsData },
     { data: bookingSuites },
     { data: travellers },
     { data: transportRequestsData },
@@ -105,6 +114,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     getDefaultDepositPercentage(supabase),
     supabase.from("customers").select(CUSTOMER_COLUMNS).eq("id", booking.customer_id).single(),
     supabase.from("profiles").select("user_id, name, surname, email, clearance_level, is_active").order("name"),
+    supabase.from("outcome_reasons").select("id, label, applies_to, active").eq("active", true).order("label"),
     supabase.from("booking_suites").select(BOOKING_SUITE_COLUMNS).eq("booking_id", id),
     supabase.from("travellers").select(TRAVELLER_COLUMNS).eq("booking_id", id).order("sort_order"),
     supabase
@@ -123,19 +133,22 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   ])
 
   // Map booking → shape matching the existing Job interface so page components are unchanged
-  const salespeople = (profiles ?? [])
-    .filter((profile) =>
-      ["admin", "manager", "consultant"].includes(profile.clearance_level) &&
-      (profile.is_active ?? true),
-    )
-    .map((profile) => ({
-      id: profile.user_id,
-      name: [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.email,
-      email: profile.email,
-      clearanceLevel: profile.clearance_level,
-    }))
+  const allProfiles = (profiles ?? []).map((profile) => ({
+    id: profile.user_id,
+    name: [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.email,
+    email: profile.email,
+    clearanceLevel: profile.clearance_level,
+    isActive: profile.is_active ?? true,
+  }))
+  const salespeople = allProfiles.filter(
+    (profile) =>
+      ["admin", "manager", "consultant"].includes(profile.clearanceLevel) && profile.isActive,
+  )
   const assignedSalesperson = booking.assigned_salesperson_id
     ? salespeople.find((profile) => profile.id === booking.assigned_salesperson_id) ?? null
+    : null
+  const ownerProfile = booking.owner_user_id
+    ? allProfiles.find((profile) => profile.id === booking.owner_user_id) ?? null
     : null
 
   const job = {
@@ -146,16 +159,28 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     purpose: booking.purpose,
     source: booking.source,
     ownerUser: booking.consultant ?? "consultant",
+    ownerUserId: booking.owner_user_id ?? null,
+    ownerName: ownerProfile?.name ?? null,
     consultant: booking.consultant,
     assignedSalespersonId: booking.assigned_salesperson_id ?? null,
     assignedSalespersonName: assignedSalesperson?.name ?? null,
+    isRepeatClientAtCreation: booking.is_repeat_client_at_creation,
     createdAt: booking.created_at,
     updatedAt: booking.updated_at,
     createdAtDisplay: formatDisplayDateTime(booking.created_at),
     updatedAtDisplay: formatDisplayDateTime(booking.updated_at),
-    cancelReason: booking.cancel_reason ?? null,
     cancelledAt: booking.cancelled_at ?? null,
     cancelledAtDisplay: formatDisplayDateTime(booking.cancelled_at),
+    depositPaid: booking.deposit_paid ?? false,
+    invoiceBalance: booking.invoice_balance !== null ? Number(booking.invoice_balance) : null,
+    outcome: (booking.outcome as string) ?? "Open",
+    outcomeReasonId: booking.outcome_reason_id ?? null,
+    outcomeNotes: booking.outcome_notes ?? null,
+    outcomeSetAt: booking.outcome_set_at ?? null,
+    outcomeSetAtDisplay: formatDisplayDateTime(booking.outcome_set_at),
+    outcomeSetBy: booking.outcome_set_by ?? null,
+    supplierReference: (booking as Record<string, unknown>).supplier_reference as string | null ?? null,
+    suggestedRefund: null as number | null,
   }
 
   // Map customer
@@ -165,10 +190,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
         firstName: customer.first_name,
         lastName: customer.last_name,
         email: customer.email,
-        phone: customer.phone,
-        country: customer.country,
-        title: customer.title,
-        createdAt: customer.created_at,
+      phone: customer.phone,
+      country: customer.country,
+      title: customer.title,
+      isRepeatClient: customer.is_repeat_client,
+      createdAt: customer.created_at,
         createdAtDisplay: formatDisplayDateTime(customer.created_at),
       }
     : null
@@ -269,9 +295,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       .filter((li) => li.quote_id === q.id)
       .map((li) => ({
         description: li.description,
+        supplierDescription: li.supplier_description,
         qty: li.qty,
         unitPrice: li.unit_price,
         total: li.total,
+        pricingSnapshot: li.pricing_snapshot,
       })),
   }))
 
@@ -285,6 +313,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     method: p.method ?? "",
     reference: p.reference ?? "",
     notes: p.notes ?? "",
+    proofStoragePath: (p as Record<string, unknown>).proof_storage_path as string | null ?? null,
   }))
 
   const invoices = (invoicesData ?? []).map((invoice) => ({
@@ -311,16 +340,45 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   }))
 
   // Map documents
-  const documents = (documentsData ?? []).map((d) => ({
-    id: d.id,
-    jobId: d.booking_id,
-    kind: d.kind,
-    status: d.status,
-    storagePath: d.storage_path,
-    generatedAt: d.created_at,
-    generatedAtDisplay: formatDisplayDateTime(d.created_at),
-    urlOrBlobRef: d.storage_path ?? "",
-  }))
+  const documentUploaderIds = Array.from(
+    new Set(
+      (documentsData ?? [])
+        .map((d) => (d as { uploaded_by?: string | null }).uploaded_by)
+        .filter((v): v is string => Boolean(v)),
+    ),
+  )
+  let documentUploaderMap: Record<string, string> = {}
+  if (documentUploaderIds.length > 0) {
+    const { data: uploaderProfiles } = await supabase
+      .from("profiles")
+      .select("user_id, name, surname, email")
+      .in("user_id", documentUploaderIds)
+    documentUploaderMap = Object.fromEntries(
+      (uploaderProfiles ?? []).map((p) => [
+        p.user_id,
+        [p.name, p.surname].filter(Boolean).join(" ").trim() || p.email || "Unknown",
+      ]),
+    )
+  }
+
+  const documents = (documentsData ?? []).map((d) => {
+    const uploadedBy = (d as { uploaded_by?: string | null }).uploaded_by ?? null
+    const fileName = (d as { file_name?: string | null }).file_name ?? null
+    return {
+      id: d.id,
+      jobId: d.booking_id,
+      kind: d.kind,
+      status: d.status,
+      storagePath: d.storage_path,
+      fileName,
+      uploadedBy,
+      uploadedByName: uploadedBy ? documentUploaderMap[uploadedBy] ?? null : null,
+      paymentId: (d as { payment_id?: string | null }).payment_id ?? null,
+      generatedAt: d.created_at,
+      generatedAtDisplay: formatDisplayDateTime(d.created_at),
+      urlOrBlobRef: d.storage_path ?? "",
+    }
+  })
 
   // Map correspondence
   const correspondence = (correspondenceData ?? []).map((c) => ({
@@ -353,6 +411,12 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     createdAtDisplay: formatDisplayDateTime(a.created_at),
   }))
 
+  const depositInvoice = (invoicesData ?? []).find((inv) => inv.kind === "deposit")
+  const totalPaid = (paymentsData ?? []).reduce((sum, p) => sum + Number(p.amount), 0)
+  if (depositInvoice !== undefined) {
+    job.suggestedRefund = Math.max(0, totalPaid - Number(depositInvoice.amount))
+  }
+
   return NextResponse.json({
     job,
     customer: customerOut,
@@ -365,6 +429,12 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     correspondence,
     auditLogs,
     salespeople,
+    outcomeReasons: (outcomeReasonsData ?? []).map((r) => ({
+      id: r.id,
+      label: r.label,
+      appliesTo: r.applies_to,
+      active: r.active,
+    })),
     settings: {
       defaultDepositPercentage,
     },
@@ -390,12 +460,23 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const { data: booking } = await supabase
     .from("bookings")
     .select(
-      "id, stage, booking_number, customer_id, consultant, assigned_salesperson_id, source, raw_text, email_import_needs_review, email_import_review_resolved_at, updated_at",
+      "id, stage, booking_number, customer_id, consultant, assigned_salesperson_id, source, raw_text, email_import_needs_review, email_import_review_resolved_at, updated_at, departure_date, duration_nights, deposit_paid, invoice_balance, no_of_adults, no_of_children, no_of_suites",
     )
     .eq("id", id)
     .single()
 
   if (!booking) return NextResponse.json({ error: "Not found" }, { status: 404 })
+
+  const { data: patchActorProfile } = await supabase
+    .from("profiles")
+    .select("clearance_level")
+    .eq("user_id", user.id)
+    .maybeSingle()
+
+  const patchActorRole = extractRoleFromJwt(user) ?? patchActorProfile?.clearance_level ?? null
+  if (!["admin", "manager", "consultant"].includes(patchActorRole ?? "")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
 
   if (body.expectedUpdatedAt && body.expectedUpdatedAt !== booking.updated_at) {
     return staleVersionResponse("booking", booking.updated_at)
@@ -404,6 +485,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
 
   if (body.resolveEmailImportReview === true) {
+    const { data: actorProfile } = await supabase
+      .from("profiles")
+      .select("clearance_level")
+      .eq("user_id", user.id)
+      .maybeSingle()
+
+    const role = extractRoleFromJwt(user) ?? actorProfile?.clearance_level ?? null
+    if (role !== "manager" && role !== "admin") {
+      return NextResponse.json({ error: "Manager access required to clear import review" }, { status: 403 })
+    }
+
     updates.email_import_needs_review = false
     updates.email_import_review_resolved_at = new Date().toISOString()
     updates.email_import_review_resolved_by = user?.id ?? null
@@ -425,7 +517,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         booking_number: string
         stage: string
         consultant: string | null
-        cancel_reason: string | null
         cancelled_at: string | null
         updated_at: string
       }
@@ -445,10 +536,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const role = extractRoleFromJwt(user) ?? profile?.clearance_level ?? null
     const isManager = role === "manager" || role === "admin"
     const overrideReason = body.overrideReason?.trim() ?? ""
-    const lostContext = {
-      ...body.lostContext,
-      cancelReason: body.lostContext?.cancelReason ?? body.cancelReason ?? null,
-    }
+    const lostContext = { ...body.lostContext }
 
     const [
       { data: customer },
@@ -484,6 +572,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         body.resolveEmailImportReview === true
           ? new Date().toISOString()
           : booking.email_import_review_resolved_at,
+      deposit_paid: booking.deposit_paid,
+      invoice_balance: booking.invoice_balance !== null ? Number(booking.invoice_balance) : null,
+      departure_date: booking.departure_date,
     }
     const failures = validateTransition({
       booking: validationBooking,
@@ -505,7 +596,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         return NextResponse.json({ error: "Override reason is required" }, { status: 400 })
       }
     } else if (failures.length > 0) {
-      return NextResponse.json({ failures, isManager }, { status: 422 })
+      return NextResponse.json(
+        { error: "Stage transition blocked", details: { failures, isManager } },
+        { status: 400 },
+      )
     }
 
     if (fromStage === "closed" && targetStage !== "closed" && !body.closedReopenReason?.trim()) {
@@ -524,6 +618,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
           customer_id: booking.customer_id,
           consultant: booking.consultant,
         },
+        departureDate: booking.departure_date,
+        durationNights: booking.duration_nights,
         targetStage,
         actorName,
         actorUserId: user.id,
@@ -562,10 +658,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       entity_id: id,
       action: "stage_change",
       before_json: { stage: fromStage },
-      after_json: {
-        stage: targetStage,
-        ...(lostContext.cancelReason ? { cancel_reason: lostContext.cancelReason } : {}),
-      },
+      after_json: { stage: targetStage },
       meta_json: {
         payments_seen: payments?.length ?? 0,
         manual_confirmations: body.manualConfirmations ?? null,
@@ -611,9 +704,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       if (reopenAudit.error) return NextResponse.json({ error: reopenAudit.error.message }, { status: 500 })
     }
   }
-
-  if (body.ownerUser) updates.consultant = body.ownerUser
-  if (body.consultant) updates.consultant = body.consultant
 
   if (body.assignedSalespersonId !== undefined) {
     const { data: actorProfile } = await supabase
@@ -680,6 +770,66 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     })
   }
 
+  if (body.supplierReference !== undefined) {
+    const { data: actorProfile } = await supabase
+      .from("profiles")
+      .select("name, surname, email")
+      .eq("user_id", user.id)
+      .maybeSingle()
+
+    const actorName =
+      [actorProfile?.name, actorProfile?.surname].filter(Boolean).join(" ").trim() ||
+      actorProfile?.email ||
+      user.email ||
+      "System"
+
+    const result = await updateSupplierReference(supabase, {
+      bookingId: id,
+      value: body.supplierReference,
+      actor: actorName,
+      actorUserId: user.id,
+    })
+    if (!result.ok) {
+      const status = result.notFound ? 404 : 500
+      return NextResponse.json({ error: result.error }, { status })
+    }
+  }
+
+  if (body.parsedFieldEdits) {
+    const edits = body.parsedFieldEdits
+    type ParsedFieldMap = [keyof typeof edits, string, unknown]
+    const fieldMap: ParsedFieldMap[] = [
+      ["noOfAdults", "no_of_adults", booking.no_of_adults],
+      ["noOfChildren", "no_of_children", booking.no_of_children],
+      ["noOfSuites", "no_of_suites", booking.no_of_suites],
+      ["departureDate", "departure_date", booking.departure_date],
+    ]
+
+    const before: Record<string, unknown> = {}
+    const after: Record<string, unknown> = {}
+
+    for (const [camelKey, snakeKey, oldValue] of fieldMap) {
+      const newValue = edits[camelKey]
+      if (newValue !== undefined) {
+        before[camelKey] = oldValue
+        after[camelKey] = newValue
+        updates[snakeKey] = newValue
+      }
+    }
+
+    if (Object.keys(after).length > 0) {
+      await supabase.from("audit_logs").insert({
+        actor: user?.email ?? "System",
+        actor_user_id: user?.id ?? null,
+        entity_type: "Booking",
+        entity_id: id,
+        action: "enquiry_field_updated",
+        before_json: before as Json,
+        after_json: after as Json,
+      })
+    }
+  }
+
   if (stageUpdated && Object.keys(updates).length === 1) {
     return NextResponse.json({
       id: stageUpdated.id,
@@ -687,7 +837,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       stage: stageUpdated.stage,
       consultant: stageUpdated.consultant,
       assignedSalespersonId: booking.assigned_salesperson_id ?? null,
-      cancelReason: stageUpdated.cancel_reason ?? null,
       cancelledAt: stageUpdated.cancelled_at ?? null,
       updatedAt: stageUpdated.updated_at,
       updatedAtDisplay: formatDisplayDateTime(stageUpdated.updated_at),
@@ -729,7 +878,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     stage: updated.stage,
     consultant: updated.consultant,
     assignedSalespersonId: updated.assigned_salesperson_id ?? null,
-    cancelReason: updated.cancel_reason ?? null,
     cancelledAt: updated.cancelled_at ?? null,
     updatedAt: updated.updated_at,
     updatedAtDisplay: formatDisplayDateTime(updated.updated_at),

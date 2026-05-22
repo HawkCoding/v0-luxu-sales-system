@@ -1,0 +1,8 @@
+{
+  "from": "john.smith@gmail.com",
+  "to": "enquiries@luxustravel.co.za",
+  "subject": "New enquiry from website",
+  "text": "Title: Mr\nFirst name: John\nSurname: Smith\nContact number: +27821234567\nEmail: john.smith@gmail.com\nCountry: South Africa\nProvince: Gauteng\nDirection: Pretoria to Cape Town\nDeparture date: 2026-09-15\nNo. of adults: 2\nNo. of suites: 1\nSuite type: Deluxe Double Suite\nPlease indicate the purpose of your request: Quote\n\nDear Luxus Travel,\n\nI am interested in a Rovos Rail journey from Pretoria to Cape Town for myself and my wife.\nWe would like to travel in a Deluxe Double Suite departing on 2026-09-15.\n\nKind regards,\nJohn Smith\n",
+  "html": "",
+  "date": "2026-05-18T09:00:00Z"
+}

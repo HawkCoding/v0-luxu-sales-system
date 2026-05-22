@@ -32,6 +32,35 @@ describe("parseStageTransitionFailurePayload", () => {
     expect(parseStageTransitionFailurePayload({ error: "Request failed" })).toBeNull()
     expect(parseStageTransitionFailurePayload({ failures: [{ gateId: "missing" }] })).toBeNull()
   })
+
+  it("returns typed failures from the standard error details shape", () => {
+    expect(
+      parseStageTransitionFailurePayload({
+        error: "Stage transition blocked",
+        details: {
+          failures: [
+            {
+              gateId: "voucher_balance_zero",
+              message: "The invoice balance must be zero before generating a voucher.",
+              fixHint: "Record all outstanding payments to clear the invoice balance.",
+              severity: "block",
+            },
+          ],
+          isManager: false,
+        },
+      }),
+    ).toEqual({
+      failures: [
+        {
+          gateId: "voucher_balance_zero",
+          message: "The invoice balance must be zero before generating a voucher.",
+          fixHint: "Record all outstanding payments to clear the invoice balance.",
+          severity: "block",
+        },
+      ],
+      isManager: false,
+    })
+  })
 })
 
 describe("getApiErrorMessage", () => {

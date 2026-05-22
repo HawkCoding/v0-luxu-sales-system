@@ -1,75 +1,123 @@
 "use client"
 
-import { useAllData } from "@/lib/use-data"
+import { useAllData, useEnquiries, type EnquiryFilter, type EnquiryListItem } from "@/lib/use-data"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Search, Plus, FileText, Clipboard, Send, AlertCircle, Download, HelpCircle, CheckCircle2, Trash2 } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import {
+  Search,
+  Plus,
+  FileText,
+  Clipboard,
+  Send,
+  AlertCircle,
+  Download,
+  HelpCircle,
+  CheckCircle2,
+  Trash2,
+} from "lucide-react"
 import Link from "next/link"
-import { useState } from "react"
+import { useState, useCallback } from "react"
+import { useSearchParams, useRouter } from "next/navigation"
 import { useRole } from "@/lib/role-context"
 import { NewEnquiryDialog } from "@/components/new-enquiry-dialog"
-import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { toast } from "sonner"
 import { downloadAuditLog } from "@/lib/export-audit"
 import { formatDisplayDate } from "@/lib/date-format"
 import { SendQuoteDialog } from "@/components/send-quote-dialog"
-import { isVisibleInEnquiries } from "@/lib/booking-visibility"
+import type { AuditLog } from "@/lib/types"
+
+const FILTER_CHIPS: { value: EnquiryFilter; label: string }[] = [
+  { value: "needs_review", label: "Needs Review" },
+  { value: "complete", label: "Complete" },
+  { value: "unassigned", label: "Unassigned" },
+  { value: "my_enquiries", label: "My Enquiries" },
+  { value: "possible_duplicates", label: "Possible Duplicates" },
+]
 
 export default function EnquiriesPage() {
-  const { data, isLoading, mutate } = useAllData()
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const activeFilter = (searchParams.get("filter") as EnquiryFilter | null) ?? undefined
+
+  const { data: enquiriesData, isLoading, error, mutate: mutateEnquiries } = useEnquiries(activeFilter)
+  const { data: allData, mutate: mutateAllData } = useAllData()
   const { can } = useRole()
+
   const [search, setSearch] = useState("")
   const [sourceFilter, setSourceFilter] = useState("all")
   const [newEnquiryOpen, setNewEnquiryOpen] = useState(false)
   const [dialogOpenId, setDialogOpenId] = useState<string | null>(null)
 
-  if (isLoading || !data) {
-    return <div className="p-6"><div className="animate-pulse space-y-3">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-16 bg-secondary rounded-lg" />)}</div></div>
+  const setFilter = useCallback(
+    (value: EnquiryFilter | undefined) => {
+      if (value) {
+        router.replace(`/app/enquiries?filter=${value}`)
+      } else {
+        router.replace("/app/enquiries")
+      }
+    },
+    [router],
+  )
+
+  const refreshAll = useCallback(() => {
+    mutateEnquiries()
+    mutateAllData()
+  }, [mutateEnquiries, mutateAllData])
+
+  if (isLoading) {
+    return (
+      <div className="p-6">
+        <div className="animate-pulse space-y-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-16 bg-secondary rounded-lg" />
+          ))}
+        </div>
+      </div>
+    )
   }
 
-  // Enquiry intake queue: bookings in "enquiry" stage
-  const enquiries = data.bookings
-    .filter(isVisibleInEnquiries)
-    .map((b: any) => {
-      const customer = data.customers.find((c: any) => c.id === b.customerId)
-      const quotes = data.quotes?.filter((q: any) => q.bookingId === b.id) || []
-      const totalQuote = quotes.reduce((sum: number, q: any) => sum + (q.total || 0), 0)
-      return {
-        ...b,
-        // Legacy field names used by the UI below
-        jobNumber: b.bookingNumber,
-        jobId: b.id,
-        name: customer?.firstName || "",
-        surname: customer?.lastName || "",
-        email: customer?.email || "",
-        title: customer?.title || "",
-        totalQuote,
-        quotes,
-      }
-    })
+  if (error) {
+    return (
+      <div className="p-6">
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
+            Failed to load enquiries: {error instanceof Error ? error.message : "Unknown error"}
+          </AlertDescription>
+        </Alert>
+      </div>
+    )
+  }
 
-  const filtered = enquiries.filter((e: any) => {
-    const matchSearch = !search || [e.name, e.surname, e.email, e.bookingNumber, e.direction].some((f: string) => f?.toLowerCase().includes(search.toLowerCase()))
+  const rawEnquiries: EnquiryListItem[] = enquiriesData?.enquiries ?? []
+
+  const filtered = rawEnquiries.filter((e) => {
+    const customer = e.customer
+    const matchSearch =
+      !search ||
+      [customer?.firstName, customer?.lastName, customer?.email, e.bookingNumber, e.direction].some((f) =>
+        f?.toLowerCase().includes(search.toLowerCase()),
+      )
     const matchSource = sourceFilter === "all" || e.source === sourceFilter
     return matchSearch && matchSource
   })
 
-  const handleDownloadAudit = (e: React.MouseEvent, enquiry: any) => {
-    e.preventDefault()
-    e.stopPropagation()
-    
+  const handleDownloadAudit = (ev: React.MouseEvent, enquiry: EnquiryListItem) => {
+    ev.preventDefault()
+    ev.stopPropagation()
     try {
-      const jobAuditLogs = (data.auditLogs || []).filter((log: any) => 
-        log.entityId === enquiry.id || (log.entityType === 'Booking' && log.entityId === enquiry.id)
+      const jobAuditLogs = ((allData as { auditLogs?: AuditLog[] } | undefined)?.auditLogs ?? []).filter(
+        (log) =>
+          log.entityId === enquiry.id || (log.entityType === "Booking" && log.entityId === enquiry.id),
       )
       downloadAuditLog(jobAuditLogs, enquiry.bookingNumber)
       toast.success("Audit log downloaded")
-    } catch (error) {
-      console.error("[v0] Failed to download audit:", error)
+    } catch {
       toast.error("Failed to download audit log")
     }
   }
@@ -80,7 +128,7 @@ export default function EnquiriesPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ resolveEmailImportReview: true }),
     })
-    mutate()
+    refreshAll()
     toast.success("Import review resolved")
   }
 
@@ -91,7 +139,7 @@ export default function EnquiriesPage() {
       toast.error(body.error || "Failed to reject enquiry")
       return
     }
-    mutate()
+    refreshAll()
     toast.success("Imported enquiry rejected")
   }
 
@@ -115,7 +163,8 @@ export default function EnquiriesPage() {
               </PopoverTrigger>
               <PopoverContent align="start" className="w-80 text-sm leading-6">
                 <p>
-                  This queue shows newly captured enquiries, including unreviewed enquiries and enquiries that need attention. Once you send a quote, the job will move to the Pipeline.
+                  This queue shows newly captured enquiries, including unreviewed enquiries and enquiries that need
+                  attention. Once you send a quote, the job will move to the Pipeline.
                 </p>
               </PopoverContent>
             </Popover>
@@ -129,16 +178,44 @@ export default function EnquiriesPage() {
             <NewEnquiryDialog
               open={newEnquiryOpen}
               onOpenChange={setNewEnquiryOpen}
-              onSaved={() => mutate()}
+              onSaved={() => refreshAll()}
             />
           </>
         )}
       </div>
 
+      {/* Filter chips */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <Button
+          variant={!activeFilter ? "default" : "outline"}
+          size="sm"
+          onClick={() => setFilter(undefined)}
+          aria-pressed={!activeFilter}
+        >
+          All
+        </Button>
+        {FILTER_CHIPS.map((chip) => (
+          <Button
+            key={chip.value}
+            variant={activeFilter === chip.value ? "default" : "outline"}
+            size="sm"
+            onClick={() => setFilter(activeFilter === chip.value ? undefined : chip.value)}
+            aria-pressed={activeFilter === chip.value}
+          >
+            {chip.label}
+          </Button>
+        ))}
+      </div>
+
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input placeholder="Search enquiries..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8 h-9 text-sm" />
+          <Input
+            placeholder="Search enquiries..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-8 h-9 text-sm"
+          />
         </div>
         <Select value={sourceFilter} onValueChange={setSourceFilter}>
           <SelectTrigger className="w-40 h-9 text-sm">
@@ -160,49 +237,75 @@ export default function EnquiriesPage() {
       </div>
 
       <div className="space-y-3">
-        {filtered.map((e: any) => {
+        {filtered.map((e) => {
+          const customer = e.customer
+          const name = customer?.firstName ?? ""
+          const surname = customer?.lastName ?? ""
+          const email = customer?.email ?? ""
+          const title = customer?.title ?? ""
+
           return (
             <Card key={e.id} className="group hover:shadow-md transition-shadow border-2 relative">
               <CardContent className="p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-start gap-4 min-w-0 flex-1">
                     <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0 relative">
-                      {e.source === "paste_import" ? <Clipboard className="w-5 h-5 text-primary" /> : <FileText className="w-5 h-5 text-primary" />}
-                      {/* Grey status circle for new enquiry */}
+                      {e.source === "paste_import" ? (
+                        <Clipboard className="w-5 h-5 text-primary" />
+                      ) : (
+                        <FileText className="w-5 h-5 text-primary" />
+                      )}
                       <div className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-gray-400 border-2 border-white" title="New enquiry" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 mb-1">
-                        <Link href={`/app/bookings/${e.jobId}`} className="text-base font-semibold text-foreground hover:text-primary transition-colors">
-                          {e.jobNumber}
+                        <Link
+                          href={`/app/bookings/${e.id}`}
+                          className="text-base font-semibold text-foreground hover:text-primary transition-colors"
+                        >
+                          {e.bookingNumber}
                         </Link>
                         {e.consultant && (
-                          <Badge variant="default" className="text-xs font-bold">{e.consultant}</Badge>
+                          <Badge variant="default" className="text-xs font-bold">
+                            {e.consultant}
+                          </Badge>
                         )}
-                        <Badge variant="outline" className="text-xs">{e.source.replace("_", " ")}</Badge>
-                        <Badge variant="secondary" className="text-xs">{e.purpose}</Badge>
+                        <Badge variant="outline" className="text-xs">
+                          {e.source.replace("_", " ")}
+                        </Badge>
+                        <Badge variant="secondary" className="text-xs">
+                          {e.purpose}
+                        </Badge>
                         {e.emailImportNeedsReview && (
-                          <Badge variant="destructive" className="text-xs">Needs Review</Badge>
+                          <Badge variant="destructive" className="text-xs">
+                            Needs Review
+                          </Badge>
                         )}
                         {e.emailImportDuplicateOfBookingId && (
-                          <Badge variant="outline" className="text-xs">Possible duplicate</Badge>
+                          <Badge variant="outline" className="text-xs">
+                            Possible duplicate
+                          </Badge>
                         )}
                       </div>
                       <p className="text-sm text-muted-foreground mb-2">
-                        {e.title} {e.name} {e.surname} • {e.email}
+                        {title} {name} {surname} • {email}
                       </p>
                       <div className="flex items-center gap-4 text-xs text-muted-foreground">
                         <span>{e.direction}</span>
                         <span>•</span>
                         <span>{formatDisplayDate(e.departureDate)}</span>
                         <span>•</span>
-                        <span>{e.noOfAdults} adults, {e.noOfChildren} children</span>
+                        <span>
+                          {e.noOfAdults} adults, {e.noOfChildren} children
+                        </span>
                       </div>
                       {e.emailImportNeedsReview && (
                         <Alert className="mt-3 py-2 border-destructive/40">
                           <AlertCircle className="h-3 w-3" />
                           <AlertDescription className="text-xs">
-                            Needs Review: {[...(e.emailImportMissingFields || []), ...(e.emailImportWarnings || [])].join(", ") || "Review parsed email fields"}
+                            Needs Review:{" "}
+                            {[...(e.emailImportMissingFields || []), ...(e.emailImportWarnings || [])].join(", ") ||
+                              "Review parsed email fields"}
                           </AlertDescription>
                         </Alert>
                       )}
@@ -218,15 +321,9 @@ export default function EnquiriesPage() {
                   </div>
                   <div className="flex flex-col items-end gap-2 flex-shrink-0">
                     <div className="text-right">
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        Created {formatDisplayDate(e.createdAt)}
-                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Created {formatDisplayDate(e.createdAt)}</p>
                     </div>
-                    <Button
-                      size="sm"
-                      onClick={() => setDialogOpenId(e.id)}
-                      className="w-full"
-                    >
+                    <Button size="sm" onClick={() => setDialogOpenId(e.id)} className="w-full">
                       <Send className="w-3.5 h-3.5 mr-1.5" />
                       Send Quote
                     </Button>
@@ -238,10 +335,10 @@ export default function EnquiriesPage() {
                       departureDate={e.departureDate}
                       noOfAdults={e.noOfAdults}
                       noOfChildren={e.noOfChildren}
-                      customerName={`${e.title} ${e.surname}`.trim()}
+                      customerName={`${title} ${surname}`.trim()}
                       emailImportNeedsReview={e.emailImportNeedsReview}
                       onSent={() => {
-                        mutate()
+                        refreshAll()
                         setDialogOpenId(null)
                       }}
                     />
@@ -287,7 +384,9 @@ export default function EnquiriesPage() {
                 <FileText className="w-12 h-12 text-muted-foreground/40 mx-auto" />
                 <p className="text-base font-medium text-foreground">No enquiries in queue</p>
                 <p className="text-sm text-muted-foreground">
-                  All enquiries have been processed or there are no new enquiries yet
+                  {activeFilter
+                    ? "No enquiries match this filter"
+                    : "All enquiries have been processed or there are no new enquiries yet"}
                 </p>
               </div>
             </CardContent>

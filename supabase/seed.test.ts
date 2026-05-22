@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 
-const seedSql = readFileSync(new URL("./seed.sql", import.meta.url), "utf8")
+const seedSql = readFileSync(join(process.cwd(), "supabase", "seed.sql"), "utf8")
 
 const devUsers = [
   { id: "00000000-0000-0000-0000-0000000000a1", email: "carmen@luxustravel.co.za", role: "admin" },
@@ -29,5 +30,17 @@ describe("local Supabase seed", () => {
     expect(seedSql).toContain("on conflict (id) do update")
     expect(seedSql).toContain("on conflict (user_id) do update")
     expect(seedSql).toContain("is_active = excluded.is_active")
+  })
+
+  it("uses product-year job numbers and seeds product counters", () => {
+    expect(seedSql).not.toContain("LUX-")
+    expect(seedSql).not.toContain("nextval")
+    expect(seedSql).not.toContain("::regclass")
+    expect(seedSql).not.toContain("job_number_counters")
+    expect(seedSql).toContain("'Blue Train', 'blue-train', 'train_operator'")
+    expect(seedSql).toContain("'RR-2025-0001'")
+    expect(seedSql).toContain("insert into public.booking_number_sequences")
+    expect(seedSql).toContain("max(parsed.sequence_number)")
+    expect(seedSql).toContain("booking_number ~ '^(BT|RR|REV)-[0-9]{4}-[0-9]{4}$'")
   })
 })

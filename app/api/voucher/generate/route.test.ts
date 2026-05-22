@@ -16,6 +16,18 @@ vi.mock("@/lib/voucher/render-voucher-email", () => ({
   renderVoucherEmail: vi.fn(async () => "<p>voucher</p>"),
 }))
 
+const buildBlocksMock = vi.hoisted(() => vi.fn())
+vi.mock("@/lib/voucher/build-service-blocks", () => ({
+  buildVoucherServiceBlocks: buildBlocksMock,
+}))
+
+const auditMocks = vi.hoisted(() => ({
+  writeAuditLog: vi.fn(async () => ({ error: null })),
+}))
+vi.mock("@/lib/audit-write", () => ({
+  writeAuditLog: auditMocks.writeAuditLog,
+}))
+
 import { POST } from "./route"
 import { renderVoucherPdf } from "@/lib/voucher/render-pdf"
 
@@ -29,11 +41,6 @@ function postJson(body: unknown) {
   })
 }
 
-interface BookingOpts {
-  stage: string
-  invoiceBalance: number | null
-}
-
 function createSelectResult(data: unknown) {
   return {
     select: vi.fn(() => ({
@@ -43,6 +50,7 @@ function createSelectResult(data: unknown) {
         limit: vi.fn(() => ({
           maybeSingle: vi.fn(async () => ({ data, error: null })),
         })),
+        maybeSingle: vi.fn(async () => ({ data, error: null })),
       })),
       limit: vi.fn(() => ({
         maybeSingle: vi.fn(async () => ({ data, error: null })),
@@ -51,10 +59,22 @@ function createSelectResult(data: unknown) {
   }
 }
 
-function buildAuth({ stage, invoiceBalance }: BookingOpts) {
+interface BookingOpts {
+  stage: string
+  invoiceBalance: number | null
+  existingDocumentId?: string
+  existingVoucherId?: string
+  blocks?: Array<{
+    serviceType: "train" | "hotel" | "transfer" | "tour" | "airline" | "additional_service"
+    title: string
+    displayOrder: number
+  }>
+}
+
+function buildAuth({ stage, invoiceBalance, existingDocumentId, existingVoucherId, blocks }: BookingOpts) {
   const documentWrite = {
     data: {
-      id: "document-1",
+      id: existingDocumentId ?? "document-1",
       booking_id: BOOKING_ID,
       kind: "voucher_pdf",
       status: "generated",
@@ -63,6 +83,36 @@ function buildAuth({ stage, invoiceBalance }: BookingOpts) {
     },
     error: null,
   }
+
+  const voucherWrite = {
+    data: {
+      id: existingVoucherId ?? "voucher-1",
+      sent_at: null,
+      generated_at: "2026-05-18T00:00:00.000Z",
+    },
+    error: null,
+  }
+
+  const insertedBlocks: unknown[] = []
+  let deleteBlocksCalled = false
+
+  buildBlocksMock.mockResolvedValue({
+    blocks: (blocks ?? [
+      {
+        serviceType: "train",
+        title: "Train",
+        displayOrder: 0,
+        supplierReference: "BT-2026-0001",
+        contactDetails: { name: "Blue Train" },
+        serviceData: { route: "Pretoria to Cape Town" },
+      },
+    ]).map((b) => ({
+      contactDetails: {},
+      serviceData: {},
+      supplierReference: null,
+      ...b,
+    })),
+  })
 
   const supabase = {
     storage: {
@@ -91,16 +141,16 @@ function buildAuth({ stage, invoiceBalance }: BookingOpts) {
       if (table === "booking_suites") return createSelectResult([{ suite_type_name: "Luxury" }])
       if (table === "travellers") return createSelectResult([])
       if (table === "voucher_template") return createSelectResult(null)
-      if (table === "audit_logs") return { insert: vi.fn(async () => ({ error: null })) }
 
       if (table === "documents") {
+        const existingDoc = existingDocumentId ? { id: existingDocumentId } : null
         return {
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
               eq: vi.fn(() => ({
                 order: vi.fn(() => ({
                   limit: vi.fn(() => ({
-                    maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+                    maybeSingle: vi.fn(async () => ({ data: existingDoc, error: null })),
                   })),
                 })),
               })),
@@ -111,6 +161,51 @@ function buildAuth({ stage, invoiceBalance }: BookingOpts) {
               single: vi.fn(async () => documentWrite),
             })),
           })),
+          update: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              select: vi.fn(() => ({
+                single: vi.fn(async () => documentWrite),
+              })),
+            })),
+          })),
+        }
+      }
+
+      if (table === "vouchers") {
+        const existingVoucher = existingVoucherId ? { id: existingVoucherId } : null
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn(async () => ({ data: existingVoucher, error: null })),
+            })),
+          })),
+          insert: vi.fn(() => ({
+            select: vi.fn(() => ({
+              single: vi.fn(async () => voucherWrite),
+            })),
+          })),
+          update: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              select: vi.fn(() => ({
+                single: vi.fn(async () => voucherWrite),
+              })),
+            })),
+          })),
+        }
+      }
+
+      if (table === "voucher_service_blocks") {
+        return {
+          delete: vi.fn(() => ({
+            eq: vi.fn(async () => {
+              deleteBlocksCalled = true
+              return { error: null }
+            }),
+          })),
+          insert: vi.fn(async (rows: unknown[]) => {
+            insertedBlocks.push(...rows)
+            return { error: null }
+          }),
         }
       }
 
@@ -126,12 +221,22 @@ function buildAuth({ stage, invoiceBalance }: BookingOpts) {
       profile: { clearanceLevel: "consultant", actorName: "Jane" },
     },
   })
+
+  return {
+    insertedBlocks,
+    get deleteBlocksCalled() {
+      return deleteBlocksCalled
+    },
+  }
 }
 
 describe("POST /api/voucher/generate", () => {
   beforeEach(() => {
     authMocks.requireRole.mockReset()
     vi.mocked(renderVoucherPdf).mockClear()
+    vi.mocked(renderVoucherPdf).mockResolvedValue(Buffer.from("pdf"))
+    auditMocks.writeAuditLog.mockClear()
+    buildBlocksMock.mockReset()
   })
 
   it("rejects voucher generation when the invoice balance is not zero", async () => {
@@ -140,7 +245,7 @@ describe("POST /api/voucher/generate", () => {
     const res = await POST(postJson({ jobId: BOOKING_ID }))
 
     expect(res.status).toBe(422)
-    expect(await res.json()).toMatchObject({ error: "Booking must be paid in full before generating a voucher" })
+    expect(await res.json()).toMatchObject({ error: "The invoice balance must be zero before generating a voucher." })
     expect(renderVoucherPdf).not.toHaveBeenCalled()
   })
 
@@ -150,7 +255,7 @@ describe("POST /api/voucher/generate", () => {
     const res = await POST(postJson({ jobId: BOOKING_ID }))
 
     expect(res.status).toBe(422)
-    expect(await res.json()).toMatchObject({ error: "Booking must be paid in full before generating a voucher" })
+    expect(await res.json()).toMatchObject({ error: "The booking must be in Paid in Full, Voucher Sent, or Closed stage." })
     expect(renderVoucherPdf).not.toHaveBeenCalled()
   })
 
@@ -161,5 +266,68 @@ describe("POST /api/voucher/generate", () => {
 
     expect(res.status).toBe(200)
     expect(renderVoucherPdf).toHaveBeenCalled()
+  })
+
+  it("logs voucher_regenerated when a voucher row already exists", async () => {
+    buildAuth({
+      stage: "final_paid",
+      invoiceBalance: 0,
+      existingDocumentId: "existing-doc-1",
+      existingVoucherId: "existing-voucher-1",
+    })
+
+    const res = await POST(postJson({ jobId: BOOKING_ID }))
+
+    expect(res.status).toBe(200)
+    expect(auditMocks.writeAuditLog).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: "voucher_regenerated" }),
+    )
+  })
+
+  it("logs voucher_generated when no voucher row exists yet", async () => {
+    buildAuth({ stage: "final_paid", invoiceBalance: 0 })
+
+    const res = await POST(postJson({ jobId: BOOKING_ID }))
+
+    expect(res.status).toBe(200)
+    expect(auditMocks.writeAuditLog).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: "voucher_generated" }),
+    )
+  })
+
+  it("inserts service blocks in display_order", async () => {
+    const built = buildAuth({
+      stage: "final_paid",
+      invoiceBalance: 0,
+      blocks: [
+        { serviceType: "hotel", title: "Hotel", displayOrder: 1 },
+        { serviceType: "train", title: "Train", displayOrder: 0 },
+        { serviceType: "additional_service", title: "Extras", displayOrder: 2 },
+      ],
+    })
+
+    const res = await POST(postJson({ jobId: BOOKING_ID }))
+
+    expect(res.status).toBe(200)
+    expect(built.deleteBlocksCalled).toBe(true)
+    expect(built.insertedBlocks).toHaveLength(3)
+    const orders = (built.insertedBlocks as Array<{ display_order: number; service_type: string }>).map(
+      (b) => `${b.display_order}:${b.service_type}`,
+    )
+    expect(orders).toEqual(["1:hotel", "0:train", "2:additional_service"])
+  })
+
+  it("does not write a vouchers row when PDF rendering fails", async () => {
+    const built = buildAuth({ stage: "final_paid", invoiceBalance: 0 })
+    vi.mocked(renderVoucherPdf).mockRejectedValueOnce(new Error("pdf boom"))
+
+    const res = await POST(postJson({ jobId: BOOKING_ID }))
+
+    expect(res.status).toBe(500)
+    expect(built.insertedBlocks).toHaveLength(0)
+    expect(built.deleteBlocksCalled).toBe(false)
+    expect(auditMocks.writeAuditLog).not.toHaveBeenCalled()
   })
 })

@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server"
 import { randomUUID } from "node:crypto"
+import { z } from "zod"
+import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { detectCountryInText, loadCountryAliasMap, normalizeCountry } from "@/lib/countries"
+import { addJobNumberingMetadata, allocateJobNumberForBooking, type JobNumberAllocation } from "@/lib/job-numbering"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
 import { buildPackageQuoteLineItems, calculateQuoteTotals } from "@/lib/quotes/build-from-package"
 import { buildQuoteNumber } from "@/lib/quotes/quote-number"
 import type { PackageDetail, QuoteLineItem } from "@/lib/types"
 import { createServiceClient, createSessionClient } from "@/lib/supabase/server"
+import type { Json } from "@/lib/supabase/types"
+import { COMPLETED_REPEAT_BOOKING_STAGES } from "@/lib/customer-repeat-status"
 import { loadPackageDetail } from "../packages/[slug]/helpers"
 
 type ServiceClient = ReturnType<typeof createServiceClient>
@@ -53,7 +58,7 @@ function normalizeNullableNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null
 }
 
-function normalizeSuiteSelections(body: Record<string, unknown>): SuiteSelection[] {
+export function normalizeSuiteSelections(body: Record<string, unknown>): SuiteSelection[] {
   const structuredSelections = Array.isArray(body.suiteSelections)
     ? body.suiteSelections
         .map((selection: unknown): SuiteSelection | null => {
@@ -82,7 +87,7 @@ function normalizeSuiteSelections(body: Record<string, unknown>): SuiteSelection
     : []
 }
 
-async function resolveSuiteSelectionIds(
+export async function resolveSuiteSelectionIds(
   supabase: ServiceClient,
   supplierId: unknown,
   selections: SuiteSelection[],
@@ -298,6 +303,110 @@ async function createDraftQuoteForBooking({
   return { quoteId: quote.id, warning }
 }
 
+const enquiryFilterSchema = z
+  .enum(["needs_review", "complete", "unassigned", "my_enquiries", "possible_duplicates"])
+  .optional()
+
+const ENQUIRY_SELECT =
+  "id, booking_number, customer_id, stage, purpose, source, consultant, owner_user_id, assigned_salesperson_id, departure_date, duration_nights, email_import_needs_review, email_import_review_resolved_at, email_import_missing_fields, email_import_warnings, email_import_source_message_id, email_import_duplicate_of_booking_id, email_import_subject, email_import_mailbox, email_import_received_at, email_import_raw_preview, no_of_adults, no_of_children, no_of_suites, child_ages, route_id, extracted_json, additional_services, additional_services_details, created_at, updated_at, route:routes(id, name), customer:customers(id, first_name, last_name, email, title)"
+
+export async function GET(req: Request) {
+  const supabase = await createSessionClient()
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser()
+  if (authError || !user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
+  const url = new URL(req.url)
+  const filterResult = enquiryFilterSchema.safeParse(url.searchParams.get("filter") ?? undefined)
+  if (!filterResult.success) {
+    return NextResponse.json({ error: "Invalid filter value" }, { status: 400 })
+  }
+  const filter = filterResult.data
+
+  let query = supabase
+    .from("bookings")
+    .select(ENQUIRY_SELECT)
+    .eq("stage", "enquiry")
+    .order("created_at", { ascending: false })
+
+  if (filter === "needs_review") query = query.eq("email_import_needs_review", true)
+  else if (filter === "complete") query = query.eq("email_import_needs_review", false)
+  else if (filter === "unassigned") query = query.is("owner_user_id", null)
+  else if (filter === "my_enquiries") query = query.eq("owner_user_id", user.id)
+  else if (filter === "possible_duplicates")
+    query = query.not("email_import_duplicate_of_booking_id", "is", null)
+
+  const { data: rows, error } = await query
+  if (error) return NextResponse.json({ error: "Failed to load enquiries" }, { status: 500 })
+
+  const allRows = rows ?? []
+  const filtered =
+    filter === "complete"
+      ? allRows.filter((b) => ((b.email_import_missing_fields as string[] | null) ?? []).length === 0)
+      : allRows
+
+  type CustomerRow = { id: string; first_name: string | null; last_name: string | null; email: string | null; title: string | null }
+  type RouteRow = { id: string; name: string }
+
+  const enquiries = filtered.map((b) => {
+    const cust = b.customer as CustomerRow | null
+    const route = b.route as RouteRow | null
+    return {
+      id: b.id,
+      bookingNumber: b.booking_number,
+      customerId: b.customer_id,
+      stage: b.stage,
+      purpose: b.purpose,
+      source: b.source,
+      consultant: b.consultant,
+      ownerUserId: b.owner_user_id,
+      assignedSalespersonId: b.assigned_salesperson_id,
+      departureDate: b.departure_date,
+      departureDateDisplay: formatDisplayDate(b.departure_date),
+      durationNights: b.duration_nights,
+      emailImportNeedsReview: b.email_import_needs_review,
+      emailImportReviewResolvedAt: b.email_import_review_resolved_at,
+      emailImportMissingFields: (b.email_import_missing_fields as string[] | null) ?? [],
+      emailImportWarnings: (b.email_import_warnings as string[] | null) ?? [],
+      emailImportSourceMessageId: b.email_import_source_message_id,
+      emailImportDuplicateOfBookingId: b.email_import_duplicate_of_booking_id,
+      emailImportSubject: b.email_import_subject,
+      emailImportMailbox: b.email_import_mailbox,
+      emailImportReceivedAt: b.email_import_received_at,
+      emailImportReceivedAtDisplay: formatDisplayDateTime(b.email_import_received_at),
+      emailImportRawPreview: b.email_import_raw_preview,
+      noOfAdults: b.no_of_adults,
+      noOfChildren: b.no_of_children,
+      noOfSuites: b.no_of_suites,
+      childAges: b.child_ages,
+      routeId: b.route_id,
+      direction:
+        route?.name ??
+        ((b.extracted_json as { historical_import?: { route?: string } } | null)?.historical_import?.route ?? null),
+      extractedJson: b.extracted_json,
+      additionalServices: b.additional_services,
+      additionalServicesDetails: b.additional_services_details,
+      createdAt: b.created_at,
+      updatedAt: b.updated_at,
+      createdAtDisplay: formatDisplayDateTime(b.created_at),
+      updatedAtDisplay: formatDisplayDateTime(b.updated_at),
+      customer: cust
+        ? {
+            id: cust.id,
+            firstName: cust.first_name,
+            lastName: cust.last_name,
+            email: cust.email,
+            title: cust.title,
+          }
+        : null,
+    }
+  })
+
+  return NextResponse.json({ enquiries })
+}
+
 export async function POST(req: Request) {
   const body = await req.json()
 
@@ -328,46 +437,18 @@ export async function POST(req: Request) {
   )
 
   // --- 1. Upsert customer (match on email) ---
-  const { data: existingCustomer } = await supabase
-    .from("customers")
-    .select("id")
-    .eq("email", normalizedEmail)
-    .maybeSingle()
+  const { customerId, customerIsRepeatClient } = await resolveEnquiryCustomer(supabase, {
+    normalizedEmail,
+    firstName: normalizedCustomerFirstName,
+    lastName: normalizedCustomerLastName,
+    phone: body.contactNumber || null,
+    country: normalizedCountry,
+    title: body.title || null,
+    nowIso: new Date().toISOString(),
+  })
 
-  let customerId: string
-
-  if (existingCustomer) {
-    customerId = existingCustomer.id
-    // Update contact details in case they changed
-    await supabase
-      .from("customers")
-      .update({
-        first_name: normalizedCustomerFirstName,
-        last_name: normalizedCustomerLastName,
-        phone: body.contactNumber || null,
-        country: normalizedCountry,
-        title: body.title || null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", customerId)
-  } else {
-    const { data: newCustomer, error: customerError } = await supabase
-      .from("customers")
-      .insert({
-        first_name: normalizedCustomerFirstName,
-        last_name: normalizedCustomerLastName,
-        email: normalizedEmail,
-        phone: body.contactNumber || null,
-        country: normalizedCountry,
-        title: body.title || null,
-      })
-      .select("id")
-      .single()
-
-    if (customerError || !newCustomer) {
-      return NextResponse.json({ error: "Failed to create customer" }, { status: 500 })
-    }
-    customerId = newCustomer.id
+  if (!customerId) {
+    return NextResponse.json({ error: "Failed to create customer" }, { status: 500 })
   }
 
   // --- 2. Insert booking ---
@@ -375,6 +456,23 @@ export async function POST(req: Request) {
   const routeId = await findRouteId(supabase, body.direction)
   const packageId = await findPackageId(supabase, body.packageOption)
   const hotelSupplierId = await findHotelSupplierId(supabase, body.hotelOption)
+  let jobNumberAllocation: JobNumberAllocation
+  try {
+    jobNumberAllocation = await allocateJobNumberForBooking(supabase, {
+      supplierId: normalizeNullableText(body.supplierId),
+      parsedSupplier: normalizeNullableText(body.supplier),
+      routeId,
+      routeName: normalizeNullableText(body.direction),
+      packageId,
+      packageName: normalizeNullableText(body.packageOption),
+      rawText: normalizeNullableText(body.rawText),
+    })
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to allocate job number" },
+      { status: 500 },
+    )
+  }
   const existingExtractedJson =
     body.extractedJson && typeof body.extractedJson === "object" && !Array.isArray(body.extractedJson)
       ? body.extractedJson as Record<string, unknown>
@@ -383,7 +481,7 @@ export async function POST(req: Request) {
     existingExtractedJson.formFields && typeof existingExtractedJson.formFields === "object" && !Array.isArray(existingExtractedJson.formFields)
       ? existingExtractedJson.formFields as Record<string, unknown>
       : {}
-  const extractedJson = {
+  const extractedJson = addJobNumberingMetadata({
     ...existingExtractedJson,
     formFields: {
       ...existingFormFields,
@@ -399,14 +497,17 @@ export async function POST(req: Request) {
       hotelSupplierId,
       supplierId: normalizeNullableText(body.supplierId),
     },
-  }
+  }, jobNumberAllocation.resolution)
 
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
     .insert({
+      booking_number: jobNumberAllocation.bookingNumber,
       customer_id: customerId,
       assigned_salesperson_id: user?.id ?? null,
+      // owner_user_id is the immutable original creator; reassignment uses assigned_salesperson_id.
       owner_user_id: user?.id ?? null,
+      is_repeat_client_at_creation: customerIsRepeatClient,
       purpose: body.purpose || "quote",
       source,
       stage: "enquiry",
@@ -419,7 +520,7 @@ export async function POST(req: Request) {
       no_of_suites: body.noOfSuites ?? 1,
       child_ages: body.childAges || null,
       raw_text: body.rawText || null,
-      extracted_json: extractedJson,
+      extracted_json: extractedJson as Json,
       terms_accepted: body.termsAccepted ?? false,
       extend_stay: body.extendStay === "yes" || body.extendStay === true || false,
       extra_nights: body.extraNights ? Number(body.extraNights) : null,
@@ -566,6 +667,21 @@ export async function POST(req: Request) {
     },
   })
 
+  if (jobNumberAllocation.resolution.needsReview) {
+    await supabase.from("audit_logs").insert({
+      actor: user?.email ?? (body.rawText ? "consultant" : "system"),
+      actor_user_id: user?.id ?? null,
+      entity_type: "Booking",
+      entity_id: booking.id,
+      action: "job_number_product_needs_review",
+      meta_json: {
+        booking_number: booking.booking_number,
+        reason: jobNumberAllocation.resolution.reason,
+        sources: jobNumberAllocation.resolution.sources,
+      },
+    })
+  }
+
   return NextResponse.json({
     bookingNumber: booking.booking_number,
     bookingId: booking.id,
@@ -574,6 +690,72 @@ export async function POST(req: Request) {
     jobId: booking.id,
     quoteId: draftQuote.quoteId,
     quoteWarning: draftQuote.warning,
-    needsReview: false,
+    customerId,
+    customerIsRepeatClient,
+    needsReview: jobNumberAllocation.resolution.needsReview,
   })
+}
+
+interface ResolveEnquiryCustomerInput {
+  normalizedEmail: string
+  firstName: string
+  lastName: string
+  phone: string | null
+  country: string | null
+  title: string | null
+  nowIso: string
+}
+
+export async function resolveEnquiryCustomer(
+  supabase: ServiceClient,
+  input: ResolveEnquiryCustomerInput,
+): Promise<{ customerId: string | null; customerIsRepeatClient: boolean }> {
+  const { data: existingCustomer } = await supabase
+    .from("customers")
+    .select("id")
+    .eq("email", input.normalizedEmail)
+    .maybeSingle()
+
+  if (existingCustomer) {
+    const { data: priorCompletedBookings } = await supabase
+      .from("bookings")
+      .select("id")
+      .eq("customer_id", existingCustomer.id)
+      .in("stage", COMPLETED_REPEAT_BOOKING_STAGES)
+      .limit(1)
+    const customerIsRepeatClient = (priorCompletedBookings ?? []).length > 0
+
+    await supabase
+      .from("customers")
+      .update({
+        first_name: input.firstName,
+        last_name: input.lastName,
+        phone: input.phone,
+        country: input.country,
+        title: input.title,
+        updated_at: input.nowIso,
+      })
+      .eq("id", existingCustomer.id)
+
+    return { customerId: existingCustomer.id, customerIsRepeatClient }
+  }
+
+  const { data: newCustomer, error: customerError } = await supabase
+    .from("customers")
+    .insert({
+      first_name: input.firstName,
+      last_name: input.lastName,
+      email: input.normalizedEmail,
+      phone: input.phone,
+      country: input.country,
+      title: input.title,
+    })
+    .select("id")
+    .single()
+
+  if (customerError || !newCustomer) {
+    return { customerId: null, customerIsRepeatClient: false }
+  }
+
+  return { customerId: newCustomer.id, customerIsRepeatClient: false }
 }
