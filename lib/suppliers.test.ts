@@ -28,11 +28,14 @@ const supplierRow: SupplierRow = {
   phone: "+27 12 345 6789",
   website: "example.com",
   location_id: null,
+  location_area_id: null,
   location: "Cape Town",
   location_detail: null,
   notes: "Preferred",
   active: false,
   single_supplement_pct: 35,
+  default_time_start: null,
+  default_time_end: null,
   created_at: "2026-01-01T10:00:00.000Z",
   updated_at: "2026-01-02T11:30:00.000Z",
 }
@@ -88,6 +91,7 @@ const locationRow: LocationRow = {
   name: "Cape Town",
   country: "South Africa",
   region_code: "ZA-WC",
+  parent_location_id: null,
   created_at: "2026-01-01T10:00:00.000Z",
   updated_at: "2026-01-01T10:00:00.000Z",
 }

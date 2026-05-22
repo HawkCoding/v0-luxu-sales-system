@@ -76,7 +76,7 @@ function buildSupabase(state: MockState) {
           })),
           insert: vi.fn(async (rows: unknown[]) => {
             lastSelectionRows = rows as unknown[]
-            return selectionsInsert(rows)
+            return selectionsInsert()
           }),
           select: vi.fn(() => ({
             eq: vi.fn(async () => ({ data: lastSelectionRows, error: null })),

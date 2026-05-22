@@ -112,7 +112,7 @@ function buildSupabase(opts: BuildOpts = {}) {
         }
       }
       if (table === "correspondences") {
-        return { insert: vi.fn(async (...args) => correspondenceInsert(...args)) }
+        return { insert: vi.fn(async () => correspondenceInsert()) }
       }
       if (table === "bookings") {
         return {
