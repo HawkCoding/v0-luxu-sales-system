@@ -4,6 +4,8 @@ import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 import { createSessionClient } from "@/lib/supabase/server"
 import { AGE_SETTINGS_KEYS, DEFAULT_AGE_BUCKETS } from "@/lib/pricing/age-buckets"
 
+const ALLOWED_ROLES = new Set(["admin", "manager"])
+
 const patchSchema = z
   .object({
     infantMaxAge: z.number().int().min(0).max(17),
@@ -32,7 +34,7 @@ async function getAuthenticatedContext() {
     ok: true as const,
     value: {
       supabase,
-      canEdit: profile.clearance_level === "admin",
+      canEdit: ALLOWED_ROLES.has(profile.clearance_level),
       userId: user.id,
       actorName:
         [profile.name, profile.surname].filter(Boolean).join(" ").trim() ||

@@ -32,8 +32,6 @@ export interface VariantChipPickerProps {
   className?: string
 }
 
-const VISIBLE_CHIP_LIMIT = 3
-
 export function VariantChipPicker({
   label,
   available,
@@ -84,20 +82,10 @@ export function VariantChipPicker({
     }
   }
 
-  const visibleChips = selectedOptions.slice(0, VISIBLE_CHIP_LIMIT)
-  const extraCount = selectedOptions.length - visibleChips.length
-  const triggerLabelChips = visibleChips.length === 0 ? null : (
-    <span className="flex flex-wrap items-center gap-1">
-      {visibleChips.map((option) => (
-        <Badge key={option.id} variant="secondary" className="gap-1">
-          {option.name}
-        </Badge>
-      ))}
-      {extraCount > 0 ? (
-        <Badge variant="outline">+{extraCount}</Badge>
-      ) : null}
-    </span>
-  )
+  const triggerSummary =
+    selectedOptions.length === 0
+      ? null
+      : `${selectedOptions.length} selected`
 
   return (
     <div className={cn("space-y-1", className)}>
@@ -111,7 +99,9 @@ export function VariantChipPicker({
             className="h-auto min-h-9 w-full justify-between gap-2 px-2 py-1 text-left"
             data-testid="variant-chip-picker-trigger"
           >
-            {triggerLabelChips ?? (
+            {triggerSummary ? (
+              <span className="text-sm text-foreground">{triggerSummary}</span>
+            ) : (
               <span className="text-sm text-muted-foreground">{emptyText}</span>
             )}
             <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
