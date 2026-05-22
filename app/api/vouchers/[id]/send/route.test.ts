@@ -83,7 +83,7 @@ function buildSupabase(opts: BuildOpts = {}) {
       }
     : null
 
-  const correspondenceInsert = vi.fn(async () => ({ error: null }))
+  const correspondenceInsert = vi.fn(async (_data?: unknown) => ({ error: null }))
   const voucherUpdate = vi.fn(async () => ({ error: null }))
   const bookingUpdate = vi.fn(async () => ({ error: null }))
   const documentUpdate = vi.fn(async () => ({ error: null }))
@@ -112,7 +112,7 @@ function buildSupabase(opts: BuildOpts = {}) {
         }
       }
       if (table === "correspondences") {
-        return { insert: vi.fn(async () => correspondenceInsert()) }
+        return { insert: vi.fn(async (data: unknown) => correspondenceInsert(data)) }
       }
       if (table === "bookings") {
         return {

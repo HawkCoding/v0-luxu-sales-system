@@ -263,6 +263,7 @@ describe("booking lifecycle workflow regression", () => {
         booking: { id: BOOKING_ID, stage: "deposit_requested", source: "web_form" },
         customer,
         targetStage: "deposit_paid",
+        manualConfirmations: { depositReceived: true },
       }),
     ).toEqual([])
 

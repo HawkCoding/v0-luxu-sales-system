@@ -38,7 +38,7 @@ interface MockState {
 }
 
 function buildSupabase(state: MockState) {
-  const selectionsInsert = vi.fn(async () => ({ error: null }))
+  const selectionsInsert = vi.fn(async (_rows?: unknown) => ({ error: null }))
   const selectionsDelete = vi.fn(async () => ({ error: null }))
   const bookingUpdate = vi.fn(async () => ({ error: null }))
   let lastSelectionRows: unknown[] = []
@@ -76,7 +76,7 @@ function buildSupabase(state: MockState) {
           })),
           insert: vi.fn(async (rows: unknown[]) => {
             lastSelectionRows = rows as unknown[]
-            return selectionsInsert()
+            return selectionsInsert(rows)
           }),
           select: vi.fn(() => ({
             eq: vi.fn(async () => ({ data: lastSelectionRows, error: null })),
