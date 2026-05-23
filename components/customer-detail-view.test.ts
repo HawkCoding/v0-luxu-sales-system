@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const customerDetailMock = vi.hoisted(() => ({
   useCustomerDetail: vi.fn(),
+  useActiveSuppliers: vi.fn(() => ({ data: [] })),
 }))
 
 vi.mock("next/navigation", () => ({
@@ -58,6 +59,10 @@ vi.mock("@/components/presence-avatars", () => ({
 
 vi.mock("@/components/linked-account-form", () => ({
   LinkedAccountForm: () => null,
+}))
+
+vi.mock("@/components/new-enquiry-dialog", () => ({
+  NewEnquiryDialog: () => null,
 }))
 
 vi.mock("@/components/ui/accordion", () => ({
