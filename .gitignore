@@ -23,6 +23,11 @@ tmp-db-sync/
 .cursor/debug-*.log
 .cursor/plans/
 
+# QA / test run artefacts
+qa-phase5-output*.log
+qa/dev-server.log
+*.log
+
 # Local MCP configuration may contain access tokens
 .mcp.json
 .vscode/mcp.json
