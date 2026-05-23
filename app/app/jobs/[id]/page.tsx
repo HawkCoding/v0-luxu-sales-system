@@ -544,31 +544,6 @@ export default function JobDetailPage() {
               ) : (
                 <span>{currentSupplierRef || "—"}</span>
               )}
-              {canClaimBooking && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-8"
-                  disabled={reassigningSalesperson}
-                  onClick={() => void updateOwnership("claim")}
-                >
-                  <UserRound className="mr-1.5 h-3.5 w-3.5" />
-                  Claim
-                </Button>
-              )}
-              {canReleaseOwnBooking && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-8"
-                  disabled={reassigningSalesperson}
-                  onClick={() => void updateOwnership("release")}
-                >
-                  Release
-                </Button>
-              )}
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <Label htmlFor="booking-supplier-reference" className="font-medium text-foreground">
