@@ -1,5 +1,6 @@
 import { Document, Page, Text, View } from "@react-pdf/renderer"
 import type { VoucherData } from "@/lib/generate-voucher"
+import { sortedVoucherServiceBlocks } from "@/lib/generate-voucher"
 import type { VoucherSectionKey, VoucherTemplate } from "@/lib/types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
 import { registerVoucherFonts, resolveVoucherFontFamily } from "./fonts"
@@ -7,6 +8,7 @@ import { voucherStyles } from "./styles"
 import { HeaderBanner } from "./sections/header-banner"
 import { GuestInfo } from "./sections/guest-info"
 import { ServiceProvider } from "./sections/service-provider"
+import { ServiceBlock } from "./sections/service-block"
 import { VoucherFooter } from "./sections/footer"
 
 export interface VoucherDocumentProps {
@@ -20,7 +22,17 @@ function normalizeTemplate(template?: VoucherTemplate | null): VoucherTemplate {
 
 function sectionFor(key: VoucherSectionKey, data: VoucherData, template: VoucherTemplate, styles: ReturnType<typeof voucherStyles>) {
   if (key === "guest_info") return <GuestInfo key={key} data={data} styles={styles} />
-  if (key === "service_provider") return <ServiceProvider key={key} data={data} styles={styles} />
+  if (key === "service_provider") {
+    const blocks = data.serviceBlocks ?? []
+    if (blocks.length === 0) return <ServiceProvider key={key} data={data} styles={styles} />
+    return (
+      <View key={key}>
+        {sortedVoucherServiceBlocks(blocks).map((block, idx) => (
+          <ServiceBlock key={`${block.serviceType}-${idx}`} block={block} styles={styles} />
+        ))}
+      </View>
+    )
+  }
   if (key === "footer") return <VoucherFooter key={key} template={template} styles={styles} />
   return null
 }

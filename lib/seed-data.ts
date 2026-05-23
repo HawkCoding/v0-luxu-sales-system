@@ -19,42 +19,39 @@ export const customers: Customer[] = [
 ]
 
 export const jobs: Job[] = [
-  { id: "j1", jobNumber: "LUX-2025-000001", ownerUser: "consultant", customerId: "c1", consultant: "LB", purpose: "reservation", source: "web_form", stage: "enquiry", createdAt: "2025-09-01T08:05:00Z", updatedAt: "2025-09-01T08:05:00Z" },
-  { id: "j2", jobNumber: "LUX-2025-000002", ownerUser: "consultant", customerId: "c2", consultant: "CDJ", purpose: "quote", source: "web_form", stage: "quoted", createdAt: "2025-09-05T10:35:00Z", updatedAt: "2025-09-08T14:00:00Z" },
-  { id: "j3", jobNumber: "LUX-2025-000003", ownerUser: "consultant", customerId: "c3", consultant: "DR", purpose: "reservation", source: "paste_import", stage: "quote_sent", createdAt: "2025-09-10T14:05:00Z", updatedAt: "2025-09-15T09:00:00Z" },
-  { id: "j4", jobNumber: "LUX-2025-000004", ownerUser: "consultant", customerId: "c4", consultant: "MVE", purpose: "availability", source: "web_form", stage: "accepted", createdAt: "2025-09-15T09:05:00Z", updatedAt: "2025-09-22T11:00:00Z" },
-  { id: "j5", jobNumber: "LUX-2025-000005", ownerUser: "consultant", customerId: "c5", consultant: "DL", purpose: "reservation", source: "web_form", stage: "deposit_requested", createdAt: "2025-09-20T16:05:00Z", updatedAt: "2025-09-28T10:00:00Z" },
-  { id: "j6", jobNumber: "LUX-2025-000006", ownerUser: "consultant", customerId: "c6", consultant: "LB", purpose: "reservation", source: "web_form", stage: "deposit_paid", createdAt: "2025-10-01T07:05:00Z", updatedAt: "2025-10-10:15:00:00Z" },
-  { id: "j7", jobNumber: "LUX-2025-000007", ownerUser: "consultant", customerId: "c7", consultant: "CDJ", purpose: "quote", source: "web_form", stage: "final_paid", createdAt: "2025-10-05T11:05:00Z", updatedAt: "2025-10-25T16:00:00Z" },
-  { id: "j8", jobNumber: "LUX-2025-000008", ownerUser: "consultant", customerId: "c8", consultant: "DR", purpose: "reservation", source: "web_form", stage: "voucher_sent", createdAt: "2025-10-10T06:05:00Z", updatedAt: "2025-11-01T08:00:00Z" },
-  { id: "j9", jobNumber: "LUX-2025-000009", ownerUser: "consultant", customerId: "c9", consultant: "MVE", purpose: "quote", source: "paste_import", stage: "closed", createdAt: "2025-10-15T13:05:00Z", updatedAt: "2025-11-10T12:00:00Z" },
-  { id: "j10", jobNumber: "LUX-2025-000010", ownerUser: "consultant", customerId: "c10", consultant: "DL", purpose: "availability", source: "web_form", stage: "lost", createdAt: "2025-10-20T08:35:00Z", updatedAt: "2025-11-15T09:00:00Z" },
-  { id: "j11", jobNumber: "LUX-2025-000011", ownerUser: "consultant", customerId: "c11", consultant: "LB", purpose: "reservation", source: "web_form", stage: "enquiry", createdAt: "2025-11-01T10:05:00Z", updatedAt: "2025-11-01T10:05:00Z" },
-  { id: "j12", jobNumber: "LUX-2025-000012", ownerUser: "consultant", customerId: "c12", consultant: "CDJ", purpose: "quote", source: "web_form", stage: "quoted", createdAt: "2025-11-05T12:05:00Z", updatedAt: "2025-11-08T14:00:00Z" },
-  { id: "j13", jobNumber: "LUX-2025-000013", ownerUser: "consultant", customerId: "c1", consultant: "LB", purpose: "reservation", source: "web_form", stage: "accepted", createdAt: "2025-11-12T09:05:00Z", updatedAt: "2025-11-14T11:00:00Z" },
-  { id: "j14", jobNumber: "LUX-2025-000014", ownerUser: "consultant", customerId: "c2", consultant: "CDJ", purpose: "reservation", source: "web_form", stage: "accepted", createdAt: "2025-11-13T09:05:00Z", updatedAt: "2025-11-15T11:00:00Z" },
-  { id: "j15", jobNumber: "LUX-2025-000015", ownerUser: "consultant", customerId: "c3", consultant: "DR", purpose: "reservation", source: "web_form", stage: "accepted", createdAt: "2025-11-14T09:05:00Z", updatedAt: "2025-11-16T11:00:00Z" },
-  { id: "j16", jobNumber: "LUX-2025-000016", ownerUser: "consultant", customerId: "c4", consultant: "MVE", purpose: "reservation", source: "web_form", stage: "accepted", createdAt: "2025-11-15T09:05:00Z", updatedAt: "2025-11-17T11:00:00Z" },
-  { id: "j17", jobNumber: "LUX-2025-000017", ownerUser: "consultant", customerId: "c5", consultant: "DL", purpose: "reservation", source: "web_form", stage: "accepted", createdAt: "2025-11-16T09:05:00Z", updatedAt: "2025-11-18T11:00:00Z" },
-  { id: "j18", jobNumber: "LUX-2025-000018", ownerUser: "consultant", customerId: "c6", consultant: "LB", purpose: "reservation", source: "web_form", stage: "accepted", createdAt: "2025-11-17T09:05:00Z", updatedAt: "2025-11-19T11:00:00Z" },
-  { id: "j19", jobNumber: "LUX-2025-000019", ownerUser: "consultant", customerId: "c7", consultant: "CDJ", purpose: "reservation", source: "web_form", stage: "deposit_requested", createdAt: "2025-11-18T09:05:00Z", updatedAt: "2025-11-21T10:00:00Z" },
-  { id: "j20", jobNumber: "LUX-2025-000020", ownerUser: "consultant", customerId: "c8", consultant: "DR", purpose: "reservation", source: "web_form", stage: "deposit_requested", createdAt: "2025-11-19T09:05:00Z", updatedAt: "2025-11-22T10:00:00Z" },
-  { id: "j21", jobNumber: "LUX-2025-000021", ownerUser: "consultant", customerId: "c9", consultant: "MVE", purpose: "reservation", source: "web_form", stage: "deposit_requested", createdAt: "2025-11-20T09:05:00Z", updatedAt: "2025-11-23T10:00:00Z" },
-  { id: "j22", jobNumber: "LUX-2025-000022", ownerUser: "consultant", customerId: "c10", consultant: "DL", purpose: "reservation", source: "web_form", stage: "final_paid", createdAt: "2025-11-21T09:05:00Z", updatedAt: "2025-11-26T16:00:00Z" },
-  { id: "j23", jobNumber: "LUX-2025-000023", ownerUser: "consultant", customerId: "c11", consultant: "LB", purpose: "reservation", source: "web_form", stage: "final_paid", createdAt: "2025-11-22T09:05:00Z", updatedAt: "2025-11-27T16:00:00Z" },
+  { id: "j1", jobNumber: "BT-2025-0001", ownerUser: "consultant", customerId: "c1", consultant: "LB", purpose: "reservation", source: "web_form", stage: "enquiry", createdAt: "2025-09-01T08:05:00Z", updatedAt: "2025-09-01T08:05:00Z", outcome: "Open" },
+  { id: "j2", jobNumber: "BT-2025-0002", ownerUser: "consultant", customerId: "c2", consultant: "CDJ", purpose: "quote", source: "web_form", stage: "quoted", createdAt: "2025-09-05T10:35:00Z", updatedAt: "2025-09-08T14:00:00Z", outcome: "Open" },
+  { id: "j3", jobNumber: "RR-2025-0003", ownerUser: "consultant", customerId: "c3", consultant: "DR", purpose: "reservation", source: "paste_import", stage: "quote_sent", createdAt: "2025-09-10T14:05:00Z", updatedAt: "2025-09-15T09:00:00Z", outcome: "Open" },
+  { id: "j4", jobNumber: "RR-2025-0004", ownerUser: "consultant", customerId: "c4", consultant: "MVE", purpose: "availability", source: "web_form", stage: "accepted", createdAt: "2025-09-15T09:05:00Z", updatedAt: "2025-09-22T11:00:00Z", outcome: "Open" },
+  { id: "j5", jobNumber: "RR-2025-0005", ownerUser: "consultant", customerId: "c5", consultant: "DL", purpose: "reservation", source: "web_form", stage: "deposit_requested", createdAt: "2025-09-20T16:05:00Z", updatedAt: "2025-09-28T10:00:00Z", outcome: "Open" },
+  { id: "j6", jobNumber: "RR-2025-0006", ownerUser: "consultant", customerId: "c6", consultant: "LB", purpose: "reservation", source: "web_form", stage: "deposit_paid", createdAt: "2025-10-01T07:05:00Z", updatedAt: "2025-10-10:15:00:00Z", outcome: "Open" },
+  { id: "j7", jobNumber: "RR-2025-0007", ownerUser: "consultant", customerId: "c7", consultant: "CDJ", purpose: "quote", source: "web_form", stage: "final_paid", createdAt: "2025-10-05T11:05:00Z", updatedAt: "2025-10-25T16:00:00Z", outcome: "Open" },
+  { id: "j8", jobNumber: "RR-2025-0008", ownerUser: "consultant", customerId: "c8", consultant: "DR", purpose: "reservation", source: "web_form", stage: "voucher_sent", createdAt: "2025-10-10T06:05:00Z", updatedAt: "2025-11-01T08:00:00Z", outcome: "Won" },
+  { id: "j9", jobNumber: "RR-2025-0009", ownerUser: "consultant", customerId: "c9", consultant: "MVE", purpose: "quote", source: "paste_import", stage: "closed", createdAt: "2025-10-15T13:05:00Z", updatedAt: "2025-11-10T12:00:00Z", outcome: "Won" },
+  { id: "j10", jobNumber: "RR-2025-0010", ownerUser: "consultant", customerId: "c10", consultant: "DL", purpose: "availability", source: "web_form", stage: "lost", createdAt: "2025-10-20T08:35:00Z", updatedAt: "2025-11-15T09:00:00Z", outcome: "Lost" },
+  { id: "j11", jobNumber: "RR-2025-0011", ownerUser: "consultant", customerId: "c11", consultant: "LB", purpose: "reservation", source: "web_form", stage: "enquiry", createdAt: "2025-11-01T10:05:00Z", updatedAt: "2025-11-01T10:05:00Z", outcome: "Open" },
+  { id: "j12", jobNumber: "RR-2025-0012", ownerUser: "consultant", customerId: "c12", consultant: "CDJ", purpose: "quote", source: "web_form", stage: "quoted", createdAt: "2025-11-05T12:05:00Z", updatedAt: "2025-11-08T14:00:00Z", outcome: "Open" },
+  { id: "j13", jobNumber: "RR-2025-0013", ownerUser: "consultant", customerId: "c1", consultant: "LB", purpose: "reservation", source: "web_form", stage: "accepted", createdAt: "2025-11-12T09:05:00Z", updatedAt: "2025-11-14T11:00:00Z", outcome: "Open" },
+  { id: "j14", jobNumber: "RR-2025-0014", ownerUser: "consultant", customerId: "c2", consultant: "CDJ", purpose: "reservation", source: "web_form", stage: "accepted", createdAt: "2025-11-13T09:05:00Z", updatedAt: "2025-11-15T11:00:00Z", outcome: "Open" },
+  { id: "j15", jobNumber: "RR-2025-0015", ownerUser: "consultant", customerId: "c3", consultant: "DR", purpose: "reservation", source: "web_form", stage: "accepted", createdAt: "2025-11-14T09:05:00Z", updatedAt: "2025-11-16T11:00:00Z", outcome: "Open" },
+  { id: "j16", jobNumber: "RR-2025-0016", ownerUser: "consultant", customerId: "c4", consultant: "MVE", purpose: "reservation", source: "web_form", stage: "accepted", createdAt: "2025-11-15T09:05:00Z", updatedAt: "2025-11-17T11:00:00Z", outcome: "Open" },
+  { id: "j17", jobNumber: "RR-2025-0017", ownerUser: "consultant", customerId: "c5", consultant: "DL", purpose: "reservation", source: "web_form", stage: "accepted", createdAt: "2025-11-16T09:05:00Z", updatedAt: "2025-11-18T11:00:00Z", outcome: "Open" },
+  { id: "j18", jobNumber: "RR-2025-0018", ownerUser: "consultant", customerId: "c6", consultant: "LB", purpose: "reservation", source: "web_form", stage: "accepted", createdAt: "2025-11-17T09:05:00Z", updatedAt: "2025-11-19T11:00:00Z", outcome: "Open" },
+  { id: "j19", jobNumber: "RR-2025-0019", ownerUser: "consultant", customerId: "c7", consultant: "CDJ", purpose: "reservation", source: "web_form", stage: "deposit_requested", createdAt: "2025-11-18T09:05:00Z", updatedAt: "2025-11-21T10:00:00Z", outcome: "Open" },
+  { id: "j20", jobNumber: "RR-2025-0020", ownerUser: "consultant", customerId: "c8", consultant: "DR", purpose: "reservation", source: "web_form", stage: "deposit_requested", createdAt: "2025-11-19T09:05:00Z", updatedAt: "2025-11-22T10:00:00Z", outcome: "Open" },
+  { id: "j21", jobNumber: "RR-2025-0021", ownerUser: "consultant", customerId: "c9", consultant: "MVE", purpose: "reservation", source: "web_form", stage: "deposit_requested", createdAt: "2025-11-20T09:05:00Z", updatedAt: "2025-11-23T10:00:00Z", outcome: "Open" },
+  { id: "j22", jobNumber: "RR-2025-0022", ownerUser: "consultant", customerId: "c10", consultant: "DL", purpose: "reservation", source: "web_form", stage: "final_paid", createdAt: "2025-11-21T09:05:00Z", updatedAt: "2025-11-26T16:00:00Z", outcome: "Open" },
+  { id: "j23", jobNumber: "RR-2025-0023", ownerUser: "consultant", customerId: "c11", consultant: "LB", purpose: "reservation", source: "web_form", stage: "final_paid", createdAt: "2025-11-22T09:05:00Z", updatedAt: "2025-11-27T16:00:00Z", outcome: "Open" },
 ]
 
+// Bidirectional routes — each row covers both legs.
+// Direction (outbound/return/round_trip) is captured per-quote-line, not here.
 const directions = [
-  "Pretoria to Cape Town",
-  "Cape Town to Pretoria",
-  "Pretoria to Durban",
-  "Durban to Pretoria",
-  "Pretoria to Victoria Falls",
-  "Victoria Falls to Pretoria",
-  "Cape Town to Dar es Salaam",
-  "Dar es Salaam to Cape Town",
-  "Pretoria to Swakopmund",
-  "Swakopmund to Pretoria",
+  "Pretoria ↔ Cape Town",
+  "Pretoria ↔ Durban",
+  "Pretoria ↔ Victoria Falls",
+  "Pretoria ↔ Swakopmund",
+  "Cape Town ↔ Dar es Salaam",
 ]
 
 export const enquiries: Enquiry[] = [
@@ -120,7 +117,7 @@ export const payments: Payment[] = [
   { id: "p4", jobId: "j8", amount: 55000, receivedAt: "2025-10-30T16:00:00Z", method: "Credit Card", reference: "CC-ET-002", notes: "Final balance" },
   { id: "p5", jobId: "j5", amount: 5000, receivedAt: "2025-09-30T11:00:00Z", method: "EFT", reference: "REF-RC-001", notes: "Partial deposit - below threshold" },
   { id: "p6", jobId: "j9", amount: 28000, receivedAt: "2025-11-05T10:00:00Z", method: "EFT", reference: "REF-DK-001", notes: "Full payment" },
-  { id: "p7", jobId: "j9", amount: -2000, receivedAt: "2025-11-08T15:00:00Z", method: "Credit Adjustment", reference: "ADJ-DK-001", notes: "Credit adjustment for service not rendered" },
+  { id: "p7", jobId: "j9", amount: -2000, paymentKind: "refund" as const, receivedAt: "2025-11-08T15:00:00Z", method: "Credit Adjustment", reference: "ADJ-DK-001", notes: "Credit adjustment for service not rendered" },
   { id: "p8", jobId: "j19", amount: 12500, receivedAt: "2025-11-24T11:00:00Z", method: "EFT", reference: "REF-MR-019", notes: "Partial deposit received" },
   { id: "p9", jobId: "j22", amount: 111550, receivedAt: "2025-11-26T15:30:00Z", method: "Credit Card", reference: "CC-MD-022", notes: "Full payment received" },
   { id: "p10", jobId: "j23", amount: 63250, receivedAt: "2025-11-27T15:30:00Z", method: "EFT", reference: "REF-HJ-023", notes: "Full payment received" },
@@ -141,14 +138,14 @@ export const templates: Template[] = [
 ]
 
 export const correspondences: Correspondence[] = [
-  { id: "cor1", jobId: "j3", channel: "email", subject: "Your Rovos Rail Quote - LUX-2025-000003", bodyHtml: "<p>Dear Thomas...</p>", status: "sent", sentAt: "2025-09-15T09:30:00Z" },
-  { id: "cor2", jobId: "j7", channel: "email", subject: "Your Rovos Rail Quote - LUX-2025-000007", bodyHtml: "<p>Dear Marco...</p>", status: "sent", sentAt: "2025-10-12T14:30:00Z" },
-  { id: "cor3", jobId: "j3", channel: "email", subject: "Following up on your Rovos Rail enquiry - LUX-2025-000003", bodyHtml: "<p>Dear Thomas, following up...</p>", status: "sent", sentAt: "2025-09-17T10:00:00Z" },
-  { id: "cor4", jobId: "j8", channel: "email", subject: "Your Travel Voucher - LUX-2025-000008", bodyHtml: "<p>Dear Elizabeth...</p>", status: "sent", sentAt: "2025-11-01T08:30:00Z" },
-  { id: "cor5", jobId: "j5", channel: "email", subject: "Deposit Request - LUX-2025-000005", bodyHtml: "<p>Dear Robert...</p>", status: "scheduled", scheduledAt: "2025-10-01T09:00:00Z" },
-  { id: "cor6", jobId: "j19", channel: "email", subject: "Deposit Request - LUX-2025-000019", bodyHtml: "<p>Dear Marco, your deposit invoice is attached.</p>", status: "sent", sentAt: "2025-11-21T10:15:00Z" },
-  { id: "cor7", jobId: "j20", channel: "email", subject: "Deposit Request - LUX-2025-000020", bodyHtml: "<p>Dear Elizabeth, your deposit invoice is attached.</p>", status: "sent", sentAt: "2025-11-22T10:15:00Z" },
-  { id: "cor8", jobId: "j21", channel: "email", subject: "Deposit Request - LUX-2025-000021", bodyHtml: "<p>Dear David, your deposit invoice is attached.</p>", status: "sent", sentAt: "2025-11-23T10:15:00Z" },
+  { id: "cor1", jobId: "j3", channel: "email", subject: "Your Rovos Rail Quote - RR-2025-0003", bodyHtml: "<p>Dear Thomas...</p>", status: "sent", sentAt: "2025-09-15T09:30:00Z" },
+  { id: "cor2", jobId: "j7", channel: "email", subject: "Your Rovos Rail Quote - RR-2025-0007", bodyHtml: "<p>Dear Marco...</p>", status: "sent", sentAt: "2025-10-12T14:30:00Z" },
+  { id: "cor3", jobId: "j3", channel: "email", subject: "Following up on your Rovos Rail enquiry - RR-2025-0003", bodyHtml: "<p>Dear Thomas, following up...</p>", status: "sent", sentAt: "2025-09-17T10:00:00Z" },
+  { id: "cor4", jobId: "j8", channel: "email", subject: "Your Travel Voucher - RR-2025-0008", bodyHtml: "<p>Dear Elizabeth...</p>", status: "sent", sentAt: "2025-11-01T08:30:00Z" },
+  { id: "cor5", jobId: "j5", channel: "email", subject: "Deposit Request - RR-2025-0005", bodyHtml: "<p>Dear Robert...</p>", status: "scheduled", scheduledAt: "2025-10-01T09:00:00Z" },
+  { id: "cor6", jobId: "j19", channel: "email", subject: "Deposit Request - RR-2025-0019", bodyHtml: "<p>Dear Marco, your deposit invoice is attached.</p>", status: "sent", sentAt: "2025-11-21T10:15:00Z" },
+  { id: "cor7", jobId: "j20", channel: "email", subject: "Deposit Request - RR-2025-0020", bodyHtml: "<p>Dear Elizabeth, your deposit invoice is attached.</p>", status: "sent", sentAt: "2025-11-22T10:15:00Z" },
+  { id: "cor8", jobId: "j21", channel: "email", subject: "Deposit Request - RR-2025-0021", bodyHtml: "<p>Dear David, your deposit invoice is attached.</p>", status: "sent", sentAt: "2025-11-23T10:15:00Z" },
 ]
 
 export const auditLogs: AuditLog[] = [
@@ -162,26 +159,19 @@ export const auditLogs: AuditLog[] = [
   { id: "a8", actor: "consultant", entityType: "Payment", entityId: "p7", action: "credit_adjustment", metaJson: JSON.stringify({ amount: -2000, reason: "Service not rendered" }), createdAt: "2025-11-08T15:00:00Z" },
 ]
 
+// One priced row per (route, suite). Variant attributes (bedroom type, bedroom layout,
+// bathroom type) are M:N joins on the live `suite_types` rows in Supabase.
 export const rateCards: RateCard[] = [
-  { direction: "Pretoria to Cape Town", suiteType: "Pullman Twin Suite", pricePerPerson: 24900, currency: "ZAR" },
-  { direction: "Pretoria to Cape Town", suiteType: "Pullman Double Suite", pricePerPerson: 24900, currency: "ZAR" },
-  { direction: "Pretoria to Cape Town", suiteType: "Deluxe Twin Suite", pricePerPerson: 38500, currency: "ZAR" },
-  { direction: "Pretoria to Cape Town", suiteType: "Deluxe Double Suite", pricePerPerson: 38500, currency: "ZAR" },
-  { direction: "Pretoria to Cape Town", suiteType: "Royal Twin Suite", pricePerPerson: 58000, currency: "ZAR" },
-  { direction: "Pretoria to Cape Town", suiteType: "Royal Double Suite", pricePerPerson: 62000, currency: "ZAR" },
-  { direction: "Cape Town to Pretoria", suiteType: "Pullman Twin Suite", pricePerPerson: 24900, currency: "ZAR" },
-  { direction: "Cape Town to Pretoria", suiteType: "Pullman Double Suite", pricePerPerson: 24900, currency: "ZAR" },
-  { direction: "Cape Town to Pretoria", suiteType: "Deluxe Twin Suite", pricePerPerson: 38500, currency: "ZAR" },
-  { direction: "Cape Town to Pretoria", suiteType: "Deluxe Double Suite", pricePerPerson: 38500, currency: "ZAR" },
-  { direction: "Cape Town to Pretoria", suiteType: "Royal Twin Suite", pricePerPerson: 58000, currency: "ZAR" },
-  { direction: "Cape Town to Pretoria", suiteType: "Royal Double Suite", pricePerPerson: 62000, currency: "ZAR" },
-  { direction: "Pretoria to Victoria Falls", suiteType: "Pullman Twin Suite", pricePerPerson: 32000, currency: "ZAR" },
-  { direction: "Pretoria to Victoria Falls", suiteType: "Deluxe Double Suite", pricePerPerson: 48500, currency: "ZAR" },
-  { direction: "Pretoria to Victoria Falls", suiteType: "Royal Double Suite", pricePerPerson: 72000, currency: "ZAR" },
-  { direction: "Pretoria to Durban", suiteType: "Pullman Double Suite", pricePerPerson: 18500, currency: "ZAR" },
-  { direction: "Durban to Pretoria", suiteType: "Pullman Double Suite", pricePerPerson: 18500, currency: "ZAR" },
-  { direction: "Pretoria to Swakopmund", suiteType: "Deluxe Double Suite", pricePerPerson: 55000, currency: "ZAR" },
-  { direction: "Pretoria to Swakopmund", suiteType: "Royal Double Suite", pricePerPerson: 78000, currency: "ZAR" },
+  { direction: "Pretoria ↔ Cape Town", suiteType: "Pullman", pricePerPerson: 24900, currency: "ZAR" },
+  { direction: "Pretoria ↔ Cape Town", suiteType: "Deluxe",  pricePerPerson: 38500, currency: "ZAR" },
+  { direction: "Pretoria ↔ Cape Town", suiteType: "Royal",   pricePerPerson: 62000, currency: "ZAR" },
+  { direction: "Pretoria ↔ Durban",         suiteType: "Pullman", pricePerPerson: 18500, currency: "ZAR" },
+  { direction: "Pretoria ↔ Victoria Falls", suiteType: "Deluxe",  pricePerPerson: 48500, currency: "ZAR" },
+  { direction: "Pretoria ↔ Victoria Falls", suiteType: "Royal",   pricePerPerson: 72000, currency: "ZAR" },
+  { direction: "Pretoria ↔ Swakopmund",     suiteType: "Deluxe",  pricePerPerson: 55000, currency: "ZAR" },
+  { direction: "Pretoria ↔ Swakopmund",     suiteType: "Royal",   pricePerPerson: 78000, currency: "ZAR" },
+  { direction: "Cape Town ↔ Dar es Salaam", suiteType: "Deluxe",  pricePerPerson: 64000, currency: "ZAR" },
+  { direction: "Cape Town ↔ Dar es Salaam", suiteType: "Royal",   pricePerPerson: 82500, currency: "ZAR" },
 ]
 
 export const pipelineHistories: PipelineHistory[] = [

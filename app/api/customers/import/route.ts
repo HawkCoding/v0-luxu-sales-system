@@ -3,6 +3,7 @@ import { z } from "zod"
 import { loadCountryAliasMap, normalizeCountry } from "@/lib/countries"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
 import { createSessionClient } from "@/lib/supabase/server"
+import { allocateJobNumber } from "@/lib/job-numbering"
 import { importRowSchema, payloadSchema } from "./schemas"
 
 const allowedRoles = new Set(["admin", "manager"])
@@ -474,6 +475,7 @@ export async function POST(req: Request) {
   }
 
   let bookingRows: Array<{
+    booking_number: string
     customer_id: string
     owner_user_id: string
     purpose: "reservation"
@@ -494,18 +496,21 @@ export async function POST(req: Request) {
     }
   }>
   let skippedDuplicates = 0
+  bookingRows = []
   try {
-    bookingRows = bookingImportRows.flatMap((row) => {
+    for (const row of bookingImportRows) {
       if (row.sourceRowId && existingSourceRowIds.has(row.sourceRowId)) {
         skippedDuplicates += 1
-        return []
+        continue
       }
       if (parsed.routeId && customerIdsWithHistoricalRouteBookings.has(row.customerId)) {
         skippedDuplicates += 1
-        return []
+        continue
       }
 
-      return [{
+      const bookingNumber = await allocateJobNumber(supabase, "BT")
+      bookingRows.push({
+        booking_number: bookingNumber,
         customer_id: row.customerId,
         owner_user_id: user.id,
         purpose: "reservation" as const,
@@ -524,8 +529,8 @@ export async function POST(req: Request) {
             source_value: null,
           },
         },
-      }]
-    })
+      })
+    }
   } catch (error) {
     return buildImportErrorResponse({
       traceId,

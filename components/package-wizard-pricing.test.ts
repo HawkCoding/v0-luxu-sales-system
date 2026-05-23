@@ -17,6 +17,7 @@ function rateCard(
     id,
     routeId,
     suiteTypeId: "suite-1",
+    rateTypeId: "rate-type-1",
     pricePerPerson,
     childPrice: null,
     infantPrice: null,

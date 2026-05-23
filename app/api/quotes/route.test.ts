@@ -19,8 +19,9 @@ import { POST } from "./route"
 const BOOKING_ID = "00000000-0000-4000-8000-00000000aaaa"
 const QUOTE_ID = "00000000-0000-4000-8000-00000000dddd"
 
-function buildAuth() {
+function buildAuth(validityDays = "14") {
   const lineInsert = vi.fn(async () => ({ error: null }))
+  const auditInsert = vi.fn(async () => ({ error: null }))
   const quoteInsertPayload = vi.fn()
   const supabase = {
     from: vi.fn((table: string) => {
@@ -65,6 +66,18 @@ function buildAuth() {
       if (table === "quote_line_items") {
         return { insert: lineInsert }
       }
+      if (table === "audit_logs") {
+        return { insert: auditInsert }
+      }
+      if (table === "app_settings") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn(async () => ({ data: { value: validityDays }, error: null })),
+            })),
+          })),
+        }
+      }
       throw new Error(`Unexpected table ${table}`)
     }),
   }
@@ -78,7 +91,7 @@ function buildAuth() {
     },
   })
 
-  return { lineInsert, quoteInsertPayload }
+  return { lineInsert, quoteInsertPayload, auditInsert }
 }
 
 function postJson(body: unknown) {
@@ -122,7 +135,7 @@ describe("POST /api/quotes", () => {
   })
 
   it("creates the quote and inserts line items", async () => {
-    const { lineInsert } = buildAuth()
+    const { lineInsert, auditInsert } = buildAuth()
     const res = await POST(
       postJson({
         bookingId: BOOKING_ID,
@@ -133,6 +146,9 @@ describe("POST /api/quotes", () => {
     const body = await res.json()
     expect(body).toMatchObject({ id: QUOTE_ID, quoteNumber: "BT-2026-0001-Q1" })
     expect(lineInsert).toHaveBeenCalled()
+    expect(auditInsert).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "quote_generated", entity_id: QUOTE_ID }),
+    )
   })
 
   it("accepts and forwards status: 'ready'", async () => {
@@ -142,6 +158,17 @@ describe("POST /api/quotes", () => {
     expect(quoteInsertPayload).toHaveBeenLastCalledWith(
       expect.objectContaining({ status: "ready" }),
     )
+  })
+
+  it("computes validity_until from quote_validity_days setting", async () => {
+    const { quoteInsertPayload } = buildAuth("21")
+    const res = await POST(postJson({ bookingId: BOOKING_ID }))
+
+    expect(res.status).toBe(200)
+    const insertedPayload = quoteInsertPayload.mock.calls[0]?.[0] as Record<string, unknown>
+    const validityUntil = insertedPayload?.validity_until as string
+    const expectedDate = new Date(Date.now() + 21 * 86_400_000).toISOString().slice(0, 10)
+    expect(validityUntil).toBe(expectedDate)
   })
 
   it("persists preview line item prices without recalculating them", async () => {
@@ -173,6 +200,7 @@ describe("POST /api/quotes", () => {
         unit_price: 1000,
         total: 2000,
         sort_order: 0,
+        pricing_snapshot: null,
       },
       {
         quote_id: QUOTE_ID,
@@ -182,6 +210,7 @@ describe("POST /api/quotes", () => {
         unit_price: 500,
         total: 2000,
         sort_order: 1,
+        pricing_snapshot: null,
       },
     ])
   })

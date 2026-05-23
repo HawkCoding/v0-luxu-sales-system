@@ -327,7 +327,13 @@ function AppShell({ children }: { children: ReactNode }) {
               v{APP_VERSION}
             </Badge>
           </div>
-          <Button variant="ghost" size="sm" onClick={() => setCollapsed(!collapsed)} className="w-full border border-stroke/40 bg-bg-surface/50">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setCollapsed(!collapsed)}
+            className="w-full border border-stroke/40 bg-bg-surface/50"
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
             <ChevronLeft className={cn("w-4 h-4 transition-transform", collapsed && "rotate-180")} />
           </Button>
         </div>
@@ -336,7 +342,7 @@ function AppShell({ children }: { children: ReactNode }) {
       <div className="flex-1 flex flex-col overflow-hidden">
         <header className="app-header h-14 border-b border-stroke bg-bg-surface flex items-center justify-between px-4 gap-4">
           <div className="flex items-center gap-3">
-            <Button variant="ghost" size="sm" className="lg:hidden" onClick={() => setMobileOpen(true)}>
+            <Button variant="ghost" size="sm" className="lg:hidden" onClick={() => setMobileOpen(true)} aria-label="Open navigation menu">
               <Menu className="w-4 h-4" />
             </Button>
             <div className="relative hidden sm:block">
@@ -393,10 +399,23 @@ function AppShell({ children }: { children: ReactNode }) {
   )
 }
 
-export default function AppClientLayout({ children, initialUser }: { children: ReactNode; initialUser: User | null }) {
+export default function AppClientLayout({
+  children,
+  initialUser,
+  demoMode,
+}: {
+  children: ReactNode
+  initialUser: User | null
+  demoMode?: boolean
+}) {
   return (
     <AuthProvider initialUser={initialUser}>
       <RoleProvider initialRole={initialUser?.role}>
+        {demoMode && (
+          <div className="flex items-center justify-center gap-2 bg-amber-400/90 text-amber-950 text-xs font-medium py-1 px-4 z-50">
+            <span>Demo mode — emails not sent</span>
+          </div>
+        )}
         <AppShell>{children}</AppShell>
       </RoleProvider>
     </AuthProvider>

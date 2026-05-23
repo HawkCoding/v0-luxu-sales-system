@@ -1,6 +1,49 @@
 import type { Enquiry, ConsultantAbbreviation, VoucherTemplate } from "./types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "./types"
 
+export type VoucherServiceType =
+  | "train"
+  | "hotel"
+  | "transfer"
+  | "tour"
+  | "airline"
+  | "additional_service"
+
+export interface VoucherServiceBlockContact {
+  name?: string | null
+  phone?: string | null
+  email?: string | null
+  website?: string | null
+  location?: string | null
+}
+
+export interface VoucherServiceBlockData {
+  route?: string | null
+  departureDate?: string | null
+  arrivalDate?: string | null
+  suiteType?: string | null
+  numberOfSuites?: number | null
+  roomType?: string | null
+  nights?: number | null
+  mealPlan?: string | null
+  vehicleType?: string | null
+  pickup?: string | null
+  dropoff?: string | null
+  itinerary?: string | null
+  cabin?: string | null
+  flightNumber?: string | null
+  notes?: string | null
+}
+
+export interface VoucherServiceBlock {
+  serviceType: VoucherServiceType
+  title: string
+  supplierReference?: string | null
+  contactDetails: VoucherServiceBlockContact
+  serviceData: VoucherServiceBlockData
+  displayOrder: number
+}
+
 export interface VoucherData {
   voucherNumber: string
   guestNames: string
@@ -17,6 +60,24 @@ export interface VoucherData {
   customerPhone: string
   enquiry: Enquiry
   consultant: ConsultantAbbreviation
+  serviceBlocks?: VoucherServiceBlock[]
+}
+
+const SERVICE_TYPE_LABELS: Record<VoucherServiceType, string> = {
+  train: "Train Service",
+  hotel: "Hotel Stay",
+  transfer: "Transfer",
+  tour: "Tour",
+  airline: "Flight",
+  additional_service: "Additional Service",
+}
+
+export function voucherServiceTypeLabel(type: VoucherServiceType): string {
+  return SERVICE_TYPE_LABELS[type]
+}
+
+export function sortedVoucherServiceBlocks(blocks: VoucherServiceBlock[]): VoucherServiceBlock[] {
+  return [...blocks].sort((a, b) => a.displayOrder - b.displayOrder)
 }
 
 function escapeHtml(value: string | number | null | undefined): string {
@@ -121,6 +182,79 @@ ${specialRequestsHtml}
   </div>`
 }
 
+function buildServiceBlockBodyRows(block: VoucherServiceBlock): string {
+  const rows: Array<[string, string | number | null | undefined]> = []
+  const d = block.serviceData
+  rows.push(["Your Reference:", block.supplierReference ?? "—"])
+
+  if (block.serviceType === "train") {
+    rows.push(["Route:", d.route ?? "—"])
+    rows.push(["Departure Date:", d.departureDate ?? "—"])
+    rows.push(["Arrival Date:", d.arrivalDate ?? "TBC"])
+    rows.push(["Suite Type:", d.suiteType ?? "—"])
+    if (d.numberOfSuites != null) rows.push(["Number of Suites:", d.numberOfSuites])
+    if (d.mealPlan) rows.push(["Meal Basis:", d.mealPlan])
+  } else if (block.serviceType === "hotel") {
+    if (d.roomType) rows.push(["Room Type:", d.roomType])
+    if (d.nights != null) rows.push(["Nights:", d.nights])
+    if (d.mealPlan) rows.push(["Meal Plan:", d.mealPlan])
+    if (d.departureDate) rows.push(["Check-In:", d.departureDate])
+    if (d.arrivalDate) rows.push(["Check-Out:", d.arrivalDate])
+  } else if (block.serviceType === "transfer") {
+    if (d.vehicleType) rows.push(["Vehicle:", d.vehicleType])
+    if (d.pickup) rows.push(["Pickup:", d.pickup])
+    if (d.dropoff) rows.push(["Drop-off:", d.dropoff])
+    if (d.departureDate) rows.push(["Date:", d.departureDate])
+  } else if (block.serviceType === "tour") {
+    if (d.itinerary) rows.push(["Itinerary:", d.itinerary])
+    if (d.departureDate) rows.push(["Start Date:", d.departureDate])
+    if (d.arrivalDate) rows.push(["End Date:", d.arrivalDate])
+  } else if (block.serviceType === "airline") {
+    if (d.route) rows.push(["Route:", d.route])
+    if (d.cabin) rows.push(["Cabin:", d.cabin])
+    if (d.flightNumber) rows.push(["Flight:", d.flightNumber])
+    if (d.departureDate) rows.push(["Departure:", d.departureDate])
+    if (d.arrivalDate) rows.push(["Arrival:", d.arrivalDate])
+  }
+
+  if (d.notes) rows.push(["Notes:", d.notes])
+
+  const contactParts: string[] = []
+  if (block.contactDetails.phone) contactParts.push(`Phone: ${block.contactDetails.phone}`)
+  if (block.contactDetails.email) contactParts.push(`Email: ${block.contactDetails.email}`)
+  if (block.contactDetails.location) contactParts.push(`Location: ${block.contactDetails.location}`)
+  if (contactParts.length > 0) {
+    rows.push(["Contact:", contactParts.join(" • ")])
+  }
+
+  return rows
+    .map(
+      ([label, value]) => `
+        <div class="info-label">${escapeHtml(label)}</div>
+        <div class="info-value">${escapeHtml(value)}</div>`,
+    )
+    .join("\n")
+}
+
+function buildServiceBlocksSection(data: VoucherData): string {
+  const blocks = data.serviceBlocks ?? []
+  if (blocks.length === 0) return buildServiceProviderSection(data)
+
+  return sortedVoucherServiceBlocks(blocks)
+    .map(
+      (block) => `
+  <div class="section">
+    <div class="section-title">${escapeHtml(block.title || voucherServiceTypeLabel(block.serviceType))}</div>
+    <div class="provider-box">
+      <div class="provider-name">${escapeHtml(block.contactDetails.name ?? "")}</div>
+      <div class="info-grid">${buildServiceBlockBodyRows(block)}
+      </div>
+    </div>
+  </div>`,
+    )
+    .join("\n")
+}
+
 function buildServiceProviderSection(data: VoucherData): string {
   const descriptionHtml = data.supplierDescription
     ? `<div class="provider-description">${escapeHtml(data.supplierDescription)}</div>`
@@ -179,7 +313,7 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
     .filter((s) => !hidden.has(s))
     .map((s) => {
       if (s === "guest_info") return buildGuestInfoSection(data)
-      if (s === "service_provider") return buildServiceProviderSection(data)
+      if (s === "service_provider") return buildServiceBlocksSection(data)
       if (s === "footer") return buildFooterSection(t)
       return ""
     })

@@ -24,7 +24,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { CANCEL_REASONS, type PipelineStage } from "@/lib/types"
+import type { OutcomeReason, PipelineStage } from "@/lib/types"
 
 interface CancelBookingDialogProps {
   open: boolean
@@ -32,6 +32,8 @@ interface CancelBookingDialogProps {
   bookingId: string
   bookingNumber: string
   sourceStage: PipelineStage
+  outcomeReasons?: OutcomeReason[]
+  suggestedRefund?: number | null
   onCancelled: () => void
 }
 
@@ -41,24 +43,36 @@ export function CancelBookingDialog({
   bookingId,
   bookingNumber,
   sourceStage,
+  outcomeReasons = [],
+  suggestedRefund,
   onCancelled,
 }: CancelBookingDialogProps) {
-  const [reason, setReason] = useState("")
+  const [reasonId, setReasonId] = useState("")
   const [notes, setNotes] = useState("")
   const [refundStatus, setRefundStatus] = useState<"refunded" | "not_refunded" | "">("")
-  const [refundAmount, setRefundAmount] = useState("")
+  const [refundAmount, setRefundAmount] = useState(
+    suggestedRefund !== null && suggestedRefund !== undefined ? suggestedRefund.toFixed(2) : "",
+  )
   const [refundReference, setRefundReference] = useState("")
   const [refundedAt, setRefundedAt] = useState("")
   const [loading, setLoading] = useState(false)
   const requiresRefundCapture = ["deposit_paid", "final_paid", "voucher_sent", "closed", "trip_active"].includes(sourceStage)
 
+  const cancelReasons = outcomeReasons.filter(
+    (r) => r.active && (r.appliesTo === "Cancelled" || r.appliesTo === "Both"),
+  )
+  const selectedReason = cancelReasons.find((r) => r.id === reasonId) ?? null
+  const isOther = selectedReason?.label === "Other"
+
   const handleOpenChange = (nextOpen: boolean) => {
     if (!loading) {
       if (!nextOpen) {
-        setReason("")
+        setReasonId("")
         setNotes("")
         setRefundStatus("")
-        setRefundAmount("")
+        setRefundAmount(
+          suggestedRefund !== null && suggestedRefund !== undefined ? suggestedRefund.toFixed(2) : "",
+        )
         setRefundReference("")
         setRefundedAt("")
       }
@@ -67,7 +81,9 @@ export function CancelBookingDialog({
   }
 
   const handleConfirm = async () => {
-    if (!reason) return
+    const hasReason = cancelReasons.length === 0 || Boolean(reasonId)
+    if (!hasReason) return
+    if (isOther && !notes.trim()) return
     if (requiresRefundCapture && !refundStatus) return
     if (
       requiresRefundCapture &&
@@ -77,29 +93,26 @@ export function CancelBookingDialog({
       return
     }
     setLoading(true)
-    const finalReason = notes.trim() ? `${reason} - ${notes.trim()}` : reason
     try {
-      const res = await fetch(`/api/jobs/${bookingId}`, {
-        method: "PATCH",
+      const res = await fetch(`/api/jobs/${bookingId}/cancel`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          stage: "lost",
-          cancelReason: finalReason,
-          lostContext: requiresRefundCapture
-            ? {
-                cancelReason: finalReason,
-                refundStatus,
-                refundAmount: refundStatus === "refunded" ? Number(refundAmount) : null,
-                refundReference: refundStatus === "refunded" ? refundReference.trim() : null,
-                refundedAt: refundStatus === "refunded" ? refundedAt : null,
-              }
-            : { cancelReason: finalReason },
+          outcomeReasonId: reasonId || undefined,
+          outcomeNotes: notes.trim() || undefined,
+          refundStatus: requiresRefundCapture ? refundStatus || undefined : undefined,
+          refundAmount:
+            requiresRefundCapture && refundStatus === "refunded" ? Number(refundAmount) : undefined,
+          refundReference:
+            requiresRefundCapture && refundStatus === "refunded" ? refundReference.trim() : undefined,
+          refundedAt:
+            requiresRefundCapture && refundStatus === "refunded" ? refundedAt : undefined,
         }),
       })
       if (res.ok) {
         toast.success("Booking cancelled")
         onOpenChange(false)
-        setReason("")
+        setReasonId("")
         setNotes("")
         setRefundStatus("")
         setRefundAmount("")
@@ -107,7 +120,8 @@ export function CancelBookingDialog({
         setRefundedAt("")
         onCancelled()
       } else {
-        toast.error("Failed to cancel booking")
+        const data = await res.json().catch(() => ({}))
+        toast.error((data as { error?: string }).error ?? "Failed to cancel booking")
       }
     } catch {
       toast.error("Failed to cancel booking")
@@ -135,33 +149,53 @@ export function CancelBookingDialog({
             </AlertDescription>
           </Alert>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="cancel-reason">Reason for cancellation</Label>
-            <Select value={reason} onValueChange={setReason}>
-              <SelectTrigger id="cancel-reason">
-                <SelectValue placeholder="Select a reason..." />
-              </SelectTrigger>
-              <SelectContent>
-                {CANCEL_REASONS.map((r) => (
-                  <SelectItem key={r} value={r}>
-                    {r}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {cancelReasons.length > 0 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="cancel-reason">
+                Reason for cancellation <span aria-hidden="true" className="text-destructive">*</span>
+              </Label>
+              <Select value={reasonId} onValueChange={(v) => { setReasonId(v); setNotes("") }}>
+                <SelectTrigger id="cancel-reason">
+                  <SelectValue placeholder="Select a reason..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {cancelReasons.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>{r.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
-          <div className="space-y-1.5">
-            <Label htmlFor="cancel-notes">Additional notes (optional)</Label>
-            <Textarea
-              id="cancel-notes"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value.slice(0, 180))}
-              placeholder="Short note..."
-              rows={2}
-              className="resize-none"
-            />
-          </div>
+          {isOther && (
+            <div className="space-y-1.5">
+              <Label htmlFor="cancel-notes">
+                Please describe <span aria-hidden="true" className="text-destructive">*</span>
+              </Label>
+              <Textarea
+                id="cancel-notes"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value.slice(0, 300))}
+                placeholder="Brief description..."
+                rows={2}
+                className="resize-none"
+              />
+            </div>
+          )}
+
+          {!isOther && cancelReasons.length > 0 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="cancel-notes">Additional notes (optional)</Label>
+              <Textarea
+                id="cancel-notes"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value.slice(0, 180))}
+                placeholder="Short note..."
+                rows={2}
+                className="resize-none"
+              />
+            </div>
+          )}
 
           {requiresRefundCapture && (
             <div className="space-y-3 rounded-md border border-border p-3">
@@ -186,7 +220,14 @@ export function CancelBookingDialog({
               {refundStatus === "refunded" && (
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1.5">
-                    <Label htmlFor="refund-amount">Refund amount</Label>
+                    <Label htmlFor="refund-amount">
+                      Refund amount
+                      {suggestedRefund !== null && suggestedRefund !== undefined && (
+                        <span className="ml-1.5 text-xs text-muted-foreground">
+                          (suggested: {suggestedRefund.toFixed(2)})
+                        </span>
+                      )}
+                    </Label>
                     <Input
                       id="refund-amount"
                       type="number"
@@ -228,8 +269,9 @@ export function CancelBookingDialog({
             variant="destructive"
             onClick={handleConfirm}
             disabled={
-              !reason ||
               loading ||
+              (cancelReasons.length > 0 && !reasonId) ||
+              (isOther && !notes.trim()) ||
               (requiresRefundCapture && !refundStatus) ||
               (requiresRefundCapture &&
                 refundStatus === "refunded" &&

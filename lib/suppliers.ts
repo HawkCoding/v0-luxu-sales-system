@@ -4,14 +4,17 @@ import type {
   BookingScheduleSupplierKind,
   BookingSupplierSchedule,
   BookingVehicleRentalDetails,
+  CommissionKind,
   Location,
   Supplier,
   BookingTransportRequest,
+  RateType,
   SupplierDetail,
   SupplierEmail,
   SupplierRateCard,
   SupplierRoute,
   SupplierSuiteType,
+  SupplierVariantValue,
   TransportRequestServiceType,
   VehicleRentalRouteDetails,
 } from "@/lib/types"
@@ -27,14 +30,26 @@ type RateCardRow = Database["public"]["Tables"]["rate_cards"]["Row"]
 type RouteRow = Database["public"]["Tables"]["routes"]["Row"]
 type SupplierRow = Database["public"]["Tables"]["suppliers"]["Row"]
 type SupplierEmailRow = Database["public"]["Tables"]["supplier_emails"]["Row"]
+type RateTypeRow = Database["public"]["Tables"]["rate_types"]["Row"]
 type SuiteTypeRow = Database["public"]["Tables"]["suite_types"]["Row"]
 type VehicleRentalRouteDetailsRow = Database["public"]["Tables"]["vehicle_rental_route_details"]["Row"]
+type BedroomTypeRow = Database["public"]["Tables"]["bedroom_types"]["Row"]
+type BedroomLayoutRow = Database["public"]["Tables"]["bedroom_layouts"]["Row"]
+type BathroomTypeRow = Database["public"]["Tables"]["bathroom_types"]["Row"]
+type SuiteTypeBedroomTypeRow = Database["public"]["Tables"]["suite_type_bedroom_types"]["Row"]
+type SuiteTypeBedroomLayoutRow = Database["public"]["Tables"]["suite_type_bedroom_layouts"]["Row"]
+type SuiteTypeBathroomTypeRow = Database["public"]["Tables"]["suite_type_bathroom_types"]["Row"]
 
 function normalizeSupplierStatus(value: string): Supplier["status"] {
   if (value === "draft" || value === "active" || value === "inactive") {
     return value
   }
   return "inactive"
+}
+
+function normalizeCommissionKind(value: string | null | undefined): CommissionKind | null {
+  if (value === "percent" || value === "per_person") return value
+  return null
 }
 
 function normalizeTransportRequestServiceType(value: string | null): TransportRequestServiceType | null {
@@ -92,10 +107,20 @@ export function mapSupplier(row: SupplierRow): Supplier {
     location: row.location,
     locationDetail: row.location_detail ?? null,
     locationId: row.location_id ?? null,
+    locationAreaId: row.location_area_id ?? null,
     description: row.description ?? null,
     notes: row.notes,
     active: row.active,
     singleSupplementPct: Number(row.single_supplement_pct ?? 0),
+    infantMaxAge: row.infant_max_age ?? null,
+    childMaxAge: row.child_max_age ?? null,
+    defaultCommissionType: normalizeCommissionKind(row.default_commission_type),
+    defaultCommissionValue:
+      row.default_commission_value === null || row.default_commission_value === undefined
+        ? null
+        : Number(row.default_commission_value),
+    defaultTimeStart: row.default_time_start ?? null,
+    defaultTimeEnd: row.default_time_end ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     createdAtDisplay: formatDisplayDateTime(row.created_at),
@@ -108,6 +133,7 @@ export function mapLocation(row: LocationRow): Location {
     id: row.id,
     name: row.name,
     country: row.country,
+    parentLocationId: row.parent_location_id ?? null,
     regionCode: row.region_code,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -129,6 +155,12 @@ export function mapSupplierRoute(
     pickupPoint: row.pickup_point ?? null,
     dropoffPoint: row.dropoff_point ?? null,
     vehicleRentalDetails: mapVehicleRentalRouteDetails(vehicleRentalDetails),
+    directionMode: row.direction_mode ?? "one_way",
+    commissionType: normalizeCommissionKind(row.commission_type),
+    commissionValue:
+      row.commission_value === null || row.commission_value === undefined
+        ? null
+        : Number(row.commission_value),
     active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -137,7 +169,39 @@ export function mapSupplierRoute(
   }
 }
 
-export function mapSupplierSuiteType(row: SuiteTypeRow): SupplierSuiteType {
+export interface SuiteTypeMembershipMaps {
+  bedroomTypeIdsBySuiteType: Map<string, string[]>
+  bedroomLayoutIdsBySuiteType: Map<string, string[]>
+  bathroomTypeIdsBySuiteType: Map<string, string[]>
+  bedroomTypeNamesById: Map<string, string>
+  bedroomLayoutNamesById: Map<string, string>
+  bathroomTypeNamesById: Map<string, string>
+}
+
+export function mapSupplierSuiteType(
+  row: SuiteTypeRow,
+  memberships?: SuiteTypeMembershipMaps,
+): SupplierSuiteType {
+  const bedroomTypeIds = memberships?.bedroomTypeIdsBySuiteType.get(row.id) ?? []
+  const bedroomLayoutIds = memberships?.bedroomLayoutIdsBySuiteType.get(row.id) ?? []
+  const bathroomTypeIds = memberships?.bathroomTypeIdsBySuiteType.get(row.id) ?? []
+
+  const bedroomTypes = memberships
+    ? bedroomTypeIds
+        .map((id) => memberships.bedroomTypeNamesById.get(id))
+        .filter((name): name is string => Boolean(name))
+    : undefined
+  const bedroomLayouts = memberships
+    ? bedroomLayoutIds
+        .map((id) => memberships.bedroomLayoutNamesById.get(id))
+        .filter((name): name is string => Boolean(name))
+    : undefined
+  const bathroomTypes = memberships
+    ? bathroomTypeIds
+        .map((id) => memberships.bathroomTypeNamesById.get(id))
+        .filter((name): name is string => Boolean(name))
+    : undefined
+
   return {
     id: row.id,
     supplierId: row.supplier_id,
@@ -146,10 +210,31 @@ export function mapSupplierSuiteType(row: SuiteTypeRow): SupplierSuiteType {
     luggageCapacity: row.luggage_capacity ?? null,
     description: row.description ?? null,
     active: row.active,
+    sortOrder: row.sort_order ?? 0,
+    bedroomTypeIds,
+    bedroomLayoutIds,
+    bathroomTypeIds,
+    bedroomTypes,
+    bedroomLayouts,
+    bathroomTypes,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     createdAtDisplay: formatDisplayDateTime(row.created_at),
     updatedAtDisplay: formatDisplayDateTime(row.updated_at),
+  }
+}
+
+function mapVariantValue(row: {
+  id: string
+  name: string
+  sort_order: number
+  archived_at: string | null
+}): SupplierVariantValue {
+  return {
+    id: row.id,
+    name: row.name,
+    sortOrder: row.sort_order ?? 0,
+    archivedAt: row.archived_at ?? null,
   }
 }
 
@@ -205,6 +290,7 @@ export function mapSupplierRateCard(row: RateCardRow): SupplierRateCard {
     id: row.id,
     routeId: row.route_id,
     suiteTypeId: row.suite_type_id,
+    rateTypeId: row.rate_type_id,
     pricePerPerson: row.price_per_person,
     childPrice: row.child_price,
     infantPrice: row.infant_price,
@@ -215,6 +301,19 @@ export function mapSupplierRateCard(row: RateCardRow): SupplierRateCard {
     validFromDisplay: formatDisplayDate(row.valid_from),
     validToDisplay: formatDisplayDate(row.valid_to),
     createdAtDisplay: formatDisplayDateTime(row.created_at),
+  }
+}
+
+export function mapRateType(row: RateTypeRow): RateType {
+  return {
+    id: row.id,
+    code: row.code,
+    name: row.name,
+    sortOrder: row.sort_order ?? 0,
+    isDefault: row.is_default,
+    archivedAt: row.archived_at ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   }
 }
 
@@ -229,6 +328,55 @@ export function mapSupplierEmail(row: SupplierEmailRow): SupplierEmail {
   }
 }
 
+export interface SupplierDetailMapInput {
+  bedroomTypes?: BedroomTypeRow[]
+  bedroomLayouts?: BedroomLayoutRow[]
+  bathroomTypes?: BathroomTypeRow[]
+  suiteTypeBedroomTypes?: SuiteTypeBedroomTypeRow[]
+  suiteTypeBedroomLayouts?: SuiteTypeBedroomLayoutRow[]
+  suiteTypeBathroomTypes?: SuiteTypeBathroomTypeRow[]
+  rateTypes?: RateTypeRow[]
+}
+
+function buildSuiteTypeMemberships(
+  bedroomTypeRows: BedroomTypeRow[],
+  bedroomLayoutRows: BedroomLayoutRow[],
+  bathroomTypeRows: BathroomTypeRow[],
+  suiteTypeBedroomTypes: SuiteTypeBedroomTypeRow[],
+  suiteTypeBedroomLayouts: SuiteTypeBedroomLayoutRow[],
+  suiteTypeBathroomTypes: SuiteTypeBathroomTypeRow[],
+): SuiteTypeMembershipMaps {
+  const bedroomTypeIdsBySuiteType = new Map<string, string[]>()
+  for (const row of suiteTypeBedroomTypes) {
+    const list = bedroomTypeIdsBySuiteType.get(row.suite_type_id) ?? []
+    list.push(row.bedroom_type_id)
+    bedroomTypeIdsBySuiteType.set(row.suite_type_id, list)
+  }
+  const bedroomLayoutIdsBySuiteType = new Map<string, string[]>()
+  for (const row of suiteTypeBedroomLayouts) {
+    const list = bedroomLayoutIdsBySuiteType.get(row.suite_type_id) ?? []
+    list.push(row.bedroom_layout_id)
+    bedroomLayoutIdsBySuiteType.set(row.suite_type_id, list)
+  }
+  const bathroomTypeIdsBySuiteType = new Map<string, string[]>()
+  for (const row of suiteTypeBathroomTypes) {
+    const list = bathroomTypeIdsBySuiteType.get(row.suite_type_id) ?? []
+    list.push(row.bathroom_type_id)
+    bathroomTypeIdsBySuiteType.set(row.suite_type_id, list)
+  }
+  const bedroomTypeNamesById = new Map(bedroomTypeRows.map((row) => [row.id, row.name]))
+  const bedroomLayoutNamesById = new Map(bedroomLayoutRows.map((row) => [row.id, row.name]))
+  const bathroomTypeNamesById = new Map(bathroomTypeRows.map((row) => [row.id, row.name]))
+  return {
+    bedroomTypeIdsBySuiteType,
+    bedroomLayoutIdsBySuiteType,
+    bathroomTypeIdsBySuiteType,
+    bedroomTypeNamesById,
+    bedroomLayoutNamesById,
+    bathroomTypeNamesById,
+  }
+}
+
 export function mapSupplierDetail(
   supplier: SupplierRow,
   suiteTypes: SuiteTypeRow[],
@@ -237,17 +385,50 @@ export function mapSupplierDetail(
   rateCards: RateCardRow[] = [],
   locations: LocationRow[] = [],
   vehicleRentalRouteDetails: VehicleRentalRouteDetailsRow[] = [],
+  variants: SupplierDetailMapInput = {},
 ): SupplierDetail {
   const detailsByRouteId = new Map(
     vehicleRentalRouteDetails.map((details) => [details.route_id, details]),
   )
 
+  const bedroomTypeRows = variants.bedroomTypes ?? []
+  const bedroomLayoutRows = variants.bedroomLayouts ?? []
+  const bathroomTypeRows = variants.bathroomTypes ?? []
+  const memberships = buildSuiteTypeMemberships(
+    bedroomTypeRows,
+    bedroomLayoutRows,
+    bathroomTypeRows,
+    variants.suiteTypeBedroomTypes ?? [],
+    variants.suiteTypeBedroomLayouts ?? [],
+    variants.suiteTypeBathroomTypes ?? [],
+  )
+
+  const sortedSuiteTypes = [...suiteTypes].sort((a, b) => {
+    const aOrder = a.sort_order ?? 0
+    const bOrder = b.sort_order ?? 0
+    if (aOrder !== bOrder) return aOrder - bOrder
+    return a.name.localeCompare(b.name)
+  })
+
   return {
     ...mapSupplier(supplier),
     emails: emails.map(mapSupplierEmail),
-    suiteTypes: suiteTypes.map(mapSupplierSuiteType),
+    suiteTypes: sortedSuiteTypes.map((row) => mapSupplierSuiteType(row, memberships)),
     routes: routes.map((route) => mapSupplierRoute(route, detailsByRouteId.get(route.id))),
     rateCards: rateCards.map(mapSupplierRateCard),
     locations: locations.map(mapLocation),
+    bedroomTypes: [...bedroomTypeRows]
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name))
+      .map(mapVariantValue),
+    bedroomLayouts: [...bedroomLayoutRows]
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name))
+      .map(mapVariantValue),
+    bathroomTypes: [...bathroomTypeRows]
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name))
+      .map(mapVariantValue),
+    rateTypes: [...(variants.rateTypes ?? [])]
+      .filter((row) => !row.archived_at)
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name))
+      .map(mapRateType),
   }
 }

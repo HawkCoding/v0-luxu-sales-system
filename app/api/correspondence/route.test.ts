@@ -36,10 +36,18 @@ const QUOTE_ID = "00000000-0000-4000-8000-00000000bbbb"
 
 interface AuthOptions {
   bookingStage?: string
+  customerEmail?: string | null
+  departureDate?: string | null
+  invoiceBalance?: number | null
+  quotePdfStoragePath?: string | null
 }
 
 function buildAuth(options: AuthOptions = {}) {
   const bookingStage = options.bookingStage ?? "enquiry"
+  const customerEmail = options.customerEmail === undefined ? "c@example.com" : options.customerEmail
+  const departureDate = options.departureDate === undefined ? "2026-06-01" : options.departureDate
+  const invoiceBalance = options.invoiceBalance === undefined ? 0 : options.invoiceBalance
+  const quotePdfStoragePath = options.quotePdfStoragePath ?? null
 
   const correspondenceInsertResult = vi.fn(async () => ({
     data: {
@@ -53,6 +61,7 @@ function buildAuth(options: AuthOptions = {}) {
       sent_at: "2026-05-01T00:00:00.000Z",
       error: null,
       provider_message_id: "pmid",
+      recipients: ["c@example.com"],
     },
     error: null,
   }))
@@ -73,9 +82,27 @@ function buildAuth(options: AuthOptions = {}) {
       eq: vi.fn(async () => ({ error: null })),
     })),
   }))
-  const quoteSelect = vi.fn(() => ({
-    eq: vi.fn(async () => ({ data: [], error: null })),
-  }))
+  const quoteSelect = vi.fn((columns: string) => {
+    if (columns.includes("pdf_document_id")) {
+      return {
+        eq: vi.fn(() => ({
+          maybeSingle: vi.fn(async () => ({
+            data: quotePdfStoragePath
+              ? {
+                  quote_number: "BT-2026-0001-Q1",
+                  pdf_document_id: "doc-1",
+                  documents: { storage_path: quotePdfStoragePath },
+                }
+              : null,
+            error: null,
+          })),
+        })),
+      }
+    }
+    return {
+      eq: vi.fn(async () => ({ data: [], error: null })),
+    }
+  })
 
   const documentSelect = vi.fn(() => ({
     eq: vi.fn(async () => ({ data: [], error: null })),
@@ -83,6 +110,10 @@ function buildAuth(options: AuthOptions = {}) {
 
   const pipelineHistoryInsert = vi.fn(async () => ({ error: null }))
   const auditInsert = vi.fn(async () => ({ error: null }))
+  const storageDownload = vi.fn(async () => ({
+    data: new Blob(["pdf-content"], { type: "application/pdf" }),
+    error: null,
+  }))
   let correspondenceInsertCount = 0
 
   const supabase = {
@@ -101,7 +132,10 @@ function buildAuth(options: AuthOptions = {}) {
                   updated_at: "2026-05-01T00:00:00.000Z",
                   customer_id: "cust-1",
                   consultant: "HK",
-                  customer: { email: "c@example.com" },
+                  departure_date: departureDate,
+                  duration_nights: 3,
+                  invoice_balance: invoiceBalance,
+                  customer: { email: customerEmail },
                 },
                 error: null,
               })),
@@ -136,6 +170,11 @@ function buildAuth(options: AuthOptions = {}) {
       }
       throw new Error(`Unexpected table ${table}`)
     }),
+    storage: {
+      from: vi.fn(() => ({
+        download: storageDownload,
+      })),
+    },
   }
 
   authMocks.requireRole.mockResolvedValue({
@@ -153,6 +192,7 @@ function buildAuth(options: AuthOptions = {}) {
     quoteUpdate,
     pipelineHistoryInsert,
     auditInsert,
+    storageDownload,
   }
 }
 
@@ -312,5 +352,171 @@ describe("POST /api/correspondence", () => {
     expect(transitionMocks.applyTransition).not.toHaveBeenCalled()
     expect(mocks.pipelineHistoryInsert).not.toHaveBeenCalled()
     expect(mocks.quoteUpdate).toHaveBeenCalled()
+  })
+
+  it("sends a voucher email and applies the voucher_sent transition", async () => {
+    const mocks = buildAuth({ bookingStage: "final_paid" })
+    const res = await POST(
+      postJson({
+        bookingId: BOOKING_ID,
+        subject: "Travel voucher BT-2026-0001",
+        kind: "voucher",
+        moveStage: "voucher_sent",
+        attachments: [
+          {
+            filename: "voucher.pdf",
+            contentBase64: Buffer.from("pdf").toString("base64"),
+            contentType: "application/pdf",
+          },
+        ],
+      }),
+    )
+
+    expect(res.status).toBe(200)
+    expect(emailMocks.sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subject: "Travel voucher BT-2026-0001",
+        attachments: [expect.objectContaining({ filename: "voucher.pdf" })],
+      }),
+    )
+    expect(transitionMocks.applyTransition).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        targetStage: "voucher_sent",
+        booking: expect.objectContaining({ id: BOOKING_ID, stage: "final_paid" }),
+      }),
+    )
+    expect(mocks.pipelineHistoryInsert).toHaveBeenCalledWith(
+      expect.objectContaining({ from_stage: "final_paid", to_stage: "voucher_sent" }),
+    )
+  })
+
+  it("blocks voucher email before send when invoice balance is not zero", async () => {
+    const mocks = buildAuth({ bookingStage: "final_paid", invoiceBalance: 100 })
+    const res = await POST(
+      postJson({
+        bookingId: BOOKING_ID,
+        subject: "Travel voucher BT-2026-0001",
+        kind: "voucher",
+        moveStage: "voucher_sent",
+      }),
+    )
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toMatchObject({
+      error: "Voucher cannot be sent",
+      details: {
+        failures: [expect.objectContaining({ code: "balance_not_zero" })],
+      },
+    })
+    expect(emailMocks.sendEmail).not.toHaveBeenCalled()
+    expect(mocks.correspondenceInsertChain).not.toHaveBeenCalled()
+    expect(transitionMocks.applyTransition).not.toHaveBeenCalled()
+  })
+
+  it("blocks voucher email before send when required readiness fields are missing", async () => {
+    const mocks = buildAuth({ bookingStage: "final_paid", departureDate: null, customerEmail: null })
+    const res = await POST(
+      postJson({
+        bookingId: BOOKING_ID,
+        subject: "Travel voucher BT-2026-0001",
+        moveStage: "voucher_sent",
+      }),
+    )
+
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body).toMatchObject({
+      error: "Voucher cannot be sent",
+      details: {
+        failures: [
+          expect.objectContaining({ code: "departure_date_missing" }),
+          expect.objectContaining({ code: "customer_email_missing" }),
+        ],
+      },
+    })
+    expect(emailMocks.sendEmail).not.toHaveBeenCalled()
+    expect(mocks.correspondenceInsertChain).not.toHaveBeenCalled()
+    expect(transitionMocks.applyTransition).not.toHaveBeenCalled()
+  })
+
+  it("stores recipients in the correspondence record when email is sent", async () => {
+    const mocks = buildAuth()
+    const res = await POST(
+      postJson({
+        bookingId: BOOKING_ID,
+        subject: "Quote for you",
+        to: "customer@example.com",
+        kind: "quote",
+        quoteId: QUOTE_ID,
+      }),
+    )
+
+    expect(res.status).toBe(200)
+    expect(mocks.correspondenceInsertChain).toHaveBeenCalledWith(
+      expect.objectContaining({ recipients: ["customer@example.com"] }),
+    )
+    const body = await res.json()
+    expect(body.recipients).toEqual(["c@example.com"])
+  })
+
+  it("attaches quote PDF when pdf_document_id is set on the quote", async () => {
+    const mocks = buildAuth({ quotePdfStoragePath: "quotes/BT-2026-0001-Q1/quote-BT-2026-0001-Q1.pdf" })
+    const res = await POST(
+      postJson({
+        bookingId: BOOKING_ID,
+        subject: "Your quote",
+        kind: "quote",
+        quoteId: QUOTE_ID,
+      }),
+    )
+
+    expect(res.status).toBe(200)
+    expect(mocks.storageDownload).toHaveBeenCalledWith("BT-2026-0001-Q1/quote-BT-2026-0001-Q1.pdf")
+    expect(emailMocks.sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachments: expect.arrayContaining([
+          expect.objectContaining({ filename: "quote-BT-2026-0001-Q1.pdf", contentType: "application/pdf" }),
+        ]),
+      }),
+    )
+  })
+
+  it("sends quote email without PDF attachment when no pdf_document_id is set", async () => {
+    const mocks = buildAuth()
+    const res = await POST(
+      postJson({
+        bookingId: BOOKING_ID,
+        subject: "Your quote",
+        kind: "quote",
+        quoteId: QUOTE_ID,
+      }),
+    )
+
+    expect(res.status).toBe(200)
+    expect(mocks.storageDownload).not.toHaveBeenCalled()
+    expect(emailMocks.sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ attachments: [] }),
+    )
+  })
+
+  it("records correspondence as failed when email send fails", async () => {
+    emailMocks.sendEmail.mockResolvedValue({
+      success: false,
+      provider: "resend",
+      providerMessageId: null,
+      error: "Connection refused",
+    })
+    const mocks = buildAuth()
+    const res = await POST(
+      postJson({ bookingId: BOOKING_ID, subject: "Quote", kind: "quote", quoteId: QUOTE_ID }),
+    )
+
+    expect(res.status).toBe(502)
+    const body = await res.json()
+    expect(body.error).toBe("Connection refused")
+    expect(mocks.correspondenceInsertChain).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "failed", sent_at: null, error: "Connection refused" }),
+    )
   })
 })

@@ -142,6 +142,293 @@ export type Database = {
         }
         Relationships: []
       }
+      backup_records: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          retained_until: string | null
+          size_bytes: number | null
+          storage_path: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          retained_until?: string | null
+          size_bytes?: number | null
+          storage_path: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          retained_until?: string | null
+          size_bytes?: number | null
+          storage_path?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "backup_records_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
+      bathroom_types: {
+        Row: {
+          archived_at: string | null
+          created_at: string
+          id: string
+          name: string
+          sort_order: number
+          supplier_id: string
+          updated_at: string
+        }
+        Insert: {
+          archived_at?: string | null
+          created_at?: string
+          id?: string
+          name: string
+          sort_order?: number
+          supplier_id: string
+          updated_at?: string
+        }
+        Update: {
+          archived_at?: string | null
+          created_at?: string
+          id?: string
+          name?: string
+          sort_order?: number
+          supplier_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bathroom_types_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bedroom_layouts: {
+        Row: {
+          archived_at: string | null
+          created_at: string
+          id: string
+          name: string
+          sort_order: number
+          supplier_id: string
+          updated_at: string
+        }
+        Insert: {
+          archived_at?: string | null
+          created_at?: string
+          id?: string
+          name: string
+          sort_order?: number
+          supplier_id: string
+          updated_at?: string
+        }
+        Update: {
+          archived_at?: string | null
+          created_at?: string
+          id?: string
+          name?: string
+          sort_order?: number
+          supplier_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bedroom_layouts_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bedroom_types: {
+        Row: {
+          archived_at: string | null
+          created_at: string
+          id: string
+          name: string
+          sort_order: number
+          supplier_id: string
+          updated_at: string
+        }
+        Insert: {
+          archived_at?: string | null
+          created_at?: string
+          id?: string
+          name: string
+          sort_order?: number
+          supplier_id: string
+          updated_at?: string
+        }
+        Update: {
+          archived_at?: string | null
+          created_at?: string
+          id?: string
+          name?: string
+          sort_order?: number
+          supplier_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bedroom_types_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      booking_notes: {
+        Row: {
+          author_id: string | null
+          body: string
+          booking_id: string
+          created_at: string
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          author_id?: string | null
+          body: string
+          booking_id: string
+          created_at?: string
+          id?: string
+          updated_at?: string
+        }
+        Update: {
+          author_id?: string | null
+          body?: string
+          booking_id?: string
+          created_at?: string
+          id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "booking_notes_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+          {
+            foreignKeyName: "booking_notes_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      booking_number_sequences: {
+        Row: {
+          last_number: number
+          product_code: string
+          year: number
+        }
+        Insert: {
+          last_number?: number
+          product_code: string
+          year: number
+        }
+        Update: {
+          last_number?: number
+          product_code?: string
+          year?: number
+        }
+        Relationships: []
+      }
+      booking_package_selections: {
+        Row: {
+          booking_id: string
+          created_at: string
+          id: string
+          notes: string | null
+          package_leg_id: string
+          route_id: string | null
+          selected: boolean
+          service_date: string | null
+          suite_type_id: string | null
+          supplier_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          booking_id: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          package_leg_id: string
+          route_id?: string | null
+          selected?: boolean
+          service_date?: string | null
+          suite_type_id?: string | null
+          supplier_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          booking_id?: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          package_leg_id?: string
+          route_id?: string | null
+          selected?: boolean
+          service_date?: string | null
+          suite_type_id?: string | null
+          supplier_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "booking_package_selections_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_package_selections_package_leg_id_fkey"
+            columns: ["package_leg_id"]
+            isOneToOne: false
+            referencedRelation: "package_legs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_package_selections_route_id_fkey"
+            columns: ["route_id"]
+            isOneToOne: false
+            referencedRelation: "routes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_package_selections_suite_type_id_fkey"
+            columns: ["suite_type_id"]
+            isOneToOne: false
+            referencedRelation: "suite_types"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_package_selections_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       booking_suites: {
         Row: {
           booking_id: string
@@ -372,7 +659,6 @@ export type Database = {
           additional_services_details: string | null
           assigned_salesperson_id: string | null
           booking_number: string
-          cancel_reason: string | null
           cancelled_at: string | null
           child_ages: number[] | null
           closed_at: string | null
@@ -403,11 +689,18 @@ export type Database = {
           hotel_supplier_id: string | null
           id: string
           invoice_balance: number | null
+          is_repeat_client_at_creation: boolean
           no_of_adults: number
           no_of_children: number
           no_of_suites: number
+          outcome: string
+          outcome_notes: string | null
+          outcome_reason_id: string | null
+          outcome_set_at: string | null
+          outcome_set_by: string | null
           owner_user_id: string | null
           package_id: string | null
+          package_travel_date: string | null
           promotion_code: string | null
           purpose: Database["public"]["Enums"]["booking_purpose"]
           quote_sent_at: string | null
@@ -419,6 +712,7 @@ export type Database = {
           route_id: string | null
           source: Database["public"]["Enums"]["source_kind"]
           stage: Database["public"]["Enums"]["pipeline_stage"]
+          supplier_reference: string | null
           terms_accepted: boolean
           updated_at: string
           voucher_sent_at: string | null
@@ -428,8 +722,7 @@ export type Database = {
           additional_services?: boolean
           additional_services_details?: string | null
           assigned_salesperson_id?: string | null
-          booking_number?: string
-          cancel_reason?: string | null
+          booking_number: string
           cancelled_at?: string | null
           child_ages?: number[] | null
           closed_at?: string | null
@@ -460,11 +753,18 @@ export type Database = {
           hotel_supplier_id?: string | null
           id?: string
           invoice_balance?: number | null
+          is_repeat_client_at_creation?: boolean
           no_of_adults?: number
           no_of_children?: number
           no_of_suites?: number
+          outcome?: string
+          outcome_notes?: string | null
+          outcome_reason_id?: string | null
+          outcome_set_at?: string | null
+          outcome_set_by?: string | null
           owner_user_id?: string | null
           package_id?: string | null
+          package_travel_date?: string | null
           promotion_code?: string | null
           purpose: Database["public"]["Enums"]["booking_purpose"]
           quote_sent_at?: string | null
@@ -476,6 +776,7 @@ export type Database = {
           route_id?: string | null
           source?: Database["public"]["Enums"]["source_kind"]
           stage?: Database["public"]["Enums"]["pipeline_stage"]
+          supplier_reference?: string | null
           terms_accepted?: boolean
           updated_at?: string
           voucher_sent_at?: string | null
@@ -486,7 +787,6 @@ export type Database = {
           additional_services_details?: string | null
           assigned_salesperson_id?: string | null
           booking_number?: string
-          cancel_reason?: string | null
           cancelled_at?: string | null
           child_ages?: number[] | null
           closed_at?: string | null
@@ -517,11 +817,18 @@ export type Database = {
           hotel_supplier_id?: string | null
           id?: string
           invoice_balance?: number | null
+          is_repeat_client_at_creation?: boolean
           no_of_adults?: number
           no_of_children?: number
           no_of_suites?: number
+          outcome?: string
+          outcome_notes?: string | null
+          outcome_reason_id?: string | null
+          outcome_set_at?: string | null
+          outcome_set_by?: string | null
           owner_user_id?: string | null
           package_id?: string | null
+          package_travel_date?: string | null
           promotion_code?: string | null
           purpose?: Database["public"]["Enums"]["booking_purpose"]
           quote_sent_at?: string | null
@@ -533,18 +840,12 @@ export type Database = {
           route_id?: string | null
           source?: Database["public"]["Enums"]["source_kind"]
           stage?: Database["public"]["Enums"]["pipeline_stage"]
+          supplier_reference?: string | null
           terms_accepted?: boolean
           updated_at?: string
           voucher_sent_at?: string | null
         }
         Relationships: [
-          {
-            foreignKeyName: "bookings_assigned_salesperson_id_fkey"
-            columns: ["assigned_salesperson_id"]
-            isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "bookings_customer_id_fkey"
             columns: ["customer_id"]
@@ -574,6 +875,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "bookings_outcome_reason_id_fkey"
+            columns: ["outcome_reason_id"]
+            isOneToOne: false
+            referencedRelation: "outcome_reasons"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "bookings_package_id_fkey"
             columns: ["package_id"]
             isOneToOne: false
@@ -599,6 +907,7 @@ export type Database = {
           id: string
           kind: string | null
           provider_message_id: string | null
+          recipients: string[] | null
           scheduled_at: string | null
           sent_at: string | null
           status: Database["public"]["Enums"]["correspondence_status"]
@@ -613,6 +922,7 @@ export type Database = {
           id?: string
           kind?: string | null
           provider_message_id?: string | null
+          recipients?: string[] | null
           scheduled_at?: string | null
           sent_at?: string | null
           status?: Database["public"]["Enums"]["correspondence_status"]
@@ -627,6 +937,7 @@ export type Database = {
           id?: string
           kind?: string | null
           provider_message_id?: string | null
+          recipients?: string[] | null
           scheduled_at?: string | null
           sent_at?: string | null
           status?: Database["public"]["Enums"]["correspondence_status"]
@@ -751,40 +1062,64 @@ export type Database = {
       }
       customers: {
         Row: {
+          communication_preferences: string | null
           country: string | null
           created_at: string
+          date_of_birth: string | null
           email: string
           first_name: string
+          first_travel_date: string | null
           id: string
+          is_repeat_client: boolean
           last_name: string
+          last_travel_date: string | null
           notes: string | null
           phone: string | null
+          preferences: string | null
+          province: string | null
           title: string | null
           updated_at: string
+          vip_status: boolean
         }
         Insert: {
+          communication_preferences?: string | null
           country?: string | null
           created_at?: string
+          date_of_birth?: string | null
           email: string
           first_name: string
+          first_travel_date?: string | null
           id?: string
+          is_repeat_client?: boolean
           last_name: string
+          last_travel_date?: string | null
           notes?: string | null
           phone?: string | null
+          preferences?: string | null
+          province?: string | null
           title?: string | null
           updated_at?: string
+          vip_status?: boolean
         }
         Update: {
+          communication_preferences?: string | null
           country?: string | null
           created_at?: string
+          date_of_birth?: string | null
           email?: string
           first_name?: string
+          first_travel_date?: string | null
           id?: string
+          is_repeat_client?: boolean
           last_name?: string
+          last_travel_date?: string | null
           notes?: string | null
           phone?: string | null
+          preferences?: string | null
+          province?: string | null
           title?: string | null
           updated_at?: string
+          vip_status?: boolean
         }
         Relationships: []
       }
@@ -792,26 +1127,35 @@ export type Database = {
         Row: {
           booking_id: string
           created_at: string
+          file_name: string | null
           id: string
           kind: Database["public"]["Enums"]["document_kind"]
+          payment_id: string | null
           status: Database["public"]["Enums"]["document_status"]
           storage_path: string | null
+          uploaded_by: string | null
         }
         Insert: {
           booking_id: string
           created_at?: string
+          file_name?: string | null
           id?: string
           kind: Database["public"]["Enums"]["document_kind"]
+          payment_id?: string | null
           status?: Database["public"]["Enums"]["document_status"]
           storage_path?: string | null
+          uploaded_by?: string | null
         }
         Update: {
           booking_id?: string
           created_at?: string
+          file_name?: string | null
           id?: string
           kind?: Database["public"]["Enums"]["document_kind"]
+          payment_id?: string | null
           status?: Database["public"]["Enums"]["document_status"]
           storage_path?: string | null
+          uploaded_by?: string | null
         }
         Relationships: [
           {
@@ -820,6 +1164,20 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "bookings"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "documents_payment_id_fkey"
+            columns: ["payment_id"]
+            isOneToOne: false
+            referencedRelation: "payments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "documents_uploaded_by_fkey"
+            columns: ["uploaded_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
           },
         ]
       }
@@ -1210,6 +1568,7 @@ export type Database = {
           created_at: string
           id: string
           name: string
+          parent_location_id: string | null
           region_code: string | null
           updated_at: string
         }
@@ -1218,6 +1577,7 @@ export type Database = {
           created_at?: string
           id?: string
           name: string
+          parent_location_id?: string | null
           region_code?: string | null
           updated_at?: string
         }
@@ -1226,8 +1586,41 @@ export type Database = {
           created_at?: string
           id?: string
           name?: string
+          parent_location_id?: string | null
           region_code?: string | null
           updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "locations_parent_location_id_fkey"
+            columns: ["parent_location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      outcome_reasons: {
+        Row: {
+          active: boolean
+          applies_to: string
+          created_at: string
+          id: string
+          label: string
+        }
+        Insert: {
+          active?: boolean
+          applies_to: string
+          created_at?: string
+          id?: string
+          label: string
+        }
+        Update: {
+          active?: boolean
+          applies_to?: string
+          created_at?: string
+          id?: string
+          label?: string
         }
         Relationships: []
       }
@@ -1315,6 +1708,7 @@ export type Database = {
           duration_nights: number | null
           fixed_price_per_person: number | null
           id: string
+          markup_pct: number
           name: string
           single_supplement_pct: number
           slug: string
@@ -1328,6 +1722,7 @@ export type Database = {
           duration_nights?: number | null
           fixed_price_per_person?: number | null
           id?: string
+          markup_pct?: number
           name: string
           single_supplement_pct?: number
           slug: string
@@ -1341,6 +1736,7 @@ export type Database = {
           duration_nights?: number | null
           fixed_price_per_person?: number | null
           id?: string
+          markup_pct?: number
           name?: string
           single_supplement_pct?: number
           slug?: string
@@ -1348,34 +1744,84 @@ export type Database = {
         }
         Relationships: []
       }
+      payment_reminders: {
+        Row: {
+          created_at: string
+          error: string | null
+          id: string
+          invoice_id: string
+          scheduled_for: string
+          sent_at: string | null
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          error?: string | null
+          id?: string
+          invoice_id: string
+          scheduled_for: string
+          sent_at?: string | null
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          error?: string | null
+          id?: string
+          invoice_id?: string
+          scheduled_for?: string
+          sent_at?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_reminders_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payments: {
         Row: {
           amount: number
           booking_id: string
+          captured_by: string | null
           created_at: string
           id: string
+          invoice_id: string | null
           method: string | null
           notes: string | null
+          payment_kind: string
+          proof_storage_path: string | null
           received_at: string
           reference: string | null
         }
         Insert: {
           amount: number
           booking_id: string
+          captured_by?: string | null
           created_at?: string
           id?: string
+          invoice_id?: string | null
           method?: string | null
           notes?: string | null
+          payment_kind?: string
+          proof_storage_path?: string | null
           received_at?: string
           reference?: string | null
         }
         Update: {
           amount?: number
           booking_id?: string
+          captured_by?: string | null
           created_at?: string
           id?: string
+          invoice_id?: string | null
           method?: string | null
           notes?: string | null
+          payment_kind?: string
+          proof_storage_path?: string | null
           received_at?: string
           reference?: string | null
         }
@@ -1385,6 +1831,20 @@ export type Database = {
             columns: ["booking_id"]
             isOneToOne: false
             referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payments_captured_by_fkey"
+            columns: ["captured_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+          {
+            foreignKeyName: "payments_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
             referencedColumns: ["id"]
           },
         ]
@@ -1460,14 +1920,57 @@ export type Database = {
         }
         Relationships: []
       }
+      quote_acceptance_tokens: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          expires_at: string
+          id: string
+          quote_id: string
+          token: string
+          used_at: string | null
+          used_by_ip: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          expires_at: string
+          id?: string
+          quote_id: string
+          token?: string
+          used_at?: string | null
+          used_by_ip?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          expires_at?: string
+          id?: string
+          quote_id?: string
+          token?: string
+          used_at?: string | null
+          used_by_ip?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_acceptance_tokens_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       quote_line_items: {
         Row: {
           created_at: string
           description: string
           id: string
+          pricing_snapshot: Json | null
           qty: number
           quote_id: string
           sort_order: number
+          status: string | null
           supplier_description: string | null
           total: number
           unit_price: number
@@ -1476,9 +1979,11 @@ export type Database = {
           created_at?: string
           description: string
           id?: string
+          pricing_snapshot?: Json | null
           qty?: number
           quote_id: string
           sort_order?: number
+          status?: string | null
           supplier_description?: string | null
           total?: number
           unit_price?: number
@@ -1487,9 +1992,11 @@ export type Database = {
           created_at?: string
           description?: string
           id?: string
+          pricing_snapshot?: Json | null
           qty?: number
           quote_id?: string
           sort_order?: number
+          status?: string | null
           supplier_description?: string | null
           total?: number
           unit_price?: number
@@ -1506,67 +2013,72 @@ export type Database = {
       }
       quotes: {
         Row: {
+          amount_received: number | null
           booking_id: string
           created_at: string
           id: string
           itinerary_id: string | null
           last_sent_at: string | null
           no_package_match: boolean
+          outstanding_amount: number | null
           override_pin: string | null
           override_reason: string | null
           parent_quote_id: string | null
+          pdf_document_id: string | null
           quote_number: string | null
           status: Database["public"]["Enums"]["quote_status"]
           subtotal: number
+          title: string | null
           total: number
           updated_at: string
           validity_until: string | null
           vat: number
         }
         Insert: {
+          amount_received?: number | null
           booking_id: string
           created_at?: string
           id?: string
           itinerary_id?: string | null
           last_sent_at?: string | null
           no_package_match?: boolean
+          outstanding_amount?: number | null
           override_pin?: string | null
           override_reason?: string | null
           parent_quote_id?: string | null
+          pdf_document_id?: string | null
           quote_number?: string | null
           status?: Database["public"]["Enums"]["quote_status"]
           subtotal?: number
+          title?: string | null
           total?: number
           updated_at?: string
           validity_until?: string | null
           vat?: number
         }
         Update: {
+          amount_received?: number | null
           booking_id?: string
           created_at?: string
           id?: string
           itinerary_id?: string | null
           last_sent_at?: string | null
           no_package_match?: boolean
+          outstanding_amount?: number | null
           override_pin?: string | null
           override_reason?: string | null
           parent_quote_id?: string | null
+          pdf_document_id?: string | null
           quote_number?: string | null
           status?: Database["public"]["Enums"]["quote_status"]
           subtotal?: number
+          title?: string | null
           total?: number
           updated_at?: string
           validity_until?: string | null
           vat?: number
         }
         Relationships: [
-          {
-            foreignKeyName: "quotes_parent_quote_id_fkey"
-            columns: ["parent_quote_id"]
-            isOneToOne: false
-            referencedRelation: "quotes"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "quotes_booking_id_fkey"
             columns: ["booking_id"]
@@ -1588,6 +2100,13 @@ export type Database = {
             referencedRelation: "quotes"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "quotes_pdf_document_id_fkey"
+            columns: ["pdf_document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
         ]
       }
       rate_cards: {
@@ -1598,6 +2117,7 @@ export type Database = {
           id: string
           infant_price: number | null
           price_per_person: number
+          rate_type_id: string
           route_id: string
           suite_type_id: string
           valid_from: string
@@ -1610,6 +2130,7 @@ export type Database = {
           id?: string
           infant_price?: number | null
           price_per_person: number
+          rate_type_id?: string
           route_id: string
           suite_type_id: string
           valid_from?: string
@@ -1622,12 +2143,20 @@ export type Database = {
           id?: string
           infant_price?: number | null
           price_per_person?: number
+          rate_type_id?: string
           route_id?: string
           suite_type_id?: string
           valid_from?: string
           valid_to?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "rate_cards_rate_type_id_fkey"
+            columns: ["rate_type_id"]
+            isOneToOne: false
+            referencedRelation: "rate_types"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "rate_cards_route_id_fkey"
             columns: ["route_id"]
@@ -1643,6 +2172,39 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      rate_types: {
+        Row: {
+          archived_at: string | null
+          code: string
+          created_at: string
+          id: string
+          is_default: boolean
+          name: string
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          archived_at?: string | null
+          code: string
+          created_at?: string
+          id?: string
+          is_default?: boolean
+          name: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          archived_at?: string | null
+          code?: string
+          created_at?: string
+          id?: string
+          is_default?: boolean
+          name?: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: []
       }
       report_snapshots: {
         Row: {
@@ -1671,8 +2233,11 @@ export type Database = {
       routes: {
         Row: {
           active: boolean
+          commission_type: Database["public"]["Enums"]["commission_kind"] | null
+          commission_value: number | null
           created_at: string
           destination_location_id: string | null
+          direction_mode: Database["public"]["Enums"]["route_direction_mode"]
           dropoff_point: string | null
           id: string
           name: string
@@ -1683,8 +2248,13 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          commission_type?:
+            | Database["public"]["Enums"]["commission_kind"]
+            | null
+          commission_value?: number | null
           created_at?: string
           destination_location_id?: string | null
+          direction_mode?: Database["public"]["Enums"]["route_direction_mode"]
           dropoff_point?: string | null
           id?: string
           name: string
@@ -1695,8 +2265,13 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          commission_type?:
+            | Database["public"]["Enums"]["commission_kind"]
+            | null
+          commission_value?: number | null
           created_at?: string
           destination_location_id?: string | null
+          direction_mode?: Database["public"]["Enums"]["route_direction_mode"]
           dropoff_point?: string | null
           id?: string
           name?: string
@@ -1729,6 +2304,161 @@ export type Database = {
           },
         ]
       }
+      salesperson_credentials: {
+        Row: {
+          created_at: string
+          email_address: string
+          encrypted_password: string | null
+          id: string
+          imap_encryption: string
+          imap_host: string
+          imap_port: number
+          imap_sent_folder: string
+          profile_id: string
+          smtp_encryption: string
+          smtp_host: string
+          smtp_port: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          email_address: string
+          encrypted_password?: string | null
+          id?: string
+          imap_encryption?: string
+          imap_host?: string
+          imap_port?: number
+          imap_sent_folder?: string
+          profile_id: string
+          smtp_encryption?: string
+          smtp_host?: string
+          smtp_port?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          email_address?: string
+          encrypted_password?: string | null
+          id?: string
+          imap_encryption?: string
+          imap_host?: string
+          imap_port?: number
+          imap_sent_folder?: string
+          profile_id?: string
+          smtp_encryption?: string
+          smtp_host?: string
+          smtp_port?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "salesperson_credentials_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
+      suite_type_bathroom_types: {
+        Row: {
+          bathroom_type_id: string
+          created_at: string
+          suite_type_id: string
+        }
+        Insert: {
+          bathroom_type_id: string
+          created_at?: string
+          suite_type_id: string
+        }
+        Update: {
+          bathroom_type_id?: string
+          created_at?: string
+          suite_type_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "suite_type_bathroom_types_bathroom_type_id_fkey"
+            columns: ["bathroom_type_id"]
+            isOneToOne: false
+            referencedRelation: "bathroom_types"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "suite_type_bathroom_types_suite_type_id_fkey"
+            columns: ["suite_type_id"]
+            isOneToOne: false
+            referencedRelation: "suite_types"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      suite_type_bedroom_layouts: {
+        Row: {
+          bedroom_layout_id: string
+          created_at: string
+          suite_type_id: string
+        }
+        Insert: {
+          bedroom_layout_id: string
+          created_at?: string
+          suite_type_id: string
+        }
+        Update: {
+          bedroom_layout_id?: string
+          created_at?: string
+          suite_type_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "suite_type_bedroom_layouts_bedroom_layout_id_fkey"
+            columns: ["bedroom_layout_id"]
+            isOneToOne: false
+            referencedRelation: "bedroom_layouts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "suite_type_bedroom_layouts_suite_type_id_fkey"
+            columns: ["suite_type_id"]
+            isOneToOne: false
+            referencedRelation: "suite_types"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      suite_type_bedroom_types: {
+        Row: {
+          bedroom_type_id: string
+          created_at: string
+          suite_type_id: string
+        }
+        Insert: {
+          bedroom_type_id: string
+          created_at?: string
+          suite_type_id: string
+        }
+        Update: {
+          bedroom_type_id?: string
+          created_at?: string
+          suite_type_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "suite_type_bedroom_types_bedroom_type_id_fkey"
+            columns: ["bedroom_type_id"]
+            isOneToOne: false
+            referencedRelation: "bedroom_types"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "suite_type_bedroom_types_suite_type_id_fkey"
+            columns: ["suite_type_id"]
+            isOneToOne: false
+            referencedRelation: "suite_types"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       suite_types: {
         Row: {
           active: boolean
@@ -1738,6 +2468,7 @@ export type Database = {
           luggage_capacity: number | null
           name: string
           passenger_capacity: number | null
+          sort_order: number
           supplier_id: string
           updated_at: string
         }
@@ -1749,6 +2480,7 @@ export type Database = {
           luggage_capacity?: number | null
           name: string
           passenger_capacity?: number | null
+          sort_order?: number
           supplier_id: string
           updated_at?: string
         }
@@ -1760,6 +2492,7 @@ export type Database = {
           luggage_capacity?: number | null
           name?: string
           passenger_capacity?: number | null
+          sort_order?: number
           supplier_id?: string
           updated_at?: string
         }
@@ -1956,12 +2689,21 @@ export type Database = {
       suppliers: {
         Row: {
           active: boolean
+          child_max_age: number | null
           created_at: string
+          default_commission_type:
+            | Database["public"]["Enums"]["commission_kind"]
+            | null
+          default_commission_value: number | null
+          default_time_end: string | null
+          default_time_start: string | null
           description: string | null
           email: string | null
           id: string
+          infant_max_age: number | null
           kind: Database["public"]["Enums"]["supplier_kind"]
           location: string | null
+          location_area_id: string | null
           location_detail: string | null
           location_id: string | null
           name: string
@@ -1975,12 +2717,21 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          child_max_age?: number | null
           created_at?: string
+          default_commission_type?:
+            | Database["public"]["Enums"]["commission_kind"]
+            | null
+          default_commission_value?: number | null
+          default_time_end?: string | null
+          default_time_start?: string | null
           description?: string | null
           email?: string | null
           id?: string
+          infant_max_age?: number | null
           kind: Database["public"]["Enums"]["supplier_kind"]
           location?: string | null
+          location_area_id?: string | null
           location_detail?: string | null
           location_id?: string | null
           name: string
@@ -1994,12 +2745,21 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          child_max_age?: number | null
           created_at?: string
+          default_commission_type?:
+            | Database["public"]["Enums"]["commission_kind"]
+            | null
+          default_commission_value?: number | null
+          default_time_end?: string | null
+          default_time_start?: string | null
           description?: string | null
           email?: string | null
           id?: string
+          infant_max_age?: number | null
           kind?: Database["public"]["Enums"]["supplier_kind"]
           location?: string | null
+          location_area_id?: string | null
           location_detail?: string | null
           location_id?: string | null
           name?: string
@@ -2012,6 +2772,13 @@ export type Database = {
           website?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "suppliers_location_area_id_fkey"
+            columns: ["location_area_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "suppliers_location_id_fkey"
             columns: ["location_id"]
@@ -2139,6 +2906,60 @@ export type Database = {
           },
         ]
       }
+      voucher_service_blocks: {
+        Row: {
+          contact_details: Json
+          created_at: string
+          display_order: number
+          id: string
+          service_data: Json
+          service_type: string
+          supplier_id: string | null
+          supplier_reference: string | null
+          title: string
+          voucher_id: string
+        }
+        Insert: {
+          contact_details?: Json
+          created_at?: string
+          display_order?: number
+          id?: string
+          service_data?: Json
+          service_type: string
+          supplier_id?: string | null
+          supplier_reference?: string | null
+          title: string
+          voucher_id: string
+        }
+        Update: {
+          contact_details?: Json
+          created_at?: string
+          display_order?: number
+          id?: string
+          service_data?: Json
+          service_type?: string
+          supplier_id?: string | null
+          supplier_reference?: string | null
+          title?: string
+          voucher_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "voucher_service_blocks_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "voucher_service_blocks_voucher_id_fkey"
+            columns: ["voucher_id"]
+            isOneToOne: false
+            referencedRelation: "vouchers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       voucher_template: {
         Row: {
           accent_colour: string
@@ -2193,6 +3014,54 @@ export type Database = {
         }
         Relationships: []
       }
+      vouchers: {
+        Row: {
+          booking_id: string
+          created_at: string
+          created_by: string
+          generated_at: string | null
+          id: string
+          pdf_document_id: string | null
+          sent_at: string | null
+          voucher_number: string
+        }
+        Insert: {
+          booking_id: string
+          created_at?: string
+          created_by: string
+          generated_at?: string | null
+          id?: string
+          pdf_document_id?: string | null
+          sent_at?: string | null
+          voucher_number: string
+        }
+        Update: {
+          booking_id?: string
+          created_at?: string
+          created_by?: string
+          generated_at?: string | null
+          id?: string
+          pdf_document_id?: string | null
+          sent_at?: string | null
+          voucher_number?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vouchers_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vouchers_pdf_document_id_fkey"
+            columns: ["pdf_document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -2204,6 +3073,11 @@ export type Database = {
         Returns: boolean
       }
       custom_access_token_hook: { Args: { event: Json }; Returns: Json }
+      default_rate_type_id: { Args: never; Returns: string }
+      next_booking_number: {
+        Args: { p_product_code: string; p_year?: number }
+        Returns: number
+      }
       replace_booking_transport_requests: {
         Args: {
           p_booking_id: string
@@ -2225,6 +3099,7 @@ export type Database = {
     }
     Enums: {
       booking_purpose: "quote" | "availability" | "reservation"
+      commission_kind: "percent" | "per_person"
       correspondence_status: "sent" | "failed" | "scheduled"
       document_kind:
         | "quote_pdf"
@@ -2232,6 +3107,7 @@ export type Database = {
         | "voucher_pdf"
         | "summary_pdf"
         | "other"
+        | "proof_of_payment"
       document_status: "required" | "received" | "generated" | "sent"
       hotel_phase: "pre" | "post" | "none"
       pipeline_stage:
@@ -2254,6 +3130,10 @@ export type Database = {
         | "ready"
         | "sent"
         | "accepted"
+        | "expired"
+        | "superseded"
+        | "cancelled"
+      route_direction_mode: "one_way" | "round_trip" | "loop"
       source_kind:
         | "web_form"
         | "paste_import"
@@ -2403,6 +3283,7 @@ export const Constants = {
   public: {
     Enums: {
       booking_purpose: ["quote", "availability", "reservation"],
+      commission_kind: ["percent", "per_person"],
       correspondence_status: ["sent", "failed", "scheduled"],
       document_kind: [
         "quote_pdf",
@@ -2410,6 +3291,7 @@ export const Constants = {
         "voucher_pdf",
         "summary_pdf",
         "other",
+        "proof_of_payment",
       ],
       document_status: ["required", "received", "generated", "sent"],
       hotel_phase: ["pre", "post", "none"],
@@ -2434,7 +3316,11 @@ export const Constants = {
         "ready",
         "sent",
         "accepted",
+        "expired",
+        "superseded",
+        "cancelled",
       ],
+      route_direction_mode: ["one_way", "round_trip", "loop"],
       source_kind: [
         "web_form",
         "paste_import",
@@ -2458,3 +3344,4 @@ export const Constants = {
     },
   },
 } as const
+

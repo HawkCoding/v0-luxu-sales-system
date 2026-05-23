@@ -4,6 +4,7 @@ import useSWR from "swr"
 import type {
   AuditLog,
   Booking,
+  BookingNote,
   BookingSupplierSchedule,
   Customer,
   CustomerLinkedAccount,
@@ -63,7 +64,14 @@ const fetcher = async (url: string) => {
 }
 
 const swrOptions = {
+  // Phase 5.4 originally enabled focus revalidation here, but it raced the
+  // Supabase session refresh under Playwright (the 03-customer spec hit 403s
+  // on customer PATCH because focus events fired during navigation). Holding
+  // off until we have a session-refresh-safe story. focusThrottleInterval
+  // and dedupingInterval are still useful for hot endpoints.
   revalidateOnFocus: false,
+  focusThrottleInterval: 30_000,
+  dedupingInterval: 2_000,
   onErrorRetry: (
     error: ApiError,
     _key: string,
@@ -84,6 +92,30 @@ export function useAllData() {
   return useSWR("/api/data", fetcher, swrOptions)
 }
 
+export type EnquiryFilter =
+  | "needs_review"
+  | "complete"
+  | "unassigned"
+  | "my_enquiries"
+  | "possible_duplicates"
+
+export interface EnquiryCustomer {
+  id: string
+  firstName: string | null
+  lastName: string | null
+  email: string | null
+  title: string | null
+}
+
+export interface EnquiryListItem extends Booking {
+  customer: EnquiryCustomer | null
+}
+
+export function useEnquiries(filter?: EnquiryFilter | string) {
+  const url = filter ? `/api/enquiries?filter=${encodeURIComponent(filter)}` : "/api/enquiries"
+  return useSWR<{ enquiries: EnquiryListItem[] }>(url, fetcher, swrOptions)
+}
+
 export function useAuditLogs(filters: AuditLogFilters) {
   const params = new URLSearchParams()
 
@@ -102,6 +134,14 @@ export function usePipeline() {
 
 export function useJobDetail(id: string) {
   return useSWR(id ? `/api/jobs/${id}` : null, fetcher, swrOptions)
+}
+
+export function useBookingNotes(bookingId: string | null | undefined) {
+  return useSWR<{ notes: BookingNote[] }>(
+    bookingId ? `/api/bookings/${bookingId}/notes` : null,
+    fetcher,
+    swrOptions,
+  )
 }
 
 export function useBookingSupplierSchedules(bookingId: string | null | undefined) {

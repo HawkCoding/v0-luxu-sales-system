@@ -49,7 +49,7 @@ import {
 } from "@/lib/session-timeout"
 import type { Role } from "@/lib/types"
 import { APP_VERSION } from "@/lib/version"
-import { Clock, KeyRound, MoreHorizontal, ShieldCheck, Trash2, Upload, UserCheck, UserPlus, UserX } from "lucide-react"
+import { Clock, KeyRound, MoreHorizontal, ShieldCheck, Tag, Trash2, Upload, UserCheck, UserPlus, UserX } from "lucide-react"
 
 interface AppUser {
   userId: string
@@ -888,6 +888,258 @@ function DepositSettingsCard({ canEdit }: { canEdit: boolean }) {
   )
 }
 
+function DefaultAgeBandsCard({ canEdit }: { canEdit: boolean }) {
+  const [infantMax, setInfantMax] = useState("2")
+  const [childMax, setChildMax] = useState("12")
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+
+    fetch("/api/settings/age-bands")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("load failed")
+        return response.json()
+      })
+      .then((data: { infantMaxAge?: number; childMaxAge?: number }) => {
+        if (cancelled) return
+        if (typeof data.infantMaxAge === "number") setInfantMax(String(data.infantMaxAge))
+        if (typeof data.childMaxAge === "number") setChildMax(String(data.childMaxAge))
+      })
+      .catch(() => {
+        toast.error("Failed to load default age bands")
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const infantValue = Number(infantMax)
+  const childValue = Number(childMax)
+  const isValid =
+    Number.isInteger(infantValue) &&
+    Number.isInteger(childValue) &&
+    infantValue >= 0 &&
+    infantValue <= 17 &&
+    childValue >= 0 &&
+    childValue <= 17 &&
+    infantValue <= childValue
+
+  const handleSave = async () => {
+    if (!isValid) return
+    setSaving(true)
+    try {
+      const res = await fetch("/api/settings/age-bands", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ infantMaxAge: infantValue, childMaxAge: childValue }),
+      })
+      if (!res.ok) throw new Error()
+      const data = (await res.json()) as { infantMaxAge: number; childMaxAge: number }
+      setInfantMax(String(data.infantMaxAge))
+      setChildMax(String(data.childMaxAge))
+      toast.success("Default age bands saved")
+    } catch {
+      toast.error("Failed to save default age bands")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card className={!canEdit ? "opacity-80" : undefined}>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium">Passenger Age Bands</CardTitle>
+        <CardDescription className="text-xs">
+          Defaults used to classify passengers as infant, child or adult. Suppliers can override
+          these on their own profile.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="grid gap-3 sm:max-w-md sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label htmlFor="default-infant-max" className="text-xs font-medium text-muted-foreground">
+              Infant max age
+            </Label>
+            <Input
+              id="default-infant-max"
+              type="number"
+              min={0}
+              max={17}
+              step={1}
+              inputMode="numeric"
+              value={infantMax}
+              onChange={(event) => setInfantMax(event.target.value)}
+              readOnly={!canEdit}
+              disabled={loading}
+              aria-invalid={!isValid}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="default-child-max" className="text-xs font-medium text-muted-foreground">
+              Child max age
+            </Label>
+            <Input
+              id="default-child-max"
+              type="number"
+              min={0}
+              max={17}
+              step={1}
+              inputMode="numeric"
+              value={childMax}
+              onChange={(event) => setChildMax(event.target.value)}
+              readOnly={!canEdit}
+              disabled={loading}
+              aria-invalid={!isValid}
+            />
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Resolves to: Infant <span className="tabular-nums">0–{Number.isFinite(infantValue) ? infantValue : "?"}</span>,
+          Child <span className="tabular-nums">{Number.isFinite(infantValue) ? infantValue + 1 : "?"}–{Number.isFinite(childValue) ? childValue : "?"}</span>,
+          Adult <span className="tabular-nums">{Number.isFinite(childValue) ? childValue + 1 : "?"}+</span>
+        </p>
+        {canEdit && (
+          <div>
+            <Button size="sm" onClick={handleSave} disabled={loading || saving || !isValid}>
+              {saving ? "Saving..." : "Save"}
+            </Button>
+          </div>
+        )}
+        {!canEdit && (
+          <p className="text-xs text-muted-foreground">Only admins can change these defaults.</p>
+        )}
+        {!isValid && (
+          <p className="text-xs text-destructive">
+            Infant max must be ≤ child max, and both must be between 0 and 17.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function TrainChildPriceRatioCard({ canEdit }: { canEdit: boolean }) {
+  const [percent, setPercent] = useState("50")
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+
+    fetch("/api/settings/train-child-price-ratio")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("load failed")
+        return response.json()
+      })
+      .then((data: { ratio?: number }) => {
+        if (!cancelled && typeof data.ratio === "number") {
+          setPercent(String(Math.round(data.ratio * 10000) / 100))
+        }
+      })
+      .catch(() => {
+        toast.error("Failed to load train child price ratio")
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const numericValue = Number(percent)
+  const isValid =
+    percent.trim() !== "" &&
+    Number.isFinite(numericValue) &&
+    numericValue >= 0 &&
+    numericValue <= 100
+
+  const handleSave = async () => {
+    if (!isValid) return
+
+    setSaving(true)
+    try {
+      const res = await fetch("/api/settings/train-child-price-ratio", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ratio: numericValue / 100 }),
+      })
+      if (!res.ok) throw new Error()
+
+      const data = (await res.json()) as { ratio: number }
+      setPercent(String(Math.round(data.ratio * 10000) / 100))
+      toast.success("Train child price ratio saved")
+    } catch {
+      toast.error("Failed to save train child price ratio")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card className={!canEdit ? "opacity-80" : undefined}>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium">Train Pricing Defaults</CardTitle>
+        <CardDescription className="text-xs">
+          When entering Adult prices on train rate cards, Child prices auto-fill to this
+          percentage of Adult. Manual edits are preserved.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        <div className="grid gap-2 sm:max-w-xs">
+          <Label
+            htmlFor="train-child-price-ratio"
+            className="text-xs font-medium text-muted-foreground"
+          >
+            Child price as % of Adult
+          </Label>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Input
+                id="train-child-price-ratio"
+                type="number"
+                min={0}
+                max={100}
+                step={0.01}
+                inputMode="decimal"
+                value={percent}
+                onChange={(event) => setPercent(event.target.value)}
+                readOnly={!canEdit}
+                disabled={loading}
+                aria-invalid={!isValid}
+                className="pr-8"
+              />
+              <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-muted-foreground">
+                %
+              </span>
+            </div>
+            {canEdit && (
+              <Button size="sm" onClick={handleSave} disabled={loading || saving || !isValid}>
+                {saving ? "Saving..." : "Save"}
+              </Button>
+            )}
+          </div>
+          {!canEdit && (
+            <p className="text-xs text-muted-foreground">
+              Only admins can change this default.
+            </p>
+          )}
+          {!isValid && (
+            <p className="text-xs text-destructive">Enter a value between 0 and 100.</p>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 function SessionTimeoutSettingsCard({ canEdit }: { canEdit: boolean }) {
   const [sessionTimeoutMinutes, setSessionTimeoutMinutes] = useState("30")
   const [warningMinutes, setWarningMinutes] = useState(5)
@@ -1027,6 +1279,10 @@ export default function SettingsPage() {
 
       <DepositSettingsCard canEdit={canEditDepositSettings} />
 
+      <TrainChildPriceRatioCard canEdit={role === "admin"} />
+
+      <DefaultAgeBandsCard canEdit={role === "admin"} />
+
       <SessionTimeoutSettingsCard canEdit={canEditSettings} />
 
       {can("import:customers") && (
@@ -1042,6 +1298,25 @@ export default function SettingsPage() {
               <Link href="/app/settings/customer-import">
                 <Upload className="h-4 w-4" />
                 Bulk Import Customers
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {canEditSettings && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Rate Types</CardTitle>
+            <CardDescription className="text-xs">
+              Manage RAC / STO / NETT / Resident and other rate types used on supplier rate cards.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild size="sm" variant="outline" className="gap-2">
+              <Link href="/app/settings/rate-types">
+                <Tag className="h-4 w-4" />
+                Manage Rate Types
               </Link>
             </Button>
           </CardContent>

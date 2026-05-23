@@ -1,11 +1,15 @@
 import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
+import { writeAuditLog } from "@/lib/audit-write"
 import { formatDisplayDateLong } from "@/lib/date-format"
 import type { VoucherData } from "@/lib/generate-voucher"
+import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
+import { checkVoucherReadiness } from "@/lib/voucher/check-readiness"
 import { renderVoucherEmail } from "@/lib/voucher/render-voucher-email"
 import { renderVoucherPdf } from "@/lib/voucher/render-pdf"
 import { CONSULTANTS, VOUCHER_TEMPLATE_DEFAULTS, type ConsultantAbbreviation, type VoucherTemplate } from "@/lib/types"
+import type { Database, Json } from "@/lib/supabase/types"
 
 export const runtime = "nodejs"
 
@@ -124,13 +128,21 @@ export async function POST(req: Request) {
   if (travellersError) return safeSupabaseError("voucher:travellers", travellersError)
 
   const booking = bookingRaw as unknown as BookingVoucherRecord
-  const paidInFullStages = new Set(["final_paid", "voucher_sent", "closed"])
-  if (!paidInFullStages.has(booking.stage ?? "") || Number(booking.invoice_balance ?? NaN) !== 0) {
-    return jsonError("Booking must be paid in full before generating a voucher", 422)
+  const customer = firstRecord(booking.customer)
+
+  const readiness = checkVoucherReadiness({
+    stage: booking.stage,
+    invoiceBalance: booking.invoice_balance,
+    departureDate: booking.departure_date,
+    customerEmail: customer?.email ?? null,
+  })
+  if (!readiness.ready) {
+    return jsonError(readiness.failures[0]?.message ?? "Booking is not ready for voucher generation", 422)
   }
 
-  const customer = firstRecord(booking.customer)
-  if (!customer?.email) return jsonError("Customer email is required before generating a voucher", 422)
+  if (!customer) {
+    return jsonError("Customer data is missing from booking", 422)
+  }
 
   const consultant = resolveConsultant(booking.consultant)
   const route = booking.route?.name ?? ""
@@ -140,6 +152,18 @@ export async function POST(req: Request) {
   const suiteType = suites?.map((suite) => suite.suite_type_name).filter(Boolean).join(", ") || "Suite"
   const adultTravellers = (travellers ?? []).filter((traveller) => !traveller.is_child)
   const template = normalizeTemplate(templateRaw as VoucherTemplateRow | null)
+
+  let serviceBlocks: Awaited<ReturnType<typeof buildVoucherServiceBlocks>>["blocks"] = []
+  try {
+    const built = await buildVoucherServiceBlocks(supabase, {
+      bookingId: booking.id,
+      supplierReferenceFallback: booking.booking_number,
+      additionalServicesDetails: booking.additional_services_details ?? null,
+    })
+    serviceBlocks = built.blocks
+  } catch (error) {
+    return safeSupabaseError("voucher:build-service-blocks", error)
+  }
 
   const voucherData: VoucherData = {
     voucherNumber: booking.booking_number,
@@ -176,6 +200,7 @@ export async function POST(req: Request) {
       createdAt: new Date().toISOString(),
     },
     consultant: consultant.key,
+    serviceBlocks,
   }
 
   let pdfBuffer: Buffer
@@ -232,13 +257,86 @@ export async function POST(req: Request) {
     return safeSupabaseError("voucher:document-write", documentWrite.error)
   }
 
-  await supabase.from("audit_logs").insert({
+  const { data: existingVoucher, error: existingVoucherError } = await supabase
+    .from("vouchers")
+    .select("id")
+    .eq("booking_id", booking.id)
+    .maybeSingle()
+
+  if (existingVoucherError) return safeSupabaseError("voucher:existing-voucher", existingVoucherError)
+
+  const nowIso = new Date().toISOString()
+  const voucherPayload: Database["public"]["Tables"]["vouchers"]["Insert"] = {
+    booking_id: booking.id,
+    voucher_number: booking.booking_number,
+    pdf_document_id: documentWrite.data.id,
+    generated_at: nowIso,
+    created_by: user.id,
+  }
+
+  const voucherWrite = existingVoucher
+    ? await supabase
+        .from("vouchers")
+        .update({
+          pdf_document_id: documentWrite.data.id,
+          generated_at: nowIso,
+          voucher_number: booking.booking_number,
+        })
+        .eq("id", existingVoucher.id)
+        .select("id, sent_at, generated_at")
+        .single()
+    : await supabase
+        .from("vouchers")
+        .insert(voucherPayload)
+        .select("id, sent_at, generated_at")
+        .single()
+
+  if (voucherWrite.error || !voucherWrite.data) {
+    return safeSupabaseError("voucher:voucher-write", voucherWrite.error)
+  }
+
+  const voucherId = voucherWrite.data.id
+
+  const { error: deleteBlocksError } = await supabase
+    .from("voucher_service_blocks")
+    .delete()
+    .eq("voucher_id", voucherId)
+
+  if (deleteBlocksError) return safeSupabaseError("voucher:clear-service-blocks", deleteBlocksError)
+
+  if (serviceBlocks.length > 0) {
+    const blockRows: Database["public"]["Tables"]["voucher_service_blocks"]["Insert"][] = serviceBlocks.map(
+      (block) => ({
+        voucher_id: voucherId,
+        service_type: block.serviceType,
+        supplier_id: null,
+        title: block.title,
+        supplier_reference: block.supplierReference ?? null,
+        contact_details: block.contactDetails as unknown as Json,
+        service_data: block.serviceData as unknown as Json,
+        display_order: block.displayOrder,
+      }),
+    )
+
+    const { error: insertBlocksError } = await supabase
+      .from("voucher_service_blocks")
+      .insert(blockRows)
+
+    if (insertBlocksError) return safeSupabaseError("voucher:insert-service-blocks", insertBlocksError)
+  }
+
+  await writeAuditLog(supabase, {
     actor: auth.value.profile.actorName,
-    actor_user_id: user.id,
-    entity_type: "Booking",
-    entity_id: booking.id,
-    action: "voucher_pdf_generated",
-    meta_json: { document_id: documentWrite.data.id, storage_path: documentPayload.storage_path },
+    actorUserId: user.id,
+    entityType: "Booking",
+    entityId: booking.id,
+    action: existingVoucher ? "voucher_regenerated" : "voucher_generated",
+    meta: {
+      voucher_id: voucherId,
+      voucher_number: booking.booking_number,
+      document_id: documentWrite.data.id,
+      service_block_count: serviceBlocks.length,
+    },
   })
 
   const customerName = [customer.first_name, customer.last_name].filter(Boolean).join(" ").trim()
@@ -258,6 +356,13 @@ export async function POST(req: Request) {
       status: documentWrite.data.status,
       storagePath: documentWrite.data.storage_path,
       generatedAt: documentWrite.data.created_at,
+    },
+    voucherRecord: {
+      id: voucherId,
+      voucherNumber: booking.booking_number,
+      generatedAt: voucherWrite.data.generated_at,
+      sentAt: voucherWrite.data.sent_at,
+      serviceBlockCount: serviceBlocks.length,
     },
     voucher: {
       filename,

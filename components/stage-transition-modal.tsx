@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useMemo, useState } from "react"
-import { AlertTriangle, CheckCircle2, ShieldAlert } from "lucide-react"
+import { AlertTriangle, CheckCircle2, FileText, ShieldAlert, Wand2 } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -49,6 +49,15 @@ interface StageTransitionModalProps {
   onCancel: () => void
   onProceed: (manualConfirmations: ManualConfirmations) => Promise<void>
   onOverride: (overrideReason: string) => Promise<void>
+  /**
+   * Optional callback that opens the booking's final-invoice generation
+   * flow. When provided, a blocking `final_invoice_correspondence` failure
+   * renders an inline "Send final invoice" button that invokes this
+   * callback (mirroring the dialog opened from the booking page). When
+   * omitted (e.g. on the pipeline page where the relevant booking-level
+   * data is not loaded), only the standard "Fix" link is shown.
+   */
+  onSendFinalInvoice?: () => void
 }
 
 export function gateIdToTabPath(gateId: string): string {
@@ -75,6 +84,7 @@ export function StageTransitionModal({
   onCancel,
   onProceed,
   onOverride,
+  onSendFinalInvoice,
 }: StageTransitionModalProps) {
   const [confirmations, setConfirmations] = useState<ManualConfirmations>({})
   const [overrideReason, setOverrideReason] = useState("")
@@ -125,6 +135,10 @@ export function StageTransitionModal({
         <div className="flex flex-col gap-3">
           {failures.map((failure) => {
             const confirmationKey = confirmationKeyForFailure(failure)
+            const showSendFinalInvoice =
+              failure.gateId === "final_invoice_correspondence" &&
+              failure.severity === "block" &&
+              typeof onSendFinalInvoice === "function"
             return (
               <Alert key={failure.gateId} variant={failure.severity === "block" ? "destructive" : "default"}>
                 <AlertTriangle />
@@ -140,11 +154,47 @@ export function StageTransitionModal({
                         </div>
                         <p className="mt-1 text-sm">{failure.fixHint}</p>
                       </div>
-                      <Button asChild size="sm" variant="outline">
-                        <Link href={`/app/bookings/${jobId}${gateIdToTabPath(failure.gateId)}`}>Fix</Link>
-                      </Button>
+                      <div className="flex shrink-0 flex-wrap items-center gap-2">
+                        {showSendFinalInvoice ? (
+                          <Button
+                            size="sm"
+                            variant="default"
+                            onClick={() => onSendFinalInvoice?.()}
+                            disabled={submitting}
+                          >
+                            <FileText data-icon="inline-start" />
+                            Send final invoice
+                          </Button>
+                        ) : null}
+                        <Button asChild size="sm" variant="outline">
+                          <Link href={`/app/bookings/${jobId}${gateIdToTabPath(failure.gateId)}`}>Fix</Link>
+                        </Button>
+                      </div>
                     </div>
-                    {confirmationKey && (
+                    {confirmationKey && failure.autoFixable && (
+                      <div className="flex items-center gap-2">
+                        {confirmations[confirmationKey] === true ? (
+                          <div
+                            className="flex items-center gap-2 text-sm text-green-700 dark:text-green-400"
+                            data-testid={`autofix-${failure.gateId}-satisfied`}
+                          >
+                            <CheckCircle2 className="h-4 w-4" />
+                            <span>Will fix on confirm</span>
+                          </div>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="default"
+                            onClick={() => handleConfirmationChange(failure, true)}
+                            data-testid={`autofix-${failure.gateId}`}
+                          >
+                            <Wand2 data-icon="inline-start" />
+                            Fix and continue
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                    {confirmationKey && !failure.autoFixable && (
                       <div className="flex items-center gap-2">
                         <Checkbox
                           id={`${failure.gateId}-confirm`}

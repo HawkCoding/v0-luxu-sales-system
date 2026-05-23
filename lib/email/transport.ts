@@ -1,14 +1,6 @@
 import nodemailer from "nodemailer"
 import { Resend } from "resend"
-
-export interface SendEmailOptions {
-  from: string
-  to: string | string[]
-  subject: string
-  html?: string | null
-  text?: string | null
-  attachments?: SendEmailAttachment[]
-}
+import { sendViaSalespersonSmtp } from "@/lib/email/smtp-transport"
 
 export interface SendEmailAttachment {
   filename: string
@@ -18,9 +10,10 @@ export interface SendEmailAttachment {
 
 export interface SendEmailResult {
   success: boolean
-  provider: "resend" | "mailpit"
+  provider: "smtp" | "resend" | "mailpit"
   providerMessageId: string | null
   error: string | null
+  sentAppendFailed?: boolean
 }
 
 function normalizeRecipients(to: string | string[]): string[] {
@@ -47,15 +40,15 @@ export function resolveMailpitSmtpConfig(): MailpitSmtpConfig {
 
   const host = process.env.MAILPIT_SMTP_HOST?.trim()
   const portRaw = process.env.MAILPIT_SMTP_PORT?.trim()
-  if (host && portRaw) {
+  if (portRaw) {
     const port = Number(portRaw)
     if (!Number.isFinite(port)) {
       throw new Error(`Invalid MAILPIT_SMTP_PORT: ${portRaw}`)
     }
-    return { host, port }
+    return { host: host || "127.0.0.1", port }
   }
 
-  return { host: "127.0.0.1", port: 1025 }
+  return { host: host || "127.0.0.1", port: 1025 }
 }
 
 async function sendWithMailpit(options: SendEmailOptions): Promise<SendEmailResult> {
@@ -145,15 +138,57 @@ async function sendWithResend(options: SendEmailOptions, apiKey: string): Promis
   }
 }
 
+export interface SendEmailOptions {
+  from: string
+  to: string | string[]
+  subject: string
+  html?: string | null
+  text?: string | null
+  attachments?: SendEmailAttachment[]
+  /** When set, routes the email through the salesperson's cPanel SMTP account. */
+  salespersonCredentialId?: string | null
+}
+
 export async function sendEmail(options: SendEmailOptions): Promise<SendEmailResult> {
   const recipients = normalizeRecipients(options.to)
 
   if (recipients.length === 0) {
     return {
       success: false,
-      provider: process.env.RESEND_API_KEY ? "resend" : "mailpit",
+      provider: options.salespersonCredentialId ? "smtp" : process.env.RESEND_API_KEY ? "resend" : "mailpit",
       providerMessageId: null,
       error: "Email recipient is required",
+    }
+  }
+
+  if (options.salespersonCredentialId) {
+    try {
+      const result = await sendViaSalespersonSmtp({
+        credentialId: options.salespersonCredentialId,
+        to: recipients,
+        subject: options.subject,
+        htmlBody: options.html ?? "",
+        textBody: options.text ?? undefined,
+        attachments: options.attachments?.map((a) => ({
+          filename: a.filename,
+          content: typeof a.content === "string" ? Buffer.from(a.content, "base64") : a.content,
+          contentType: a.contentType ?? "application/octet-stream",
+        })),
+      })
+      return {
+        success: true,
+        provider: "smtp",
+        providerMessageId: result.messageId,
+        error: null,
+        sentAppendFailed: result.sentAppendFailed,
+      }
+    } catch (err) {
+      return {
+        success: false,
+        provider: "smtp",
+        providerMessageId: null,
+        error: err instanceof Error ? err.message : "SMTP send failed",
+      }
     }
   }
 

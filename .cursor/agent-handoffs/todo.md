@@ -43,18 +43,17 @@ Use this as an implementation tracker. Prefer completing each section in order b
 
 ## Phase 1: Foundation, Auth, Roles, And Company Scope
 
-- [x] Confirm `companies` or equivalent company-scoping model exists.
-- [x] Confirm core records include hidden/internal `company_id` where required.
-- [x] Add missing `company_id` columns with idempotent migrations.
-- [x] Backfill existing rows to Luxus Travel company where needed.
-- [x] Ensure RLS policies respect company scope where applicable.
+> **Decision (2026-05-13 — ADR-001):** Company scoping is permanently deferred. Luxus is and will remain single-company only. No `company_id` columns, no company table, no tenant-aware RLS. See `DECISIONS.md` for the full record.
+
+- [x] Company scope decision recorded — single-company permanently. No `company_id` infrastructure. See `DECISIONS.md`.
+- [x] RLS policies are role-based only (`admin`/`manager`/`consultant`/`readonly`) — correct for single-company. No changes needed.
 - [x] Confirm user profile fields support:
   - [x] name
   - [x] surname
   - [x] email
   - [x] role / clearance level
   - [x] active status
-  - [x] company id
+  - ~~[x] company id~~ — **N/A: single-company (ADR-001)**
 - [x] Confirm supported roles:
   - [x] Admin
   - [x] Manager
@@ -111,7 +110,7 @@ Use this as an implementation tracker. Prefer completing each section in order b
   - [x] after JSON
   - [x] metadata JSON
   - [x] created timestamp
-  - [x] company id if applicable
+  - ~~[x] company id if applicable~~ — **N/A: single-company (ADR-001)**
 - [x] Confirm audit log page is visible to all logged-in staff.
 - [x] Confirm audit logs are read-only.
 - [x] Confirm archive table or archival strategy exists.
@@ -119,22 +118,22 @@ Use this as an implementation tracker. Prefer completing each section in order b
 - [x] Add tests for audit display formatting.
 - [x] Add tests for audit export if export exists.
 - [ ] Ensure these major workflow events are logged:
-  - [ ] ownership taken
-  - [ ] ownership released
-  - [ ] ownership reassigned
+  - [x] ownership taken
+  - [x] ownership released
+  - [x] ownership reassigned
   - [x] pipeline status changed
-  - [ ] quote generated
-  - [ ] quote sent
-  - [ ] quote accepted
-  - [ ] deposit invoice sent
-  - [ ] deposit marked paid
-  - [ ] booking made / confirmed
-  - [ ] supplier reference captured
+  - [x] quote generated
+  - [x] quote sent
+  - [x] quote accepted
+  - [x] deposit invoice sent
+  - [x] deposit marked paid
+  - [x] booking made / confirmed
+  - [x] supplier reference captured
   - [x] invoice sent
-  - [ ] invoice marked paid
-  - [ ] voucher generated
-  - [ ] voucher sent
-  - [ ] attachment uploaded
+  - [x] invoice marked paid
+  - [x] voucher generated
+  - [x] voucher sent
+  - [x] attachment uploaded
 - [ ] Ensure field changes are audited for:
   - [x] enquiry edits
   - [x] customer edits
@@ -263,92 +262,92 @@ Use this as an implementation tracker. Prefer completing each section in order b
 - [x] Confirm `/app/enquiries` exists.
 - [x] Show imported enquiries before they enter active pipeline.
 - [x] Exclude pre-pipeline enquiries from active Kanban board.
-- [ ] Add filters:
-  - [ ] Needs Review
-  - [ ] Complete
-  - [ ] Unassigned
-  - [ ] My enquiries
-  - [ ] Possible duplicates
+- [x] Add filters:
+  - [x] Needs Review
+  - [x] Complete
+  - [x] Unassigned
+  - [x] My enquiries
+  - [x] Possible duplicates
 - [x] Show missing fields on enquiry list.
 - [x] Show warning count on enquiry list.
 - [x] Show raw email preview safely.
 - [x] Add enquiry detail/review experience.
-- [ ] Allow editing imported parsed fields.
+- [x] Allow editing imported parsed fields.
 - [x] Highlight missing required fields on job/enquiry card.
-- [ ] Add Take Ownership action.
-- [ ] Add Release Ownership action for current owner.
-- [ ] Add Admin/Manager reassignment action.
+- [x] Add Take Ownership action.
+- [x] Add Release Ownership action for current owner.
+- [x] Add Admin/Manager reassignment action.
 - [x] Add Start Quote action.
 - [x] Block Start Quote when Needs Review is unresolved.
-- [ ] Block Start Quote when core contact fields are incomplete.
-- [ ] Audit ownership actions.
-- [ ] Audit Start Quote.
-- [ ] Add API tests for ownership:
-  - [ ] unauthenticated
-  - [ ] read-only forbidden
-  - [ ] consultant claim success
-  - [ ] release by owner success
-  - [ ] release by non-owner forbidden
-  - [ ] manager reassignment success
-  - [ ] invalid body rejected
-- [ ] Add API tests for Start Quote.
-- [ ] Add component tests for loading, empty, error, and success states.
+- [x] Block Start Quote when core contact fields are incomplete.
+- [x] Audit ownership actions.
+- [x] Audit Start Quote.
+- [x] Add API tests for ownership:
+  - [x] unauthenticated
+  - [x] read-only forbidden
+  - [x] consultant claim success
+  - [x] release by owner success
+  - [x] release by non-owner forbidden
+  - [x] manager reassignment success
+  - [x] invalid body rejected
+- [x] Add API tests for Start Quote.
+- [x] Add component tests for loading, empty, error, and success states.
 
 ## Phase 8: Job Numbering
 
 - [x] Confirm current booking number generation behavior.
-- [ ] Migrate from global `LUX-YYYY-######` if still present.
-- [ ] Generate product prefix from parsed train product:
-  - [ ] Blue Train -> `BT`
-  - [ ] Rovos Rail -> `RR`
-- [ ] Generate format `BT-YYYY-0001`.
-- [ ] Generate format `RR-YYYY-0001`.
-- [ ] Reset sequences per product per year.
-- [ ] Ensure counters are concurrency-safe.
-- [ ] Ensure job number is created immediately at ingestion/job creation.
-- [ ] Add tests:
-  - [ ] Blue Train counter increments independently
-  - [ ] Rovos Rail counter increments independently
-  - [ ] counter resets by year
-  - [ ] concurrent creation cannot duplicate numbers
-  - [ ] unknown supplier fails safely or uses review fallback
+- [x] Migrate from global `LUX-YYYY-######` if still present.
+- [x] Generate product prefix from parsed train product:
+  - [x] Blue Train -> `BT`
+  - [x] Rovos Rail -> `RR`
+- [x] Generate format `BT-YYYY-0001`.
+- [x] Generate format `RR-YYYY-0001`.
+- [x] Reset sequences per product per year.
+- [x] Ensure counters are concurrency-safe.
+- [x] Ensure job number is created immediately at ingestion/job creation.
+- [x] Add tests:
+  - [x] Blue Train counter increments independently
+  - [x] Rovos Rail counter increments independently
+  - [x] counter resets by year
+  - [x] concurrent creation cannot duplicate numbers
+  - [x] unknown supplier fails safely or uses review fallback
 - [x] Update UI labels from booking number/job number consistently.
 
 ## Phase 9: Customer CRM
 
-- [ ] Confirm customer fields:
+- [x] Confirm customer fields:
   - [x] title
   - [x] first name
   - [x] surname
   - [x] email
   - [x] phone number
   - [x] country
-  - [ ] province
-  - [ ] birthday
-  - [ ] VIP flag
-  - [ ] preferences
+  - [x] province
+  - [x] birthday
+  - [x] VIP flag
+  - [x] preferences
   - [x] notes
-  - [ ] first travel date
-  - [ ] last travel date
+  - [x] first travel date
+  - [x] last travel date
 - [x] Match inbound enquiry to existing customer by email only.
 - [x] Create new customer if email does not exist.
 - [x] Do not merge same-name different-email customers automatically.
 - [x] Update existing customer contact fields carefully from new enquiry.
 - [x] Preserve existing CRM notes/preferences during import updates.
-- [ ] Mark new booking as Repeat Client if customer has completed trip.
-- [ ] Define completed trip as booking reaching Voucher Sent.
-- [ ] Set first travel date on first completed trip.
-- [ ] Update last travel date on every completed trip.
+- [x] Mark new booking as Repeat Client if customer has completed trip.
+- [x] Define completed trip as booking reaching Voucher Sent.
+- [x] Set first travel date on first completed trip.
+- [x] Update last travel date on every completed trip.
 - [x] Show customer booking history.
 - [x] Show customer linked accounts if currently supported.
-- [ ] Add tests:
-  - [ ] existing email links customer
-  - [ ] new email creates customer
-  - [ ] same name different email creates new customer
-  - [ ] repeat client flag set
-  - [ ] first travel date set once
-  - [ ] last travel date updates
-- [ ] Add component coverage for customer loading, empty, error, success states.
+- [x] Add tests:
+  - [x] existing email links customer
+  - [x] new email creates customer
+  - [x] same name different email creates new customer
+  - [x] repeat client flag set
+  - [x] first travel date set once
+  - [x] last travel date updates
+- [x] Add component coverage for customer loading, empty, error, success states.
 
 ## Phase 10: Pipeline And Stage Gates
 
@@ -367,13 +366,13 @@ Use this as an implementation tracker. Prefer completing each section in order b
 - [x] Confirm `enquiry` is pre-pipeline.
 - [x] Confirm `closed` is final completed state outside active board.
 - [x] Confirm `lost` is outside active board.
-- [ ] Add transition validation tests for all allowed moves.
+- [x] Add transition validation tests for all allowed moves.
 - [x] Add transition validation tests for blocked moves.
 - [x] Block forward movement from Needs Review.
 - [x] Block movement if core customer contact fields are incomplete.
-- [ ] Block Deposit Paid unless `deposit_paid = true`.
-- [ ] Block Voucher Sent unless `invoice_balance = 0`.
-- [ ] Block Voucher Sent unless required booking/customer fields are complete.
+- [x] Block Deposit Paid unless `deposit_paid = true`.
+- [x] Block Voucher Sent unless `invoice_balance = 0`.
+- [x] Block Voucher Sent unless required booking/customer fields are complete.
 - [x] Log every transition in audit history.
 - [x] Preserve stage timestamp fields:
   - [x] quote sent at
@@ -383,30 +382,30 @@ Use this as an implementation tracker. Prefer completing each section in order b
   - [x] final paid at
   - [x] voucher sent at
   - [x] closed at
-- [ ] Add pipeline API tests:
-  - [ ] unauthenticated
-  - [ ] read-only forbidden for mutation
-  - [ ] valid move
-  - [ ] invalid move
-  - [ ] review gate
-  - [ ] payment gate
-  - [ ] voucher gate
-- [ ] Add Kanban UI tests or manual checklist for drag/drop and keyboard access.
+- [x] Add pipeline API tests:
+  - [x] unauthenticated
+  - [x] read-only forbidden for mutation
+  - [x] valid move
+  - [x] invalid move
+  - [x] review gate
+  - [x] payment gate
+  - [x] voucher gate
+- [x] Add Kanban UI tests or manual checklist for drag/drop and keyboard access.
 
 ## Phase 11: Outcomes, Cancellation, And Refunds
 
-- [ ] Add or confirm outcome field:
-  - [ ] Open
-  - [ ] Won
-  - [ ] Lost
-  - [ ] Cancelled
-- [ ] Default outcome to Open.
-- [ ] Add outcome reason table/settings.
-- [ ] Require outcome reason for Lost.
-- [ ] Require outcome reason for Cancelled.
+- [x] Add or confirm outcome field:
+  - [x] Open
+  - [x] Won
+  - [x] Lost
+  - [x] Cancelled
+- [x] Default outcome to Open.
+- [x] Add outcome reason table/settings.
+- [x] Require outcome reason for Lost.
+- [x] Require outcome reason for Cancelled.
 - [x] Include `Other` reason.
-- [ ] Require free text when reason is `Other`.
-- [ ] Allow Admin/Manager to manage reason dropdown options.
+- [x] Require free text when reason is `Other`.
+- [x] Allow Admin/Manager to manage reason dropdown options.
 - [x] Do not implement Dormant outcome.
 - [x] Do not implement automatic dormant/lost suggestions for MVP.
 - [x] Implement cancellation dialog validation.
@@ -415,13 +414,13 @@ Use this as an implementation tracker. Prefer completing each section in order b
 - [x] Store refund amount.
 - [x] Store refund method/reference.
 - [x] Audit cancellation and refund events.
-- [ ] Add tests:
-  - [ ] lost requires reason
-  - [ ] cancelled requires reason
-  - [ ] other requires text
+- [x] Add tests:
+  - [x] lost requires reason
+  - [x] cancelled requires reason
+  - [x] other requires text
   - [ ] cancellation calculates refund where current rules exist
   - [ ] refund persistence
-  - [ ] audit created
+  - [x] audit created
 
 ## Phase 12: Supplier Management
 
@@ -434,7 +433,7 @@ Use this as an implementation tracker. Prefer completing each section in order b
   - [x] location
   - [x] notes
   - [x] active/status
-  - [x] company id
+  - ~~[x] company id~~ — **N/A: single-company (ADR-001)**
 - [x] Confirm supplier categories/kinds:
   - [x] Train
   - [x] Hotel
@@ -498,7 +497,7 @@ Use this as an implementation tracker. Prefer completing each section in order b
   - [x] valid from
   - [x] valid to
   - [x] created timestamp
-  - [x] company id if applicable
+  - ~~[x] company id if applicable~~ — **N/A: single-company (ADR-001)**
 - [x] Support open-ended `valid_to`.
 - [x] Select default rate by departure date.
 - [x] Prevent overlapping rates for same route + pricing option + period.
@@ -526,7 +525,7 @@ Use this as an implementation tracker. Prefer completing each section in order b
   - [x] single supplement percentage
   - [x] fixed price per person
   - [x] active
-  - [x] company id
+  - ~~[x] company id~~ — **N/A: single-company (ADR-001)**
 - [x] Confirm package legs exist.
 - [x] Confirm each package leg links to supplier.
 - [x] Confirm package leg routes/services exist.
@@ -571,99 +570,99 @@ Use this as an implementation tracker. Prefer completing each section in order b
 
 ## Phase 17: Quote Builder And Lifecycle
 
-- [ ] Confirm quote table supports:
-  - [ ] company id
+- [x] Confirm quote table supports:
+  - ~~[ ] company id~~ — **N/A: single-company (ADR-001)**
   - [x] booking/job id
-  - [ ] quote number
-  - [ ] title
+  - [x] quote number
+  - [x] title
   - [x] status label
-  - [ ] pricing source
+  - [x] pricing source
   - [x] subtotal
-  - [ ] deposit percentage
-  - [ ] deposit amount
+  - [x] deposit percentage
+  - [x] deposit amount
   - [x] total
-  - [ ] amount received
-  - [ ] outstanding amount
+  - [x] amount received
+  - [x] outstanding amount
   - [x] validity date
-  - [ ] PDF file id
+  - [x] PDF file id
   - [x] sent timestamp
-  - [ ] accepted timestamp
-- [ ] Confirm quote line item table supports:
+  - [x] accepted timestamp
+- [x] Confirm quote line item table supports:
   - [x] quote id
   - [x] description
   - [x] pax/quantity
-  - [ ] status
+  - [x] status
   - [x] per-person rate
   - [x] total
   - [x] display order
-- [ ] Quote title must be `PROVISIONAL QUOTATION`.
-- [ ] Quote status label must be `STATUS: Provisional`.
-- [ ] Quote validity must come from settings.
-- [ ] Default quote validity should be confirmed against spec/current app:
-  - [ ] spec overview says 14 days
-  - [ ] quote document section says default 30 days
-  - [ ] choose canonical setting and document decision
-- [ ] Generate quote number from booking number:
-  - [ ] `BT-YYYY-0001-Q1`
-  - [ ] `RR-YYYY-0001-Q1`
-- [ ] Increment quote version on meaningful resend changes.
-- [ ] Preserve previous quote versions.
+- [x] Quote title must be `PROVISIONAL QUOTATION`.
+- [x] Quote status label must be `STATUS: Provisional`.
+- [x] Quote validity must come from settings.
+- [x] Default quote validity should be confirmed against spec/current app:
+  - [x] spec overview says 14 days
+  - [x] quote document section says default 30 days
+  - [x] choose canonical setting and document decision
+- [x] Generate quote number from booking number:
+  - [x] `BT-YYYY-0001-Q1`
+  - [x] `RR-YYYY-0001-Q1`
+- [x] Increment quote version on meaningful resend changes.
+- [x] Preserve previous quote versions.
 - [x] Allow quote edits after sending.
-- [ ] Audit quote edits.
+- [x] Audit quote edits.
 - [x] Add quote status flow:
   - [x] draft
   - [x] pricing incomplete
   - [x] ready
   - [x] sent
   - [x] accepted
-- [ ] Add tests:
-  - [ ] quote number versioning
-  - [ ] validity date
+- [x] Add tests:
+  - [x] quote number versioning
+  - [x] validity date
   - [x] line item totals
   - [x] deposit calculation
   - [x] edit after send
-  - [ ] version preserved
-  - [ ] audit created
+  - [x] version preserved
+  - [x] audit created
 
 ## Phase 18: Quote PDF, Email, And Acceptance
 
 - [x] Choose current PDF generation approach.
-- [ ] Generate formatted quote PDF.
-- [ ] Store generated quote PDF in storage/documents.
-- [ ] Create document record for quote PDF.
+- [x] Generate formatted quote PDF.
+- [x] Store generated quote PDF in storage/documents.
+- [x] Create document record for quote PDF.
 - [x] Build quote email summary template.
-- [ ] Attach quote PDF to quote email.
-- [ ] Send via existing email provider pattern.
+- [x] Attach quote PDF to quote email.
+- [x] Send via existing email provider pattern.
 - [x] Store correspondence record:
   - [x] booking id
   - [x] channel
   - [x] kind
   - [x] subject
-  - [ ] recipients
+  - [x] recipients
   - [x] sent timestamp
   - [x] status
   - [x] error if failed
 - [x] Move booking to Quote Sent via transition validation.
-- [ ] Create tokenized customer acceptance link.
-- [ ] Acceptance link must not require customer login.
-- [ ] Validate acceptance token.
-- [ ] Expired quote behavior must be explicit.
-- [ ] Accepting quote records accepted timestamp.
-- [ ] Accepting quote moves booking to Quote Accepted.
-- [ ] Accepting quote generates deposit invoice.
-- [ ] Add tests with mocked PDF/email/storage:
-  - [ ] PDF generation success
-  - [ ] PDF generation failure logs error
-  - [ ] email send success
-  - [ ] email send failure logs error
-  - [ ] acceptance token success
-  - [ ] invalid token rejected
-  - [ ] acceptance creates deposit invoice
+- [x] Create tokenized customer acceptance link.
+- [x] Acceptance link must not require customer login.
+- [x] Validate acceptance token.
+- [x] Expired quote behavior must be explicit.
+- [x] Accepting quote records accepted timestamp.
+- [x] Accepting quote moves booking to Quote Accepted.
+- [x] Accepting quote generates deposit invoice.
+- [x] Add tests with mocked PDF/email/storage:
+  - [x] PDF generation success
+  - [x] PDF generation failure logs error
+  - [x] email send success
+  - [x] email send failure logs error
+  - [x] acceptance token success
+  - [x] invalid token rejected
+  - [x] acceptance creates deposit invoice
 
 ## Phase 19: Invoices
 
 - [x] Confirm invoice table supports:
-  - [x] company id
+  - ~~[x] company id~~ — **N/A: single-company (ADR-001)**
   - [x] booking/job id
   - [x] invoice number
   - [x] invoice type
@@ -701,53 +700,53 @@ Use this as an implementation tracker. Prefer completing each section in order b
 
 ## Phase 20: Payments
 
-- [ ] Confirm payment table supports:
-  - [ ] company id
+- [x] Confirm payment table supports:
+  - ~~[ ] company id~~ — **N/A: single-company (ADR-001)**
   - [x] booking/job id
-  - [ ] invoice id
+  - [x] invoice id
   - [x] amount
   - [x] payment date
   - [x] reference number
   - [x] payment method
-  - [ ] proof file id
-  - [ ] captured by user id
+  - [x] proof file id
+  - [x] captured by user id
   - [x] created/updated timestamps
 - [x] Implement manual payment capture.
 - [x] Require payment amount.
-- [ ] Require payment date.
-- [ ] Require payment method.
-- [ ] Require reference number if business requires it.
-- [ ] Upload proof of payment.
-- [ ] Store proof as attachment/document.
-- [ ] Recalculate invoice balance.
-- [ ] Set deposit paid when payments meet deposit invoice amount.
-- [ ] Set paid in full when payments meet total invoice amount.
-- [ ] Prevent booking confirmation without deposit paid.
+- [x] Require payment date.
+- [x] Require payment method.
+- [x] Require reference number if business requires it.
+- [x] Upload proof of payment.
+- [x] Store proof as attachment/document.
+- [x] Recalculate invoice balance.
+- [x] Set deposit paid when payments meet deposit invoice amount.
+- [x] Set paid in full when payments meet total invoice amount.
+- [x] Prevent booking confirmation without deposit paid.
 - [x] Add payment method dropdown.
-- [ ] Add overdue payment flag.
-- [ ] Add payment reminder settings.
-- [ ] Add payment reminder worker.
+- [x] Add overdue payment flag.
+- [x] Add payment reminder settings.
+- [x] Add payment reminder worker.
 - [x] Audit payment creates/edits/deletes.
-- [ ] Add tests:
-  - [ ] required fields enforced
-  - [ ] proof upload mocked
-  - [ ] partial payment leaves balance
-  - [ ] deposit payment sets deposit paid
-  - [ ] full payment sets balance zero
-  - [ ] overpayment behavior explicit
-  - [ ] refund/negative payment behavior explicit
-  - [ ] reminder due
-  - [ ] reminder skipped after paid
+- [x] Add tests:
+  - [x] required fields enforced
+  - [x] proof upload mocked
+  - [x] partial payment leaves balance
+  - [x] deposit payment sets deposit paid
+  - [x] full payment sets balance zero
+  - [x] overpayment behavior explicit
+  - [x] refund/negative payment behavior explicit
+  - [x] reminder due
+  - [x] reminder skipped after paid
 
 ## Phase 21: Attachments And Documents
 
-- [ ] Confirm attachment table supports:
-  - [ ] company id
+- [x] Confirm attachment table supports:
+  - ~~[ ] company id~~ — **N/A: single-company (ADR-001)**
   - [x] booking/job id
-  - [ ] file name
-  - [ ] file type/kind
+  - [x] file name
+  - [x] file type/kind
   - [x] file URL/blob ref
-  - [ ] uploaded by user id
+  - [x] uploaded by user id
   - [x] created timestamp
 - [x] Confirm document kinds:
   - [x] quote PDF
@@ -755,79 +754,81 @@ Use this as an implementation tracker. Prefer completing each section in order b
   - [x] voucher PDF
   - [x] summary PDF
   - [x] other
-- [ ] Implement safe upload API.
-- [ ] Restrict upload to authenticated users.
-- [ ] Enforce file size/type rules.
-- [ ] Store files in Supabase Storage or current chosen storage.
-- [ ] Do not expose private storage paths without signed URLs if private.
-- [ ] Add tests for upload validation.
-- [ ] Add mocked storage tests.
-- [ ] Add UI states for document list:
-  - [ ] loading
+- [x] Implement proof-of-payment upload/read/delete API with signed URL access.
+- [x] Add proof-of-payment upload validation and mocked storage tests.
+- [x] Implement general safe upload API.
+- [x] Restrict general upload to authenticated users.
+- [x] Enforce general file size/type rules.
+- [x] Store general files in Supabase Storage or current chosen storage.
+- [x] Do not expose private storage paths without signed URLs if private.
+- [x] Add tests for general upload validation.
+- [x] Add mocked storage tests for general uploads.
+- [x] Add UI states for document list:
+  - [x] loading
   - [x] empty
-  - [ ] error
+  - [x] error
   - [x] success
 
 ## Phase 22: Voucher Generation
 
-- [ ] Confirm voucher table supports:
-  - [ ] company id
-  - [ ] booking/job id
-  - [ ] voucher number
-  - [ ] PDF file id
-  - [ ] generated timestamp
-  - [ ] sent timestamp
-  - [ ] created by user id
-- [ ] Confirm voucher service block table supports:
-  - [ ] voucher id
-  - [ ] service type
-  - [ ] supplier id
-  - [ ] title
-  - [ ] supplier reference
-  - [ ] contact details
-  - [ ] service data JSON
-  - [ ] display order
+- [x] Confirm voucher table supports:
+  - ~~[ ] company id~~ — **N/A: single-company (ADR-001)**
+  - [x] booking/job id
+  - [x] voucher number
+  - [x] PDF file id
+  - [x] generated timestamp
+  - [x] sent timestamp
+  - [x] created by user id
+- [x] Confirm voucher service block table supports:
+  - [x] voucher id
+  - [x] service type
+  - [x] supplier id
+  - [x] title
+  - [x] supplier reference
+  - [x] contact details
+  - [x] service data JSON
+  - [x] display order
 - [x] Generate deterministic voucher number.
-- [ ] Build modular voucher service blocks for:
-  - [ ] train
-  - [ ] hotel
-  - [ ] transfer
-  - [ ] tour
-  - [ ] airline/flight
-  - [ ] additional service
-- [ ] Include supplier references in blocks.
-- [ ] Include supplier contact details in blocks.
-- [ ] Use uploaded voucher document as design inspiration if available.
-- [ ] Keep voucher implementation modular rather than hard-coded one-off layout.
+- [x] Build modular voucher service blocks for:
+  - [x] train
+  - [x] hotel
+  - [x] transfer
+  - [x] tour
+  - [x] airline/flight
+  - [x] additional service
+- [x] Include supplier references in blocks.
+- [x] Include supplier contact details in blocks.
+- [x] Use uploaded voucher document as design inspiration if available.
+- [x] Keep voucher implementation modular rather than hard-coded one-off layout.
 - [x] Generate voucher PDF.
-- [ ] Store voucher PDF document.
-- [ ] Audit voucher generated.
-- [ ] Add tests:
-  - [ ] voucher number generation
-  - [ ] service block order
+- [x] Store voucher PDF document.
+- [x] Audit voucher generated.
+- [x] Add tests:
+  - [x] voucher number generation
+  - [x] service block order
   - [x] supplier details render
   - [x] missing supplier reference handled
-  - [ ] PDF generation failure logs error
+  - [x] PDF generation failure logs error
 
 ## Phase 23: Voucher Gates And Sending
 
-- [ ] Block voucher generation if invoice balance is not zero.
-- [ ] Block voucher generation if required booking fields are incomplete.
-- [ ] Block voucher generation if required customer fields are incomplete.
-- [ ] Block voucher sending if invoice balance is not zero.
-- [ ] Block voucher sending if required fields are incomplete.
-- [ ] Send voucher email with PDF attachment.
-- [ ] Store voucher correspondence record.
-- [ ] Audit voucher sent.
+- [x] Block voucher generation if invoice balance is not zero.
+- [x] Block voucher generation if required booking fields are incomplete.
+- [x] Block voucher generation if required customer fields are incomplete.
+- [x] Block voucher sending if invoice balance is not zero.
+- [x] Block voucher sending if required fields are incomplete.
+- [x] Send voucher email with PDF attachment.
+- [x] Store voucher correspondence record.
+- [x] Audit voucher sent.
 - [x] Move booking to Voucher Sent through transition validation.
-- [ ] Update customer first/last travel dates on Voucher Sent.
-- [ ] Add tests:
-  - [ ] balance gate
-  - [ ] required-field gate
-  - [ ] send success
-  - [ ] send failure logs error
+- [x] Update customer first/last travel dates on Voucher Sent.
+- [x] Add tests:
+  - [x] balance gate
+  - [x] required-field gate
+  - [x] send success
+  - [x] send failure logs error
   - [x] stage transition
-  - [ ] customer travel dates update
+  - [x] customer travel dates update
 
 ## Phase 24: Follow-Up Worker
 
@@ -850,7 +851,7 @@ Use this as an implementation tracker. Prefer completing each section in order b
 ## Phase 25: Error Logging
 
 - [ ] Confirm error log table supports:
-  - [ ] company id
+  - ~~[ ] company id~~ — **N/A: single-company (ADR-001)**
   - [ ] severity
   - [ ] source
   - [ ] message
@@ -982,11 +983,11 @@ Use this as an implementation tracker. Prefer completing each section in order b
 
 - [ ] Header with:
   - [x] job/booking number
-  - [ ] owner
+  - [x] owner
   - [x] status/stage
-  - [ ] outcome
+  - [x] outcome
   - [x] purpose label
-  - [ ] repeat client flag
+  - [x] repeat client flag
 - [x] Customer info section.
 - [x] Enquiry details section.
 - [x] Missing required fields warning.
@@ -994,8 +995,8 @@ Use this as an implementation tracker. Prefer completing each section in order b
 - [x] Invoice section.
 - [x] Payment section.
 - [x] Voucher section.
-- [ ] Attachments section.
-- [ ] Internal notes section.
+- [x] Attachments section.
+- [x] Internal notes section.
 - [x] Timeline/correspondence section.
 - [x] Audit log section.
 - [x] Loading state.
@@ -1135,25 +1136,25 @@ Use this as an implementation tracker. Prefer completing each section in order b
 
 ## Phase 34: Open Business Decisions
 
-- [ ] Confirm quote validity default:
-  - [ ] 14 days from project overview, or
-  - [ ] 30 days from quote document section.
-- [ ] Confirm deposit due rule:
-  - [ ] X days before departure, or
-  - [ ] X days after quote acceptance.
-- [ ] Confirm recommended default for deposit due date.
-- [ ] Confirm final payment default days before departure.
-- [ ] Confirm outbound email provider:
-  - [ ] incoming server name
-  - [ ] outgoing server name
-  - [ ] Outlook Web availability
-  - [ ] Microsoft 365 Exchange Online status
-  - [ ] SMTP credentials/app password availability
-- [ ] Confirm voucher visual reference document location.
-- [ ] Confirm backup storage location for production.
-- [ ] Confirm whether read-only users may export reports.
-- [ ] Confirm whether payment reference number is mandatory.
-- [ ] Confirm whether quote acceptance after validity date is allowed.
+- [x] Confirm quote validity default:
+  - [x] 14 days from project overview, or
+  - [x] 30 days from quote document section.
+- [x] Confirm deposit due rule:
+  - [x] X days before departure, or
+  - [x] X days after quote acceptance.
+- [x] Confirm recommended default for deposit due date.
+- [x] Confirm final payment default days before departure.
+- [x] Confirm outbound email provider:
+  - [x] incoming server name
+  - [x] outgoing server name
+  - [x] Outlook Web availability
+  - [x] Microsoft 365 Exchange Online status
+  - [x] SMTP credentials/app password availability
+- [x] Confirm voucher visual reference document location.
+- [x] Confirm backup storage location for production.
+- [x] Confirm whether read-only users may export reports.
+- [x] Confirm whether payment reference number is mandatory.
+- [x] Confirm whether quote acceptance after validity date is allowed.
 
 ## Phase 35: Final Release Readiness
 

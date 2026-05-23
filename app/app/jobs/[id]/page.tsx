@@ -12,6 +12,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
@@ -28,22 +29,28 @@ import {
   type PipelineStage,
 } from "@/lib/types"
 import { useRole } from "@/lib/role-context"
-import { AlertCircle, ArrowLeft, CheckCircle2, ChevronRight, ChevronLeft as ChevronLeftIcon, UserRound, XCircle } from "lucide-react"
+import { AlertCircle, ArrowLeft, CheckCircle2, ChevronRight, ChevronLeft as ChevronLeftIcon, UserRound, XCircle, Target } from "lucide-react"
+import type { Outcome, OutcomeReason } from "@/lib/types"
 import Link from "next/link"
 import { JobEnquiryTab } from "@/components/job-enquiry-tab"
 import { JobQuotesTab } from "@/components/job-quotes-tab"
 import { JobPaymentsTab } from "@/components/job-payments-tab"
 import { JobCorrespondenceTab } from "@/components/job-correspondence-tab"
 import { JobDocumentsTab } from "@/components/job-documents-tab"
+import { JobAttachmentsTab } from "@/components/job-attachments-tab"
+import { JobInternalNotesTab } from "@/components/job-internal-notes-tab"
 import { JobAuditTab } from "@/components/job-audit-tab"
+import { BookingStageStepper } from "@/components/booking-stage-stepper"
 import { CancelBookingDialog } from "@/components/cancel-booking-dialog"
 import { StageTransitionModal } from "@/components/stage-transition-modal"
 import { GenerateDepositInvoiceDialog } from "@/components/generate-deposit-invoice-dialog"
 import { GenerateFinalInvoiceDialog } from "@/components/generate-final-invoice-dialog"
 import { GenerateVoucherDialog } from "@/components/generate-voucher-dialog"
+import { BookingPackageSection } from "@/components/booking-package-section"
 import { PresenceAvatars } from "@/components/presence-avatars"
 import { useRecordPresence } from "@/hooks/use-record-presence"
 import { useVersionedSave } from "@/hooks/use-versioned-save"
+import { useBookingNotes } from "@/lib/use-data"
 import type { GateFailure, ManualConfirmations } from "@/lib/pipeline/validate-transition"
 import { getApiErrorMessage, parseStageTransitionFailurePayload } from "@/lib/pipeline/stage-transition-response"
 import { toast } from "sonner"
@@ -53,14 +60,26 @@ interface JobPatchResponse {
   updatedAt: string
 }
 
-type JobDetailTab = "enquiry" | "quotes" | "payments" | "correspondence" | "documents" | "audit"
+type JobDetailTab =
+  | "enquiry"
+  | "package"
+  | "quotes"
+  | "payments"
+  | "correspondence"
+  | "documents"
+  | "attachments"
+  | "notes"
+  | "audit"
 
 const JOB_DETAIL_TABS = new Set<JobDetailTab>([
   "enquiry",
+  "package",
   "quotes",
   "payments",
   "correspondence",
   "documents",
+  "attachments",
+  "notes",
   "audit",
 ])
 
@@ -111,7 +130,7 @@ function JobDetailSkeleton() {
 
       <div className="space-y-4">
         <div className="flex gap-2 overflow-hidden rounded-md bg-secondary/50 p-1">
-          {Array.from({ length: 6 }).map((_, index) => (
+          {Array.from({ length: 9 }).map((_, index) => (
             <Skeleton key={index} className="h-8 w-24 rounded-sm" />
           ))}
         </div>
@@ -154,9 +173,22 @@ export default function JobDetailPage() {
   const [customerSearch, setCustomerSearch] = useState("")
   const [customerResults, setCustomerResults] = useState<Array<{ id: string; firstName: string; lastName: string; email: string }>>([])
   const [changingCustomer, setChangingCustomer] = useState(false)
-  const [reassigningSalesperson, setReassigningSalesperson] = useState(false)
+  const [resolvingImportReview, setResolvingImportReview] = useState(false)
   const [lastJobPayload, setLastJobPayload] = useState<Record<string, unknown> | null>(null)
   const [activeTab, setActiveTab] = useState<JobDetailTab>(() => parseJobDetailTab(searchParams.get("tab")))
+  const [supplierRefDraft, setSupplierRefDraft] = useState<string>("")
+  const [supplierRefSaving, setSupplierRefSaving] = useState(false)
+  const {
+    data: notesData,
+    error: notesError,
+    isLoading: notesLoading,
+    mutate: mutateNotes,
+  } = useBookingNotes(activeTab === "notes" ? id : null)
+  const [outcomeOpen, setOutcomeOpen] = useState(false)
+  const [outcomeSubmitting, setOutcomeSubmitting] = useState(false)
+  const [pendingOutcome, setPendingOutcome] = useState<Outcome>("Open")
+  const [pendingReasonId, setPendingReasonId] = useState<string>("")
+  const [pendingNotes, setPendingNotes] = useState<string>("")
   const {
     save: saveJob,
     isSaving: isSavingJob,
@@ -185,6 +217,11 @@ export default function JobDetailPage() {
     setActiveTab(parseJobDetailTab(searchParams.get("tab")))
   }, [searchParams])
 
+  useEffect(() => {
+    const next = (data?.job as { supplierReference?: string | null } | undefined)?.supplierReference ?? ""
+    setSupplierRefDraft(next)
+  }, [data?.job])
+
   if (isLoading || !data || hasLoadError) {
     return <JobDetailSkeleton />
   }
@@ -200,14 +237,13 @@ export default function JobDetailPage() {
     documents,
     correspondence,
     auditLogs,
-    salespeople = [],
+    outcomeReasons = [],
     settings,
   } = data
   const currentStage = getCanonicalPipelineStage(job.stage as PipelineStage)
   const currentStageIdx = PIPELINE_STAGES.findIndex(s => s.key === currentStage)
   const consultantName = CONSULTANTS.find((consultant) => consultant.key === job.consultant)?.name ?? job.consultant ?? undefined
   const needsEmailReview = Boolean(enquiry?.emailImportNeedsReview)
-  const canReassignSalesperson = role === "manager" || role === "admin"
   const assignedSalespersonName = job.assignedSalespersonName ?? "Unassigned"
   const hasNoPackageMatchQuote = quotes.some((quote: { noPackageMatch?: boolean }) => quote.noPackageMatch)
   const hasSentDepositInvoice = invoices.some(
@@ -218,6 +254,34 @@ export default function JobDetailPage() {
     (invoice: { kind: string; status: string }) =>
       invoice.kind === "final" && (invoice.status === "sent" || invoice.status === "paid"),
   )
+
+  const canEditSupplierRef = can("edit:jobs")
+  const currentSupplierRef = (job as { supplierReference?: string | null } | undefined)?.supplierReference ?? ""
+  const supplierRefDirty = supplierRefDraft !== currentSupplierRef
+
+  const saveSupplierReference = async () => {
+    if (!supplierRefDirty || supplierRefSaving) return
+    setSupplierRefSaving(true)
+    try {
+      const response = await fetch(`/api/jobs/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          supplierReference: supplierRefDraft.trim().length > 0 ? supplierRefDraft.trim() : null,
+          expectedUpdatedAt: data?.job?.updatedAt,
+        }),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null)
+        toast.error(typeof payload?.error === "string" ? payload.error : "Could not save supplier reference")
+        return
+      }
+      toast.success("Supplier reference saved")
+      await mutate()
+    } finally {
+      setSupplierRefSaving(false)
+    }
+  }
 
   const saveJobPatch = async (
     payload: Record<string, unknown>,
@@ -262,7 +326,7 @@ export default function JobDetailPage() {
       })
 
       const payload = await response.json().catch(() => null)
-      const stageGatePayload = response.status === 422 ? parseStageTransitionFailurePayload(payload) : null
+      const stageGatePayload = response.status === 400 ? parseStageTransitionFailurePayload(payload) : null
       if (stageGatePayload) {
         const canGenerateDepositInvoice =
           targetStage === "deposit_requested" &&
@@ -324,7 +388,20 @@ export default function JobDetailPage() {
   }
 
   const resolveEmailReview = async () => {
-    await saveJobPatch({ resolveEmailImportReview: true })
+    setResolvingImportReview(true)
+    try {
+      const response = await fetch(`/api/jobs/${id}/clear-import-review`, { method: "POST" })
+      const payload = (await response.json().catch(() => ({}))) as { error?: string }
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Could not resolve import review")
+      }
+      await mutate()
+      toast.success("Import review cleared")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not resolve import review")
+    } finally {
+      setResolvingImportReview(false)
+    }
   }
 
   const searchCustomers = async () => {
@@ -349,17 +426,28 @@ export default function JobDetailPage() {
     }
   }
 
-  const reassignSalesperson = async (salespersonId: string) => {
-    setReassigningSalesperson(true)
+  const setOutcome = async () => {
+    setOutcomeSubmitting(true)
     try {
-      const saved = await saveJobPatch({
-        assignedSalespersonId: salespersonId === "__unassigned" ? null : salespersonId,
+      const body: Record<string, unknown> = { outcome: pendingOutcome }
+      if (pendingReasonId) body.reasonId = pendingReasonId
+      if (pendingNotes.trim()) body.outcomeNotes = pendingNotes.trim()
+      const response = await fetch(`/api/jobs/${id}/outcome`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       })
-      if (saved) {
-        toast.success("Salesperson reassigned")
+      const payload = (await response.json().catch(() => ({}))) as { error?: string }
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Could not update outcome")
       }
+      await mutate()
+      setOutcomeOpen(false)
+      toast.success("Outcome updated")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update outcome")
     } finally {
-      setReassigningSalesperson(false)
+      setOutcomeSubmitting(false)
     }
   }
 
@@ -373,54 +461,109 @@ export default function JobDetailPage() {
             <Button variant="ghost" size="sm"><ArrowLeft className="w-4 h-4" /></Button>
           </Link>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl font-semibold text-foreground tracking-tight" style={{ fontFamily: "var(--font-inter)" }}>{job.jobNumber}</h1>
               <Badge variant="outline" className="text-xs">{getPipelineStageLabel(job.stage)}</Badge>
               <Badge variant="secondary" className="text-xs">{job.purpose}</Badge>
+              {job.isRepeatClientAtCreation ? (
+                <Badge variant="outline" className="text-xs">Repeat Client</Badge>
+              ) : null}
+              {(() => {
+                const outcome = (job.outcome as Outcome | undefined) ?? "Open"
+                const colors: Record<Outcome, string> = {
+                  Open: "bg-blue-50 text-blue-700 border-blue-200",
+                  Won: "bg-green-50 text-green-700 border-green-200",
+                  Lost: "bg-red-50 text-red-700 border-red-200",
+                  Cancelled: "bg-orange-50 text-orange-700 border-orange-200",
+                }
+                return (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPendingOutcome(outcome)
+                      setPendingReasonId("")
+                      setPendingNotes("")
+                      setOutcomeOpen(true)
+                    }}
+                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium transition-opacity hover:opacity-80 ${colors[outcome]}`}
+                    aria-label={`Outcome: ${outcome}. Click to change.`}
+                    title="Click to change outcome"
+                  >
+                    <Target className="w-3 h-3" aria-hidden="true" />
+                    {outcome}
+                  </button>
+                )
+              })()}
               {needsEmailReview && <Badge variant="destructive" className="text-xs">Needs Review</Badge>}
               <PresenceAvatars users={others} className="ml-1" />
             </div>
             <p className="text-sm text-muted-foreground mt-0.5">
               {customer?.firstName} {customer?.lastName} &middot; {customer?.email}
             </p>
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">Owner</span>
+              <span>{(job as Record<string, unknown>).ownerName as string ?? "Unassigned"}</span>
+              <span className="text-muted-foreground/40">·</span>
               <span className="font-medium text-foreground">Salesperson</span>
-              {canReassignSalesperson ? (
-                <Select
-                  value={job.assignedSalespersonId ?? "__unassigned"}
-                  onValueChange={(value) => void reassignSalesperson(value)}
-                  disabled={reassigningSalesperson || isSavingJob}
-                >
-                  <SelectTrigger size="sm" className="h-8 w-56 bg-background">
-                    <SelectValue placeholder="Assign salesperson" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__unassigned">Unassigned</SelectItem>
-                    {salespeople.map((salesperson: { id: string; name: string; email: string }) => (
-                      <SelectItem key={salesperson.id} value={salesperson.id}>
-                        {salesperson.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <span>{assignedSalespersonName}</span>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <Label htmlFor="booking-supplier-reference" className="font-medium text-foreground">
+                Supplier ref
+              </Label>
+              {canEditSupplierRef ? (
+                <>
+                  <Input
+                    id="booking-supplier-reference"
+                    value={supplierRefDraft}
+                    onChange={(e) => setSupplierRefDraft(e.target.value)}
+                    onBlur={() => void saveSupplierReference()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        void saveSupplierReference()
+                      }
+                    }}
+                    placeholder="Supplier confirmation #"
+                    maxLength={120}
+                    disabled={supplierRefSaving}
+                    className="h-8 w-56 bg-background"
+                  />
+                  {supplierRefDirty ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8"
+                      onClick={() => void saveSupplierReference()}
+                      disabled={supplierRefSaving}
+                    >
+                      {supplierRefSaving ? "Saving..." : "Save"}
+                    </Button>
+                  ) : null}
+                </>
               ) : (
-                <span>{assignedSalespersonName}</span>
+                <span>{currentSupplierRef || "—"}</span>
               )}
             </div>
           </div>
         </div>
         {can("edit:pipeline") && (
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" disabled={currentStageIdx <= 0 || transitionSubmitting} onClick={() => moveStage("back")}>
-              <ChevronLeftIcon className="w-4 h-4 mr-1" /> Back
-            </Button>
-            <Button size="sm" disabled={currentStageIdx >= PIPELINE_STAGES.length - 1 || needsEmailReview || isSavingJob || transitionSubmitting} onClick={() => moveStage("forward")}>
-              Next <ChevronRight className="w-4 h-4 ml-1" />
-            </Button>
-            {can("cancel:booking") && job.stage !== "lost" && job.stage !== "closed" && (
-              <Button variant="destructive" size="sm" onClick={() => setCancelOpen(true)}>
-                <XCircle className="w-4 h-4 mr-1" /> Cancel Booking
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" disabled={currentStageIdx <= 0 || transitionSubmitting} onClick={() => moveStage("back")}>
+                <ChevronLeftIcon className="w-4 h-4 mr-1" /> Back
               </Button>
+              <Button size="sm" disabled={currentStageIdx >= PIPELINE_STAGES.length - 1 || needsEmailReview || isSavingJob || transitionSubmitting} onClick={() => moveStage("forward")}>
+                Next <ChevronRight className="w-4 h-4 ml-1" />
+              </Button>
+              {can("cancel:booking") && job.stage !== "lost" && job.stage !== "closed" && (
+                <Button variant="destructive" size="sm" onClick={() => setCancelOpen(true)}>
+                  <XCircle className="w-4 h-4 mr-1" /> Cancel Booking
+                </Button>
+              )}
+            </div>
+            {needsEmailReview && (
+              <p className="text-[11px] text-muted-foreground">Resolve email review to advance</p>
             )}
           </div>
         )}
@@ -462,23 +605,7 @@ export default function JobDetailPage() {
       )}
 
       {/* Stage Progress */}
-      <div className="flex items-center gap-1 overflow-x-auto pb-1">
-        {PIPELINE_STAGES.map((s, i) => (
-          <div
-            key={s.key}
-            className={`px-2.5 py-1 rounded text-[10px] font-medium whitespace-nowrap transition-colors ${
-              i === currentStageIdx
-                ? "bg-brand-gold text-card"
-                : i < currentStageIdx
-                  ? "bg-secondary text-foreground"
-                  : "bg-secondary/50 text-muted-foreground"
-            }`}
-            style={{ fontFamily: "var(--font-inter)" }}
-          >
-            {s.label}
-          </div>
-        ))}
-      </div>
+      <BookingStageStepper currentStage={job.stage as PipelineStage} />
 
       {/* Customer Info */}
       <Card>
@@ -496,9 +623,9 @@ export default function JobDetailPage() {
                 Change customer
               </Button>
               {needsEmailReview && (
-                <Button size="sm" onClick={resolveEmailReview} disabled={isSavingJob}>
+                <Button size="sm" onClick={resolveEmailReview} disabled={resolvingImportReview}>
                   <CheckCircle2 className="w-4 h-4 mr-1.5" />
-                  Resolve review
+                  {resolvingImportReview ? "Resolving" : "Resolve review"}
                 </Button>
               )}
             </div>
@@ -567,15 +694,32 @@ export default function JobDetailPage() {
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(parseJobDetailTab(value))} className="space-y-4">
         <TabsList className="bg-secondary/50">
           <TabsTrigger value="enquiry" className="text-xs">Enquiry</TabsTrigger>
+          <TabsTrigger value="package" className="text-xs">Package</TabsTrigger>
           <TabsTrigger value="quotes" className="text-xs">Quotes ({quotes.length})</TabsTrigger>
           <TabsTrigger value="payments" className="text-xs">Payments ({payments.length})</TabsTrigger>
           <TabsTrigger value="correspondence" className="text-xs">Emails Sent ({correspondence.length})</TabsTrigger>
           <TabsTrigger value="documents" className="text-xs">Documents ({documents.length})</TabsTrigger>
+          <TabsTrigger value="attachments" className="text-xs">Attachments</TabsTrigger>
+          <TabsTrigger value="notes" className="text-xs">Notes</TabsTrigger>
           <TabsTrigger value="audit" className="text-xs">Audit Log</TabsTrigger>
         </TabsList>
 
         <TabsContent value="enquiry">
-          <JobEnquiryTab enquiry={enquiry} itineraries={itineraries} onTransportRequestsChange={mutate} />
+          <JobEnquiryTab
+            enquiry={enquiry}
+            itineraries={itineraries}
+            stage={job.stage}
+            hasDraftQuotes={quotes.some((quote: { status: string }) => quote.status === "draft")}
+            onQuoteStarted={async () => {
+              await mutate()
+              setActiveTab("quotes")
+            }}
+            onTransportRequestsChange={mutate}
+            onFieldsUpdated={mutate}
+          />
+        </TabsContent>
+        <TabsContent value="package">
+          <BookingPackageSection jobId={id} />
         </TabsContent>
         <TabsContent value="quotes">
           <JobQuotesTab
@@ -592,13 +736,46 @@ export default function JobDetailPage() {
           />
         </TabsContent>
         <TabsContent value="payments">
-          <JobPaymentsTab payments={payments} jobId={id} mutate={mutate} />
+          <JobPaymentsTab
+            payments={payments}
+            jobId={id}
+            mutate={mutate}
+            stage={currentStage}
+          />
         </TabsContent>
         <TabsContent value="correspondence">
           <JobCorrespondenceTab correspondence={correspondence} jobId={id} mutate={mutate} />
         </TabsContent>
         <TabsContent value="documents">
-          <JobDocumentsTab documents={documents} job={job} enquiry={enquiry} customer={customer} onChange={mutate} />
+          <JobDocumentsTab
+            documents={documents}
+            job={job}
+            enquiry={enquiry}
+            customer={customer}
+            onChange={mutate}
+            loading={isLoading}
+            error={error as Error | null}
+          />
+        </TabsContent>
+        <TabsContent value="attachments">
+          <JobAttachmentsTab
+            bookingId={id}
+            documents={documents}
+            loading={isLoading}
+            error={error as Error | null}
+            onChange={mutate}
+          />
+        </TabsContent>
+        <TabsContent value="notes">
+          <JobInternalNotesTab
+            bookingId={id}
+            notes={notesData?.notes ?? []}
+            loading={notesLoading}
+            error={notesError as Error | null}
+            onChange={async () => {
+              await mutateNotes()
+            }}
+          />
         </TabsContent>
         <TabsContent value="audit">
           <JobAuditTab
@@ -624,6 +801,8 @@ export default function JobDetailPage() {
         bookingId={id}
         bookingNumber={job.jobNumber}
         sourceStage={job.stage}
+        outcomeReasons={outcomeReasons as OutcomeReason[]}
+        suggestedRefund={job.suggestedRefund ?? null}
         onCancelled={() => router.push("/app/pipeline")}
       />
 
@@ -643,6 +822,9 @@ export default function JobDetailPage() {
         onOverride={async (overrideReason) => {
           if (!pendingStage) return
           await moveStageTo(pendingStage, { overrideReason })
+        }}
+        onSendFinalInvoice={() => {
+          setFinalInvoiceOpen(true)
         }}
       />
 
@@ -693,6 +875,82 @@ export default function JobDetailPage() {
           resetPendingTransition()
         }}
       />
+
+      {/* Outcome Dialog */}
+      <Dialog open={outcomeOpen} onOpenChange={(open) => { if (!outcomeSubmitting) setOutcomeOpen(open) }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Set Outcome</DialogTitle>
+            <DialogDescription>
+              Record the final result for this booking.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="outcome-select">Outcome</Label>
+              <Select value={pendingOutcome} onValueChange={(v) => { setPendingOutcome(v as Outcome); setPendingReasonId("") }}>
+                <SelectTrigger id="outcome-select">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(["Open", "Won", "Lost", "Cancelled"] as Outcome[]).map((o) => (
+                    <SelectItem key={o} value={o}>{o}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {(pendingOutcome === "Lost" || pendingOutcome === "Cancelled") && (
+              <div className="space-y-1.5">
+                <Label htmlFor="outcome-reason">Reason <span aria-hidden="true" className="text-destructive">*</span></Label>
+                <Select value={pendingReasonId} onValueChange={setPendingReasonId}>
+                  <SelectTrigger id="outcome-reason">
+                    <SelectValue placeholder="Select a reason…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(outcomeReasons as OutcomeReason[])
+                      .filter((r) => r.appliesTo === pendingOutcome || r.appliesTo === "Both")
+                      .map((r) => (
+                        <SelectItem key={r.id} value={r.id}>{r.label}</SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {(() => {
+              const selectedReason = (outcomeReasons as OutcomeReason[]).find((r) => r.id === pendingReasonId)
+              if (!selectedReason || selectedReason.label !== "Other") return null
+              return (
+                <div className="space-y-1.5">
+                  <Label htmlFor="outcome-notes">Notes <span aria-hidden="true" className="text-destructive">*</span></Label>
+                  <Input
+                    id="outcome-notes"
+                    value={pendingNotes}
+                    onChange={(e) => setPendingNotes(e.target.value)}
+                    placeholder="Briefly describe the reason…"
+                    maxLength={500}
+                  />
+                </div>
+              )
+            })()}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" disabled={outcomeSubmitting} onClick={() => setOutcomeOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => void setOutcome()}
+              disabled={
+                outcomeSubmitting ||
+                ((pendingOutcome === "Lost" || pendingOutcome === "Cancelled") && !pendingReasonId) ||
+                (() => {
+                  const r = (outcomeReasons as OutcomeReason[]).find((x) => x.id === pendingReasonId)
+                  return r?.label === "Other" && !pendingNotes.trim()
+                })()
+              }
+            >
+              {outcomeSubmitting ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={changeCustomerOpen} onOpenChange={setChangeCustomerOpen}>
         <DialogContent>

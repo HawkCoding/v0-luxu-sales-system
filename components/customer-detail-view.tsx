@@ -4,9 +4,10 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useSWRConfig } from "swr"
-import { AlertCircle, ArrowLeft, CalendarDays, Globe, Link2, Mail, Pencil, Phone, Save, Trash2 } from "lucide-react"
+import { AlertCircle, ArrowLeft, CalendarDays, Globe, Link2, Mail, Pencil, Phone, Plus, Save, Star, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { LinkedAccountForm, type LinkedAccountFormValue } from "@/components/linked-account-form"
+import { NewEnquiryDialog } from "@/components/new-enquiry-dialog"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -17,6 +18,7 @@ import { PresenceAvatars } from "@/components/presence-avatars"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { useRole } from "@/lib/role-context"
 import { getPipelineStageLabel, PIPELINE_STAGES } from "@/lib/types"
@@ -31,12 +33,22 @@ interface CustomerPatchPayload {
   notes: string
   email: string
   phone: string | null
+  province: string | null
+  date_of_birth: string | null
+  vip_status: boolean
+  preferences: string | null
+  communication_preferences: string | null
 }
 
 interface CustomerPatchResponse {
   notes: string | null
   email: string
   phone: string | null
+  province: string | null
+  dateOfBirth: string | null
+  vipStatus: boolean
+  preferences: string | null
+  communicationPreferences: string | null
   updatedAt: string
 }
 
@@ -51,15 +63,22 @@ export function CustomerDetailView({
   customerId,
   presentation = "page",
 }: CustomerDetailViewProps) {
-  const router = useRouter()
   const { data, isLoading, error, mutate } = useCustomerDetail(customerId)
   const { mutate: mutateGlobal } = useSWRConfig()
   const { can } = useRole()
+  const router = useRouter()
   const { others, setEditing: setPresenceEditing } = useRecordPresence("customer", customerId)
   const canEditCustomers = can("edit:customers")
+  const canCreateBooking = can("create:enquiry")
+  const [newBookingOpen, setNewBookingOpen] = useState(false)
   const [emailDraft, setEmailDraft] = useState("")
   const [phoneDraft, setPhoneDraft] = useState("")
   const [notesDraft, setNotesDraft] = useState("")
+  const [provinceDraft, setProvinceDraft] = useState("")
+  const [dateOfBirthDraft, setDateOfBirthDraft] = useState("")
+  const [vipStatusDraft, setVipStatusDraft] = useState(false)
+  const [preferencesDraft, setPreferencesDraft] = useState("")
+  const [communicationPreferencesDraft, setCommunicationPreferencesDraft] = useState("")
   const [isEditing, setIsEditing] = useState(false)
   const [editingStartedUpdatedAt, setEditingStartedUpdatedAt] = useState<string | undefined>(undefined)
   const [hasExternalUpdate, setHasExternalUpdate] = useState(false)
@@ -102,19 +121,17 @@ export function CustomerDetailView({
         setEmailDraft(data.customer.email)
         setPhoneDraft(data.customer.phone ?? "")
         setNotesDraft(data.customer.notes ?? "")
+        setProvinceDraft(data.customer.province ?? "")
+        setDateOfBirthDraft(data.customer.dateOfBirth ?? "")
+        setVipStatusDraft(data.customer.vipStatus ?? false)
+        setPreferencesDraft(data.customer.preferences ?? "")
+        setCommunicationPreferencesDraft(data.customer.communicationPreferences ?? "")
         setEditingStartedUpdatedAt(undefined)
       }
 
       lastSeenCustomerUpdatedAtRef.current = nextUpdatedAt
     }
   }, [data, isEditing])
-
-  useEffect(() => {
-    if (!hasLoadError) {
-      return
-    }
-    router.replace("/app/customers")
-  }, [hasLoadError, router])
 
   useEffect(() => {
     setPresenceEditing(isEditing || isAddingLinkedAccount || editingLinkedAccountId !== null)
@@ -132,7 +149,21 @@ export function CustomerDetailView({
     }, {})
   }, [])
 
-  if (isLoading || !data || hasLoadError || "error" in data) {
+  if (hasLoadError || (data && "error" in data)) {
+    return (
+      <div className={contentClassName}>
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Could not load customer</AlertTitle>
+          <AlertDescription>
+            Refresh the page or return to the customer list.
+          </AlertDescription>
+        </Alert>
+      </div>
+    )
+  }
+
+  if (isLoading || !data) {
     return (
       <div className={contentClassName}>
         <div className="space-y-3">
@@ -155,16 +186,30 @@ export function CustomerDetailView({
   const fullName = `${customer.firstName} ${customer.lastName}`.trim()
   const initials = `${customer.firstName?.[0] ?? ""}${customer.lastName?.[0] ?? ""}`.toUpperCase()
   const linkedAccountsCount = linkedAccounts.length
+  const completedBookings = bookings.filter(
+    (booking) => booking.stage === "voucher_sent" || booking.stage === "trip_active" || booking.stage === "closed",
+  ).length
+  const isRepeatClient = (customer.isRepeatClient ?? false) || completedBookings > 0
   const hasChanges =
     emailDraft !== customer.email ||
     phoneDraft !== (customer.phone ?? "") ||
-    notesDraft !== (customer.notes ?? "")
+    notesDraft !== (customer.notes ?? "") ||
+    provinceDraft !== (customer.province ?? "") ||
+    dateOfBirthDraft !== (customer.dateOfBirth ?? "") ||
+    vipStatusDraft !== (customer.vipStatus ?? false) ||
+    preferencesDraft !== (customer.preferences ?? "") ||
+    communicationPreferencesDraft !== (customer.communicationPreferences ?? "")
 
   function getCustomerPatchPayload(): CustomerPatchPayload {
     return {
       notes: notesDraft,
       email: emailDraft,
       phone: phoneDraft || null,
+      province: provinceDraft || null,
+      date_of_birth: dateOfBirthDraft || null,
+      vip_status: vipStatusDraft,
+      preferences: preferencesDraft || null,
+      communication_preferences: communicationPreferencesDraft || null,
     }
   }
 
@@ -311,6 +356,13 @@ export function CustomerDetailView({
               </div>
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground mt-1">
                 {customer.title && <Badge variant="outline">{customer.title}</Badge>}
+                {customer.vipStatus ? (
+                  <Badge variant="secondary" className="gap-1">
+                    <Star className="w-3 h-3" />
+                    VIP
+                  </Badge>
+                ) : null}
+                {isRepeatClient ? <Badge variant="outline">Repeat Client</Badge> : null}
                 <span className="inline-flex items-center gap-1">
                   <CalendarDays className="w-3 h-3" />
                   Customer since {formatDisplayDate(customer.createdAt)}
@@ -319,25 +371,38 @@ export function CustomerDetailView({
             </div>
           </div>
 
-          {canEditCustomers && (
+          {(canEditCustomers || canCreateBooking) && (
             <div
               className={`flex items-center gap-2${
                 presentation === "modal" ? " mr-10 sm:mr-12" : ""
               }`}
             >
               {!isEditing ? (
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setEditingStartedUpdatedAt(customer.updatedAt)
-                    setHasExternalUpdate(false)
-                    clearCustomerConflict()
-                    setIsEditing(true)
-                  }}
-                >
-                  <Pencil className="mr-2 h-4 w-4" />
-                  Edit
-                </Button>
+                <>
+                  {canCreateBooking && (
+                    <Button
+                      onClick={() => setNewBookingOpen(true)}
+                      data-testid="customer-new-booking-button"
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      New booking
+                    </Button>
+                  )}
+                  {canEditCustomers && (
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        setEditingStartedUpdatedAt(customer.updatedAt)
+                        setHasExternalUpdate(false)
+                        clearCustomerConflict()
+                        setIsEditing(true)
+                      }}
+                    >
+                      <Pencil className="mr-2 h-4 w-4" />
+                      Edit
+                    </Button>
+                  )}
+                </>
               ) : (
                 <>
                   <Button
@@ -345,6 +410,11 @@ export function CustomerDetailView({
                       setEmailDraft(customer.email)
                       setPhoneDraft(customer.phone ?? "")
                       setNotesDraft(customer.notes ?? "")
+                      setProvinceDraft(customer.province ?? "")
+                      setDateOfBirthDraft(customer.dateOfBirth ?? "")
+                      setVipStatusDraft(customer.vipStatus ?? false)
+                      setPreferencesDraft(customer.preferences ?? "")
+                      setCommunicationPreferencesDraft(customer.communicationPreferences ?? "")
                       setIsEditing(false)
                       setHasExternalUpdate(false)
                       clearCustomerConflict()
@@ -447,6 +517,101 @@ export function CustomerDetailView({
                 <Globe className="w-3 h-3" />
                 {customer.country ?? "Not provided"}
               </Badge>
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Province</Label>
+              <Input
+                value={provinceDraft}
+                onChange={(event) => setProvinceDraft(event.target.value)}
+                readOnly={!canEditCustomers || !isEditing}
+                disabled={isSaving}
+                placeholder={isEditing ? "Enter province" : "Not provided"}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Birthday / Date of Birth</Label>
+              <Input
+                type={isEditing ? "date" : "text"}
+                value={
+                  isEditing
+                    ? dateOfBirthDraft
+                    : customer.dateOfBirth
+                      ? formatDisplayDate(customer.dateOfBirth)
+                      : "Not provided"
+                }
+                onChange={(event) => setDateOfBirthDraft(event.target.value)}
+                readOnly={!canEditCustomers || !isEditing}
+                disabled={isSaving}
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="space-y-2">
+              <Label>VIP Status</Label>
+              <div className="flex h-10 items-center gap-2 rounded-md border px-3">
+                <Switch
+                  checked={vipStatusDraft}
+                  onCheckedChange={setVipStatusDraft}
+                  disabled={!canEditCustomers || !isEditing || isSaving}
+                  aria-label="VIP status"
+                />
+                <span className="text-sm text-muted-foreground">
+                  {vipStatusDraft ? "VIP client" : "Standard client"}
+                </span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>First Travel Date</Label>
+              <Input
+                value={
+                  customer.firstTravelDate
+                    ? formatDisplayDate(customer.firstTravelDate)
+                    : "Not recorded"
+                }
+                readOnly
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Last Travel Date</Label>
+              <Input
+                value={
+                  customer.lastTravelDate
+                    ? formatDisplayDate(customer.lastTravelDate)
+                    : "Not recorded"
+                }
+                readOnly
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Preferences</Label>
+              <Textarea
+                value={preferencesDraft}
+                onChange={(event) => setPreferencesDraft(event.target.value)}
+                maxLength={2000}
+                className="min-h-24"
+                disabled={!canEditCustomers || !isEditing || isSaving}
+                readOnly={!canEditCustomers || !isEditing}
+                placeholder={isEditing ? "Service, suite, dietary, or journey preferences..." : "Not provided"}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Communication Preferences</Label>
+              <Textarea
+                value={communicationPreferencesDraft}
+                onChange={(event) => setCommunicationPreferencesDraft(event.target.value)}
+                maxLength={1000}
+                className="min-h-24"
+                disabled={!canEditCustomers || !isEditing || isSaving}
+                readOnly={!canEditCustomers || !isEditing}
+                placeholder={isEditing ? "Preferred channels, timing, or contact notes..." : "Not provided"}
+              />
             </div>
           </div>
         </CardContent>
@@ -665,6 +830,24 @@ export function CustomerDetailView({
           />
         </CardContent>
       </Card>
+
+      {canCreateBooking && (
+        <NewEnquiryDialog
+          open={newBookingOpen}
+          onOpenChange={setNewBookingOpen}
+          onSaved={(jobId) => router.push(`/app/bookings/${jobId}`)}
+          presetCustomer={{
+            id: customer.id,
+            title: customer.title,
+            firstName: customer.firstName,
+            lastName: customer.lastName,
+            email: customer.email,
+            phone: customer.phone,
+            country: customer.country,
+            province: customer.province,
+          }}
+        />
+      )}
     </div>
   )
 }

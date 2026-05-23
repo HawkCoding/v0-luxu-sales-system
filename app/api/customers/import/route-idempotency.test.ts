@@ -20,6 +20,10 @@ interface MockState {
 
 function createMockSupabase(state: MockState) {
   return {
+    rpc: vi.fn(async () => ({
+      data: 1,
+      error: null,
+    })),
     auth: {
       getUser: vi.fn().mockResolvedValue({
         data: { user: { id: USER_ID, email: "manager@example.com" } },
@@ -86,6 +90,17 @@ function createMockSupabase(state: MockState) {
           select: async () => ({
             data: [],
             error: null,
+          }),
+        }
+      }
+
+      if (table === "suppliers") {
+        return {
+          select: () => ({
+            in: async () => ({
+              data: [{ id: SUPPLIER_ID, name: "Blue Train", kind: "train_operator" }],
+              error: null,
+            }),
           }),
         }
       }
@@ -189,6 +204,7 @@ describe("POST /api/customers/import idempotency", () => {
     })
     expect(state.precheckCustomerIds.sort()).toEqual(["cust-existing", "cust-new"])
     expect(state.bookingInsertRows).toHaveLength(1)
+    expect(state.bookingInsertRows[0]?.booking_number).toBe("BT-2026-0001")
     expect(state.bookingInsertRows[0]?.hotel_supplier_id).toBe(SUPPLIER_ID)
 
     const insertedBookingMeta = (state.bookingInsertRows[0].extracted_json as {

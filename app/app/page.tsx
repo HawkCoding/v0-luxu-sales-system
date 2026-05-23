@@ -21,10 +21,13 @@ export default function DashboardPage() {
     count: data.bookings.filter((b: { stage: PipelineStage }) => getCanonicalPipelineStage(b.stage) === s.key).length,
   }))
 
-  const openJobs = data.bookings.filter((b: { stage: string }) => !["closed", "lost"].includes(b.stage)).length
+  const openJobs = data.bookings.filter((b: { stage: PipelineStage }) => {
+    const canonical = getCanonicalPipelineStage(b.stage)
+    return canonical !== "closed" && canonical !== "lost"
+  }).length
   const quotedJobs = data.bookings.filter((b: { stage: PipelineStage }) => getCanonicalPipelineStage(b.stage) === "quote_sent").length
-  const depositsPaid = data.bookings.filter((b: { stage: string }) => b.stage === "deposit_paid").length
-  const fullPayments = data.bookings.filter((b: { stage: string }) => b.stage === "final_paid").length
+  const depositsPaid = data.bookings.filter((b: { stage: PipelineStage }) => getCanonicalPipelineStage(b.stage) === "deposit_paid").length
+  const fullPayments = data.bookings.filter((b: { stage: PipelineStage }) => getCanonicalPipelineStage(b.stage) === "final_paid").length
 
   const recentJobs = [...data.bookings].sort((a: { createdAt: string }, b: { createdAt: string }) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 5)
 

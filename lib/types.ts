@@ -101,8 +101,18 @@ export interface Customer {
   email: string
   phone: string | null
   country: string | null
+  province?: string | null
   title?: string | null
   notes?: string | null
+  dateOfBirth?: string | null
+  vipStatus?: boolean
+  preferences?: string | null
+  communicationPreferences?: string | null
+  firstTravelDate?: string | null
+  firstTravelDateDisplay?: string
+  lastTravelDate?: string | null
+  lastTravelDateDisplay?: string
+  isRepeatClient?: boolean
   createdAt: string
   createdAtDisplay?: string
   updatedAt?: string
@@ -135,6 +145,7 @@ export interface Booking {
   ownerUserId: string | null
   assignedSalespersonId: string | null
   assignedSalespersonName?: string | null
+  isRepeatClientAtCreation: boolean
   departureDate: string | null
   departureDateDisplay?: string
   durationNights: number | null
@@ -181,25 +192,29 @@ export interface Booking {
   closedAt: string | null
   depositPaid: boolean
   invoiceBalance: number | null
-  cancelReason: string | null
   cancelledAt: string | null
   cancelledAtDisplay?: string
   refundStatus: "refunded" | "not_refunded" | null
   refundAmount: number | null
   refundReference: string | null
   refundedAt: string | null
+  outcome: Outcome
+  outcomeReasonId: string | null
+  outcomeNotes: string | null
+  outcomeSetAt: string | null
+  outcomeSetAtDisplay?: string
+  outcomeSetBy: string | null
 }
 
-export const CANCEL_REASONS = [
-  "Client cancelled",
-  "No availability",
-  "Price or payment concern",
-  "Duplicate request",
-  "Created by mistake",
-  "Other",
-] as const
+export type Outcome = "Open" | "Won" | "Lost" | "Cancelled"
 
-export type CancelReason = (typeof CANCEL_REASONS)[number]
+export interface OutcomeReason {
+  id: string
+  label: string
+  appliesTo: "Lost" | "Cancelled" | "Both"
+  active: boolean
+  createdAt: string
+}
 
 export type SupplierKind =
   | "train_operator"
@@ -273,7 +288,7 @@ const JOURNEY_SUPPLIER_VOCABULARY: SupplierVocabulary = {
   scheduleFields: {
     dateFromLabel: "Departure date",
     dateToLabel: "Arrival date",
-    timeStartLabel: "Boarding time",
+    timeStartLabel: "Departure time",
     timeEndLabel: "Arrival time",
   },
 }
@@ -342,6 +357,12 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     originLabel: "Pickup point",
     destinationLabel: "Return point",
     durationLabel: "days",
+    scheduleFields: {
+      dateFromLabel: "Pickup date",
+      dateToLabel: "Return date",
+      timeStartLabel: "Pickup time",
+      timeEndLabel: "Return time",
+    },
   },
 
   tour_operator: {
@@ -399,11 +420,36 @@ export interface Location {
   id: string
   name: string
   country: string
+  parentLocationId: string | null
   regionCode: string | null
   createdAt: string
   createdAtDisplay?: string
   updatedAt: string
   updatedAtDisplay?: string
+}
+
+export type RouteDirectionMode = "one_way" | "round_trip" | "loop"
+
+export type CommissionKind = "percent" | "per_person"
+
+export interface CommissionConfig {
+  type: CommissionKind
+  value: number
+}
+
+export type CommissionSource = "line" | "route" | "supplier" | "none"
+
+export interface ResolvedCommission {
+  type: CommissionKind | null
+  value: number
+  source: CommissionSource
+}
+
+export interface CommissionBreakdown {
+  type: CommissionKind
+  value: number
+  amount: number
+  source: CommissionSource
 }
 
 export interface SupplierRoute {
@@ -415,6 +461,9 @@ export interface SupplierRoute {
   pickupPoint?: string | null
   dropoffPoint?: string | null
   vehicleRentalDetails?: VehicleRentalRouteDetails | null
+  directionMode?: RouteDirectionMode
+  commissionType?: CommissionKind | null
+  commissionValue?: number | null
   active: boolean
   createdAt: string
   createdAtDisplay?: string
@@ -432,6 +481,13 @@ export interface VehicleRentalRouteDetails {
   updatedAt: string
 }
 
+export interface SupplierVariantValue {
+  id: string
+  name: string
+  sortOrder: number
+  archivedAt: string | null
+}
+
 export interface SupplierSuiteType {
   id: string
   supplierId: string
@@ -440,6 +496,13 @@ export interface SupplierSuiteType {
   luggageCapacity?: number | null
   description?: string | null
   active: boolean
+  sortOrder?: number
+  bedroomTypeIds?: string[]
+  bedroomLayoutIds?: string[]
+  bathroomTypeIds?: string[]
+  bedroomTypes?: string[]
+  bedroomLayouts?: string[]
+  bathroomTypes?: string[]
   createdAt: string
   createdAtDisplay?: string
   updatedAt: string
@@ -450,6 +513,7 @@ export interface SupplierRateCard {
   id: string
   routeId: string
   suiteTypeId: string
+  rateTypeId: string
   pricePerPerson: number
   childPrice: number | null
   infantPrice: number | null
@@ -461,6 +525,50 @@ export interface SupplierRateCard {
   createdAt: string
   createdAtDisplay?: string
 }
+
+export interface RateType {
+  id: string
+  code: string
+  name: string
+  sortOrder: number
+  isDefault: boolean
+  archivedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PricingSnapshot {
+  source: "pricing_engine"
+  pricingMode: "rate_card" | "fixed_package"
+  packageId: string
+  packageName: string
+  legId: string | null
+  legLabel: string | null
+  supplierId: string | null
+  supplierName: string | null
+  supplierKind: SupplierKind | null
+  routeId: string | null
+  routeName: string | null
+  suiteTypeId: string | null
+  suiteTypeName: string | null
+  rateCardId: string | null
+  rateTypeId?: string | null
+  rateTypeCode?: string | null
+  rateTypeName?: string | null
+  travelDate: string
+  passengerKind: "adult" | "child" | "infant" | "single_supplement" | "service" | "included"
+  baseUnitPrice: number
+  markupPct: number
+  singleSupplementPct: number | null
+  serviceType: "transfer" | "rental" | null
+  directionMode?: RouteDirectionMode | null
+  direction?: RouteDirection | null
+  suiteVariants?: { label: string; values: string[] }[]
+  markupAmount?: number | null
+  commission?: CommissionBreakdown | null
+}
+
+export type RouteDirection = "outbound" | "return" | "round_trip"
 
 export interface SupplierPackage {
   id: string
@@ -500,6 +608,7 @@ export interface PackageDetail {
   description: string | null
   durationNights: number | null
   singleSupplementPct: number
+  markupPct?: number
   fixedPricePerPerson: number | null
   currency: string
   active: boolean
@@ -524,6 +633,7 @@ export interface Package {
   priceTo: number | null
   trainRouteName: string | null
   fixedPricePerPerson: number | null
+  markupPct?: number
 }
 
 export interface SupplierEmail {
@@ -547,10 +657,17 @@ export interface Supplier {
   location: string | null
   locationDetail: string | null
   locationId: string | null
+  locationAreaId: string | null
   description: string | null
   notes: string | null
   active: boolean
   singleSupplementPct: number
+  infantMaxAge: number | null
+  childMaxAge: number | null
+  defaultCommissionType: CommissionKind | null
+  defaultCommissionValue: number | null
+  defaultTimeStart: string | null
+  defaultTimeEnd: string | null
   createdAt: string
   createdAtDisplay?: string
   updatedAt: string
@@ -563,6 +680,10 @@ export interface SupplierDetail extends Supplier {
   routes: SupplierRoute[]
   rateCards: SupplierRateCard[]
   locations: Location[]
+  bedroomTypes: SupplierVariantValue[]
+  bedroomLayouts: SupplierVariantValue[]
+  bathroomTypes: SupplierVariantValue[]
+  rateTypes: RateType[]
 }
 
 export interface BookingTransportRequest {
@@ -597,7 +718,7 @@ export interface BookingVehicleRentalDetails {
   updatedAt: string
 }
 
-export type BookingScheduleSupplierKind = "hotel_property" | "train_operator"
+export type BookingScheduleSupplierKind = "hotel_property" | "train_operator" | "vehicle_rental"
 
 export interface BookingSupplierSchedule {
   id: string
@@ -635,6 +756,13 @@ export interface Job {
   createdAtDisplay?: string
   updatedAt: string
   updatedAtDisplay?: string
+  depositPaid?: boolean | null
+  invoiceBalance?: number | null
+  cancelReason?: string | null
+  cancelledAt?: string | null
+  cancelledAtDisplay?: string
+  outcome?: Outcome
+  isRepeatClientAtCreation?: boolean
 }
 
 export interface Enquiry {
@@ -701,14 +829,24 @@ export interface Itinerary {
   acceptedAtDisplay?: string
 }
 
-export type QuoteStatus = "draft" | "pricing_incomplete" | "ready" | "sent" | "accepted"
+export type QuoteStatus =
+  | "draft"
+  | "pricing_incomplete"
+  | "ready"
+  | "sent"
+  | "accepted"
+  | "expired"
+  | "superseded"
+  | "cancelled"
 
 export interface QuoteLineItem {
   description: string
   supplierDescription?: string | null
   qty: number
+  status?: string | null
   unitPrice: number
   total: number
+  pricingSnapshot?: PricingSnapshot | null
 }
 
 export interface Quote {
@@ -731,17 +869,25 @@ export interface Quote {
   overridePin?: string
   overrideReason?: string
   noPackageMatch?: boolean
+  title?: string | null
+  amountReceived?: number | null
+  outstandingAmount?: number | null
+  pdfDocumentId?: string | null
 }
 
 export interface Payment {
   id: string
   jobId: string
+  invoiceId?: string | null
   amount: number
+  paymentKind?: "capture" | "refund"
+  paymentDate?: string
   receivedAt: string
   receivedAtDisplay?: string
   method: string
   reference: string
   notes: string
+  proofStoragePath?: string | null
 }
 
 export type InvoiceKind = "deposit" | "final"
@@ -766,16 +912,36 @@ export interface Invoice {
   createdAtDisplay?: string
 }
 
-export type DocumentKind = "quote_pdf" | "invoice_pdf" | "voucher_pdf" | "summary_pdf" | "other"
+export type DocumentKind =
+  | "quote_pdf"
+  | "invoice_pdf"
+  | "voucher_pdf"
+  | "summary_pdf"
+  | "proof_of_payment"
+  | "other"
 
 export interface DocRecord {
   id: string
   jobId: string
   kind: DocumentKind
   status?: "required" | "received" | "generated" | "sent"
+  fileName?: string | null
+  uploadedBy?: string | null
+  uploadedByName?: string | null
+  paymentId?: string | null
   generatedAt: string
   generatedAtDisplay?: string
   urlOrBlobRef: string
+}
+
+export interface BookingNote {
+  id: string
+  bookingId: string
+  authorId: string | null
+  authorName: string
+  body: string
+  createdAt: string
+  updatedAt: string
 }
 
 export interface Template {
@@ -853,6 +1019,31 @@ export interface VoucherTemplate {
   footer_phone: string
   footer_email: string
   guidance_text: string
+}
+
+export interface SalespersonCredential {
+  id: string
+  profile_id: string
+  email_address: string
+  smtp_host: string
+  smtp_port: number
+  smtp_encryption: string
+  imap_host: string
+  imap_port: number
+  imap_encryption: string
+  imap_sent_folder: string
+  encrypted_password: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface BackupRecord {
+  id: string
+  storage_path: string
+  size_bytes: number | null
+  created_at: string
+  created_by: string | null
+  retained_until: string | null
 }
 
 export const VOUCHER_TEMPLATE_DEFAULTS: VoucherTemplate = {
