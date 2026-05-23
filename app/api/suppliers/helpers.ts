@@ -13,6 +13,9 @@ export type RefTableName =
   | "routes"
   | "supplier_emails"
   | "suite_types"
+  | "bedroom_types"
+  | "bedroom_layouts"
+  | "bathroom_types"
 
 export async function requireAuthenticatedUser() {
   const supabase = await createSessionClient()
@@ -197,6 +200,7 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
       .from("suite_types")
       .select("*")
       .eq("supplier_id", supplierId)
+      .order("sort_order", { ascending: true })
       .order("name", { ascending: true }),
     supabase
       .from("supplier_emails")
@@ -381,6 +385,75 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     }
   }
 
+  const suiteTypeIds = (suiteTypes ?? []).map((row) => row.id)
+  const [
+    bedroomTypesResult,
+    bedroomLayoutsResult,
+    bathroomTypesResult,
+    stBedroomTypesResult,
+    stBedroomLayoutsResult,
+    stBathroomTypesResult,
+    rateTypesResult,
+  ] = await Promise.all([
+    supabase
+      .from("bedroom_types")
+      .select("*")
+      .eq("supplier_id", supplierId)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true }),
+    supabase
+      .from("bedroom_layouts")
+      .select("*")
+      .eq("supplier_id", supplierId)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true }),
+    supabase
+      .from("bathroom_types")
+      .select("*")
+      .eq("supplier_id", supplierId)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true }),
+    suiteTypeIds.length > 0
+      ? supabase.from("suite_type_bedroom_types").select("*").in("suite_type_id", suiteTypeIds)
+      : Promise.resolve({ data: [], error: null as null }),
+    suiteTypeIds.length > 0
+      ? supabase.from("suite_type_bedroom_layouts").select("*").in("suite_type_id", suiteTypeIds)
+      : Promise.resolve({ data: [], error: null as null }),
+    suiteTypeIds.length > 0
+      ? supabase.from("suite_type_bathroom_types").select("*").in("suite_type_id", suiteTypeIds)
+      : Promise.resolve({ data: [], error: null as null }),
+    supabase
+      .from("rate_types")
+      .select("*")
+      .is("archived_at", null)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true }),
+  ])
+
+  const variantErrors = [
+    bedroomTypesResult.error,
+    bedroomLayoutsResult.error,
+    bathroomTypesResult.error,
+    stBedroomTypesResult.error,
+    stBedroomLayoutsResult.error,
+    stBathroomTypesResult.error,
+    rateTypesResult.error,
+  ].filter((err) => Boolean(err))
+
+  if (variantErrors.length > 0) {
+    console.error("Failed to load supplier suite variant vocabulary", {
+      supplierId,
+      supplierSlug: slug,
+      errors: variantErrors,
+    })
+    return {
+      error: NextResponse.json(
+        { error: "Failed to load supplier suite vocabulary" },
+        { status: 500 },
+      ),
+    }
+  }
+
   return {
     supplier,
     suiteTypes: suiteTypes ?? [],
@@ -389,5 +462,12 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     rateCards: rateCards ?? [],
     locations: locations ?? [],
     vehicleRentalRouteDetails: vehicleRentalRouteDetails ?? [],
+    bedroomTypes: bedroomTypesResult.data ?? [],
+    bedroomLayouts: bedroomLayoutsResult.data ?? [],
+    bathroomTypes: bathroomTypesResult.data ?? [],
+    suiteTypeBedroomTypes: stBedroomTypesResult.data ?? [],
+    suiteTypeBedroomLayouts: stBedroomLayoutsResult.data ?? [],
+    suiteTypeBathroomTypes: stBathroomTypesResult.data ?? [],
+    rateTypes: rateTypesResult.data ?? [],
   }
 }

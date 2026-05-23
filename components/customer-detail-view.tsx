@@ -3,9 +3,10 @@
 import Link from "next/link"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useSWRConfig } from "swr"
-import { AlertCircle, ArrowLeft, CalendarDays, Globe, Link2, Mail, Pencil, Phone, Save, Star, Trash2 } from "lucide-react"
+import { AlertCircle, ArrowLeft, CalendarDays, Globe, Link2, Mail, Pencil, Phone, Plus, Save, Star, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { LinkedAccountForm, type LinkedAccountFormValue } from "@/components/linked-account-form"
+import { NewEnquiryDialog } from "@/components/new-enquiry-dialog"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -64,8 +65,11 @@ export function CustomerDetailView({
   const { data, isLoading, error, mutate } = useCustomerDetail(customerId)
   const { mutate: mutateGlobal } = useSWRConfig()
   const { can } = useRole()
+  const router = useRouter()
   const { others, setEditing: setPresenceEditing } = useRecordPresence("customer", customerId)
   const canEditCustomers = can("edit:customers")
+  const canCreateBooking = can("create:enquiry")
+  const [newBookingOpen, setNewBookingOpen] = useState(false)
   const [emailDraft, setEmailDraft] = useState("")
   const [phoneDraft, setPhoneDraft] = useState("")
   const [notesDraft, setNotesDraft] = useState("")
@@ -366,25 +370,38 @@ export function CustomerDetailView({
             </div>
           </div>
 
-          {canEditCustomers && (
+          {(canEditCustomers || canCreateBooking) && (
             <div
               className={`flex items-center gap-2${
                 presentation === "modal" ? " mr-10 sm:mr-12" : ""
               }`}
             >
               {!isEditing ? (
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setEditingStartedUpdatedAt(customer.updatedAt)
-                    setHasExternalUpdate(false)
-                    clearCustomerConflict()
-                    setIsEditing(true)
-                  }}
-                >
-                  <Pencil className="mr-2 h-4 w-4" />
-                  Edit
-                </Button>
+                <>
+                  {canCreateBooking && (
+                    <Button
+                      onClick={() => setNewBookingOpen(true)}
+                      data-testid="customer-new-booking-button"
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      New booking
+                    </Button>
+                  )}
+                  {canEditCustomers && (
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        setEditingStartedUpdatedAt(customer.updatedAt)
+                        setHasExternalUpdate(false)
+                        clearCustomerConflict()
+                        setIsEditing(true)
+                      }}
+                    >
+                      <Pencil className="mr-2 h-4 w-4" />
+                      Edit
+                    </Button>
+                  )}
+                </>
               ) : (
                 <>
                   <Button
@@ -812,6 +829,24 @@ export function CustomerDetailView({
           />
         </CardContent>
       </Card>
+
+      {canCreateBooking && (
+        <NewEnquiryDialog
+          open={newBookingOpen}
+          onOpenChange={setNewBookingOpen}
+          onSaved={(jobId) => router.push(`/app/bookings/${jobId}`)}
+          presetCustomer={{
+            id: customer.id,
+            title: customer.title,
+            firstName: customer.firstName,
+            lastName: customer.lastName,
+            email: customer.email,
+            phone: customer.phone,
+            country: customer.country,
+            province: customer.province,
+          }}
+        />
+      )}
     </div>
   )
 }

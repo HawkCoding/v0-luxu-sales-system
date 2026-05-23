@@ -428,6 +428,30 @@ export interface Location {
   updatedAtDisplay?: string
 }
 
+export type RouteDirectionMode = "one_way" | "round_trip" | "loop"
+
+export type CommissionKind = "percent" | "per_person"
+
+export interface CommissionConfig {
+  type: CommissionKind
+  value: number
+}
+
+export type CommissionSource = "line" | "route" | "supplier" | "none"
+
+export interface ResolvedCommission {
+  type: CommissionKind | null
+  value: number
+  source: CommissionSource
+}
+
+export interface CommissionBreakdown {
+  type: CommissionKind
+  value: number
+  amount: number
+  source: CommissionSource
+}
+
 export interface SupplierRoute {
   id: string
   supplierId: string
@@ -437,6 +461,9 @@ export interface SupplierRoute {
   pickupPoint?: string | null
   dropoffPoint?: string | null
   vehicleRentalDetails?: VehicleRentalRouteDetails | null
+  directionMode?: RouteDirectionMode
+  commissionType?: CommissionKind | null
+  commissionValue?: number | null
   active: boolean
   createdAt: string
   createdAtDisplay?: string
@@ -454,6 +481,13 @@ export interface VehicleRentalRouteDetails {
   updatedAt: string
 }
 
+export interface SupplierVariantValue {
+  id: string
+  name: string
+  sortOrder: number
+  archivedAt: string | null
+}
+
 export interface SupplierSuiteType {
   id: string
   supplierId: string
@@ -462,6 +496,13 @@ export interface SupplierSuiteType {
   luggageCapacity?: number | null
   description?: string | null
   active: boolean
+  sortOrder?: number
+  bedroomTypeIds?: string[]
+  bedroomLayoutIds?: string[]
+  bathroomTypeIds?: string[]
+  bedroomTypes?: string[]
+  bedroomLayouts?: string[]
+  bathroomTypes?: string[]
   createdAt: string
   createdAtDisplay?: string
   updatedAt: string
@@ -472,6 +513,7 @@ export interface SupplierRateCard {
   id: string
   routeId: string
   suiteTypeId: string
+  rateTypeId: string
   pricePerPerson: number
   childPrice: number | null
   infantPrice: number | null
@@ -482,6 +524,17 @@ export interface SupplierRateCard {
   validToDisplay?: string
   createdAt: string
   createdAtDisplay?: string
+}
+
+export interface RateType {
+  id: string
+  code: string
+  name: string
+  sortOrder: number
+  isDefault: boolean
+  archivedAt: string | null
+  createdAt: string
+  updatedAt: string
 }
 
 export interface PricingSnapshot {
@@ -499,13 +552,23 @@ export interface PricingSnapshot {
   suiteTypeId: string | null
   suiteTypeName: string | null
   rateCardId: string | null
+  rateTypeId?: string | null
+  rateTypeCode?: string | null
+  rateTypeName?: string | null
   travelDate: string
   passengerKind: "adult" | "child" | "infant" | "single_supplement" | "service" | "included"
   baseUnitPrice: number
   markupPct: number
   singleSupplementPct: number | null
   serviceType: "transfer" | "rental" | null
+  directionMode?: RouteDirectionMode | null
+  direction?: RouteDirection | null
+  suiteVariants?: { label: string; values: string[] }[]
+  markupAmount?: number | null
+  commission?: CommissionBreakdown | null
 }
+
+export type RouteDirection = "outbound" | "return" | "round_trip"
 
 export interface SupplierPackage {
   id: string
@@ -599,6 +662,10 @@ export interface Supplier {
   notes: string | null
   active: boolean
   singleSupplementPct: number
+  infantMaxAge: number | null
+  childMaxAge: number | null
+  defaultCommissionType: CommissionKind | null
+  defaultCommissionValue: number | null
   defaultTimeStart: string | null
   defaultTimeEnd: string | null
   createdAt: string
@@ -613,6 +680,10 @@ export interface SupplierDetail extends Supplier {
   routes: SupplierRoute[]
   rateCards: SupplierRateCard[]
   locations: Location[]
+  bedroomTypes: SupplierVariantValue[]
+  bedroomLayouts: SupplierVariantValue[]
+  bathroomTypes: SupplierVariantValue[]
+  rateTypes: RateType[]
 }
 
 export interface BookingTransportRequest {

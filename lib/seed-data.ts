@@ -44,17 +44,14 @@ export const jobs: Job[] = [
   { id: "j23", jobNumber: "RR-2025-0023", ownerUser: "consultant", customerId: "c11", consultant: "LB", purpose: "reservation", source: "web_form", stage: "final_paid", createdAt: "2025-11-22T09:05:00Z", updatedAt: "2025-11-27T16:00:00Z", outcome: "Open" },
 ]
 
+// Bidirectional routes — each row covers both legs.
+// Direction (outbound/return/round_trip) is captured per-quote-line, not here.
 const directions = [
-  "Pretoria to Cape Town",
-  "Cape Town to Pretoria",
-  "Pretoria to Durban",
-  "Durban to Pretoria",
-  "Pretoria to Victoria Falls",
-  "Victoria Falls to Pretoria",
-  "Cape Town to Dar es Salaam",
-  "Dar es Salaam to Cape Town",
-  "Pretoria to Swakopmund",
-  "Swakopmund to Pretoria",
+  "Pretoria ↔ Cape Town",
+  "Pretoria ↔ Durban",
+  "Pretoria ↔ Victoria Falls",
+  "Pretoria ↔ Swakopmund",
+  "Cape Town ↔ Dar es Salaam",
 ]
 
 export const enquiries: Enquiry[] = [
@@ -162,26 +159,19 @@ export const auditLogs: AuditLog[] = [
   { id: "a8", actor: "consultant", entityType: "Payment", entityId: "p7", action: "credit_adjustment", metaJson: JSON.stringify({ amount: -2000, reason: "Service not rendered" }), createdAt: "2025-11-08T15:00:00Z" },
 ]
 
+// One priced row per (route, suite). Variant attributes (bedroom type, bedroom layout,
+// bathroom type) are M:N joins on the live `suite_types` rows in Supabase.
 export const rateCards: RateCard[] = [
-  { direction: "Pretoria to Cape Town", suiteType: "Pullman Twin Suite", pricePerPerson: 24900, currency: "ZAR" },
-  { direction: "Pretoria to Cape Town", suiteType: "Pullman Double Suite", pricePerPerson: 24900, currency: "ZAR" },
-  { direction: "Pretoria to Cape Town", suiteType: "Deluxe Twin Suite", pricePerPerson: 38500, currency: "ZAR" },
-  { direction: "Pretoria to Cape Town", suiteType: "Deluxe Double Suite", pricePerPerson: 38500, currency: "ZAR" },
-  { direction: "Pretoria to Cape Town", suiteType: "Royal Twin Suite", pricePerPerson: 58000, currency: "ZAR" },
-  { direction: "Pretoria to Cape Town", suiteType: "Royal Double Suite", pricePerPerson: 62000, currency: "ZAR" },
-  { direction: "Cape Town to Pretoria", suiteType: "Pullman Twin Suite", pricePerPerson: 24900, currency: "ZAR" },
-  { direction: "Cape Town to Pretoria", suiteType: "Pullman Double Suite", pricePerPerson: 24900, currency: "ZAR" },
-  { direction: "Cape Town to Pretoria", suiteType: "Deluxe Twin Suite", pricePerPerson: 38500, currency: "ZAR" },
-  { direction: "Cape Town to Pretoria", suiteType: "Deluxe Double Suite", pricePerPerson: 38500, currency: "ZAR" },
-  { direction: "Cape Town to Pretoria", suiteType: "Royal Twin Suite", pricePerPerson: 58000, currency: "ZAR" },
-  { direction: "Cape Town to Pretoria", suiteType: "Royal Double Suite", pricePerPerson: 62000, currency: "ZAR" },
-  { direction: "Pretoria to Victoria Falls", suiteType: "Pullman Twin Suite", pricePerPerson: 32000, currency: "ZAR" },
-  { direction: "Pretoria to Victoria Falls", suiteType: "Deluxe Double Suite", pricePerPerson: 48500, currency: "ZAR" },
-  { direction: "Pretoria to Victoria Falls", suiteType: "Royal Double Suite", pricePerPerson: 72000, currency: "ZAR" },
-  { direction: "Pretoria to Durban", suiteType: "Pullman Double Suite", pricePerPerson: 18500, currency: "ZAR" },
-  { direction: "Durban to Pretoria", suiteType: "Pullman Double Suite", pricePerPerson: 18500, currency: "ZAR" },
-  { direction: "Pretoria to Swakopmund", suiteType: "Deluxe Double Suite", pricePerPerson: 55000, currency: "ZAR" },
-  { direction: "Pretoria to Swakopmund", suiteType: "Royal Double Suite", pricePerPerson: 78000, currency: "ZAR" },
+  { direction: "Pretoria ↔ Cape Town", suiteType: "Pullman", pricePerPerson: 24900, currency: "ZAR" },
+  { direction: "Pretoria ↔ Cape Town", suiteType: "Deluxe",  pricePerPerson: 38500, currency: "ZAR" },
+  { direction: "Pretoria ↔ Cape Town", suiteType: "Royal",   pricePerPerson: 62000, currency: "ZAR" },
+  { direction: "Pretoria ↔ Durban",         suiteType: "Pullman", pricePerPerson: 18500, currency: "ZAR" },
+  { direction: "Pretoria ↔ Victoria Falls", suiteType: "Deluxe",  pricePerPerson: 48500, currency: "ZAR" },
+  { direction: "Pretoria ↔ Victoria Falls", suiteType: "Royal",   pricePerPerson: 72000, currency: "ZAR" },
+  { direction: "Pretoria ↔ Swakopmund",     suiteType: "Deluxe",  pricePerPerson: 55000, currency: "ZAR" },
+  { direction: "Pretoria ↔ Swakopmund",     suiteType: "Royal",   pricePerPerson: 78000, currency: "ZAR" },
+  { direction: "Cape Town ↔ Dar es Salaam", suiteType: "Deluxe",  pricePerPerson: 64000, currency: "ZAR" },
+  { direction: "Cape Town ↔ Dar es Salaam", suiteType: "Royal",   pricePerPerson: 82500, currency: "ZAR" },
 ]
 
 export const pipelineHistories: PipelineHistory[] = [

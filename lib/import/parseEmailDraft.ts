@@ -44,6 +44,7 @@ export interface ParsedDraft {
     [key: string]: 'high' | 'low'
   }
   rawText: string
+  linkedCustomerId?: string
 }
 
 export interface ValidationResult {

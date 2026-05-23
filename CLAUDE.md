@@ -3,7 +3,9 @@
 ## Project Overview
 
 Luxus Sales System manages the full lifecycle of luxury train travel bookings:
-**New Enquiry → Quote Sent → Quote Accepted → Deposit Invoice Sent → Deposit Paid → Booking Made → Final Invoice Sent → Paid in Full → Voucher Sent → Closed**
+**New Enquiry → Quote Sent → Quote Accepted → Deposit Invoice Sent → Deposit Paid → Final Invoice Sent → Paid in Full → Voucher Sent → Closed**
+
+The supplier booking step is captured by the `deposit_paid` stage + the suppliers tab on the booking; there is no separate `booking_made` enum value. Stage transitions are enforced by `lib/pipeline/validate-transition.ts`.
 
 Key domain rules:
 - Quotes are valid 14 days and versioned (e.g. `BT-2026-0001-Q1`)
@@ -14,6 +16,21 @@ Key domain rules:
 User roles:
 - **Salesperson** — create jobs, manage customers, quotes, invoices, payments, vouchers
 - **Manager/Admin** — manage suppliers, pricing, follow-ups, settings, reporting
+
+---
+
+## Communication Style
+
+Default to terse, high-signal output. These rules override any verbose defaults.
+
+- Lead with the answer or the change. No preambles ("I'll help with that", "Let me…", "Sure!").
+- No trailing summary of what you just did — the diff or tool output speaks for itself. End-of-turn is one sentence max, only if something needs flagging.
+- Drop filler: "Certainly", "Great question", "You're absolutely right", "I hope this helps".
+- Plain questions get 1–3 sentence answers — no headers, no bullet lists unless the content is genuinely a list.
+- Reference code as `file:line` (or markdown link), don't paste blocks the user can already see in their editor.
+- State results directly; skip meta-commentary about what you're about to do next. Just do it.
+- Don't restate the user's request back to them.
+- When proposing options, give the recommendation first and the trade-off in one line — not a comparison matrix.
 
 ---
 

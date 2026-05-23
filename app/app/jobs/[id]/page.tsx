@@ -29,7 +29,6 @@ import {
   type PipelineStage,
 } from "@/lib/types"
 import { useRole } from "@/lib/role-context"
-import { useAuth } from "@/lib/auth-context"
 import { AlertCircle, ArrowLeft, CheckCircle2, ChevronRight, ChevronLeft as ChevronLeftIcon, UserRound, XCircle, Target } from "lucide-react"
 import type { Outcome, OutcomeReason } from "@/lib/types"
 import Link from "next/link"
@@ -41,6 +40,7 @@ import { JobDocumentsTab } from "@/components/job-documents-tab"
 import { JobAttachmentsTab } from "@/components/job-attachments-tab"
 import { JobInternalNotesTab } from "@/components/job-internal-notes-tab"
 import { JobAuditTab } from "@/components/job-audit-tab"
+import { BookingStageStepper } from "@/components/booking-stage-stepper"
 import { CancelBookingDialog } from "@/components/cancel-booking-dialog"
 import { StageTransitionModal } from "@/components/stage-transition-modal"
 import { GenerateDepositInvoiceDialog } from "@/components/generate-deposit-invoice-dialog"
@@ -158,7 +158,6 @@ export default function JobDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { data, isLoading, error, mutate } = useJobDetail(id)
   const { can, role } = useRole()
-  const { user: currentUser } = useAuth()
   const { others, setEditing } = useRecordPresence("job", id)
   const hasLoadError = Boolean(error)
   const [cancelOpen, setCancelOpen] = useState(false)
@@ -174,7 +173,6 @@ export default function JobDetailPage() {
   const [customerSearch, setCustomerSearch] = useState("")
   const [customerResults, setCustomerResults] = useState<Array<{ id: string; firstName: string; lastName: string; email: string }>>([])
   const [changingCustomer, setChangingCustomer] = useState(false)
-  const [reassigningSalesperson, setReassigningSalesperson] = useState(false)
   const [resolvingImportReview, setResolvingImportReview] = useState(false)
   const [lastJobPayload, setLastJobPayload] = useState<Record<string, unknown> | null>(null)
   const [activeTab, setActiveTab] = useState<JobDetailTab>(() => parseJobDetailTab(searchParams.get("tab")))
@@ -239,7 +237,6 @@ export default function JobDetailPage() {
     documents,
     correspondence,
     auditLogs,
-    salespeople = [],
     outcomeReasons = [],
     settings,
   } = data
@@ -247,11 +244,6 @@ export default function JobDetailPage() {
   const currentStageIdx = PIPELINE_STAGES.findIndex(s => s.key === currentStage)
   const consultantName = CONSULTANTS.find((consultant) => consultant.key === job.consultant)?.name ?? job.consultant ?? undefined
   const needsEmailReview = Boolean(enquiry?.emailImportNeedsReview)
-  const canReassignSalesperson = role === "manager" || role === "admin"
-  const canOwnBooking = role === "consultant" || role === "manager" || role === "admin"
-  const canClaimBooking = canOwnBooking && job.assignedSalespersonId === null
-  const canReleaseOwnBooking =
-    role === "consultant" && Boolean(currentUser?.id) && job.assignedSalespersonId === currentUser?.id
   const assignedSalespersonName = job.assignedSalespersonName ?? "Unassigned"
   const hasNoPackageMatchQuote = quotes.some((quote: { noPackageMatch?: boolean }) => quote.noPackageMatch)
   const hasSentDepositInvoice = invoices.some(
@@ -434,31 +426,6 @@ export default function JobDetailPage() {
     }
   }
 
-  const reassignSalesperson = async (salespersonId: string) => {
-    setReassigningSalesperson(true)
-    try {
-      const response = await fetch(`/api/jobs/${id}/ownership`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          salespersonId === "__unassigned"
-            ? { action: "release" }
-            : { action: "assign", userId: salespersonId },
-        ),
-      })
-      const payload = (await response.json().catch(() => ({}))) as { error?: string }
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Could not update salesperson")
-      }
-      await mutate()
-      toast.success("Salesperson reassigned")
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not update salesperson")
-    } finally {
-      setReassigningSalesperson(false)
-    }
-  }
-
   const setOutcome = async () => {
     setOutcomeSubmitting(true)
     try {
@@ -481,27 +448,6 @@ export default function JobDetailPage() {
       toast.error(error instanceof Error ? error.message : "Could not update outcome")
     } finally {
       setOutcomeSubmitting(false)
-    }
-  }
-
-  const updateOwnership = async (action: "claim" | "release") => {
-    setReassigningSalesperson(true)
-    try {
-      const response = await fetch(`/api/jobs/${id}/ownership`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
-      })
-      const payload = (await response.json().catch(() => ({}))) as { error?: string }
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Could not update ownership")
-      }
-      await mutate()
-      toast.success(action === "claim" ? "Booking claimed" : "Booking released")
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not update ownership")
-    } finally {
-      setReassigningSalesperson(false)
     }
   }
 
@@ -559,26 +505,44 @@ export default function JobDetailPage() {
               <span>{(job as Record<string, unknown>).ownerName as string ?? "Unassigned"}</span>
               <span className="text-muted-foreground/40">·</span>
               <span className="font-medium text-foreground">Salesperson</span>
-              {canReassignSalesperson ? (
-                <Select
-                  value={job.assignedSalespersonId ?? "__unassigned"}
-                  onValueChange={(value) => void reassignSalesperson(value)}
-                  disabled={reassigningSalesperson || isSavingJob}
-                >
-                  <SelectTrigger size="sm" className="h-8 w-56 bg-background">
-                    <SelectValue placeholder="Assign salesperson" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__unassigned">Unassigned</SelectItem>
-                    {salespeople.map((salesperson: { id: string; name: string; email: string }) => (
-                      <SelectItem key={salesperson.id} value={salesperson.id}>
-                        {salesperson.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <span>{assignedSalespersonName}</span>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <Label htmlFor="booking-supplier-reference" className="font-medium text-foreground">
+                Supplier ref
+              </Label>
+              {canEditSupplierRef ? (
+                <>
+                  <Input
+                    id="booking-supplier-reference"
+                    value={supplierRefDraft}
+                    onChange={(e) => setSupplierRefDraft(e.target.value)}
+                    onBlur={() => void saveSupplierReference()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        void saveSupplierReference()
+                      }
+                    }}
+                    placeholder="Supplier confirmation #"
+                    maxLength={120}
+                    disabled={supplierRefSaving}
+                    className="h-8 w-56 bg-background"
+                  />
+                  {supplierRefDirty ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8"
+                      onClick={() => void saveSupplierReference()}
+                      disabled={supplierRefSaving}
+                    >
+                      {supplierRefSaving ? "Saving..." : "Save"}
+                    </Button>
+                  ) : null}
+                </>
               ) : (
-                <span>{assignedSalespersonName}</span>
+                <span>{currentSupplierRef || "—"}</span>
               )}
               {canClaimBooking && (
                 <Button
@@ -647,17 +611,22 @@ export default function JobDetailPage() {
           </div>
         </div>
         {can("edit:pipeline") && (
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" disabled={currentStageIdx <= 0 || transitionSubmitting} onClick={() => moveStage("back")}>
-              <ChevronLeftIcon className="w-4 h-4 mr-1" /> Back
-            </Button>
-            <Button size="sm" disabled={currentStageIdx >= PIPELINE_STAGES.length - 1 || needsEmailReview || isSavingJob || transitionSubmitting} onClick={() => moveStage("forward")}>
-              Next <ChevronRight className="w-4 h-4 ml-1" />
-            </Button>
-            {can("cancel:booking") && job.stage !== "lost" && job.stage !== "closed" && (
-              <Button variant="destructive" size="sm" onClick={() => setCancelOpen(true)}>
-                <XCircle className="w-4 h-4 mr-1" /> Cancel Booking
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" disabled={currentStageIdx <= 0 || transitionSubmitting} onClick={() => moveStage("back")}>
+                <ChevronLeftIcon className="w-4 h-4 mr-1" /> Back
               </Button>
+              <Button size="sm" disabled={currentStageIdx >= PIPELINE_STAGES.length - 1 || needsEmailReview || isSavingJob || transitionSubmitting} onClick={() => moveStage("forward")}>
+                Next <ChevronRight className="w-4 h-4 ml-1" />
+              </Button>
+              {can("cancel:booking") && job.stage !== "lost" && job.stage !== "closed" && (
+                <Button variant="destructive" size="sm" onClick={() => setCancelOpen(true)}>
+                  <XCircle className="w-4 h-4 mr-1" /> Cancel Booking
+                </Button>
+              )}
+            </div>
+            {needsEmailReview && (
+              <p className="text-[11px] text-muted-foreground">Resolve email review to advance</p>
             )}
           </div>
         )}
@@ -699,23 +668,7 @@ export default function JobDetailPage() {
       )}
 
       {/* Stage Progress */}
-      <div className="flex items-center gap-1 overflow-x-auto pb-1">
-        {PIPELINE_STAGES.map((s, i) => (
-          <div
-            key={s.key}
-            className={`px-2.5 py-1 rounded text-[10px] font-medium whitespace-nowrap transition-colors ${
-              i === currentStageIdx
-                ? "bg-brand-gold text-card"
-                : i < currentStageIdx
-                  ? "bg-secondary text-foreground"
-                  : "bg-secondary/50 text-muted-foreground"
-            }`}
-            style={{ fontFamily: "var(--font-inter)" }}
-          >
-            {s.label}
-          </div>
-        ))}
-      </div>
+      <BookingStageStepper currentStage={job.stage as PipelineStage} />
 
       {/* Customer Info */}
       <Card>
@@ -850,6 +803,7 @@ export default function JobDetailPage() {
             payments={payments}
             jobId={id}
             mutate={mutate}
+            stage={currentStage}
           />
         </TabsContent>
         <TabsContent value="correspondence">
@@ -931,6 +885,9 @@ export default function JobDetailPage() {
         onOverride={async (overrideReason) => {
           if (!pendingStage) return
           await moveStageTo(pendingStage, { overrideReason })
+        }}
+        onSendFinalInvoice={() => {
+          setFinalInvoiceOpen(true)
         }}
       />
 

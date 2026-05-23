@@ -82,6 +82,7 @@ function createRateCard(leg: EditablePackageLeg): EditableSupplierRateCard {
     id: makeClientId(),
     routeId: routeId ?? "",
     suiteTypeId: leg.suiteTypes[0]?.id ?? "",
+    rateTypeId: "",
     pricePerPerson: 0,
     childPrice: null,
     infantPrice: null,

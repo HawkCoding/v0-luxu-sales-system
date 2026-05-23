@@ -14,6 +14,10 @@ import {
   Save,
   Trash2,
 } from "lucide-react"
+import { SortableList } from "@/components/ui/sortable-list"
+import { SuiteVocabularyCard, type EditableVocabularyValue } from "@/components/supplier/suite-vocabulary-card"
+import { CommissionControl } from "@/components/supplier/commission-control"
+import { VariantChipPicker } from "@/components/supplier/variant-chip-picker"
 import { toast } from "sonner"
 import {
   AlertDialog,
@@ -65,6 +69,12 @@ import {
   shouldAutoFillChild,
   shouldPromptChildUpdate,
 } from "@/lib/suppliers/auto-child-price"
+import { AgeRangeChip } from "@/components/ui/age-range-chip"
+import {
+  DEFAULT_AGE_BUCKETS,
+  resolveAgeBuckets,
+  type AgeBuckets,
+} from "@/lib/pricing/age-buckets"
 import { shortenUrl } from "@/lib/url"
 import { useLocations, useSupplierDetail } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
@@ -80,6 +90,9 @@ import {
   type SupplierRateCard,
   type SupplierSuiteType,
   type SupplierVocabulary,
+  type RouteDirectionMode,
+  type RateType,
+  type CommissionKind,
   type VehicleRentalRouteDetails,
 } from "@/lib/types"
 
@@ -100,6 +113,9 @@ interface EditableRoute {
   pickupPoint: string | null
   dropoffPoint: string | null
   vehicleRentalDetails: Omit<VehicleRentalRouteDetails, "routeId" | "createdAt" | "updatedAt"> | null
+  directionMode: RouteDirectionMode
+  commissionType: CommissionKind | null
+  commissionValue: number | null
   active: boolean
 }
 
@@ -110,12 +126,17 @@ interface EditableSuiteType {
   luggageCapacity: number | null
   description: string | null
   active: boolean
+  sortOrder: number
+  bedroomTypeIds: string[]
+  bedroomLayoutIds: string[]
+  bathroomTypeIds: string[]
 }
 
 interface EditableRateCard {
   id: string
   routeId: string
   suiteTypeId: string
+  rateTypeId: string
   pricePerPerson: number
   childPrice: number | null
   infantPrice: number | null
@@ -149,8 +170,15 @@ interface SupplierFormState {
   notes: string
   active: boolean
   singleSupplementPct: number
+  infantMaxAge: number | null
+  childMaxAge: number | null
+  defaultCommissionType: CommissionKind | null
+  defaultCommissionValue: number | null
   suiteTypes: EditableSuiteType[]
   packages: EditablePackage[]
+  bedroomTypes: EditableVocabularyValue[]
+  bedroomLayouts: EditableVocabularyValue[]
+  bathroomTypes: EditableVocabularyValue[]
 }
 
 const DRAFT_AUTOSAVE_DEBOUNCE_MS = 3000
@@ -247,11 +275,14 @@ function createEmptyRoute(locations: Location[], kind: SupplierKind): EditableRo
             oneWayFee: null,
           }
         : null,
+    directionMode: "one_way",
+    commissionType: null,
+    commissionValue: null,
     active: true,
   }
 }
 
-function createEmptySuiteType(): EditableSuiteType {
+function createEmptySuiteType(sortOrder = 0): EditableSuiteType {
   return {
     id: makeClientId(),
     name: "",
@@ -259,6 +290,10 @@ function createEmptySuiteType(): EditableSuiteType {
     luggageCapacity: null,
     description: null,
     active: true,
+    sortOrder,
+    bedroomTypeIds: [],
+    bedroomLayoutIds: [],
+    bathroomTypeIds: [],
   }
 }
 
@@ -309,13 +344,39 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
     notes: supplier.notes ?? "",
     active: supplier.active,
     singleSupplementPct: supplier.singleSupplementPct,
-    suiteTypes: supplier.suiteTypes.map((suiteType) => ({
+    infantMaxAge: supplier.infantMaxAge ?? null,
+    childMaxAge: supplier.childMaxAge ?? null,
+    defaultCommissionType: supplier.defaultCommissionType ?? null,
+    defaultCommissionValue: supplier.defaultCommissionValue ?? null,
+    suiteTypes: supplier.suiteTypes.map((suiteType, index) => ({
       id: suiteType.id,
       name: suiteType.name,
       passengerCapacity: suiteType.passengerCapacity ?? null,
       luggageCapacity: suiteType.luggageCapacity ?? null,
       description: suiteType.description ?? null,
       active: suiteType.active,
+      sortOrder: suiteType.sortOrder ?? index,
+      bedroomTypeIds: suiteType.bedroomTypeIds ?? [],
+      bedroomLayoutIds: suiteType.bedroomLayoutIds ?? [],
+      bathroomTypeIds: suiteType.bathroomTypeIds ?? [],
+    })),
+    bedroomTypes: (supplier.bedroomTypes ?? []).map((value, index) => ({
+      id: value.id,
+      name: value.name,
+      sortOrder: value.sortOrder ?? index,
+      archivedAt: value.archivedAt ?? null,
+    })),
+    bedroomLayouts: (supplier.bedroomLayouts ?? []).map((value, index) => ({
+      id: value.id,
+      name: value.name,
+      sortOrder: value.sortOrder ?? index,
+      archivedAt: value.archivedAt ?? null,
+    })),
+    bathroomTypes: (supplier.bathroomTypes ?? []).map((value, index) => ({
+      id: value.id,
+      name: value.name,
+      sortOrder: value.sortOrder ?? index,
+      archivedAt: value.archivedAt ?? null,
     })),
     packages: [
       {
@@ -335,12 +396,16 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
                 oneWayFee: route.vehicleRentalDetails.oneWayFee,
               }
             : null,
+          directionMode: route.directionMode ?? "one_way",
+          commissionType: route.commissionType ?? null,
+          commissionValue: route.commissionValue ?? null,
           active: route.active,
         })),
         rateCards: supplier.rateCards.map((rateCard) => ({
           id: rateCard.id,
           routeId: rateCard.routeId,
           suiteTypeId: rateCard.suiteTypeId,
+          rateTypeId: rateCard.rateTypeId,
           pricePerPerson: rateCard.pricePerPerson,
           childPrice: rateCard.childPrice,
           infantPrice: rateCard.infantPrice,
@@ -494,9 +559,15 @@ function getNextRateCardPeriodStart(pkg: EditablePackage): {
 function buildRateCardBusinessKey(rateCard: {
   suiteTypeId: string
   routeId: string
+  rateTypeId?: string
   validFrom: string
 }) {
-  return [rateCard.suiteTypeId, rateCard.routeId ?? "__null__", rateCard.validFrom].join("|")
+  return [
+    rateCard.rateTypeId ?? "__default__",
+    rateCard.suiteTypeId,
+    rateCard.routeId ?? "__null__",
+    rateCard.validFrom,
+  ].join("|")
 }
 
 function findPackageRateCardConflicts(
@@ -517,6 +588,7 @@ function findPackageRateCardConflicts(
     const businessKey = buildRateCardBusinessKey({
       suiteTypeId: rateCard.suiteTypeId,
       routeId: rateCard.routeId,
+      rateTypeId: rateCard.rateTypeId,
       validFrom,
     })
 
@@ -634,7 +706,7 @@ function findPackageRateCardOverlapConflicts(
       continue
     }
 
-    const key = [rateCard.suiteTypeId, rateCard.routeId ?? "__null__"].join("|")
+    const key = [rateCard.rateTypeId ?? "__default__", rateCard.suiteTypeId, rateCard.routeId ?? "__null__"].join("|")
     const next = groupedCards.get(key) ?? []
     next.push({
       suiteTypeId: rateCard.suiteTypeId,
@@ -1032,20 +1104,23 @@ interface RateCardMatrixEditorProps {
   routes: EditableRoute[]
   rateCards: EditableRateCard[]
   suiteTypes: EditableSuiteType[]
+  rateTypes: RateType[]
   packageIndex: number
   locationsById: Record<string, Location>
   vocabulary: SupplierVocabulary
   isTransport: boolean
   supplierKind: SupplierKind
   trainChildPriceRatio: number
-  onAddPeriod: (packageIndex: number, routeId: string) => void
-  onRemovePeriod: (packageIndex: number, routeId: string, periodKey: string) => void
+  ageBuckets: AgeBuckets
+  onAddPeriod: (packageIndex: number, routeId: string, rateTypeId: string) => void
+  onRemovePeriod: (packageIndex: number, routeId: string, periodKey: string, rateTypeId: string) => void
   onUpdatePeriodField: (
     packageIndex: number,
     routeId: string,
     periodKey: string,
     key: "validFrom" | "validTo" | "currency",
     value: string | null,
+    rateTypeId: string,
   ) => void
   onUpdateCellPrice: (
     packageIndex: number,
@@ -1064,6 +1139,7 @@ interface RateCardMatrixEditorProps {
     suiteTypeId: string,
     routeId: string,
     enabled: boolean,
+    rateTypeId: string,
   ) => void
   periodFieldErrors: Set<string>
 }
@@ -1074,6 +1150,7 @@ interface RateCardPricingCellProps {
   isTransport: boolean
   supplierKind: SupplierKind
   trainChildPriceRatio: number
+  ageBuckets: AgeBuckets
   onUpdateCellPrice: (
     packageIndex: number,
     rateCardId: string,
@@ -1093,6 +1170,7 @@ function RateCardPricingCell({
   isTransport,
   supplierKind,
   trainChildPriceRatio,
+  ageBuckets,
   onUpdateCellPrice,
   onUpdateCellField,
 }: RateCardPricingCellProps) {
@@ -1168,8 +1246,9 @@ function RateCardPricingCell({
   return (
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center gap-1">
-        <span className="w-16 shrink-0 text-xs text-muted-foreground">
+        <span className="flex w-16 shrink-0 flex-wrap items-center gap-1 text-xs text-muted-foreground">
           {isTransport ? "Flat" : "Adult"}
+          {!isTransport ? <AgeRangeChip kind="adult" buckets={ageBuckets} /> : null}
         </span>
         <NumericInput
           min="0"
@@ -1184,7 +1263,10 @@ function RateCardPricingCell({
       {!isTransport ? (
         <>
           <div className="flex items-center gap-1">
-            <span className="w-16 shrink-0 text-xs text-muted-foreground">Child</span>
+            <span className="flex w-16 shrink-0 flex-wrap items-center gap-1 text-xs text-muted-foreground">
+              Child
+              <AgeRangeChip kind="child" buckets={ageBuckets} />
+            </span>
             <NumericInput
               min="0"
               step="0.01"
@@ -1222,7 +1304,10 @@ function RateCardPricingCell({
             </div>
           ) : null}
           <div className="flex items-center gap-1">
-            <span className="w-16 shrink-0 text-xs text-muted-foreground">Infant</span>
+            <span className="flex w-16 shrink-0 flex-wrap items-center gap-1 text-xs text-muted-foreground">
+              Infant
+              <AgeRangeChip kind="infant" buckets={ageBuckets} />
+            </span>
             <NumericInput
               min="0"
               step="0.01"
@@ -1244,12 +1329,14 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
   routes,
   rateCards,
   suiteTypes,
+  rateTypes,
   packageIndex,
   locationsById,
   vocabulary,
   isTransport,
   supplierKind,
   trainChildPriceRatio,
+  ageBuckets,
   onAddPeriod,
   onRemovePeriod,
   onUpdatePeriodField,
@@ -1259,14 +1346,22 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
   periodFieldErrors,
 }: RateCardMatrixEditorProps) {
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(routes[0]?.id ?? null)
+  const defaultRateTypeId =
+    rateTypes.find((rt) => rt.isDefault && !rt.archivedAt)?.id
+    ?? rateTypes.find((rt) => !rt.archivedAt)?.id
+    ?? null
+  const [selectedRateTypeId, setSelectedRateTypeId] = useState<string | null>(defaultRateTypeId)
   const periodGroups = useMemo(
     () =>
       groupEditableRateCardsByPeriod(
-        selectedRouteId
-          ? rateCards.filter((rateCard) => rateCard.routeId === selectedRouteId)
+        selectedRouteId && selectedRateTypeId
+          ? rateCards.filter(
+              (rateCard) =>
+                rateCard.routeId === selectedRouteId && rateCard.rateTypeId === selectedRateTypeId,
+            )
           : [],
       ),
-    [rateCards, selectedRouteId],
+    [rateCards, selectedRouteId, selectedRateTypeId],
   )
 
   useEffect(() => {
@@ -1281,6 +1376,16 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
       setSelectedRouteId(routes[0].id)
     }
   }, [routes, selectedRouteId])
+
+  useEffect(() => {
+    if (rateTypes.length === 0) {
+      if (selectedRateTypeId !== null) setSelectedRateTypeId(null)
+      return
+    }
+    if (!selectedRateTypeId || !rateTypes.some((rt) => rt.id === selectedRateTypeId)) {
+      setSelectedRateTypeId(defaultRateTypeId)
+    }
+  }, [rateTypes, selectedRateTypeId, defaultRateTypeId])
 
   if (suiteTypes.length === 0) {
     return (
@@ -1299,16 +1404,54 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
           size="sm"
           variant="outline"
           onClick={() => {
-            if (selectedRouteId) {
-              onAddPeriod(packageIndex, selectedRouteId)
+            if (selectedRouteId && selectedRateTypeId) {
+              onAddPeriod(packageIndex, selectedRouteId, selectedRateTypeId)
             }
           }}
-          disabled={!selectedRouteId}
+          disabled={!selectedRouteId || !selectedRateTypeId}
         >
           <Plus className="mr-2 h-4 w-4" />
           Add pricing period
         </Button>
       </div>
+
+      {rateTypes.length > 0 ? (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Rate Types
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            {rateTypes.map((rt) => {
+              const isSelected = selectedRateTypeId === rt.id
+              return (
+                <Button
+                  key={rt.id}
+                  type="button"
+                  size="sm"
+                  variant={isSelected ? "default" : "outline"}
+                  className="h-7 rounded-full px-3 text-xs"
+                  onClick={() => setSelectedRateTypeId(rt.id)}
+                  title={rt.code}
+                >
+                  {rt.name}
+                  {rt.isDefault ? (
+                    <span className="ml-1 text-[10px] uppercase opacity-70">default</span>
+                  ) : null}
+                </Button>
+              )
+            })}
+            <Button asChild type="button" size="sm" variant="ghost" className="h-7 text-xs">
+              <Link href="/app/settings/rate-types">+ Add Rate Type</Link>
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+          No rate types configured.{" "}
+          <Link href="/app/settings/rate-types" className="underline">Set up rate types</Link>
+          {" "}before adding pricing periods.
+        </div>
+      )}
 
       {routes.length > 1 ? (
         <div className="space-y-2">
@@ -1365,6 +1508,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                         period.key,
                         "validFrom",
                         value ?? "",
+                        selectedRateTypeId ?? "",
                       )
                     }
                   />
@@ -1394,6 +1538,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                           period.key,
                           "validTo",
                           value || null,
+                          selectedRateTypeId ?? "",
                         )
                       }
                     />
@@ -1411,6 +1556,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                         period.key,
                         "currency",
                         value.toUpperCase(),
+                        selectedRateTypeId ?? "",
                       )
                     }
                   />
@@ -1422,7 +1568,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                     size="icon"
                     className={REMOVE_ICON_BUTTON_CLASS}
                     aria-label="Remove period"
-                    onClick={() => onRemovePeriod(packageIndex, selectedRouteId ?? "", period.key)}
+                    onClick={() => onRemovePeriod(packageIndex, selectedRouteId ?? "", period.key, selectedRateTypeId ?? "")}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
@@ -1467,6 +1613,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                                     isTransport={isTransport}
                                     supplierKind={supplierKind}
                                     trainChildPriceRatio={trainChildPriceRatio}
+                                    ageBuckets={ageBuckets}
                                     onUpdateCellPrice={onUpdateCellPrice}
                                     onUpdateCellField={onUpdateCellField}
                                   />
@@ -1483,6 +1630,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                                         suiteType.id,
                                         routeId,
                                         false,
+                                        selectedRateTypeId ?? "",
                                       )
                                     }
                                   >
@@ -1501,6 +1649,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                                       suiteType.id,
                                       routeId,
                                       true,
+                                      selectedRateTypeId ?? "",
                                     )
                                   }
                                 >
@@ -1533,10 +1682,20 @@ interface SuiteTypeEditorRowProps {
   suiteType: EditableSuiteType
   suiteTypeIndex: number
   vocabulary: SupplierVocabulary
+  bedroomTypes: EditableVocabularyValue[]
+  bedroomLayouts: EditableVocabularyValue[]
+  bathroomTypes: EditableVocabularyValue[]
+  showVariants: boolean
+  dragHandle?: React.ReactNode
   onUpdateSuiteType: (
     suiteTypeIndex: number,
     key: keyof EditableSuiteType,
     value: string | boolean | number | null,
+  ) => void
+  onUpdateSuiteTypeVariantIds?: (
+    suiteTypeIndex: number,
+    key: "bedroomTypeIds" | "bedroomLayoutIds" | "bathroomTypeIds",
+    ids: string[],
   ) => void
   onRemoveSuiteType: (suiteTypeIndex: number) => void
 }
@@ -1545,19 +1704,27 @@ const SuiteTypeEditorRow = memo(function SuiteTypeEditorRow({
   suiteType,
   suiteTypeIndex,
   vocabulary,
+  bedroomTypes,
+  bedroomLayouts,
+  bathroomTypes,
+  showVariants,
+  dragHandle,
   onUpdateSuiteType,
+  onUpdateSuiteTypeVariantIds,
   onRemoveSuiteType,
 }: SuiteTypeEditorRowProps) {
   const isTransport = vocabulary.suiteType === "Vehicle Type"
 
   return (
-    <div
-      className={
-        isTransport
-          ? "grid gap-4 rounded-lg border p-3 md:grid-cols-2 xl:grid-cols-[1fr_10rem_10rem_1fr_auto_auto]"
-          : "grid gap-4 rounded-lg border p-3 md:grid-cols-[1fr_auto_auto]"
-      }
-    >
+    <div className="rounded-lg border p-3 space-y-3">
+      <div
+        className={
+          isTransport
+            ? "grid gap-4 md:grid-cols-2 xl:grid-cols-[auto_1fr_10rem_10rem_1fr_auto_auto]"
+            : "grid gap-4 md:grid-cols-[auto_1fr_auto_auto]"
+        }
+      >
+        {dragHandle ? <div className="flex items-center pt-6">{dragHandle}</div> : null}
       <div className="space-y-2">
         <Label>{`${vocabulary.suiteType} name`}</Label>
         <BufferedInput
@@ -1617,9 +1784,126 @@ const SuiteTypeEditorRow = memo(function SuiteTypeEditorRow({
       >
         <Trash2 className="h-4 w-4" />
       </Button>
+      </div>
+      {showVariants && onUpdateSuiteTypeVariantIds ? (
+        <div className="grid gap-3 md:grid-cols-3">
+          <VariantChipPicker
+            label="Bedroom Types"
+            available={bedroomTypes.map((value) => ({ id: value.id, name: value.name }))}
+            selectedIds={suiteType.bedroomTypeIds}
+            onChange={(ids) =>
+              onUpdateSuiteTypeVariantIds(suiteTypeIndex, "bedroomTypeIds", ids)
+            }
+          />
+          <VariantChipPicker
+            label="Bedroom Layouts"
+            available={bedroomLayouts.map((value) => ({ id: value.id, name: value.name }))}
+            selectedIds={suiteType.bedroomLayoutIds}
+            onChange={(ids) =>
+              onUpdateSuiteTypeVariantIds(suiteTypeIndex, "bedroomLayoutIds", ids)
+            }
+          />
+          <VariantChipPicker
+            label="Bathroom Types"
+            available={bathroomTypes.map((value) => ({ id: value.id, name: value.name }))}
+            selectedIds={suiteType.bathroomTypeIds}
+            onChange={(ids) =>
+              onUpdateSuiteTypeVariantIds(suiteTypeIndex, "bathroomTypeIds", ids)
+            }
+          />
+        </div>
+      ) : null}
     </div>
   )
 })
+
+interface PassengerAgeBandsSectionProps {
+  isEditing: boolean
+  infantMaxAge: number | null
+  childMaxAge: number | null
+  onChangeInfantMaxAge: (value: number | null) => void
+  onChangeChildMaxAge: (value: number | null) => void
+}
+
+function PassengerAgeBandsSection({
+  isEditing,
+  infantMaxAge,
+  childMaxAge,
+  onChangeInfantMaxAge,
+  onChangeChildMaxAge,
+}: PassengerAgeBandsSectionProps) {
+  const usingInfantDefault = infantMaxAge === null
+  const usingChildDefault = childMaxAge === null
+  const effectiveInfant = infantMaxAge ?? 2
+  const effectiveChild = childMaxAge ?? 12
+  const usingAnyDefault = usingInfantDefault || usingChildDefault
+
+  return (
+    <div className="rounded-lg border p-4 space-y-3">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <p className="text-sm font-semibold text-foreground">Passenger Age Bands</p>
+          <p className="text-xs text-muted-foreground">
+            Override the defaults set in Settings. Leave blank to inherit.
+          </p>
+        </div>
+        {isEditing && !usingAnyDefault ? (
+          <button
+            type="button"
+            className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+            onClick={() => {
+              onChangeInfantMaxAge(null)
+              onChangeChildMaxAge(null)
+            }}
+          >
+            Reset to default
+          </button>
+        ) : null}
+      </div>
+      {isEditing ? (
+        <div className="grid gap-3 sm:grid-cols-2 sm:max-w-md">
+          <div className="space-y-1">
+            <Label className="text-xs font-medium text-muted-foreground">Infant max age</Label>
+            <NumericInput
+              min="0"
+              max="17"
+              step="1"
+              nullable
+              value={infantMaxAge}
+              placeholder="default"
+              onValueChange={(value) => onChangeInfantMaxAge(value)}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs font-medium text-muted-foreground">Child max age</Label>
+            <NumericInput
+              min="0"
+              max="17"
+              step="1"
+              nullable
+              value={childMaxAge}
+              placeholder="default"
+              onValueChange={(value) => onChangeChildMaxAge(value)}
+            />
+          </div>
+        </div>
+      ) : null}
+      <div className="text-xs text-muted-foreground">
+        Resolves to:{" "}
+        <span className="tabular-nums">
+          Infant 0–{effectiveInfant}
+          {usingInfantDefault ? " (default)" : ""}
+        </span>{" "}
+        ·{" "}
+        <span className="tabular-nums">
+          Child {effectiveInfant + 1}–{effectiveChild}
+          {usingChildDefault ? " (default)" : ""}
+        </span>{" "}
+        · <span className="tabular-nums">Adult {effectiveChild + 1}+</span>
+      </div>
+    </div>
+  )
+}
 
 interface RouteEditorRowProps {
   route: EditableRoute
@@ -1627,6 +1911,7 @@ interface RouteEditorRowProps {
   packageIndex: number
   vocabulary: SupplierVocabulary
   locations: Location[]
+  supplierCommissionDefault?: { type: CommissionKind | null; value: number | null } | null
   onUpdateRoute: (
     packageIndex: number,
     routeIndex: number,
@@ -1642,6 +1927,7 @@ const RouteEditorRow = memo(function RouteEditorRow({
   packageIndex,
   vocabulary,
   locations,
+  supplierCommissionDefault,
   onUpdateRoute,
   onRemoveRoute,
 }: RouteEditorRowProps) {
@@ -1668,10 +1954,10 @@ const RouteEditorRow = memo(function RouteEditorRow({
     <div
       className={`grid min-w-0 gap-4 overflow-hidden rounded-lg border p-3 ${
         isTransport
-          ? "md:grid-cols-2 xl:grid-cols-4"
+          ? "md:grid-cols-2 xl:grid-cols-5"
           : vocabulary.routeHasLocations
-            ? "md:grid-cols-2 xl:grid-cols-5"
-            : "md:grid-cols-[1fr_auto]"
+            ? "md:grid-cols-2 xl:grid-cols-6"
+            : "md:grid-cols-[1fr_auto_auto]"
       }`}
     >
       <div className={`space-y-2 ${vocabulary.routeHasLocations ? "xl:col-span-2" : ""}`}>
@@ -1788,6 +2074,36 @@ const RouteEditorRow = memo(function RouteEditorRow({
           </div>
         </>
       ) : null}
+      <div className="min-w-0 space-y-2">
+        <Label>Direction</Label>
+        <div role="radiogroup" aria-label="Route direction" className="inline-flex rounded-md border bg-muted p-0.5">
+          {(
+            [
+              { value: "one_way", label: "One way" },
+              { value: "round_trip", label: "Round trip" },
+              { value: "loop", label: "Loop" },
+            ] as const
+          ).map((option) => {
+            const selected = route.directionMode === option.value
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                onClick={() => onUpdateRoute(packageIndex, routeIndex, "directionMode", option.value)}
+                className={`px-2.5 py-1 text-xs rounded-sm transition-colors ${
+                  selected
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {option.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
       <div className="flex items-end justify-end gap-3">
         <div className="flex items-center gap-2">
           <Switch
@@ -1806,6 +2122,29 @@ const RouteEditorRow = memo(function RouteEditorRow({
         >
           <Trash2 className="h-4 w-4" />
         </Button>
+      </div>
+      <div
+        className={
+          vocabulary.routeHasLocations ? "xl:col-span-6 md:col-span-2" : "md:col-span-3"
+        }
+      >
+        <CommissionControl
+          isEditing
+          label="Route commission"
+          description="Overrides the supplier default for this route."
+          value={{ type: route.commissionType, value: route.commissionValue }}
+          inherited={supplierCommissionDefault ?? null}
+          inheritedSourceLabel="supplier default"
+          onChange={(next) => {
+            onUpdateRoute(packageIndex, routeIndex, "commissionType", next.type)
+            onUpdateRoute(packageIndex, routeIndex, "commissionValue", next.value)
+          }}
+          onClear={() => {
+            onUpdateRoute(packageIndex, routeIndex, "commissionType", null)
+            onUpdateRoute(packageIndex, routeIndex, "commissionValue", null)
+          }}
+          clearLabel="Reset to supplier default"
+        />
       </div>
     </div>
   )
@@ -1864,6 +2203,17 @@ export function SupplierDetailView({
     },
   )
   const trainChildPriceRatio = trainRatioData?.ratio ?? DEFAULT_TRAIN_CHILD_PRICE_RATIO
+  const { data: ageBandsData } = useSWR<{ infantMaxAge: number; childMaxAge: number }>(
+    "/api/settings/age-bands",
+    async (url: string) => {
+      const res = await fetch(url)
+      if (!res.ok) throw new Error("Failed to load")
+      return res.json()
+    },
+  )
+  const globalAgeDefaults: AgeBuckets = ageBandsData
+    ? { infantMax: ageBandsData.infantMaxAge, childMax: ageBandsData.childMaxAge }
+    : DEFAULT_AGE_BUCKETS
   const { mutate } = useSWRConfig()
   const { can } = useRole()
   const canEdit = can("edit:suppliers")
@@ -2043,8 +2393,49 @@ export function SupplierDetailView({
   )
 
   const addSuiteType = useCallback(() => {
-    updateSuiteTypes((suiteTypes) => [...suiteTypes, createEmptySuiteType()])
+    updateSuiteTypes((suiteTypes) => [
+      ...suiteTypes,
+      createEmptySuiteType(suiteTypes.length),
+    ])
   }, [updateSuiteTypes])
+
+  const reorderSuiteTypes = useCallback(
+    (orderedIds: string[]) => {
+      updateSuiteTypes((suiteTypes) => {
+        const byId = new Map(suiteTypes.map((suiteType) => [suiteType.id, suiteType]))
+        return orderedIds.flatMap((id, index) => {
+          const suiteType = byId.get(id)
+          return suiteType ? [{ ...suiteType, sortOrder: index }] : []
+        })
+      })
+    },
+    [updateSuiteTypes],
+  )
+
+  const updateSuiteTypeVariantIds = useCallback(
+    (
+      suiteTypeIndex: number,
+      key: "bedroomTypeIds" | "bedroomLayoutIds" | "bathroomTypeIds",
+      ids: string[],
+    ) => {
+      updateSuiteTypes((suiteTypes) =>
+        suiteTypes.map((suiteType, index) =>
+          index === suiteTypeIndex ? { ...suiteType, [key]: ids } : suiteType,
+        ),
+      )
+    },
+    [updateSuiteTypes],
+  )
+
+  const setBedroomTypes = useCallback((next: EditableVocabularyValue[]) => {
+    setForm((current) => (current ? { ...current, bedroomTypes: next } : current))
+  }, [])
+  const setBedroomLayouts = useCallback((next: EditableVocabularyValue[]) => {
+    setForm((current) => (current ? { ...current, bedroomLayouts: next } : current))
+  }, [])
+  const setBathroomTypes = useCallback((next: EditableVocabularyValue[]) => {
+    setForm((current) => (current ? { ...current, bathroomTypes: next } : current))
+  }, [])
 
   const updateSuiteType = useCallback(
     (
@@ -2261,7 +2652,7 @@ export function SupplierDetailView({
   )
 
   const addRateCardPeriod = useCallback(
-    (packageIndex: number, routeId: string) => {
+    (packageIndex: number, routeId: string, rateTypeId: string) => {
       updatePackage(packageIndex, (pkg) => {
         const currentForm = formRef.current
         if (!currentForm) return pkg
@@ -2287,7 +2678,9 @@ export function SupplierDetailView({
         }
         const { nextValidFrom, previousPeriodKey } = getNextRateCardPeriodStart({
           ...pkg,
-          rateCards: pkg.rateCards.filter((rateCard) => rateCard.routeId === route.id),
+          rateCards: pkg.rateCards.filter(
+            (rateCard) => rateCard.routeId === route.id && rateCard.rateTypeId === rateTypeId,
+          ),
         })
         const linkedPreviousValidTo = addIsoDays(nextValidFrom, -1)
         const baseRateCards =
@@ -2301,6 +2694,7 @@ export function SupplierDetailView({
             id: makeClientId(),
             routeId: route.id,
             suiteTypeId: suiteType.id,
+            rateTypeId,
             pricePerPerson: 0,
             childPrice: null,
             infantPrice: null,
@@ -2333,6 +2727,7 @@ export function SupplierDetailView({
       periodKey: string,
       key: "validFrom" | "validTo" | "currency",
       value: string | null,
+      rateTypeId: string,
     ) => {
       updatePackage(packageIndex, (pkg) => {
         const currentForm = formRef.current
@@ -2342,6 +2737,7 @@ export function SupplierDetailView({
         let nextRateCards = pkg.rateCards.map((rateCard) => {
           if (
             rateCard.routeId !== routeId ||
+            (rateTypeId && rateCard.rateTypeId !== rateTypeId) ||
             getRatePeriodKey(rateCard.validFrom, rateCard.validTo, rateCard.currency) !== periodKey
           ) {
             return rateCard
@@ -2412,14 +2808,16 @@ export function SupplierDetailView({
   )
 
   const removeRateCardPeriod = useCallback(
-    (packageIndex: number, routeId: string, periodKey: string) => {
+    (packageIndex: number, routeId: string, periodKey: string, rateTypeId: string) => {
       updatePackage(packageIndex, (pkg) => ({
         ...pkg,
-        rateCards: pkg.rateCards.filter(
-          (rateCard) =>
-            rateCard.routeId !== routeId ||
-            getRatePeriodKey(rateCard.validFrom, rateCard.validTo, rateCard.currency) !== periodKey,
-        ),
+        rateCards: pkg.rateCards.filter((rateCard) => {
+          const matchesRoute = rateCard.routeId === routeId
+          const matchesType = !rateTypeId || rateCard.rateTypeId === rateTypeId
+          const matchesPeriod =
+            getRatePeriodKey(rateCard.validFrom, rateCard.validTo, rateCard.currency) === periodKey
+          return !(matchesRoute && matchesType && matchesPeriod)
+        }),
       }))
     },
     [updatePackage],
@@ -2461,15 +2859,19 @@ export function SupplierDetailView({
       suiteTypeId: string,
       routeId: string,
       enabled: boolean,
+      rateTypeId: string,
     ) => {
       updatePackage(packageIndex, (pkg) => {
-        const period = groupEditableRateCardsByPeriod(pkg.rateCards).find(
-          (candidate) => candidate.key === periodKey,
-        )
+        const period = groupEditableRateCardsByPeriod(
+          pkg.rateCards.filter((rateCard) => !rateTypeId || rateCard.rateTypeId === rateTypeId),
+        ).find((candidate) => candidate.key === periodKey)
         if (!period) return pkg
 
         const existingCard = period.items.find(
-          (item) => item.suiteTypeId === suiteTypeId && item.routeId === routeId,
+          (item) =>
+            item.suiteTypeId === suiteTypeId &&
+            item.routeId === routeId &&
+            (!rateTypeId || item.rateTypeId === rateTypeId),
         )
 
         if (enabled) {
@@ -2482,6 +2884,7 @@ export function SupplierDetailView({
                 id: makeClientId(),
                 routeId,
                 suiteTypeId,
+                rateTypeId,
                 pricePerPerson: 0,
                 childPrice: null,
                 infantPrice: null,
@@ -2588,13 +2991,41 @@ export function SupplierDetailView({
 
     const cleanedSuiteTypes = form.suiteTypes
       .filter((suiteType) => suiteType.name.trim())
-      .map((suiteType) => ({
+      .map((suiteType, index) => ({
         id: suiteType.id,
         name: suiteType.name.trim(),
         passengerCapacity: isTransportSupplier(form.kind) ? suiteType.passengerCapacity : null,
         luggageCapacity: isTransportSupplier(form.kind) ? suiteType.luggageCapacity : null,
         description: isTransportSupplier(form.kind) ? suiteType.description?.trim() || null : null,
         active: suiteType.active,
+        sortOrder: suiteType.sortOrder ?? index,
+        bedroomTypeIds: suiteType.bedroomTypeIds,
+        bedroomLayoutIds: suiteType.bedroomLayoutIds,
+        bathroomTypeIds: suiteType.bathroomTypeIds,
+      }))
+    const cleanedBedroomTypes = form.bedroomTypes
+      .filter((value) => value.name.trim())
+      .map((value, index) => ({
+        id: value.id,
+        name: value.name.trim(),
+        sortOrder: value.sortOrder ?? index,
+        archivedAt: value.archivedAt ?? null,
+      }))
+    const cleanedBedroomLayouts = form.bedroomLayouts
+      .filter((value) => value.name.trim())
+      .map((value, index) => ({
+        id: value.id,
+        name: value.name.trim(),
+        sortOrder: value.sortOrder ?? index,
+        archivedAt: value.archivedAt ?? null,
+      }))
+    const cleanedBathroomTypes = form.bathroomTypes
+      .filter((value) => value.name.trim())
+      .map((value, index) => ({
+        id: value.id,
+        name: value.name.trim(),
+        sortOrder: value.sortOrder ?? index,
+        archivedAt: value.archivedAt ?? null,
       }))
     const suiteTypeIds = new Set(cleanedSuiteTypes.map((suiteType) => suiteType.id))
 
@@ -2685,6 +3116,9 @@ export function SupplierDetailView({
                 oneWayFee: null,
               }
             : null,
+        directionMode: route.directionMode,
+        commissionType: route.commissionType ?? null,
+        commissionValue: route.commissionValue ?? null,
         active: route.active,
         rateCards: routeRateGroup.rateCards
           .filter((rateCard) => rateCard.routeId === route.id)
@@ -2726,8 +3160,15 @@ export function SupplierDetailView({
           notes: form.notes.trim(),
           active: form.active,
           singleSupplementPct: form.singleSupplementPct,
+          infantMaxAge: form.infantMaxAge,
+          childMaxAge: form.childMaxAge,
+          defaultCommissionType: form.defaultCommissionType,
+          defaultCommissionValue: form.defaultCommissionValue,
           suiteTypes: cleanedSuiteTypes,
           routes: cleanedRoutes,
+          bedroomTypes: cleanedBedroomTypes,
+          bedroomLayouts: cleanedBedroomLayouts,
+          bathroomTypes: cleanedBathroomTypes,
           expectedUpdatedAt:
             expectedUpdatedAtRef.current ?? supplier?.updatedAt,
         }),
@@ -3335,6 +3776,18 @@ export function SupplierDetailView({
           </CardContent>
         </Card>
 
+        {form.kind === "train_operator" || form.kind === "hotel_property" ? (
+          <SuiteVocabularyCard
+            bedroomTypes={form.bedroomTypes}
+            bedroomLayouts={form.bedroomLayouts}
+            bathroomTypes={form.bathroomTypes}
+            onChangeBedroomTypes={setBedroomTypes}
+            onChangeBedroomLayouts={setBedroomLayouts}
+            onChangeBathroomTypes={setBathroomTypes}
+            isEditing={isEditing}
+          />
+        ) : null}
+
         <Card>
             <CardHeader className="pb-4">
               <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -3387,6 +3840,33 @@ export function SupplierDetailView({
                 </div>
               ) : null}
 
+              <PassengerAgeBandsSection
+                isEditing={isEditing}
+                infantMaxAge={isEditing ? form.infantMaxAge : supplier.infantMaxAge}
+                childMaxAge={isEditing ? form.childMaxAge : supplier.childMaxAge}
+                onChangeInfantMaxAge={(value) => updateField("infantMaxAge", value)}
+                onChangeChildMaxAge={(value) => updateField("childMaxAge", value)}
+              />
+
+              <CommissionControl
+                isEditing={isEditing}
+                label="Default Commission"
+                description="Applied to every line on this supplier unless a route or quote line overrides it."
+                value={{
+                  type: isEditing ? form.defaultCommissionType : supplier.defaultCommissionType,
+                  value: isEditing ? form.defaultCommissionValue : supplier.defaultCommissionValue,
+                }}
+                onChange={(next) => {
+                  updateField("defaultCommissionType", next.type)
+                  updateField("defaultCommissionValue", next.value)
+                }}
+                onClear={() => {
+                  updateField("defaultCommissionType", null)
+                  updateField("defaultCommissionValue", null)
+                }}
+                clearLabel="Clear default"
+              />
+
               <div className="rounded-lg border p-4 space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -3405,16 +3885,27 @@ export function SupplierDetailView({
 
                 {isEditing ? (
                   form.suiteTypes.length > 0 ? (
-                    form.suiteTypes.map((suiteType, suiteTypeIndex) => (
-                      <SuiteTypeEditorRow
-                        key={suiteType.id}
-                        suiteType={suiteType}
-                        suiteTypeIndex={suiteTypeIndex}
-                        vocabulary={activeVocabulary}
-                        onUpdateSuiteType={updateSuiteType}
-                        onRemoveSuiteType={removeSuiteType}
-                      />
-                    ))
+                    <SortableList
+                      items={form.suiteTypes}
+                      onReorder={reorderSuiteTypes}
+                      renderItem={({ item, index, dragHandle }) => (
+                        <SuiteTypeEditorRow
+                          suiteType={item}
+                          suiteTypeIndex={index}
+                          vocabulary={activeVocabulary}
+                          bedroomTypes={form.bedroomTypes}
+                          bedroomLayouts={form.bedroomLayouts}
+                          bathroomTypes={form.bathroomTypes}
+                          showVariants={
+                            form.kind === "train_operator" || form.kind === "hotel_property"
+                          }
+                          dragHandle={dragHandle}
+                          onUpdateSuiteType={updateSuiteType}
+                          onUpdateSuiteTypeVariantIds={updateSuiteTypeVariantIds}
+                          onRemoveSuiteType={removeSuiteType}
+                        />
+                      )}
+                    />
                   ) : (
                     <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
                       {`No ${activeVocabulary.suiteTypePlural.toLowerCase()} added yet.`}
@@ -3422,11 +3913,21 @@ export function SupplierDetailView({
                   )
                 ) : supplier.suiteTypes.length > 0 ? (
                   <div className="flex flex-wrap gap-2">
-                    {supplier.suiteTypes.map((suiteType) => (
-                      <Badge key={suiteType.id} variant="outline">
-                        {suiteType.name}
-                      </Badge>
-                    ))}
+                    {supplier.suiteTypes.map((suiteType) => {
+                      const variantLabels = [
+                        ...(suiteType.bedroomTypes ?? []),
+                        ...(suiteType.bedroomLayouts ?? []),
+                        ...(suiteType.bathroomTypes ?? []),
+                      ]
+                      const variantSuffix =
+                        variantLabels.length > 0 ? ` — ${variantLabels.join(", ")}` : ""
+                      return (
+                        <Badge key={suiteType.id} variant="outline">
+                          {suiteType.name}
+                          {variantSuffix}
+                        </Badge>
+                      )
+                    })}
                   </div>
                 ) : (
                   <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
@@ -3460,6 +3961,10 @@ export function SupplierDetailView({
                         packageIndex={0}
                         vocabulary={activeVocabulary}
                         locations={locations}
+                        supplierCommissionDefault={{
+                          type: form.defaultCommissionType,
+                          value: form.defaultCommissionValue,
+                        }}
                         onUpdateRoute={updateRoute}
                         onRemoveRoute={removeRoute}
                       />
@@ -3491,12 +3996,17 @@ export function SupplierDetailView({
                   routes={routeRateGroup.routes}
                   rateCards={routeRateGroup.rateCards}
                   suiteTypes={form.suiteTypes}
+                  rateTypes={supplier.rateTypes ?? []}
                   packageIndex={0}
                   locationsById={locationsById}
                   vocabulary={activeVocabulary}
                   isTransport={isTransportSupplier(form.kind)}
                   supplierKind={form.kind}
                   trainChildPriceRatio={trainChildPriceRatio}
+                  ageBuckets={resolveAgeBuckets(globalAgeDefaults, {
+                    infantMaxAge: form.infantMaxAge,
+                    childMaxAge: form.childMaxAge,
+                  })}
                   onAddPeriod={addRateCardPeriod}
                   onRemovePeriod={removeRateCardPeriod}
                   onUpdatePeriodField={updateRateCardPeriodField}
