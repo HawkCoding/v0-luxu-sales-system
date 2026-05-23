@@ -223,7 +223,15 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     })
     return {
       error: NextResponse.json(
-        { error: "Failed to load supplier suite types" },
+        {
+          error: "Failed to load supplier suite types",
+          details: {
+            message: suiteTypesError.message,
+            code: (suiteTypesError as { code?: string }).code,
+            hint: (suiteTypesError as { hint?: string }).hint,
+            details: (suiteTypesError as { details?: string }).details,
+          },
+        },
         { status: 500 },
       ),
     }
@@ -237,7 +245,15 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     })
     return {
       error: NextResponse.json(
-        { error: "Failed to load supplier emails" },
+        {
+          error: "Failed to load supplier emails",
+          details: {
+            message: emailsError.message,
+            code: (emailsError as { code?: string }).code,
+            hint: (emailsError as { hint?: string }).hint,
+            details: (emailsError as { details?: string }).details,
+          },
+        },
         { status: 500 },
       ),
     }
@@ -247,7 +263,15 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     console.error("Failed to load supplier routes", { supplierId, supplierSlug: slug, error: routesError })
     return {
       error: NextResponse.json(
-        { error: "Failed to load supplier routes" },
+        {
+          error: "Failed to load supplier routes",
+          details: {
+            message: routesError.message,
+            code: (routesError as { code?: string }).code,
+            hint: (routesError as { hint?: string }).hint,
+            details: (routesError as { details?: string }).details,
+          },
+        },
         { status: 500 },
       ),
     }
@@ -281,7 +305,15 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     })
     return {
       error: NextResponse.json(
-        { error: "Failed to load supplier rate cards" },
+        {
+          error: "Failed to load supplier rate cards",
+          details: {
+            message: rateCardsError.message,
+            code: (rateCardsError as { code?: string }).code,
+            hint: (rateCardsError as { hint?: string }).hint,
+            details: (rateCardsError as { details?: string }).details,
+          },
+        },
         { status: 500 },
       ),
     }
@@ -295,7 +327,15 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     })
     return {
       error: NextResponse.json(
-        { error: "Failed to load vehicle rental route details" },
+        {
+          error: "Failed to load vehicle rental route details",
+          details: {
+            message: vehicleRentalRouteDetailsError.message,
+            code: (vehicleRentalRouteDetailsError as { code?: string }).code,
+            hint: (vehicleRentalRouteDetailsError as { hint?: string }).hint,
+            details: (vehicleRentalRouteDetailsError as { details?: string }).details,
+          },
+        },
         { status: 500 },
       ),
     }
@@ -331,7 +371,15 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     })
     return {
       error: NextResponse.json(
-        { error: "Failed to load route locations" },
+        {
+          error: "Failed to load route locations",
+          details: {
+            message: locationsError.message,
+            code: (locationsError as { code?: string }).code,
+            hint: (locationsError as { hint?: string }).hint,
+            details: (locationsError as { details?: string }).details,
+          },
+        },
         { status: 500 },
       ),
     }

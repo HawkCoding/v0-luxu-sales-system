@@ -1,31 +1,10 @@
-import {
-  isOptionalPackageLegKind,
-  type CommissionBreakdown,
-  type PackageDetail,
-  type QuoteLineItem,
-  type ResolvedCommission,
-  type RouteDirection,
-  type RouteDirectionMode,
-  type SupplierKind,
-} from "@/lib/types"
-import { buildCommissionBreakdown, calculateCommissionAmount } from "@/lib/pricing/commission"
+import { isOptionalPackageLegKind, type PackageDetail, type QuoteLineItem, type SupplierKind } from "@/lib/types"
 
 export interface PackageLegSelection {
   legId: string
   selected?: boolean
   routeId?: string
   suiteTypeId?: string
-  rateTypeId?: string
-  direction?: RouteDirection
-}
-
-function getDirectionMultiplier(directionMode: RouteDirectionMode, direction: RouteDirection): number {
-  if (directionMode !== "round_trip") return 1
-  return direction === "round_trip" ? 2 : 1
-}
-
-function defaultDirectionFor(directionMode: RouteDirectionMode): RouteDirection {
-  return directionMode === "round_trip" ? "round_trip" : "outbound"
 }
 
 export interface PricingBookingInput {
@@ -33,11 +12,6 @@ export interface PricingBookingInput {
   noOfChildren: number
   noOfSuites: number
   childAges: number[] | null
-}
-
-export interface PricingAgeBuckets {
-  infantMax: number
-  childMax: number
 }
 
 export interface PricingTransportRequest {
@@ -50,27 +24,13 @@ export interface PricingTransportRequest {
   rentalDetails?: { returnAt: string | null } | { returnAt: string | null }[] | null
 }
 
-export interface CommissionResolverContext {
-  supplierId: string | null
-  routeId: string | null
-  legId: string
-}
-
-export type CommissionResolver = (
-  context: CommissionResolverContext,
-) => ResolvedCommission | null
-
 interface BuildPackagePricingInput {
   packageDetail: PackageDetail
   booking: PricingBookingInput
   travelDate: string
   selections?: PackageLegSelection[]
   transportRequests?: PricingTransportRequest[]
-  ageBuckets?: PricingAgeBuckets
-  commissionResolver?: CommissionResolver
 }
-
-const DEFAULT_AGE_BUCKETS: PricingAgeBuckets = { infantMax: 2, childMax: 12 }
 
 type PassengerKind = "adult" | "child" | "infant" | "single_supplement" | "service" | "included"
 type PricingMode = "rate_card" | "fixed_package"
@@ -83,7 +43,6 @@ interface SnapshotInput {
   suiteTypeId?: string | null
   suiteTypeName?: string | null
   rateCardId?: string | null
-  rateTypeId?: string | null
   travelDate: string
   passengerKind: PassengerKind
   pricingMode: PricingMode
@@ -91,10 +50,6 @@ interface SnapshotInput {
   markupPct: number
   singleSupplementPct?: number | null
   serviceType?: "transfer" | "rental" | null
-  directionMode?: RouteDirectionMode | null
-  direction?: RouteDirection | null
-  markupAmount?: number | null
-  commission?: CommissionBreakdown | null
 }
 
 export function roundMoney(value: number): number {
@@ -126,7 +81,6 @@ function snapshot({
   suiteTypeId,
   suiteTypeName,
   rateCardId,
-  rateTypeId = null,
   travelDate,
   passengerKind,
   pricingMode,
@@ -134,10 +88,6 @@ function snapshot({
   markupPct,
   singleSupplementPct = null,
   serviceType = null,
-  directionMode = null,
-  direction = null,
-  markupAmount = null,
-  commission = null,
 }: SnapshotInput): NonNullable<QuoteLineItem["pricingSnapshot"]> {
   return {
     source: "pricing_engine",
@@ -154,17 +104,12 @@ function snapshot({
     suiteTypeId: suiteTypeId ?? null,
     suiteTypeName: suiteTypeName ?? null,
     rateCardId: rateCardId ?? null,
-    rateTypeId: rateTypeId ?? null,
     travelDate,
     passengerKind,
     baseUnitPrice: roundMoney(baseUnitPrice),
     markupPct,
     singleSupplementPct,
     serviceType,
-    directionMode,
-    direction,
-    markupAmount,
-    commission,
   }
 }
 
@@ -190,13 +135,11 @@ function getValidRateCard(
   routeId: string,
   suiteTypeId: string,
   travelDate: string,
-  rateTypeId?: string | null,
 ) {
   return leg.rateCards.find(
     (rateCard) =>
       rateCard.routeId === routeId &&
       rateCard.suiteTypeId === suiteTypeId &&
-      (!rateTypeId || rateCard.rateTypeId === rateTypeId) &&
       rateCard.validFrom <= travelDate &&
       (rateCard.validTo === null || rateCard.validTo >= travelDate),
   )
@@ -251,13 +194,11 @@ export function buildPackagePricing({
   travelDate,
   selections = [],
   transportRequests = [],
-  ageBuckets = DEFAULT_AGE_BUCKETS,
-  commissionResolver,
 }: BuildPackagePricingInput): QuoteLineItem[] {
   const selectionMap = new Map(selections.map((entry) => [entry.legId, entry]))
   const lineItems: QuoteLineItem[] = []
   const childAges = booking.childAges ?? []
-  const infantCount = childAges.filter((age) => age <= ageBuckets.infantMax).length
+  const infantCount = childAges.filter((age) => age <= 2).length
   const childCount = Math.max(0, booking.noOfChildren - infantCount)
   const singleAdultCount = inferSingleAdultCount(booking)
   const markupPct = packageDetail.markupPct ?? 0
@@ -272,42 +213,18 @@ export function buildPackagePricing({
     if (qty <= 0) return
 
     const unitPrice = applyMarkup(baseUnitPrice, markupPct)
-    const lineSubtotal = roundMoney(unitPrice * qty)
-    const markupAmount = roundMoney((unitPrice - baseUnitPrice) * qty)
-
-    let commission: CommissionBreakdown | null = null
-    let commissionAmount = 0
-    if (commissionResolver && snapshotInput.leg) {
-      const resolved = commissionResolver({
-        supplierId: snapshotInput.leg.supplierId ?? null,
-        routeId: snapshotInput.routeId ?? null,
-        legId: snapshotInput.leg.id,
-      })
-      if (resolved && resolved.type !== null) {
-        commissionAmount = calculateCommissionAmount({
-          amountAfterMarkup: lineSubtotal,
-          passengerCount: qty,
-          resolved,
-        })
-        commission = buildCommissionBreakdown(resolved, commissionAmount)
-      }
-    }
-
-    const total = roundMoney(lineSubtotal + commissionAmount)
     lineItems.push({
       description,
       supplierDescription: supplierDescription ?? null,
       qty,
       unitPrice,
-      total,
+      total: roundMoney(unitPrice * qty),
       pricingSnapshot: snapshot({
         ...snapshotInput,
         packageDetail,
         travelDate,
         baseUnitPrice,
         markupPct,
-        markupAmount,
-        commission,
       }),
     })
   }
@@ -386,7 +303,7 @@ export function buildPackagePricing({
       throw new Error(`Selected type is not available for leg: ${leg.label ?? leg.supplierName}`)
     }
 
-    const validRateCard = getValidRateCard(leg, routeId, suiteTypeId, travelDate, selection.rateTypeId)
+    const validRateCard = getValidRateCard(leg, routeId, suiteTypeId, travelDate)
     if (!validRateCard) {
       const legLabel = leg.label ?? leg.supplierName
       throw new Error(`No pricing available for "${legLabel}" on ${travelDate}. Update the package rate cards first.`)
@@ -395,10 +312,6 @@ export function buildPackagePricing({
     const legLabel = leg.label ?? leg.supplierName
     const routeName = getRouteName(leg, routeId)
     const suiteTypeName = getSuiteTypeName(leg, suiteTypeId)
-    const routeMeta = leg.routes.find((route) => route.id === routeId) ?? null
-    const directionMode: RouteDirectionMode = routeMeta?.directionMode ?? "one_way"
-    const direction: RouteDirection = selection.direction ?? defaultDirectionFor(directionMode)
-    const directionMultiplier = getDirectionMultiplier(directionMode, direction)
     const descriptionParts = [legLabel, suiteTypeName, routeName].filter(Boolean)
     const description = descriptionParts.join(" - ")
     const snapshotBase = {
@@ -408,10 +321,7 @@ export function buildPackagePricing({
       suiteTypeId,
       suiteTypeName,
       rateCardId: validRateCard.id,
-      rateTypeId: validRateCard.rateTypeId,
       pricingMode: "rate_card" as const,
-      directionMode,
-      direction,
     }
 
     if (isHotel) {
@@ -441,28 +351,24 @@ export function buildPackagePricing({
         leg.supplierDescription,
       )
     } else {
-      const adultBase = validRateCard.pricePerPerson * directionMultiplier
-      const childBase = (validRateCard.childPrice ?? validRateCard.pricePerPerson) * directionMultiplier
-      const infantBase =
-        (validRateCard.infantPrice ?? validRateCard.childPrice ?? validRateCard.pricePerPerson) * directionMultiplier
       addLineItem(
         `${description} - Adult`,
         booking.noOfAdults,
-        adultBase,
+        validRateCard.pricePerPerson,
         { ...snapshotBase, passengerKind: "adult" },
         leg.supplierDescription,
       )
       addLineItem(
         `${description} - Child`,
         childCount,
-        childBase,
+        validRateCard.childPrice ?? validRateCard.pricePerPerson,
         { ...snapshotBase, passengerKind: "child" },
         leg.supplierDescription,
       )
       addLineItem(
         `${description} - Infant`,
         infantCount,
-        infantBase,
+        validRateCard.infantPrice ?? validRateCard.childPrice ?? validRateCard.pricePerPerson,
         { ...snapshotBase, passengerKind: "infant" },
         leg.supplierDescription,
       )
@@ -471,7 +377,7 @@ export function buildPackagePricing({
         addLineItem(
           `${description} - Single supplement`,
           singleAdultCount,
-          adultBase * (packageDetail.singleSupplementPct / 100),
+          validRateCard.pricePerPerson * (packageDetail.singleSupplementPct / 100),
           {
             ...snapshotBase,
             passengerKind: "single_supplement",

@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const customerDetailMock = vi.hoisted(() => ({
   useCustomerDetail: vi.fn(),
+  useActiveSuppliers: vi.fn(() => ({ data: [] })),
 }))
 
 vi.mock("next/navigation", () => ({

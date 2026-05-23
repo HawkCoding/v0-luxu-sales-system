@@ -545,6 +545,44 @@ export default function JobDetailPage() {
                 <span>{currentSupplierRef || "—"}</span>
               )}
             </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <Label htmlFor="booking-supplier-reference" className="font-medium text-foreground">
+                Supplier ref
+              </Label>
+              {canEditSupplierRef ? (
+                <>
+                  <Input
+                    id="booking-supplier-reference"
+                    value={supplierRefDraft}
+                    onChange={(e) => setSupplierRefDraft(e.target.value)}
+                    onBlur={() => void saveSupplierReference()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault()
+                        void saveSupplierReference()
+                      }
+                    }}
+                    placeholder="Supplier confirmation #"
+                    maxLength={120}
+                    disabled={supplierRefSaving}
+                    className="h-8 w-56 bg-background"
+                  />
+                  {supplierRefDirty ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8"
+                      onClick={() => void saveSupplierReference()}
+                      disabled={supplierRefSaving}
+                    >
+                      {supplierRefSaving ? "Saving..." : "Save"}
+                    </Button>
+                  ) : null}
+                </>
+              ) : (
+                <span>{currentSupplierRef || "—"}</span>
+              )}
+            </div>
           </div>
         </div>
         {can("edit:pipeline") && (

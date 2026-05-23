@@ -33,27 +33,6 @@ interface BuildContext {
   additionalServicesDetails?: string | null
 }
 
-type RouteJoin = { name: string | null; direction_mode: string | null }
-
-type VariantNameRow = { name: string | null }
-type VariantJoinRow<K extends string> = { [P in K]: VariantNameRow | VariantNameRow[] | null }
-
-interface SuiteTypeJoin {
-  name: string | null
-  suite_type_bedroom_types:
-    | VariantJoinRow<"bedroom_types">
-    | VariantJoinRow<"bedroom_types">[]
-    | null
-  suite_type_bedroom_layouts:
-    | VariantJoinRow<"bedroom_layouts">
-    | VariantJoinRow<"bedroom_layouts">[]
-    | null
-  suite_type_bathroom_types:
-    | VariantJoinRow<"bathroom_types">
-    | VariantJoinRow<"bathroom_types">[]
-    | null
-}
-
 interface SelectionJoinRow {
   id: string
   package_leg_id: string
@@ -79,57 +58,13 @@ interface SelectionJoinRow {
     location: string | null
     kind: SupplierKind | string | null
   }> | null
-  routes: RouteJoin | RouteJoin[] | null
-  suite_types: SuiteTypeJoin | SuiteTypeJoin[] | null
-}
-
-function formatRouteForVoucher(name: string | null, directionMode: string | null): string | null {
-  if (!name) return null
-  if (directionMode !== "round_trip") return name
-  // Common separators in route names: "->", "→", "-", "to"
-  const separators = [" -> ", " → ", " — ", " - ", " to "]
-  for (const sep of separators) {
-    const idx = name.toLowerCase().indexOf(sep.toLowerCase())
-    if (idx !== -1) {
-      const origin = name.slice(0, idx).trim()
-      const destination = name.slice(idx + sep.length).trim()
-      if (origin && destination) return `${origin} ↔ ${destination}`
-    }
-  }
-  return name
+  routes: { name: string | null } | { name: string | null }[] | null
+  suite_types: { name: string | null } | { name: string | null }[] | null
 }
 
 function firstRecord<T>(value: T | T[] | null | undefined): T | null {
   if (Array.isArray(value)) return value[0] ?? null
   return value ?? null
-}
-
-function toArray<T>(value: T | T[] | null | undefined): T[] {
-  if (Array.isArray(value)) return value
-  if (value === null || value === undefined) return []
-  return [value]
-}
-
-export function formatSuiteLabel(suite: SuiteTypeJoin): string | null {
-  const name = suite.name?.trim() ?? null
-  if (!name) return null
-
-  const collect = <K extends string>(
-    rows: VariantJoinRow<K> | VariantJoinRow<K>[] | null | undefined,
-    key: K,
-  ): string[] =>
-    toArray(rows)
-      .flatMap((row) => toArray((row as VariantJoinRow<K>)[key]))
-      .map((v) => v?.name?.trim() ?? "")
-      .filter((v) => v.length > 0)
-
-  const variants = [
-    ...collect(suite.suite_type_bedroom_types, "bedroom_types"),
-    ...collect(suite.suite_type_bedroom_layouts, "bedroom_layouts"),
-    ...collect(suite.suite_type_bathroom_types, "bathroom_types"),
-  ]
-
-  return variants.length > 0 ? `${name} — ${variants.join(", ")}` : name
 }
 
 export interface BuildVoucherServiceBlocksResult {
@@ -146,13 +81,8 @@ export async function buildVoucherServiceBlocks(
       `id, package_leg_id, selected, supplier_id, route_id, suite_type_id, service_date, notes,
        package_legs(sort_order, label),
        suppliers(name, phone, email, website, location, kind),
-       routes(name, direction_mode),
-       suite_types(
-         name,
-         suite_type_bedroom_types(bedroom_types(name)),
-         suite_type_bedroom_layouts(bedroom_layouts(name)),
-         suite_type_bathroom_types(bathroom_types(name))
-       )`,
+       routes(name),
+       suite_types(name)`,
     )
     .eq("booking_id", context.bookingId)
 
@@ -178,8 +108,8 @@ export async function buildVoucherServiceBlocks(
       }
 
       const serviceData: VoucherServiceBlockData = {
-        route: formatRouteForVoucher(route?.name ?? null, route?.direction_mode ?? null),
-        suiteType: suite ? formatSuiteLabel(suite) : null,
+        route: route?.name ?? null,
+        suiteType: suite?.name ?? null,
         departureDate: row.service_date ?? null,
         notes: row.notes ?? null,
       }

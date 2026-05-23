@@ -136,10 +136,7 @@ describe("POST /api/jobs/[id]/cancel", () => {
         return {
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
-              maybeSingle: vi.fn(async () => ({
-                data: { name: "Test", surname: "User", email: "test@example.com", clearance_level: "manager" },
-                error: null,
-              })),
+              maybeSingle: vi.fn(async () => ({ data: { name: "Test", surname: "User", email: "test@example.com", clearance_level: "manager" }, error: null })),
             })),
           })),
         }

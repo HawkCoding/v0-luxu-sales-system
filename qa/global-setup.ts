@@ -1,39 +1,14 @@
 import { chromium, type FullConfig } from "@playwright/test"
-import { existsSync, mkdirSync, statSync } from "node:fs"
+import { mkdirSync } from "node:fs"
 import { spawnSync } from "node:child_process"
-import { dirname, resolve } from "node:path"
+import { dirname } from "node:path"
 import { ADMIN_STORAGE_STATE } from "./lib/auth"
 import { configurePlaywrightRuntime } from "./lib/browser-runtime"
 import { createQaSupabase, loadQaEnv } from "./lib/db"
 
-// The QA suite resets the DB at the start of a run, then phases accumulate
-// fixtures into qa/.run-state.json. When phases are invoked separately,
-// re-resetting on every Playwright invocation wipes the prior phase's
-// fixtures (see qa/reports/2026-05-19-q-and-a.md Item 1). We use the
-// run-state file as a freshness sentinel: if it was modified within
-// RUN_STATE_FRESH_MS, treat it as the same logical run and skip the reset.
-//
-// Escape hatches:
-//   QA_SKIP_DB_RESET=1   — never reset (developer flow)
-//   QA_FORCE_DB_RESET=1  — always reset (force a clean run)
-const RUN_STATE_PATH = resolve(process.cwd(), "qa", ".run-state.json")
-const RUN_STATE_FRESH_MS = 4 * 60 * 60 * 1000
-
 function runDbReset(): void {
   if (process.env.QA_SKIP_DB_RESET === "1") {
     return
-  }
-
-  if (process.env.QA_FORCE_DB_RESET !== "1" && existsSync(RUN_STATE_PATH)) {
-    const ageMs = Date.now() - statSync(RUN_STATE_PATH).mtimeMs
-    if (ageMs >= 0 && ageMs < RUN_STATE_FRESH_MS) {
-      const ageMin = Math.round(ageMs / 60_000)
-      console.log(
-        `[qa] Skipping pnpm db:reset — run-state sentinel is ${ageMin}m old ` +
-          `(< ${RUN_STATE_FRESH_MS / 60_000}m). Set QA_FORCE_DB_RESET=1 to override.`,
-      )
-      return
-    }
   }
 
   const result = spawnSync("pnpm", ["db:reset"], {
