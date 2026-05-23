@@ -1,5 +1,8 @@
 -- Quote lifecycle completion: add statuses, acceptance tokens
 
+-- Ensure pgcrypto is available for gen_random_bytes
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 -- 1a. Extend quote_status enum with new terminal/lifecycle values
 ALTER TYPE quote_status ADD VALUE IF NOT EXISTS 'expired';
 ALTER TYPE quote_status ADD VALUE IF NOT EXISTS 'superseded';
@@ -14,7 +17,7 @@ CREATE INDEX IF NOT EXISTS idx_quotes_validity_until
 CREATE TABLE IF NOT EXISTS quote_acceptance_tokens (
   id             uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   quote_id       uuid        NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
-  token          text        NOT NULL UNIQUE DEFAULT encode(gen_random_bytes(32), 'hex'),
+  token          text        NOT NULL UNIQUE DEFAULT encode(extensions.gen_random_bytes(32), 'hex'),
   expires_at     timestamptz NOT NULL,
   used_at        timestamptz,
   used_by_ip     text,

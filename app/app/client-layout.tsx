@@ -407,7 +407,7 @@ export default function AppClientLayout({
       <RoleProvider initialRole={initialUser?.role}>
         {demoMode && (
           <div className="flex items-center justify-center gap-2 bg-amber-400/90 text-amber-950 text-xs font-medium py-1 px-4 z-50">
-            <span>Demo mode — emails not sent</span>
+            <span>Demo mode</span>
           </div>
         )}
         <AppShell>{children}</AppShell>
