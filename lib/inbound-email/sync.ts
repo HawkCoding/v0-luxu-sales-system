@@ -7,6 +7,7 @@ import { findMatchingInboundSubjectRule, type InboundSubjectRule } from "@/lib/i
 import { getEmailImportReviewMetadata } from "@/lib/inbound-email/review"
 import { parseEmailDraft } from "@/lib/import/parseEmailDraft"
 import { createServiceClient } from "@/lib/supabase/server"
+import { logError } from "@/lib/error-log"
 import type { Database } from "@/lib/supabase/types"
 
 type ServiceClient = ReturnType<typeof createServiceClient>
@@ -201,6 +202,7 @@ export async function syncInboundEmailAccount(account: AccountRow): Promise<Emai
 
       if (await hasProcessedIdentity(supabase, account.id, uidvalidity, uid)) {
         summary.duplicateCount += 1
+        void logError({ severity: "Info", source: "inbound-email-sync", message: "Duplicate email ignored", details: { accountId: account.id, uid } })
         continue
       }
 
@@ -278,6 +280,7 @@ export async function syncInboundEmailAccount(account: AccountRow): Promise<Emai
             .eq("id", messageRow.id)
 
           summary.errors.push(`Filing failed for UID ${uid}`)
+          void logError({ severity: "Warning", source: "inbound-email-sync", message: "Email moved to processed folder failed", details: { accountId: account.id, uid, error: filingError instanceof Error ? filingError.message : String(filingError) } })
         }
 
         summary.importedCount += 1
@@ -299,6 +302,10 @@ export async function syncInboundEmailAccount(account: AccountRow): Promise<Emai
 
     await updateRun(supabase, run.id, summary.errors.length > 0 ? "partial" : "success", summary)
 
+    if (summary.errors.length > 0) {
+      void logError({ severity: "Critical", source: "inbound-email-sync", message: `Mailbox sync completed with ${summary.errors.length} error(s)`, details: { accountId: account.id, errors: summary.errors } })
+    }
+
     await supabase.from("audit_logs").insert({
       actor: "system",
       entity_type: "InboundEmailAccount",
@@ -317,6 +324,7 @@ export async function syncInboundEmailAccount(account: AccountRow): Promise<Emai
     const message = error instanceof Error ? error.message : "Mailbox sync failed"
     summary.errors.push(message)
     await updateRun(supabase, run.id, "failed", summary, message)
+    void logError({ severity: "Critical", source: "inbound-email-sync", message: "Mailbox sync failed", details: { accountId: account.id, error: message } })
     throw error
   } finally {
     if (client.usable) {

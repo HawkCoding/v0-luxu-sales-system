@@ -49,7 +49,7 @@ import {
 } from "@/lib/session-timeout"
 import type { Role } from "@/lib/types"
 import { APP_VERSION } from "@/lib/version"
-import { Clock, KeyRound, MoreHorizontal, ShieldCheck, Tag, Trash2, Upload, UserCheck, UserPlus, UserX } from "lucide-react"
+import { AlertTriangle, Clock, KeyRound, MoreHorizontal, ShieldCheck, Tag, Trash2, Upload, UserCheck, UserPlus, UserX } from "lucide-react"
 
 interface AppUser {
   userId: string
@@ -1317,6 +1317,25 @@ export default function SettingsPage() {
               <Link href="/app/settings/rate-types">
                 <Tag className="h-4 w-4" />
                 Manage Rate Types
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {canEditDepositSettings && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Error Log</CardTitle>
+            <CardDescription className="text-xs">
+              View and resolve system errors, warnings, and info events logged by the application.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild size="sm" variant="outline" className="gap-2">
+              <Link href="/app/settings/error-log">
+                <AlertTriangle className="h-4 w-4" />
+                View Error Log
               </Link>
             </Button>
           </CardContent>

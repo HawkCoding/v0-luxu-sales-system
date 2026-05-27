@@ -4,6 +4,7 @@ import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDate } from "@/lib/date-format"
 import { calculateInvoiceBalance } from "@/lib/invoices/calculate-balance"
 import { renderInvoiceEmail } from "@/lib/invoices/render-invoice-email"
+import { logError } from "@/lib/error-log"
 
 export const runtime = "nodejs"
 
@@ -134,6 +135,7 @@ export async function POST(req: Request) {
     return data
   })().catch((error: unknown) => {
     console.error("supabase:final-invoice:create", error)
+    void logError({ severity: "Critical", source: "invoice-final", message: "Final invoice could not be generated", details: { jobId: parsed.data.jobId, error: error instanceof Error ? error.message : String(error) } })
     return null
   })
 

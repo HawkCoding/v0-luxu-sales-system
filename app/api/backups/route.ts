@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { safeSupabaseError } from "@/lib/api/responses"
 import { createBackup } from "@/lib/backup/create-backup"
 import { requireManagerSettingsAccess } from "@/lib/settings-access"
+import { logError } from "@/lib/error-log"
 
 export async function GET() {
   const auth = await requireManagerSettingsAccess()
@@ -26,6 +27,7 @@ export async function POST() {
     return NextResponse.json({ backup: result }, { status: 201 })
   } catch (err) {
     console.error("[api/backups] Backup creation failed:", err)
+    void logError({ severity: "Critical", source: "backup", message: "Backup creation failed", details: { error: err instanceof Error ? err.message : String(err) } })
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Backup failed" },
       { status: 500 },

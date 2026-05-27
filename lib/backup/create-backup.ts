@@ -1,4 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/server"
+import { logError } from "@/lib/error-log"
 import type { Database } from "@/lib/supabase/types"
 
 const BACKUP_BUCKET = "backups"
@@ -50,6 +51,7 @@ export async function createBackup(createdByUserId: string): Promise<CreateBacku
 
   if (insertError) {
     console.error("[create-backup] Failed to insert backup_record:", insertError)
+    void logError({ severity: "Warning", source: "backup", message: "Backup file uploaded but record insert failed", details: { path, error: insertError.message } })
   }
 
   await pruneOldBackups(supabase, now)

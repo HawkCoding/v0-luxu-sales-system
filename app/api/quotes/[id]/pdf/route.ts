@@ -1,6 +1,7 @@
 import { requireRole } from "@/lib/api/auth"
 import { jsonError, safeSupabaseError } from "@/lib/api/responses"
 import { renderQuotePdf } from "@/lib/quotes/render-quote-pdf"
+import { logError } from "@/lib/error-log"
 
 export const runtime = "nodejs"
 
@@ -68,6 +69,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
     })
   } catch (err) {
     console.error("quote-pdf:render", err)
+    void logError({ severity: "Critical", source: "quote-pdf", message: "Quote PDF could not be rendered", details: { quoteId: id, error: err instanceof Error ? err.message : String(err) } })
     return jsonError("Quote PDF could not be rendered", 500)
   }
 

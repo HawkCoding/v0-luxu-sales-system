@@ -1181,6 +1181,42 @@ export type Database = {
           },
         ]
       }
+      error_logs: {
+        Row: {
+          created_at: string
+          details: Json | null
+          id: string
+          message: string
+          resolved: boolean
+          resolved_at: string | null
+          resolved_by: string | null
+          severity: string
+          source: string
+        }
+        Insert: {
+          created_at?: string
+          details?: Json | null
+          id?: string
+          message: string
+          resolved?: boolean
+          resolved_at?: string | null
+          resolved_by?: string | null
+          severity: string
+          source: string
+        }
+        Update: {
+          created_at?: string
+          details?: Json | null
+          id?: string
+          message?: string
+          resolved?: boolean
+          resolved_at?: string | null
+          resolved_by?: string | null
+          severity?: string
+          source?: string
+        }
+        Relationships: []
+      }
       hotel_offers: {
         Row: {
           active: boolean
@@ -2239,11 +2275,16 @@ export type Database = {
           destination_location_id: string | null
           direction_mode: Database["public"]["Enums"]["route_direction_mode"]
           dropoff_point: string | null
+          extra_km_price: number | null
           id: string
+          included_km_per_day: number | null
           name: string
+          one_way_fee: number | null
           origin_location_id: string | null
           pickup_point: string | null
+          security_deposit: number | null
           supplier_id: string
+          transport_service_type: string | null
           updated_at: string
         }
         Insert: {
@@ -2256,11 +2297,16 @@ export type Database = {
           destination_location_id?: string | null
           direction_mode?: Database["public"]["Enums"]["route_direction_mode"]
           dropoff_point?: string | null
+          extra_km_price?: number | null
           id?: string
+          included_km_per_day?: number | null
           name: string
+          one_way_fee?: number | null
           origin_location_id?: string | null
           pickup_point?: string | null
+          security_deposit?: number | null
           supplier_id: string
+          transport_service_type?: string | null
           updated_at?: string
         }
         Update: {
@@ -2273,11 +2319,16 @@ export type Database = {
           destination_location_id?: string | null
           direction_mode?: Database["public"]["Enums"]["route_direction_mode"]
           dropoff_point?: string | null
+          extra_km_price?: number | null
           id?: string
+          included_km_per_day?: number | null
           name?: string
+          one_way_fee?: number | null
           origin_location_id?: string | null
           pickup_point?: string | null
+          security_deposit?: number | null
           supplier_id?: string
+          transport_service_type?: string | null
           updated_at?: string
         }
         Relationships: [

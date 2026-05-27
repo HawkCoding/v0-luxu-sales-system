@@ -91,13 +91,13 @@ Use this as an implementation tracker. Prefer completing each section in order b
 - [x] Add or complete System Settings.
 - [x] Persist settings in a typed settings table or current app settings model.
 - [x] Add Zod schemas for settings API updates.
-- [ ] Add API tests for settings:
-  - [ ] unauthenticated returns `401`
-  - [ ] insufficient role returns `403`
-  - [ ] invalid body returns `400`
-  - [ ] valid update persists
-  - [ ] changes are audited
-- [ ] Add visible unresolved-error badge on Settings when error logging is complete.
+- [x] Add API tests for settings:
+  - [x] unauthenticated returns `401`
+  - [x] insufficient role returns `403`
+  - [x] invalid body returns `400`
+  - [x] valid update persists
+  - [x] changes are audited
+- [x] Add visible unresolved-error badge on Settings when error logging is complete.
 
 ## Phase 3: Audit Log Foundation
 
@@ -141,7 +141,7 @@ Use this as an implementation tracker. Prefer completing each section in order b
   - [x] quote edits
   - [x] payment edits
   - [x] supplier/rate edits
-  - [ ] settings changes
+  - [x] settings changes
 
 ## Phase 4: Email Parser Hardening
 
@@ -503,15 +503,15 @@ Use this as an implementation tracker. Prefer completing each section in order b
 - [x] Prevent overlapping rates for same route + pricing option + period.
 - [x] Add database constraint or exclusion logic for overlap prevention.
 - [x] Add API validation for overlaps.
-- [ ] Add tests:
-  - [ ] matching date inside range
-  - [ ] matching open-ended range
-  - [ ] date before range returns no rate
-  - [ ] date after closed range returns no rate
-  - [ ] overlap blocked
-  - [ ] adjacent non-overlap allowed
-  - [ ] different route can overlap
-  - [ ] different pricing option can overlap
+- [x] Add tests:
+  - [x] matching date inside range
+  - [x] matching open-ended range
+  - [x] date before range returns no rate
+  - [x] date after closed range returns no rate
+  - [x] overlap blocked
+  - [x] adjacent non-overlap allowed
+  - [x] different route can overlap
+  - [x] different pricing option can overlap
 - [x] Audit rate creates, edits, and deletes.
 
 ## Phase 15: Package Model
@@ -643,21 +643,24 @@ Use this as an implementation tracker. Prefer completing each section in order b
   - [x] status
   - [x] error if failed
 - [x] Move booking to Quote Sent via transition validation.
-- [x] Create tokenized customer acceptance link.
-- [x] Acceptance link must not require customer login.
-- [x] Validate acceptance token.
-- [x] Expired quote behavior must be explicit.
-- [x] Accepting quote records accepted timestamp.
-- [x] Accepting quote moves booking to Quote Accepted.
-- [x] Accepting quote generates deposit invoice.
+
+> **Record correction (2026-05-27):** Acceptance is **internal-only**, not customer-facing. There is no tokenized acceptance link/page in the codebase. Moving a booking to the `accepted` stage flips the newest `sent` quote to `accepted` (`lib/pipeline/apply-transition.ts`). The deposit invoice is a **separate step** (`app/api/invoices/deposit/route.ts`, which requires an already-`accepted` quote) — it is **not** auto-created on acceptance. The items below were previously marked done in error.
+
+- [ ] Create tokenized customer acceptance link. — **NOT built** (internal-only acceptance)
+- [ ] Acceptance link must not require customer login. — **N/A** (no public link)
+- [ ] Validate acceptance token. — **NOT built** (no token mechanism)
+- [ ] Expired quote behavior must be explicit. — quote `validity_until` is stored, but no acceptance-time enforcement exists
+- [x] Accepting quote records accepted timestamp. — via stage move (`accepted_at`)
+- [x] Accepting quote moves booking to Quote Accepted. — via pipeline transition
+- [ ] Accepting quote generates deposit invoice. — **separate manual step**, not auto-created on acceptance
 - [x] Add tests with mocked PDF/email/storage:
   - [x] PDF generation success
   - [x] PDF generation failure logs error
   - [x] email send success
   - [x] email send failure logs error
-  - [x] acceptance token success
-  - [x] invalid token rejected
-  - [x] acceptance creates deposit invoice
+  - [ ] acceptance token success — **NOT built** (no token mechanism)
+  - [ ] invalid token rejected — **NOT built** (no token mechanism)
+  - [x] internal acceptance + deposit invoice covered by route-level lifecycle E2E (`app/api/__tests__/booking-lifecycle.e2e.test.ts`)
 
 ## Phase 19: Invoices
 
@@ -850,50 +853,50 @@ Use this as an implementation tracker. Prefer completing each section in order b
 
 ## Phase 25: Error Logging
 
-- [ ] Confirm error log table supports:
-  - ~~[ ] company id~~ — **N/A: single-company (ADR-001)**
-  - [ ] severity
-  - [ ] source
-  - [ ] message
-  - [ ] details JSON
-  - [ ] resolved flag
-  - [ ] resolved by user id
-  - [ ] resolved timestamp
-  - [ ] created timestamp
-- [ ] Support severities:
-  - [ ] Critical
-  - [ ] Warning
-  - [ ] Info
-- [ ] Log critical errors:
-  - [ ] mailbox cannot connect
-  - [ ] email sync failed
-  - [ ] quote PDF generation failed
-  - [ ] invoice generation failed
-  - [ ] voucher generation failed
-  - [ ] backup failed
-  - [ ] restore failed
-- [ ] Log warning errors:
-  - [ ] required field missing
-  - [ ] date could not be parsed
-  - [ ] rate not found
-  - [ ] duplicate email detected
-  - [ ] email moved to processed folder failed
-  - [ ] email sent but timeline update failed
-- [ ] Log info events:
-  - [ ] duplicate ignored
-  - [ ] follow-up skipped because job progressed
-  - [ ] reminder skipped because payment already marked paid
-- [ ] Add Settings error-log page.
-- [ ] Add unresolved error badge on Settings nav.
-- [ ] Allow users to mark errors resolved.
-- [ ] No resolution note required for MVP.
-- [ ] Add tests:
-  - [ ] create error log helper
-  - [ ] list unresolved
-  - [ ] badge count
-  - [ ] resolve success
-  - [ ] unauthenticated resolve rejected
-  - [ ] read-only resolve permission decision tested
+- [x] Confirm error log table supports:
+  - ~~[x] company id~~ — **N/A: single-company (ADR-001)**
+  - [x] severity
+  - [x] source
+  - [x] message
+  - [x] details JSON
+  - [x] resolved flag
+  - [x] resolved by user id
+  - [x] resolved timestamp
+  - [x] created timestamp
+- [x] Support severities:
+  - [x] Critical
+  - [x] Warning
+  - [x] Info
+- [x] Log critical errors:
+  - [x] mailbox cannot connect
+  - [x] email sync failed
+  - [x] quote PDF generation failed
+  - [x] invoice generation failed
+  - [x] voucher generation failed
+  - [x] backup failed
+  - [ ] restore failed — deferred to Phase 3 (restore not yet implemented)
+- [x] Log warning errors:
+  - [ ] required field missing — no dedicated console.error site; captured via sync summary
+  - [ ] date could not be parsed — no dedicated console.error site; captured via sync summary
+  - [ ] rate not found — no dedicated console.error site; captured via sync summary
+  - [ ] duplicate email detected — logged as Info (duplicate ignored) rather than Warning
+  - [x] email moved to processed folder failed
+  - [x] email sent but timeline update failed
+- [x] Log info events:
+  - [x] duplicate ignored
+  - [ ] follow-up skipped because job progressed — deferred to Phase 2 (worker not yet built)
+  - [x] reminder skipped because payment already marked paid
+- [x] Add Settings error-log page.
+- [x] Add unresolved error badge on Settings nav.
+- [x] Allow users to mark errors resolved.
+- [x] No resolution note required for MVP.
+- [x] Add tests:
+  - [x] create error log helper
+  - [x] list unresolved
+  - [x] badge count
+  - [x] resolve success
+  - [x] unauthenticated resolve rejected
+  - [x] read-only resolve permission decision tested
 
 ## Phase 26: Backup And Restore
 
@@ -933,7 +936,7 @@ Use this as an implementation tracker. Prefer completing each section in order b
   - [x] deposits paid
   - [x] paid in full
   - [x] vouchers sent
-  - [ ] unresolved errors
+  - [x] unresolved errors
 - [ ] Add filters:
   - [ ] consultant
   - [ ] product
@@ -976,7 +979,7 @@ Use this as an implementation tracker. Prefer completing each section in order b
 - [x] Settings page complete.
 - [x] Audit log page complete.
 - [x] Audit archive page complete if archival exists.
-- [ ] Error log page complete.
+- [x] Error log page complete.
 - [ ] Backup/restore page complete.
 
 ## Phase 29: Job/Booking Card Sections
@@ -1011,25 +1014,25 @@ Use this as an implementation tracker. Prefer completing each section in order b
 - [x] Search for accidental client imports of `createServiceClient`.
 - [x] Search for `SUPABASE_SERVICE_ROLE_KEY` exposure outside server-only code.
 - [x] Search for `select("*")` in production code and replace where practical.
-- [ ] Search for `any` in changed files.
+- [x] Search for `any` in changed files.
 - [x] Search for `@ts-ignore`.
 - [x] Search for API routes without auth checks.
 - [x] Search for API routes without Zod validation on mutation.
 - [x] Search for routes returning raw stack traces.
-- [ ] Confirm read-only user cannot mutate:
-  - [ ] customers
-  - [ ] bookings/jobs
-  - [ ] quotes
-  - [ ] payments
+- [x] Confirm read-only user cannot mutate:
+  - [x] customers
+  - [x] bookings/jobs
+  - [x] quotes
+  - [x] payments
   - [x] suppliers
-  - [ ] packages
+  - [x] packages
   - [x] settings
-  - [ ] documents
-  - [ ] exports
-- [ ] Confirm Consultant cannot manage:
-  - [ ] users
+  - [x] documents
+  - [x] exports
+- [x] Confirm Consultant cannot manage:
+  - [x] users
   - [x] global settings
-  - [ ] supplier categories
+  - [x] supplier categories
   - [x] supplier rates
 - [x] Confirm Manager/Admin can manage operational settings as intended.
 - [x] Confirm Admin-only settings are protected.
@@ -1037,25 +1040,37 @@ Use this as an implementation tracker. Prefer completing each section in order b
 ## Phase 31: Test Suite Completion
 
 - [x] Parser unit tests complete.
-- [ ] Job/booking number tests complete.
-- [ ] Customer matching tests complete.
+- [x] Job/booking number tests complete.
+- [x] Customer matching tests complete.
 - [x] Pricing tests complete.
-- [ ] Quote tests complete.
-- [ ] Invoice tests complete.
-- [ ] Payment tests complete.
-- [ ] Voucher tests complete.
-- [ ] Permission tests complete.
-- [ ] Email ingestion integration tests complete.
-- [ ] Email sending tests complete.
-- [ ] File storage tests complete.
+- [x] Quote tests complete.
+- [x] Invoice tests complete.
+- [x] Payment tests complete.
+- [x] Voucher tests complete.
+- [x] Permission tests complete.
+- [x] Email ingestion integration tests complete.
+- [x] Email sending tests complete.
+- [x] File storage tests complete.
 - [ ] Backup and restore tests complete.
 - [ ] Error logging tests complete.
 - [x] Pipeline transition tests complete.
 - [x] Supplier/rate tests complete.
 - [ ] Reporting tests complete.
-- [ ] Run `pnpm test:ci`.
-- [ ] Run `pnpm test:coverage`.
-- [ ] Review coverage gaps for high-risk workflow logic.
+- [x] Run `pnpm test:ci`. — 2026-05-27: 96 files / 608 tests passing.
+- [x] Run `pnpm test:coverage`. — 2026-05-27: project 63.9% stmts / 50.9% branch (provider `@vitest/coverage-v8` added). Lifecycle modules well covered: lib/pipeline 86.8%, lib/invoices 88.9%, lib/voucher 100%, app/api/payments 95.8%, app/api/quotes 87.8%, app/api/pipeline 80%.
+- [ ] Review coverage gaps for high-risk workflow logic. — known low areas (non-lifecycle): app/api/jobs/[id] 7.5%, app/api/enquiries 18.8%, app/api/users 36.7%. No CI coverage threshold gate added (report-only).
+
+> **Prompt 9 — End-to-end workflow test coverage (2026-05-27, verified passing):**
+> - Added `app/api/jobs/[id]/start-quote/route.test.ts` — Start Quote gates (customer-complete, email-import review), happy-path draft-quote creation, quote-number versioning, and 401/403/404 failures.
+> - Added duplicate-detection cases to `lib/inbound-email/import-booking.test.ts` — flags + audits `possible_duplicate_email_import` for a recent same-email booking, and leaves it unset when there is no match.
+> - Existing `lib/pipeline/__tests__/booking-lifecycle.workflow.test.ts` already covers the domain happy path enquiry→closed, payment-derived balance/deposit state, voucher readiness, and the voucher-sent/closed side effects (customer travel-date update + stage move). No `booking_made` enum: supplier booking is the `deposit_paid` stage + suppliers tab (per AGENTS.md).
+
+> **Test-hardening follow-up (2026-05-27, verified passing):**
+> - Added reusable in-memory Supabase test double `lib/testing/supabase-mock.ts` (+ its own tests) so route tests stop hand-rolling bespoke chainable mocks.
+> - Added route-level lifecycle E2E `app/api/__tests__/booking-lifecycle.e2e.test.ts` — drives the **real** start-quote, quotes, deposit-invoice and payments handlers against one shared store (enquiry→quote→accepted→deposit invoice→deposit paid→paid in full→voucher sent→closed), plus blocked-path + permission assertions.
+> - Refactored `start-quote` and `invoices/deposit` route tests onto the shared double.
+> - Added the one genuinely-uncovered `apply-transition` branch test (invoice_balance backfill). The `accepted` quote-flip and `deposit_requested` invoice-doc/correspondence branches were already covered by `lib/pipeline/__tests__/apply-transition.test.ts`.
+> - **Pre-existing concern (not introduced here):** `pnpm typecheck` reports 4 errors in `lib/quotes/pricing-engine.test.ts` (open-ended `validTo: string | null` vs a local type expecting `string`). Vitest does not type-check, so tests stay green, but `pnpm build` would fail. Left unfixed — unrelated to lifecycle scope.
 
 ## Phase 32: End-To-End MVP Scenarios
 
