@@ -8,6 +8,7 @@ import {
   SESSION_TIMEOUT_SETTING_KEY,
 } from "@/lib/session-timeout"
 import { createSessionClient } from "@/lib/supabase/server"
+import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 
 const patchSchema = z.object({
   sessionTimeoutMinutes: z
@@ -33,7 +34,7 @@ async function getAuthenticatedContext() {
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
-    .select("clearance_level, is_active")
+    .select("clearance_level, is_active, name, surname, email")
     .eq("user_id", user.id)
     .single()
 
@@ -44,10 +45,18 @@ async function getAuthenticatedContext() {
     }
   }
 
+  const actorName =
+    [profile.name, profile.surname].filter(Boolean).join(" ").trim() ||
+    profile.email ||
+    user.email ||
+    "unknown"
+
   return {
     ok: true as const,
     value: {
       supabase,
+      userId: user.id,
+      actorName,
       canEdit: profile.clearance_level === "admin",
     },
   }
@@ -93,6 +102,12 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: "Invalid input", details: parsed.error.flatten() }, { status: 400 })
   }
 
+  const { data: existing } = await context.value.supabase
+    .from("app_settings")
+    .select("value")
+    .eq("key", SESSION_TIMEOUT_SETTING_KEY)
+    .maybeSingle()
+
   const value = String(parseSessionTimeoutMinutes(parsed.data.sessionTimeoutMinutes))
   const { error } = await context.value.supabase
     .from("app_settings")
@@ -103,6 +118,17 @@ export async function PATCH(req: Request) {
     })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  await writeAuditLog(context.value.supabase, {
+    actor: context.value.actorName,
+    actorUserId: context.value.userId,
+    entityType: "Settings",
+    entityId: "session_timeout",
+    action: "settings_changed",
+    before: { sessionTimeoutMinutes: existing?.value ?? null },
+    after: { sessionTimeoutMinutes: Number(value) },
+    meta: settingAuditMeta(SESSION_TIMEOUT_SETTING_KEY),
+  })
 
   const sessionTimeoutMinutes = Number(value)
   return NextResponse.json({

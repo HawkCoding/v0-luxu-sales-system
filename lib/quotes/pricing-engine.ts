@@ -130,7 +130,7 @@ function getRequiredRouteId(
   return null
 }
 
-function getValidRateCard(
+export function getValidRateCard(
   leg: PackageDetail["legs"][number],
   routeId: string,
   suiteTypeId: string,

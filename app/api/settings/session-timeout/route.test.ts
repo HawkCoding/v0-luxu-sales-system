@@ -8,6 +8,16 @@ vi.mock("@/lib/supabase/server", () => ({
   createSessionClient: supabaseMocks.createSessionClient,
 }))
 
+const auditMocks = vi.hoisted(() => ({
+  writeAuditLog: vi.fn(async () => ({ error: null })),
+  settingAuditMeta: vi.fn(() => ({})),
+}))
+
+vi.mock("@/lib/audit-write", () => ({
+  writeAuditLog: auditMocks.writeAuditLog,
+  settingAuditMeta: auditMocks.settingAuditMeta,
+}))
+
 import { GET, PATCH } from "./route"
 
 const USER_ID = "00000000-0000-4000-8000-000000000001"
@@ -37,7 +47,7 @@ function createSupabase({
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
               single: vi.fn(async () => ({
-                data: user ? { clearance_level: role, is_active: isActive } : null,
+                data: user ? { clearance_level: role, is_active: isActive, name: "Admin", surname: "User", email: "admin@example.com" } : null,
                 error: null,
               })),
             })),
@@ -139,5 +149,26 @@ describe("/api/settings/session-timeout", () => {
       sessionTimeoutMinutes: 45,
       warningMinutes: 5,
     })
+  })
+
+  it("PATCH writes an audit log entry on success", async () => {
+    supabaseMocks.createSessionClient.mockResolvedValue(createSupabase())
+
+    await PATCH(
+      new Request("http://localhost/api/settings/session-timeout", {
+        method: "PATCH",
+        body: JSON.stringify({ sessionTimeoutMinutes: 45 }),
+      }),
+    )
+
+    expect(auditMocks.writeAuditLog).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        entityType: "Settings",
+        entityId: "session_timeout",
+        action: "settings_changed",
+        after: { sessionTimeoutMinutes: 45 },
+      }),
+    )
   })
 })

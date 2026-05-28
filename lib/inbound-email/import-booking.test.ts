@@ -42,6 +42,7 @@ interface ExistingCustomer {
 interface MockState {
   existingCustomers: ExistingCustomer[]
   completedCustomerIds: Set<string>
+  duplicateBookingId: string | null
   customerInsertRows: Array<Record<string, unknown>>
   customerUpdateRows: Array<{ id: string; payload: Record<string, unknown> }>
   bookingInsertRows: Array<Record<string, unknown>>
@@ -53,6 +54,7 @@ function createState(overrides: Partial<MockState> = {}): MockState {
   return {
     existingCustomers: [],
     completedCustomerIds: new Set(),
+    duplicateBookingId: null,
     customerInsertRows: [],
     customerUpdateRows: [],
     bookingInsertRows: [],
@@ -168,7 +170,10 @@ function createSupabase(state: MockState) {
               gte: vi.fn(() => query),
               order: vi.fn(() => query),
               limit: vi.fn(() => query),
-              maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+              maybeSingle: vi.fn(async () => ({
+                data: state.duplicateBookingId ? { id: state.duplicateBookingId } : null,
+                error: null,
+              })),
               ...createThenable(() => ({
                 data:
                   isRepeatQuery && state.completedCustomerIds.has(filters.customer_id)
@@ -360,5 +365,52 @@ describe("createEmailBookingFromParsedDraft customer matching", () => {
 
     expect(repeatState.bookingInsertRows[0]?.is_repeat_client_at_creation).toBe(true)
     expect(newState.bookingInsertRows[0]?.is_repeat_client_at_creation).toBe(false)
+  })
+})
+
+describe("createEmailBookingFromParsedDraft duplicate detection", () => {
+  beforeEach(() => {
+    importBookingMocks.createServiceClient.mockReset()
+    importBookingMocks.bookingSequence = 0
+  })
+
+  it("flags a possible duplicate and audits it when a recent booking exists for the same email", async () => {
+    const state = createState({
+      existingCustomers: [
+        { id: "customer-existing", email: "jane@example.com", first_name: "Jane", last_name: "Doe" },
+      ],
+      duplicateBookingId: "booking-prior",
+    })
+
+    const result = await importFixture(state, "jane@example.com")
+
+    expect(result.duplicateOfBookingId).toBe("booking-prior")
+    expect(state.bookingInsertRows[0]).toEqual(
+      expect.objectContaining({ email_import_duplicate_of_booking_id: "booking-prior" }),
+    )
+    expect(state.auditRows).toContainEqual(
+      expect.objectContaining({
+        action: "possible_duplicate_email_import",
+        meta_json: { duplicate_of_booking_id: "booking-prior" },
+      }),
+    )
+  })
+
+  it("does not flag a duplicate when no recent matching booking exists", async () => {
+    const state = createState({
+      existingCustomers: [
+        { id: "customer-existing", email: "jane@example.com", first_name: "Jane", last_name: "Doe" },
+      ],
+    })
+
+    const result = await importFixture(state, "jane@example.com")
+
+    expect(result.duplicateOfBookingId).toBeNull()
+    expect(state.bookingInsertRows[0]).toEqual(
+      expect.objectContaining({ email_import_duplicate_of_booking_id: null }),
+    )
+    expect(
+      state.auditRows.some((row) => row.action === "possible_duplicate_email_import"),
+    ).toBe(false)
   })
 })

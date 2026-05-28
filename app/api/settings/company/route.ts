@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { requireRole, requireUser } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
+import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 
 export async function GET() {
   const auth = await requireUser()
@@ -34,6 +35,12 @@ export async function PATCH(req: Request) {
   const parsed = patchSchema.safeParse(raw)
   if (!parsed.success) return jsonZodError(parsed.error, "Invalid input")
 
+  const { data: existing } = await auth.value.supabase
+    .from("app_settings")
+    .select("value")
+    .eq("key", "business_name")
+    .maybeSingle()
+
   const { error } = await auth.value.supabase
     .from("app_settings")
     .upsert({
@@ -43,6 +50,17 @@ export async function PATCH(req: Request) {
     })
 
   if (error) return safeSupabaseError("settings-company:upsert", error)
+
+  await writeAuditLog(auth.value.supabase, {
+    actor: auth.value.profile.actorName,
+    actorUserId: auth.value.user.id,
+    entityType: "Settings",
+    entityId: "company",
+    action: "settings_changed",
+    before: { business_name: existing?.value ?? null },
+    after: { business_name: parsed.data.business_name },
+    meta: settingAuditMeta("business_name"),
+  })
 
   return Response.json({ business_name: parsed.data.business_name })
 }

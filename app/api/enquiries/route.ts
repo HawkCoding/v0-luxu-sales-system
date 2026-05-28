@@ -569,29 +569,31 @@ export async function POST(req: Request) {
     sort_order: number
   }
   const travellerRows: TravellerInsert[] = []
-  const adultTravellers: any[] = body.travellers || []
-  const childTravellers: any[] = body.childTravellers || []
+  // Travellers arrive from an external webhook payload; shape is validated at the Zod boundary above
+  type TravellerInput = Record<string, unknown>
+  const adultTravellers: TravellerInput[] = Array.isArray(body.travellers) ? (body.travellers as TravellerInput[]) : []
+  const childTravellers: TravellerInput[] = Array.isArray(body.childTravellers) ? (body.childTravellers as TravellerInput[]) : []
 
-  adultTravellers.forEach((t: any, idx: number) => {
+  adultTravellers.forEach((t, idx) => {
     travellerRows.push({
       booking_id: booking.id,
-      first_name: typeof t.name === "string" ? normalizeFirstName(t.name) : t.name,
-      last_name: typeof t.surname === "string" ? normalizeLastName(t.surname) : t.surname,
-      prefix: t.prefix || null,
-      id_passport: t.idPassport || null,
-      date_of_birth: t.dateOfBirth || null,
+      first_name: typeof t.name === "string" ? normalizeFirstName(t.name) : (t.name as string),
+      last_name: typeof t.surname === "string" ? normalizeLastName(t.surname) : (t.surname as string),
+      prefix: typeof t.prefix === "string" ? t.prefix : null,
+      id_passport: typeof t.idPassport === "string" ? t.idPassport : null,
+      date_of_birth: typeof t.dateOfBirth === "string" ? t.dateOfBirth : null,
       is_child: false,
       sort_order: idx,
     })
   })
-  childTravellers.forEach((t: any, idx: number) => {
+  childTravellers.forEach((t, idx) => {
     travellerRows.push({
       booking_id: booking.id,
-      first_name: typeof t.name === "string" ? normalizeFirstName(t.name) : t.name,
-      last_name: typeof t.surname === "string" ? normalizeLastName(t.surname) : t.surname,
-      prefix: t.prefix || null,
-      id_passport: t.idPassport || null,
-      date_of_birth: t.dateOfBirth || null,
+      first_name: typeof t.name === "string" ? normalizeFirstName(t.name) : (t.name as string),
+      last_name: typeof t.surname === "string" ? normalizeLastName(t.surname) : (t.surname as string),
+      prefix: typeof t.prefix === "string" ? t.prefix : null,
+      id_passport: typeof t.idPassport === "string" ? t.idPassport : null,
+      date_of_birth: typeof t.dateOfBirth === "string" ? t.dateOfBirth : null,
       is_child: true,
       sort_order: idx,
     })

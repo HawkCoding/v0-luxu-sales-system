@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
+import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 
 const createSchema = z.object({
   label: z.string().min(1).max(120),
@@ -57,6 +58,16 @@ export async function POST(req: Request) {
     .single()
 
   if (error) return safeSupabaseError("settings:outcome-reasons-create", error)
+
+  await writeAuditLog(supabase, {
+    actor: auth.value.profile.actorName,
+    actorUserId: auth.value.user.id,
+    entityType: "Settings",
+    entityId: `outcome_reason:${data.id}`,
+    action: "settings_changed",
+    after: { label, appliesTo },
+    meta: settingAuditMeta("outcome_reasons"),
+  })
 
   return Response.json(
     { id: data.id, label: data.label, appliesTo: data.applies_to, active: data.active, createdAt: data.created_at },
