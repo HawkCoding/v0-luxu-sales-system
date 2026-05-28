@@ -10,6 +10,7 @@ export async function GET() {
   const { data, error } = await auth.value.supabase
     .from("app_settings")
     .select("key, value")
+    .eq("key", "business_name")
 
   if (error) return safeSupabaseError("settings-company:list", error)
 

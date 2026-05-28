@@ -132,9 +132,13 @@ export async function POST(_req: Request, { params }: RouteParams) {
     },
   })
 
-  const { data: signedUrlData } = await supabase.storage
+  const { data: signedUrlData, error: signedUrlError } = await supabase.storage
     .from(QUOTE_BUCKET)
     .createSignedUrl(storagePath, 3600)
+
+  if (signedUrlError) {
+    return safeSupabaseError("quote-pdf:signed-url", signedUrlError)
+  }
 
   return Response.json({
     document: {
@@ -145,6 +149,6 @@ export async function POST(_req: Request, { params }: RouteParams) {
       storagePath: documentWrite.data.storage_path,
       createdAt: documentWrite.data.created_at,
     },
-    url: signedUrlData?.signedUrl ?? null,
+    url: signedUrlData.signedUrl,
   })
 }

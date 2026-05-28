@@ -86,7 +86,7 @@ async function hasProcessedIdentity(
   uidvalidity: number,
   uid: number,
 ): Promise<boolean> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("inbound_email_messages")
     .select("id")
     .eq("email_account_id", accountId)
@@ -94,6 +94,7 @@ async function hasProcessedIdentity(
     .eq("uid", uid)
     .maybeSingle()
 
+  if (error) throw new Error(`Duplicate-check query failed: ${error.message}`)
   return Boolean(data)
 }
 

@@ -64,7 +64,7 @@ function hasCorrespondence(
 ): boolean {
   return correspondences.some((correspondence) => {
     const subject = correspondence.subject?.toLowerCase() ?? ""
-    return correspondence.kind === kind || terms.some((term) => subject.includes(term))
+    return correspondence.kind === kind && terms.some((term) => subject.includes(term))
   })
 }
 

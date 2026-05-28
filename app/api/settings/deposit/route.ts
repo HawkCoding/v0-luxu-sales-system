@@ -83,7 +83,12 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
-  const body = await req.json()
+  let body: unknown
+  try {
+    body = await req.json()
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
+  }
   const parsed = patchSchema.safeParse(body)
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid input", details: parsed.error.flatten() }, { status: 400 })
@@ -112,7 +117,7 @@ export async function PATCH(req: Request) {
     entityType: "Settings",
     entityId: "deposit",
     action: "settings_changed",
-    before: { defaultDepositPercentage: existing?.value ?? null },
+    before: { defaultDepositPercentage: existing?.value != null ? Number(existing.value) : null },
     after: { defaultDepositPercentage: Number(value) },
     meta: settingAuditMeta(DEFAULT_DEPOSIT_PERCENTAGE_SETTING_KEY),
   })

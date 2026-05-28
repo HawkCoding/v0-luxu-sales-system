@@ -179,7 +179,8 @@ function findTransportRequest(
     requests.find(
       (request) =>
         request.serviceType === serviceType &&
-        (request.routeId === routeId || request.suiteTypeId === suiteTypeId),
+        request.routeId === routeId &&
+        request.suiteTypeId === suiteTypeId,
     ) ?? null
   )
 }

@@ -119,8 +119,6 @@ export async function runPaymentRemindersWorker(
 
       sent++
     }
-
-    skipped++ // counted the invoice as processed-but-skipped for already-sent cadence points
   }
 
   if (skipped > 0) {

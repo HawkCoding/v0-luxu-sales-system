@@ -10,7 +10,7 @@ export const runtime = "nodejs"
 
 const depositInvoiceSchema = z.object({
   jobId: z.string().uuid(),
-  depositPercentage: z.number().min(0).max(100),
+  depositPercentage: z.number().min(1).max(100),
 })
 
 const updateDepositInvoiceSchema = z.object({

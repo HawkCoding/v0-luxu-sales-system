@@ -113,7 +113,7 @@ export async function getPaymentReminderSettings(
 
   const map = Object.fromEntries((rows ?? []).map((r) => [r.key, r.value]))
 
-  const enabled = map["payment_reminder_enabled"] !== "false"
+  const enabled = map["payment_reminder_enabled"] === "true"
   let cadence: number[] = [3, 7, 14]
   try {
     const parsed: unknown = JSON.parse(map["payment_reminder_cadence"] ?? "")
@@ -123,6 +123,42 @@ export async function getPaymentReminderSettings(
   }
 
   return { enabled, cadence }
+}
+
+export async function getQuoteFollowUpSettings(
+  supabase: SupabaseClient<Database>,
+): Promise<{ enabled: boolean; cadence: number[]; template: string }> {
+  const { data: rows } = await supabase
+    .from("app_settings")
+    .select("key, value")
+    .in("key", ["quote_follow_up_enabled", "quote_follow_up_cadence", "quote_follow_up_template"])
+
+  const map = Object.fromEntries((rows ?? []).map((r) => [r.key, r.value]))
+
+  const enabled = map["quote_follow_up_enabled"] === "true"
+  let cadence: number[] = [3, 7]
+  try {
+    const parsed: unknown = JSON.parse(map["quote_follow_up_cadence"] ?? "")
+    if (Array.isArray(parsed)) cadence = parsed.filter((v): v is number => typeof v === "number")
+  } catch {
+    // use default cadence
+  }
+  const template =
+    map["quote_follow_up_template"] ??
+    "<p>Dear {{customerName}},</p><p>We are following up on the quotation sent on <strong>{{lastSentDate}}</strong>. We would love to secure your booking.</p><p>Kind regards,<br/>Luxus Travel &amp; Tours</p>"
+
+  return { enabled, cadence, template }
+}
+
+export async function getReadOnlyExportsAllowed(
+  supabase: SupabaseClient<Database>,
+): Promise<boolean> {
+  const { data } = await supabase
+    .from("app_settings")
+    .select("value")
+    .eq("key", "read_only_exports_allowed")
+    .maybeSingle()
+  return data?.value === "true"
 }
 
 const DEFAULT_ATTACHMENT_MAX_SIZE_MB = 10

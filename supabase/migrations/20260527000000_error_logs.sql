@@ -58,6 +58,14 @@ do $$ begin
           where p.user_id = auth.uid()
             and p.clearance_level in ('admin', 'manager')
         )
+      )
+      with check (
+        resolved = true
+        and exists (
+          select 1 from public.profiles p
+          where p.user_id = auth.uid()
+            and p.clearance_level in ('admin', 'manager')
+        )
       );
   end if;
 end $$;

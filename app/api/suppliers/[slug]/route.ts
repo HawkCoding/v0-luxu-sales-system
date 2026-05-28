@@ -1044,6 +1044,7 @@ export async function PATCH(
         suiteTypeBedroomTypes: updatedDetail.suiteTypeBedroomTypes,
         suiteTypeBedroomLayouts: updatedDetail.suiteTypeBedroomLayouts,
         suiteTypeBathroomTypes: updatedDetail.suiteTypeBathroomTypes,
+        rateTypes: updatedDetail.rateTypes,
       },
     ),
   )

@@ -22,6 +22,10 @@ export async function POST(_req: Request, { params }: RouteParams) {
     return NextResponse.json({ error: "Error log not found" }, { status: 404 })
   }
 
+  if (existing.resolved) {
+    return NextResponse.json({ error: "Error log already resolved" }, { status: 409 })
+  }
+
   const { data, error } = await supabase
     .from("error_logs")
     .update({

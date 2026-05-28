@@ -65,7 +65,7 @@ async function globalSetup(config: FullConfig): Promise<void> {
       await page.getByLabel("Email").fill("carmen@luxustravel.co.za")
       await page.getByLabel("Password").fill("password123")
       await page.getByRole("button", { name: /sign in with email/i }).click()
-      loggedIn = await page.waitForURL(/\/app(?:\/)?$/, { timeout: 30_000 })
+      loggedIn = await page.waitForURL(/\/app(?:\/|$)/, { timeout: 30_000 })
         .then(() => true)
         .catch(() => false)
       if (loggedIn) {
