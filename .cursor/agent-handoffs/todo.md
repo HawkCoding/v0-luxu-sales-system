@@ -1056,9 +1056,9 @@ Use this as an implementation tracker. Prefer completing each section in order b
 - [x] Pipeline transition tests complete.
 - [x] Supplier/rate tests complete.
 - [x] Reporting tests complete.
-- [x] Run `pnpm test:ci`. — 2026-05-29: 107 files / 673 tests passing.
+- [x] Run `pnpm test:ci`. — 2026-05-29: 111 files / 688 tests passing (Phase 6 added 3 E2E suites).
 - [x] Run `pnpm test:coverage`. — 2026-05-27: project 63.9% stmts / 50.9% branch (provider `@vitest/coverage-v8` added). Lifecycle modules well covered: lib/pipeline 86.8%, lib/invoices 88.9%, lib/voucher 100%, app/api/payments 95.8%, app/api/quotes 87.8%, app/api/pipeline 80%.
-- [ ] Review coverage gaps for high-risk workflow logic. — known low areas (non-lifecycle): app/api/jobs/[id] 7.5%, app/api/enquiries 18.8%, app/api/users 36.7%. No CI coverage threshold gate added (report-only).
+- [x] Review coverage gaps for high-risk workflow logic. — known low areas (non-lifecycle): app/api/jobs/[id] 7.5%, app/api/enquiries 18.8%, app/api/users 36.7%. No CI coverage threshold gate added (report-only). 2026-05-29: three Phase 32 scenario E2Es land under `tests/e2e/*` covering enquiry-parse → quote, full Rovos lifecycle to voucher_sent, and forfeit-deposit cancellation+refund — exercises the highest-risk workflow paths end-to-end without driving the storage backend.
 
 > **Prompt 9 — End-to-end workflow test coverage (2026-05-27, verified passing):**
 > - Added `app/api/jobs/[id]/start-quote/route.test.ts` — Start Quote gates (customer-complete, email-import review), happy-path draft-quote creation, quote-number versioning, and 401/403/404 failures.
@@ -1074,48 +1074,48 @@ Use this as an implementation tracker. Prefer completing each section in order b
 
 ## Phase 32: End-To-End MVP Scenarios
 
-- [ ] E2E Scenario 1: Blue Train enquiry to quote.
-  - [ ] Receive Blue Train email.
-  - [ ] Parse fields.
-  - [ ] Create customer.
-  - [ ] Create booking/job number starting with `BT`.
-  - [ ] Consultant claims job.
-  - [ ] Consultant resolves review if required.
-  - [ ] Consultant starts quote.
-  - [ ] Booking enters pipeline.
-  - [ ] Consultant generates quote.
-  - [ ] Consultant sends quote.
-  - [ ] Quote PDF generated.
-  - [ ] Email/correspondence timeline created.
-  - [ ] Audit log created.
-- [ ] E2E Scenario 2: Rovos enquiry to voucher.
-  - [ ] Receive Rovos email.
-  - [ ] Parse enquiry.
-  - [ ] Create booking/job number starting with `RR`.
-  - [ ] Generate quote.
-  - [ ] Send quote.
-  - [ ] Customer accepts quote.
-  - [ ] Deposit invoice generated.
-  - [ ] Consultant records deposit payment.
-  - [ ] Consultant generates final invoice.
-  - [ ] Consultant marks invoice paid / records final payment.
-  - [ ] Voucher generation gate passes.
-  - [ ] Consultant generates voucher.
-  - [ ] Consultant sends voucher.
-  - [ ] Booking reaches Voucher Sent.
-  - [ ] Customer last travel date updates.
-  - [ ] Repeat client rule works on future enquiry.
-  - [ ] Voucher contains modular service blocks.
-- [ ] E2E Scenario 3: Cancellation and refund.
-  - [ ] Quote accepted.
-  - [ ] Consultant cancels booking.
-  - [ ] Cancellation reason required.
-  - [ ] Other reason requires text.
-  - [ ] System calculates/stores cancellation fee if rule exists.
-  - [ ] System calculates/stores refund.
-  - [ ] Consultant records refund.
-  - [ ] Outcome set to Cancelled.
-  - [ ] Audit log complete.
+- [x] E2E Scenario 1: Blue Train enquiry to quote. — `tests/e2e/scenario-1-blue-train.e2e.test.ts`
+  - [x] Receive Blue Train email.
+  - [x] Parse fields.
+  - [x] Create customer.
+  - [x] Create booking/job number starting with `BT`.
+  - [x] Consultant claims job.
+  - [x] Consultant resolves review if required.
+  - [x] Consultant starts quote.
+  - [x] Booking enters pipeline.
+  - [x] Consultant generates quote.
+  - [x] Consultant sends quote.
+  - [x] Quote PDF generated.
+  - [x] Email/correspondence timeline created.
+  - [x] Audit log created.
+- [x] E2E Scenario 2: Rovos enquiry to voucher. — `tests/e2e/scenario-2-rovos.e2e.test.ts`
+  - [x] Receive Rovos email.
+  - [x] Parse enquiry.
+  - [x] Create booking/job number starting with `RR`.
+  - [x] Generate quote.
+  - [x] Send quote.
+  - [x] Customer accepts quote.
+  - [x] Deposit invoice generated.
+  - [x] Consultant records deposit payment.
+  - [x] Consultant generates final invoice.
+  - [x] Consultant marks invoice paid / records final payment.
+  - [x] Voucher generation gate passes.
+  - [x] Consultant generates voucher.
+  - [x] Consultant sends voucher.
+  - [x] Booking reaches Voucher Sent.
+  - [x] Customer last travel date updates.
+  - [x] Repeat client rule works on future enquiry.
+  - [x] Voucher contains modular service blocks.
+- [x] E2E Scenario 3: Cancellation and refund. — `tests/e2e/scenario-3-cancellation.e2e.test.ts`
+  - [x] Quote accepted.
+  - [x] Consultant cancels booking.
+  - [x] Cancellation reason required.
+  - [x] Other reason requires text.
+  - [x] System calculates/stores cancellation fee if rule exists.
+  - [x] System calculates/stores refund.
+  - [x] Consultant records refund.
+  - [x] Outcome set to Cancelled.
+  - [x] Audit log complete.
 
 ## Phase 33: User Acceptance Testing
 
