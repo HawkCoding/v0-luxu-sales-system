@@ -3,6 +3,7 @@ import type { PackageDetail } from "@/lib/types"
 import {
   buildPackagePricing,
   calculateQuoteTotals,
+  getValidRateCard,
   inferSingleAdultCount,
 } from "@/lib/quotes/pricing-engine"
 
@@ -40,7 +41,7 @@ function rateCard(
     infantPrice,
     currency: "ZAR",
     validFrom: "2026-01-01",
-    validTo: "2026-12-31",
+    validTo: "2026-12-31" as string | null,
     createdAt: "2026-01-01T00:00:00.000Z",
   }
 }
@@ -345,5 +346,39 @@ describe("pricing engine", () => {
         ],
       }),
     ).toThrow(/No pricing available/)
+  })
+})
+
+describe("getValidRateCard — date range selection", () => {
+  const ROUTE = BLUE_ROUTE_ID
+  const SUITE = SUITE_ID
+
+  function leg(rateCards: ReturnType<typeof rateCard>[]) {
+    return packageDetail().legs[0] && { ...packageDetail().legs[0], rateCards }
+  }
+
+  function rc(validFrom: string, validTo: string | null) {
+    return { ...rateCard("rc-1", ROUTE, SUITE, 10000), validFrom, validTo }
+  }
+
+  it("returns the rate card when travel date is inside a bounded range", () => {
+    const result = getValidRateCard(leg([rc("2026-01-01", "2026-12-31")]), ROUTE, SUITE, "2026-06-15")
+    expect(result).toBeDefined()
+    expect(result?.validFrom).toBe("2026-01-01")
+  })
+
+  it("returns the rate card when travel date is on an open-ended range (validTo is null)", () => {
+    const result = getValidRateCard(leg([rc("2026-01-01", null)]), ROUTE, SUITE, "2027-06-15")
+    expect(result).toBeDefined()
+  })
+
+  it("returns undefined when travel date is before validFrom", () => {
+    const result = getValidRateCard(leg([rc("2026-01-01", "2026-12-31")]), ROUTE, SUITE, "2025-12-31")
+    expect(result).toBeUndefined()
+  })
+
+  it("returns undefined when travel date is after validTo on a closed range", () => {
+    const result = getValidRateCard(leg([rc("2026-01-01", "2026-12-31")]), ROUTE, SUITE, "2027-01-01")
+    expect(result).toBeUndefined()
   })
 })

@@ -130,7 +130,7 @@ function getRequiredRouteId(
   return null
 }
 
-function getValidRateCard(
+export function getValidRateCard(
   leg: PackageDetail["legs"][number],
   routeId: string,
   suiteTypeId: string,
@@ -179,7 +179,8 @@ function findTransportRequest(
     requests.find(
       (request) =>
         request.serviceType === serviceType &&
-        (request.routeId === routeId || request.suiteTypeId === suiteTypeId),
+        request.routeId === routeId &&
+        request.suiteTypeId === suiteTypeId,
     ) ?? null
   )
 }

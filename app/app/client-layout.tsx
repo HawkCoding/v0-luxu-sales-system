@@ -73,6 +73,13 @@ function AppShell({ children }: { children: ReactNode }) {
 
   const enquiriesCount = data?.bookings?.filter((b: any) => b.stage === "enquiry").length || 0
 
+  const { data: errorLogCountData } = useSWR<{ count: number }>(
+    "/api/error-logs?resolved=false&count=true",
+    fetcher,
+    { refreshInterval: 60_000 },
+  )
+  const unresolvedErrorsCount = errorLogCountData?.count ?? 0
+
   useEffect(() => {
     setMounted(true)
   }, [])
@@ -259,7 +266,9 @@ function AppShell({ children }: { children: ReactNode }) {
               const Icon = item.icon!
               const active = pathname === item.href || (item.href !== "/app" && pathname.startsWith(item.href!))
               const isEnquiries = item.href === "/app/enquiries"
+              const isSettings = item.href === "/app/settings"
               const showBadge = isEnquiries && enquiriesCount > 0
+              const showSettingsBadge = isSettings && unresolvedErrorsCount > 0
               return (
                 <Link
                   key={item.href}
@@ -279,6 +288,11 @@ function AppShell({ children }: { children: ReactNode }) {
                       {showBadge && (
                         <Badge variant="default" className="h-5 min-w-[20px] px-1.5 text-xs font-semibold">
                           {enquiriesCount}
+                        </Badge>
+                      )}
+                      {showSettingsBadge && (
+                        <Badge variant="destructive" className="h-5 min-w-[20px] px-1.5 text-xs font-semibold">
+                          {unresolvedErrorsCount}
                         </Badge>
                       )}
                     </>

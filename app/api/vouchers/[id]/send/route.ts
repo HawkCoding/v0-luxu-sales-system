@@ -6,6 +6,7 @@ import { sendEmail } from "@/lib/email/transport"
 import { formatDisplayDateLong } from "@/lib/date-format"
 import { checkVoucherReadiness } from "@/lib/voucher/check-readiness"
 import { renderVoucherEmail } from "@/lib/voucher/render-voucher-email"
+import { logError } from "@/lib/error-log"
 import type { Database } from "@/lib/supabase/types"
 
 export const runtime = "nodejs"
@@ -186,6 +187,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
 
   if (correspondenceError) {
     console.error("voucher-send:correspondence-insert", correspondenceError)
+    void logError({ severity: "Warning", source: "voucher-send", message: "Voucher sent but correspondence record failed to insert", details: { voucherId: voucher.id, error: correspondenceError.message } })
   }
 
   if (!sendResult.success) {
@@ -223,6 +225,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
 
     if (documentUpdateError) {
       console.error("voucher-send:document-status", documentUpdateError)
+      void logError({ severity: "Warning", source: "voucher-send", message: "Voucher sent but document status update failed", details: { voucherId: voucher.id, bookingId: booking.id, error: documentUpdateError.message } })
     }
 
     if (booking.customer_id) {

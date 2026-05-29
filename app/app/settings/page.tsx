@@ -49,7 +49,9 @@ import {
 } from "@/lib/session-timeout"
 import type { Role } from "@/lib/types"
 import { APP_VERSION } from "@/lib/version"
-import { Clock, KeyRound, MoreHorizontal, ShieldCheck, Tag, Trash2, Upload, UserCheck, UserPlus, UserX } from "lucide-react"
+import { Textarea } from "@/components/ui/textarea"
+import { Switch } from "@/components/ui/switch"
+import { AlertTriangle, Clock, KeyRound, MoreHorizontal, ShieldCheck, Tag, Trash2, Upload, UserCheck, UserPlus, UserX } from "lucide-react"
 
 interface AppUser {
   userId: string
@@ -1263,6 +1265,127 @@ function SessionTimeoutSettingsCard({ canEdit }: { canEdit: boolean }) {
   )
 }
 
+function QuoteFollowUpSettingsCard({ canEdit }: { canEdit: boolean }) {
+  const [enabled, setEnabled] = useState(true)
+  const [cadenceInput, setCadenceInput] = useState("3,7")
+  const [emailTemplate, setEmailTemplate] = useState("")
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch("/api/settings/quote-follow-up")
+      .then((r) => r.json())
+      .then((d: { enabled?: boolean; cadence?: number[]; template?: string }) => {
+        if (cancelled) return
+        if (typeof d.enabled === "boolean") setEnabled(d.enabled)
+        if (Array.isArray(d.cadence)) setCadenceInput(d.cadence.join(","))
+        if (typeof d.template === "string") setEmailTemplate(d.template)
+      })
+      .catch(() => toast.error("Failed to load quote follow-up settings"))
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [])
+
+  const parsedCadence = cadenceInput
+    .split(",")
+    .map((v) => parseInt(v.trim(), 10))
+    .filter((v) => Number.isInteger(v) && v > 0)
+  const isCadenceValid = parsedCadence.length > 0
+
+  const handleSave = async () => {
+    if (!isCadenceValid) return
+    setSaving(true)
+    try {
+      const res = await fetch("/api/settings/quote-follow-up", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled, cadence: parsedCadence, template: emailTemplate }),
+      })
+      if (!res.ok) throw new Error()
+      toast.success("Quote follow-up settings saved")
+    } catch {
+      toast.error("Failed to save quote follow-up settings")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card className={!canEdit ? "opacity-80" : undefined}>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium">Quote Follow-Up</CardTitle>
+        <CardDescription className="text-xs">
+          Automatically email customers with outstanding quotes at configured intervals after the quote was sent.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex items-center gap-3">
+          <Switch
+            id="follow-up-enabled"
+            checked={enabled}
+            onCheckedChange={setEnabled}
+            disabled={!canEdit || loading}
+            aria-label="Enable quote follow-up emails"
+          />
+          <Label htmlFor="follow-up-enabled" className="text-sm">
+            {enabled ? "Follow-ups enabled" : "Follow-ups disabled"}
+          </Label>
+        </div>
+
+        <div className="space-y-1">
+          <Label htmlFor="follow-up-cadence" className="text-xs font-medium text-muted-foreground">
+            Follow-up days after quote sent (comma-separated)
+          </Label>
+          <Input
+            id="follow-up-cadence"
+            value={cadenceInput}
+            onChange={(e) => setCadenceInput(e.target.value)}
+            placeholder="e.g. 3,7"
+            readOnly={!canEdit}
+            disabled={loading}
+            aria-invalid={!isCadenceValid}
+            className="sm:max-w-xs"
+          />
+          {!isCadenceValid && (
+            <p className="text-xs text-destructive">Enter at least one positive integer.</p>
+          )}
+        </div>
+
+        <div className="space-y-1">
+          <Label htmlFor="follow-up-template" className="text-xs font-medium text-muted-foreground">
+            Email body template (HTML — supports {"{{customerName}}"}, {"{{jobNumber}}"}, {"{{lastSentDate}}"})
+          </Label>
+          <Textarea
+            id="follow-up-template"
+            value={emailTemplate}
+            onChange={(e) => setEmailTemplate(e.target.value)}
+            readOnly={!canEdit}
+            disabled={loading}
+            rows={5}
+            className="font-mono text-xs"
+          />
+        </div>
+
+        {canEdit && (
+          <Button
+            size="sm"
+            onClick={handleSave}
+            disabled={loading || saving || !isCadenceValid}
+          >
+            {saving ? "Saving..." : "Save"}
+          </Button>
+        )}
+        {!canEdit && (
+          <p className="text-xs text-muted-foreground">
+            Only managers and admins can change follow-up settings.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 export default function SettingsPage() {
   const { can, role } = useRole()
   const canEditSettings = can("edit:settings")
@@ -1321,6 +1444,29 @@ export default function SettingsPage() {
             </Button>
           </CardContent>
         </Card>
+      )}
+
+      {canEditDepositSettings && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Error Log</CardTitle>
+            <CardDescription className="text-xs">
+              View and resolve system errors, warnings, and info events logged by the application.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild size="sm" variant="outline" className="gap-2">
+              <Link href="/app/settings/error-log">
+                <AlertTriangle className="h-4 w-4" />
+                View Error Log
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {canEditDepositSettings && (
+        <QuoteFollowUpSettingsCard canEdit={canEditDepositSettings} />
       )}
 
       {can("manage:users") && <UserManagementCard />}

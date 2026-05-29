@@ -5,6 +5,7 @@ import {
   parseDepositPercentage,
 } from "@/lib/pipeline/constants"
 import { createSessionClient } from "@/lib/supabase/server"
+import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 
 const allowedRoles = new Set(["admin", "manager"])
 
@@ -28,7 +29,7 @@ async function getAuthenticatedContext() {
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
-    .select("clearance_level")
+    .select("clearance_level, name, surname, email")
     .eq("user_id", user.id)
     .single()
 
@@ -39,10 +40,18 @@ async function getAuthenticatedContext() {
     }
   }
 
+  const actorName =
+    [profile.name, profile.surname].filter(Boolean).join(" ").trim() ||
+    profile.email ||
+    user.email ||
+    "unknown"
+
   return {
     ok: true as const,
     value: {
       supabase,
+      userId: user.id,
+      actorName,
       canEdit: allowedRoles.has(profile.clearance_level),
     },
   }
@@ -74,11 +83,22 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
-  const body = await req.json()
+  let body: unknown
+  try {
+    body = await req.json()
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
+  }
   const parsed = patchSchema.safeParse(body)
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid input", details: parsed.error.flatten() }, { status: 400 })
   }
+
+  const { data: existing } = await context.value.supabase
+    .from("app_settings")
+    .select("value")
+    .eq("key", DEFAULT_DEPOSIT_PERCENTAGE_SETTING_KEY)
+    .maybeSingle()
 
   const value = String(parseDepositPercentage(parsed.data.defaultDepositPercentage))
   const { error } = await context.value.supabase
@@ -90,6 +110,17 @@ export async function PATCH(req: Request) {
     })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  await writeAuditLog(context.value.supabase, {
+    actor: context.value.actorName,
+    actorUserId: context.value.userId,
+    entityType: "Settings",
+    entityId: "deposit",
+    action: "settings_changed",
+    before: { defaultDepositPercentage: existing?.value != null ? Number(existing.value) : null },
+    after: { defaultDepositPercentage: Number(value) },
+    meta: settingAuditMeta(DEFAULT_DEPOSIT_PERCENTAGE_SETTING_KEY),
+  })
 
   return NextResponse.json({ defaultDepositPercentage: Number(value) })
 }

@@ -1,6 +1,10 @@
 "use client"
 
+import { useCallback } from "react"
+import { useSearchParams, useRouter, usePathname } from "next/navigation"
+import useSWR from "swr"
 import { useAllData } from "@/lib/use-data"
+import { useRole } from "@/lib/role-context"
 import {
   CONSULTANTS,
   getCanonicalPipelineStage,
@@ -15,6 +19,13 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
+import { Button } from "@/components/ui/button"
+import { Download } from "lucide-react"
+import type { SalesPerSalespersonRow } from "@/lib/reports/sales-per-salesperson"
+import type { ConversionRateResult } from "@/lib/reports/conversion-rate"
+import type { RevenuePerProductRow } from "@/lib/reports/revenue-per-product"
+import type { OutstandingPaymentRow } from "@/lib/reports/outstanding-payments"
+import type { EnquiriesBySourceRow } from "@/lib/reports/enquiries-by-source"
 
 interface ReportingData {
   bookings: Booking[]
@@ -38,11 +49,76 @@ const SOURCE_LABELS: Record<Source, string> = {
 const UPCOMING_DEPARTURE_LIMIT = 8
 const UPCOMING_DEPARTURE_WINDOW_DAYS = 30
 
+const jsonFetcher = (url: string) => fetch(url).then((r) => r.json())
+
 export default function ReportingPage() {
   const { data, isLoading } = useAllData()
+  const { can } = useRole()
+  const canExport = can("export:reporting")
+
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
+
+  const filterFrom = searchParams.get("from") ?? ""
+  const filterTo = searchParams.get("to") ?? ""
+  const filterConsultant = searchParams.get("consultant") ?? ""
+  const filterProduct = searchParams.get("product") ?? ""
+  const filterStage = searchParams.get("stage") ?? ""
+
+  const updateFilter = useCallback(
+    (key: string, value: string) => {
+      const params = new URLSearchParams(searchParams.toString())
+      if (value) {
+        params.set(key, value)
+      } else {
+        params.delete(key)
+      }
+      router.push(`${pathname}?${params.toString()}`)
+    },
+    [searchParams, router, pathname],
+  )
+
+  const filterQs = new URLSearchParams({
+    ...(filterFrom && { from: filterFrom }),
+    ...(filterTo && { to: filterTo }),
+    ...(filterConsultant && { consultant: filterConsultant }),
+    ...(filterProduct && { product: filterProduct }),
+    ...(filterStage && { stage: filterStage }),
+  }).toString()
+
+  const qs = filterQs ? `?${filterQs}` : ""
+
+  const { data: salesData, isLoading: salesLoading } = useSWR<{ data: SalesPerSalespersonRow[] }>(
+    `/api/reports/sales-per-salesperson${qs}`,
+    jsonFetcher,
+  )
+  const { data: convData, isLoading: convLoading } = useSWR<{ data: ConversionRateResult }>(
+    `/api/reports/conversion-rate${qs}`,
+    jsonFetcher,
+  )
+  const { data: revenueData, isLoading: revenueLoading } = useSWR<{ data: RevenuePerProductRow[] }>(
+    `/api/reports/revenue-per-product${qs}`,
+    jsonFetcher,
+  )
+  const { data: outstandingData, isLoading: outstandingLoading } = useSWR<{
+    data: OutstandingPaymentRow[]
+  }>(`/api/reports/outstanding-payments${qs}`, jsonFetcher)
+  const { data: sourceData, isLoading: sourceLoading } = useSWR<{ data: EnquiriesBySourceRow[] }>(
+    `/api/reports/enquiries-by-source${qs}`,
+    jsonFetcher,
+  )
 
   if (isLoading || !data) {
-    return <div className="p-6"><div className="animate-pulse space-y-3">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-32 bg-secondary rounded-lg" />)}</div></div>
+    return (
+      <div className="p-6">
+        <div className="animate-pulse space-y-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-32 bg-secondary rounded-lg" />
+          ))}
+        </div>
+      </div>
+    )
   }
 
   const reportingData = data as ReportingData
@@ -53,37 +129,39 @@ export default function ReportingPage() {
     const balance = booking.invoiceBalance ?? 0
     return balance > 0 ? sum + balance : sum
   }, 0)
-  const openJobs = bookings.filter((b) => !["closed", "lost"].includes(getCanonicalPipelineStage(b.stage))).length
+  const openJobs = bookings.filter(
+    (b) => !["closed", "lost"].includes(getCanonicalPipelineStage(b.stage)),
+  ).length
   const closedJobs = bookings.filter((b) => getCanonicalPipelineStage(b.stage) === "closed").length
   const lostJobs = bookings.filter((b) => getCanonicalPipelineStage(b.stage) === "lost").length
-  const conversionRate = bookings.length > 0 ? ((closedJobs / bookings.length) * 100).toFixed(1) : "0"
+  const conversionRate =
+    bookings.length > 0 ? ((closedJobs / bookings.length) * 100).toFixed(1) : "0"
 
-  const stageCounts = PIPELINE_STAGES.map(s => ({
+  const stageCounts = PIPELINE_STAGES.map((s) => ({
     ...s,
-    count: bookings.filter((b: { stage: PipelineStage }) => getCanonicalPipelineStage(b.stage) === s.key).length,
+    count: bookings.filter((b: { stage: PipelineStage }) => getCanonicalPipelineStage(b.stage) === s.key)
+      .length,
   }))
 
-  // Revenue by method
   const byMethod = payments.reduce((acc: Record<string, number>, p: Payment) => {
     acc[p.method] = (acc[p.method] || 0) + p.amount
     return acc
   }, {})
 
-  // Top countries
   const byCountry = customers.reduce((acc: Record<string, number>, c: Customer) => {
     const country = c.country ?? "Unknown"
     acc[country] = (acc[country] || 0) + 1
     return acc
   }, {})
-  const topCountries = Object.entries(byCountry).sort((a, b) => (b[1] as number) - (a[1] as number)).slice(0, 5)
+  const topCountries = Object.entries(byCountry)
+    .sort((a, b) => (b[1] as number) - (a[1] as number))
+    .slice(0, 5)
 
-  // Quote status breakdown
   const quoteStats = quotes.reduce((acc: Record<string, number>, q: Quote) => {
     acc[q.status] = (acc[q.status] || 0) + 1
     return acc
   }, {})
 
-  // Pipeline value (total of ready + sent quotes)
   const pipelineValue = quotes
     .filter((q: Quote) => ["ready", "sent"].includes(q.status))
     .reduce((s: number, q: Quote) => s + q.total, 0)
@@ -106,7 +184,6 @@ export default function ReportingPage() {
       if (!booking.consultant || consultantKeys.has(booking.consultant)) {
         return acc
       }
-
       acc[booking.consultant] = (acc[booking.consultant] || 0) + 1
       return acc
     }, {}),
@@ -115,7 +192,9 @@ export default function ReportingPage() {
   const consultantRows = [
     ...byConsultant,
     ...otherConsultants,
-    ...(unassignedBookings > 0 ? [{ key: "unassigned", label: "Unassigned", count: unassignedBookings }] : []),
+    ...(unassignedBookings > 0
+      ? [{ key: "unassigned", label: "Unassigned", count: unassignedBookings }]
+      : []),
   ]
 
   const customerNames = new Map(
@@ -130,7 +209,6 @@ export default function ReportingPage() {
   const upcomingDepartures = bookings
     .filter((booking) => {
       const departureDate = parseDateString(booking.departureDate)
-
       return (
         departureDate !== null &&
         departureDate >= today &&
@@ -170,7 +248,7 @@ export default function ReportingPage() {
             <CardTitle className="text-sm font-medium">Pipeline Distribution</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {stageCounts.map(s => {
+            {stageCounts.map((s) => {
               const pct = data.bookings.length > 0 ? (s.count / data.bookings.length) * 100 : 0
               return (
                 <div key={s.key} className="space-y-1">
@@ -179,7 +257,10 @@ export default function ReportingPage() {
                     <span className="text-xs font-medium text-foreground">{s.count}</span>
                   </div>
                   <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
-                    <div className="h-full bg-brand-gold rounded-full transition-all" style={{ width: `${pct}%` }} />
+                    <div
+                      className="h-full bg-brand-gold rounded-full transition-all"
+                      style={{ width: `${pct}%` }}
+                    />
                   </div>
                 </div>
               )
@@ -196,7 +277,11 @@ export default function ReportingPage() {
             {Object.entries(byMethod).map(([method, amount]) => (
               <div key={method} className="flex items-center justify-between py-1.5">
                 <span className="text-sm text-muted-foreground">{method}</span>
-                <span className={`text-sm font-medium ${(amount as number) >= 0 ? "text-foreground" : "text-payment-red"}`}>R {(amount as number).toLocaleString()}</span>
+                <span
+                  className={`text-sm font-medium ${(amount as number) >= 0 ? "text-foreground" : "text-payment-red"}`}
+                >
+                  R {(amount as number).toLocaleString()}
+                </span>
               </div>
             ))}
           </CardContent>
@@ -211,7 +296,9 @@ export default function ReportingPage() {
             {topCountries.map(([country, count]) => (
               <div key={country} className="flex items-center justify-between py-1.5">
                 <span className="text-sm text-muted-foreground">{country}</span>
-                <Badge variant="secondary" className="text-xs">{count as number}</Badge>
+                <Badge variant="secondary" className="text-xs">
+                  {count as number}
+                </Badge>
               </div>
             ))}
           </CardContent>
@@ -226,7 +313,9 @@ export default function ReportingPage() {
             {Object.entries(quoteStats).map(([status, count]) => (
               <div key={status} className="flex items-center justify-between py-1.5">
                 <span className="text-sm text-muted-foreground">{status.replace(/_/g, " ")}</span>
-                <Badge variant="secondary" className="text-xs">{count as number}</Badge>
+                <Badge variant="secondary" className="text-xs">
+                  {count as number}
+                </Badge>
               </div>
             ))}
             <Separator />
@@ -246,8 +335,12 @@ export default function ReportingPage() {
             {bySource.length > 0 ? (
               bySource.map(([source, count]) => (
                 <div key={source} className="flex items-center justify-between py-1.5">
-                  <span className="text-sm text-muted-foreground">{SOURCE_LABELS[source as Source] ?? source.replace(/_/g, " ")}</span>
-                  <Badge variant="secondary" className="text-xs">{count}</Badge>
+                  <span className="text-sm text-muted-foreground">
+                    {SOURCE_LABELS[source as Source] ?? source.replace(/_/g, " ")}
+                  </span>
+                  <Badge variant="secondary" className="text-xs">
+                    {count}
+                  </Badge>
                 </div>
               ))
             ) : (
@@ -265,7 +358,9 @@ export default function ReportingPage() {
             {consultantRows.map((consultant) => (
               <div key={consultant.key} className="flex items-center justify-between py-1.5">
                 <span className="text-sm text-muted-foreground">{consultant.label}</span>
-                <Badge variant="secondary" className="text-xs">{consultant.count}</Badge>
+                <Badge variant="secondary" className="text-xs">
+                  {consultant.count}
+                </Badge>
               </div>
             ))}
           </CardContent>
@@ -279,9 +374,14 @@ export default function ReportingPage() {
           <CardContent className="space-y-2">
             {upcomingDepartures.length > 0 ? (
               upcomingDepartures.map((booking) => (
-                <div key={booking.id} className="flex items-center justify-between gap-4 py-1.5">
+                <div
+                  key={booking.id}
+                  className="flex items-center justify-between gap-4 py-1.5"
+                >
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-foreground">{booking.bookingNumber}</p>
+                    <p className="truncate text-sm font-medium text-foreground">
+                      {booking.bookingNumber}
+                    </p>
                     <p className="truncate text-xs text-muted-foreground">
                       {customerNames.get(booking.customerId) ?? "Unknown customer"}
                     </p>
@@ -297,7 +397,292 @@ export default function ReportingPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* ── Filtered Reports ── */}
+      <div>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-foreground">Filtered Reports</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Filter by date range, consultant, or product
+            </p>
+          </div>
+        </div>
+
+        {/* Filter controls */}
+        <div className="flex flex-wrap gap-3 mb-6 p-4 bg-secondary/40 rounded-lg border border-border">
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+              From
+            </label>
+            <input
+              type="date"
+              value={filterFrom}
+              onChange={(e) => updateFilter("from", e.target.value)}
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+              To
+            </label>
+            <input
+              type="date"
+              value={filterTo}
+              onChange={(e) => updateFilter("to", e.target.value)}
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+              Consultant
+            </label>
+            <select
+              value={filterConsultant}
+              onChange={(e) => updateFilter("consultant", e.target.value)}
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              <option value="">All</option>
+              {CONSULTANTS.map((c) => (
+                <option key={c.key} value={c.key}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+              Product
+            </label>
+            <select
+              value={filterProduct}
+              onChange={(e) => updateFilter("product", e.target.value)}
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              <option value="">All</option>
+              <option value="BT">Blue Train</option>
+              <option value="RR">Rovos Rail</option>
+            </select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+              Stage
+            </label>
+            <select
+              value={filterStage}
+              onChange={(e) => updateFilter("stage", e.target.value)}
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              <option value="">All</option>
+              {PIPELINE_STAGES.map((s) => (
+                <option key={s.key} value={s.key}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          {(filterFrom || filterTo || filterConsultant || filterProduct || filterStage) && (
+            <div className="flex flex-col justify-end">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => router.push(pathname)}
+              >
+                Clear filters
+              </Button>
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Sales per Salesperson */}
+          <ReportCard
+            title="Sales per Salesperson"
+            report="sales-per-salesperson"
+            exportQs={filterQs}
+            canExport={canExport}
+            isLoading={salesLoading}
+            isEmpty={!salesData?.data?.length}
+          >
+            {salesData?.data?.map((row) => (
+              <div key={row.consultant} className="flex items-start justify-between py-1.5 gap-2">
+                <span className="text-sm text-muted-foreground">{row.consultant}</span>
+                <div className="text-right shrink-0">
+                  <p className="text-sm font-medium text-foreground">R {row.revenue.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {row.bookingCount} bookings · {row.wonCount} won
+                  </p>
+                </div>
+              </div>
+            ))}
+          </ReportCard>
+
+          {/* Conversion Rate */}
+          <ReportCard
+            title="Conversion Rate"
+            report="conversion-rate"
+            exportQs={filterQs}
+            canExport={canExport}
+            isLoading={convLoading}
+            isEmpty={!convData?.data}
+          >
+            {convData?.data && (
+              <div className="space-y-3 pt-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Total bookings</span>
+                  <span className="text-sm font-medium text-foreground">{convData.data.total}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Won (Closed)</span>
+                  <span className="text-sm font-medium text-foreground">{convData.data.won}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Lost</span>
+                  <span className="text-sm font-medium text-foreground">{convData.data.lost}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Cancelled</span>
+                  <span className="text-sm font-medium text-foreground">{convData.data.cancelled}</span>
+                </div>
+                <Separator />
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-foreground">Conversion rate</span>
+                  <span className="text-lg font-semibold text-foreground">
+                    {(convData.data.rate * 100).toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+            )}
+          </ReportCard>
+
+          {/* Revenue per Product */}
+          <ReportCard
+            title="Revenue per Product"
+            report="revenue-per-product"
+            exportQs={filterQs}
+            canExport={canExport}
+            isLoading={revenueLoading}
+            isEmpty={!revenueData?.data?.length}
+          >
+            {revenueData?.data?.map((row) => (
+              <div key={row.product} className="flex items-start justify-between py-1.5">
+                <span className="text-sm text-muted-foreground">
+                  {row.product === "BT" ? "Blue Train" : row.product === "RR" ? "Rovos Rail" : row.product}
+                </span>
+                <div className="text-right">
+                  <p className="text-sm font-medium text-foreground">R {row.revenue.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground">{row.bookingCount} bookings</p>
+                </div>
+              </div>
+            ))}
+          </ReportCard>
+
+          {/* Outstanding Payments */}
+          <ReportCard
+            title="Outstanding Payments"
+            report="outstanding-payments"
+            exportQs={filterQs}
+            canExport={canExport}
+            isLoading={outstandingLoading}
+            isEmpty={!outstandingData?.data?.length}
+            emptyText="No outstanding balances"
+          >
+            {outstandingData?.data?.map((row) => (
+              <div key={row.bookingId} className="flex items-start justify-between py-1.5 gap-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{row.bookingNumber}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {row.consultant ?? "Unassigned"} · {row.departureDate ?? "No date"}
+                  </p>
+                </div>
+                <span className="shrink-0 text-sm font-medium text-foreground">
+                  R {row.balance.toLocaleString()}
+                </span>
+              </div>
+            ))}
+          </ReportCard>
+
+          {/* Enquiries by Source */}
+          <ReportCard
+            title="Enquiries by Source"
+            report="enquiries-by-source"
+            exportQs={filterQs}
+            canExport={canExport}
+            isLoading={sourceLoading}
+            isEmpty={!sourceData?.data?.length}
+          >
+            {sourceData?.data?.map((row) => (
+              <div key={row.source} className="flex items-center justify-between py-1.5">
+                <span className="text-sm text-muted-foreground">
+                  {SOURCE_LABELS[row.source as Source] ?? row.source.replace(/_/g, " ")}
+                </span>
+                <Badge variant="secondary" className="text-xs">
+                  {row.count}
+                </Badge>
+              </div>
+            ))}
+          </ReportCard>
+        </div>
+      </div>
     </div>
+  )
+}
+
+interface ReportCardProps {
+  title: string
+  report: string
+  exportQs: string
+  canExport: boolean
+  isLoading: boolean
+  isEmpty: boolean
+  emptyText?: string
+  children: React.ReactNode
+}
+
+function ReportCard({
+  title,
+  report,
+  exportQs,
+  canExport,
+  isLoading,
+  isEmpty,
+  emptyText = "No data for selected filters",
+  children,
+}: ReportCardProps) {
+  const exportHref = `/api/reports/${report}/export${exportQs ? `?${exportQs}` : ""}`
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-medium">{title}</CardTitle>
+          {canExport && (
+            <a
+              href={exportHref}
+              download
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              aria-label={`Download ${title} as CSV`}
+            >
+              <Download className="h-3 w-3" />
+              CSV
+            </a>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-0.5">
+        {isLoading ? (
+          <div className="animate-pulse space-y-2 py-2">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-4 bg-secondary rounded" />
+            ))}
+          </div>
+        ) : isEmpty ? (
+          <EmptyCardText>{emptyText}</EmptyCardText>
+        ) : (
+          children
+        )}
+      </CardContent>
+    </Card>
   )
 }
 
@@ -305,7 +690,12 @@ function KPI({ label, value }: { label: string; value: string | number }) {
   return (
     <Card>
       <CardContent className="p-4">
-        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider" style={{ fontFamily: "var(--font-inter)" }}>{label}</p>
+        <p
+          className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider"
+          style={{ fontFamily: "var(--font-inter)" }}
+        >
+          {label}
+        </p>
         <p className="text-lg font-semibold text-foreground mt-1">{value}</p>
       </CardContent>
     </Card>

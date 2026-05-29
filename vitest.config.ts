@@ -9,5 +9,12 @@ export default defineConfig({
     setupFiles: ["./vitest.setup.ts"],
     // qa/specs/ is Playwright-driven (pnpm qa); keep vitest out of it.
     exclude: ["**/node_modules/**", "**/.next/**", "qa/**"],
+    coverage: {
+      provider: "v8",
+      thresholds: {
+        statements: 60,
+        branches: 48,
+      },
+    },
   },
 })

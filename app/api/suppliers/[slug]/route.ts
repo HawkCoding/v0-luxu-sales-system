@@ -18,6 +18,7 @@ import {
   type SupplierSaveInput,
 } from "../schemas"
 import { isTransportSupplier } from "@/lib/types"
+import { areRateCardDateRangesOverlapping, checkRateCardOverlaps } from "@/lib/rate-cards/overlap"
 
 interface NormalizedRoute {
   id: string
@@ -57,11 +58,6 @@ interface NormalizedRateCard {
   valid_from: string
   valid_to: string | null
   created_at: string
-}
-
-interface RateCardDateRangeDetails {
-  validFrom: string
-  validTo: string | null
 }
 
 function logSupplierMutationError(
@@ -104,49 +100,6 @@ function normalizeOptionalText(value: string | null | undefined): string | null 
 
 function normalizeOptionalUuid(value: string | null | undefined): string | null {
   return value && value.length > 0 ? value : null
-}
-
-function areRateCardDateRangesOverlapping(
-  firstRange: RateCardDateRangeDetails,
-  secondRange: RateCardDateRangeDetails,
-) {
-  const firstStartsBeforeSecondEnds =
-    !secondRange.validTo || firstRange.validFrom <= secondRange.validTo
-  const secondStartsBeforeFirstEnds =
-    !firstRange.validTo || secondRange.validFrom <= firstRange.validTo
-  return firstStartsBeforeSecondEnds && secondStartsBeforeFirstEnds
-}
-
-function checkRateCardOverlaps(rateCards: NormalizedRateCard[]) {
-  const groupedRateCards = new Map<string, NormalizedRateCard[]>()
-
-  for (const rateCard of rateCards) {
-    const groupKey = [rateCard.rate_type_id, rateCard.route_id, rateCard.suite_type_id].join("|")
-    const nextGroup = groupedRateCards.get(groupKey) ?? []
-    nextGroup.push(rateCard)
-    groupedRateCards.set(groupKey, nextGroup)
-  }
-
-  for (const groupedCardSet of groupedRateCards.values()) {
-    const sortedRateCards = [...groupedCardSet].sort((a, b) =>
-      a.valid_from.localeCompare(b.valid_from),
-    )
-
-    for (let index = 0; index < sortedRateCards.length; index += 1) {
-      const firstCard = sortedRateCards[index]
-      for (let compareIndex = index + 1; compareIndex < sortedRateCards.length; compareIndex += 1) {
-        const secondCard = sortedRateCards[compareIndex]
-        if (
-          areRateCardDateRangesOverlapping(
-            { validFrom: firstCard.valid_from, validTo: firstCard.valid_to },
-            { validFrom: secondCard.valid_from, validTo: secondCard.valid_to },
-          )
-        ) {
-          throw new Error("Overlapping rate card periods are not allowed for the same route and suite type.")
-        }
-      }
-    }
-  }
 }
 
 function findDuplicateNames(items: Array<{ id: string; name: string }>): string | null {
@@ -552,7 +505,15 @@ export async function PATCH(
       }
     })
 
-    checkRateCardOverlaps(normalizedRateCards)
+    checkRateCardOverlaps(
+      normalizedRateCards.map((rc) => ({
+        rateTypeId: rc.rate_type_id,
+        routeId: rc.route_id,
+        suiteTypeId: rc.suite_type_id,
+        validFrom: rc.valid_from,
+        validTo: rc.valid_to,
+      })),
+    )
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Invalid supplier route structure" },
@@ -1083,6 +1044,7 @@ export async function PATCH(
         suiteTypeBedroomTypes: updatedDetail.suiteTypeBedroomTypes,
         suiteTypeBedroomLayouts: updatedDetail.suiteTypeBedroomLayouts,
         suiteTypeBathroomTypes: updatedDetail.suiteTypeBathroomTypes,
+        rateTypes: updatedDetail.rateTypes,
       },
     ),
   )

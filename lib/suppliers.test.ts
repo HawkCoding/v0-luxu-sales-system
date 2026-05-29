@@ -56,6 +56,11 @@ const routeRow: RouteRow = {
   direction_mode: "one_way",
   commission_type: null,
   commission_value: null,
+  transport_service_type: null,
+  included_km_per_day: null,
+  extra_km_price: null,
+  one_way_fee: null,
+  security_deposit: null,
   created_at: "2026-01-01T10:00:00.000Z",
   updated_at: "2026-01-02T10:00:00.000Z",
 }

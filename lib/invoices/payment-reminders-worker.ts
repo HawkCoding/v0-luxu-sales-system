@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { getPaymentReminderSettings } from "@/lib/settings-access"
+import { logError } from "@/lib/error-log"
 
 export interface ReminderWorkerResult {
   processed: number
@@ -118,8 +119,10 @@ export async function runPaymentRemindersWorker(
 
       sent++
     }
+  }
 
-    skipped++ // counted the invoice as processed-but-skipped for already-sent cadence points
+  if (skipped > 0) {
+    void logError({ severity: "Info", source: "payment-reminders", message: `${skipped} invoice(s) skipped — all cadence points already sent`, details: { skipped } })
   }
 
   return { processed: overdueInvoices.length, sent, skipped, failed }

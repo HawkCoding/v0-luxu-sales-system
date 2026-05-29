@@ -7,8 +7,12 @@ vi.mock("@/lib/supabase/server", () => ({
 }))
 vi.mock("@/lib/role-utils", () => ({ extractRoleFromJwt: vi.fn(() => null) }))
 vi.mock("@/lib/audit-write", () => ({ writeAuditLog: vi.fn(async () => {}) }))
+vi.mock("@/lib/invoices/sync-booking-payment-state", () => ({
+  syncBookingPaymentState: vi.fn(async () => ({ totalPaid: 0, depositPaid: false, invoiceBalance: 0 })),
+}))
 
 import { POST } from "./route"
+import { syncBookingPaymentState } from "@/lib/invoices/sync-booking-payment-state"
 
 const USER_ID = "00000000-0000-4000-8000-000000000001"
 const OTHER_USER_ID = "00000000-0000-4000-8000-000000000002"
@@ -37,6 +41,9 @@ interface MockOptions {
   bookingOutcome?: string
   reason?: { id: string; label: string; applies_to: string; active: boolean } | null
   updateResult?: { data: unknown; error: unknown }
+  totalPaid?: number
+  depositInvoiceAmount?: number
+  depositRefundable?: boolean
 }
 
 function createSupabaseMock(opts: MockOptions = {}) {
@@ -49,6 +56,9 @@ function createSupabaseMock(opts: MockOptions = {}) {
     bookingOutcome = "Open",
     reason = { id: REASON_ID, label: "Customer cancelled", applies_to: "Cancelled", active: true },
     updateResult = { data: { id: BOOKING_ID, booking_number: "BT-2026-0001", stage: "lost", updated_at: "2026-05-17T10:00:00Z" }, error: null },
+    totalPaid = 0,
+    depositInvoiceAmount = 0,
+    depositRefundable = false,
   } = opts
 
   const supabase = {
@@ -105,6 +115,37 @@ function createSupabaseMock(opts: MockOptions = {}) {
       }
       if (table === "pipeline_history") {
         return { insert: vi.fn(async () => ({ error: null })) }
+      }
+      if (table === "app_settings") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn(async () => ({
+                data: { value: depositRefundable ? "true" : "false" },
+                error: null,
+              })),
+            })),
+          })),
+        }
+      }
+      if (table === "payments") {
+        const paymentsData = totalPaid > 0 ? [{ amount: totalPaid }] : []
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(async () => ({ data: paymentsData, error: null })),
+          })),
+          insert: vi.fn(async () => ({ data: null, error: null })),
+        }
+      }
+      if (table === "invoices") {
+        const invoiceData = depositInvoiceAmount > 0 ? { amount: depositInvoiceAmount } : null
+        const maybeSingleFn = vi.fn(async () => ({ data: invoiceData, error: null }))
+        const limitMock = { maybeSingle: maybeSingleFn }
+        const orderMock = { limit: vi.fn(() => limitMock) }
+        const inMock = { order: vi.fn(() => orderMock) }
+        const eq2Mock = { in: vi.fn(() => inMock) }
+        const eq1Mock = { eq: vi.fn(() => eq2Mock) }
+        return { select: vi.fn(() => ({ eq: vi.fn(() => eq1Mock) })) }
       }
       return {}
     }),
@@ -254,5 +295,60 @@ describe("POST /api/jobs/[id]/cancel", () => {
       makeParams(),
     )
     expect(res.status).toBe(200)
+  })
+
+  it("calculates forfeit-deposit refund automatically when no refundAmount override is given", async () => {
+    // totalPaid=5000, depositAmount=2000, depositRefundable=false → fee=2000, suggestedRefund=3000
+    createSupabaseMock({
+      role: "manager",
+      bookingStage: "deposit_paid",
+      totalPaid: 5000,
+      depositInvoiceAmount: 2000,
+      depositRefundable: false,
+    })
+
+    const res = await POST(
+      postJson({ outcomeReasonId: REASON_ID, refundStatus: "refunded" }),
+      makeParams(),
+    )
+    expect(res.status).toBe(200)
+    const body = await res.json() as { ok: boolean }
+    expect(body.ok).toBe(true)
+
+    // syncBookingPaymentState is called only when finalRefundAmount > 0 (3000 in this case)
+    expect(vi.mocked(syncBookingPaymentState)).toHaveBeenCalledWith(
+      expect.anything(),
+      BOOKING_ID,
+      expect.objectContaining({ actorUserId: USER_ID }),
+    )
+  })
+
+  it("inserts negative payment row using consultant refundAmount override and calls sync", async () => {
+    createSupabaseMock({
+      role: "manager",
+      bookingStage: "deposit_paid",
+      totalPaid: 5000,
+      depositInvoiceAmount: 2000,
+      depositRefundable: false,
+    })
+
+    const res = await POST(
+      postJson({
+        outcomeReasonId: REASON_ID,
+        refundStatus: "refunded",
+        refundAmount: 1500,  // explicit override — lower than calculated 3000
+      }),
+      makeParams(),
+    )
+    expect(res.status).toBe(200)
+    const body = await res.json() as { ok: boolean }
+    expect(body.ok).toBe(true)
+
+    // Override is > 0, so sync should still be called
+    expect(vi.mocked(syncBookingPaymentState)).toHaveBeenCalledWith(
+      expect.anything(),
+      BOOKING_ID,
+      expect.objectContaining({ actorUserId: USER_ID }),
+    )
   })
 })

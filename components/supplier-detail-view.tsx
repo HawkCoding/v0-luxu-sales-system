@@ -76,6 +76,7 @@ import {
   type AgeBuckets,
 } from "@/lib/pricing/age-buckets"
 import { shortenUrl } from "@/lib/url"
+import { cn } from "@/lib/utils"
 import { useLocations, useSupplierDetail } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
 import { formatRateCardValidityRange } from "@/lib/rate-card-validity"
@@ -95,6 +96,8 @@ import {
   type CommissionKind,
   type VehicleRentalRouteDetails,
 } from "@/lib/types"
+
+const DESCRIPTION_SOFT_LIMIT = 500
 
 type Presentation = "page" | "modal"
 
@@ -1725,7 +1728,7 @@ const SuiteTypeEditorRow = memo(function SuiteTypeEditorRow({
         }
       >
         {dragHandle ? <div className="flex items-center pt-6">{dragHandle}</div> : null}
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         <Label>{`${vocabulary.suiteType} name`}</Label>
         <BufferedInput
           value={suiteType.name}
@@ -1767,23 +1770,27 @@ const SuiteTypeEditorRow = memo(function SuiteTypeEditorRow({
           </div>
         </>
       ) : null}
-      <div className="flex items-end gap-2">
-        <Switch
-          checked={suiteType.active}
-          onCheckedChange={(checked) => onUpdateSuiteType(suiteTypeIndex, "active", checked)}
-        />
-        <span className="self-center text-sm text-muted-foreground">Active</span>
+      <div className="space-y-1.5">
+        <Label>Active</Label>
+        <div className="flex h-9 items-center">
+          <Switch
+            checked={suiteType.active}
+            onCheckedChange={(checked) => onUpdateSuiteType(suiteTypeIndex, "active", checked)}
+          />
+        </div>
       </div>
-      <Button
-        type="button"
-        size="icon"
-        variant="outline"
-        className={`self-end ${REMOVE_ICON_BUTTON_CLASS}`}
-        aria-label={`Remove ${vocabulary.suiteType.toLowerCase()}`}
-        onClick={() => onRemoveSuiteType(suiteTypeIndex)}
-      >
-        <Trash2 className="h-4 w-4" />
-      </Button>
+      <div className="flex items-end">
+        <Button
+          type="button"
+          size="icon"
+          variant="outline"
+          className={REMOVE_ICON_BUTTON_CLASS}
+          aria-label={`Remove ${vocabulary.suiteType.toLowerCase()}`}
+          onClick={() => onRemoveSuiteType(suiteTypeIndex)}
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
       </div>
       {showVariants && onUpdateSuiteTypeVariantIds ? (
         <div className="grid gap-3 md:grid-cols-3">
@@ -1952,15 +1959,15 @@ const RouteEditorRow = memo(function RouteEditorRow({
 
   return (
     <div
-      className={`grid min-w-0 gap-4 overflow-hidden rounded-lg border p-3 ${
+      className={`grid min-w-0 gap-3 overflow-hidden rounded-lg border p-3 ${
         isTransport
           ? "md:grid-cols-2 xl:grid-cols-5"
           : vocabulary.routeHasLocations
-            ? "md:grid-cols-2 xl:grid-cols-6"
+            ? "md:grid-cols-2 xl:grid-cols-[2fr_1fr_1fr_auto]"
             : "md:grid-cols-[1fr_auto_auto]"
       }`}
     >
-      <div className={`space-y-2 ${vocabulary.routeHasLocations ? "xl:col-span-2" : ""}`}>
+      <div className="space-y-1.5">
         <Label>{`${vocabulary.route} name`}</Label>
         <BufferedInput
           value={route.name}
@@ -2032,7 +2039,7 @@ const RouteEditorRow = memo(function RouteEditorRow({
         </>
       ) : vocabulary.routeHasLocations ? (
         <>
-          <div className="min-w-0 space-y-2">
+          <div className="min-w-0 space-y-1.5">
             <Label>{vocabulary.originLabel}</Label>
             <Select
               value={route.originLocationId || undefined}
@@ -2052,7 +2059,7 @@ const RouteEditorRow = memo(function RouteEditorRow({
               </SelectContent>
             </Select>
           </div>
-          <div className="min-w-0 space-y-2">
+          <div className="min-w-0 space-y-1.5">
             <Label>{vocabulary.destinationLabel}</Label>
             <Select
               value={route.destinationLocationId || undefined}
@@ -2074,38 +2081,38 @@ const RouteEditorRow = memo(function RouteEditorRow({
           </div>
         </>
       ) : null}
-      <div className="min-w-0 space-y-2">
-        <Label>Direction</Label>
-        <div role="radiogroup" aria-label="Route direction" className="inline-flex rounded-md border bg-muted p-0.5">
-          {(
-            [
-              { value: "one_way", label: "One way" },
-              { value: "round_trip", label: "Round trip" },
-              { value: "loop", label: "Loop" },
-            ] as const
-          ).map((option) => {
-            const selected = route.directionMode === option.value
-            return (
-              <button
-                key={option.value}
-                type="button"
-                role="radio"
-                aria-checked={selected}
-                onClick={() => onUpdateRoute(packageIndex, routeIndex, "directionMode", option.value)}
-                className={`px-2.5 py-1 text-xs rounded-sm transition-colors ${
-                  selected
-                    ? "bg-background text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {option.label}
-              </button>
-            )
-          })}
+      <div className="flex items-end gap-2">
+        <div className="space-y-1.5">
+          <Label>Direction</Label>
+          <div role="radiogroup" aria-label="Route direction" className="flex h-9 items-center rounded-md border bg-muted p-0.5">
+            {(
+              [
+                { value: "one_way", label: "One way" },
+                { value: "round_trip", label: "Round trip" },
+                { value: "loop", label: "Loop" },
+              ] as const
+            ).map((option) => {
+              const selected = route.directionMode === option.value
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => onUpdateRoute(packageIndex, routeIndex, "directionMode", option.value)}
+                  className={`h-full px-2 text-xs rounded-sm transition-colors whitespace-nowrap ${
+                    selected
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              )
+            })}
+          </div>
         </div>
-      </div>
-      <div className="flex items-end justify-end gap-3">
-        <div className="flex items-center gap-2">
+        <div className="flex h-9 items-center gap-2">
           <Switch
             checked={route.active}
             onCheckedChange={(checked) => onUpdateRoute(packageIndex, routeIndex, "active", checked)}
@@ -2125,7 +2132,7 @@ const RouteEditorRow = memo(function RouteEditorRow({
       </div>
       <div
         className={
-          vocabulary.routeHasLocations ? "xl:col-span-6 md:col-span-2" : "md:col-span-3"
+          vocabulary.routeHasLocations ? "xl:col-span-4 md:col-span-2" : "md:col-span-3"
         }
       >
         <CommissionControl
@@ -3644,6 +3651,23 @@ export function SupplierDetailView({
                     onValueChange={(value) => updateField("description", value)}
                     rows={3}
                   />
+                  <div className="flex items-start justify-between gap-2 mt-1">
+                    {form.description.length > DESCRIPTION_SOFT_LIMIT && (
+                      <p className="text-xs text-amber-600">
+                        Text is too long and may not present well on the voucher.
+                      </p>
+                    )}
+                    <p
+                      className={cn(
+                        "text-xs ml-auto tabular-nums",
+                        form.description.length > DESCRIPTION_SOFT_LIMIT
+                          ? "text-amber-600"
+                          : "text-muted-foreground"
+                      )}
+                    >
+                      {form.description.length} / {DESCRIPTION_SOFT_LIMIT}
+                    </p>
+                  </div>
                 </div>
 
                 <div className="space-y-2">

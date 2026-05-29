@@ -171,6 +171,46 @@ describe("applyTransition", () => {
     )
   })
 
+  it("backfills invoice_balance from the accepted quote when the booking balance is unset", async () => {
+    const now = new Date("2026-05-01T10:00:00.000Z")
+    const { client, operations } = createFakeSupabase({
+      id: "booking-bal",
+      stage: "deposit_requested",
+      invoice_balance: null,
+    })
+
+    await applyTransition(client, {
+      booking: {
+        id: "booking-bal",
+        booking_number: "BT-2026-0009",
+        stage: "accepted",
+        source: "web_form",
+        raw_text: null,
+        updated_at: "2026-05-01T09:00:00.000Z",
+        customer_id: "customer-bal",
+        consultant: "DR",
+      },
+      targetStage: "deposit_requested",
+      actorName: "Douwlien",
+      actorUserId: "user-1",
+      quotes: [{ id: "quote-bal", status: "accepted", total: 1234.56, created_at: "2026-05-01T08:00:00.000Z" }],
+      documents: [{ id: "document-bal", kind: "invoice_pdf", status: "generated" }],
+      correspondences: [],
+      now,
+    })
+
+    const balanceUpdate = operations.find(
+      (op) =>
+        op.table === "bookings" &&
+        op.action === "update" &&
+        typeof op.payload === "object" &&
+        op.payload !== null &&
+        "invoice_balance" in (op.payload as Record<string, unknown>) &&
+        Object.keys(op.payload as Record<string, unknown>).length === 1,
+    )
+    expect(balanceUpdate?.payload).toEqual({ invoice_balance: 1234.56 })
+  })
+
   it("allows cron-style closing without running validation", async () => {
     const now = new Date("2026-05-01T03:00:00.000Z")
     const { client, operations } = createFakeSupabase({

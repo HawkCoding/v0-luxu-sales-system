@@ -12,7 +12,6 @@ describe("canRolePerform", () => {
       expect(canRolePerform("admin", action)).toBe(true)
     }
 
-    expect(canRolePerform("admin", "export:reporting")).toBe(false)
     expect(canRolePerform("admin", "view:full_audit")).toBe(false)
   })
 

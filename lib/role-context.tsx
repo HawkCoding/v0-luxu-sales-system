@@ -44,7 +44,7 @@ export const permissions: Record<string, Role[]> = {
   "view:templates": ["admin"],
   "edit:templates": ["admin"],
   "view:reporting": ["admin", "manager"],
-  "export:reporting": ["manager"],
+  "export:reporting": ["admin", "manager"],
   "view:audit": ["admin", "manager"],
   "view:full_audit": ["manager"],
   "view:settings": ["admin", "manager", "consultant"],

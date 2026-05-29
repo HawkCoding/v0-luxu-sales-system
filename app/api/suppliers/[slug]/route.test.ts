@@ -224,6 +224,25 @@ describe("PATCH /api/suppliers/[slug]", () => {
     helperMocks.makeUuid.mockReturnValue("00000000-0000-4000-8000-000000000099")
   })
 
+  it("returns 403 for consultant role (supplier categories are manager/admin only)", async () => {
+    mockAuth()
+    helperMocks.supabaseFrom.mockImplementation((table: string) => {
+      if (table === "profiles") return profileQuery("consultant")
+      throw new Error(`Unexpected table ${table}`)
+    })
+
+    const response = await PATCH(
+      new Request("http://localhost/api/suppliers/test", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "X", kind: "hotel_property", email: "", phone: "", website: "", location: "", notes: "", active: true, emails: [], suiteTypes: [] }),
+      }),
+      { params: Promise.resolve({ slug: "test" }) },
+    )
+
+    expect(response.status).toBe(403)
+  })
+
   it("returns 409 on optimistic concurrency mismatch", async () => {
     mockAuth()
     mockSupplierDetail()

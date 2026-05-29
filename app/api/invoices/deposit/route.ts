@@ -4,12 +4,13 @@ import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDate } from "@/lib/date-format"
 import { calculateDepositAmount, normalizeDepositPercentage } from "@/lib/pipeline/constants"
 import { renderInvoiceEmail } from "@/lib/invoices/render-invoice-email"
+import { logError } from "@/lib/error-log"
 
 export const runtime = "nodejs"
 
 const depositInvoiceSchema = z.object({
   jobId: z.string().uuid(),
-  depositPercentage: z.number().min(0).max(100),
+  depositPercentage: z.number().min(1).max(100),
 })
 
 const updateDepositInvoiceSchema = z.object({
@@ -120,6 +121,7 @@ export async function POST(req: Request) {
     return data
   })().catch((error: unknown) => {
     console.error("supabase:deposit-invoice:create", error)
+    void logError({ severity: "Critical", source: "invoice-deposit", message: "Deposit invoice could not be generated", details: { jobId: parsed.data.jobId, error: error instanceof Error ? error.message : String(error) } })
     return null
   })
 

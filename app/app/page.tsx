@@ -1,16 +1,21 @@
 "use client"
 
+import useSWR from "swr"
 import { useAllData } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
 import { getCanonicalPipelineStage, getPipelineStageLabel, PIPELINE_STAGES, type PipelineStage } from "@/lib/types"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import { Briefcase, Users, FileText, CreditCard, MessageSquare, Clock } from "lucide-react"
+import { AlertTriangle, Briefcase, Clock, CreditCard, FileText, MessageSquare, Users } from "lucide-react"
 import Link from "next/link"
+
+const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
 export default function DashboardPage() {
   const { data, isLoading } = useAllData()
+  const { data: errorLogCountData } = useSWR<{ count: number }>("/api/error-logs?resolved=false&count=true", fetcher)
+  const unresolvedErrors = errorLogCountData?.count ?? 0
 
   if (isLoading || !data) {
     return <div className="p-6"><div className="animate-pulse space-y-4">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-24 bg-bg-raised rounded-lg" />)}</div></div>
@@ -50,6 +55,9 @@ export default function DashboardPage() {
         <StatCard icon={FileText} label="Quotes Sent" value={quotedJobs} href="/app/pipeline" />
         <StatCard icon={CreditCard} label="Deposits Paid" value={depositsPaid} href="/app/payments" />
         <StatCard icon={CreditCard} label="Full Payment" value={fullPayments} href="/app/payments" />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        <StatCard icon={AlertTriangle} label="Unresolved Errors" value={unresolvedErrors} href="/app/settings/error-log" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
