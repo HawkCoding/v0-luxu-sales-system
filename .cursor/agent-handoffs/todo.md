@@ -835,21 +835,21 @@ Use this as an implementation tracker. Prefer completing each section in order b
 
 ## Phase 24: Follow-Up Worker
 
-- [ ] Add quote follow-up settings:
-  - [ ] enabled by default or configurable
-  - [ ] schedule intervals
-  - [ ] templates
-- [ ] Find quote follow-ups due.
-- [ ] Send follow-up email if enabled.
-- [ ] Stop follow-ups if job progressed.
-- [ ] Stop follow-ups if disabled for job.
-- [ ] Log skipped follow-ups as info where useful.
+- [x] Add quote follow-up settings:
+  - [x] enabled by default or configurable
+  - [x] schedule intervals
+  - [x] templates
+- [x] Find quote follow-ups due.
+- [x] Send follow-up email if enabled.
+- [x] Stop follow-ups if job progressed.
+- [x] Stop follow-ups if disabled for job.
+- [x] Log skipped follow-ups as info where useful.
 - [x] Store correspondence records.
-- [ ] Add tests:
-  - [ ] follow-up due
-  - [ ] disabled follow-up skipped
-  - [ ] progressed job skipped
-  - [ ] email failure logs error
+- [x] Add tests:
+  - [x] follow-up due
+  - [x] disabled follow-up skipped
+  - [x] progressed job skipped
+  - [x] email failure logs error
 
 ## Phase 25: Error Logging
 
@@ -874,7 +874,7 @@ Use this as an implementation tracker. Prefer completing each section in order b
   - [x] invoice generation failed
   - [x] voucher generation failed
   - [x] backup failed
-  - [ ] restore failed — deferred to Phase 3 (restore not yet implemented)
+  - [x] restore failed
 - [x] Log warning errors:
   - [ ] required field missing — no dedicated console.error site; captured via sync summary
   - [ ] date could not be parsed — no dedicated console.error site; captured via sync summary
@@ -884,7 +884,7 @@ Use this as an implementation tracker. Prefer completing each section in order b
   - [x] email sent but timeline update failed
 - [x] Log info events:
   - [x] duplicate ignored
-  - [ ] follow-up skipped because job progressed — deferred to Phase 2 (worker not yet built)
+  - [x] follow-up skipped because job progressed
   - [x] reminder skipped because payment already marked paid
 - [x] Add Settings error-log page.
 - [x] Add unresolved error badge on Settings nav.
@@ -900,30 +900,30 @@ Use this as an implementation tracker. Prefer completing each section in order b
 
 ## Phase 26: Backup And Restore
 
-- [ ] Decide local/production backup mechanism.
-- [ ] Create automatic backup worker route/job.
-- [ ] Run automatic backup every 24 hours.
-- [ ] Store backups securely.
-- [ ] Retain backups for 14 days.
-- [ ] Delete backups older than 14 days.
-- [ ] Add Settings Backup and Restore UI.
-- [ ] List available backups.
-- [ ] Implement full restore only.
-- [ ] Require Admin/Manager permission for restore.
-- [ ] Show restore warning:
-  - [ ] entire database will roll back
-  - [ ] changes after selected backup will be lost
-  - [ ] user must confirm
-- [ ] Do not implement selective restore in MVP.
-- [ ] Log backup failures as Critical.
-- [ ] Log restore failures as Critical.
-- [ ] Audit successful restore.
-- [ ] Add mocked tests:
-  - [ ] backup created
-  - [ ] backup retention deletes old backups
-  - [ ] restore requires confirmation
-  - [ ] restore permission enforced
-  - [ ] backup failure logs error
+- [x] Decide local/production backup mechanism.
+- [x] Create automatic backup worker route/job.
+- [x] Run automatic backup every 24 hours.
+- [x] Store backups securely.
+- [x] Retain backups for 14 days.
+- [x] Delete backups older than 14 days.
+- [x] Add Settings Backup and Restore UI.
+- [x] List available backups.
+- [x] Implement full restore only.
+- [x] Require Admin/Manager permission for restore.
+- [x] Show restore warning:
+  - [x] entire database will roll back
+  - [x] changes after selected backup will be lost
+  - [x] user must confirm
+- [x] Do not implement selective restore in MVP.
+- [x] Log backup failures as Critical.
+- [x] Log restore failures as Critical.
+- [x] Audit successful restore.
+- [x] Add mocked tests:
+  - [x] backup created
+  - [x] backup retention deletes old backups
+  - [x] restore requires confirmation
+  - [x] restore permission enforced
+  - [x] backup failure logs error
 
 ## Phase 27: Dashboard And Reports
 
@@ -937,27 +937,27 @@ Use this as an implementation tracker. Prefer completing each section in order b
   - [x] paid in full
   - [x] vouchers sent
   - [x] unresolved errors
-- [ ] Add filters:
-  - [ ] consultant
-  - [ ] product
-  - [ ] date range
-  - [ ] status/stage
-- [ ] Add reports:
-  - [ ] sales per salesperson
-  - [ ] conversion rate
-  - [ ] revenue per product
-  - [ ] outstanding payments
-  - [ ] new enquiries by source/mailbox
-- [ ] Add CSV export.
-- [ ] Add PDF export only if existing PDF tooling supports it cleanly.
-- [ ] Ensure export permission rules are explicit.
-- [ ] Add tests for report query helpers.
-- [ ] Add tests for export authorization.
-- [ ] Add UI states for report pages:
-  - [ ] loading
-  - [ ] empty
-  - [ ] error
-  - [ ] success
+- [x] Add filters:
+  - [x] consultant
+  - [x] product
+  - [x] date range
+  - [x] status/stage
+- [x] Add reports:
+  - [x] sales per salesperson
+  - [x] conversion rate
+  - [x] revenue per product
+  - [x] outstanding payments
+  - [x] new enquiries by source/mailbox
+- [x] Add CSV export.
+- [ ] Add PDF export only if existing PDF tooling supports it cleanly. — **deferred**: tabular-only data does not benefit meaningfully from PDF; CSV export covers all reports.
+- [x] Ensure export permission rules are explicit.
+- [x] Add tests for report query helpers.
+- [x] Add tests for export authorization.
+- [x] Add UI states for report pages:
+  - [x] loading
+  - [x] empty
+  - [x] error (SWR surfaces errors; reports return 500 with message)
+  - [x] success
 
 ## Phase 28: Required UI Pages
 
@@ -980,7 +980,7 @@ Use this as an implementation tracker. Prefer completing each section in order b
 - [x] Audit log page complete.
 - [x] Audit archive page complete if archival exists.
 - [x] Error log page complete.
-- [ ] Backup/restore page complete.
+- [x] Backup/restore page complete.
 
 ## Phase 29: Job/Booking Card Sections
 
@@ -1051,12 +1051,12 @@ Use this as an implementation tracker. Prefer completing each section in order b
 - [x] Email ingestion integration tests complete.
 - [x] Email sending tests complete.
 - [x] File storage tests complete.
-- [ ] Backup and restore tests complete.
+- [x] Backup and restore tests complete.
 - [ ] Error logging tests complete.
 - [x] Pipeline transition tests complete.
 - [x] Supplier/rate tests complete.
-- [ ] Reporting tests complete.
-- [x] Run `pnpm test:ci`. — 2026-05-27: 96 files / 608 tests passing.
+- [x] Reporting tests complete.
+- [x] Run `pnpm test:ci`. — 2026-05-29: 107 files / 673 tests passing.
 - [x] Run `pnpm test:coverage`. — 2026-05-27: project 63.9% stmts / 50.9% branch (provider `@vitest/coverage-v8` added). Lifecycle modules well covered: lib/pipeline 86.8%, lib/invoices 88.9%, lib/voucher 100%, app/api/payments 95.8%, app/api/quotes 87.8%, app/api/pipeline 80%.
 - [ ] Review coverage gaps for high-risk workflow logic. — known low areas (non-lifecycle): app/api/jobs/[id] 7.5%, app/api/enquiries 18.8%, app/api/users 36.7%. No CI coverage threshold gate added (report-only).
 
