@@ -418,8 +418,8 @@ Use this as an implementation tracker. Prefer completing each section in order b
   - [x] lost requires reason
   - [x] cancelled requires reason
   - [x] other requires text
-  - [ ] cancellation calculates refund where current rules exist
-  - [ ] refund persistence
+  - [x] cancellation calculates refund where current rules exist
+  - [x] refund persistence
   - [x] audit created
 
 ## Phase 12: Supplier Management

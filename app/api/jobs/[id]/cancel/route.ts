@@ -3,6 +3,9 @@ import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
 import { extractRoleFromJwt } from "@/lib/role-utils"
 import { writeAuditLog } from "@/lib/audit-write"
+import { calculateRefund } from "@/lib/invoices/calculate-refund"
+import { getDepositRefundable } from "@/lib/settings-access"
+import { syncBookingPaymentState } from "@/lib/invoices/sync-booking-payment-state"
 
 const REFUND_REQUIRED_FROM = new Set([
   "deposit_paid",
@@ -85,6 +88,35 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     return NextResponse.json({ error: "refundStatus is required for this booking stage" }, { status: 400 })
   }
 
+  // Auto-calculate refund when refundStatus is 'refunded'
+  let finalRefundAmount: number | null = null
+  let cancellationFee: number | null = null
+
+  if (body.refundStatus === "refunded") {
+    const [{ data: paymentsData }, { data: depositInvoice }, depositRefundable] = await Promise.all([
+      supabase.from("payments").select("amount").eq("booking_id", id),
+      supabase
+        .from("invoices")
+        .select("amount")
+        .eq("booking_id", id)
+        .eq("kind", "deposit")
+        .in("status", ["draft", "sent", "paid"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      getDepositRefundable(supabase),
+    ])
+
+    const totalPaid = (paymentsData ?? []).reduce((sum, p) => sum + Number(p.amount ?? 0), 0)
+    const depositAmount = depositInvoice ? Number(depositInvoice.amount) : 0
+
+    const calc = calculateRefund(totalPaid, depositAmount, depositRefundable)
+    cancellationFee = calc.cancellationFee
+    finalRefundAmount = body.refundAmount ?? calc.suggestedRefund
+  } else if (body.refundStatus === "not_refunded") {
+    finalRefundAmount = null
+  }
+
   const nowIso = new Date().toISOString()
   const actorName =
     [actorProfile?.name, actorProfile?.surname].filter(Boolean).join(" ").trim() ||
@@ -103,7 +135,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       outcome_set_at: nowIso,
       outcome_set_by: user.id,
       refund_status: body.refundStatus ?? null,
-      refund_amount: body.refundStatus === "refunded" ? (body.refundAmount ?? null) : null,
+      refund_amount: body.refundStatus === "refunded" ? finalRefundAmount : null,
       refund_reference: body.refundStatus === "refunded" ? (body.refundReference?.trim() || null) : null,
       refunded_at: body.refundStatus === "refunded" ? (body.refundedAt || null) : null,
       updated_at: nowIso,
@@ -113,6 +145,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     .single()
 
   if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 })
+
+  // Insert negative payment row and recalc balance when a refund is issued
+  if (body.refundStatus === "refunded" && finalRefundAmount != null && finalRefundAmount > 0) {
+    await supabase.from("payments").insert({
+      booking_id: id,
+      amount: -finalRefundAmount,
+      payment_kind: "refund",
+      received_at: nowIso,
+      captured_by: user.id,
+      notes: "Cancellation refund",
+    })
+
+    await syncBookingPaymentState(supabase, id, { actorName, actorUserId: user.id })
+  }
 
   await supabase.from("pipeline_history").insert({
     booking_id: id,
@@ -134,6 +180,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       outcome: "Cancelled",
       outcome_reason: reason.label,
       refund_status: body.refundStatus ?? null,
+      ...(body.refundStatus === "refunded" && {
+        cancellation_fee: cancellationFee,
+        refund_amount: finalRefundAmount,
+      }),
     },
   })
 

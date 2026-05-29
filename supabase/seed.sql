@@ -438,9 +438,13 @@ insert into public.app_settings (key,value,updated_at) values
   ('payment_reference_required','false','2025-08-01T08:00:00Z'),
   ('payment_reminder_enabled','true','2025-08-01T08:00:00Z'),
   ('payment_reminder_cadence','[3,7,14]','2025-08-01T08:00:00Z'),
+  ('quote_follow_up_enabled','true','2025-08-01T08:00:00Z'),
+  ('quote_follow_up_cadence','[3,7]','2025-08-01T08:00:00Z'),
+  ('quote_follow_up_template','<p>Dear {{customerName}},</p><p>We are following up on the quotation sent on <strong>{{lastSentDate}}</strong>. Availability on peak dates can be limited — we would love to secure your suite.</p><p>Kind regards,<br/>Luxus Travel &amp; Tours</p>','2025-08-01T08:00:00Z'),
   ('quote_acceptance_after_expiry','blocked','2025-08-01T08:00:00Z'),
   ('session_timeout_minutes','480','2025-08-01T08:00:00Z'),
-  ('business_name','Luxus Travel and Tours','2025-08-01T08:00:00Z')
+  ('business_name','Luxus Travel and Tours','2025-08-01T08:00:00Z'),
+  ('deposit_refundable','false','2025-08-01T08:00:00Z')
 on conflict (key) do update set value=excluded.value,updated_at=excluded.updated_at;
 
 update public.voucher_template set

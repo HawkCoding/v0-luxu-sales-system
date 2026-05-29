@@ -150,6 +150,17 @@ export async function getQuoteFollowUpSettings(
   return { enabled, cadence, template }
 }
 
+export async function getDepositRefundable(
+  supabase: SupabaseClient<Database>,
+): Promise<boolean> {
+  const { data } = await supabase
+    .from("app_settings")
+    .select("value")
+    .eq("key", "deposit_refundable")
+    .maybeSingle()
+  return data?.value === "true"
+}
+
 export async function getReadOnlyExportsAllowed(
   supabase: SupabaseClient<Database>,
 ): Promise<boolean> {
