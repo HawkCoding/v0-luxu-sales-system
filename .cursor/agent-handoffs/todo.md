@@ -1173,19 +1173,19 @@ Use this as an implementation tracker. Prefer completing each section in order b
 
 ## Phase 35: Final Release Readiness
 
-- [ ] All MVP checklist items either complete or explicitly deferred.
+- [ ] All MVP checklist items either complete or explicitly deferred. _(Remaining open: Phase 33 UAT runthrough + the manual Phase 35 items below. All other phases checked or deferred-with-reason in `final-release-handoff.md` §2.)_
 - [x] No known secrets committed.
-- [ ] `pnpm test:ci` passes.
-- [ ] `pnpm build` passes.
-- [ ] Database migrations apply cleanly with `pnpm db:reset`.
-- [ ] Supabase types regenerated with `pnpm run db:types` after schema changes.
-- [ ] App version bumped for final code-change session.
-- [ ] Manual smoke test completed on `http://localhost:3000`.
-- [ ] Settings and roles manually checked.
-- [ ] Email sync tested with safe/test mailbox.
-- [ ] PDF generation tested.
-- [ ] File upload tested.
-- [ ] Backup job tested in non-production.
-- [ ] Restore tested in non-production.
-- [ ] UAT feedback captured.
-- [ ] Final handoff notes written.
+- [x] `pnpm test:ci` passes. _(688/688 passing — see verification log in `final-release-handoff.md` §4.)_
+- [x] `pnpm build` passes. _(Next.js 16.1.6, 53 routes generated — see verification log.)_
+- [x] Database migrations apply cleanly with `pnpm db:reset`. _(All migrations through `20260528110000_backup_restore_function.sql` apply without error.)_
+- [x] Supabase types regenerated with `pnpm run db:types` after schema changes. _(Regenerated; resulting `lib/supabase/types.ts` committed in Phase 7.)_
+- [x] App version bumped for final code-change session.
+- [ ] Manual smoke test completed on `http://localhost:3000`. _(Human task — follow `uat_checklist.md`.)_
+- [ ] Settings and roles manually checked. _(Human task — covered by UAT sections 2, 3, 4.)_
+- [ ] Email sync tested with safe/test mailbox. _(Human task — UAT 3.3.2.)_
+- [ ] PDF generation tested. _(Human task — UAT 1.6, 1.10, 3.4.)_
+- [ ] File upload tested. _(Human task — UAT 1.9, 3.4.)_
+- [ ] Backup job tested in non-production. _(Automated round-trip in `app/api/cron/backup/route.test.ts` covers local Supabase; human confirms in a real non-prod env — UAT 3.4.)_
+- [ ] Restore tested in non-production. _(Automated coverage in `app/api/backups/restore/route.test.ts`; human confirms in non-prod — UAT 3.5.)_
+- [ ] UAT feedback captured. _(Depends on Phase 33 runthrough — capture in `.cursor/agent-handoffs/uat-findings/`.)_
+- [x] Final handoff notes written. _(`.cursor/agent-handoffs/final-release-handoff.md`.)_
