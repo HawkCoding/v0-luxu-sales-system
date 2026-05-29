@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { AlertTriangle, Database, Download, Loader2, Plus, Trash2 } from "lucide-react"
 import {
@@ -16,6 +16,8 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import type { BackupRecord } from "@/lib/types"
 
 function formatBytes(bytes: number | null): string {
@@ -50,6 +52,8 @@ export function BackupSettings({ isAdmin }: { isAdmin: boolean }) {
 
   const [restoreTarget, setRestoreTarget] = useState<BackupRecord | null>(null)
   const [restoring, setRestoring] = useState(false)
+  const [restoreConfirmInput, setRestoreConfirmInput] = useState("")
+  const restoreInputRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -118,18 +122,31 @@ export function BackupSettings({ isAdmin }: { isAdmin: boolean }) {
       const res = await fetch("/api/backups/restore", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ backupId: restoreTarget.id, confirm: true }),
+        body: JSON.stringify({
+          backupId: restoreTarget.id,
+          confirm: true,
+          confirmBackupId: restoreConfirmInput.trim(),
+        }),
       })
-      const data = (await res.json()) as { warning?: string; error?: string }
+      const data = (await res.json()) as { message?: string; error?: string }
       if (!res.ok) {
         toast.error(data.error ?? "Restore failed")
         return
       }
-      toast.warning(data.warning ?? "Restore initiated — check the audit log for status")
+      toast.success(data.message ?? "Database restored successfully — please refresh")
       setRestoreTarget(null)
+      setRestoreConfirmInput("")
+      await load()
     } finally {
       setRestoring(false)
     }
+  }
+
+  const openRestoreDialog = (backup: BackupRecord) => {
+    setRestoreConfirmInput("")
+    setRestoreTarget(backup)
+    // Focus the input after the dialog renders
+    setTimeout(() => restoreInputRef.current?.focus(), 100)
   }
 
   return (
@@ -195,7 +212,7 @@ export function BackupSettings({ isAdmin }: { isAdmin: boolean }) {
                         size="sm"
                         variant="outline"
                         className="gap-1.5 border-amber-300 text-amber-700 hover:bg-amber-50"
-                        onClick={() => setRestoreTarget(backup)}
+                        onClick={() => openRestoreDialog(backup)}
                         aria-label="Restore from backup"
                       >
                         <AlertTriangle className="h-3.5 w-3.5" />
@@ -243,7 +260,15 @@ export function BackupSettings({ isAdmin }: { isAdmin: boolean }) {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={!!restoreTarget} onOpenChange={(open) => !open && setRestoreTarget(null)}>
+      <AlertDialog
+        open={!!restoreTarget}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRestoreTarget(null)
+            setRestoreConfirmInput("")
+          }
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2 text-destructive">
@@ -261,24 +286,51 @@ export function BackupSettings({ isAdmin }: { isAdmin: boolean }) {
                 </p>
                 <p className="font-semibold text-destructive">
                   Warning: the entire database will roll back to this snapshot. All changes made
-                  after this backup was created will be permanently lost.
+                  after this backup was created will be permanently lost. This cannot be undone.
                 </p>
                 <p>
-                  This action is audited and cannot be undone. Make sure this is the correct backup
-                  before proceeding.
+                  To confirm, type the backup ID shown below and click{" "}
+                  <span className="font-semibold">Restore</span>.
                 </p>
+                {restoreTarget && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="restore-confirm" className="text-xs text-muted-foreground">
+                      Backup ID to confirm
+                    </Label>
+                    <code className="block rounded bg-muted px-2 py-1 text-xs break-all">
+                      {restoreTarget.id}
+                    </code>
+                    <Input
+                      id="restore-confirm"
+                      ref={restoreInputRef}
+                      value={restoreConfirmInput}
+                      onChange={(e) => setRestoreConfirmInput(e.target.value)}
+                      placeholder="Paste or type the backup ID"
+                      className="font-mono text-xs"
+                      disabled={restoring}
+                      aria-label="Type the backup ID to confirm restore"
+                    />
+                  </div>
+                )}
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={restoring}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
+            <Button
               onClick={handleRestore}
-              disabled={restoring}
+              disabled={restoring || restoreConfirmInput.trim() !== restoreTarget?.id}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {restoring ? "Initiating restore..." : "Yes, restore this backup"}
-            </AlertDialogAction>
+              {restoring ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Restoring...
+                </>
+              ) : (
+                "Restore"
+              )}
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

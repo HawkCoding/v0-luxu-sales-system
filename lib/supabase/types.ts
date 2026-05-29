@@ -1997,6 +1997,47 @@ export type Database = {
           },
         ]
       }
+      quote_follow_ups: {
+        Row: {
+          created_at: string
+          error: string | null
+          id: string
+          quote_id: string
+          scheduled_for: string
+          sent_at: string | null
+          skip_reason: string | null
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          error?: string | null
+          id?: string
+          quote_id: string
+          scheduled_for: string
+          sent_at?: string | null
+          skip_reason?: string | null
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          error?: string | null
+          id?: string
+          quote_id?: string
+          scheduled_for?: string
+          sent_at?: string | null
+          skip_reason?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_follow_ups_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       quote_line_items: {
         Row: {
           created_at: string
@@ -2052,6 +2093,7 @@ export type Database = {
           amount_received: number | null
           booking_id: string
           created_at: string
+          follow_ups_disabled: boolean
           id: string
           itinerary_id: string | null
           last_sent_at: string | null
@@ -2074,6 +2116,7 @@ export type Database = {
           amount_received?: number | null
           booking_id: string
           created_at?: string
+          follow_ups_disabled?: boolean
           id?: string
           itinerary_id?: string | null
           last_sent_at?: string | null
@@ -2096,6 +2139,7 @@ export type Database = {
           amount_received?: number | null
           booking_id?: string
           created_at?: string
+          follow_ups_disabled?: boolean
           id?: string
           itinerary_id?: string | null
           last_sent_at?: string | null
@@ -3147,6 +3191,7 @@ export type Database = {
         }
         Returns: undefined
       }
+      restore_backup_snapshot: { Args: { snapshot: Json }; Returns: undefined }
     }
     Enums: {
       booking_purpose: "quote" | "availability" | "reservation"

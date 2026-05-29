@@ -90,24 +90,84 @@ async function pruneOldBackups(
 
 type TableName = keyof Database["public"]["Tables"]
 
+// Tables included in snapshots — ordered parents-before-children for readability;
+// the restore function uses session_replication_role=replica so actual order is irrelevant.
+// Excluded: backup_records (self-referential), inbound_email_messages / inbound_email_sync_runs
+// (large/transient), report_snapshots (generated cache).
+// Note: salesperson_credentials contains AES-encrypted SMTP secrets — acceptable in the
+// private, server-only 'backups' bucket (see migration 20260528110000 for full rationale).
 const TABLES_TO_SNAPSHOT = [
+  // Config / reference
+  "app_settings",
+  "outcome_reasons",
+  "rate_types",
+  "countries",
+  "country_aliases",
+  "locations",
+  "templates",
+  "voucher_template",
+  // Auth
   "profiles",
-  "customers",
-  "bookings",
-  "quotes",
-  "quote_line_items",
-  "invoices",
-  "payments",
+  "salesperson_credentials",
+  // Suppliers
   "suppliers",
+  "supplier_emails",
+  "supplier_email_labels",
+  "suite_types",
+  "bathroom_types",
+  "bedroom_types",
+  "bedroom_layouts",
+  "suite_type_bathroom_types",
+  "suite_type_bedroom_types",
+  "suite_type_bedroom_layouts",
   "supplier_pricing_options",
   "supplier_seasonal_periods",
   "supplier_seasonal_prices",
   "rate_cards",
+  // Routes & packages
+  "routes",
+  "itineraries",
   "packages",
   "package_legs",
+  "package_leg_routes",
+  // Inbound email
   "inbound_email_accounts",
-  "app_settings",
+  "inbound_email_rules",
+  // Customers
+  "customers",
+  "customer_linked_accounts",
+  // Bookings
+  "booking_number_sequences",
+  "bookings",
+  "booking_suites",
+  "booking_notes",
+  "booking_package_selections",
+  "booking_supplier_schedules",
+  "booking_transport_requests",
+  "booking_vehicle_rental_details",
+  "vehicle_rental_route_details",
+  "travellers",
+  "hotel_offers",
+  "pipeline_history",
+  // Quotes
+  "quotes",
+  "quote_acceptance_tokens",
+  "quote_line_items",
+  "quote_follow_ups",
+  // Invoices & payments
+  "invoices",
+  "payments",
+  "payment_reminders",
+  // Documents & correspondence
+  "documents",
+  "correspondences",
+  // Vouchers
+  "vouchers",
+  "voucher_service_blocks",
+  // Logs
   "audit_logs",
+  "audit_log_archives",
+  "error_logs",
 ] as const satisfies readonly TableName[]
 
 async function buildSnapshot(
