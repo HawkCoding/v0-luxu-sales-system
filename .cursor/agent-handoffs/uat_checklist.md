@@ -204,11 +204,16 @@ Login: read-only role (e.g. `readonly@luxus.test`).
 
 ### 4.1 Can view allowed pages (`todo.md` line 1149)
 
-- [ ] **4.1.1** Action: Navigate to Pipeline, Jobs list, a specific job, Reporting, Documents.
+> Read-only's allowed pages **exclude Reporting and the Audit Log** — both are
+> manager+ surfaces and are hidden from the read-only sidebar.
+
+- [ ] **4.1.1** Action: Navigate to Pipeline, Jobs list, a specific job, Customers, Documents.
       Expect: Each page renders in read-only mode; no create/edit/send buttons are visible.
 
-- [ ] **4.1.2** Action: Open the Reporting page.
-      Expect: Reports render; **Download CSV** is hidden or disabled when `read_only_exports_allowed = 'false'`.
+- [ ] **4.1.2** Action: Check the read-only sidebar for Reporting and Audit Log links.
+      Expect: Neither link is shown (Reporting/Audit are manager+). The export API gate is
+      still covered by §4.2.3 (`/api/reports/.../export` returns 403 while
+      `read_only_exports_allowed = 'false'`).
 
 ### 4.2 Cannot create, edit, delete, send, export, or manage settings/users (`todo.md` line 1150)
 
