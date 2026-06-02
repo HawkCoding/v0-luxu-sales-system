@@ -156,6 +156,20 @@ export function useTemplates() {
   return useSWR("/api/templates", fetcher, swrOptions)
 }
 
+export interface AssignableUser {
+  userId: string
+  name: string
+  clearanceLevel: string
+}
+
+export function useAssignableUsers(enabled = true) {
+  return useSWR<{ users: AssignableUser[] }>(
+    enabled ? "/api/users/assignable" : null,
+    fetcher,
+    swrOptions,
+  )
+}
+
 export function useSuppliers() {
   return useSWR<Supplier[]>("/api/suppliers?includeDrafts=true", fetcher, swrOptions)
 }

@@ -1,6 +1,6 @@
 "use client"
 
-import { useJobDetail } from "@/lib/use-data"
+import { useJobDetail, useAssignableUsers } from "@/lib/use-data"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -29,7 +29,8 @@ import {
   type PipelineStage,
 } from "@/lib/types"
 import { useRole } from "@/lib/role-context"
-import { AlertCircle, ArrowLeft, CheckCircle2, ChevronRight, ChevronLeft as ChevronLeftIcon, UserRound, XCircle, Target } from "lucide-react"
+import { useAuth } from "@/lib/auth-context"
+import { AlertCircle, ArrowLeft, CheckCircle2, ChevronRight, ChevronLeft as ChevronLeftIcon, UserRound, XCircle, Target, UserPlus, UserMinus } from "lucide-react"
 import type { Outcome, OutcomeReason } from "@/lib/types"
 import Link from "next/link"
 import { JobEnquiryTab } from "@/components/job-enquiry-tab"
@@ -152,12 +153,17 @@ function JobDetailSkeleton() {
   )
 }
 
+// Sentinel for the reassign picker's "Unassigned" choice. Radix SelectItem
+// disallows an empty-string value, so we map this to null on submit.
+const UNASSIGNED_VALUE = "__unassigned__"
+
 export default function JobDetailPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { id } = useParams<{ id: string }>()
   const { data, isLoading, error, mutate } = useJobDetail(id)
   const { can, role } = useRole()
+  const { user: authUser } = useAuth()
   const { others, setEditing } = useRecordPresence("job", id)
   const hasLoadError = Boolean(error)
   const [cancelOpen, setCancelOpen] = useState(false)
@@ -174,10 +180,15 @@ export default function JobDetailPage() {
   const [customerResults, setCustomerResults] = useState<Array<{ id: string; firstName: string; lastName: string; email: string }>>([])
   const [changingCustomer, setChangingCustomer] = useState(false)
   const [resolvingImportReview, setResolvingImportReview] = useState(false)
+  const [claimSubmitting, setClaimSubmitting] = useState(false)
   const [lastJobPayload, setLastJobPayload] = useState<Record<string, unknown> | null>(null)
   const [activeTab, setActiveTab] = useState<JobDetailTab>(() => parseJobDetailTab(searchParams.get("tab")))
   const [supplierRefDraft, setSupplierRefDraft] = useState<string>("")
   const [supplierRefSaving, setSupplierRefSaving] = useState(false)
+  const [reassignOpen, setReassignOpen] = useState(false)
+  const [reassignTarget, setReassignTarget] = useState<string>("")
+  const [reassignSubmitting, setReassignSubmitting] = useState(false)
+  const { data: assignableData } = useAssignableUsers(reassignOpen)
   const {
     data: notesData,
     error: notesError,
@@ -244,7 +255,15 @@ export default function JobDetailPage() {
   const currentStageIdx = PIPELINE_STAGES.findIndex(s => s.key === currentStage)
   const consultantName = CONSULTANTS.find((consultant) => consultant.key === job.consultant)?.name ?? job.consultant ?? undefined
   const needsEmailReview = Boolean(enquiry?.emailImportNeedsReview)
+  const claimedByUserId = (job as Record<string, unknown>).claimedByUserId as string | null ?? null
+  const claimedByName = (job as Record<string, unknown>).claimedByName as string | null ?? null
+  const isClaimed = Boolean(claimedByUserId)
+  const isClaimedByMe = claimedByUserId === authUser?.id
+  const canClaim = can("edit:jobs") && !isClaimedByMe
+  const canRelease = can("edit:jobs") && (isClaimedByMe || role === "manager" || role === "admin")
   const assignedSalespersonName = job.assignedSalespersonName ?? "Unassigned"
+  const assignedSalespersonId = (job as { assignedSalespersonId?: string | null }).assignedSalespersonId ?? null
+  const canReassign = role === "manager" || role === "admin"
   const hasNoPackageMatchQuote = quotes.some((quote: { noPackageMatch?: boolean }) => quote.noPackageMatch)
   const hasSentDepositInvoice = invoices.some(
     (invoice: { kind: string; status: string }) =>
@@ -280,6 +299,38 @@ export default function JobDetailPage() {
       await mutate()
     } finally {
       setSupplierRefSaving(false)
+    }
+  }
+
+  const openReassign = () => {
+    setReassignTarget(assignedSalespersonId ?? UNASSIGNED_VALUE)
+    setReassignOpen(true)
+  }
+
+  const submitReassign = async () => {
+    if (reassignSubmitting) return
+    const next = reassignTarget === UNASSIGNED_VALUE ? null : reassignTarget || null
+    if (next === assignedSalespersonId) {
+      setReassignOpen(false)
+      return
+    }
+    setReassignSubmitting(true)
+    try {
+      const response = await fetch(`/api/jobs/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assignedSalespersonId: next, expectedUpdatedAt: data?.job?.updatedAt }),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null)
+        toast.error(typeof payload?.error === "string" ? payload.error : "Could not reassign job")
+        return
+      }
+      toast.success("Job reassigned")
+      setReassignOpen(false)
+      await mutate()
+    } finally {
+      setReassignSubmitting(false)
     }
   }
 
@@ -404,6 +455,44 @@ export default function JobDetailPage() {
     }
   }
 
+  const claimJob = async () => {
+    setClaimSubmitting(true)
+    try {
+      const response = await fetch(`/api/jobs/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ claimJob: true }),
+      })
+      const payload = (await response.json().catch(() => ({}))) as { error?: string }
+      if (!response.ok) throw new Error(payload.error ?? "Could not claim job")
+      await mutate()
+      toast.success("Job claimed")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not claim job")
+    } finally {
+      setClaimSubmitting(false)
+    }
+  }
+
+  const releaseJob = async () => {
+    setClaimSubmitting(true)
+    try {
+      const response = await fetch(`/api/jobs/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ releaseJob: true }),
+      })
+      const payload = (await response.json().catch(() => ({}))) as { error?: string }
+      if (!response.ok) throw new Error(payload.error ?? "Could not release job")
+      await mutate()
+      toast.success("Job released")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not release job")
+    } finally {
+      setClaimSubmitting(false)
+    }
+  }
+
   const searchCustomers = async () => {
     const response = await fetch(`/api/customers?search=${encodeURIComponent(customerSearch)}`)
     if (!response.ok) return
@@ -501,48 +590,48 @@ export default function JobDetailPage() {
               {customer?.firstName} {customer?.lastName} &middot; {customer?.email}
             </p>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <span className="font-medium text-foreground">Owner</span>
-              <span>{(job as Record<string, unknown>).ownerName as string ?? "Unassigned"}</span>
+              <span className="font-medium text-foreground">Claimed by</span>
+              <span>{isClaimed ? (claimedByName ?? "Unknown") : "Unclaimed"}</span>
+              {canClaim && !isClaimed && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 px-2 text-xs"
+                  disabled={claimSubmitting}
+                  onClick={() => void claimJob()}
+                  aria-label="Claim this job"
+                >
+                  <UserPlus className="w-3 h-3 mr-1" />
+                  {claimSubmitting ? "Claiming…" : "Claim"}
+                </Button>
+              )}
+              {canRelease && isClaimed && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 px-2 text-xs"
+                  disabled={claimSubmitting}
+                  onClick={() => void releaseJob()}
+                  aria-label="Release this job"
+                >
+                  <UserMinus className="w-3 h-3 mr-1" />
+                  {claimSubmitting ? "Releasing…" : "Release"}
+                </Button>
+              )}
               <span className="text-muted-foreground/40">·</span>
               <span className="font-medium text-foreground">Salesperson</span>
               <span>{assignedSalespersonName}</span>
-            </div>
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <Label htmlFor="booking-supplier-reference" className="font-medium text-foreground">
-                Supplier ref
-              </Label>
-              {canEditSupplierRef ? (
-                <>
-                  <Input
-                    id="booking-supplier-reference"
-                    value={supplierRefDraft}
-                    onChange={(e) => setSupplierRefDraft(e.target.value)}
-                    onBlur={() => void saveSupplierReference()}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault()
-                        void saveSupplierReference()
-                      }
-                    }}
-                    placeholder="Supplier confirmation #"
-                    maxLength={120}
-                    disabled={supplierRefSaving}
-                    className="h-8 w-56 bg-background"
-                  />
-                  {supplierRefDirty ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8"
-                      onClick={() => void saveSupplierReference()}
-                      disabled={supplierRefSaving}
-                    >
-                      {supplierRefSaving ? "Saving..." : "Save"}
-                    </Button>
-                  ) : null}
-                </>
-              ) : (
-                <span>{currentSupplierRef || "—"}</span>
+              {canReassign && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 px-2 text-xs"
+                  onClick={openReassign}
+                  aria-label="Reassign this job"
+                >
+                  <UserRound className="w-3 h-3 mr-1" />
+                  Reassign
+                </Button>
               )}
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -1026,6 +1115,41 @@ export default function JobDetailPage() {
               ))}
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={reassignOpen} onOpenChange={(open) => { if (!reassignSubmitting) setReassignOpen(open) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reassign job</DialogTitle>
+            <DialogDescription>
+              Move this booking to a different salesperson. The change is recorded in the audit log.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>Salesperson</Label>
+            <Select value={reassignTarget} onValueChange={setReassignTarget}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a salesperson" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={UNASSIGNED_VALUE}>Unassigned</SelectItem>
+                {(assignableData?.users ?? []).map((u) => (
+                  <SelectItem key={u.userId} value={u.userId}>
+                    {u.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReassignOpen(false)} disabled={reassignSubmitting}>
+              Cancel
+            </Button>
+            <Button onClick={() => void submitReassign()} disabled={reassignSubmitting || !reassignTarget}>
+              {reassignSubmitting ? "Reassigning..." : "Reassign"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </ContentTransition>

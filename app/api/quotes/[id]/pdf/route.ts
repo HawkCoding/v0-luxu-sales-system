@@ -120,6 +120,12 @@ export async function POST(_req: Request, { params }: RouteParams) {
     return safeSupabaseError("quote-pdf:document-write", documentWrite.error)
   }
 
+  // Link the generated document back so correspondence can auto-attach it.
+  await supabase
+    .from("quotes")
+    .update({ pdf_document_id: documentWrite.data.id })
+    .eq("id", id)
+
   await supabase.from("audit_logs").insert({
     actor: profile.actorName,
     actor_user_id: user.id,

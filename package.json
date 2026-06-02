@@ -29,6 +29,10 @@
     "qa": "playwright test --config qa/playwright.config.ts",
     "qa:headed": "playwright test --config qa/playwright.config.ts --headed",
     "qa:phase": "playwright test --config qa/playwright.config.ts --grep",
+    "qa:consultant": "playwright test --config tests/qa/playwright.config.ts",
+    "qa:manager": "playwright test --config tests/qa/manager.config.ts",
+    "qa:admin": "playwright test --config tests/qa/admin.config.ts",
+    "qa:all": "playwright test --config tests/qa/playwright.config.ts && playwright test --config tests/qa/manager.config.ts && playwright test --config tests/qa/admin.config.ts",
     "app:version:bump": "node scripts/bump-app-version.mjs",
     "db:start": "npx supabase start",
     "db:stop": "npx supabase stop",
@@ -46,8 +50,8 @@
     "lint": "eslint . --ext .js,.mjs,.cjs --no-error-on-unmatched-pattern --no-eslintrc --env es2022 --env node --parser-options=ecmaVersion:latest --parser-options=sourceType:module",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
-    "test:ci": "vitest run --passWithNoTests",
-    "test:coverage": "vitest run --coverage",
+    "test:ci": "vitest run --passWithNoTests --no-file-parallelism",
+    "test:coverage": "vitest run --coverage --no-file-parallelism",
     "types:db": "npx supabase gen types typescript --local > lib/supabase/types.ts"
   },
   "dependencies": {

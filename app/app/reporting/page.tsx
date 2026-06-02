@@ -6,7 +6,6 @@ import useSWR from "swr"
 import { useAllData } from "@/lib/use-data"
 import { useRole } from "@/lib/role-context"
 import {
-  CONSULTANTS,
   getCanonicalPipelineStage,
   PIPELINE_STAGES,
   type Booking,
@@ -173,29 +172,29 @@ export default function ReportingPage() {
     }, {}),
   ).sort((a, b) => b[1] - a[1])
 
-  const consultantKeys = new Set<string>(CONSULTANTS.map((consultant) => consultant.key))
-  const byConsultant = CONSULTANTS.map((consultant) => ({
-    key: consultant.key,
-    label: consultant.name,
-    count: bookings.filter((booking) => booking.consultant === consultant.key).length,
-  }))
-  const otherConsultants = Object.entries(
-    bookings.reduce((acc: Record<string, number>, booking) => {
-      if (!booking.consultant || consultantKeys.has(booking.consultant)) {
-        return acc
+  // Owner = assigned salesperson (reflects reassignments), falling back to
+  // "Unassigned". This matches how the server-side reports resolve ownership.
+  const ownerCounts = bookings.reduce((acc: Record<string, number>, booking) => {
+    const label = booking.assignedSalespersonName ?? "Unassigned"
+    acc[label] = (acc[label] || 0) + 1
+    return acc
+  }, {})
+  const consultantRows = Object.entries(ownerCounts)
+    .map(([label, count]) => ({ key: label, label, count }))
+    .sort((a, b) => b.count - a.count)
+
+  // Filter options for the owner dropdown, keyed by user id (assigned_salesperson_id).
+  const ownerFilterOptions = (() => {
+    const map = new Map<string, string>()
+    for (const booking of bookings) {
+      if (booking.assignedSalespersonId) {
+        map.set(booking.assignedSalespersonId, booking.assignedSalespersonName ?? booking.assignedSalespersonId)
       }
-      acc[booking.consultant] = (acc[booking.consultant] || 0) + 1
-      return acc
-    }, {}),
-  ).map(([consultant, count]) => ({ key: consultant, label: consultant, count }))
-  const unassignedBookings = bookings.filter((booking) => !booking.consultant).length
-  const consultantRows = [
-    ...byConsultant,
-    ...otherConsultants,
-    ...(unassignedBookings > 0
-      ? [{ key: "unassigned", label: "Unassigned", count: unassignedBookings }]
-      : []),
-  ]
+    }
+    return Array.from(map.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  })()
 
   const customerNames = new Map(
     customers.map((customer) => [
@@ -443,8 +442,8 @@ export default function ReportingPage() {
               className="h-8 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
             >
               <option value="">All</option>
-              {CONSULTANTS.map((c) => (
-                <option key={c.key} value={c.key}>
+              {ownerFilterOptions.map((c) => (
+                <option key={c.id} value={c.id}>
                   {c.name}
                 </option>
               ))}

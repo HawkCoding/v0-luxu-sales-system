@@ -7,6 +7,8 @@ const bookings: BookingInputRow[] = [
     id: "b1",
     booking_number: "BT-2026-0001",
     consultant: "LB",
+    assigned_salesperson_id: "u-lb",
+    owner_name: "Leonie",
     departure_date: "2026-08-01",
     stage: "closed",
     outcome: "Won",
@@ -18,6 +20,8 @@ const bookings: BookingInputRow[] = [
     id: "b2",
     booking_number: "RR-2026-0001",
     consultant: "LB",
+    assigned_salesperson_id: "u-lb",
+    owner_name: "Leonie",
     departure_date: "2026-09-01",
     stage: "quote_sent",
     outcome: "Open",
@@ -29,6 +33,8 @@ const bookings: BookingInputRow[] = [
     id: "b3",
     booking_number: "BT-2026-0002",
     consultant: "CDJ",
+    assigned_salesperson_id: "u-cdj",
+    owner_name: "Carmen",
     departure_date: "2026-10-01",
     stage: "closed",
     outcome: "Won",
@@ -40,6 +46,8 @@ const bookings: BookingInputRow[] = [
     id: "b4",
     booking_number: "BT-2026-0003",
     consultant: null,
+    assigned_salesperson_id: null,
+    owner_name: null,
     departure_date: null,
     stage: "enquiry",
     outcome: "Open",
@@ -56,10 +64,10 @@ const payments: PaymentInputRow[] = [
 ]
 
 describe("salesPerSalesperson", () => {
-  it("groups bookings and revenue by consultant", () => {
+  it("groups bookings and revenue by owner", () => {
     const result = salesPerSalesperson(bookings, payments, {})
-    const lb = result.find((r) => r.consultant === "LB")
-    const cdj = result.find((r) => r.consultant === "CDJ")
+    const lb = result.find((r) => r.consultant === "Leonie")
+    const cdj = result.find((r) => r.consultant === "Carmen")
     const unassigned = result.find((r) => r.consultant === "Unassigned")
 
     expect(lb?.bookingCount).toBe(2)
@@ -75,16 +83,16 @@ describe("salesPerSalesperson", () => {
     expect(unassigned?.wonCount).toBe(0)
   })
 
-  it("filters by consultant", () => {
-    const result = salesPerSalesperson(bookings, payments, { consultant: "CDJ" })
+  it("filters by owner (assigned salesperson id)", () => {
+    const result = salesPerSalesperson(bookings, payments, { consultant: "u-cdj" })
     expect(result).toHaveLength(1)
-    expect(result[0].consultant).toBe("CDJ")
+    expect(result[0].consultant).toBe("Carmen")
   })
 
   it("filters by product", () => {
     const result = salesPerSalesperson(bookings, payments, { product: "RR" })
     expect(result).toHaveLength(1)
-    expect(result[0].consultant).toBe("LB")
+    expect(result[0].consultant).toBe("Leonie")
     expect(result[0].bookingCount).toBe(1)
   })
 

@@ -2,7 +2,7 @@ import { z } from "zod"
 import { requireRole, requireUser } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 
-const TEMPLATE_COLUMNS = "id, key, subject, body_html, version, active"
+const TEMPLATE_COLUMNS = "id, key, subject, body_html, version, active, is_system"
 
 const templatePatchSchema = z
   .object({
@@ -35,7 +35,98 @@ export async function GET() {
       bodyHtml: t.body_html,
       version: t.version,
       active: t.active,
+      isSystem: t.is_system,
     })),
+  )
+}
+
+const templateCreateSchema = z.object({
+  name: z.string().trim().min(2, "Name must be at least 2 characters").max(120),
+  subject: z.string().trim().min(1, "Subject is required").max(500),
+  bodyHtml: z.string().max(200_000).default(""),
+})
+
+// Slugify a display name into a stable, unique template key (custom templates
+// only — the four built-in keys are reserved/system). Keys are lower_snake,
+// length-capped, and never empty so they stay readable and collision-safe.
+const KEY_MAX_LENGTH = 60
+
+function slugifyKey(name: string): string {
+  const base = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, KEY_MAX_LENGTH)
+    .replace(/_+$/g, "") // re-trim a trailing underscore left by truncation
+  return base || "template"
+}
+
+export async function POST(req: Request) {
+  const auth = await requireRole(["admin", "manager"])
+  if (!auth.ok) return auth.response
+
+  let raw: unknown
+  try {
+    raw = await req.json()
+  } catch {
+    return jsonError("Invalid JSON body", 400)
+  }
+
+  const parsed = templateCreateSchema.safeParse(raw)
+  if (!parsed.success) return jsonZodError(parsed.error)
+
+  const { supabase, profile, user } = auth.value
+
+  // Resolve a unique key for the new custom template.
+  const slugBase = slugifyKey(parsed.data.name)
+  const { data: existingKeys } = await supabase
+    .from("templates")
+    .select("key")
+    .or(`key.eq.${slugBase},key.like.${slugBase}_%`)
+  const used = new Set((existingKeys ?? []).map((row) => row.key))
+  let key = slugBase
+  let suffix = 2
+  while (used.has(key)) {
+    key = `${slugBase}_${suffix}`
+    suffix += 1
+  }
+
+  const { data: created, error } = await supabase
+    .from("templates")
+    .insert({
+      key,
+      subject: parsed.data.subject,
+      body_html: parsed.data.bodyHtml,
+      version: 1,
+      active: true,
+      is_system: false,
+    })
+    .select(TEMPLATE_COLUMNS)
+    .single()
+
+  if (error || !created) return safeSupabaseError("templates:create", error)
+
+  await supabase.from("audit_logs").insert({
+    actor: profile.actorName,
+    actor_user_id: user.id,
+    entity_type: "Template",
+    entity_id: created.id,
+    action: "template_created",
+    after_json: { key: created.key },
+  })
+
+  return Response.json(
+    {
+      id: created.id,
+      key: created.key,
+      subject: created.subject,
+      bodyHtml: created.body_html,
+      version: created.version,
+      active: created.active,
+      isSystem: created.is_system,
+    },
+    { status: 201 },
   )
 }
 
@@ -94,5 +185,6 @@ export async function PATCH(req: Request) {
     bodyHtml: updated.body_html,
     version: updated.version,
     active: updated.active,
+    isSystem: updated.is_system,
   })
 }

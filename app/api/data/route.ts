@@ -335,6 +335,7 @@ export async function GET() {
       bodyHtml: t.body_html,
       version: t.version,
       active: t.active,
+      isSystem: t.is_system,
     })),
 
     rateCards: [],

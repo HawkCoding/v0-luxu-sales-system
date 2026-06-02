@@ -145,6 +145,9 @@ export interface Booking {
   ownerUserId: string | null
   assignedSalespersonId: string | null
   assignedSalespersonName?: string | null
+  claimedByUserId?: string | null
+  claimedByName?: string | null
+  claimedAt?: string | null
   isRepeatClientAtCreation: boolean
   departureDate: string | null
   departureDateDisplay?: string
@@ -745,8 +748,13 @@ export interface Job {
   id: string
   jobNumber: string
   ownerUser: string
+  ownerUserId?: string | null
+  ownerName?: string | null
   assignedSalespersonId?: string | null
   assignedSalespersonName?: string | null
+  claimedByUserId?: string | null
+  claimedByName?: string | null
+  claimedAt?: string | null
   customerId: string
   consultant: ConsultantAbbreviation
   purpose: Purpose
@@ -951,6 +959,7 @@ export interface Template {
   bodyHtml: string
   version: number
   active: boolean
+  isSystem: boolean
 }
 
 export interface Correspondence {

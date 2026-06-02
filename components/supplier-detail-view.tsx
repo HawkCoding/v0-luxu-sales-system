@@ -1959,12 +1959,12 @@ const RouteEditorRow = memo(function RouteEditorRow({
 
   return (
     <div
-      className={`grid min-w-0 gap-3 overflow-hidden rounded-lg border p-3 ${
+      className={`grid min-w-0 items-end gap-3 overflow-hidden rounded-lg border p-3 ${
         isTransport
           ? "md:grid-cols-2 xl:grid-cols-5"
           : vocabulary.routeHasLocations
-            ? "md:grid-cols-2 xl:grid-cols-[2fr_1fr_1fr_auto]"
-            : "md:grid-cols-[1fr_auto_auto]"
+            ? "md:grid-cols-2 xl:grid-cols-[1.5fr_1fr_1fr_1fr_auto]"
+            : "md:grid-cols-[1.5fr_1fr_auto]"
       }`}
     >
       <div className="space-y-1.5">
@@ -2081,38 +2081,26 @@ const RouteEditorRow = memo(function RouteEditorRow({
           </div>
         </>
       ) : null}
-      <div className="flex items-end gap-2">
-        <div className="space-y-1.5">
-          <Label>Direction</Label>
-          <div role="radiogroup" aria-label="Route direction" className="flex h-9 items-center rounded-md border bg-muted p-0.5">
-            {(
-              [
-                { value: "one_way", label: "One way" },
-                { value: "round_trip", label: "Round trip" },
-                { value: "loop", label: "Loop" },
-              ] as const
-            ).map((option) => {
-              const selected = route.directionMode === option.value
-              return (
-                <button
-                  key={option.value}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  onClick={() => onUpdateRoute(packageIndex, routeIndex, "directionMode", option.value)}
-                  className={`h-full px-2 text-xs rounded-sm transition-colors whitespace-nowrap ${
-                    selected
-                      ? "bg-background text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {option.label}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-        <div className="flex h-9 items-center gap-2">
+      <div className="min-w-0 space-y-1.5">
+        <Label>Direction</Label>
+        <Select
+          value={route.directionMode}
+          onValueChange={(value) =>
+            onUpdateRoute(packageIndex, routeIndex, "directionMode", value as RouteDirectionMode)
+          }
+        >
+          <SelectTrigger className="max-w-full">
+            <SelectValue placeholder="Select direction" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="one_way">One way</SelectItem>
+            <SelectItem value="round_trip">Round trip</SelectItem>
+            <SelectItem value="loop">Loop</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="flex h-9 items-center gap-3 self-end">
+        <div className="flex items-center gap-2">
           <Switch
             checked={route.active}
             onCheckedChange={(checked) => onUpdateRoute(packageIndex, routeIndex, "active", checked)}
@@ -2132,7 +2120,11 @@ const RouteEditorRow = memo(function RouteEditorRow({
       </div>
       <div
         className={
-          vocabulary.routeHasLocations ? "xl:col-span-4 md:col-span-2" : "md:col-span-3"
+          isTransport
+            ? "xl:col-span-5 md:col-span-2"
+            : vocabulary.routeHasLocations
+              ? "xl:col-span-5 md:col-span-2"
+              : "md:col-span-3"
         }
       >
         <CommissionControl

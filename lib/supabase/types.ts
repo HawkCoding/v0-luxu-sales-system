@@ -661,6 +661,8 @@ export type Database = {
           booking_number: string
           cancelled_at: string | null
           child_ages: number[] | null
+          claimed_at: string | null
+          claimed_by_user_id: string | null
           closed_at: string | null
           consultant: string | null
           created_at: string
@@ -725,6 +727,8 @@ export type Database = {
           booking_number: string
           cancelled_at?: string | null
           child_ages?: number[] | null
+          claimed_at?: string | null
+          claimed_by_user_id?: string | null
           closed_at?: string | null
           consultant?: string | null
           created_at?: string
@@ -789,6 +793,8 @@ export type Database = {
           booking_number?: string
           cancelled_at?: string | null
           child_ages?: number[] | null
+          claimed_at?: string | null
+          claimed_by_user_id?: string | null
           closed_at?: string | null
           consultant?: string | null
           created_at?: string
@@ -2889,6 +2895,7 @@ export type Database = {
           body_html: string
           created_at: string
           id: string
+          is_system: boolean
           key: string
           subject: string
           updated_at: string
@@ -2899,6 +2906,7 @@ export type Database = {
           body_html: string
           created_at?: string
           id?: string
+          is_system?: boolean
           key: string
           subject: string
           updated_at?: string
@@ -2909,6 +2917,7 @@ export type Database = {
           body_html?: string
           created_at?: string
           id?: string
+          is_system?: boolean
           key?: string
           subject?: string
           updated_at?: string

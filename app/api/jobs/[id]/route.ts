@@ -67,6 +67,8 @@ const patchJobSchema = z.object({
     })
     .optional(),
   ownerUser: z.string().optional(),
+  claimJob: z.literal(true).optional(),
+  releaseJob: z.literal(true).optional(),
   consultant: z.string().optional(),
   assignedSalespersonId: z.string().uuid().nullable().optional(),
   customerId: z.string().optional(),
@@ -150,6 +152,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const ownerProfile = booking.owner_user_id
     ? allProfiles.find((profile) => profile.id === booking.owner_user_id) ?? null
     : null
+  const claimedByProfile = booking.claimed_by_user_id
+    ? allProfiles.find((profile) => profile.id === booking.claimed_by_user_id) ?? null
+    : null
 
   const job = {
     id: booking.id,
@@ -161,6 +166,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     ownerUser: booking.consultant ?? "consultant",
     ownerUserId: booking.owner_user_id ?? null,
     ownerName: ownerProfile?.name ?? null,
+    claimedByUserId: booking.claimed_by_user_id ?? null,
+    claimedByName: claimedByProfile?.name ?? null,
+    claimedAt: booking.claimed_at ?? null,
     consultant: booking.consultant,
     assignedSalespersonId: booking.assigned_salesperson_id ?? null,
     assignedSalespersonName: assignedSalesperson?.name ?? null,
@@ -460,7 +468,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const { data: booking } = await supabase
     .from("bookings")
     .select(
-      "id, stage, booking_number, customer_id, consultant, assigned_salesperson_id, source, raw_text, email_import_needs_review, email_import_review_resolved_at, updated_at, departure_date, duration_nights, deposit_paid, invoice_balance, no_of_adults, no_of_children, no_of_suites",
+      "id, stage, booking_number, customer_id, consultant, assigned_salesperson_id, claimed_by_user_id, claimed_at, source, raw_text, email_import_needs_review, email_import_review_resolved_at, updated_at, departure_date, duration_nights, deposit_paid, invoice_balance, no_of_adults, no_of_children, no_of_suites",
     )
     .eq("id", id)
     .single()
@@ -830,6 +838,80 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     }
   }
 
+  if (body.claimJob === true) {
+    const { data: patchActorProfileClaim } = await supabase
+      .from("profiles")
+      .select("name, surname, email, clearance_level")
+      .eq("user_id", user.id)
+      .maybeSingle()
+
+    const claimRole = extractRoleFromJwt(user) ?? patchActorProfileClaim?.clearance_level ?? null
+    const isManagerOrAdmin = claimRole === "manager" || claimRole === "admin"
+
+    if (booking.claimed_by_user_id && !isManagerOrAdmin) {
+      return NextResponse.json(
+        { error: "This job is already claimed. Ask a manager to reassign it." },
+        { status: 409 },
+      )
+    }
+
+    const claimActorName =
+      [patchActorProfileClaim?.name, patchActorProfileClaim?.surname].filter(Boolean).join(" ").trim() ||
+      patchActorProfileClaim?.email ||
+      user.email ||
+      "System"
+
+    updates.claimed_by_user_id = user.id
+    updates.claimed_at = new Date().toISOString()
+
+    await supabase.from("audit_logs").insert({
+      actor: claimActorName,
+      actor_user_id: user.id,
+      entity_type: "Booking",
+      entity_id: id,
+      action: "job_claimed",
+      before_json: { claimed_by_user_id: booking.claimed_by_user_id ?? null },
+      after_json: { claimed_by_user_id: user.id },
+    })
+  }
+
+  if (body.releaseJob === true) {
+    const { data: patchActorProfileRelease } = await supabase
+      .from("profiles")
+      .select("name, surname, email, clearance_level")
+      .eq("user_id", user.id)
+      .maybeSingle()
+
+    const releaseRole = extractRoleFromJwt(user) ?? patchActorProfileRelease?.clearance_level ?? null
+    const isManagerOrAdmin = releaseRole === "manager" || releaseRole === "admin"
+
+    if (!isManagerOrAdmin && booking.claimed_by_user_id !== user.id) {
+      return NextResponse.json(
+        { error: "You can only release a job you have claimed." },
+        { status: 403 },
+      )
+    }
+
+    const releaseActorName =
+      [patchActorProfileRelease?.name, patchActorProfileRelease?.surname].filter(Boolean).join(" ").trim() ||
+      patchActorProfileRelease?.email ||
+      user.email ||
+      "System"
+
+    updates.claimed_by_user_id = null
+    updates.claimed_at = null
+
+    await supabase.from("audit_logs").insert({
+      actor: releaseActorName,
+      actor_user_id: user.id,
+      entity_type: "Booking",
+      entity_id: id,
+      action: "job_released",
+      before_json: { claimed_by_user_id: booking.claimed_by_user_id ?? null },
+      after_json: { claimed_by_user_id: null },
+    })
+  }
+
   if (stageUpdated && Object.keys(updates).length === 1) {
     return NextResponse.json({
       id: stageUpdated.id,
@@ -878,6 +960,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     stage: updated.stage,
     consultant: updated.consultant,
     assignedSalespersonId: updated.assigned_salesperson_id ?? null,
+    claimedByUserId: updated.claimed_by_user_id ?? null,
+    claimedAt: updated.claimed_at ?? null,
     cancelledAt: updated.cancelled_at ?? null,
     updatedAt: updated.updated_at,
     updatedAtDisplay: formatDisplayDateTime(updated.updated_at),
