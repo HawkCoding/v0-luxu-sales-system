@@ -17,7 +17,7 @@ export function getCrossTabChannel(): BroadcastChannel | null {
   }
 
   if (channel === undefined) {
-    channel = new BroadcastChannel("luxus-sync")
+    channel = new BroadcastChannel("ttt-sync")
   }
 
   return channel

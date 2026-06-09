@@ -65,7 +65,7 @@ export function useRealtimeSync(): void {
 
   useEffect(() => {
     const supabase = getSupabase()
-    const channel = supabase.channel("luxus-record-sync")
+    const channel = supabase.channel("ttt-record-sync")
 
     const handleChange = (table: RealtimeTable) => {
       invalidate(table)
