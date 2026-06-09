@@ -4,9 +4,9 @@
  * Hidden by default; only shown where NEXT_PUBLIC_PREVIEW_BANNER === "true"
  * (e.g. the prospect demo portal). Keeps the codebase identical across branches.
  */
-const SHOW_BANNER = process.env.NEXT_PUBLIC_PREVIEW_BANNER === "true"
+const SHOW_BANNER = process.env.NEXT_PUBLIC_PREVIEW_BANNER?.trim() === "true"
 const BANNER_TEXT =
-  process.env.NEXT_PUBLIC_PREVIEW_BANNER_TEXT ??
+  process.env.NEXT_PUBLIC_PREVIEW_BANNER_TEXT?.trim() ||
   "Preview environment — this product is in active development and uses sample data only."
 
 export function PreviewBanner() {
