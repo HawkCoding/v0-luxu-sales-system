@@ -10,6 +10,7 @@ import { NextResponse } from "next/server"
 import { createServiceClient, createSessionClient } from "@/lib/supabase/server"
 import { getEmailFromAddress } from "@/lib/email/from"
 import { sendEmail } from "@/lib/email/transport"
+import { BRAND_NAME } from "@/lib/brand"
 
 export const runtime = "nodejs"
 
@@ -111,8 +112,8 @@ export async function POST(
     await sendEmail({
       from: await getEmailFromAddress(service),
       to: targetEmail,
-      subject: "Your password was reset – Luxus Sales",
-      text: `Your password for Luxus Sales was reset by ${adminName} at ${new Date().toISOString()}.\n\nIf you did not request this, contact your administrator.`,
+      subject: `Your password was reset – ${BRAND_NAME}`,
+      text: `Your password for ${BRAND_NAME} was reset by ${adminName} at ${new Date().toISOString()}.\n\nIf you did not request this, contact your administrator.`,
     })
   } catch {
     // Ignore send errors for now; password was already updated.

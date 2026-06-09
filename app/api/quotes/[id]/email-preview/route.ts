@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { renderQuoteEmail } from "@/lib/quotes/render-quote-email"
 import { createSessionClient } from "@/lib/supabase/server"
+import { BRAND_NAME } from "@/lib/brand"
 
 const previewSchema = z.object({
   introText: z.string().trim().min(1).optional(),
@@ -65,8 +66,8 @@ export async function POST(req: Request, { params }: RouteParams) {
   const quoteNumber = quote.quote_number ?? `${booking?.booking_number ?? "QUOTE"}-Q1`
   const introText =
     parsed.data.introText ??
-    "Thank you for your enquiry. We are pleased to share your Luxus Travel & Tours quote for review."
-  const subject = parsed.data.subject ?? `Quote ${quoteNumber} - Luxus Travel & Tours`
+    `Thank you for your enquiry. We are pleased to share your ${BRAND_NAME} quote for review.`
+  const subject = parsed.data.subject ?? `Quote ${quoteNumber} - ${BRAND_NAME}`
 
   const html = await renderQuoteEmail({
     customerName,

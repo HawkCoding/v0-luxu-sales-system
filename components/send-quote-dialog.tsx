@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { CheckCircle2, Loader2, PackageOpen, Search, Send } from "lucide-react"
+import { BRAND_NAME } from "@/lib/brand"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -344,14 +345,14 @@ export function SendQuoteDialog({
 
       setSendingStepIndex(1)
 
-      const subject = `Quote ${quoteNumber ?? bookingNumber} - Luxus Travel & Tours`
+      const subject = `Quote ${quoteNumber ?? bookingNumber} - ${BRAND_NAME}`
       const previewResponse = await fetch(`/api/quotes/${quoteId}/email-preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           subject,
           introText:
-            "Thank you for your enquiry. We are pleased to share your Luxus Travel & Tours quote for review.",
+            `Thank you for your enquiry. We are pleased to share your ${BRAND_NAME} quote for review.`,
         }),
       })
       const previewPayload = (await previewResponse.json()) as { html?: string; error?: string }

@@ -9,7 +9,7 @@ export function LuxusLogo({ className, size = 64 }: LuxusLogoProps) {
   return (
     <Image
       src="/3in1.png"
-      alt="Luxus logo"
+      alt="Company logo"
       width={size}
       height={size}
       className={className}

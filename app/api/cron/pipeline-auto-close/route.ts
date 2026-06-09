@@ -3,6 +3,7 @@ import { renderThankYouEmail } from "@/lib/email-templates/thank-you"
 import { applyTransition } from "@/lib/pipeline/apply-transition"
 import { createServiceClient } from "@/lib/supabase/server"
 import type { PipelineStage, Source } from "@/lib/types"
+import { BRAND_SHORT_NAME } from "@/lib/brand"
 
 const THANK_YOU_CATCHUP_WINDOW_DAYS = 14
 
@@ -94,7 +95,7 @@ export async function GET(request: Request) {
         customerFirstName: booking.customer?.first_name ?? "",
         routeName: booking.route?.name ?? "",
         tripEndDate: tripEndDate.toISOString().slice(0, 10),
-        consultantName: booking.consultant ?? "The Luxus team",
+        consultantName: booking.consultant ?? `The ${BRAND_SHORT_NAME} team`,
       })
       const { error: correspondenceError } = await supabase.from("correspondences").insert({
         booking_id: booking.id,

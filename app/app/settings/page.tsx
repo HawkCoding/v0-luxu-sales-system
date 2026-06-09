@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
 import { InboundEmailSettings } from "@/components/inbound-email-settings"
+import { BRAND_NAME, BRAND_CONTACT_EMAIL } from "@/lib/brand"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -754,7 +755,7 @@ function CompanyInfoCard({ canEdit }: { canEdit: boolean }) {
                 value={businessName}
                 onChange={(e) => setBusinessName(e.target.value)}
                 readOnly={!canEdit}
-                placeholder="Luxus Travel"
+                placeholder={BRAND_NAME}
               />
               {canEdit && (
                 <Button size="sm" onClick={handleSave} disabled={saving || !businessName.trim()}>
@@ -765,7 +766,7 @@ function CompanyInfoCard({ canEdit }: { canEdit: boolean }) {
           </div>
           <div>
             <label className="text-xs font-medium text-muted-foreground">Email</label>
-            <Input defaultValue="info@luxustravel.co.za" className="mt-1" readOnly />
+            <Input defaultValue={BRAND_CONTACT_EMAIL} className="mt-1" readOnly />
           </div>
           <div>
             <label className="text-xs font-medium text-muted-foreground">Phone</label>

@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react"
 import Cropper, { type Area } from "react-easy-crop"
 import { useSWRConfig } from "swr"
+import { BRAND_NAME } from "@/lib/brand"
 import { toast } from "sonner"
 import {
   Eye,
@@ -475,7 +476,7 @@ export function VoucherTemplateEditor({ initial, canEdit }: Props) {
               value={draft.header_text}
               onChange={(e) => set("header_text", e.target.value)}
               disabled={!canEdit}
-              placeholder="A division of Luxus Travel & Tours"
+              placeholder={`A division of ${BRAND_NAME}`}
             />
           </div>
         </div>

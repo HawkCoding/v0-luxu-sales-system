@@ -1,5 +1,6 @@
 import { Heading, Hr, Row, Section, Text } from "@react-email/components"
 import { BaseLayout } from "./base-layout"
+import { BRAND_SHORT_NAME } from "@/lib/brand"
 
 export interface InvoiceEmailLine {
   label: string
@@ -38,7 +39,7 @@ export function InvoiceEmail({
       <Text style={paragraph}>Dear {customerName || "traveller"},</Text>
       <Text style={paragraph}>
         {introText?.trim() ||
-          `Please find the ${invoiceLabel.toLowerCase()} for your Luxus booking below.`}
+          `Please find the ${invoiceLabel.toLowerCase()} for your ${BRAND_SHORT_NAME} booking below.`}
       </Text>
 
       <Section style={summaryBox}>

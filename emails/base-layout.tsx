@@ -9,6 +9,7 @@ import {
   Text,
 } from "@react-email/components"
 import type { ReactNode } from "react"
+import { BRAND_NAME, BRAND_LOGO_URL } from "@/lib/brand"
 
 interface BaseLayoutProps {
   preview: string
@@ -24,15 +25,15 @@ export function BaseLayout({ preview, children }: BaseLayoutProps) {
         <Container style={container}>
           <Section style={header}>
             <Img
-              alt="Luxus Travel & Tours"
+              alt={BRAND_NAME}
               height="48"
-              src="https://www.luxustravelandtours.co.za/wp-content/uploads/2023/06/luxus-logo.png"
+              src={BRAND_LOGO_URL}
               style={logo}
             />
           </Section>
           <Section style={content}>{children}</Section>
           <Section style={footer}>
-            <Text style={footerText}>Luxus Travel & Tours</Text>
+            <Text style={footerText}>{BRAND_NAME}</Text>
             <Text style={footerText}>Luxury train journeys, handled with care.</Text>
           </Section>
         </Container>

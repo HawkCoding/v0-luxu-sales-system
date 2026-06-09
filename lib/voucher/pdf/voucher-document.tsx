@@ -3,6 +3,7 @@ import type { VoucherData } from "@/lib/generate-voucher"
 import { sortedVoucherServiceBlocks } from "@/lib/generate-voucher"
 import type { VoucherSectionKey, VoucherTemplate } from "@/lib/types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
+import { BRAND_NAME } from "@/lib/brand"
 import { registerVoucherFonts, resolveVoucherFontFamily } from "./fonts"
 import { voucherStyles } from "./styles"
 import { HeaderBanner } from "./sections/header-banner"
@@ -51,7 +52,7 @@ export function VoucherDocument({ data, template }: VoucherDocumentProps) {
 
   return (
     <Document
-      author="Luxus Travel & Tours"
+      author={BRAND_NAME}
       subject={`Travel voucher ${data.voucherNumber}`}
       title={`Travel Voucher - ${data.voucherNumber}`}
     >

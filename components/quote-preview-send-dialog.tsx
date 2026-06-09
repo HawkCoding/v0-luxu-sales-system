@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { Loader2, Mail, RotateCcw, Send } from "lucide-react"
+import { BRAND_NAME } from "@/lib/brand"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { useOptimisticSend } from "@/hooks/use-optimistic-send"
@@ -36,7 +37,7 @@ interface PreviewResponse {
 }
 
 const DEFAULT_INTRO =
-  "Thank you for your enquiry. We are pleased to share your Luxus Travel & Tours quote for review."
+  `Thank you for your enquiry. We are pleased to share your ${BRAND_NAME} quote for review.`
 
 export function QuotePreviewSendDialog({
   quote,
@@ -87,7 +88,7 @@ export function QuotePreviewSendDialog({
   useEffect(() => {
     if (open) {
       const quoteNumber = quote.quoteNumber || bookingNumber
-      const nextSubject = `Quote ${quoteNumber} - Luxus Travel & Tours`
+      const nextSubject = `Quote ${quoteNumber} - ${BRAND_NAME}`
       setSubject(nextSubject)
       setIntroText(DEFAULT_INTRO)
       void loadPreview(DEFAULT_INTRO, nextSubject)

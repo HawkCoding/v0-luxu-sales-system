@@ -1,5 +1,6 @@
 import { Heading, Section, Text } from "@react-email/components"
 import { BaseLayout } from "./base-layout"
+import { BRAND_NAME } from "@/lib/brand"
 
 export interface VoucherEmailProps {
   customerName: string
@@ -37,7 +38,7 @@ export function VoucherEmail({
       </Section>
 
       <Text style={paragraph}>
-        Your consultant {consultantName || "from Luxus Travel & Tours"} remains available if you need anything before departure.
+        Your consultant {consultantName || `from ${BRAND_NAME}`} remains available if you need anything before departure.
       </Text>
     </BaseLayout>
   )

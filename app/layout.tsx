@@ -4,6 +4,8 @@ import { Analytics } from '@vercel/analytics/next'
 import { Toaster } from '@/components/ui/sonner'
 import { ThemeProvider } from '@/components/theme-provider'
 import './globals.css'
+import { BRAND_NAME } from '@/lib/brand'
+import { PreviewBanner } from '@/components/preview-banner'
 
 const playfair = Playfair_Display({
   subsets: ["latin"],
@@ -17,8 +19,8 @@ const inter = Inter({
 })
 
 export const metadata: Metadata = {
-  title: 'Luxus Travel and Tourist - Sales Operations',
-  description: 'Internal sales ops system for Luxus Travel and Tourist',
+  title: `${BRAND_NAME} - Sales Operations`,
+  description: `Sales operations system for ${BRAND_NAME}`,
 }
 
 export default function RootLayout({
@@ -30,6 +32,7 @@ export default function RootLayout({
     <html lang="en" className={`${playfair.variable} ${inter.variable}`} suppressHydrationWarning>
       <body className="font-sans antialiased">
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
+          <PreviewBanner />
           {children}
           <Toaster position="top-right" />
           <Analytics />

@@ -1,4 +1,5 @@
 import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer"
+import { BRAND_NAME, BRAND_TAGLINE } from "@/lib/brand"
 
 export interface QuotePdfLineItem {
   description: string
@@ -203,14 +204,14 @@ const styles = StyleSheet.create({
 export function QuoteDocument({ quoteNumber, bookingNumber, customerName, quoteDate, validUntil, lineItems, subtotal, vat, total, currency = "ZAR", title = "PROVISIONAL QUOTATION", statusLabel = "Provisional" }: QuotePdfData) {
   return (
     <Document
-      author="Luxus Travel & Tours"
+      author={BRAND_NAME}
       subject={`Quote ${quoteNumber}`}
       title={`Quote ${quoteNumber} — ${customerName}`}
     >
       <Page size="A4" style={styles.page}>
         <View style={styles.header}>
-          <Text style={styles.brand}>Luxus Travel & Tours</Text>
-          <Text style={styles.brandSub}>Luxury Rail Journeys</Text>
+          <Text style={styles.brand}>{BRAND_NAME}</Text>
+          <Text style={styles.brandSub}>{BRAND_TAGLINE}</Text>
         </View>
 
         <View style={styles.titleRow}>
@@ -294,7 +295,7 @@ export function QuoteDocument({ quoteNumber, bookingNumber, customerName, quoteD
         </View>
 
         <Text style={styles.footer}>
-          This quotation is valid until {formatDate(validUntil)} and is subject to availability. Prices are quoted in {currency}. Luxus Travel & Tours — Luxury Rail Journeys.
+          This quotation is valid until {formatDate(validUntil)} and is subject to availability. Prices are quoted in {currency}. {BRAND_NAME} — {BRAND_TAGLINE}.
         </Text>
       </Page>
     </Document>

@@ -4,6 +4,7 @@ import {
   Section,
   Text,
 } from "@react-email/components"
+import { BRAND_NAME } from "@/lib/brand"
 import { BaseLayout } from "@/emails/base-layout"
 
 export interface QuoteEmailLineItem {
@@ -57,7 +58,7 @@ function renderMultilineText(value: string): string[] {
 
 export function QuoteEmail({ customerName, introText, quote }: QuoteEmailProps) {
   return (
-    <BaseLayout preview={`Quote ${quote.quoteNumber} from Luxus Travel & Tours`}>
+    <BaseLayout preview={`Quote ${quote.quoteNumber} from ${BRAND_NAME}`}>
       <Heading style={heading}>Your luxury rail quote</Heading>
       <Text style={text}>Dear {customerName || "traveller"},</Text>
       {renderMultilineText(introText).map((line) => (

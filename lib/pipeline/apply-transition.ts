@@ -4,6 +4,7 @@ import type { Database } from "@/lib/supabase/types"
 import type { PipelineStage } from "@/lib/types"
 import { calculateDepositAmount, getDefaultDepositPercentage } from "./constants"
 import { getCrossedForwardStages, type LostContext, type ManualConfirmations } from "./validate-transition"
+import { BRAND_SHORT_NAME } from "@/lib/brand"
 
 type BookingRow = Database["public"]["Tables"]["bookings"]["Row"]
 type BookingUpdate = Database["public"]["Tables"]["bookings"]["Update"]
@@ -193,7 +194,7 @@ export async function applyTransition(
         status: "scheduled",
         scheduled_at: nowIso,
         subject,
-        body_html: `<p>Thank you for choosing Luxus. Please find your deposit invoice attached.</p>${amountLine}`,
+        body_html: `<p>Thank you for choosing ${BRAND_SHORT_NAME}. Please find your deposit invoice attached.</p>${amountLine}`,
       })
 
       if (correspondenceError) throw new Error(correspondenceError.message)

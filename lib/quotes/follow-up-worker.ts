@@ -3,6 +3,7 @@ import type { Database } from "@/lib/supabase/types"
 import { getQuoteFollowUpSettings } from "@/lib/settings-access"
 import { logError } from "@/lib/error-log"
 import { sendEmail } from "@/lib/email/transport"
+import { BRAND_REPLY_TO } from "@/lib/brand"
 
 export interface FollowUpWorkerResult {
   processed: number
@@ -130,7 +131,7 @@ export async function runQuoteFollowUpWorker(
     }
 
     // Resolve salesperson sender (email address + credential id for SMTP routing)
-    let fromAddress = "reservations@luxustravel.co.za"
+    let fromAddress = BRAND_REPLY_TO
     let salespersonCredentialId: string | null = null
 
     if (booking.assigned_salesperson_id) {

@@ -24,6 +24,7 @@ import { useRealtimeSync } from "@/hooks/use-realtime-sync"
 import { APP_VERSION } from "@/lib/version"
 import type { User } from "@/lib/auth-context"
 import { LuxusLogo } from "@/components/luxus-logo"
+import { BRAND_NAME, BRAND_INITIALS } from "@/lib/brand"
 import useSWR from "swr"
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
@@ -56,7 +57,7 @@ function AppShell({ children }: { children: ReactNode }) {
   const { theme, setTheme } = useTheme()
   const { data, error: dataError } = useAllData()
   const { data: companySettings } = useSWR("/api/settings/company", fetcher)
-  const businessName: string = companySettings?.business_name || "Luxus Travel"
+  const businessName: string = companySettings?.business_name || BRAND_NAME
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [mounted, setMounted] = useState(false)
@@ -203,7 +204,7 @@ function AppShell({ children }: { children: ReactNode }) {
       >
         <div className="space-y-3 text-center">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 animate-pulse">
-            <span className="text-xl font-bold text-primary">LT</span>
+            <span className="text-xl font-bold text-primary">{BRAND_INITIALS}</span>
           </div>
           <p className="text-muted-foreground">Loading...</p>
           {slowLoad && (

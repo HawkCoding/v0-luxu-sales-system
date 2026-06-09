@@ -1,7 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 
-const DEFAULT_FROM_ADDRESS = "Luxus <onboarding@resend.dev>"
+import { BRAND_FROM_ADDRESS } from "@/lib/brand"
+
+const DEFAULT_FROM_ADDRESS = BRAND_FROM_ADDRESS
 
 type SettingsClient = Pick<
   SupabaseClient<Database>,

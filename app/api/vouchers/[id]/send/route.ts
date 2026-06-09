@@ -6,6 +6,7 @@ import { sendEmail } from "@/lib/email/transport"
 import { formatDisplayDateLong } from "@/lib/date-format"
 import { checkVoucherReadiness } from "@/lib/voucher/check-readiness"
 import { renderVoucherEmail } from "@/lib/voucher/render-voucher-email"
+import { BRAND_FROM_ADDRESS } from "@/lib/brand"
 import { logError } from "@/lib/error-log"
 import type { Database } from "@/lib/supabase/types"
 
@@ -158,7 +159,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
 
   const fromAddress = process.env.VOUCHER_EMAIL_FROM?.trim()
     || process.env.OUTBOUND_EMAIL_FROM?.trim()
-    || "no-reply@luxustravel.local"
+    || BRAND_FROM_ADDRESS
 
   const sendResult = await sendEmail({
     from: fromAddress,
