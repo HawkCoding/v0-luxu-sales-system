@@ -1,0 +1,57 @@
+name: Sync Travel-Through-Time portal with dev
+
+# Keeps the prospect demo portal branch (Travel-Through-Time) up to date with
+# dev, one-way. Portal branding lives only on that branch (env-driven, see
+# lib/brand.ts), so these merges normally apply cleanly. On conflict the run
+# stops and opens an issue for manual review instead of forcing anything.
+#
+# Lives on dev (the repo's default branch) so the schedule can fire.
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # daily
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sync-portal
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: Travel-Through-Time
+          fetch-depth: 0
+
+      - name: Merge dev into Travel-Through-Time
+        id: merge
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin dev:dev
+          if git merge --no-edit dev; then
+            git push origin HEAD:Travel-Through-Time
+            echo "Portal synced with dev."
+          else
+            git merge --abort || true
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open an issue on conflict
+        if: steps.merge.outputs.conflict == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: "Portal sync conflict: dev → Travel-Through-Time",
+              body: "The scheduled sync could not merge `dev` into `Travel-Through-Time` automatically (conflict). Resolve manually:\n\n```\ngit fetch origin\ngit checkout Travel-Through-Time\ngit merge origin/dev\n# resolve conflicts, then\ngit push origin Travel-Through-Time\n```",
+              labels: ["portal-sync"],
+            })
