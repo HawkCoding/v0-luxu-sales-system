@@ -180,7 +180,7 @@ export default function JobDetailPage() {
   const [customerResults, setCustomerResults] = useState<Array<{ id: string; firstName: string; lastName: string; email: string }>>([])
   const [changingCustomer, setChangingCustomer] = useState(false)
   const [resolvingImportReview, setResolvingImportReview] = useState(false)
-  const [claimSubmitting, setClaimSubmitting] = useState(false)
+  const [ownerSubmitting, setOwnerSubmitting] = useState(false)
   const [lastJobPayload, setLastJobPayload] = useState<Record<string, unknown> | null>(null)
   const [activeTab, setActiveTab] = useState<JobDetailTab>(() => parseJobDetailTab(searchParams.get("tab")))
   const [supplierRefDraft, setSupplierRefDraft] = useState<string>("")
@@ -255,15 +255,13 @@ export default function JobDetailPage() {
   const currentStageIdx = PIPELINE_STAGES.findIndex(s => s.key === currentStage)
   const consultantName = CONSULTANTS.find((consultant) => consultant.key === job.consultant)?.name ?? job.consultant ?? undefined
   const needsEmailReview = Boolean(enquiry?.emailImportNeedsReview)
-  const claimedByUserId = (job as Record<string, unknown>).claimedByUserId as string | null ?? null
-  const claimedByName = (job as Record<string, unknown>).claimedByName as string | null ?? null
-  const isClaimed = Boolean(claimedByUserId)
-  const isClaimedByMe = claimedByUserId === authUser?.id
-  const canClaim = can("edit:jobs") && !isClaimedByMe
-  const canRelease = can("edit:jobs") && (isClaimedByMe || role === "manager" || role === "admin")
   const assignedSalespersonName = job.assignedSalespersonName ?? "Unassigned"
   const assignedSalespersonId = (job as { assignedSalespersonId?: string | null }).assignedSalespersonId ?? null
   const canReassign = role === "manager" || role === "admin"
+  // Self-serve owner controls for consultants: take an unassigned job, release one they own.
+  const isOwnedByMe = Boolean(assignedSalespersonId) && assignedSalespersonId === authUser?.id
+  const canTake = can("edit:jobs") && !assignedSalespersonId
+  const canRelease = can("edit:jobs") && isOwnedByMe
   const hasNoPackageMatchQuote = quotes.some((quote: { noPackageMatch?: boolean }) => quote.noPackageMatch)
   const hasSentDepositInvoice = invoices.some(
     (invoice: { kind: string; status: string }) =>
@@ -455,43 +453,31 @@ export default function JobDetailPage() {
     }
   }
 
-  const claimJob = async () => {
-    setClaimSubmitting(true)
+  const setOwner = async (next: string | null, successMessage: string, failMessage: string) => {
+    setOwnerSubmitting(true)
     try {
       const response = await fetch(`/api/jobs/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ claimJob: true }),
+        body: JSON.stringify({ assignedSalespersonId: next, expectedUpdatedAt: data?.job?.updatedAt }),
       })
       const payload = (await response.json().catch(() => ({}))) as { error?: string }
-      if (!response.ok) throw new Error(payload.error ?? "Could not claim job")
+      if (!response.ok) throw new Error(payload.error ?? failMessage)
       await mutate()
-      toast.success("Job claimed")
+      toast.success(successMessage)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not claim job")
+      toast.error(error instanceof Error ? error.message : failMessage)
     } finally {
-      setClaimSubmitting(false)
+      setOwnerSubmitting(false)
     }
   }
 
-  const releaseJob = async () => {
-    setClaimSubmitting(true)
-    try {
-      const response = await fetch(`/api/jobs/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ releaseJob: true }),
-      })
-      const payload = (await response.json().catch(() => ({}))) as { error?: string }
-      if (!response.ok) throw new Error(payload.error ?? "Could not release job")
-      await mutate()
-      toast.success("Job released")
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not release job")
-    } finally {
-      setClaimSubmitting(false)
-    }
+  const takeJob = () => {
+    if (!authUser?.id) return
+    void setOwner(authUser.id, "Job assigned to you", "Could not take job")
   }
+
+  const releaseJob = () => void setOwner(null, "Job released", "Could not release job")
 
   const searchCustomers = async () => {
     const response = await fetch(`/api/customers?search=${encodeURIComponent(customerSearch)}`)
@@ -590,37 +576,34 @@ export default function JobDetailPage() {
               {customer?.firstName} {customer?.lastName} &middot; {customer?.email}
             </p>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <span className="font-medium text-foreground">Claimed by</span>
-              <span>{isClaimed ? (claimedByName ?? "Unknown") : "Unclaimed"}</span>
-              {canClaim && !isClaimed && (
+              <span className="font-medium text-foreground">Salesperson</span>
+              <span>{assignedSalespersonName}</span>
+              {canTake && (
                 <Button
                   size="sm"
                   variant="outline"
                   className="h-6 px-2 text-xs"
-                  disabled={claimSubmitting}
-                  onClick={() => void claimJob()}
-                  aria-label="Claim this job"
+                  disabled={ownerSubmitting}
+                  onClick={takeJob}
+                  aria-label="Take this job"
                 >
                   <UserPlus className="w-3 h-3 mr-1" />
-                  {claimSubmitting ? "Claiming…" : "Claim"}
+                  {ownerSubmitting ? "Taking…" : "Take"}
                 </Button>
               )}
-              {canRelease && isClaimed && (
+              {canRelease && (
                 <Button
                   size="sm"
                   variant="outline"
                   className="h-6 px-2 text-xs"
-                  disabled={claimSubmitting}
-                  onClick={() => void releaseJob()}
+                  disabled={ownerSubmitting}
+                  onClick={releaseJob}
                   aria-label="Release this job"
                 >
                   <UserMinus className="w-3 h-3 mr-1" />
-                  {claimSubmitting ? "Releasing…" : "Release"}
+                  {ownerSubmitting ? "Releasing…" : "Release"}
                 </Button>
               )}
-              <span className="text-muted-foreground/40">·</span>
-              <span className="font-medium text-foreground">Salesperson</span>
-              <span>{assignedSalespersonName}</span>
               {canReassign && (
                 <Button
                   size="sm"
@@ -853,11 +836,11 @@ export default function JobDetailPage() {
             quotes={quotes}
             jobId={id}
             bookingNumber={job.jobNumber}
-            itineraries={itineraries}
             travelDate={enquiry?.departureDate ?? null}
             noOfAdults={enquiry?.noOfAdults ?? 0}
             noOfChildren={enquiry?.noOfChildren ?? 0}
             customerName={`${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()}
+            customerDefaultRateTypeId={customer?.defaultRateTypeId ?? null}
             emailImportNeedsReview={needsEmailReview}
             mutate={mutate}
           />
@@ -879,6 +862,7 @@ export default function JobDetailPage() {
             job={job}
             enquiry={enquiry}
             customer={customer}
+            itineraries={itineraries}
             onChange={mutate}
             loading={isLoading}
             error={error as Error | null}
