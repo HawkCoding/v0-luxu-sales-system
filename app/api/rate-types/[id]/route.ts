@@ -86,6 +86,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     )
   }
 
+  // Block archiving a system-standard rate type (Rack Rate / Standard Tour
+  // Operator). These must always exist; they may be renamed but not removed.
+  if (parsed.data.archived === true && existing.is_standard) {
+    return NextResponse.json(
+      { error: "Cannot archive a standard rate type." },
+      { status: 409 },
+    )
+  }
+
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (typeof parsed.data.name === "string") updates.name = parsed.data.name
   if (typeof parsed.data.sortOrder === "number") updates.sort_order = parsed.data.sortOrder

@@ -8,43 +8,28 @@ import {
 describe("resolveCommission", () => {
   it("returns no commission when nothing is set", () => {
     expect(
-      resolveCommission({ supplierDefault: null, routeOverride: null }),
+      resolveCommission({}),
     ).toEqual({ type: null, value: 0, source: "none" })
   })
 
-  it("uses supplier default when no overrides exist", () => {
+  it("returns no commission when lineOverride is null", () => {
     expect(
-      resolveCommission({
-        supplierDefault: { type: "percent", value: 15 },
-        routeOverride: null,
-      }),
-    ).toEqual({ type: "percent", value: 15, source: "supplier" })
+      resolveCommission({ lineOverride: null }),
+    ).toEqual({ type: null, value: 0, source: "none" })
   })
 
-  it("prefers a route override over the supplier default", () => {
+  it("uses line override when set", () => {
     expect(
       resolveCommission({
-        supplierDefault: { type: "percent", value: 15 },
-        routeOverride: { type: "percent", value: 12 },
-      }),
-    ).toEqual({ type: "percent", value: 12, source: "route" })
-  })
-
-  it("prefers a line override over both", () => {
-    expect(
-      resolveCommission({
-        supplierDefault: { type: "percent", value: 15 },
-        routeOverride: { type: "percent", value: 12 },
         lineOverride: { type: "per_person", value: 2500 },
       }),
     ).toEqual({ type: "per_person", value: 2500, source: "line" })
   })
 
-  it("skips partial entries (missing type or value)", () => {
+  it("skips partial line override (missing type or value)", () => {
     expect(
       resolveCommission({
-        supplierDefault: { type: null, value: 15 },
-        routeOverride: { type: "percent", value: null },
+        lineOverride: { type: null, value: 15 },
       }),
     ).toEqual({ type: null, value: 0, source: "none" })
   })
@@ -55,7 +40,7 @@ describe("calculateCommissionAmount", () => {
     const amount = calculateCommissionAmount({
       amountAfterMarkup: 55000,
       passengerCount: 2,
-      resolved: { type: "percent", value: 15, source: "supplier" },
+      resolved: { type: "percent", value: 15, source: "line" },
     })
     expect(amount).toBe(8250)
   })
@@ -64,7 +49,7 @@ describe("calculateCommissionAmount", () => {
     const amount = calculateCommissionAmount({
       amountAfterMarkup: 50000,
       passengerCount: 3,
-      resolved: { type: "per_person", value: 1000, source: "route" },
+      resolved: { type: "per_person", value: 1000, source: "line" },
     })
     expect(amount).toBe(3000)
   })
@@ -89,7 +74,7 @@ describe("buildCommissionBreakdown", () => {
 
   it("packages type, value, amount, and source into a breakdown", () => {
     expect(
-      buildCommissionBreakdown({ type: "percent", value: 15, source: "supplier" }, 8250),
-    ).toEqual({ type: "percent", value: 15, amount: 8250, source: "supplier" })
+      buildCommissionBreakdown({ type: "percent", value: 15, source: "line" }, 8250),
+    ).toEqual({ type: "percent", value: 15, amount: 8250, source: "line" })
   })
 })

@@ -1,13 +1,10 @@
 import type {
   CommissionBreakdown,
   CommissionKind,
-  CommissionSource,
   ResolvedCommission,
 } from "@/lib/types"
 
 export interface CommissionInputs {
-  supplierDefault?: { type: CommissionKind | null; value: number | null } | null
-  routeOverride?: { type: CommissionKind | null; value: number | null } | null
   lineOverride?: { type: CommissionKind | null; value: number | null } | null
 }
 
@@ -24,19 +21,10 @@ function isUsable(entry: { type: CommissionKind | null; value: number | null } |
 }
 
 export function resolveCommission(inputs: CommissionInputs): ResolvedCommission {
-  const layers: { entry: { type: CommissionKind | null; value: number | null } | null | undefined; source: CommissionSource }[] = [
-    { entry: inputs.lineOverride, source: "line" },
-    { entry: inputs.routeOverride, source: "route" },
-    { entry: inputs.supplierDefault, source: "supplier" },
-  ]
-
-  for (const layer of layers) {
-    if (isUsable(layer.entry)) {
-      const entry = layer.entry!
-      return { type: entry.type, value: entry.value as number, source: layer.source }
-    }
+  if (isUsable(inputs.lineOverride)) {
+    const entry = inputs.lineOverride!
+    return { type: entry.type, value: entry.value as number, source: "line" }
   }
-
   return NONE
 }
 
@@ -75,26 +63,10 @@ export function buildCommissionBreakdown(
   }
 }
 
-export interface CommissionContext {
-  supplierDefault: { type: CommissionKind | null; value: number | null } | null
-  routeOverride: { type: CommissionKind | null; value: number | null } | null
-}
-
-export function getCommission(context: CommissionContext): ResolvedCommission {
-  return resolveCommission({
-    supplierDefault: context.supplierDefault,
-    routeOverride: context.routeOverride,
-  })
-}
-
-export function describeCommissionSource(source: CommissionSource): string {
+export function describeCommissionSource(source: ResolvedCommission["source"]): string {
   switch (source) {
     case "line":
       return "line override"
-    case "route":
-      return "route override"
-    case "supplier":
-      return "supplier default"
     default:
       return "no commission"
   }
