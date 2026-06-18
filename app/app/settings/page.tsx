@@ -43,6 +43,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
+import { Skeleton } from "@/components/ui/skeleton"
+import { useSystemInfo } from "@/lib/use-data"
 import { useRole } from "@/lib/role-context"
 import {
   MAX_SESSION_TIMEOUT_MINUTES,
@@ -1493,6 +1495,7 @@ function QuoteValidityCard({ canEdit }: { canEdit: boolean }) {
 
 export default function SettingsPage() {
   const { can, role } = useRole()
+  const { data: systemInfo } = useSystemInfo()
   const canEditSettings = can("edit:settings")
   const canEditDepositSettings = role === "admin" || role === "manager"
 
@@ -1601,16 +1604,20 @@ export default function SettingsPage() {
           <Separator />
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Data Mode</span>
-            <Badge variant="secondary" className="text-xs">
-              In-Memory (Seeded)
-            </Badge>
+            {systemInfo ? (
+              <Badge variant="secondary" className="text-xs">{systemInfo.dataMode}</Badge>
+            ) : (
+              <Skeleton className="h-4 w-36" />
+            )}
           </div>
           <Separator />
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Email Provider</span>
-            <Badge variant="secondary" className="text-xs">
-              Mock (90% success rate)
-            </Badge>
+            {systemInfo ? (
+              <Badge variant="secondary" className="text-xs">{systemInfo.emailProvider}</Badge>
+            ) : (
+              <Skeleton className="h-4 w-36" />
+            )}
           </div>
         </CardContent>
       </Card>

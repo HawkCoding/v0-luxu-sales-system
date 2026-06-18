@@ -73,15 +73,7 @@ export default function BookingsPage() {
       const quotes = data.quotes?.filter((q: any) => q.bookingId === b.id) || []
       const totalQuote = quotes.reduce((sum: number, q: any) => sum + (q.total || 0), 0)
 
-      // Infer supplier from route direction name
-      let supplier = "Unknown"
-      if (b.direction) {
-        if (b.direction.toLowerCase().includes("blue train")) {
-          supplier = "Blue Train"
-        } else {
-          supplier = "Rovos Rail"
-        }
-      }
+      const supplier = b.supplierName?.trim() || null
 
       const paymentStatus =
         b.stage === "final_paid" || b.stage === "voucher_sent" || b.stage === "closed"
@@ -102,6 +94,10 @@ export default function BookingsPage() {
         totalQuote,
       }
     })
+
+  const supplierOptions = Array.from(
+    new Set(bookings.map((b: any) => b.supplier).filter(Boolean) as string[]),
+  ).sort((a, b) => a.localeCompare(b))
 
   // Apply filters
   const filtered = bookings.filter((booking: any) => {
@@ -164,7 +160,7 @@ export default function BookingsPage() {
   }
 
   return (
-    <div className="p-6 space-y-5 max-w-7xl">
+    <div className="p-6 space-y-5 max-w-7xl mx-auto">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold text-foreground tracking-tight">Bookings</h1>
@@ -198,8 +194,11 @@ export default function BookingsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Suppliers</SelectItem>
-                  <SelectItem value="Rovos Rail">Rovos Rail</SelectItem>
-                  <SelectItem value="Blue Train">Blue Train</SelectItem>
+                  {supplierOptions.map((name) => (
+                    <SelectItem key={name} value={name}>
+                      {name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
 
@@ -339,11 +338,11 @@ export default function BookingsPage() {
         {filtered.map((booking: any) => (
           <Link key={booking.id} href={`/app/bookings/${booking.id}`}>
             <Card className="hover:shadow-lg transition-all cursor-pointer border-2 hover:border-primary/50">
-              <CardContent className="p-5">
+              <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-start gap-4 min-w-0 flex-1">
-                    <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                      <CalendarCheck className="w-6 h-6 text-primary" />
+                  <div className="flex items-start gap-3 min-w-0 flex-1">
+                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                      <CalendarCheck className="w-5 h-5 text-primary" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 mb-1">
@@ -367,9 +366,11 @@ export default function BookingsPage() {
                         >
                           {booking.lifecycleStatus}
                         </Badge>
-                        <Badge variant="outline" className="text-xs">
-                          {booking.supplier}
-                        </Badge>
+                        {booking.supplier && (
+                          <Badge variant="outline" className="text-xs">
+                            {booking.supplier}
+                          </Badge>
+                        )}
                       </div>
                       <p className="text-sm text-foreground font-medium mb-1">
                         {booking.customerName}

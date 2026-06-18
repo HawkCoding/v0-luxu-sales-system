@@ -10,6 +10,7 @@ import type {
   CustomerLinkedAccount,
   Location,
   Package,
+  RateType,
   Supplier,
   SupplierDetail,
   VoucherTemplate,
@@ -217,6 +218,23 @@ export function useActivePackages() {
   return useSWR<Package[]>("/api/packages", fetcher, swrOptions)
 }
 
+export function useRateTypes() {
+  return useSWR<{ rateTypes: RateType[]; canEdit: boolean }>(
+    "/api/rate-types",
+    fetcher,
+    swrOptions,
+  )
+}
+
 export function useVoucherTemplate() {
   return useSWR<VoucherTemplate>("/api/voucher-template", fetcher, swrOptions)
+}
+
+export interface SystemInfo {
+  dataMode: string
+  emailProvider: string
+}
+
+export function useSystemInfo() {
+  return useSWR<SystemInfo>("/api/settings/system-info", fetcher, swrOptions)
 }

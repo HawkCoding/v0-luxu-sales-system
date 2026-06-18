@@ -36,7 +36,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
 
   const { data: lineItems, error: lineItemsError } = await supabase
     .from("quote_line_items")
-    .select("description, supplier_description, qty, unit_price, total, sort_order")
+    .select("description, supplier_description, qty, unit_price, total, sort_order, pricing_snapshot")
     .eq("quote_id", id)
     .order("sort_order", { ascending: true })
 
@@ -60,6 +60,10 @@ export async function POST(_req: Request, { params }: RouteParams) {
         description: li.description,
         supplierDescription: li.supplier_description,
         qty: li.qty,
+        unit:
+          li.pricing_snapshot && typeof li.pricing_snapshot === "object"
+            ? ((li.pricing_snapshot as { unit?: string | null }).unit ?? null)
+            : null,
         unitPrice: li.unit_price,
         total: li.total,
       })),

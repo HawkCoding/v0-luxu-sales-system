@@ -38,6 +38,7 @@ export const permissions: Record<string, Role[]> = {
   "view:suppliers": ["admin", "manager", "consultant", "readonly"],
   "edit:suppliers": ["admin", "manager"],
   "delete:suppliers": ["admin"],
+  "create:temporary-supplier": ["admin", "manager", "consultant"],
   "view:packages": ["admin", "manager", "consultant", "readonly"],
   "view:products": ["admin", "manager", "consultant", "readonly"],
   "edit:products": ["admin"],

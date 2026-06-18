@@ -41,10 +41,10 @@ export default function QuotesPage() {
   })
 
   return (
-    <div className="p-6 space-y-4 max-w-5xl">
+    <div className="p-6 space-y-4 max-w-6xl mx-auto">
       <div>
-        <h1 className="text-2xl font-semibold text-foreground tracking-tight">Quotes</h1>
-        <p className="text-sm text-muted-foreground mt-1">{filtered.length} quotes</p>
+        <h1 className="text-3xl font-semibold text-foreground tracking-tight">Quotes</h1>
+        <p className="text-base text-muted-foreground mt-2">{filtered.length} quotes</p>
       </div>
 
       <div className="flex items-center gap-3">
@@ -77,8 +77,8 @@ export default function QuotesPage() {
                   <div className="flex items-center justify-between gap-4">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-foreground" style={{ fontFamily: "var(--font-inter)" }}>{q.jobNumber}</span>
-                        <Badge variant={badge.variant} className="text-[10px]">{badge.label}</Badge>
+                        <span className="text-sm font-medium text-foreground" style={{ fontFamily: "var(--font-inter)" }}>{q.quoteNumber || q.jobNumber}</span>
+                        <Badge variant={badge.variant} className="text-xs">{badge.label}</Badge>
                       </div>
                       <p className="text-xs text-muted-foreground mt-0.5 truncate">
                         {q.customerName} {q.itineraryName ? `| ${q.itineraryName}` : ""}
@@ -86,7 +86,9 @@ export default function QuotesPage() {
                     </div>
                     <div className="text-right flex-shrink-0">
                       <p className="text-sm font-semibold text-foreground">R {q.total.toLocaleString()}</p>
-                      <p className="text-[10px] text-muted-foreground">Valid: {formatDisplayDate(q.validityUntil)}</p>
+                      {q.validityUntil && (
+                        <p className="text-xs text-muted-foreground">Valid: {formatDisplayDate(q.validityUntil)}</p>
+                      )}
                     </div>
                   </div>
                 </CardContent>

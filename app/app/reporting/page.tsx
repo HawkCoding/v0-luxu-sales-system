@@ -50,6 +50,11 @@ const UPCOMING_DEPARTURE_WINDOW_DAYS = 30
 
 const jsonFetcher = (url: string) => fetch(url).then((r) => r.json())
 
+// Whole-rand formatting for management reporting (avoids stray half-cents like "R 590,817.5").
+function formatRand(amount: number): string {
+  return `R ${Math.round(amount).toLocaleString("en-ZA")}`
+}
+
 export default function ReportingPage() {
   const { data, isLoading } = useAllData()
   const { can } = useRole()
@@ -223,17 +228,17 @@ export default function ReportingPage() {
     .slice(0, UPCOMING_DEPARTURE_LIMIT)
 
   return (
-    <div className="p-6 space-y-6 max-w-5xl">
+    <div className="p-6 space-y-6 max-w-6xl mx-auto">
       <div>
-        <h1 className="text-2xl font-semibold text-foreground tracking-tight">Reporting</h1>
-        <p className="text-sm text-muted-foreground mt-1">Sales performance overview</p>
+        <h1 className="text-3xl font-semibold text-foreground tracking-tight">Reporting</h1>
+        <p className="text-base text-muted-foreground mt-2">Sales performance overview</p>
       </div>
 
       {/* KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-7 gap-4">
-        <KPI label="Total Revenue" value={`R ${totalRevenue.toLocaleString()}`} />
-        <KPI label="Pipeline Value" value={`R ${pipelineValue.toLocaleString()}`} />
-        <KPI label="Outstanding Balance" value={`R ${outstandingBalance.toLocaleString()}`} />
+        <KPI label="Total Revenue" value={formatRand(totalRevenue)} />
+        <KPI label="Pipeline Value" value={formatRand(pipelineValue)} />
+        <KPI label="Outstanding Balance" value={formatRand(outstandingBalance)} />
         <KPI label="Open Jobs" value={openJobs} />
         <KPI label="Closed/Won" value={closedJobs} />
         <KPI label="Lost" value={lostJobs} />
@@ -279,7 +284,7 @@ export default function ReportingPage() {
                 <span
                   className={`text-sm font-medium ${(amount as number) >= 0 ? "text-foreground" : "text-payment-red"}`}
                 >
-                  R {(amount as number).toLocaleString()}
+                  {formatRand(amount as number)}
                 </span>
               </div>
             ))}
@@ -507,7 +512,7 @@ export default function ReportingPage() {
               <div key={row.consultant} className="flex items-start justify-between py-1.5 gap-2">
                 <span className="text-sm text-muted-foreground">{row.consultant}</span>
                 <div className="text-right shrink-0">
-                  <p className="text-sm font-medium text-foreground">R {row.revenue.toLocaleString()}</p>
+                  <p className="text-sm font-medium text-foreground">{formatRand(row.revenue)}</p>
                   <p className="text-xs text-muted-foreground">
                     {row.bookingCount} bookings · {row.wonCount} won
                   </p>
@@ -569,7 +574,7 @@ export default function ReportingPage() {
                   {row.product === "BT" ? "Blue Train" : row.product === "RR" ? "Rovos Rail" : row.product}
                 </span>
                 <div className="text-right">
-                  <p className="text-sm font-medium text-foreground">R {row.revenue.toLocaleString()}</p>
+                  <p className="text-sm font-medium text-foreground">{formatRand(row.revenue)}</p>
                   <p className="text-xs text-muted-foreground">{row.bookingCount} bookings</p>
                 </div>
               </div>
@@ -595,7 +600,7 @@ export default function ReportingPage() {
                   </p>
                 </div>
                 <span className="shrink-0 text-sm font-medium text-foreground">
-                  R {row.balance.toLocaleString()}
+                  {formatRand(row.balance)}
                 </span>
               </div>
             ))}

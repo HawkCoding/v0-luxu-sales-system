@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { RoleProvider, useRole } from "@/lib/role-context"
 import { AuthProvider, useAuth } from "@/lib/auth-context"
 import { cn } from "@/lib/utils"
@@ -51,6 +51,8 @@ function AppShell({ children }: { children: ReactNode }) {
   useRealtimeSync()
 
   const pathname = usePathname()
+  const router = useRouter()
+  const [headerSearch, setHeaderSearch] = useState("")
   const { user, loading: authLoading, logout } = useAuth()
   const { role, setRole, can } = useRole()
   const { theme, setTheme } = useTheme()
@@ -199,7 +201,7 @@ function AppShell({ children }: { children: ReactNode }) {
   if (!mounted || authLoading || !user) {
     return (
       <div
-        className="flex h-svh items-center justify-center overflow-hidden bg-app-canvas"
+        className="flex flex-1 min-h-0 items-center justify-center overflow-hidden bg-app-canvas"
       >
         <div className="space-y-3 text-center">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 animate-pulse">
@@ -218,7 +220,7 @@ function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div
-      className="flex h-svh overflow-hidden bg-app-canvas"
+      className="flex flex-1 min-h-0 overflow-hidden bg-app-canvas"
     >
       <SessionTimeoutGuard />
       {mobileOpen && (
@@ -226,7 +228,7 @@ function AppShell({ children }: { children: ReactNode }) {
       )}
 
       <aside className={cn(
-        "h-svh bg-bg-surface border-r border-stroke flex flex-col transition-all duration-200 z-50",
+        "h-full bg-bg-surface border-r border-stroke flex flex-col transition-all duration-200 z-50",
         collapsed ? "w-16" : "w-60",
         mobileOpen ? "fixed inset-y-0 left-0 w-60" : "hidden lg:flex",
       )}>
@@ -353,16 +355,29 @@ function AppShell({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 flex flex-col overflow-hidden min-h-0">
         <header className="app-header h-14 border-b border-stroke bg-bg-surface flex items-center justify-between px-4 gap-4">
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="sm" className="lg:hidden" onClick={() => setMobileOpen(true)} aria-label="Open navigation menu">
               <Menu className="w-4 h-4" />
             </Button>
-            <div className="relative hidden sm:block">
+            <form
+              onSubmit={(event) => {
+                event.preventDefault()
+                const query = headerSearch.trim()
+                if (query) router.push(`/app/customers?search=${encodeURIComponent(query)}`)
+              }}
+              className="relative hidden sm:block"
+            >
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
-              <Input placeholder="Search jobs, customers..." className="pl-10 w-80 h-10 bg-bg-white border-stroke hover:border-accent focus:border-accent-hover transition-colors" />
-            </div>
+              <Input
+                value={headerSearch}
+                onChange={(event) => setHeaderSearch(event.target.value)}
+                placeholder="Search customers..."
+                aria-label="Search customers"
+                className="pl-10 w-80 h-10 bg-bg-white border-stroke hover:border-accent focus:border-accent-hover transition-colors"
+              />
+            </form>
           </div>
           <div className="flex items-center gap-3">
             <Button
@@ -404,7 +419,7 @@ function AppShell({ children }: { children: ReactNode }) {
             </Button>
           </div>
         </header>
-        <main className="flex-1 overflow-auto">
+        <main className="flex-1 overflow-auto min-h-0">
           {dataError && dataError.status !== 401 && <ConnectionErrorBanner />}
           {children}
         </main>
@@ -425,12 +440,14 @@ export default function AppClientLayout({
   return (
     <AuthProvider initialUser={initialUser}>
       <RoleProvider initialRole={initialUser?.role}>
-        {demoMode && (
-          <div className="flex items-center justify-center gap-2 bg-amber-400/90 text-amber-950 text-xs font-medium py-1 px-4 z-50">
-            <span>Demo mode — emails not sent</span>
-          </div>
-        )}
-        <AppShell>{children}</AppShell>
+        <div className="flex flex-col h-svh overflow-hidden">
+          {demoMode && (
+            <div className="flex items-center justify-center gap-2 bg-amber-400/90 text-amber-950 text-xs font-medium py-1 px-4 z-50 shrink-0">
+              <span>Demo mode — emails not sent</span>
+            </div>
+          )}
+          <AppShell>{children}</AppShell>
+        </div>
       </RoleProvider>
     </AuthProvider>
   )

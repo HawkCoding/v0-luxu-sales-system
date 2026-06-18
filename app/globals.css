@@ -3,12 +3,19 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
 :root {
   /* Theme tint base */
   --luxu-theme-tint: #566e7b;
 
-  /* App canvas background - Flat neutral */
-  --luxu-app-bg: #8FA3AE; /* Flat neutral gray-blue for app canvas */
+  /* App canvas background - Flat neutral.
+     Lightened from #8FA3AE so muted page text (subtitles, counts) placed
+     directly on the canvas clears WCAG AA (~5:1) while keeping the cool tint. */
+  --luxu-app-bg: #c2ccd2; /* Light cool gray for app canvas */
 
   /* Background layers (4) - light surfaces for content */
   --luxu-bg-0: #f5f6f7; /* Not used for app, kept for other contexts */
@@ -100,16 +107,16 @@
   /* App canvas background */
   --luxu-app-bg: #111111;
 
-  /* Background layers (4) */
+  /* Background layers (4) - bg-1 (cards/sidebar) lifted off bg-0 for separation */
   --luxu-bg-0: #141414;
-  --luxu-bg-1: #1c1c1c;
-  --luxu-bg-2: #242424;
-  --luxu-bg-3: #2c2c2c;
-  --luxu-bg-white: #363636;
+  --luxu-bg-1: #212121;
+  --luxu-bg-2: #282828;
+  --luxu-bg-3: #303030;
+  --luxu-bg-white: #383838;
 
-  /* Strokes (2) */
-  --luxu-stroke-1: #2e2e2e;
-  --luxu-stroke-2: #3d474d;
+  /* Strokes (2) - lightened so card outlines separate from the near-black canvas */
+  --luxu-stroke-1: #383838;
+  --luxu-stroke-2: #474747;
 
   /* Text variants (3) */
   --luxu-text-heading: #ebebeb;

@@ -308,7 +308,7 @@ const enquiryFilterSchema = z
   .optional()
 
 const ENQUIRY_SELECT =
-  "id, booking_number, customer_id, stage, purpose, source, consultant, owner_user_id, assigned_salesperson_id, claimed_by_user_id, claimed_at, departure_date, duration_nights, email_import_needs_review, email_import_review_resolved_at, email_import_missing_fields, email_import_warnings, email_import_source_message_id, email_import_duplicate_of_booking_id, email_import_subject, email_import_mailbox, email_import_received_at, email_import_raw_preview, no_of_adults, no_of_children, no_of_suites, child_ages, route_id, extracted_json, additional_services, additional_services_details, created_at, updated_at, route:routes(id, name), customer:customers(id, first_name, last_name, email, title)"
+  "id, booking_number, customer_id, stage, purpose, source, consultant, owner_user_id, assigned_salesperson_id, departure_date, duration_nights, email_import_needs_review, email_import_review_resolved_at, email_import_missing_fields, email_import_warnings, email_import_source_message_id, email_import_duplicate_of_booking_id, email_import_subject, email_import_mailbox, email_import_received_at, email_import_raw_preview, no_of_adults, no_of_children, no_of_suites, child_ages, route_id, extracted_json, additional_services, additional_services_details, created_at, updated_at, route:routes(id, name), customer:customers(id, first_name, last_name, email, title)"
 
 export async function GET(req: Request) {
   const supabase = await createSessionClient()
@@ -333,8 +333,8 @@ export async function GET(req: Request) {
 
   if (filter === "needs_review") query = query.eq("email_import_needs_review", true)
   else if (filter === "complete") query = query.eq("email_import_needs_review", false)
-  else if (filter === "unassigned") query = query.is("claimed_by_user_id", null)
-  else if (filter === "my_enquiries") query = query.eq("claimed_by_user_id", user.id)
+  else if (filter === "unassigned") query = query.is("assigned_salesperson_id", null)
+  else if (filter === "my_enquiries") query = query.eq("assigned_salesperson_id", user.id)
   else if (filter === "possible_duplicates")
     query = query.not("email_import_duplicate_of_booking_id", "is", null)
 
@@ -363,8 +363,6 @@ export async function GET(req: Request) {
       consultant: b.consultant,
       ownerUserId: b.owner_user_id,
       assignedSalespersonId: b.assigned_salesperson_id,
-      claimedByUserId: b.claimed_by_user_id ?? null,
-      claimedAt: b.claimed_at ?? null,
       departureDate: b.departure_date,
       departureDateDisplay: formatDisplayDate(b.departure_date),
       durationNights: b.duration_nights,
