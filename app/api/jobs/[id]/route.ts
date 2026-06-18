@@ -17,6 +17,7 @@ import {
   TRAVELLER_COLUMNS,
 } from "@/lib/supabase/columns"
 import type { Json } from "@/lib/supabase/types"
+import { requireUser } from "@/lib/api/auth"
 import { staleVersionResponse } from "@/lib/concurrency"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { CONSULTANTS } from "@/lib/types"
@@ -85,10 +86,10 @@ const patchJobSchema = z.object({
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const supabase = await createSessionClient()
+  const auth = await requireUser()
+  if (!auth.ok) return auth.response
 
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  const { supabase, user, profile } = auth.value
 
   const { data: booking } = await supabase
     .from("bookings")
@@ -97,6 +98,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     .single()
 
   if (!booking) return NextResponse.json({ error: "Not found" }, { status: 404 })
+
+  const role = profile.clearanceLevel
+  if (role === "readonly") return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+
+  if (role === "consultant") {
+    const isOwner = booking.owner_user_id === user.id || booking.assigned_salesperson_id === user.id
+    if (!isOwner) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
 
   const [
     defaultDepositPercentage,
@@ -137,17 +146,20 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   ])
 
   // Map booking → shape matching the existing Job interface so page components are unchanged
-  const allProfiles = (profiles ?? []).map((profile) => ({
-    id: profile.user_id,
-    name: [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.email,
-    email: profile.email,
-    clearanceLevel: profile.clearance_level,
-    isActive: profile.is_active ?? true,
+  const allProfiles = (profiles ?? []).map((p) => ({
+    id: p.user_id,
+    name: [p.name, p.surname].filter(Boolean).join(" ").trim() || p.email,
+    email: p.email,
+    isActive: p.is_active ?? true,
   }))
-  const salespeople = allProfiles.filter(
-    (profile) =>
-      ["admin", "manager", "consultant"].includes(profile.clearanceLevel) && profile.isActive,
-  )
+  const salespeople = (profiles ?? [])
+    .filter((p) => ["admin", "manager", "consultant"].includes(p.clearance_level) && (p.is_active ?? true))
+    .map((p) => ({
+      id: p.user_id,
+      name: [p.name, p.surname].filter(Boolean).join(" ").trim() || p.email,
+      email: p.email,
+      isActive: p.is_active ?? true,
+    }))
   const assignedSalesperson = booking.assigned_salesperson_id
     ? salespeople.find((profile) => profile.id === booking.assigned_salesperson_id) ?? null
     : null
