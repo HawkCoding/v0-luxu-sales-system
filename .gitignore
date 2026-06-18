@@ -43,3 +43,6 @@ qa/screenshots/
 qa/playwright-report/
 qa/**/playwright-report/
 test-results/
+
+# Portal clone working files (DB dumps, secrets) - never commit
+.portal-clone/
