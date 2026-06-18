@@ -136,47 +136,46 @@ test("C1 — find new enquiries + Needs-Review filter", async ({ page }) => {
 // ---------------------------------------------------------------------------
 // 2. Claim a job (Take ownership; owner chip updates; audit row).
 // ---------------------------------------------------------------------------
-test("C2 — claim a job (take ownership)", async ({ page }) => {
+test("C2 — take a job (take ownership)", async ({ page }) => {
   const N = 2
-  const T = "Claim a job (Take ownership)"
+  const T = "Take a job (Take ownership)"
   try {
-    // Ensure the target job is unclaimed before we navigate.
+    // Ensure the target job is unassigned before we navigate.
     const enq = await findEnquiryWithoutQuote()
     expect(enq, "an enquiry-stage booking").not.toBeNull()
-    // Clear claim before loading the page so the initial SWR fetch sees null.
-    await db.from("bookings").update({ claimed_by_user_id: null, claimed_at: null }).eq("id", enq!.id)
+    // Clear owner before loading the page so the initial SWR fetch sees null.
+    await db.from("bookings").update({ assigned_salesperson_id: null }).eq("id", enq!.id)
 
     await gotoJobTab(page, enq!.id, "enquiry")
 
-    // Claim button should be visible (job is unclaimed).
-    const claimBtn = page.getByRole("button", { name: /Claim this job|^Claim$|^Claim$/i })
-    await expect(claimBtn).toBeVisible({ timeout: 15_000 })
+    // Take button should be visible (job is unassigned).
+    const takeBtn = page.getByRole("button", { name: /Take this job|^Take$/i })
+    await expect(takeBtn).toBeVisible({ timeout: 15_000 })
 
     const respP = page.waitForResponse((r) => r.url().includes(`/api/jobs/${enq!.id}`) && r.request().method() === "PATCH")
-    await claimBtn.click()
+    await takeBtn.click()
     const resp = await respP
     expect(resp.ok()).toBeTruthy()
 
-    // DB: claimed_by_user_id should now be the consultant's user ID.
-    const { data: bk } = await db.from("bookings").select("claimed_by_user_id, claimed_at").eq("id", enq!.id).maybeSingle()
-    expect(bk?.claimed_by_user_id).toBe(CONSULTANT.userId)
-    expect(bk?.claimed_at).not.toBeNull()
+    // DB: assigned_salesperson_id should now be the consultant's user ID.
+    const { data: bk } = await db.from("bookings").select("assigned_salesperson_id").eq("id", enq!.id).maybeSingle()
+    expect(bk?.assigned_salesperson_id).toBe(CONSULTANT.userId)
 
     // Audit row written.
     const { data: audit } = await db
       .from("audit_logs")
       .select("action, after_json")
       .eq("entity_id", enq!.id)
-      .eq("action", "job_claimed")
+      .eq("action", "salesperson_reassigned")
       .order("created_at", { ascending: false })
       .limit(1)
-    expect(audit?.[0], "a job_claimed audit row").toBeTruthy()
+    expect(audit?.[0], "a salesperson_reassigned audit row").toBeTruthy()
 
-    // UI: button should have flipped to "Release" because job is now claimed by me.
+    // UI: button should have flipped to "Release" because job is now owned by me.
     await expect(page.getByRole("button", { name: /Release this job|^Release$/i })).toBeVisible({ timeout: 10_000 })
-    await report.shot(page, N, "after-claim")
-    report.addEvidence(N, T, `claimed_by_user_id=${bk?.claimed_by_user_id}; audit action=${audit?.[0]?.action}; Release button visible`)
-    report.record(N, T, "PASS", "Claim sets claimed_by_user_id, writes audit row, UI flips to Release")
+    await report.shot(page, N, "after-take")
+    report.addEvidence(N, T, `assigned_salesperson_id=${bk?.assigned_salesperson_id}; audit action=${audit?.[0]?.action}; Release button visible`)
+    report.record(N, T, "PASS", "Take sets assigned_salesperson_id, writes audit row, UI flips to Release")
   } catch (err) {
     report.record(N, T, "FAIL", `Error: ${(err as Error).message}`)
     await report.shot(page, N, "fail")
@@ -184,23 +183,23 @@ test("C2 — claim a job (take ownership)", async ({ page }) => {
 })
 
 // ---------------------------------------------------------------------------
-// 3. Release own claimed job (Release; ownership cleared).
+// 3. Release own job (Release; ownership cleared).
 // ---------------------------------------------------------------------------
-test("C3 — release own claimed job", async ({ page }) => {
+test("C3 — release own job", async ({ page }) => {
   const N = 3
-  const T = "Release own claimed job"
+  const T = "Release own job"
   try {
-    // Seed the job as claimed by the consultant before the test.
+    // Seed the job as owned by the consultant before the test.
     const enq = await findEnquiryWithoutQuote()
     expect(enq, "an enquiry-stage booking").not.toBeNull()
     await db
       .from("bookings")
-      .update({ claimed_by_user_id: CONSULTANT.userId, claimed_at: new Date().toISOString() })
+      .update({ assigned_salesperson_id: CONSULTANT.userId })
       .eq("id", enq!.id)
 
     await gotoJobTab(page, enq!.id, "enquiry")
 
-    // Release button should be visible (job is claimed by me).
+    // Release button should be visible (job is owned by me).
     const releaseBtn = page.getByRole("button", { name: /Release this job|^Release$/i })
     await expect(releaseBtn).toBeVisible({ timeout: 15_000 })
 
@@ -209,23 +208,23 @@ test("C3 — release own claimed job", async ({ page }) => {
     const resp = await respP
     expect(resp.ok()).toBeTruthy()
 
-    // DB: claimed_by_user_id cleared.
-    const { data: bk } = await db.from("bookings").select("claimed_by_user_id, claimed_at").eq("id", enq!.id).maybeSingle()
-    expect(bk?.claimed_by_user_id).toBeNull()
+    // DB: assigned_salesperson_id cleared.
+    const { data: bk } = await db.from("bookings").select("assigned_salesperson_id").eq("id", enq!.id).maybeSingle()
+    expect(bk?.assigned_salesperson_id).toBeNull()
 
     // Audit row written.
     const { data: audit } = await db
       .from("audit_logs")
       .select("action")
       .eq("entity_id", enq!.id)
-      .eq("action", "job_released")
+      .eq("action", "salesperson_reassigned")
       .order("created_at", { ascending: false })
       .limit(1)
-    expect(audit?.[0], "a job_released audit row").toBeTruthy()
+    expect(audit?.[0], "a salesperson_reassigned audit row").toBeTruthy()
 
     await report.shot(page, N, "after-release")
-    report.addEvidence(N, T, `claimed_by_user_id cleared; audit action=${audit?.[0]?.action}; Claim button visible again`)
-    report.record(N, T, "PASS", "Release clears claimed_by_user_id and writes audit row")
+    report.addEvidence(N, T, `assigned_salesperson_id cleared; audit action=${audit?.[0]?.action}; Take button visible again`)
+    report.record(N, T, "PASS", "Release clears assigned_salesperson_id and writes audit row")
   } catch (err) {
     report.record(N, T, "FAIL", `Error: ${(err as Error).message}`)
     await report.shot(page, N, "fail")
@@ -628,9 +627,9 @@ test("Z — record recommendations", async () => {
     "Align quote status semantics with the UAT wording: document clearly that quote 'ready' is a pricing-completeness state, not a side effect of PDF generation, to avoid future UAT confusion.",
   )
   report.recommend(
-    "Consider surfacing the 'Claimed by' row on the /app/enquiries list cards so consultants can see at a glance whether a job is taken before navigating to it.",
+    "Consider surfacing the 'Salesperson' owner on the /app/enquiries list cards so consultants can see at a glance whether a job is taken before navigating to it.",
   )
   report.recommend(
-    "The 'Owner' row in the header still shows the original creator (owner_user_id). Now that claimed_by_user_id is the active working axis, consider renaming or removing the 'Owner' display to avoid confusion.",
+    "The 'Owner' row in the header still shows the original creator (owner_user_id). Now that assigned_salesperson_id is the single working/ownership axis, consider renaming or removing the 'Owner' display to avoid confusion.",
   )
 })

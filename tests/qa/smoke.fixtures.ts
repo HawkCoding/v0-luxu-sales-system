@@ -3,16 +3,16 @@ import { mkdirSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
 import type { Page } from "@playwright/test"
 
-export const READONLY = {
-  email: "douwlien@luxustravel.co.za",
+export const SMOKE_USER = {
+  email: "dirk@luxustravel.co.za",
   password: "password123",
-  // Seeded user_id for douwlien (supabase/seed.sql).
-  userId: "00000000-0000-0000-0000-0000000000a5",
+  userId: "00000000-0000-0000-0000-0000000000a3",
+  role: "manager" as const,
 } as const
 
-export const READONLY_STORAGE_STATE = resolve(process.cwd(), "tests/qa/.auth/readonly.json")
+export const SMOKE_STORAGE_STATE = resolve(process.cwd(), "tests/qa/.auth/smoke.json")
 const SCREENSHOT_DIR = resolve(process.cwd(), "tests/qa/screenshots")
-const REPORT_PATH = resolve(process.cwd(), "tests/qa/reports/readonly-qa.md")
+const REPORT_PATH = resolve(process.cwd(), "tests/qa/reports/smoke-qa.md")
 
 export type CriterionStatus = "PASS" | "FAIL" | "BLOCKED"
 
@@ -34,23 +34,13 @@ export interface Finding {
   fixScope: string
 }
 
-export interface PermissionMismatch {
-  criterion: number
-  endpoint: string
-  uiAbsent: boolean
-  apiStatus: number
-  finding: string
-}
-
 // ---------------------------------------------------------------------------
-// Report aggregator — accumulates per-criterion results, findings, and
-// permission mismatches, then writes the markdown deliverable at
-// tests/qa/reports/readonly-qa.md.
+// Report aggregator — accumulates per-criterion results + findings, then writes
+// the markdown deliverable at tests/qa/reports/smoke-qa.md.
 // ---------------------------------------------------------------------------
-class ReadonlyReport {
+class SmokeReport {
   private readonly rows = new Map<number, CriterionRow>()
   private readonly findings: Finding[] = []
-  private readonly mismatches: PermissionMismatch[] = []
   private readonly recommendations: string[] = []
 
   criterion(num: number, title: string): CriterionRow {
@@ -78,43 +68,13 @@ class ReadonlyReport {
     this.findings.push(finding)
   }
 
-  permissionMismatch(mismatch: PermissionMismatch): void {
-    this.mismatches.push(mismatch)
-    // Auto-escalate as a finding so it appears in the findings section too.
-    this.findings.push({
-      severity: mismatch.uiAbsent ? "Minor" : "Major",
-      title: `Permission mismatch — ${mismatch.endpoint}`,
-      repro: `Logged in as ${READONLY.email} (readonly), ${mismatch.endpoint}`,
-      expected: "UI action absent AND API returns 403",
-      actual: mismatch.uiAbsent
-        ? `UI absent (correct) but API returned ${mismatch.apiStatus} instead of 403`
-        : `UI action visible but API returned ${mismatch.apiStatus}`,
-      fixScope: mismatch.finding,
-    })
-  }
-
-  // Convenience shorthand — records a free-text mismatch note without requiring
-  // a fully-structured PermissionMismatch object. Used by the spec's assertBlocked
-  // helper when a mutation succeeded unexpectedly for the read-only user.
-  mismatch(note: string): void {
-    this.mismatches.push({ criterion: 0, endpoint: "(see note)", uiAbsent: true, apiStatus: 200, finding: note })
-    this.findings.push({
-      severity: "Major",
-      title: "Permission mismatch",
-      repro: `Logged in as ${READONLY.email} (readonly)`,
-      expected: "API returns 403 for all mutation endpoints",
-      actual: note,
-      fixScope: "API route authorization — add readonly to the blocked-roles list",
-    })
-  }
-
   recommend(text: string): void {
     this.recommendations.push(text)
   }
 
   async shot(page: Page, num: number, label: string): Promise<string> {
     mkdirSync(SCREENSHOT_DIR, { recursive: true })
-    const file = `r${num}-${label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.png`
+    const file = `s${num}-${label.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.png`
     const abs = resolve(SCREENSHOT_DIR, file)
     await page.screenshot({ path: abs, fullPage: true }).catch(() => undefined)
     const rel = `screenshots/${file}`
@@ -137,13 +97,13 @@ class ReadonlyReport {
     const rows = [...this.rows.values()].sort((a, b) => a.num - b.num)
 
     const L: string[] = []
-    L.push("# Readonly Role — End-to-End QA Findings (Phase 33 UAT)")
+    L.push("# Phase 35 Cross-Cutting Smoke — QA Findings")
     L.push("")
     L.push(`- **Run date:** ${new Date().toISOString()}`)
     L.push(`- **Branch:** ${branch}`)
     L.push(`- **Commit SHA:** ${sha}`)
     L.push(`- **Browser:** Chromium (Playwright \`Desktop Chrome\`)`)
-    L.push(`- **Acting role:** Readonly — ${READONLY.email} (clearance_level=readonly)`)
+    L.push(`- **Acting role:** Manager — ${SMOKE_USER.email} (clearance_level=manager)`)
     L.push(`- **Base URL:** http://localhost:3000 (local dev + local Supabase)`)
     L.push("")
     const pass = rows.filter((r) => r.status === "PASS").length
@@ -181,21 +141,6 @@ class ReadonlyReport {
       })
     }
 
-    L.push("## Permission mismatches")
-    L.push("")
-    if (this.mismatches.length === 0) {
-      L.push("_None found._")
-    } else {
-      L.push("| Criterion | Endpoint | UI absent? | API status | Note |")
-      L.push("|-----------|----------|------------|------------|------|")
-      for (const m of this.mismatches) {
-        L.push(
-          `| R${m.criterion} | \`${m.endpoint}\` | ${m.uiAbsent ? "Yes" : "**No**"} | ${m.apiStatus} | ${m.finding} |`,
-        )
-      }
-    }
-    L.push("")
-
     L.push("## Improvement recommendations (prioritised)")
     L.push("")
     if (this.recommendations.length === 0) {
@@ -205,26 +150,24 @@ class ReadonlyReport {
     }
     L.push("")
 
-    L.push("## Coverage map — todo.md Phase 33 Readonly UAT")
+    L.push("## Coverage map — Phase 35 smoke acceptance criteria")
     L.push("")
-    L.push("| todo.md bullet | Criterion | Demonstrably passing? |")
-    L.push("|----------------|-----------|------------------------|")
+    L.push("| Acceptance criterion | # | Result |")
+    L.push("|---------------------|---|--------|")
     const map: [string, number][] = [
-      ["Can view allowed pages", 1],
-      ["Cannot mutate customers", 2],
-      ["Cannot mutate jobs/bookings", 3],
-      ["Cannot mutate quotes", 4],
-      ["Cannot record payments", 5],
-      ["Cannot mutate suppliers/packages", 6],
-      ["Cannot manage settings", 7],
-      ["Cannot export reports", 8],
-      ["Cannot send emails/vouchers", 9],
-      ["Cannot access users/error-log/backups", 10],
+      ["Dashboard stat cards — no NaN, no perpetual loading, Unresolved Errors card", 1],
+      ["Settings nav badge appears when unresolved errors exist; disappears when resolved", 2],
+      ["Quote PDF — magic bytes, PROVISIONAL QUOTATION, booking number, line items, validity", 3],
+      ["Invoice PDF — structural assertions", 4],
+      ["Voucher PDF — magic bytes, TRAVEL VOUCHERS, service blocks, End of Services footer", 5],
+      ["File upload — small PDF accepted, oversized rejected, disallowed MIME rejected", 6],
+      ["Signed URL — 200 + correct content-type; expiry test", 7],
+      ["Loading skeleton, empty state, API error state", 8],
     ]
     for (const [bullet, n] of map) {
       const r = this.rows.get(n)
-      const yes = r?.status === "PASS" ? "✅ Yes" : r?.status === "BLOCKED" ? "⛔ Blocked" : "❌ No"
-      L.push(`| ${bullet} | ${n} | ${yes} |`)
+      const icon = r?.status === "PASS" ? "✅ PASS" : r?.status === "BLOCKED" ? "⛔ BLOCKED" : "❌ FAIL"
+      L.push(`| ${bullet} | ${n} | ${icon} |`)
     }
     L.push("")
 
@@ -233,5 +176,5 @@ class ReadonlyReport {
   }
 }
 
-export const report = new ReadonlyReport()
+export const report = new SmokeReport()
 export const REPORT_FILE = REPORT_PATH

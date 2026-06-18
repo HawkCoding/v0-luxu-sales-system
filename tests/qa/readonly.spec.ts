@@ -172,21 +172,21 @@ test("R3 — cannot mutate bookings/jobs", async ({ page, request }) => {
   const T = "Cannot mutate bookings/jobs"
   try {
     expect(targets.bookingId, "a seeded booking").toBeTruthy()
-    const claim = await request.patch(`/api/jobs/${targets.bookingId}`, jsonInit({ claimJob: true }))
-    const a = await assertBlocked(N, T, "PATCH /api/jobs/[id] (claim)", claim)
+    const take = await request.patch(`/api/jobs/${targets.bookingId}`, jsonInit({ assignedSalespersonId: READONLY.userId }))
+    const a = await assertBlocked(N, T, "PATCH /api/jobs/[id] (take)", take)
     const stage = await request.patch(`/api/jobs/${targets.bookingId}`, jsonInit({ stage: "quote_sent" }))
     const b = await assertBlocked(N, T, "PATCH /api/jobs/[id] (stage move)", stage)
 
     await page.goto(`/app/jobs/${targets.bookingId}`).catch(() => undefined)
     await page.waitForLoadState("networkidle").catch(() => undefined)
-    const claimUi = await uiControlExposed(page, /Claim|Take ownership/i)
+    const takeUi = await uiControlExposed(page, /Take this job|^Take$/i)
     const startQuoteUi = await uiControlExposed(page, /Start Quote/i)
     const nextUi = await uiControlExposed(page, /^Next$/i)
-    report.addEvidence(N, T, `UI controls exposed — Claim=${claimUi}, Start Quote=${startQuoteUi}, Next=${nextUi}`)
-    if (claimUi || startQuoteUi || nextUi) report.mismatch("Job page exposes an enabled claim/start-quote/stage control to read-only while the API returns 403.")
+    report.addEvidence(N, T, `UI controls exposed — Take=${takeUi}, Start Quote=${startQuoteUi}, Next=${nextUi}`)
+    if (takeUi || startQuoteUi || nextUi) report.mismatch("Job page exposes an enabled take/start-quote/stage control to read-only while the API returns 403.")
     await report.shot(page, N, "job")
 
-    report.record(N, T, a && b && !claimUi && !startQuoteUi && !nextUi ? "PASS" : "FAIL", "Booking/job mutations blocked at the API; no enabled UI control")
+    report.record(N, T, a && b && !takeUi && !startQuoteUi && !nextUi ? "PASS" : "FAIL", "Booking/job mutations blocked at the API; no enabled UI control")
   } catch (err) {
     report.record(N, T, "FAIL", `Error: ${(err as Error).message}`)
     await report.shot(page, N, "fail")
