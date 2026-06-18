@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
+import { CUSTOMER_COLUMNS } from "@/lib/supabase/columns"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
 import { COMPLETED_REPEAT_BOOKING_STAGES } from "@/lib/customer-repeat-status"
 
@@ -19,6 +20,7 @@ const createCustomerSchema = z.object({
   vip_status: z.boolean().optional().default(false),
   preferences: z.string().trim().max(2000).nullable().optional(),
   communication_preferences: z.string().trim().max(1000).nullable().optional(),
+  default_rate_type_id: z.string().uuid().nullable().optional(),
 })
 
 export async function GET(request: Request) {
@@ -144,10 +146,9 @@ export async function POST(request: Request) {
       vip_status: parsed.vip_status,
       preferences: parsed.preferences ?? null,
       communication_preferences: parsed.communication_preferences ?? null,
+      default_rate_type_id: parsed.default_rate_type_id ?? null,
     })
-    .select(
-      "id, first_name, last_name, email, phone, country, province, title, notes, date_of_birth, vip_status, preferences, communication_preferences, first_travel_date, last_travel_date, is_repeat_client, created_at, updated_at",
-    )
+    .select(CUSTOMER_COLUMNS)
     .single()
 
   if (insertError) {
@@ -175,6 +176,7 @@ export async function POST(request: Request) {
       vipStatus: customer.vip_status,
       preferences: customer.preferences,
       communicationPreferences: customer.communication_preferences,
+      defaultRateTypeId: customer.default_rate_type_id,
       firstTravelDate: customer.first_travel_date,
       lastTravelDate: customer.last_travel_date,
       isRepeatClient: false,
