@@ -32,6 +32,8 @@ type BookingRecord = {
   booking_number: string
   stage: string | null
   consultant: string | null
+  assigned_salesperson_id: string | null
+  owner_user_id: string | null
   departure_date: string | null
   no_of_adults: number
   no_of_children: number
@@ -97,7 +99,7 @@ export async function POST(req: Request) {
     supabase
       .from("bookings")
       .select(
-        "id, booking_number, stage, consultant, departure_date, no_of_adults, no_of_children, customer:customers(first_name, last_name, email, phone, title)",
+        "id, booking_number, stage, consultant, assigned_salesperson_id, owner_user_id, departure_date, no_of_adults, no_of_children, customer:customers(first_name, last_name, email, phone, title)",
       )
       .eq("id", jobId)
       .single(),
@@ -112,6 +114,16 @@ export async function POST(req: Request) {
 
   const booking = bookingRaw as unknown as BookingRecord
   const customer = firstRecord(booking.customer)
+
+  const actorRole = auth.value.profile.clearanceLevel
+  if (actorRole === "consultant") {
+    const isOwner =
+      booking.assigned_salesperson_id === user.id ||
+      booking.owner_user_id === user.id
+    if (!isOwner) {
+      return jsonError("You do not have access to this booking", 403)
+    }
+  }
 
   const readiness = checkItineraryReadiness({
     stage: booking.stage,
@@ -153,14 +165,8 @@ export async function POST(req: Request) {
 
   const filename = `itinerary-${sanitizePathPart(booking.booking_number)}.pdf`
   const storagePath = `${sanitizePathPart(booking.booking_number)}/${filename}`
-  const { error: uploadError } = await supabase.storage
-    .from(ITINERARY_BUCKET)
-    .upload(storagePath, pdfBuffer, {
-      contentType: "application/pdf",
-      upsert: true,
-    })
 
-  if (uploadError) return safeSupabaseError("itinerary:storage-upload", uploadError)
+  // DB writes first — storage upload happens after so a DB failure never orphans a file.
 
   // Upsert the itineraries row for this booking (title + notes stored here)
   const { data: existingItinerary } = await supabase
@@ -220,6 +226,15 @@ export async function POST(req: Request) {
     return safeSupabaseError("itinerary:document-write", documentWrite.error)
   }
 
+  const { error: uploadError } = await supabase.storage
+    .from(ITINERARY_BUCKET)
+    .upload(storagePath, pdfBuffer, {
+      contentType: "application/pdf",
+      upsert: true,
+    })
+
+  if (uploadError) return safeSupabaseError("itinerary:storage-upload", uploadError)
+
   await writeAuditLog(supabase, {
     actor: auth.value.profile.actorName,
     actorUserId: user.id,
@@ -241,6 +256,8 @@ export async function POST(req: Request) {
     consultantName: consultant.name,
   })
 
+  const pdfBase64 = pdfBuffer.toString("base64")
+
   return Response.json({
     document: {
       id: documentWrite.data.id,
@@ -257,8 +274,8 @@ export async function POST(req: Request) {
     file: {
       filename,
       contentType: "application/pdf",
-      contentBase64: pdfBuffer.toString("base64"),
-      dataUrl: `data:application/pdf;base64,${pdfBuffer.toString("base64")}`,
+      contentBase64: pdfBase64,
+      dataUrl: `data:application/pdf;base64,${pdfBase64}`,
     },
     email: {
       to: customer.email,

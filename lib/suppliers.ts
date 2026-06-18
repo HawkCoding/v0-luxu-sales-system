@@ -94,6 +94,16 @@ function mapBookingVehicleRentalDetails(
   }
 }
 
+export function buildSupplierSlugBase(name: string): string {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+
+  return slug || "supplier"
+}
+
 export function mapSupplier(row: SupplierRow): Supplier {
   return {
     id: row.id,

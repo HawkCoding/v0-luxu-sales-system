@@ -480,6 +480,8 @@ export interface SupplierRoute {
   dropoffPoint?: string | null
   vehicleRentalDetails?: VehicleRentalRouteDetails | null
   directionMode?: RouteDirectionMode
+  commissionType: string | null
+  commissionValue: number | null
   active: boolean
   createdAt: string
   createdAtDisplay?: string

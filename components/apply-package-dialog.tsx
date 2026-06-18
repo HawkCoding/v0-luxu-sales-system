@@ -283,6 +283,7 @@ export function ApplyPackageDialog({
             routeId: extra.routeId,
             suiteTypeId: extra.suiteTypeId,
             quantity: extra.quantity,
+            rateTypeId: rateTypeId || undefined,
           })),
         }),
       })

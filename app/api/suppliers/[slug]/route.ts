@@ -1054,6 +1054,14 @@ export async function PATCH(
     }
 
     if (incomingRateTypeIds.length > 0) {
+      const archivedAdjustmentId = incomingRateTypeIds.find((id) => !activeRateTypeIds.has(id))
+      if (archivedAdjustmentId) {
+        return NextResponse.json(
+          { error: "Each rate adjustment must reference an active rate type." },
+          { status: 400 },
+        )
+      }
+
       const now = new Date().toISOString()
       const { error: upsertAdjustmentsError } = await supabase
         .from("supplier_rate_adjustments")

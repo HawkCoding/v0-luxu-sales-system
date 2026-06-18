@@ -19,6 +19,7 @@ import {
 import type { Json } from "@/lib/supabase/types"
 import { staleVersionResponse } from "@/lib/concurrency"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
+import { CONSULTANTS } from "@/lib/types"
 import type { PipelineStage } from "@/lib/types"
 import { extractRoleFromJwt } from "@/lib/role-utils"
 import { applyTransition } from "@/lib/pipeline/apply-transition"
@@ -845,6 +846,24 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         after_json: after as Json,
       })
     }
+  }
+
+  if (body.consultant !== undefined || body.ownerUser !== undefined) {
+    const role = extractRoleFromJwt(user) ?? patchActorRole
+    const isManagerOrAdmin = role === "manager" || role === "admin"
+    const isConsultant = role === "consultant"
+    if (!isManagerOrAdmin && !isConsultant) {
+      return NextResponse.json({ error: "Insufficient permissions to change the consultant" }, { status: 403 })
+    }
+    const incoming = body.consultant ?? body.ownerUser ?? null
+    if (isConsultant && incoming !== null && incoming !== "") {
+      const validKeys = new Set(CONSULTANTS.map((c) => c.key))
+      if (!validKeys.has(incoming)) {
+        return NextResponse.json({ error: "Invalid consultant key" }, { status: 400 })
+      }
+    }
+    // Both fields map to the same DB column; consultant takes precedence if both are sent.
+    updates.consultant = incoming || null
   }
 
   if (stageUpdated && Object.keys(updates).length === 1) {

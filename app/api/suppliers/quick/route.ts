@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
-import { mapSupplier } from "@/lib/suppliers"
+import { buildSupplierSlugBase, mapSupplier } from "@/lib/suppliers"
 import { buildRouteName } from "@/lib/routes/route-name"
 import { requireAuthenticatedUser } from "../helpers"
 import { createServiceClient } from "@/lib/supabase/server"
@@ -87,15 +87,6 @@ const quickSupplierSchema = z
     }
   })
 
-function buildSupplierSlugBase(name: string): string {
-  return (
-    name
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "supplier"
-  )
-}
 
 export async function POST(req: Request) {
   const auth = await requireAuthenticatedUser()
@@ -105,11 +96,11 @@ export async function POST(req: Request) {
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
-    .select("clearance_level")
+    .select("clearance_level, is_active")
     .eq("user_id", user.id)
     .single()
 
-  if (profileError || !profile || !allowedRoles.has(profile.clearance_level)) {
+  if (profileError || !profile || !allowedRoles.has(profile.clearance_level) || profile.is_active === false) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 

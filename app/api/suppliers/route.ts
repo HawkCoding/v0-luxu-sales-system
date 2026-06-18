@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
-import { mapSupplier } from "@/lib/suppliers"
+import { buildSupplierSlugBase, mapSupplier } from "@/lib/suppliers"
 import { allowedRoles, requireAuthenticatedUser, type SessionClient } from "./helpers"
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -8,15 +8,6 @@ const PHONE_PATTERN = /^[+\d\s()-]*$/
 const WEBSITE_PATTERN = /^\S+\.\S+$/
 const EMAIL_LABEL_MAX_LENGTH = 100
 
-function buildSupplierSlugBase(name: string): string {
-  const slug = name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-
-  return slug || "supplier"
-}
 
 async function resolveUniqueSupplierSlug(
   supabase: SessionClient,

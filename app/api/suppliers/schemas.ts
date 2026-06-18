@@ -160,6 +160,15 @@ export const supplierSaveSchema = z.object({
   rateAdjustments: z.array(rateAdjustmentSchema).default([]),
   expectedUpdatedAt: z.string().optional(),
 }).superRefine((value, ctx) => {
+  const rateTypeIds = value.rateAdjustments.map((a) => a.rateTypeId)
+  if (new Set(rateTypeIds).size !== rateTypeIds.length) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["rateAdjustments"],
+      message: "Each rate type may only appear once in rate adjustments",
+    })
+  }
+
   for (const [index, route] of value.routes.entries()) {
     if (value.kind === "transfers" || value.kind === "vehicle_rental") {
       if (!route.pickupPoint?.trim()) {
@@ -291,6 +300,15 @@ export const supplierDraftSaveSchema = z.object({
   bathroomTypes: z.array(draftVariantValueSchema).default([]),
   rateAdjustments: z.array(rateAdjustmentSchema).default([]),
   expectedUpdatedAt: z.string().optional(),
+}).superRefine((value, ctx) => {
+  const rateTypeIds = value.rateAdjustments.map((a) => a.rateTypeId)
+  if (new Set(rateTypeIds).size !== rateTypeIds.length) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["rateAdjustments"],
+      message: "Each rate type may only appear once in rate adjustments",
+    })
+  }
 })
 
 export type SupplierDraftSaveInput = z.infer<typeof supplierDraftSaveSchema>
