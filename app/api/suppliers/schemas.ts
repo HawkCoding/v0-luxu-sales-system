@@ -64,9 +64,12 @@ const vehicleRentalRouteDetailsSchema = z.object({
   oneWayFee: z.number().finite().nonnegative().nullable().optional(),
 })
 
-const routeDirectionModeSchema = z.enum(["one_way", "round_trip", "loop"])
+const routeDirectionModeSchema = z.enum(["one_way", "round_trip"])
 
-const commissionKindSchema = z.enum(["percent", "per_person"])
+export const rateAdjustmentSchema = z.object({
+  rateTypeId: z.string().uuid(),
+  discountPct: z.number().finite().min(0).max(100),
+})
 
 export const routeSchema = z.object({
   id: z.string().uuid().optional(),
@@ -77,8 +80,6 @@ export const routeSchema = z.object({
   dropoffPoint: z.string().trim().max(500).nullable().optional(),
   vehicleRentalDetails: vehicleRentalRouteDetailsSchema.nullable().optional(),
   directionMode: routeDirectionModeSchema.default("one_way"),
-  commissionType: commissionKindSchema.nullable().optional(),
-  commissionValue: z.number().finite().nonnegative().nullable().optional(),
   active: z.boolean(),
   rateCards: z.array(rateCardSchema).default([]),
 })
@@ -149,8 +150,6 @@ export const supplierSaveSchema = z.object({
   singleSupplementPct: z.number().finite().min(0).max(1000).default(0),
   infantMaxAge: z.number().int().min(0).max(17).nullable().optional(),
   childMaxAge: z.number().int().min(0).max(17).nullable().optional(),
-  defaultCommissionType: commissionKindSchema.nullable().optional(),
-  defaultCommissionValue: z.number().finite().nonnegative().nullable().optional(),
   active: z.boolean(),
   emails: z.array(supplierEmailSchema).default([]),
   suiteTypes: z.array(suiteTypeSchema),
@@ -158,6 +157,7 @@ export const supplierSaveSchema = z.object({
   bedroomTypes: z.array(variantValueSchema).default([]),
   bedroomLayouts: z.array(variantValueSchema).default([]),
   bathroomTypes: z.array(variantValueSchema).default([]),
+  rateAdjustments: z.array(rateAdjustmentSchema).default([]),
   expectedUpdatedAt: z.string().optional(),
 }).superRefine((value, ctx) => {
   for (const [index, route] of value.routes.entries()) {
@@ -243,8 +243,6 @@ export const draftRouteSchema = z.object({
   dropoffPoint: z.string().trim().max(500).nullable().default(null),
   vehicleRentalDetails: vehicleRentalRouteDetailsSchema.nullable().default(null),
   directionMode: routeDirectionModeSchema.default("one_way"),
-  commissionType: commissionKindSchema.nullable().optional(),
-  commissionValue: z.number().finite().nonnegative().nullable().optional(),
   active: z.boolean().default(true),
   rateCards: z.array(draftRateCardSchema).default([]),
 })
@@ -284,8 +282,6 @@ export const supplierDraftSaveSchema = z.object({
   singleSupplementPct: z.number().finite().min(0).max(1000).default(0),
   infantMaxAge: z.number().int().min(0).max(17).nullable().optional(),
   childMaxAge: z.number().int().min(0).max(17).nullable().optional(),
-  defaultCommissionType: commissionKindSchema.nullable().optional(),
-  defaultCommissionValue: z.number().finite().nonnegative().nullable().optional(),
   active: z.boolean().default(true),
   emails: z.array(draftSupplierEmailSchema).default([]),
   suiteTypes: z.array(draftSuiteTypeSchema).default([]),
@@ -293,6 +289,7 @@ export const supplierDraftSaveSchema = z.object({
   bedroomTypes: z.array(draftVariantValueSchema).default([]),
   bedroomLayouts: z.array(draftVariantValueSchema).default([]),
   bathroomTypes: z.array(draftVariantValueSchema).default([]),
+  rateAdjustments: z.array(rateAdjustmentSchema).default([]),
   expectedUpdatedAt: z.string().optional(),
 })
 

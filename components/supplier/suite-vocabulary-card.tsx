@@ -7,6 +7,7 @@ import { BufferedInput } from "@/components/ui/buffered-input"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { SortableList } from "@/components/ui/sortable-list"
+import type { SupplierKind } from "@/lib/types"
 
 export interface EditableVocabularyValue {
   id: string
@@ -15,7 +16,54 @@ export interface EditableVocabularyValue {
   archivedAt: string | null
 }
 
+interface SectionCopy {
+  title: string
+  description: string
+}
+
+interface VocabularyCopy {
+  cardTitle: string
+  cardDescription: string
+  bedroomTypes: SectionCopy
+  bedroomLayouts: SectionCopy
+  bathroomTypes: SectionCopy
+}
+
+const TRAIN_COPY: VocabularyCopy = {
+  cardTitle: "Suite Vocabulary",
+  cardDescription:
+    "Configure the bedroom and bathroom variants this supplier offers. Drag to reorder.",
+  bedroomTypes: { title: "Bedroom Types", description: "e.g. Twin, Double, King." },
+  bedroomLayouts: {
+    title: "Bedroom Layouts",
+    description: "e.g. L-Shape, Crosswise, Lengthwise.",
+  },
+  bathroomTypes: { title: "Bathroom Types", description: "e.g. Shower, Bath, Both." },
+}
+
+const VOCABULARY_COPY: Partial<Record<SupplierKind, VocabularyCopy>> = {
+  train_operator: TRAIN_COPY,
+  hotel_property: {
+    cardTitle: "Room Vocabulary",
+    cardDescription:
+      "Configure the bedroom and bathroom variants this property offers. Drag to reorder.",
+    bedroomTypes: {
+      title: "Bedroom Types",
+      description: "e.g. Single, Twin, Double, King.",
+    },
+    bedroomLayouts: {
+      title: "Bed Configuration",
+      description: "e.g. 1 King, 2 Twins, King + Sofa Bed.",
+    },
+    bathroomTypes: {
+      title: "Bathroom Types",
+      description: "e.g. En-suite, Shower, Bath.",
+    },
+  },
+}
+
 export interface SuiteVocabularyCardProps {
+  kind: SupplierKind
   bedroomTypes: EditableVocabularyValue[]
   bedroomLayouts: EditableVocabularyValue[]
   bathroomTypes: EditableVocabularyValue[]
@@ -152,6 +200,7 @@ function VocabularySection({
 }
 
 export function SuiteVocabularyCard({
+  kind,
   bedroomTypes,
   bedroomLayouts,
   bathroomTypes,
@@ -160,32 +209,31 @@ export function SuiteVocabularyCard({
   onChangeBathroomTypes,
   isEditing,
 }: SuiteVocabularyCardProps) {
+  const copy = VOCABULARY_COPY[kind] ?? TRAIN_COPY
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle>Suite Vocabulary</CardTitle>
-        <p className="text-sm text-muted-foreground">
-          Configure the bedroom and bathroom variants this supplier offers. Drag to reorder.
-        </p>
+        <CardTitle>{copy.cardTitle}</CardTitle>
+        <p className="text-sm text-muted-foreground">{copy.cardDescription}</p>
       </CardHeader>
       <CardContent className="space-y-5">
         <VocabularySection
-          title="Bedroom Types"
-          description="e.g. Twin, Double, King."
+          title={copy.bedroomTypes.title}
+          description={copy.bedroomTypes.description}
           values={bedroomTypes}
           onChange={onChangeBedroomTypes}
           isEditing={isEditing}
         />
         <VocabularySection
-          title="Bedroom Layouts"
-          description="e.g. L-Shape, Crosswise, Lengthwise."
+          title={copy.bedroomLayouts.title}
+          description={copy.bedroomLayouts.description}
           values={bedroomLayouts}
           onChange={onChangeBedroomLayouts}
           isEditing={isEditing}
         />
         <VocabularySection
-          title="Bathroom Types"
-          description="e.g. Shower, Bath, Both."
+          title={copy.bathroomTypes.title}
+          description={copy.bathroomTypes.description}
           values={bathroomTypes}
           onChange={onChangeBathroomTypes}
           isEditing={isEditing}

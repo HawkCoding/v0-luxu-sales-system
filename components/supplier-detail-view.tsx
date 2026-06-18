@@ -16,7 +16,7 @@ import {
 } from "lucide-react"
 import { SortableList } from "@/components/ui/sortable-list"
 import { SuiteVocabularyCard, type EditableVocabularyValue } from "@/components/supplier/suite-vocabulary-card"
-import { CommissionControl } from "@/components/supplier/commission-control"
+import { ApplicableRatesCard } from "@/components/supplier/applicable-rates-card"
 import { VariantChipPicker } from "@/components/supplier/variant-chip-picker"
 import { toast } from "sonner"
 import {
@@ -76,10 +76,12 @@ import {
   type AgeBuckets,
 } from "@/lib/pricing/age-buckets"
 import { shortenUrl } from "@/lib/url"
+import { applyRateMarkdown } from "@/lib/pricing/rate-markdown"
 import { cn } from "@/lib/utils"
 import { useLocations, useSupplierDetail } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
 import { formatRateCardValidityRange } from "@/lib/rate-card-validity"
+import { buildRouteName } from "@/lib/routes/route-name"
 import {
   getSupplierVocabulary,
   isTransportSupplier,
@@ -93,7 +95,7 @@ import {
   type SupplierVocabulary,
   type RouteDirectionMode,
   type RateType,
-  type CommissionKind,
+  type SupplierRateAdjustment,
   type VehicleRentalRouteDetails,
 } from "@/lib/types"
 
@@ -117,8 +119,6 @@ interface EditableRoute {
   dropoffPoint: string | null
   vehicleRentalDetails: Omit<VehicleRentalRouteDetails, "routeId" | "createdAt" | "updatedAt"> | null
   directionMode: RouteDirectionMode
-  commissionType: CommissionKind | null
-  commissionValue: number | null
   active: boolean
 }
 
@@ -175,8 +175,7 @@ interface SupplierFormState {
   singleSupplementPct: number
   infantMaxAge: number | null
   childMaxAge: number | null
-  defaultCommissionType: CommissionKind | null
-  defaultCommissionValue: number | null
+  rateAdjustments: SupplierRateAdjustment[]
   suiteTypes: EditableSuiteType[]
   packages: EditablePackage[]
   bedroomTypes: EditableVocabularyValue[]
@@ -279,8 +278,6 @@ function createEmptyRoute(locations: Location[], kind: SupplierKind): EditableRo
           }
         : null,
     directionMode: "one_way",
-    commissionType: null,
-    commissionValue: null,
     active: true,
   }
 }
@@ -349,8 +346,10 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
     singleSupplementPct: supplier.singleSupplementPct,
     infantMaxAge: supplier.infantMaxAge ?? null,
     childMaxAge: supplier.childMaxAge ?? null,
-    defaultCommissionType: supplier.defaultCommissionType ?? null,
-    defaultCommissionValue: supplier.defaultCommissionValue ?? null,
+    rateAdjustments: (supplier.rateAdjustments ?? []).map((adjustment) => ({
+      rateTypeId: adjustment.rateTypeId,
+      discountPct: adjustment.discountPct,
+    })),
     suiteTypes: supplier.suiteTypes.map((suiteType, index) => ({
       id: suiteType.id,
       name: suiteType.name,
@@ -400,8 +399,6 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
               }
             : null,
           directionMode: route.directionMode ?? "one_way",
-          commissionType: route.commissionType ?? null,
-          commissionValue: route.commissionValue ?? null,
           active: route.active,
         })),
         rateCards: supplier.rateCards.map((rateCard) => ({
@@ -894,7 +891,7 @@ function groupEditableRateCardsByPeriod(
 function getContainerClass(presentation: Presentation) {
   return presentation === "page"
     ? "p-6 space-y-6 max-w-6xl"
-    : "max-h-[80vh] overflow-y-auto p-6 space-y-6"
+    : "p-6 space-y-6"
 }
 
 function getLocationName(locationsById: Record<string, Location>, id: string | null) {
@@ -1108,6 +1105,8 @@ interface RateCardMatrixEditorProps {
   rateCards: EditableRateCard[]
   suiteTypes: EditableSuiteType[]
   rateTypes: RateType[]
+  defaultRateTypeId: string | null
+  adjustments: SupplierRateAdjustment[]
   packageIndex: number
   locationsById: Record<string, Location>
   vocabulary: SupplierVocabulary
@@ -1115,6 +1114,14 @@ interface RateCardMatrixEditorProps {
   supplierKind: SupplierKind
   trainChildPriceRatio: number
   ageBuckets: AgeBuckets
+  onAddRate: (rateTypeId: string) => void
+  onApplyMarkdown: (
+    packageIndex: number,
+    routeId: string,
+    periodKey: string,
+    rateTypeId: string,
+    discountPct: number,
+  ) => void
   onAddPeriod: (packageIndex: number, routeId: string, rateTypeId: string) => void
   onRemovePeriod: (packageIndex: number, routeId: string, periodKey: string, rateTypeId: string) => void
   onUpdatePeriodField: (
@@ -1333,6 +1340,8 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
   rateCards,
   suiteTypes,
   rateTypes,
+  defaultRateTypeId,
+  adjustments,
   packageIndex,
   locationsById,
   vocabulary,
@@ -1340,6 +1349,8 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
   supplierKind,
   trainChildPriceRatio,
   ageBuckets,
+  onAddRate,
+  onApplyMarkdown,
   onAddPeriod,
   onRemovePeriod,
   onUpdatePeriodField,
@@ -1349,11 +1360,38 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
   periodFieldErrors,
 }: RateCardMatrixEditorProps) {
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(routes[0]?.id ?? null)
-  const defaultRateTypeId =
-    rateTypes.find((rt) => rt.isDefault && !rt.archivedAt)?.id
-    ?? rateTypes.find((rt) => !rt.archivedAt)?.id
-    ?? null
-  const [selectedRateTypeId, setSelectedRateTypeId] = useState<string | null>(defaultRateTypeId)
+  const activeRateTypes = useMemo(() => rateTypes.filter((rt) => !rt.archivedAt), [rateTypes])
+  const effectiveDefaultRateTypeId =
+    (defaultRateTypeId && activeRateTypes.some((rt) => rt.id === defaultRateTypeId)
+      ? defaultRateTypeId
+      : null) ??
+    activeRateTypes.find((rt) => rt.isDefault)?.id ??
+    activeRateTypes[0]?.id ??
+    null
+  // Only the default rate plus the rates flagged as applicable to this supplier
+  // are shown as tabs (in declared order, default first).
+  const adjustmentIds = useMemo(() => new Set(adjustments.map((a) => a.rateTypeId)), [adjustments])
+  const visibleRateTypes = useMemo(
+    () =>
+      activeRateTypes.filter(
+        (rt) => rt.id === effectiveDefaultRateTypeId || adjustmentIds.has(rt.id),
+      ),
+    [activeRateTypes, effectiveDefaultRateTypeId, adjustmentIds],
+  )
+  const addableRateTypes = useMemo(
+    () =>
+      activeRateTypes.filter(
+        (rt) => rt.id !== effectiveDefaultRateTypeId && !adjustmentIds.has(rt.id),
+      ),
+    [activeRateTypes, effectiveDefaultRateTypeId, adjustmentIds],
+  )
+  const [selectedRateTypeId, setSelectedRateTypeId] = useState<string | null>(
+    effectiveDefaultRateTypeId,
+  )
+  const selectedDiscountPct =
+    selectedRateTypeId && selectedRateTypeId !== effectiveDefaultRateTypeId
+      ? adjustments.find((a) => a.rateTypeId === selectedRateTypeId)?.discountPct ?? null
+      : null
   const periodGroups = useMemo(
     () =>
       groupEditableRateCardsByPeriod(
@@ -1381,14 +1419,14 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
   }, [routes, selectedRouteId])
 
   useEffect(() => {
-    if (rateTypes.length === 0) {
+    if (visibleRateTypes.length === 0) {
       if (selectedRateTypeId !== null) setSelectedRateTypeId(null)
       return
     }
-    if (!selectedRateTypeId || !rateTypes.some((rt) => rt.id === selectedRateTypeId)) {
-      setSelectedRateTypeId(defaultRateTypeId)
+    if (!selectedRateTypeId || !visibleRateTypes.some((rt) => rt.id === selectedRateTypeId)) {
+      setSelectedRateTypeId(effectiveDefaultRateTypeId)
     }
-  }, [rateTypes, selectedRateTypeId, defaultRateTypeId])
+  }, [visibleRateTypes, selectedRateTypeId, effectiveDefaultRateTypeId])
 
   if (suiteTypes.length === 0) {
     return (
@@ -1418,14 +1456,15 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
         </Button>
       </div>
 
-      {rateTypes.length > 0 ? (
+      {visibleRateTypes.length > 0 ? (
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Rate Types
           </p>
           <div className="flex flex-wrap items-center gap-2">
-            {rateTypes.map((rt) => {
+            {visibleRateTypes.map((rt) => {
               const isSelected = selectedRateTypeId === rt.id
+              const isDefault = rt.id === effectiveDefaultRateTypeId
               return (
                 <Button
                   key={rt.id}
@@ -1437,14 +1476,29 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                   title={rt.code}
                 >
                   {rt.name}
-                  {rt.isDefault ? (
+                  {isDefault ? (
                     <span className="ml-1 text-[10px] uppercase opacity-70">default</span>
                   ) : null}
                 </Button>
               )
             })}
+            {addableRateTypes.length > 0 ? (
+              <Select value="" onValueChange={(value) => onAddRate(value)}>
+                <SelectTrigger className="h-7 w-auto gap-1 rounded-full px-3 text-xs" aria-label="Add a rate">
+                  <Plus className="h-3.5 w-3.5" />
+                  <SelectValue placeholder="Add rate" />
+                </SelectTrigger>
+                <SelectContent>
+                  {addableRateTypes.map((rt) => (
+                    <SelectItem key={rt.id} value={rt.id}>
+                      {rt.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : null}
             <Button asChild type="button" size="sm" variant="ghost" className="h-7 text-xs">
-              <Link href="/app/settings/rate-types">+ Add Rate Type</Link>
+              <Link href="/app/settings/rate-types">+ Create new rate</Link>
             </Button>
           </div>
         </div>
@@ -1577,6 +1631,33 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                   </Button>
                 </div>
               </div>
+
+              {selectedRateTypeId && selectedRateTypeId !== effectiveDefaultRateTypeId ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-secondary/10 px-4 py-2">
+                  <p className="text-xs text-muted-foreground">
+                    {selectedDiscountPct === null
+                      ? "Set this rate's markdown in Applicable Rates above to calculate prices from the default rate."
+                      : `Calculate from default rate: -${selectedDiscountPct.toFixed(2)}% of the default price.`}
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={selectedDiscountPct === null}
+                    onClick={() =>
+                      onApplyMarkdown(
+                        packageIndex,
+                        selectedRouteId ?? "",
+                        period.key,
+                        selectedRateTypeId,
+                        selectedDiscountPct ?? 0,
+                      )
+                    }
+                  >
+                    Apply markdown
+                  </Button>
+                </div>
+              ) : null}
 
               <div className="overflow-x-auto">
                 <table className="min-w-full text-sm">
@@ -1918,7 +1999,6 @@ interface RouteEditorRowProps {
   packageIndex: number
   vocabulary: SupplierVocabulary
   locations: Location[]
-  supplierCommissionDefault?: { type: CommissionKind | null; value: number | null } | null
   onUpdateRoute: (
     packageIndex: number,
     routeIndex: number,
@@ -1934,12 +2014,26 @@ const RouteEditorRow = memo(function RouteEditorRow({
   packageIndex,
   vocabulary,
   locations,
-  supplierCommissionDefault,
   onUpdateRoute,
   onRemoveRoute,
 }: RouteEditorRowProps) {
   const isTransport = vocabulary.suiteType === "Vehicle Type"
   const isRental = vocabulary.priceLabel === "per day"
+  const autoDeriveName = vocabulary.routeNameAutoDerived
+  const derivedRouteName = useMemo(() => {
+    if (!autoDeriveName) return null
+    const originName = locations.find((l) => l.id === route.originLocationId)?.name
+    const destinationName = locations.find((l) => l.id === route.destinationLocationId)?.name
+    if (!originName || !destinationName) return null
+    return buildRouteName(originName, destinationName, route.directionMode)
+  }, [autoDeriveName, locations, route.originLocationId, route.destinationLocationId, route.directionMode])
+
+  useEffect(() => {
+    if (!autoDeriveName || derivedRouteName === null) return
+    if (route.name === derivedRouteName) return
+    onUpdateRoute(packageIndex, routeIndex, "name", derivedRouteName)
+  }, [autoDeriveName, derivedRouteName, route.name, onUpdateRoute, packageIndex, routeIndex])
+
   const rentalDetails =
     route.vehicleRentalDetails ?? {
       includedKmPerDay: null,
@@ -1969,10 +2063,21 @@ const RouteEditorRow = memo(function RouteEditorRow({
     >
       <div className="space-y-1.5">
         <Label>{`${vocabulary.route} name`}</Label>
-        <BufferedInput
-          value={route.name}
-          onValueChange={(value) => onUpdateRoute(packageIndex, routeIndex, "name", value)}
-        />
+        {autoDeriveName ? (
+          <div
+            className="flex h-9 items-center rounded-md border border-input bg-muted px-3 text-sm text-muted-foreground"
+            aria-label={`${vocabulary.route} name`}
+          >
+            {derivedRouteName ?? (
+              <span className="italic">Choose origin and destination</span>
+            )}
+          </div>
+        ) : (
+          <BufferedInput
+            value={route.name}
+            onValueChange={(value) => onUpdateRoute(packageIndex, routeIndex, "name", value)}
+          />
+        )}
       </div>
       {isTransport ? (
         <>
@@ -2081,24 +2186,25 @@ const RouteEditorRow = memo(function RouteEditorRow({
           </div>
         </>
       ) : null}
-      <div className="min-w-0 space-y-1.5">
-        <Label>Direction</Label>
-        <Select
-          value={route.directionMode}
-          onValueChange={(value) =>
-            onUpdateRoute(packageIndex, routeIndex, "directionMode", value as RouteDirectionMode)
-          }
-        >
-          <SelectTrigger className="max-w-full">
-            <SelectValue placeholder="Select direction" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="one_way">One way</SelectItem>
-            <SelectItem value="round_trip">Round trip</SelectItem>
-            <SelectItem value="loop">Loop</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+      {vocabulary.routeHasDirection ? (
+        <div className="min-w-0 space-y-1.5">
+          <Label>Direction</Label>
+          <Select
+            value={route.directionMode}
+            onValueChange={(value) =>
+              onUpdateRoute(packageIndex, routeIndex, "directionMode", value as RouteDirectionMode)
+            }
+          >
+            <SelectTrigger className="max-w-full">
+              <SelectValue placeholder="Select direction" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="one_way">One way</SelectItem>
+              <SelectItem value="round_trip">Two way</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      ) : null}
       <div className="flex h-9 items-center gap-3 self-end">
         <div className="flex items-center gap-2">
           <Switch
@@ -2117,33 +2223,6 @@ const RouteEditorRow = memo(function RouteEditorRow({
         >
           <Trash2 className="h-4 w-4" />
         </Button>
-      </div>
-      <div
-        className={
-          isTransport
-            ? "xl:col-span-5 md:col-span-2"
-            : vocabulary.routeHasLocations
-              ? "xl:col-span-5 md:col-span-2"
-              : "md:col-span-3"
-        }
-      >
-        <CommissionControl
-          isEditing
-          label="Route commission"
-          description="Overrides the supplier default for this route."
-          value={{ type: route.commissionType, value: route.commissionValue }}
-          inherited={supplierCommissionDefault ?? null}
-          inheritedSourceLabel="supplier default"
-          onChange={(next) => {
-            onUpdateRoute(packageIndex, routeIndex, "commissionType", next.type)
-            onUpdateRoute(packageIndex, routeIndex, "commissionValue", next.value)
-          }}
-          onClear={() => {
-            onUpdateRoute(packageIndex, routeIndex, "commissionType", null)
-            onUpdateRoute(packageIndex, routeIndex, "commissionValue", null)
-          }}
-          clearLabel="Reset to supplier default"
-        />
       </div>
     </div>
   )
@@ -2239,6 +2318,7 @@ export function SupplierDetailView({
   const hasLoadError = Boolean(error)
   const supplier = data && !("error" in data) ? data : null
   const isDraftSupplier = supplier?.status === "draft"
+  const isTemporarySupplier = supplier?.status === "temporary"
   const supplierUpdatedAt = supplier?.updatedAt
   const localDraftStorageKey = `supplier-draft-${supplierSlug}`
   formRef.current = form
@@ -2291,11 +2371,11 @@ export function SupplierDetailView({
       expectedUpdatedAtRef.current = supplier.updatedAt
       hydratedSupplierIdentityRef.current = supplierIdentity
 
-      if (canEdit && supplier.status === "draft") {
+      if (canEdit && (supplier.status === "draft" || supplier.status === "temporary")) {
         setIsEditing(true)
       }
 
-      if (supplier.status !== "draft") {
+      if (supplier.status !== "draft" && supplier.status !== "temporary") {
         const raw = window.localStorage.getItem(localDraftStorageKey)
         if (!raw) {
           setPendingLocalDraft(null)
@@ -2905,6 +2985,82 @@ export function SupplierDetailView({
     [updatePackage],
   )
 
+  const addRateAdjustment = useCallback((rateTypeId: string) => {
+    setForm((current) => {
+      if (!current) return current
+      if (current.rateAdjustments.some((adjustment) => adjustment.rateTypeId === rateTypeId)) {
+        return current
+      }
+      return {
+        ...current,
+        rateAdjustments: [...current.rateAdjustments, { rateTypeId, discountPct: 0 }],
+      }
+    })
+  }, [])
+
+  const handleApplyRateMarkdown = useCallback(
+    (
+      packageIndex: number,
+      routeId: string,
+      periodKey: string,
+      rateTypeId: string,
+      discountPct: number,
+    ) => {
+      const baseRateTypeId = supplier?.defaultRateTypeId ?? null
+      if (!baseRateTypeId || rateTypeId === baseRateTypeId) return
+
+      updatePackage(packageIndex, (pkg) => {
+        const targetCards = pkg.rateCards.filter(
+          (rateCard) =>
+            rateCard.routeId === routeId &&
+            rateCard.rateTypeId === rateTypeId &&
+            getRatePeriodKey(rateCard.validFrom, rateCard.validTo, rateCard.currency) === periodKey,
+        )
+        if (targetCards.length === 0) return pkg
+
+        const baseCards = pkg.rateCards.filter(
+          (rateCard) => rateCard.routeId === routeId && rateCard.rateTypeId === baseRateTypeId,
+        )
+        const targetIds = new Set(targetCards.map((card) => card.id))
+        let applied = 0
+
+        const nextRateCards = pkg.rateCards.map((rateCard) => {
+          if (!targetIds.has(rateCard.id)) return rateCard
+          const base = baseCards.find(
+            (candidate) =>
+              candidate.suiteTypeId === rateCard.suiteTypeId &&
+              candidate.validFrom <= rateCard.validFrom &&
+              (candidate.validTo === null || candidate.validTo >= rateCard.validFrom),
+          )
+          if (!base) return rateCard
+          applied += 1
+          return {
+            ...rateCard,
+            pricePerPerson: applyRateMarkdown(base.pricePerPerson, discountPct),
+            childPrice:
+              base.childPrice === null ? null : applyRateMarkdown(base.childPrice, discountPct),
+            infantPrice:
+              base.infantPrice === null ? null : applyRateMarkdown(base.infantPrice, discountPct),
+          }
+        })
+
+        if (applied === 0) {
+          toast.error("No matching default-rate prices found for this period.", {
+            id: "apply-markdown-none",
+          })
+          return pkg
+        }
+
+        toast.success(
+          `Applied ${discountPct}% markdown to ${applied} ${applied === 1 ? "row" : "rows"}.`,
+          { id: "apply-markdown-done" },
+        )
+        return { ...pkg, rateCards: nextRateCards }
+      })
+    },
+    [updatePackage, supplier],
+  )
+
   useEffect(() => {
     if (!canEdit || !form || !isEditing || isPatchInFlight) return
 
@@ -2941,7 +3097,7 @@ export function SupplierDetailView({
   }
 
   const cancelEdit = () => {
-    if (supplier?.status === "draft") {
+    if (supplier?.status === "draft" || supplier?.status === "temporary") {
       exitSupplierDetail()
       return
     }
@@ -3116,8 +3272,6 @@ export function SupplierDetailView({
               }
             : null,
         directionMode: route.directionMode,
-        commissionType: route.commissionType ?? null,
-        commissionValue: route.commissionValue ?? null,
         active: route.active,
         rateCards: routeRateGroup.rateCards
           .filter((rateCard) => rateCard.routeId === route.id)
@@ -3161,8 +3315,7 @@ export function SupplierDetailView({
           singleSupplementPct: form.singleSupplementPct,
           infantMaxAge: form.infantMaxAge,
           childMaxAge: form.childMaxAge,
-          defaultCommissionType: form.defaultCommissionType,
-          defaultCommissionValue: form.defaultCommissionValue,
+          rateAdjustments: form.rateAdjustments,
           suiteTypes: cleanedSuiteTypes,
           routes: cleanedRoutes,
           bedroomTypes: cleanedBedroomTypes,
@@ -3421,7 +3574,12 @@ export function SupplierDetailView({
                 </h1>
                 <Badge variant="secondary">{SUPPLIER_KIND_LABELS[supplier.kind]}</Badge>
                 {supplier.status === "draft" && <Badge variant="outline">Draft</Badge>}
-                {supplier.status !== "draft" && (
+                {supplier.status === "temporary" && (
+                  <Badge variant="outline" className="border-amber-400 text-amber-600">
+                    Pending Activation
+                  </Badge>
+                )}
+                {supplier.status !== "draft" && supplier.status !== "temporary" && (
                   <Badge variant={supplier.status === "active" ? "default" : "outline"}>
                     {supplier.status === "active" ? "Active" : "Inactive"}
                   </Badge>
@@ -3482,7 +3640,9 @@ export function SupplierDetailView({
                     ? "Saving..."
                     : supplier.status === "draft"
                       ? "Save & Publish"
-                      : "Save changes"}
+                      : supplier.status === "temporary"
+                        ? "Save & Activate"
+                        : "Save changes"}
                 </Button>
               </>
             )}
@@ -3497,7 +3657,17 @@ export function SupplierDetailView({
           </Card>
         )}
 
-        {canEdit && supplier.status !== "draft" && pendingLocalDraft && !isEditing && (
+        {supplier.status === "temporary" && (
+          <Card className="border-dashed border-amber-300 bg-amber-50/40">
+            <CardContent className="p-4 text-sm text-amber-700">
+              {canEdit
+                ? "This supplier was created on-the-go during a quote session. Review and complete the details, then save to activate it and make it available for future bookings."
+                : "This supplier was created on-the-go and is awaiting review by a manager before it can be used in future quotes."}
+            </CardContent>
+          </Card>
+        )}
+
+        {canEdit && supplier.status !== "draft" && supplier.status !== "temporary" && pendingLocalDraft && !isEditing && (
           <Card className="border-dashed">
             <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm text-muted-foreground">
               <p>You have unsaved edits from a previous session.</p>
@@ -3719,9 +3889,11 @@ export function SupplierDetailView({
                     value={
                       supplier.status === "draft"
                         ? "Draft"
-                        : supplier.status === "active"
-                          ? "Active"
-                          : "Inactive"
+                        : supplier.status === "temporary"
+                          ? "Pending Activation"
+                          : supplier.status === "active"
+                            ? "Active"
+                            : "Inactive"
                     }
                   />
                 </div>
@@ -3794,6 +3966,7 @@ export function SupplierDetailView({
 
         {form.kind === "train_operator" || form.kind === "hotel_property" ? (
           <SuiteVocabularyCard
+            kind={form.kind}
             bedroomTypes={form.bedroomTypes}
             bedroomLayouts={form.bedroomLayouts}
             bathroomTypes={form.bathroomTypes}
@@ -3864,23 +4037,12 @@ export function SupplierDetailView({
                 onChangeChildMaxAge={(value) => updateField("childMaxAge", value)}
               />
 
-              <CommissionControl
+              <ApplicableRatesCard
                 isEditing={isEditing}
-                label="Default Commission"
-                description="Applied to every line on this supplier unless a route or quote line overrides it."
-                value={{
-                  type: isEditing ? form.defaultCommissionType : supplier.defaultCommissionType,
-                  value: isEditing ? form.defaultCommissionValue : supplier.defaultCommissionValue,
-                }}
-                onChange={(next) => {
-                  updateField("defaultCommissionType", next.type)
-                  updateField("defaultCommissionValue", next.value)
-                }}
-                onClear={() => {
-                  updateField("defaultCommissionType", null)
-                  updateField("defaultCommissionValue", null)
-                }}
-                clearLabel="Clear default"
+                rateTypes={supplier.rateTypes ?? []}
+                defaultRateTypeId={supplier.defaultRateTypeId ?? null}
+                adjustments={isEditing ? form.rateAdjustments : supplier.rateAdjustments ?? []}
+                onChange={(next) => updateField("rateAdjustments", next)}
               />
 
               <div className="rounded-lg border p-4 space-y-3">
@@ -3977,10 +4139,6 @@ export function SupplierDetailView({
                         packageIndex={0}
                         vocabulary={activeVocabulary}
                         locations={locations}
-                        supplierCommissionDefault={{
-                          type: form.defaultCommissionType,
-                          value: form.defaultCommissionValue,
-                        }}
                         onUpdateRoute={updateRoute}
                         onRemoveRoute={removeRoute}
                       />
@@ -4013,6 +4171,10 @@ export function SupplierDetailView({
                   rateCards={routeRateGroup.rateCards}
                   suiteTypes={form.suiteTypes}
                   rateTypes={supplier.rateTypes ?? []}
+                  defaultRateTypeId={supplier.defaultRateTypeId ?? null}
+                  adjustments={form.rateAdjustments}
+                  onAddRate={addRateAdjustment}
+                  onApplyMarkdown={handleApplyRateMarkdown}
                   packageIndex={0}
                   locationsById={locationsById}
                   vocabulary={activeVocabulary}

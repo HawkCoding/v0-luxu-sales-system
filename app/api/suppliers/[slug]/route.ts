@@ -18,6 +18,7 @@ import {
   type SupplierSaveInput,
 } from "../schemas"
 import { isTransportSupplier } from "@/lib/types"
+import { buildRouteName } from "@/lib/routes/route-name"
 import { areRateCardDateRangesOverlapping, checkRateCardOverlaps } from "@/lib/rate-cards/overlap"
 
 interface NormalizedRoute {
@@ -29,8 +30,6 @@ interface NormalizedRoute {
   pickup_point: string | null
   dropoff_point: string | null
   direction_mode: "one_way" | "round_trip" | "loop"
-  commission_type: "percent" | "per_person" | null
-  commission_value: number | null
   active: boolean
   created_at: string
   updated_at: string
@@ -148,6 +147,8 @@ export async function GET(
         suiteTypeBedroomLayouts: detail.suiteTypeBedroomLayouts,
         suiteTypeBathroomTypes: detail.suiteTypeBathroomTypes,
         rateTypes: detail.rateTypes,
+        rateAdjustments: detail.rateAdjustments,
+        kindDefaultRateTypes: detail.kindDefaultRateTypes,
       },
     ),
   )
@@ -348,30 +349,31 @@ export async function PATCH(
   const allowedBedroomLayoutIds = new Set(normalizedBedroomLayouts.map((row) => row.id))
   const allowedBathroomTypeIds = new Set(normalizedBathroomTypes.map((row) => row.id))
 
-  function pairCommission(
-    type: "percent" | "per_person" | null | undefined,
-    value: number | null | undefined,
-  ): { type: "percent" | "per_person" | null; value: number | null } {
-    if (type && value !== null && value !== undefined && Number.isFinite(value) && value >= 0) {
-      return { type, value }
-    }
-    return { type: null, value: null }
-  }
+  // Train routes use a locked, server-derived name (origin/destination + direction) so it stays
+  // constant regardless of what the client sends. Other supplier kinds keep their free-text name.
+  const autoDeriveRouteName = parsed.kind === "train_operator"
+  const locationNameById = new Map(existingDetail.locations.map((location) => [location.id, location.name]))
 
   const normalizedRoutes: NormalizedRoute[] = parsed.routes
     .map((route) => {
-      const commission = pairCommission(route.commissionType, route.commissionValue)
+      const originLocationId = isTransport ? null : normalizeOptionalUuid(route.originLocationId)
+      const destinationLocationId = isTransport ? null : normalizeOptionalUuid(route.destinationLocationId)
+      const directionMode = route.directionMode ?? "one_way"
+      const originName = originLocationId ? locationNameById.get(originLocationId) : undefined
+      const destinationName = destinationLocationId ? locationNameById.get(destinationLocationId) : undefined
+      const derivedName =
+        autoDeriveRouteName && originName && destinationName
+          ? buildRouteName(originName, destinationName, directionMode)
+          : null
       return {
         id: route.id ?? makeUuid(),
         supplier_id: supplierId,
-        name: route.name.trim(),
-        origin_location_id: isTransport ? null : normalizeOptionalUuid(route.originLocationId),
-        destination_location_id: isTransport ? null : normalizeOptionalUuid(route.destinationLocationId),
+        name: derivedName ?? route.name.trim(),
+        origin_location_id: originLocationId,
+        destination_location_id: destinationLocationId,
         pickup_point: isTransport ? normalizeOptionalText(route.pickupPoint) : null,
         dropoff_point: isTransport ? normalizeOptionalText(route.dropoffPoint) : null,
-        direction_mode: route.directionMode ?? "one_way",
-        commission_type: commission.type,
-        commission_value: commission.value,
+        direction_mode: directionMode,
         active: route.active,
         created_at: now,
         updated_at: now,
@@ -608,7 +610,8 @@ export async function PATCH(
     )
   }
 
-  const supplierCommission = pairCommission(parsed.defaultCommissionType, parsed.defaultCommissionValue)
+  const nextActive = isDraftSave ? false : parsed.active
+  const nextStatus = isDraftSave ? "draft" : nextActive ? "active" : "inactive"
   const supplierUpdatePayload = {
     name: parsed.name.trim(),
     kind: parsed.kind,
@@ -623,9 +626,8 @@ export async function PATCH(
     single_supplement_pct: parsed.singleSupplementPct,
     infant_max_age: parsed.infantMaxAge ?? null,
     child_max_age: parsed.childMaxAge ?? null,
-    default_commission_type: supplierCommission.type,
-    default_commission_value: supplierCommission.value,
-    active: isDraftSave ? false : parsed.active,
+    active: nextActive,
+    status: nextStatus,
   }
 
   let supplierUpdateQuery = supabase.from("suppliers").update(supplierUpdatePayload).eq("id", supplierId)
@@ -1023,6 +1025,57 @@ export async function PATCH(
     }
   }
 
+  // Sync per-supplier rate adjustments (applicable rates + markdown vs default).
+  {
+    const incoming = new Map<string, number>()
+    for (const adjustment of parsed.rateAdjustments ?? []) {
+      incoming.set(adjustment.rateTypeId, adjustment.discountPct)
+    }
+    const incomingRateTypeIds = [...incoming.keys()]
+
+    let deleteAdjustmentsQuery = supabase
+      .from("supplier_rate_adjustments")
+      .delete()
+      .eq("supplier_id", supplierId)
+    if (incomingRateTypeIds.length > 0) {
+      deleteAdjustmentsQuery = deleteAdjustmentsQuery.not(
+        "rate_type_id",
+        "in",
+        `(${incomingRateTypeIds.join(",")})`,
+      )
+    }
+    const { error: deleteAdjustmentsError } = await deleteAdjustmentsQuery
+    if (deleteAdjustmentsError) {
+      logSupplierMutationError("rate-adjustments-delete", supplierId, deleteAdjustmentsError)
+      return NextResponse.json(
+        { error: "Failed to update supplier rate adjustments" },
+        { status: 500 },
+      )
+    }
+
+    if (incomingRateTypeIds.length > 0) {
+      const now = new Date().toISOString()
+      const { error: upsertAdjustmentsError } = await supabase
+        .from("supplier_rate_adjustments")
+        .upsert(
+          incomingRateTypeIds.map((rateTypeId) => ({
+            supplier_id: supplierId,
+            rate_type_id: rateTypeId,
+            discount_pct: incoming.get(rateTypeId) ?? 0,
+            updated_at: now,
+          })),
+          { onConflict: "supplier_id,rate_type_id" },
+        )
+      if (upsertAdjustmentsError) {
+        logSupplierMutationError("rate-adjustments-upsert", supplierId, upsertAdjustmentsError)
+        return NextResponse.json(
+          { error: "Failed to update supplier rate adjustments" },
+          { status: 500 },
+        )
+      }
+    }
+  }
+
   const updatedDetail = await loadSupplierDetail(supabase, slug)
   if ("error" in updatedDetail) {
     return updatedDetail.error!
@@ -1045,6 +1098,8 @@ export async function PATCH(
         suiteTypeBedroomLayouts: updatedDetail.suiteTypeBedroomLayouts,
         suiteTypeBathroomTypes: updatedDetail.suiteTypeBathroomTypes,
         rateTypes: updatedDetail.rateTypes,
+        rateAdjustments: updatedDetail.rateAdjustments,
+        kindDefaultRateTypes: updatedDetail.kindDefaultRateTypes,
       },
     ),
   )

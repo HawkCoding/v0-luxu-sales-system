@@ -108,9 +108,10 @@ export async function GET(req: Request) {
 
   const { supabase } = auth
   const includeDrafts = new URL(req.url).searchParams.get("includeDrafts") === "true"
+  // Always include temporary suppliers (active=false but need to appear in Suppliers page and picker).
   const supplierQuery = includeDrafts
     ? supabase.from("suppliers").select("*")
-    : supabase.from("suppliers").select("*").eq("active", true)
+    : supabase.from("suppliers").select("*").or("active.eq.true,status.eq.temporary")
   const { data: suppliers, error } = await supplierQuery
     .order("kind", { ascending: true })
     .order("name", { ascending: true })

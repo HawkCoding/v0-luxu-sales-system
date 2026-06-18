@@ -162,6 +162,9 @@ describe("DELETE /api/suppliers/[slug]", () => {
           }),
         }
       }
+      if (table === "supplier_rate_adjustments") {
+        return { delete: () => ({ eq: async () => ({ error: null }) }) }
+      }
       throw new Error(`Unexpected table ${table}`)
     })
 
@@ -199,6 +202,9 @@ describe("DELETE /api/suppliers/[slug]", () => {
           }),
         }
       }
+      if (table === "supplier_rate_adjustments") {
+        return { delete: () => ({ eq: async () => ({ error: null }) }) }
+      }
       throw new Error(`Unexpected table ${table}`)
     })
 
@@ -228,6 +234,9 @@ describe("PATCH /api/suppliers/[slug]", () => {
     mockAuth()
     helperMocks.supabaseFrom.mockImplementation((table: string) => {
       if (table === "profiles") return profileQuery("consultant")
+      if (table === "supplier_rate_adjustments") {
+        return { delete: () => ({ eq: async () => ({ error: null }) }) }
+      }
       throw new Error(`Unexpected table ${table}`)
     })
 
@@ -248,6 +257,9 @@ describe("PATCH /api/suppliers/[slug]", () => {
     mockSupplierDetail()
     helperMocks.supabaseFrom.mockImplementation((table: string) => {
       if (table === "profiles") return profileQuery("manager")
+      if (table === "supplier_rate_adjustments") {
+        return { delete: () => ({ eq: async () => ({ error: null }) }) }
+      }
       throw new Error(`Unexpected table ${table}`)
     })
 
@@ -323,6 +335,9 @@ describe("PATCH /api/suppliers/[slug]", () => {
           delete: () => ({ in: async () => ({ error: null }) }),
           insert: async () => ({ error: null }),
         }
+      }
+      if (table === "supplier_rate_adjustments") {
+        return { delete: () => ({ eq: async () => ({ error: null }) }) }
       }
       throw new Error(`Unexpected table ${table}`)
     })
@@ -429,6 +444,9 @@ describe("PATCH /api/suppliers/[slug]", () => {
       if (table === "suite_type_bathroom_types") {
         return { ...linkDeleteFactory(), insert: bathroomTypeLinkInsert }
       }
+      if (table === "supplier_rate_adjustments") {
+        return { delete: () => ({ eq: async () => ({ error: null }) }) }
+      }
       throw new Error(`Unexpected table ${table}`)
     })
 
@@ -489,5 +507,123 @@ describe("PATCH /api/suppliers/[slug]", () => {
       suite_type_id: SUITE_TYPE_ID,
       bedroom_type_id: BEDROOM_TYPE_ID,
     })
+  })
+
+  it("derives and locks the train route name from origin/destination on save", async () => {
+    const ORIGIN_ID = "00000000-0000-4000-8000-0000000000b1"
+    const DEST_ID = "00000000-0000-4000-8000-0000000000b2"
+    const ROUTE_ID = "00000000-0000-4000-8000-0000000000b3"
+
+    const supplierMaybeSingle = vi.fn(async () => ({
+      data: { updated_at: "2026-01-03T00:00:00.000Z" },
+      error: null,
+    }))
+    const supplierEqMock = vi.fn()
+    const supplierUpdateQuery = {
+      eq: supplierEqMock,
+      select: () => ({ maybeSingle: supplierMaybeSingle }),
+    }
+    supplierEqMock.mockReturnValue(supplierUpdateQuery)
+
+    const emailUpsert = vi.fn(async () => ({ error: null }))
+    const suiteTypeUpsert = vi.fn(async () => ({ error: null }))
+    const routeUpsertPayloads: Array<unknown> = []
+    const routeUpsert = vi.fn(async (payload: unknown) => {
+      routeUpsertPayloads.push(payload)
+      return { error: null }
+    })
+    const linkDeleteFactory = () => ({ delete: () => ({ in: async () => ({ error: null }) }) })
+
+    mockAuth()
+    helperMocks.checkDeletionDependencies.mockResolvedValue([])
+    helperMocks.loadSupplierDetail.mockResolvedValue({
+      supplier: { ...supplierRow, kind: "train_operator" },
+      suiteTypes: [
+        {
+          id: SUITE_TYPE_ID,
+          supplier_id: SUPPLIER_ID,
+          name: "Suite",
+          active: true,
+          sort_order: 0,
+          created_at: "2026-01-01T00:00:00.000Z",
+          updated_at: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+      emails: [
+        {
+          id: EMAIL_ID,
+          supplier_id: SUPPLIER_ID,
+          email: "ops@example.com",
+          label: "General",
+          created_at: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+      routes: [],
+      rateCards: [],
+      locations: [
+        { id: ORIGIN_ID, name: "Pretoria" },
+        { id: DEST_ID, name: "Cape Town" },
+      ],
+      bedroomTypes: [],
+      bedroomLayouts: [],
+      bathroomTypes: [],
+      suiteTypeBedroomTypes: [],
+      suiteTypeBedroomLayouts: [],
+      suiteTypeBathroomTypes: [],
+      rateTypes: [],
+    })
+
+    helperMocks.supabaseFrom.mockImplementation((table: string) => {
+      if (table === "profiles") return profileQuery("manager")
+      if (table === "suppliers") return { update: () => supplierUpdateQuery }
+      if (table === "supplier_emails") return { upsert: emailUpsert }
+      if (table === "suite_types") return { upsert: suiteTypeUpsert }
+      if (table === "suite_type_bedroom_types") return linkDeleteFactory()
+      if (table === "suite_type_bedroom_layouts") return linkDeleteFactory()
+      if (table === "suite_type_bathroom_types") return linkDeleteFactory()
+      if (table === "routes") return { upsert: routeUpsert }
+      if (table === "vehicle_rental_route_details") return linkDeleteFactory()
+      if (table === "supplier_rate_adjustments") {
+        return { delete: () => ({ eq: async () => ({ error: null }) }) }
+      }
+      throw new Error(`Unexpected table ${table}`)
+    })
+
+    const response = await PATCH(
+      new Request("http://localhost/api/suppliers/test", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Rovos Rail",
+          kind: "train_operator",
+          email: "ops@example.com",
+          phone: "",
+          website: "",
+          location: "",
+          notes: "",
+          singleSupplementPct: 0,
+          active: true,
+          emails: [{ id: EMAIL_ID, email: "ops@example.com", label: "General" }],
+          suiteTypes: [{ id: SUITE_TYPE_ID, name: "Suite", active: true, sortOrder: 0 }],
+          routes: [
+            {
+              id: ROUTE_ID,
+              name: "totally wrong name typed by user",
+              originLocationId: ORIGIN_ID,
+              destinationLocationId: DEST_ID,
+              directionMode: "round_trip",
+              active: true,
+              rateCards: [],
+            },
+          ],
+          expectedUpdatedAt: "2026-01-02T00:00:00.000Z",
+        }),
+      }),
+      { params: Promise.resolve({ slug: "test" }) },
+    )
+
+    expect(response.status).toBe(200)
+    const routeRows = routeUpsertPayloads[0] as Array<{ name: string }>
+    expect(routeRows[0].name).toBe("Pretoria ↔ Cape Town")
   })
 })

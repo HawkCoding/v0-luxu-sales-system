@@ -235,7 +235,9 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
 
         <div className="grid gap-4 py-2 md:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor="supplier-kind">Category</Label>
+            <Label htmlFor="supplier-kind">
+              Category <span className="text-destructive">*</span>
+            </Label>
             <Select
               value={form.kind || undefined}
               onValueChange={(value: SupplierKind) =>
@@ -259,7 +261,9 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="supplier-name">Supplier name</Label>
+            <Label htmlFor="supplier-name">
+              Supplier name <span className="text-destructive">*</span>
+            </Label>
             <Input
               id="supplier-name"
               value={form.name}
