@@ -39,10 +39,53 @@ interface ExistingCustomer {
   last_name: string
 }
 
+interface MockLocation {
+  id: string
+  name: string
+}
+
+interface MockTrainSupplier {
+  id: string
+  name: string
+  kind: string
+  active: boolean
+}
+
+interface MockRoute {
+  id: string
+  supplier_id: string
+  origin_location_id: string | null
+  destination_location_id: string | null
+  direction_mode: "one_way" | "round_trip"
+  active: boolean
+}
+
+const DEFAULT_LOCATIONS: MockLocation[] = [
+  { id: "loc-pta", name: "Pretoria" },
+  { id: "loc-cpt", name: "Cape Town" },
+  { id: "loc-dur", name: "Durban" },
+  { id: "loc-dar", name: "Dar es Salaam" },
+]
+
+const DEFAULT_TRAIN_SUPPLIERS: MockTrainSupplier[] = [
+  { id: "sup-rovos", name: "Rovos Rail", kind: "train_operator", active: true },
+  { id: "sup-blue", name: "Blue Train", kind: "train_operator", active: true },
+]
+
+const DEFAULT_ROUTES: MockRoute[] = [
+  { id: "route-rovos-pta-cpt", supplier_id: "sup-rovos", origin_location_id: "loc-pta", destination_location_id: "loc-cpt", direction_mode: "round_trip", active: true },
+  { id: "route-blue-pta-cpt", supplier_id: "sup-blue", origin_location_id: "loc-pta", destination_location_id: "loc-cpt", direction_mode: "round_trip", active: true },
+  { id: "route-rovos-cpt-dar", supplier_id: "sup-rovos", origin_location_id: "loc-cpt", destination_location_id: "loc-dar", direction_mode: "round_trip", active: true },
+  { id: "route-rovos-pta-dur-oneway", supplier_id: "sup-rovos", origin_location_id: "loc-pta", destination_location_id: "loc-dur", direction_mode: "one_way", active: true },
+]
+
 interface MockState {
   existingCustomers: ExistingCustomer[]
   completedCustomerIds: Set<string>
   duplicateBookingId: string | null
+  locations: MockLocation[]
+  trainSuppliers: MockTrainSupplier[]
+  routes: MockRoute[]
   customerInsertRows: Array<Record<string, unknown>>
   customerUpdateRows: Array<{ id: string; payload: Record<string, unknown> }>
   bookingInsertRows: Array<Record<string, unknown>>
@@ -55,6 +98,9 @@ function createState(overrides: Partial<MockState> = {}): MockState {
     existingCustomers: [],
     completedCustomerIds: new Set(),
     duplicateBookingId: null,
+    locations: DEFAULT_LOCATIONS,
+    trainSuppliers: DEFAULT_TRAIN_SUPPLIERS,
+    routes: DEFAULT_ROUTES,
     customerInsertRows: [],
     customerUpdateRows: [],
     bookingInsertRows: [],
@@ -62,6 +108,23 @@ function createState(overrides: Partial<MockState> = {}): MockState {
     auditRows: [],
     ...overrides,
   }
+}
+
+function createFilterableListQuery<T>(rows: T[]) {
+  const filters: Record<string, unknown> = {}
+  const query = {
+    eq: vi.fn((column: string, value: unknown) => {
+      filters[column] = value
+      return query
+    }),
+    ...createThenable(() => ({
+      data: rows.filter((row) =>
+        Object.entries(filters).every(([key, value]) => (row as Record<string, unknown>)[key] === value),
+      ),
+      error: null,
+    })),
+  }
+  return query
 }
 
 function createThenable<T>(getValue: () => { data: T; error: null }) {
@@ -198,13 +261,21 @@ function createSupabase(state: MockState) {
         }
       }
 
+      if (table === "locations") {
+        return {
+          select: vi.fn(async () => ({ data: state.locations, error: null })),
+        }
+      }
+
+      if (table === "suppliers") {
+        return {
+          select: vi.fn(() => createFilterableListQuery(state.trainSuppliers)),
+        }
+      }
+
       if (table === "routes") {
         return {
-          select: vi.fn(() => ({
-            ilike: vi.fn(() => ({
-              maybeSingle: vi.fn(async () => ({ data: { id: "route-1" }, error: null })),
-            })),
-          })),
+          select: vi.fn(() => createFilterableListQuery(state.routes)),
         }
       }
 
@@ -412,5 +483,100 @@ describe("createEmailBookingFromParsedDraft duplicate detection", () => {
     expect(
       state.auditRows.some((row) => row.action === "possible_duplicate_email_import"),
     ).toBe(false)
+  })
+})
+
+describe("createEmailBookingFromParsedDraft route matching", () => {
+  beforeEach(() => {
+    importBookingMocks.createServiceClient.mockReset()
+    importBookingMocks.bookingSequence = 0
+  })
+
+  function routeDraft(supplierHeader: string, direction: string) {
+    return parseEmailDraft(`
+Please indicate the purpose of your request
+Quote
+Title
+Ms
+Name
+Jane
+Surname
+Doe
+Contact Number
+0723093611
+Email
+jane@example.com
+Country
+South Africa
+${supplierHeader}
+Direction
+${direction}
+Departure Date
+11 May 2026
+No. of Adults
+2
+No of Suites
+1
+Suite Type 1
+Deluxe Twin with shower
+`)
+  }
+
+  async function importRoute(state: MockState, supplierHeader: string, direction: string) {
+    importBookingMocks.createServiceClient.mockReturnValue(createSupabase(state))
+    const parsed = routeDraft(supplierHeader, direction)
+    await createEmailBookingFromParsedDraft(parsed, {
+      emailAccountId: "account-1",
+      mailboxEmail: "bookings@example.com",
+      subject: "Train enquiry",
+      receivedAt: "2026-05-17T10:00:00.000Z",
+      rawText: parsed.rawText,
+      missingFields: [],
+      warnings: [],
+    })
+    return state.bookingInsertRows[0]?.route_id ?? null
+  }
+
+  it("links the supplier-scoped route for a forward direction", async () => {
+    const state = createState()
+    expect(await importRoute(state, "Blue Train Information", "Pretoria to Cape Town")).toBe(
+      "route-blue-pta-cpt",
+    )
+  })
+
+  it("disambiguates a shared city pair by the resolved supplier", async () => {
+    const state = createState()
+    expect(await importRoute(state, "Rovos Rail Information", "Pretoria to Cape Town")).toBe(
+      "route-rovos-pta-cpt",
+    )
+  })
+
+  it("matches a reversed wording for a round-trip route", async () => {
+    const state = createState()
+    expect(await importRoute(state, "Rovos Rail Information", "Cape Town to Pretoria")).toBe(
+      "route-rovos-pta-cpt",
+    )
+  })
+
+  it("matches a multi-word location pair regardless of order", async () => {
+    const state = createState()
+    expect(await importRoute(state, "Rovos Rail Information", "Dar es Salaam to Cape Town")).toBe(
+      "route-rovos-cpt-dar",
+    )
+  })
+
+  it("respects direction for a one-way route", async () => {
+    const forwardState = createState()
+    expect(await importRoute(forwardState, "Rovos Rail Information", "Pretoria to Durban")).toBe(
+      "route-rovos-pta-dur-oneway",
+    )
+
+    const reverseState = createState()
+    expect(await importRoute(reverseState, "Rovos Rail Information", "Durban to Pretoria")).toBeNull()
+  })
+
+  it("does not auto-link an ambiguous city pair when the supplier is unknown", async () => {
+    const state = createState({ trainSuppliers: [] })
+    expect(await importRoute(state, "Rovos Rail Information", "Pretoria to Cape Town")).toBeNull()
   })
 })
