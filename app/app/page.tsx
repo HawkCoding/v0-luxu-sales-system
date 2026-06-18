@@ -57,6 +57,9 @@ export default function DashboardPage() {
         <StatCard icon={CreditCard} label="Full Payment" value={fullPayments} href="/app/payments" />
         <StatCard icon={AlertTriangle} label="Unresolved Errors" value={unresolvedErrors} href="/app/settings/error-log" />
       </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        <StatCard icon={AlertTriangle} label="Unresolved Errors" value={unresolvedErrors} href="/app/settings/error-log" />
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card className="shadow-lg border-2 border-stroke-strong bg-bg-white">
