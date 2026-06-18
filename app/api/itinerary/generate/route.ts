@@ -8,6 +8,7 @@ import { checkItineraryReadiness } from "@/lib/itinerary/check-readiness"
 import { renderItineraryPdf } from "@/lib/itinerary/render-pdf"
 import { renderItineraryEmail } from "@/lib/itinerary/render-itinerary-email"
 import { CONSULTANTS, VOUCHER_TEMPLATE_DEFAULTS, type ConsultantAbbreviation, type VoucherTemplate } from "@/lib/types"
+import { firstRecord } from "@/lib/utils"
 
 export const runtime = "nodejs"
 
@@ -42,10 +43,6 @@ type BookingRecord = {
 
 type VoucherTemplateRow = VoucherTemplate & { id?: string }
 
-function firstRecord<T>(value: T | T[] | null | undefined): T | null {
-  if (Array.isArray(value)) return value[0] ?? null
-  return value ?? null
-}
 
 function sanitizePathPart(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "itinerary"

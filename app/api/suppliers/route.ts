@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
-import { buildSupplierSlugBase, mapSupplier } from "@/lib/suppliers"
-import { allowedRoles, requireAuthenticatedUser, type SessionClient } from "./helpers"
+import { mapSupplier } from "@/lib/suppliers"
+import { allowedRoles, requireAuthenticatedUser, resolveUniqueSupplierSlug } from "./helpers"
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const PHONE_PATTERN = /^[+\d\s()-]*$/
@@ -9,33 +9,6 @@ const WEBSITE_PATTERN = /^\S+\.\S+$/
 const EMAIL_LABEL_MAX_LENGTH = 100
 
 
-async function resolveUniqueSupplierSlug(
-  supabase: SessionClient,
-  supplierName: string,
-): Promise<string> {
-  const slugBase = buildSupplierSlugBase(supplierName)
-
-  const { data: slugRows, error } = await supabase
-    .from("suppliers")
-    .select("slug")
-    .or(`slug.eq.${slugBase},slug.like.${slugBase}-%`)
-
-  if (error) {
-    throw new Error("Failed to validate supplier slug uniqueness")
-  }
-
-  const usedSlugs = new Set((slugRows ?? []).map((row) => row.slug))
-  if (!usedSlugs.has(slugBase)) {
-    return slugBase
-  }
-
-  let suffix = 2
-  while (usedSlugs.has(`${slugBase}-${suffix}`)) {
-    suffix += 1
-  }
-
-  return `${slugBase}-${suffix}`
-}
 
 const createSupplierSchema = z.object({
   kind: z.enum(["train_operator", "hotel_property", "transfers", "vehicle_rental", "tour_operator", "airline"]),

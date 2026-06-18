@@ -161,6 +161,8 @@ export function mapSupplierRoute(
     dropoffPoint: row.dropoff_point ?? null,
     vehicleRentalDetails: mapVehicleRentalRouteDetails(vehicleRentalDetails),
     directionMode: normalizeRouteDirectionMode(row.direction_mode),
+    commissionType: row.commission_type ?? null,
+    commissionValue: row.commission_value != null ? Number(row.commission_value) : null,
     active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -418,8 +420,9 @@ export function mapSupplierDetail(
     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name))
     .map(mapRateType)
 
+  const mapped = mapSupplier(supplier)
   return {
-    ...mapSupplier(supplier),
+    ...mapped,
     emails: emails.map(mapSupplierEmail),
     suiteTypes: sortedSuiteTypes.map((row) => mapSupplierSuiteType(row, memberships)),
     routes: routes.map((route) => mapSupplierRoute(route, detailsByRouteId.get(route.id))),
@@ -440,7 +443,7 @@ export function mapSupplierDetail(
       discountPct: Number(row.discount_pct ?? 0),
     })),
     defaultRateTypeId: resolveDefaultRateTypeId(
-      mapSupplier(supplier).kind,
+      mapped.kind,
       (variants.kindDefaultRateTypes ?? []).map((row) => ({
         kind: row.kind as SupplierKind,
         rateTypeId: row.rate_type_id,

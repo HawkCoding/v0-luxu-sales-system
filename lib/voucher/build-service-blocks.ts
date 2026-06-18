@@ -8,6 +8,7 @@ import type {
 import { voucherServiceTypeLabel } from "@/lib/generate-voucher"
 import type { Database } from "@/lib/supabase/types"
 import type { SupplierKind } from "@/lib/types"
+import { firstRecord } from "@/lib/utils"
 
 export function mapSupplierKindToServiceType(kind: SupplierKind | string | null): VoucherServiceType {
   switch (kind) {
@@ -62,10 +63,6 @@ interface SelectionJoinRow {
   suite_types: { name: string | null } | { name: string | null }[] | null
 }
 
-function firstRecord<T>(value: T | T[] | null | undefined): T | null {
-  if (Array.isArray(value)) return value[0] ?? null
-  return value ?? null
-}
 
 export interface BuildVoucherServiceBlocksResult {
   blocks: VoucherServiceBlock[]

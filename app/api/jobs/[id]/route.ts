@@ -87,6 +87,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params
   const supabase = await createSessionClient()
 
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
   const { data: booking } = await supabase
     .from("bookings")
     .select(BOOKING_WITH_ROUTE_COLUMNS)
@@ -716,19 +719,19 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
     const role = extractRoleFromJwt(user) ?? actorProfile?.clearance_level ?? null
     const isManagerOrAdmin = role === "manager" || role === "admin"
-    const isSalesperson = isManagerOrAdmin || role === "consultant"
+    const canSelfAssign = isManagerOrAdmin || role === "consultant"
 
-    // Self-serve + manager override: a salesperson may take an unassigned job or
+    // Self-assign + manager override: a salesperson may take an unassigned job or
     // release one they already own; assigning to anyone else, or taking a job
     // owned by another, requires a manager/admin. Read-only roles cannot assign.
     const currentOwner = booking.assigned_salesperson_id ?? null
     const target = body.assignedSalespersonId ?? null
-    const isSelfServe =
-      isSalesperson &&
+    const isSelfAssign =
+      canSelfAssign &&
       ((target === user.id && (currentOwner === null || currentOwner === user.id)) ||
         (target === null && currentOwner === user.id))
 
-    if (!isManagerOrAdmin && !isSelfServe) {
+    if (!isManagerOrAdmin && !isSelfAssign) {
       return NextResponse.json(
         { error: "Manager access required to assign this job to another salesperson" },
         { status: 403 },

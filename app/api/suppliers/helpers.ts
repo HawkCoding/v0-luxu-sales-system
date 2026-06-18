@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { createSessionClient } from "@/lib/supabase/server"
+import { buildSupplierSlugBase } from "@/lib/suppliers"
 import type { Database } from "@/lib/supabase/types"
 
 export const allowedRoles = new Set(["admin", "manager"])
@@ -16,6 +17,34 @@ export type RefTableName =
   | "bedroom_types"
   | "bedroom_layouts"
   | "bathroom_types"
+
+export async function resolveUniqueSupplierSlug(
+  supabase: SessionClient,
+  supplierName: string,
+): Promise<string> {
+  const slugBase = buildSupplierSlugBase(supplierName)
+
+  const { data: slugRows, error } = await supabase
+    .from("suppliers")
+    .select("slug")
+    .or(`slug.eq.${slugBase},slug.like.${slugBase}-%`)
+
+  if (error) {
+    throw new Error("Failed to validate supplier slug uniqueness")
+  }
+
+  const usedSlugs = new Set((slugRows ?? []).map((row) => row.slug))
+  if (!usedSlugs.has(slugBase)) {
+    return slugBase
+  }
+
+  let suffix = 2
+  while (usedSlugs.has(`${slugBase}-${suffix}`)) {
+    suffix += 1
+  }
+
+  return `${slugBase}-${suffix}`
+}
 
 export async function requireAuthenticatedUser() {
   const supabase = await createSessionClient()

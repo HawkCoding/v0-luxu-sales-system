@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
-import { buildSupplierSlugBase, mapSupplier } from "@/lib/suppliers"
+import { mapSupplier } from "@/lib/suppliers"
 import { buildRouteName } from "@/lib/routes/route-name"
-import { requireAuthenticatedUser } from "../helpers"
+import { requireAuthenticatedUser, resolveUniqueSupplierSlug } from "../helpers"
 import { createServiceClient } from "@/lib/supabase/server"
 
 const allowedRoles = new Set(["admin", "manager", "consultant"])
@@ -104,7 +104,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
-  const parsedResult = quickSupplierSchema.safeParse(await req.json())
+  let rawBody: unknown
+  try {
+    rawBody = await req.json()
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
+  }
+  const parsedResult = quickSupplierSchema.safeParse(rawBody)
   if (!parsedResult.success) {
     return NextResponse.json(
       { error: "Invalid request payload", details: parsedResult.error.flatten().fieldErrors },
@@ -153,20 +159,8 @@ export async function POST(req: Request) {
   // Use service client for all writes — the consultant role has no direct table write access.
   const adminSupabase = await createServiceClient()
 
-  // Resolve a unique slug.
-  const slugBase = buildSupplierSlugBase(parsed.name)
-  const { data: slugRows } = await adminSupabase
-    .from("suppliers")
-    .select("slug")
-    .or(`slug.eq.${slugBase},slug.like.${slugBase}-%`)
-
-  const usedSlugs = new Set((slugRows ?? []).map((row) => row.slug))
-  let slug = slugBase
-  if (usedSlugs.has(slug)) {
-    let suffix = 2
-    while (usedSlugs.has(`${slugBase}-${suffix}`)) suffix++
-    slug = `${slugBase}-${suffix}`
-  }
+  // Resolve a unique slug using the session client (no elevated privileges needed).
+  const slug = await resolveUniqueSupplierSlug(supabase, parsed.name)
 
   const now = new Date().toISOString()
   const routeId = crypto.randomUUID()
@@ -189,7 +183,7 @@ export async function POST(req: Request) {
       active: false,
       status: "temporary",
     })
-    .select("*")
+    .select("id, slug, kind, status, name, email, phone, website, location, location_detail, location_id, location_area_id, description, notes, active, single_supplement_pct, infant_max_age, child_max_age, default_time_start, default_time_end, created_at, updated_at")
     .single()
 
   if (supplierError || !supplier) {
