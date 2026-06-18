@@ -108,6 +108,7 @@ export interface Customer {
   vipStatus?: boolean
   preferences?: string | null
   communicationPreferences?: string | null
+  defaultRateTypeId?: string | null
   firstTravelDate?: string | null
   firstTravelDateDisplay?: string
   lastTravelDate?: string | null
@@ -145,9 +146,6 @@ export interface Booking {
   ownerUserId: string | null
   assignedSalespersonId: string | null
   assignedSalespersonName?: string | null
-  claimedByUserId?: string | null
-  claimedByName?: string | null
-  claimedAt?: string | null
   isRepeatClientAtCreation: boolean
   departureDate: string | null
   departureDateDisplay?: string
@@ -172,6 +170,7 @@ export interface Booking {
   childAges: number[] | null
   routeId: string | null
   direction: string | null
+  supplierName?: string | null
   rawText: string | null
   extractedJson: unknown
   termsAccepted: boolean
@@ -226,7 +225,7 @@ export type SupplierKind =
   | "vehicle_rental"
   | "tour_operator"
   | "airline"
-export type SupplierStatus = "draft" | "active" | "inactive"
+export type SupplierStatus = "draft" | "active" | "inactive" | "temporary"
 export type TransportRequestServiceType = "transfer" | "rental"
 export type TransportServiceType = TransportRequestServiceType
 
@@ -258,6 +257,10 @@ export interface SupplierVocabulary {
   sectionDescription: string
   priceLabel: string
   routeHasLocations: boolean
+  /** Whether the route exposes the one-way/round-trip Direction selector. Only meaningful for point-to-point journey suppliers where a return trip doubles the fare (trains, airlines). */
+  routeHasDirection: boolean
+  /** Whether the route name is auto-derived from origin/destination + direction and locked (not editable). Train operators only. */
+  routeNameAutoDerived: boolean
   showSingleSupplement: boolean
   showDurationNights: boolean
   originLabel: string
@@ -283,6 +286,8 @@ const JOURNEY_SUPPLIER_VOCABULARY: SupplierVocabulary = {
     "Manage the suite types this supplier offers, the routes they cover, and period-based rates.",
   priceLabel: "per person sharing",
   routeHasLocations: true,
+  routeHasDirection: true,
+  routeNameAutoDerived: true,
   showSingleSupplement: true,
   showDurationNights: true,
   originLabel: "Origin",
@@ -311,6 +316,8 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
       "Manage room types, meal plans, and period-based rates.",
     priceLabel: "per room per night",
     routeHasLocations: false,
+    routeHasDirection: false,
+    routeNameAutoDerived: false,
     showSingleSupplement: false,
     showDurationNights: false,
     originLabel: "Origin",
@@ -336,6 +343,8 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
       "Manage transfer services, pickup/drop-off points, vehicle types, and period-based rates.",
     priceLabel: "per vehicle",
     routeHasLocations: true,
+    routeHasDirection: true,
+    routeNameAutoDerived: false,
     showSingleSupplement: false,
     showDurationNights: false,
     originLabel: "Pickup",
@@ -355,6 +364,8 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
       "Manage vehicle types, rental pickup/return points, rental terms, and period-based rates.",
     priceLabel: "per day",
     routeHasLocations: true,
+    routeHasDirection: false,
+    routeNameAutoDerived: false,
     showSingleSupplement: false,
     showDurationNights: false,
     originLabel: "Pickup point",
@@ -380,6 +391,8 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
       "Manage the tour types this operator offers, itineraries, and per-person pricing.",
     priceLabel: "per person",
     routeHasLocations: false,
+    routeHasDirection: false,
+    routeNameAutoDerived: false,
     showSingleSupplement: true,
     showDurationNights: true,
     originLabel: "Origin",
@@ -399,6 +412,8 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
       "Manage the cabins this airline offers, routes, and per-person pricing.",
     priceLabel: "per person",
     routeHasLocations: true,
+    routeHasDirection: true,
+    routeNameAutoDerived: false,
     showSingleSupplement: true,
     showDurationNights: false,
     originLabel: "Origin",
@@ -431,7 +446,7 @@ export interface Location {
   updatedAtDisplay?: string
 }
 
-export type RouteDirectionMode = "one_way" | "round_trip" | "loop"
+export type RouteDirectionMode = "one_way" | "round_trip"
 
 export type CommissionKind = "percent" | "per_person"
 
@@ -440,7 +455,7 @@ export interface CommissionConfig {
   value: number
 }
 
-export type CommissionSource = "line" | "route" | "supplier" | "none"
+export type CommissionSource = "line" | "none"
 
 export interface ResolvedCommission {
   type: CommissionKind | null
@@ -465,8 +480,6 @@ export interface SupplierRoute {
   dropoffPoint?: string | null
   vehicleRentalDetails?: VehicleRentalRouteDetails | null
   directionMode?: RouteDirectionMode
-  commissionType?: CommissionKind | null
-  commissionValue?: number | null
   active: boolean
   createdAt: string
   createdAtDisplay?: string
@@ -535,9 +548,20 @@ export interface RateType {
   name: string
   sortOrder: number
   isDefault: boolean
+  isStandard: boolean
   archivedAt: string | null
   createdAt: string
   updatedAt: string
+}
+
+/**
+ * Per-supplier-kind default rate type. Decides which rate a supplier (and its
+ * rate matrix) starts on. Falls back to the global default rate type when a
+ * kind has no explicit mapping.
+ */
+export interface SupplierKindDefaultRateType {
+  kind: SupplierKind
+  rateTypeId: string
 }
 
 export interface PricingSnapshot {
@@ -564,14 +588,14 @@ export interface PricingSnapshot {
   markupPct: number
   singleSupplementPct: number | null
   serviceType: "transfer" | "rental" | null
-  directionMode?: RouteDirectionMode | null
-  direction?: RouteDirection | null
   suiteVariants?: { label: string; values: string[] }[]
   markupAmount?: number | null
   commission?: CommissionBreakdown | null
+  /** True when this line was added as an ad-hoc extra (not part of an applied package). */
+  isExtra?: boolean
+  /** Display-only quantity basis shown next to the qty (e.g. "per person", "per room per night"). */
+  unit?: string | null
 }
-
-export type RouteDirection = "outbound" | "return" | "round_trip"
 
 export interface SupplierPackage {
   id: string
@@ -667,14 +691,22 @@ export interface Supplier {
   singleSupplementPct: number
   infantMaxAge: number | null
   childMaxAge: number | null
-  defaultCommissionType: CommissionKind | null
-  defaultCommissionValue: number | null
   defaultTimeStart: string | null
   defaultTimeEnd: string | null
   createdAt: string
   createdAtDisplay?: string
   updatedAt: string
   updatedAtDisplay?: string
+}
+
+/**
+ * A rate type that applies to a supplier, with how much cheaper it is than the
+ * supplier's default rate. `discountPct` is the percentage off the default rate
+ * (e.g. 20 => default price * 0.8).
+ */
+export interface SupplierRateAdjustment {
+  rateTypeId: string
+  discountPct: number
 }
 
 export interface SupplierDetail extends Supplier {
@@ -687,6 +719,10 @@ export interface SupplierDetail extends Supplier {
   bedroomLayouts: SupplierVariantValue[]
   bathroomTypes: SupplierVariantValue[]
   rateTypes: RateType[]
+  /** Non-default rates that apply to this supplier and their markdown. */
+  rateAdjustments: SupplierRateAdjustment[]
+  /** Resolved default rate type for this supplier's kind (the baseline). */
+  defaultRateTypeId: string | null
 }
 
 export interface BookingTransportRequest {
@@ -752,9 +788,6 @@ export interface Job {
   ownerName?: string | null
   assignedSalespersonId?: string | null
   assignedSalespersonName?: string | null
-  claimedByUserId?: string | null
-  claimedByName?: string | null
-  claimedAt?: string | null
   customerId: string
   consultant: ConsultantAbbreviation
   purpose: Purpose
@@ -924,6 +957,7 @@ export type DocumentKind =
   | "quote_pdf"
   | "invoice_pdf"
   | "voucher_pdf"
+  | "itinerary_pdf"
   | "summary_pdf"
   | "proof_of_payment"
   | "other"
