@@ -24,21 +24,28 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { useActivePackages } from "@/lib/use-data"
-import type { Package, PackageDetail, QuoteLineItem, RouteDirection } from "@/lib/types"
+import { useActivePackages, useRateTypes } from "@/lib/use-data"
+import type { Package, PackageDetail, QuoteLineItem } from "@/lib/types"
 import { SUPPLIER_KIND_LABELS } from "@/lib/types"
 import { PresenceAvatars } from "@/components/presence-avatars"
 import { useRecordPresence } from "@/hooks/use-record-presence"
 import { useVersionedSave } from "@/hooks/use-versioned-save"
 import { CommissionControl, type CommissionControlValue } from "@/components/supplier/commission-control"
 import { CommissionBadge } from "@/components/quotes/commission-badge"
+import { QuoteLineSupplierPicker, type QuoteExtraSelection } from "@/components/quote-line-supplier-picker"
+import { getDestinationLocationIds } from "@/lib/packages/location-filter"
+import { X } from "lucide-react"
 
 interface ApplyPackageDialogProps {
   jobId: string
   quoteId: string
   travelDate: string | null
   existingLineItemCount: number
+  /** Existing quote lines — manual/extra lines (snapshot.isExtra) are preserved across re-apply. */
+  existingLineItems?: QuoteLineItem[]
   expectedUpdatedAt?: string
+  /** Customer's default rate type — pre-selects the rate version when applying a package. */
+  customerDefaultRateTypeId?: string | null
   onApplied: () => void
 }
 
@@ -74,16 +81,13 @@ interface LegSelectionState {
   selected: boolean
   routeId: string
   suiteTypeId: string
-  direction?: RouteDirection
+  /** Hotel legs only: number of rooms booked (default 1). */
+  rooms: number
+  /** Hotel legs only: number of nights stayed (default 1). */
+  nights: number
   commissionOverride?: CommissionControlValue
   showCommissionOverride?: boolean
 }
-
-const DIRECTION_OPTIONS: { key: RouteDirection; label: string }[] = [
-  { key: "outbound", label: "Outbound" },
-  { key: "return", label: "Return" },
-  { key: "round_trip", label: "Round trip" },
-]
 
 function isOptionalLeg(kind: PackageDetail["legs"][number]["supplierKind"]): boolean {
   return kind === "hotel_property" || kind === "transfers" || kind === "vehicle_rental"
@@ -103,13 +107,6 @@ function getSuiteLabel(kind: PackageDetail["legs"][number]["supplierKind"]): str
   return "suite type"
 }
 
-function defaultDirectionForRoute(
-  route: PackageDetail["legs"][number]["routes"][number] | undefined,
-): RouteDirection | undefined {
-  if (!route) return undefined
-  return route.directionMode === "round_trip" ? "round_trip" : undefined
-}
-
 function buildDefaultSelections(detail: PackageDetail): Record<string, LegSelectionState> {
   return Object.fromEntries(
     detail.legs.map((leg) => {
@@ -121,7 +118,8 @@ function buildDefaultSelections(detail: PackageDetail): Record<string, LegSelect
           selected: !isOptionalLeg(leg.supplierKind),
           routeId: onlyRoute ? onlyRoute.id : "",
           suiteTypeId: activeSuiteTypes.length === 1 ? activeSuiteTypes[0].id : "",
-          direction: defaultDirectionForRoute(onlyRoute),
+          rooms: 1,
+          nights: 1,
           commissionOverride: { type: null, value: null },
           showCommissionOverride: false,
         },
@@ -135,6 +133,8 @@ function getEmptySelection(selected: boolean): LegSelectionState {
     selected,
     routeId: "",
     suiteTypeId: "",
+    rooms: 1,
+    nights: 1,
     commissionOverride: { type: null, value: null },
     showCommissionOverride: false,
   }
@@ -145,10 +145,15 @@ export function ApplyPackageDialog({
   quoteId,
   travelDate,
   existingLineItemCount,
+  existingLineItems = [],
   expectedUpdatedAt,
+  customerDefaultRateTypeId,
   onApplied,
 }: ApplyPackageDialogProps) {
   const { data: packages = [] } = useActivePackages()
+  const { data: rateTypesData } = useRateTypes()
+  const rateTypes = (rateTypesData?.rateTypes ?? []).filter((rt) => !rt.archivedAt)
+  const systemDefaultRateTypeId = rateTypes.find((rt) => rt.isDefault)?.id ?? ""
   const [open, setOpen] = useState(false)
   const [step, setStep] = useState<Step>("pick")
   const [search, setSearch] = useState("")
@@ -156,7 +161,9 @@ export function ApplyPackageDialog({
   const [packageDetail, setPackageDetail] = useState<PackageDetail | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [legSelections, setLegSelections] = useState<Record<string, LegSelectionState>>({})
+  const [rateTypeId, setRateTypeId] = useState("")
   const [previewLineItems, setPreviewLineItems] = useState<QuoteLineItem[]>([])
+  const [extras, setExtras] = useState<QuoteExtraSelection[]>([])
   const [validating, setValidating] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
   const { others, setEditing } = useRecordPresence("quote", open ? quoteId : undefined)
@@ -183,16 +190,32 @@ export function ApplyPackageDialog({
     setEditing(open && step !== "pick")
   }, [open, setEditing, step])
 
+  // Backfill the rate type once it resolves, if the picker is still empty
+  // (rate types may load after the configure step opens).
+  useEffect(() => {
+    if (step === "configure" && !rateTypeId) {
+      const fallback = customerDefaultRateTypeId || systemDefaultRateTypeId
+      if (fallback) setRateTypeId(fallback)
+    }
+  }, [step, rateTypeId, customerDefaultRateTypeId, systemDefaultRateTypeId])
+
   function reset() {
     setStep("pick")
     setSearch("")
     setSelectedPackage(null)
     setPackageDetail(null)
     setLegSelections({})
+    setRateTypeId("")
     setPreviewLineItems([])
+    setExtras([])
     setApplyError(null)
     clearQuoteConflict()
   }
+
+  const destinationLocationIds = packageDetail ? getDestinationLocationIds(packageDetail.legs) : []
+  // Manual/extra lines added previously survive a package re-apply; new extras come back in the preview.
+  const preservedExtras = existingLineItems.filter((li) => li.pricingSnapshot?.isExtra === true)
+  const lineItemsToSave = [...previewLineItems, ...preservedExtras]
 
   async function selectPackage(pkg: Package) {
     setSelectedPackage(pkg)
@@ -203,6 +226,7 @@ export function ApplyPackageDialog({
       const detail: PackageDetail = await res.json()
       setPackageDetail(detail)
       setLegSelections(buildDefaultSelections(detail))
+      setRateTypeId(customerDefaultRateTypeId || systemDefaultRateTypeId || "")
       setStep("configure")
     } catch {
       toast.error("Could not load package details")
@@ -238,7 +262,8 @@ export function ApplyPackageDialog({
         selected: state?.selected ?? !isOptionalLeg(leg.supplierKind),
         routeId: state?.routeId || undefined,
         suiteTypeId: state?.suiteTypeId || undefined,
-        direction: state?.direction,
+        rooms: leg.supplierKind === "hotel_property" ? Math.max(1, state?.rooms ?? 1) : undefined,
+        nights: leg.supplierKind === "hotel_property" ? Math.max(1, state?.nights ?? 1) : undefined,
         commissionOverride,
       }
     })
@@ -251,7 +276,14 @@ export function ApplyPackageDialog({
           jobId,
           quoteId,
           travelDate: travelDate ?? new Date().toISOString().slice(0, 10),
+          rateTypeId: rateTypeId || undefined,
           selections,
+          extras: extras.map((extra) => ({
+            supplierId: extra.supplierId,
+            routeId: extra.routeId,
+            suiteTypeId: extra.suiteTypeId,
+            quantity: extra.quantity,
+          })),
         }),
       })
       const payload = await res.json()
@@ -271,7 +303,7 @@ export function ApplyPackageDialog({
   async function applyToQuote() {
     if (previewLineItems.length === 0) return
     try {
-      await saveQuote({ lineItems: previewLineItems })
+      await saveQuote({ lineItems: lineItemsToSave })
       toast.success(`Package "${selectedPackage?.name}" applied to quote`)
       setOpen(false)
       reset()
@@ -286,7 +318,7 @@ export function ApplyPackageDialog({
   async function applyToQuoteAnyway() {
     if (previewLineItems.length === 0) return
     try {
-      await saveQuote({ lineItems: previewLineItems }, { ignoreExpectedUpdatedAt: true })
+      await saveQuote({ lineItems: lineItemsToSave }, { ignoreExpectedUpdatedAt: true })
       toast.success(`Package "${selectedPackage?.name}" applied to quote`)
       setOpen(false)
       reset()
@@ -392,6 +424,28 @@ export function ApplyPackageDialog({
               </p>
             )}
 
+            {rateTypes.length > 0 && (
+              <div className="space-y-1.5">
+                <Label htmlFor="apply-rate-type">Rate type</Label>
+                <Select value={rateTypeId} onValueChange={setRateTypeId}>
+                  <SelectTrigger id="apply-rate-type" className="h-9">
+                    <SelectValue placeholder="System default" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {rateTypes.map((rt) => (
+                      <SelectItem key={rt.id} value={rt.id}>
+                        {rt.name}
+                        {rt.isDefault ? " (default)" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Applies to every leg; a leg without this rate falls back to the default.
+                </p>
+              </div>
+            )}
+
             <div className="space-y-4">
               {packageDetail.legs.map((leg) => {
                 const selection = legSelections[leg.id]
@@ -399,7 +453,6 @@ export function ApplyPackageDialog({
                 const enabled = selection?.selected ?? !optional
                 const activeSuiteTypes = leg.suiteTypes.filter((st) => st.active)
                 const selectedRoute = leg.routes.find((r) => r.id === selection?.routeId)
-                const isRoundTripRoute = selectedRoute?.directionMode === "round_trip"
                 const routeCommissionInherited =
                   selectedRoute?.commissionType && selectedRoute.commissionValue != null
                     ? { type: selectedRoute.commissionType, value: selectedRoute.commissionValue as number }
@@ -443,13 +496,11 @@ export function ApplyPackageDialog({
                               <Select
                                 value={selection?.routeId ?? ""}
                                 onValueChange={(value) => {
-                                  const newRoute = leg.routes.find((r) => r.id === value)
                                   setLegSelections((prev) => ({
                                     ...prev,
                                     [leg.id]: {
                                       ...(prev[leg.id] ?? getEmptySelection(!optional)),
                                       routeId: value,
-                                      direction: defaultDirectionForRoute(newRoute),
                                     },
                                   }))
                                 }}
@@ -497,41 +548,39 @@ export function ApplyPackageDialog({
                           </div>
                         </div>
 
-                        {isRoundTripRoute ? (
-                          <div className="space-y-1.5">
-                            <Label>Direction</Label>
-                            <div
-                              role="radiogroup"
-                              aria-label="Route direction"
-                              className="inline-flex rounded-md border bg-muted p-0.5"
-                            >
-                              {DIRECTION_OPTIONS.map((opt) => {
-                                const selected = (selection?.direction ?? "round_trip") === opt.key
-                                return (
-                                  <button
-                                    key={opt.key}
-                                    type="button"
-                                    role="radio"
-                                    aria-checked={selected}
-                                    onClick={() =>
-                                      setLegSelections((prev) => ({
-                                        ...prev,
-                                        [leg.id]: {
-                                          ...(prev[leg.id] ?? getEmptySelection(!optional)),
-                                          direction: opt.key,
-                                        },
-                                      }))
-                                    }
-                                    className={`px-2.5 py-1 text-xs rounded-sm transition-colors ${
-                                      selected
-                                        ? "bg-background text-foreground shadow-sm"
-                                        : "text-muted-foreground hover:text-foreground"
-                                    }`}
-                                  >
-                                    {opt.label}
-                                  </button>
-                                )
-                              })}
+                        {leg.supplierKind === "hotel_property" ? (
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <div className="space-y-1.5">
+                              <Label htmlFor={`rooms-${leg.id}`}>Rooms</Label>
+                              <Input
+                                id={`rooms-${leg.id}`}
+                                type="number"
+                                min={1}
+                                value={selection?.rooms ?? 1}
+                                onChange={(e) => {
+                                  const next = Math.max(1, Math.floor(Number(e.target.value) || 1))
+                                  setLegSelections((prev) => ({
+                                    ...prev,
+                                    [leg.id]: { ...(prev[leg.id] ?? getEmptySelection(!optional)), rooms: next },
+                                  }))
+                                }}
+                              />
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label htmlFor={`nights-${leg.id}`}>Nights</Label>
+                              <Input
+                                id={`nights-${leg.id}`}
+                                type="number"
+                                min={1}
+                                value={selection?.nights ?? 1}
+                                onChange={(e) => {
+                                  const next = Math.max(1, Math.floor(Number(e.target.value) || 1))
+                                  setLegSelections((prev) => ({
+                                    ...prev,
+                                    [leg.id]: { ...(prev[leg.id] ?? getEmptySelection(!optional)), nights: next },
+                                  }))
+                                }}
+                              />
                             </div>
                           </div>
                         ) : null}
@@ -590,6 +639,47 @@ export function ApplyPackageDialog({
               })}
             </div>
 
+            <div className="space-y-3 border-t pt-4">
+              <div>
+                <Label>Extras (optional)</Label>
+                <p className="text-xs text-muted-foreground">
+                  Add items this package doesn&apos;t include — e.g. an extra hotel, transfer, or rental the client requested.
+                </p>
+              </div>
+              {extras.length > 0 ? (
+                <div className="space-y-1.5">
+                  {extras.map((extra, index) => (
+                    <div
+                      key={index}
+                      className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-xs"
+                    >
+                      <div className="min-w-0">
+                        <span className="font-medium">{extra.supplierName}</span>
+                        <span className="text-muted-foreground">
+                          {" · "}
+                          {extra.routeName} · {extra.suiteTypeName}
+                          {extra.quantity ? ` ×${extra.quantity}` : ""}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        aria-label="Remove extra"
+                        className="text-muted-foreground hover:text-destructive"
+                        onClick={() => setExtras((prev) => prev.filter((_, i) => i !== index))}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <QuoteLineSupplierPicker
+                destinationLocationIds={destinationLocationIds}
+                onAdd={(selection) => setExtras((prev) => [...prev, selection])}
+                addLabel="Add extra"
+              />
+            </div>
+
             {applyError && (
               <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 {applyError}
@@ -619,7 +709,11 @@ export function ApplyPackageDialog({
               </DialogTitle>
               <DialogDescription>
                 {existingLineItemCount > 0
-                  ? `This will replace ${existingLineItemCount} existing line item${existingLineItemCount === 1 ? "" : "s"} with the following:`
+                  ? `This replaces the package lines${
+                      preservedExtras.length > 0
+                        ? ` and keeps ${preservedExtras.length} existing extra line${preservedExtras.length === 1 ? "" : "s"}`
+                        : ""
+                    }. The quote will be:`
                   : "The following line items will be added to the quote:"}
               </DialogDescription>
             </DialogHeader>
@@ -635,16 +729,36 @@ export function ApplyPackageDialog({
                   </tr>
                 </thead>
                 <tbody>
-                  {previewLineItems.map((li, i) => (
+                  {lineItemsToSave.map((li, i) => (
                     <tr key={i} className="border-b last:border-0">
                       <td className="px-3 py-2 text-xs">
-                        <div>{li.description}</div>
+                        <div>
+                          {li.description}
+                          {li.pricingSnapshot?.isExtra ? (
+                            <Badge variant="outline" className="ml-1.5 text-[9px] align-middle">Extra</Badge>
+                          ) : null}
+                        </div>
+                        {li.pricingSnapshot?.rateTypeName && (
+                          <span className="text-[11px] text-muted-foreground">
+                            {li.pricingSnapshot.rateTypeName}
+                            {rateTypeId &&
+                            li.pricingSnapshot.rateTypeId &&
+                            li.pricingSnapshot.rateTypeId !== rateTypeId
+                              ? " (fallback)"
+                              : ""}
+                          </span>
+                        )}
                         <CommissionBadge
                           commission={li.pricingSnapshot?.commission ?? null}
                           currency={packageDetail?.currency ?? "ZAR"}
                         />
                       </td>
-                      <td className="px-3 py-2 text-right text-xs text-muted-foreground">{li.qty}</td>
+                      <td className="px-3 py-2 text-right text-xs text-muted-foreground">
+                        <div>{li.qty}</div>
+                        {li.pricingSnapshot?.unit ? (
+                          <div className="text-[11px] text-muted-foreground">{li.pricingSnapshot.unit}</div>
+                        ) : null}
+                      </td>
                       <td className="px-3 py-2 text-right text-xs">R {li.unitPrice.toLocaleString()}</td>
                       <td className="px-3 py-2 text-right text-xs font-medium">R {li.total.toLocaleString()}</td>
                     </tr>

@@ -1,4 +1,5 @@
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
+import { normalizeRouteDirectionMode } from "@/lib/routes/route-name"
 import type { Database } from "@/lib/supabase/types"
 import type {
   Package,
@@ -89,7 +90,7 @@ export function mapPackageRoute(
     pickupPoint: row.pickup_point ?? null,
     dropoffPoint: row.dropoff_point ?? null,
     vehicleRentalDetails: mapVehicleRentalRouteDetails(vehicleRentalDetails),
-    directionMode: row.direction_mode ?? "one_way",
+    directionMode: normalizeRouteDirectionMode(row.direction_mode),
     commissionType: row.commission_type ?? null,
     commissionValue:
       row.commission_value === null || row.commission_value === undefined

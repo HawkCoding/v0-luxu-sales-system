@@ -4,6 +4,7 @@ export interface QuotePdfLineItem {
   description: string
   supplierDescription?: string | null
   qty: number
+  unit?: string | null
   unitPrice: number
   total: number
 }
@@ -264,6 +265,7 @@ export function QuoteDocument({ quoteNumber, bookingNumber, customerName, quoteD
             </View>
             <View style={styles.colQty}>
               <Text style={styles.cellRight}>{item.qty}</Text>
+              {item.unit ? <Text style={styles.descSub}>{item.unit}</Text> : null}
             </View>
             <View style={styles.colUnit}>
               <Text style={styles.cellRight}>
