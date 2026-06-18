@@ -163,7 +163,15 @@ export async function POST(req: Request) {
   const filename = `itinerary-${sanitizePathPart(booking.booking_number)}.pdf`
   const storagePath = `${sanitizePathPart(booking.booking_number)}/${filename}`
 
-  // DB writes first — storage upload happens after so a DB failure never orphans a file.
+  // Storage upload first — if this fails nothing has been written to DB, so no orphaned records.
+  const { error: uploadError } = await supabase.storage
+    .from(ITINERARY_BUCKET)
+    .upload(storagePath, pdfBuffer, {
+      contentType: "application/pdf",
+      upsert: true,
+    })
+
+  if (uploadError) return safeSupabaseError("itinerary:storage-upload", uploadError)
 
   // Upsert the itineraries row for this booking (title + notes stored here)
   const { data: existingItinerary } = await supabase
@@ -186,6 +194,7 @@ export async function POST(req: Request) {
         .single()
 
   if (itineraryWrite.error || !itineraryWrite.data) {
+    await supabase.storage.from(ITINERARY_BUCKET).remove([storagePath]).catch(() => undefined)
     return safeSupabaseError("itinerary:upsert-itinerary", itineraryWrite.error)
   }
 
@@ -220,17 +229,9 @@ export async function POST(req: Request) {
         .single()
 
   if (documentWrite.error || !documentWrite.data) {
+    await supabase.storage.from(ITINERARY_BUCKET).remove([storagePath]).catch(() => undefined)
     return safeSupabaseError("itinerary:document-write", documentWrite.error)
   }
-
-  const { error: uploadError } = await supabase.storage
-    .from(ITINERARY_BUCKET)
-    .upload(storagePath, pdfBuffer, {
-      contentType: "application/pdf",
-      upsert: true,
-    })
-
-  if (uploadError) return safeSupabaseError("itinerary:storage-upload", uploadError)
 
   await writeAuditLog(supabase, {
     actor: auth.value.profile.actorName,
