@@ -31,8 +31,7 @@ export default function DocumentsPage() {
     const booking = data.bookings.find((b: any) => b.id === d.bookingId)
     const customer = data.customers.find((c: any) => c.id === booking?.customerId)
 
-    let supplier = "Rovos Rail"
-    if (booking?.direction?.toLowerCase().includes("blue")) supplier = "Blue Train"
+    const supplier = booking?.supplierName?.trim() || null
 
     return {
       ...d,
@@ -70,7 +69,11 @@ export default function DocumentsPage() {
       matchGeneratedDateFrom && matchGeneratedDateTo
   })
 
-  const hasActiveFilters = search || docTypeFilter !== "all" || supplierFilter !== "all" || 
+  const supplierOptions = Array.from(
+    new Set(docs.map((d: any) => d.supplier).filter(Boolean) as string[]),
+  ).sort((a, b) => a.localeCompare(b))
+
+  const hasActiveFilters = search || docTypeFilter !== "all" || supplierFilter !== "all" ||
     consultantFilter !== "all" || generatedDateFrom || generatedDateTo
 
   const clearFilters = () => {
@@ -83,7 +86,7 @@ export default function DocumentsPage() {
   }
 
   return (
-    <div className="p-6 space-y-5 max-w-6xl">
+    <div className="p-6 space-y-5 max-w-6xl mx-auto">
       <div>
         <h1 className="text-3xl font-semibold text-foreground tracking-tight">Documents</h1>
         <p className="text-base text-muted-foreground mt-2">
@@ -143,8 +146,11 @@ export default function DocumentsPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Suppliers</SelectItem>
-                    <SelectItem value="Rovos Rail">Rovos Rail</SelectItem>
-                    <SelectItem value="Blue Train">Blue Train</SelectItem>
+                    {supplierOptions.map((name) => (
+                      <SelectItem key={name} value={name}>
+                        {name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -238,17 +244,22 @@ export default function DocumentsPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-sm font-medium text-foreground">
-                        {d.kind.replace(/_/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase())}
+                        {d.kind
+                          .replace(/_/g, " ")
+                          .replace(/\b\w/g, (l: string) => l.toUpperCase())
+                          .replace(/\bPdf\b/g, "PDF")}
                       </span>
-                      <Badge variant="outline" className="text-[10px]">PDF</Badge>
+                      <Badge variant="outline" className="text-xs">PDF</Badge>
                       {d.consultant && (
-                        <Badge variant="default" className="text-[10px] h-4 px-1.5 font-bold">
+                        <Badge variant="default" className="text-xs h-5 px-1.5 font-bold">
                           {d.consultant}
                         </Badge>
                       )}
-                      <Badge variant="secondary" className="text-[10px]">
-                        {d.supplier}
-                      </Badge>
+                      {d.supplier && (
+                        <Badge variant="secondary" className="text-xs">
+                          {d.supplier}
+                        </Badge>
+                      )}
                     </div>
                     <p className="text-xs text-muted-foreground truncate">
                       {d.jobNumber} • {d.customerName}

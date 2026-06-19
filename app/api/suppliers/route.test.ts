@@ -5,10 +5,14 @@ const helperMocks = vi.hoisted(() => ({
   requireAuthenticatedUser: vi.fn(),
 }))
 
-vi.mock("./helpers", () => ({
-  allowedRoles: new Set(["admin", "manager"]),
-  requireAuthenticatedUser: helperMocks.requireAuthenticatedUser,
-}))
+vi.mock("./helpers", async () => {
+  const actual = await vi.importActual<typeof import("./helpers")>("./helpers")
+  return {
+    ...actual,
+    allowedRoles: new Set(["admin", "manager"]),
+    requireAuthenticatedUser: helperMocks.requireAuthenticatedUser,
+  }
+})
 
 import { GET, POST } from "./route"
 
@@ -33,7 +37,7 @@ describe("GET /api/suppliers", () => {
   })
 
   it("returns active suppliers by default", async () => {
-    const eqMock = vi.fn(() => ({
+    const orMock = vi.fn(() => ({
       order: vi.fn(() => ({
         order: vi.fn(async () => ({
           data: [
@@ -64,7 +68,7 @@ describe("GET /api/suppliers", () => {
           if (table !== "suppliers") throw new Error(`Unexpected table ${table}`)
           return {
             select: vi.fn(() => ({
-              eq: eqMock,
+              or: orMock,
             })),
           }
         }),
@@ -76,7 +80,7 @@ describe("GET /api/suppliers", () => {
     const payload = await response.json()
 
     expect(response.status).toBe(200)
-    expect(eqMock).toHaveBeenCalledWith("active", true)
+    expect(orMock).toHaveBeenCalledWith("active.eq.true,status.eq.temporary")
     expect(payload).toHaveLength(1)
     expect(payload[0]).toMatchObject({ slug: "blue-train", name: "Blue Train" })
   })
@@ -136,7 +140,7 @@ describe("GET /api/suppliers", () => {
       supabase: {
         from: vi.fn(() => ({
           select: vi.fn(() => ({
-            eq: vi.fn(() => ({
+            or: vi.fn(() => ({
               order: vi.fn(() => ({
                 order: vi.fn(async () => ({
                   data: null,

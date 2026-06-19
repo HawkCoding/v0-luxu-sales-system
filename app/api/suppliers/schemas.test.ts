@@ -176,6 +176,34 @@ describe("supplierSaveSchema", () => {
   })
 })
 
+describe("route directionMode", () => {
+  function trainRoutePayload(directionMode: string) {
+    return {
+      ...buildValidPayload(),
+      kind: "train_operator" as const,
+      routes: [
+        {
+          id: UUID_3,
+          name: "Pretoria ↔ Cape Town",
+          originLocationId: UUID_3,
+          destinationLocationId: UUID_4,
+          directionMode,
+          active: true,
+          rateCards: [],
+        },
+      ],
+    }
+  }
+
+  it.each(["one_way", "round_trip"])("accepts %s", (directionMode) => {
+    expect(supplierSaveSchema.safeParse(trainRoutePayload(directionMode)).success).toBe(true)
+  })
+
+  it("rejects the removed loop direction", () => {
+    expect(supplierSaveSchema.safeParse(trainRoutePayload("loop")).success).toBe(false)
+  })
+})
+
 describe("supplierDraftSaveSchema", () => {
   it("allows sparse payloads with defaults", () => {
     const parsed = supplierDraftSaveSchema.parse({ kind: "airline" })

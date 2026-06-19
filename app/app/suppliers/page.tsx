@@ -3,8 +3,11 @@
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 import {
+  AlertTriangle,
   Building2,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   Mail,
   MapPin,
   Phone,
@@ -17,6 +20,7 @@ import { SupplierDetailView } from "@/components/supplier-detail-view"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   Dialog,
   DialogContent,
@@ -42,6 +46,7 @@ export default function SuppliersPage() {
   const [addOpen, setAddOpen] = useState(false)
   const [locationsOpen, setLocationsOpen] = useState(false)
   const [selectedSupplierSlug, setSelectedSupplierSlug] = useState<string | null>(null)
+  const [pendingOpen, setPendingOpen] = useState(true)
   const canEdit = can("edit:suppliers")
 
   useEffect(() => {
@@ -88,13 +93,23 @@ export default function SuppliersPage() {
     )
   }, [search, suppliers])
 
+  const temporarySuppliers = useMemo(
+    () => filteredSuppliers.filter((s) => s.status === "temporary"),
+    [filteredSuppliers],
+  )
+
+  const mainSuppliers = useMemo(
+    () => filteredSuppliers.filter((s) => s.status !== "temporary"),
+    [filteredSuppliers],
+  )
+
   const suppliersByKind = useMemo(
     () =>
       Object.keys(SUPPLIER_KIND_LABELS).reduce((grouped, kind) => {
-        grouped[kind] = filteredSuppliers.filter((supplier) => supplier.kind === kind)
+        grouped[kind] = mainSuppliers.filter((supplier) => supplier.kind === kind)
         return grouped
-      }, {} as Record<string, typeof filteredSuppliers>),
-    [filteredSuppliers],
+      }, {} as Record<string, typeof mainSuppliers>),
+    [mainSuppliers],
   )
 
   if (isLoading) {
@@ -140,7 +155,7 @@ export default function SuppliersPage() {
   }
 
   return (
-    <div className="p-6 space-y-6 max-w-6xl">
+    <div className="p-6 space-y-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
           <h1 className="text-3xl font-semibold tracking-tight text-foreground">
@@ -151,7 +166,11 @@ export default function SuppliersPage() {
             {canEdit
               ? "Managers and admins can edit supplier details and pricing."
               : "Editing is restricted to managers and admins."}{" "}
-            {suppliers.length} suppliers loaded.
+            {(() => {
+              const total = suppliers.filter((s) => s.status !== "temporary").length
+              const pending = suppliers.filter((s) => s.status === "temporary").length
+              return `${total} supplier${total === 1 ? "" : "s"} loaded${pending > 0 ? `, ${pending} pending activation` : ""}.`
+            })()}
           </p>
         </div>
         {canEdit && (
@@ -283,7 +302,7 @@ export default function SuppliersPage() {
           )
         })}
 
-        {filteredSuppliers.length === 0 && (
+        {mainSuppliers.length === 0 && temporarySuppliers.length === 0 && (
           <Card className="border-dashed">
             <CardContent className="p-12">
               <div className="space-y-2 text-center">
@@ -297,6 +316,97 @@ export default function SuppliersPage() {
               </div>
             </CardContent>
           </Card>
+        )}
+
+        {temporarySuppliers.length > 0 && (
+          <Collapsible open={pendingOpen} onOpenChange={setPendingOpen}>
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-500" />
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  className="flex items-center gap-2 text-sm font-semibold text-amber-700 hover:text-amber-800"
+                >
+                  Pending Activation
+                  <Badge variant="outline" className="border-amber-400 text-amber-600 text-xs">
+                    {temporarySuppliers.length}
+                  </Badge>
+                  {pendingOpen ? (
+                    <ChevronUp className="h-4 w-4" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4" />
+                  )}
+                </button>
+              </CollapsibleTrigger>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              These suppliers were created on-the-go during a quote session.{" "}
+              {canEdit
+                ? "Open each one to review, complete, and activate it."
+                : "A manager needs to review and activate them before they appear in the main list."}
+            </p>
+            <CollapsibleContent>
+              <div className="mt-3 grid gap-4 lg:grid-cols-2">
+                {temporarySuppliers.map((supplier) => (
+                  <Link
+                    key={supplier.id}
+                    href={`/app/suppliers/${supplier.slug}`}
+                    onClick={(event) => {
+                      if (
+                        event.defaultPrevented ||
+                        event.button !== 0 ||
+                        event.metaKey ||
+                        event.ctrlKey ||
+                        event.shiftKey ||
+                        event.altKey
+                      ) {
+                        return
+                      }
+                      event.preventDefault()
+                      openSupplierModal(supplier.slug)
+                    }}
+                  >
+                    <Card className="h-full border-2 border-dashed border-amber-300 bg-amber-50/40 transition-colors hover:border-amber-400 hover:bg-amber-50">
+                      <CardHeader className="pb-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-start gap-3 min-w-0">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-100">
+                              <AlertTriangle className="h-5 w-5 text-amber-600" />
+                            </div>
+                            <div className="min-w-0">
+                              <CardTitle className="text-base font-semibold">
+                                {supplier.name}
+                              </CardTitle>
+                              <div className="mt-2 flex items-center gap-2 flex-wrap">
+                                <Badge variant="outline" className="border-amber-400 text-amber-600">
+                                  Pending Activation
+                                </Badge>
+                                <Badge variant="secondary">{SUPPLIER_KIND_LABELS[supplier.kind]}</Badge>
+                                {supplier.location && (
+                                  <Badge variant="secondary">{supplier.location}</Badge>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          <ChevronRight className="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-1">
+                        <p className="text-sm text-muted-foreground">
+                          {supplier.email || "No email on file"}
+                        </p>
+                        <p className="text-xs text-amber-600">
+                          {canEdit
+                            ? "Open to review and activate this supplier."
+                            : "Awaiting manager review and activation."}
+                        </p>
+                      </CardContent>
+                    </Card>
+                  </Link>
+                ))}
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
         )}
       </div>
 

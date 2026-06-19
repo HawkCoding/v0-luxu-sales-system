@@ -1,6 +1,6 @@
 "use client"
 
-import { useJobDetail } from "@/lib/use-data"
+import { useJobDetail, useAssignableUsers } from "@/lib/use-data"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -29,7 +29,8 @@ import {
   type PipelineStage,
 } from "@/lib/types"
 import { useRole } from "@/lib/role-context"
-import { AlertCircle, ArrowLeft, CheckCircle2, ChevronRight, ChevronLeft as ChevronLeftIcon, UserRound, XCircle, Target } from "lucide-react"
+import { useAuth } from "@/lib/auth-context"
+import { AlertCircle, ArrowLeft, CheckCircle2, ChevronRight, ChevronLeft as ChevronLeftIcon, UserRound, XCircle, Target, UserPlus, UserMinus } from "lucide-react"
 import type { Outcome, OutcomeReason } from "@/lib/types"
 import Link from "next/link"
 import { JobEnquiryTab } from "@/components/job-enquiry-tab"
@@ -152,12 +153,17 @@ function JobDetailSkeleton() {
   )
 }
 
+// Sentinel for the reassign picker's "Unassigned" choice. Radix SelectItem
+// disallows an empty-string value, so we map this to null on submit.
+const UNASSIGNED_VALUE = "__unassigned__"
+
 export default function JobDetailPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { id } = useParams<{ id: string }>()
   const { data, isLoading, error, mutate } = useJobDetail(id)
   const { can, role } = useRole()
+  const { user: authUser } = useAuth()
   const { others, setEditing } = useRecordPresence("job", id)
   const hasLoadError = Boolean(error)
   const [cancelOpen, setCancelOpen] = useState(false)
@@ -174,10 +180,15 @@ export default function JobDetailPage() {
   const [customerResults, setCustomerResults] = useState<Array<{ id: string; firstName: string; lastName: string; email: string }>>([])
   const [changingCustomer, setChangingCustomer] = useState(false)
   const [resolvingImportReview, setResolvingImportReview] = useState(false)
+  const [ownerSubmitting, setOwnerSubmitting] = useState(false)
   const [lastJobPayload, setLastJobPayload] = useState<Record<string, unknown> | null>(null)
   const [activeTab, setActiveTab] = useState<JobDetailTab>(() => parseJobDetailTab(searchParams.get("tab")))
   const [supplierRefDraft, setSupplierRefDraft] = useState<string>("")
   const [supplierRefSaving, setSupplierRefSaving] = useState(false)
+  const [reassignOpen, setReassignOpen] = useState(false)
+  const [reassignTarget, setReassignTarget] = useState<string>("")
+  const [reassignSubmitting, setReassignSubmitting] = useState(false)
+  const { data: assignableData } = useAssignableUsers(reassignOpen)
   const {
     data: notesData,
     error: notesError,
@@ -245,6 +256,12 @@ export default function JobDetailPage() {
   const consultantName = CONSULTANTS.find((consultant) => consultant.key === job.consultant)?.name ?? job.consultant ?? undefined
   const needsEmailReview = Boolean(enquiry?.emailImportNeedsReview)
   const assignedSalespersonName = job.assignedSalespersonName ?? "Unassigned"
+  const assignedSalespersonId = (job as { assignedSalespersonId?: string | null }).assignedSalespersonId ?? null
+  const canReassign = role === "manager" || role === "admin"
+  // Self-serve owner controls for consultants: take an unassigned job, release one they own.
+  const isOwnedByMe = Boolean(assignedSalespersonId) && assignedSalespersonId === authUser?.id
+  const canTake = can("edit:jobs") && !assignedSalespersonId
+  const canRelease = can("edit:jobs") && isOwnedByMe
   const hasNoPackageMatchQuote = quotes.some((quote: { noPackageMatch?: boolean }) => quote.noPackageMatch)
   const hasSentDepositInvoice = invoices.some(
     (invoice: { kind: string; status: string }) =>
@@ -280,6 +297,38 @@ export default function JobDetailPage() {
       await mutate()
     } finally {
       setSupplierRefSaving(false)
+    }
+  }
+
+  const openReassign = () => {
+    setReassignTarget(assignedSalespersonId ?? UNASSIGNED_VALUE)
+    setReassignOpen(true)
+  }
+
+  const submitReassign = async () => {
+    if (reassignSubmitting) return
+    const next = reassignTarget === UNASSIGNED_VALUE ? null : reassignTarget || null
+    if (next === assignedSalespersonId) {
+      setReassignOpen(false)
+      return
+    }
+    setReassignSubmitting(true)
+    try {
+      const response = await fetch(`/api/jobs/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assignedSalespersonId: next, expectedUpdatedAt: data?.job?.updatedAt }),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null)
+        toast.error(typeof payload?.error === "string" ? payload.error : "Could not reassign job")
+        return
+      }
+      toast.success("Job reassigned")
+      setReassignOpen(false)
+      await mutate()
+    } finally {
+      setReassignSubmitting(false)
     }
   }
 
@@ -404,6 +453,32 @@ export default function JobDetailPage() {
     }
   }
 
+  const setOwner = async (next: string | null, successMessage: string, failMessage: string) => {
+    setOwnerSubmitting(true)
+    try {
+      const response = await fetch(`/api/jobs/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assignedSalespersonId: next, expectedUpdatedAt: data?.job?.updatedAt }),
+      })
+      const payload = (await response.json().catch(() => ({}))) as { error?: string }
+      if (!response.ok) throw new Error(payload.error ?? failMessage)
+      await mutate()
+      toast.success(successMessage)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : failMessage)
+    } finally {
+      setOwnerSubmitting(false)
+    }
+  }
+
+  const takeJob = () => {
+    if (!authUser?.id) return
+    void setOwner(authUser.id, "Job assigned to you", "Could not take job")
+  }
+
+  const releaseJob = () => void setOwner(null, "Job released", "Could not release job")
+
   const searchCustomers = async () => {
     const response = await fetch(`/api/customers?search=${encodeURIComponent(customerSearch)}`)
     if (!response.ok) return
@@ -501,48 +576,45 @@ export default function JobDetailPage() {
               {customer?.firstName} {customer?.lastName} &middot; {customer?.email}
             </p>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <span className="font-medium text-foreground">Owner</span>
-              <span>{(job as Record<string, unknown>).ownerName as string ?? "Unassigned"}</span>
-              <span className="text-muted-foreground/40">·</span>
               <span className="font-medium text-foreground">Salesperson</span>
               <span>{assignedSalespersonName}</span>
-            </div>
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <Label htmlFor="booking-supplier-reference" className="font-medium text-foreground">
-                Supplier ref
-              </Label>
-              {canEditSupplierRef ? (
-                <>
-                  <Input
-                    id="booking-supplier-reference"
-                    value={supplierRefDraft}
-                    onChange={(e) => setSupplierRefDraft(e.target.value)}
-                    onBlur={() => void saveSupplierReference()}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault()
-                        void saveSupplierReference()
-                      }
-                    }}
-                    placeholder="Supplier confirmation #"
-                    maxLength={120}
-                    disabled={supplierRefSaving}
-                    className="h-8 w-56 bg-background"
-                  />
-                  {supplierRefDirty ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8"
-                      onClick={() => void saveSupplierReference()}
-                      disabled={supplierRefSaving}
-                    >
-                      {supplierRefSaving ? "Saving..." : "Save"}
-                    </Button>
-                  ) : null}
-                </>
-              ) : (
-                <span>{currentSupplierRef || "—"}</span>
+              {canTake && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 px-2 text-xs"
+                  disabled={ownerSubmitting}
+                  onClick={takeJob}
+                  aria-label="Take this job"
+                >
+                  <UserPlus className="w-3 h-3 mr-1" />
+                  {ownerSubmitting ? "Taking…" : "Take"}
+                </Button>
+              )}
+              {canRelease && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 px-2 text-xs"
+                  disabled={ownerSubmitting}
+                  onClick={releaseJob}
+                  aria-label="Release this job"
+                >
+                  <UserMinus className="w-3 h-3 mr-1" />
+                  {ownerSubmitting ? "Releasing…" : "Release"}
+                </Button>
+              )}
+              {canReassign && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 px-2 text-xs"
+                  onClick={openReassign}
+                  aria-label="Reassign this job"
+                >
+                  <UserRound className="w-3 h-3 mr-1" />
+                  Reassign
+                </Button>
               )}
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -764,11 +836,11 @@ export default function JobDetailPage() {
             quotes={quotes}
             jobId={id}
             bookingNumber={job.jobNumber}
-            itineraries={itineraries}
             travelDate={enquiry?.departureDate ?? null}
             noOfAdults={enquiry?.noOfAdults ?? 0}
             noOfChildren={enquiry?.noOfChildren ?? 0}
             customerName={`${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()}
+            customerDefaultRateTypeId={customer?.defaultRateTypeId ?? null}
             emailImportNeedsReview={needsEmailReview}
             mutate={mutate}
           />
@@ -790,6 +862,7 @@ export default function JobDetailPage() {
             job={job}
             enquiry={enquiry}
             customer={customer}
+            itineraries={itineraries}
             onChange={mutate}
             loading={isLoading}
             error={error as Error | null}
@@ -1026,6 +1099,41 @@ export default function JobDetailPage() {
               ))}
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={reassignOpen} onOpenChange={(open) => { if (!reassignSubmitting) setReassignOpen(open) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reassign job</DialogTitle>
+            <DialogDescription>
+              Move this booking to a different salesperson. The change is recorded in the audit log.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>Salesperson</Label>
+            <Select value={reassignTarget} onValueChange={setReassignTarget}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a salesperson" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={UNASSIGNED_VALUE}>Unassigned</SelectItem>
+                {(assignableData?.users ?? []).map((u) => (
+                  <SelectItem key={u.userId} value={u.userId}>
+                    {u.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReassignOpen(false)} disabled={reassignSubmitting}>
+              Cancel
+            </Button>
+            <Button onClick={() => void submitReassign()} disabled={reassignSubmitting || !reassignTarget}>
+              {reassignSubmitting ? "Reassigning..." : "Reassign"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </ContentTransition>

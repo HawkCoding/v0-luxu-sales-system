@@ -333,8 +333,8 @@ export async function GET(req: Request) {
 
   if (filter === "needs_review") query = query.eq("email_import_needs_review", true)
   else if (filter === "complete") query = query.eq("email_import_needs_review", false)
-  else if (filter === "unassigned") query = query.is("owner_user_id", null)
-  else if (filter === "my_enquiries") query = query.eq("owner_user_id", user.id)
+  else if (filter === "unassigned") query = query.is("assigned_salesperson_id", null)
+  else if (filter === "my_enquiries") query = query.eq("assigned_salesperson_id", user.id)
   else if (filter === "possible_duplicates")
     query = query.not("email_import_duplicate_of_booking_id", "is", null)
 

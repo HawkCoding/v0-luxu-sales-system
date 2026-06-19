@@ -44,17 +44,18 @@ export default function DashboardPage() {
     .slice(0, 5)
 
   return (
-    <div className="p-6 space-y-8 max-w-7xl">
+    <div className="p-6 space-y-8 max-w-7xl mx-auto">
       <div className="pb-1">
-        <h1 className="text-text-heading">Dashboard</h1>
-        <p className="text-text-muted mt-2">Overview of your sales operations</p>
+        <h1 className="text-3xl font-semibold text-foreground tracking-tight">Dashboard</h1>
+        <p className="text-base text-muted-foreground mt-2">Overview of your sales operations</p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-5">
         <StatCard icon={Briefcase} label="Open Jobs" value={openJobs} href="/app/bookings" />
         <StatCard icon={FileText} label="Quotes Sent" value={quotedJobs} href="/app/pipeline" />
         <StatCard icon={CreditCard} label="Deposits Paid" value={depositsPaid} href="/app/payments" />
         <StatCard icon={CreditCard} label="Full Payment" value={fullPayments} href="/app/payments" />
+        <StatCard icon={AlertTriangle} label="Unresolved Errors" value={unresolvedErrors} href="/app/settings/error-log" />
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         <StatCard icon={AlertTriangle} label="Unresolved Errors" value={unresolvedErrors} href="/app/settings/error-log" />
@@ -150,14 +151,14 @@ export default function DashboardPage() {
 
 function StatCard({ icon: Icon, label, value, href }: { icon: React.ComponentType<{ className?: string }>; label: string; value: string | number; href?: string }) {
   const content = (
-    <CardContent className="p-6">
-      <div className="flex items-center gap-5">
-        <div className="w-16 h-16 rounded-lg bg-accent/15 flex items-center justify-center flex-shrink-0">
-          <Icon className="w-8 h-8 text-accent-hover" />
+    <CardContent className="p-5 h-full flex items-center">
+      <div className="flex items-center gap-4 w-full">
+        <div className="w-12 h-12 rounded-lg bg-accent/15 flex items-center justify-center flex-shrink-0">
+          <Icon className="w-6 h-6 text-accent-hover" />
         </div>
-        <div>
-          <p className="text-base text-text-muted mb-1">{label}</p>
-          <p className="text-4xl font-bold text-text-heading">{value}</p>
+        <div className="min-w-0">
+          <p className="text-sm text-text-muted mb-1 leading-tight">{label}</p>
+          <p className="text-3xl font-bold text-text-heading">{value}</p>
         </div>
       </div>
     </CardContent>
@@ -165,8 +166,8 @@ function StatCard({ icon: Icon, label, value, href }: { icon: React.ComponentTyp
 
   if (href) {
     return (
-      <Link href={href}>
-        <Card className="shadow-lg hover:shadow-xl transition-all cursor-pointer border-2 border-stroke-strong bg-bg-white hover:border-accent">
+      <Link href={href} className="h-full block">
+        <Card className="h-full shadow-lg hover:shadow-xl transition-all cursor-pointer border-2 border-stroke-strong bg-bg-white hover:border-accent">
           {content}
         </Card>
       </Link>
@@ -174,7 +175,7 @@ function StatCard({ icon: Icon, label, value, href }: { icon: React.ComponentTyp
   }
 
   return (
-    <Card className="shadow-lg border-2 border-stroke-strong bg-bg-white">
+    <Card className="h-full shadow-lg border-2 border-stroke-strong bg-bg-white">
       {content}
     </Card>
   )

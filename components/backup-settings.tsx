@@ -133,7 +133,7 @@ export function BackupSettings({ isAdmin }: { isAdmin: boolean }) {
         toast.error(data.error ?? "Restore failed")
         return
       }
-      toast.success(data.message ?? "Database restored successfully — please refresh")
+      toast.success(data.message ?? "Database restored successfully from backup")
       setRestoreTarget(null)
       setRestoreConfirmInput("")
       await load()

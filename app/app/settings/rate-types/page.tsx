@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { ArrowLeft, Archive, ArchiveRestore, Loader2, Plus, Star } from "lucide-react"
+import { ArrowLeft, Archive, ArchiveRestore, Loader2, Plus } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -16,11 +16,128 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import type { RateType } from "@/lib/types"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { SUPPLIER_KIND_LABELS, type RateType, type SupplierKind, type SupplierKindDefaultRateType } from "@/lib/types"
+
+const SUPPLIER_KINDS = Object.keys(SUPPLIER_KIND_LABELS) as SupplierKind[]
 
 interface RateTypesResponse {
   rateTypes: RateType[]
   canEdit: boolean
+}
+
+function SupplierDefaultRatesCard({
+  rateTypes,
+  canEdit,
+}: {
+  rateTypes: RateType[]
+  canEdit: boolean
+}) {
+  const [defaults, setDefaults] = useState<Record<string, string>>({})
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch("/api/rate-types/supplier-defaults")
+      .then((r) => r.json())
+      .then((d: { defaults?: SupplierKindDefaultRateType[] }) => {
+        if (cancelled) return
+        const map: Record<string, string> = {}
+        for (const entry of d.defaults ?? []) map[entry.kind] = entry.rateTypeId
+        setDefaults(map)
+      })
+      .catch(() => toast.error("Failed to load default rates"))
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const globalDefault = rateTypes.find((rt) => rt.isDefault)
+
+  const save = async () => {
+    const payload = SUPPLIER_KINDS.filter((kind) => defaults[kind]).map((kind) => ({
+      kind,
+      rateTypeId: defaults[kind],
+    }))
+    if (payload.length === 0) return
+    setSaving(true)
+    try {
+      const res = await fetch("/api/rate-types/supplier-defaults", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ defaults: payload }),
+      })
+      if (!res.ok) {
+        const detail = await res.json().catch(() => null)
+        toast.error(detail?.error ?? "Failed to save default rates")
+        return
+      }
+      toast.success("Default rates saved")
+    } catch {
+      toast.error("Failed to save default rates")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Default rate per supplier type</CardTitle>
+        <CardDescription>
+          The rate a new supplier (and its rate matrix) starts on. Unset types fall back to the
+          global default{globalDefault ? ` (${globalDefault.name})` : ""}.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <div className="flex items-center gap-2 text-muted-foreground text-sm py-2">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {SUPPLIER_KINDS.map((kind) => (
+              <div key={kind} className="flex items-center justify-between gap-3">
+                <Label className="text-sm">{SUPPLIER_KIND_LABELS[kind]}</Label>
+                <Select
+                  value={defaults[kind] ?? ""}
+                  onValueChange={(value) => setDefaults((prev) => ({ ...prev, [kind]: value }))}
+                  disabled={!canEdit}
+                >
+                  <SelectTrigger className="w-56">
+                    <SelectValue placeholder="Global default" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {rateTypes.map((rt) => (
+                      <SelectItem key={rt.id} value={rt.id}>
+                        {rt.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ))}
+            {canEdit && (
+              <Button size="sm" onClick={() => void save()} disabled={saving}>
+                {saving ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}
+                Save
+              </Button>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
 }
 
 export default function RateTypesPage() {
@@ -152,37 +269,29 @@ export default function RateTypesPage() {
                       {rt.code}
                     </span>
                     <span className="text-foreground">{rt.name}</span>
-                    {rt.isDefault && (
-                      <Badge variant="outline" className="text-xs">
-                        <Star className="w-3 h-3 mr-1" /> Default
+                    {rt.isStandard && (
+                      <Badge variant="secondary" className="text-xs">
+                        Standard
                       </Badge>
                     )}
                   </div>
                   {canEdit && (
                     <div className="flex items-center gap-1">
-                      {!rt.isDefault && (
+                      {!rt.isDefault && !rt.isStandard && (
                         <Button
                           variant="ghost"
                           size="sm"
                           disabled={busyId === rt.id}
-                          onClick={() => void patch(rt.id, { isDefault: true }, "Set as default")}
+                          onClick={() => void patch(rt.id, { archived: true }, "Rate type archived")}
+                          aria-label={`Archive ${rt.name}`}
                         >
-                          <Star className="w-4 h-4 mr-1" /> Set default
+                          {busyId === rt.id ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Archive className="w-4 h-4" />
+                          )}
                         </Button>
                       )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={busyId === rt.id || rt.isDefault}
-                        onClick={() => void patch(rt.id, { archived: true }, "Rate type archived")}
-                        aria-label={`Archive ${rt.name}`}
-                      >
-                        {busyId === rt.id ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <Archive className="w-4 h-4" />
-                        )}
-                      </Button>
                     </div>
                   )}
                 </li>
@@ -231,6 +340,8 @@ export default function RateTypesPage() {
           </CardContent>
         </Card>
       )}
+
+      <SupplierDefaultRatesCard rateTypes={active} canEdit={canEdit} />
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="sm:max-w-sm">

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { createSessionClient } from "@/lib/supabase/server"
 import {
   BOOKING_SUITE_COLUMNS,
-  BOOKING_WITH_ROUTE_COLUMNS,
+  BOOKING_WITH_SUPPLIER_COLUMNS,
   CORRESPONDENCE_COLUMNS,
   CUSTOMER_COLUMNS,
   DOCUMENT_COLUMNS,
@@ -59,7 +59,7 @@ export async function GET() {
     supabase.from("customers").select(CUSTOMER_COLUMNS).order("created_at", { ascending: false }),
     supabase
       .from("bookings")
-      .select(BOOKING_WITH_ROUTE_COLUMNS)
+      .select(BOOKING_WITH_SUPPLIER_COLUMNS)
       .order("created_at", { ascending: false }),
     supabase.from("profiles").select("user_id, name, surname, email, clearance_level, is_active"),
     supabase.from("booking_suites").select(BOOKING_SUITE_COLUMNS),
@@ -96,6 +96,28 @@ export async function GET() {
   )
 
   const repeatCustomerIds = buildRepeatCustomerIdSet(bookings ?? [])
+
+  // Resolve supplier names for historically-imported bookings (which reference a
+  // supplier id inside extracted_json rather than via a route/hotel relation).
+  const historicalSupplierIds = Array.from(
+    new Set(
+      (bookings ?? [])
+        .map(
+          (b) =>
+            (b.extracted_json as { historical_import?: { supplier_id?: string } } | null)
+              ?.historical_import?.supplier_id,
+        )
+        .filter((id): id is string => typeof id === "string" && id.length > 0),
+    ),
+  )
+  const supplierNamesById = new Map<string, string>()
+  if (historicalSupplierIds.length > 0) {
+    const { data: historicalSuppliers } = await supabase
+      .from("suppliers")
+      .select("id, name")
+      .in("id", historicalSupplierIds)
+    ;(historicalSuppliers ?? []).forEach((s) => supplierNamesById.set(s.id, s.name))
+  }
 
   const quotesWithLines = (quotes ?? []).map((q) => ({
     id: q.id,
@@ -203,6 +225,16 @@ export async function GET() {
       direction:
         (b.route as { name?: string } | null)?.name ??
         ((b.extracted_json as { historical_import?: { route?: string } } | null)?.historical_import?.route ?? null),
+      supplierName:
+        (b.route as { supplier?: { name?: string | null } | null } | null)?.supplier?.name ??
+        (b.hotel_supplier as { name?: string | null } | null)?.name ??
+        ((b.extracted_json as { historical_import?: { supplier_id?: string } } | null)?.historical_import
+          ?.supplier_id
+          ? (supplierNamesById.get(
+              (b.extracted_json as { historical_import?: { supplier_id?: string } }).historical_import!
+                .supplier_id!,
+            ) ?? null)
+          : null),
       rawText: b.raw_text,
       extractedJson: b.extracted_json,
       termsAccepted: b.terms_accepted,
@@ -335,6 +367,7 @@ export async function GET() {
       bodyHtml: t.body_html,
       version: t.version,
       active: t.active,
+      isSystem: t.is_system,
     })),
 
     rateCards: [],

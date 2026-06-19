@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { createSessionClient } from "@/lib/supabase/server"
+import { buildSupplierSlugBase } from "@/lib/suppliers"
 import type { Database } from "@/lib/supabase/types"
 
 export const allowedRoles = new Set(["admin", "manager"])
@@ -16,6 +17,34 @@ export type RefTableName =
   | "bedroom_types"
   | "bedroom_layouts"
   | "bathroom_types"
+
+export async function resolveUniqueSupplierSlug(
+  supabase: SessionClient,
+  supplierName: string,
+): Promise<string> {
+  const slugBase = buildSupplierSlugBase(supplierName)
+
+  const { data: slugRows, error } = await supabase
+    .from("suppliers")
+    .select("slug")
+    .or(`slug.eq.${slugBase},slug.like.${slugBase}-%`)
+
+  if (error) {
+    throw new Error("Failed to validate supplier slug uniqueness")
+  }
+
+  const usedSlugs = new Set((slugRows ?? []).map((row) => row.slug))
+  if (!usedSlugs.has(slugBase)) {
+    return slugBase
+  }
+
+  let suffix = 2
+  while (usedSlugs.has(`${slugBase}-${suffix}`)) {
+    suffix += 1
+  }
+
+  return `${slugBase}-${suffix}`
+}
 
 export async function requireAuthenticatedUser() {
   const supabase = await createSessionClient()
@@ -394,6 +423,8 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     stBedroomLayoutsResult,
     stBathroomTypesResult,
     rateTypesResult,
+    rateAdjustmentsResult,
+    kindDefaultRateTypesResult,
   ] = await Promise.all([
     supabase
       .from("bedroom_types")
@@ -428,6 +459,11 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
       .is("archived_at", null)
       .order("sort_order", { ascending: true })
       .order("name", { ascending: true }),
+    supabase
+      .from("supplier_rate_adjustments")
+      .select("*")
+      .eq("supplier_id", supplierId),
+    supabase.from("supplier_kind_default_rate_types").select("*"),
   ])
 
   const variantErrors = [
@@ -438,6 +474,8 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     stBedroomLayoutsResult.error,
     stBathroomTypesResult.error,
     rateTypesResult.error,
+    rateAdjustmentsResult.error,
+    kindDefaultRateTypesResult.error,
   ].filter((err) => Boolean(err))
 
   if (variantErrors.length > 0) {
@@ -469,5 +507,7 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     suiteTypeBedroomLayouts: stBedroomLayoutsResult.data ?? [],
     suiteTypeBathroomTypes: stBathroomTypesResult.data ?? [],
     rateTypes: rateTypesResult.data ?? [],
+    rateAdjustments: rateAdjustmentsResult.data ?? [],
+    kindDefaultRateTypes: kindDefaultRateTypesResult.data ?? [],
   }
 }

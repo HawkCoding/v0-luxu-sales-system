@@ -20,6 +20,7 @@ const patchCustomerSchema = z.object({
   vip_status: z.boolean().optional(),
   preferences: z.string().trim().max(2000).nullable().optional(),
   communication_preferences: z.string().trim().max(1000).nullable().optional(),
+  default_rate_type_id: z.string().uuid().nullable().optional(),
   expectedUpdatedAt: z.string().datetime({ offset: true }).optional(),
 })
 
@@ -155,6 +156,7 @@ export async function GET(
       vipStatus: customer.vip_status,
       preferences: customer.preferences,
       communicationPreferences: customer.communication_preferences,
+      defaultRateTypeId: customer.default_rate_type_id,
       firstTravelDate: customer.first_travel_date,
       firstTravelDateDisplay: formatDisplayDate(customer.first_travel_date),
       lastTravelDate: customer.last_travel_date,
@@ -283,6 +285,9 @@ export async function PATCH(
       communication_preferences: normalizedCommunicationPreferences
         ? normalizedCommunicationPreferences
         : null,
+      ...(parsed.default_rate_type_id !== undefined
+        ? { default_rate_type_id: parsed.default_rate_type_id }
+        : {}),
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)
@@ -293,7 +298,7 @@ export async function PATCH(
 
   const { data: updated, error: updateError } = await updateQuery
     .select(
-      "id, notes, email, phone, province, date_of_birth, vip_status, preferences, communication_preferences, first_travel_date, last_travel_date, updated_at",
+      "id, notes, email, phone, province, date_of_birth, vip_status, preferences, communication_preferences, default_rate_type_id, first_travel_date, last_travel_date, updated_at",
     )
     .single()
 
@@ -331,6 +336,7 @@ export async function PATCH(
     vipStatus: updated.vip_status,
     preferences: updated.preferences,
     communicationPreferences: updated.communication_preferences,
+    defaultRateTypeId: updated.default_rate_type_id,
     firstTravelDate: updated.first_travel_date,
     firstTravelDateDisplay: formatDisplayDate(updated.first_travel_date),
     lastTravelDate: updated.last_travel_date,

@@ -1,50 +1,14 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { mapSupplier } from "@/lib/suppliers"
-import { allowedRoles, requireAuthenticatedUser, type SessionClient } from "./helpers"
+import { allowedRoles, requireAuthenticatedUser, resolveUniqueSupplierSlug } from "./helpers"
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const PHONE_PATTERN = /^[+\d\s()-]*$/
 const WEBSITE_PATTERN = /^\S+\.\S+$/
 const EMAIL_LABEL_MAX_LENGTH = 100
 
-function buildSupplierSlugBase(name: string): string {
-  const slug = name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
 
-  return slug || "supplier"
-}
-
-async function resolveUniqueSupplierSlug(
-  supabase: SessionClient,
-  supplierName: string,
-): Promise<string> {
-  const slugBase = buildSupplierSlugBase(supplierName)
-
-  const { data: slugRows, error } = await supabase
-    .from("suppliers")
-    .select("slug")
-    .or(`slug.eq.${slugBase},slug.like.${slugBase}-%`)
-
-  if (error) {
-    throw new Error("Failed to validate supplier slug uniqueness")
-  }
-
-  const usedSlugs = new Set((slugRows ?? []).map((row) => row.slug))
-  if (!usedSlugs.has(slugBase)) {
-    return slugBase
-  }
-
-  let suffix = 2
-  while (usedSlugs.has(`${slugBase}-${suffix}`)) {
-    suffix += 1
-  }
-
-  return `${slugBase}-${suffix}`
-}
 
 const createSupplierSchema = z.object({
   kind: z.enum(["train_operator", "hotel_property", "transfers", "vehicle_rental", "tour_operator", "airline"]),
@@ -108,9 +72,10 @@ export async function GET(req: Request) {
 
   const { supabase } = auth
   const includeDrafts = new URL(req.url).searchParams.get("includeDrafts") === "true"
+  // Always include temporary suppliers (active=false but need to appear in Suppliers page and picker).
   const supplierQuery = includeDrafts
     ? supabase.from("suppliers").select("*")
-    : supabase.from("suppliers").select("*").eq("active", true)
+    : supabase.from("suppliers").select("*").or("active.eq.true,status.eq.temporary")
   const { data: suppliers, error } = await supplierQuery
     .order("kind", { ascending: true })
     .order("name", { ascending: true })

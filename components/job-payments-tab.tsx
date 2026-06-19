@@ -15,6 +15,7 @@ import { useRole } from "@/lib/role-context"
 import { useState } from "react"
 import { Plus } from "lucide-react"
 import { formatDisplayDate } from "@/lib/date-format"
+import { toast } from "sonner"
 
 const PAYMENT_ENABLED_STAGES: ReadonlySet<PipelineStage> = new Set([
   "deposit_requested",
@@ -36,7 +37,8 @@ interface JobPaymentsTabProps {
 export function JobPaymentsTab({ payments, jobId, mutate, stage }: JobPaymentsTabProps) {
   const { can } = useRole()
   const [open, setOpen] = useState(false)
-  const [form, setForm] = useState({ amount: "", method: "EFT", reference: "", notes: "" })
+  const todayLocal = new Date().toISOString().slice(0, 10)
+  const [form, setForm] = useState({ amount: "", method: "EFT", reference: "", notes: "", paymentDate: todayLocal })
   const [saving, setSaving] = useState(false)
   const canRecordPayment = can("edit:payments")
   const stageAllowsRecording = stage ? PAYMENT_ENABLED_STAGES.has(stage) : true
@@ -46,14 +48,36 @@ export function JobPaymentsTab({ payments, jobId, mutate, stage }: JobPaymentsTa
   const handleSubmit = async () => {
     setSaving(true)
     try {
-      await fetch("/api/payments", {
+      // paymentDate from the local date picker is a plain date string; convert
+      // to a UTC ISO datetime so paymentSchema's datetime({ offset: true }) accepts it.
+      const paymentDate = form.paymentDate
+        ? new Date(`${form.paymentDate}T12:00:00Z`).toISOString()
+        : new Date().toISOString()
+
+      const response = await fetch("/api/payments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId, amount: Number(form.amount), method: form.method, reference: form.reference, notes: form.notes }),
+        body: JSON.stringify({
+          jobId,
+          amount: Number(form.amount),
+          method: form.method,
+          reference: form.reference || null,
+          notes: form.notes || null,
+          paymentDate,
+        }),
       })
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string; details?: Record<string, unknown> }
+        throw new Error(payload.error ?? "Failed to record payment")
+      }
+
       mutate()
       setOpen(false)
-      setForm({ amount: "", method: "EFT", reference: "", notes: "" })
+      setForm({ amount: "", method: "EFT", reference: "", notes: "", paymentDate: new Date().toISOString().slice(0, 10) })
+      toast.success("Payment recorded")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to record payment")
     } finally {
       setSaving(false)
     }
@@ -91,6 +115,10 @@ export function JobPaymentsTab({ payments, jobId, mutate, stage }: JobPaymentsTa
                 <DialogDescription>Enter the payment details for this job.</DialogDescription>
               </DialogHeader>
               <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Payment Date</label>
+                  <Input type="date" value={form.paymentDate} onChange={(e) => setForm(f => ({ ...f, paymentDate: e.target.value }))} className="mt-1" />
+                </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">Amount (ZAR)</label>
                   <Input type="number" value={form.amount} onChange={(e) => setForm(f => ({ ...f, amount: e.target.value }))} placeholder="0" className="mt-1" />

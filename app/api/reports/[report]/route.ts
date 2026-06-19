@@ -6,6 +6,7 @@ import { conversionRate } from "@/lib/reports/conversion-rate"
 import { revenuePerProduct } from "@/lib/reports/revenue-per-product"
 import { outstandingPayments } from "@/lib/reports/outstanding-payments"
 import { enquiriesBySource } from "@/lib/reports/enquiries-by-source"
+import { withOwnerNames } from "@/lib/reports/owner-names"
 import type { BookingInputRow, PaymentInputRow, ReportFilter } from "@/lib/reports/types"
 
 const REPORT_NAMES = [
@@ -59,12 +60,13 @@ export async function GET(
   let bookingQuery = supabase
     .from("bookings")
     .select(
-      "id, booking_number, consultant, departure_date, stage, outcome, source, invoice_balance, created_at",
+      "id, booking_number, consultant, assigned_salesperson_id, departure_date, stage, outcome, source, invoice_balance, created_at",
     )
 
   if (filter.from) bookingQuery = bookingQuery.gte("created_at", filter.from)
   if (filter.to) bookingQuery = bookingQuery.lte("created_at", filter.to + "T23:59:59Z")
-  if (filter.consultant) bookingQuery = bookingQuery.eq("consultant", filter.consultant)
+  // The consultant filter value is the owner's user id (assigned_salesperson_id).
+  if (filter.consultant) bookingQuery = bookingQuery.eq("assigned_salesperson_id", filter.consultant)
   if (filter.stage) bookingQuery = bookingQuery.eq("stage", filter.stage as never)
   if (filter.product) bookingQuery = bookingQuery.ilike("booking_number", `${filter.product}-%`)
 
@@ -82,7 +84,7 @@ export async function GET(
     return NextResponse.json({ error: paymentsError.message }, { status: 500 })
   }
 
-  const bookingRows = (bookings ?? []) as BookingInputRow[]
+  const bookingRows = await withOwnerNames(supabase, (bookings ?? []) as BookingInputRow[])
   const paymentRows = (payments ?? []) as PaymentInputRow[]
 
   switch (report as ReportName) {

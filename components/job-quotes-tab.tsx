@@ -6,14 +6,17 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { toast } from "sonner"
-import type { Quote, Itinerary } from "@/lib/types"
+import type { Quote } from "@/lib/types"
 import { useRole } from "@/lib/role-context"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { ApplyPackageDialog } from "@/components/apply-package-dialog"
+import { AddQuoteLineDialog } from "@/components/add-quote-line-dialog"
 import { SendQuoteDialog } from "@/components/send-quote-dialog"
 import { CreateQuoteDialog } from "@/components/create-quote-dialog"
 import { QuotePreviewSendDialog } from "@/components/quote-preview-send-dialog"
-import { FileDown, Link2, Loader2, RotateCcw, Send, X } from "lucide-react"
+import { FileDown, Link2, Loader2, RotateCcw, Send, Trash2, X } from "lucide-react"
+
+const EDITABLE_QUOTE_STATUSES = ["draft", "pricing_incomplete", "ready"]
 
 const STATUS_BADGE: Record<string, { variant: "default" | "secondary" | "outline" | "destructive"; label: string; className?: string }> = {
   draft: { variant: "secondary", label: "Provisional" },
@@ -30,11 +33,11 @@ interface JobQuotesTabProps {
   quotes: Quote[]
   jobId: string
   bookingNumber: string
-  itineraries: Itinerary[]
   travelDate: string | null
   noOfAdults: number
   noOfChildren: number
   customerName: string
+  customerDefaultRateTypeId?: string | null
   emailImportNeedsReview?: boolean
   mutate: () => void
 }
@@ -43,11 +46,11 @@ export function JobQuotesTab({
   quotes,
   jobId,
   bookingNumber,
-  itineraries,
   travelDate,
   noOfAdults,
   noOfChildren,
   customerName,
+  customerDefaultRateTypeId,
   emailImportNeedsReview = false,
   mutate,
 }: JobQuotesTabProps) {
@@ -57,6 +60,32 @@ export function JobQuotesTab({
   const [cancellingQuoteId, setCancellingQuoteId] = useState<string | null>(null)
   const [generatingLinkForId, setGeneratingLinkForId] = useState<string | null>(null)
   const [generatingPdfForId, setGeneratingPdfForId] = useState<string | null>(null)
+  const [removingLineKey, setRemovingLineKey] = useState<string | null>(null)
+
+  async function removeLineItem(quote: Quote, index: number) {
+    const key = `${quote.id}:${index}`
+    setRemovingLineKey(key)
+    try {
+      const lineItems = quote.lineItems.filter((_, i) => i !== index)
+      if (lineItems.length === 0) {
+        toast.error("A quote needs at least one line. Cancel the quote instead.")
+        return
+      }
+      const response = await fetch(`/api/quotes/${quote.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lineItems, expectedUpdatedAt: quote.updatedAt }),
+      })
+      const payload = (await response.json().catch(() => ({}))) as { error?: string }
+      if (!response.ok) throw new Error(payload.error ?? "Failed to remove line")
+      mutate()
+      toast.success("Line removed.")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to remove line")
+    } finally {
+      setRemovingLineKey(null)
+    }
+  }
   const sendQuoteDialog = (
     <SendQuoteDialog
       open={sendQuoteOpen}
@@ -150,7 +179,7 @@ export function JobQuotesTab({
         <p className="text-sm text-muted-foreground">No quotes yet</p>
         {can("edit:quotes") && (
           <div className="flex flex-wrap justify-center gap-2">
-            <CreateQuoteDialog jobId={jobId} itineraries={itineraries} onCreated={mutate} />
+            <CreateQuoteDialog jobId={jobId} onCreated={mutate} />
             <Button size="sm" onClick={() => setSendQuoteOpen(true)}>
               <Send className="w-3.5 h-3.5 mr-1.5" />
               Send Quote
@@ -166,7 +195,7 @@ export function JobQuotesTab({
     <div className="space-y-4">
       {can("edit:quotes") && (
         <div className="flex justify-end gap-2">
-          <CreateQuoteDialog jobId={jobId} itineraries={itineraries} onCreated={mutate} />
+          <CreateQuoteDialog jobId={jobId} onCreated={mutate} />
           <Button size="sm" onClick={() => setSendQuoteOpen(true)}>
             <Send className="w-3.5 h-3.5 mr-1.5" />
             Send Quote
@@ -175,16 +204,16 @@ export function JobQuotesTab({
       )}
       {sendQuoteDialog}
       {quotes.map(q => {
-        const it = itineraries.find(i => i.id === q.itineraryId)
         const badge = STATUS_BADGE[q.status] || { variant: "outline" as const, label: q.status }
         const hasIncomplete = q.lineItems.some(li => li.unitPrice === 0)
+        const canEditLines = can("edit:quotes") && EDITABLE_QUOTE_STATUSES.includes(q.status)
 
         return (
           <Card key={q.id}>
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div className="flex items-center gap-2">
-                  <CardTitle className="text-sm font-medium">{q.quoteNumber || it?.name || "Quote"}</CardTitle>
+                  <CardTitle className="text-sm font-medium">{q.quoteNumber || "Quote"}</CardTitle>
                   <Badge variant={badge.variant} className={`text-[10px] ${badge.className ?? ""}`}>{badge.label}</Badge>
                   {hasIncomplete && <Badge variant="destructive" className="text-[10px]">Missing pricing</Badge>}
                 </div>
@@ -257,12 +286,22 @@ export function JobQuotesTab({
                         )}
                         PDF
                       </Button>
+                      {EDITABLE_QUOTE_STATUSES.includes(q.status) && (
+                        <AddQuoteLineDialog
+                          quoteId={q.id}
+                          expectedUpdatedAt={q.updatedAt}
+                          existingLineItems={q.lineItems}
+                          onAdded={mutate}
+                        />
+                      )}
                       <ApplyPackageDialog
                         jobId={jobId}
                         quoteId={q.id}
                         travelDate={travelDate}
                         existingLineItemCount={q.lineItems.length}
+                        existingLineItems={q.lineItems}
                         expectedUpdatedAt={q.updatedAt}
+                        customerDefaultRateTypeId={customerDefaultRateTypeId}
                         onApplied={mutate}
                       />
                     </>
@@ -279,19 +318,50 @@ export function JobQuotesTab({
                       <th className="pb-2 text-right">Qty</th>
                       <th className="pb-2 text-right">Unit Price</th>
                       <th className="pb-2 text-right">Total</th>
+                      {canEditLines && <th className="pb-2 w-8" aria-label="Actions" />}
                     </tr>
                   </thead>
                   <tbody>
-                    {q.lineItems.map((li, i) => (
+                    {q.lineItems.map((li, i) => {
+                      const isExtra = li.pricingSnapshot?.isExtra === true
+                      return (
                       <tr key={i} className="border-b border-border/50 last:border-0">
-                        <td className="py-2 text-xs text-foreground">{li.description}</td>
-                        <td className="py-2 text-xs text-right text-muted-foreground">{li.qty}</td>
+                        <td className="py-2 text-xs text-foreground">
+                          {li.description}
+                          {isExtra ? (
+                            <Badge variant="outline" className="ml-1.5 text-[9px] align-middle">Extra</Badge>
+                          ) : null}
+                        </td>
+                        <td className="py-2 text-xs text-right text-muted-foreground">
+                          <div>{li.qty}</div>
+                          {li.pricingSnapshot?.unit ? (
+                            <div className="text-[10px] text-muted-foreground">{li.pricingSnapshot.unit}</div>
+                          ) : null}
+                        </td>
                         <td className={`py-2 text-xs text-right ${li.unitPrice === 0 ? "text-destructive font-medium" : "text-muted-foreground"}`}>
                           {li.unitPrice === 0 ? "TBD" : `R ${li.unitPrice.toLocaleString()}`}
                         </td>
                         <td className="py-2 text-xs text-right text-foreground font-medium">R {li.total.toLocaleString()}</td>
+                        {canEditLines && (
+                          <td className="py-2 text-right">
+                            <button
+                              type="button"
+                              aria-label={`Remove ${li.description}`}
+                              className="text-muted-foreground hover:text-destructive disabled:opacity-50"
+                              disabled={removingLineKey === `${q.id}:${i}`}
+                              onClick={() => void removeLineItem(q, i)}
+                            >
+                              {removingLineKey === `${q.id}:${i}` ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                          </td>
+                        )}
                       </tr>
-                    ))}
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>

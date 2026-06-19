@@ -73,6 +73,20 @@ export async function POST(request: Request) {
   if (!result.success) return jsonZodError(result.error, "Invalid request payload")
   const parsed = result.data
 
+  // encryptCredential throws if EMAIL_CREDENTIAL_ENCRYPTION_KEY is not configured —
+  // surface that as a handled 500 with the standard error shape instead of an
+  // uncaught exception.
+  let passwordEncrypted: string
+  try {
+    passwordEncrypted = encryptCredential(parsed.password)
+  } catch (err) {
+    console.error("[inbound-email-accounts:create] credential encryption failed:", err)
+    return NextResponse.json(
+      { error: "Unable to store mailbox credentials due to a server configuration error." },
+      { status: 500 },
+    )
+  }
+
   const { data, error } = await auth.value.supabase
     .from("inbound_email_accounts")
     .insert({
@@ -81,7 +95,7 @@ export async function POST(request: Request) {
       port: parsed.port,
       tls_mode: parsed.tlsMode,
       username: parsed.username,
-      password_encrypted: encryptCredential(parsed.password),
+      password_encrypted: passwordEncrypted,
       inbox_folder: parsed.inboxFolder,
       processed_folder: parsed.processedFolder,
       needs_review_folder: parsed.needsReviewFolder,

@@ -1146,7 +1146,7 @@ Use this as an implementation tracker. Prefer completing each section in order b
   - [ ] Can restore from backup.
   - [ ] Can manage global settings.
 - [ ] Read-only UAT:
-  - [ ] Can view allowed pages.
+  - [ ] Can view allowed pages (dashboard, pipeline, enquiries, customers, suppliers, packages, quotes, payments, documents, correspondence). Allowed pages **exclude Reporting and the Audit Log**, which are manager+ and hidden from the read-only nav.
   - [ ] Cannot create, edit, delete, send, export, or manage settings/users.
 
 ## Phase 34: Open Business Decisions

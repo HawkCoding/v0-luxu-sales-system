@@ -144,7 +144,7 @@ export default function EnquiriesPage() {
   }
 
   return (
-    <div className="p-6 space-y-5 max-w-6xl">
+    <div className="p-6 space-y-5 max-w-6xl mx-auto">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-3xl font-semibold text-foreground tracking-tight">Enquiries</h1>
@@ -313,7 +313,7 @@ export default function EnquiriesPage() {
                         <Alert className="mt-3 py-2">
                           <AlertCircle className="h-3 w-3" />
                           <AlertDescription className="text-xs">
-                            To proceed with this inquiry, click Send Quote.
+                            To proceed with this enquiry, click Send Quote.
                           </AlertDescription>
                         </Alert>
                       )}

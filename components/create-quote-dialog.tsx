@@ -15,18 +15,9 @@ import {
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import type { Itinerary } from "@/lib/types"
 
 interface CreateQuoteDialogProps {
   jobId: string
-  itineraries: Itinerary[]
   onCreated: () => void
 }
 
@@ -36,16 +27,14 @@ function defaultValidityDate(): string {
   return d.toISOString().split("T")[0]
 }
 
-export function CreateQuoteDialog({ jobId, itineraries, onCreated }: CreateQuoteDialogProps) {
+export function CreateQuoteDialog({ jobId, onCreated }: CreateQuoteDialogProps) {
   const [open, setOpen] = useState(false)
-  const [itineraryId, setItineraryId] = useState<string>("")
   const [validityUntil, setValidityUntil] = useState<string>(defaultValidityDate())
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   function handleOpenChange(next: boolean) {
     if (!next) {
-      setItineraryId("")
       setValidityUntil(defaultValidityDate())
       setError(null)
     }
@@ -61,7 +50,6 @@ export function CreateQuoteDialog({ jobId, itineraries, onCreated }: CreateQuote
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         jobId,
-        itineraryId: itineraryId || null,
         validityUntil,
         status: "draft",
       }),
@@ -92,28 +80,11 @@ export function CreateQuoteDialog({ jobId, itineraries, onCreated }: CreateQuote
         <DialogHeader>
           <DialogTitle>Create Quote</DialogTitle>
           <DialogDescription>
-            Start a new draft quote. You can apply a package to it afterwards.
+            Start a new draft quote, then add pricing by applying a package.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="itinerary">Itinerary (optional)</Label>
-            <Select value={itineraryId} onValueChange={setItineraryId}>
-              <SelectTrigger id="itinerary">
-                <SelectValue placeholder="Select itinerary…" />
-              </SelectTrigger>
-              <SelectContent>
-                {itineraries.map(it => (
-                  <SelectItem key={it.id} value={it.id}>{it.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              You can attach an itinerary later by applying a package.
-            </p>
-          </div>
-
           <div className="space-y-1.5">
             <Label htmlFor="validity">Valid until</Label>
             <Input

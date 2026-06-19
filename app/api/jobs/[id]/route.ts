@@ -17,8 +17,10 @@ import {
   TRAVELLER_COLUMNS,
 } from "@/lib/supabase/columns"
 import type { Json } from "@/lib/supabase/types"
+import { requireUser } from "@/lib/api/auth"
 import { staleVersionResponse } from "@/lib/concurrency"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
+import { CONSULTANTS } from "@/lib/types"
 import type { PipelineStage } from "@/lib/types"
 import { extractRoleFromJwt } from "@/lib/role-utils"
 import { applyTransition } from "@/lib/pipeline/apply-transition"
@@ -84,7 +86,10 @@ const patchJobSchema = z.object({
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const supabase = await createSessionClient()
+  const auth = await requireUser()
+  if (!auth.ok) return auth.response
+
+  const { supabase, user, profile } = auth.value
 
   const { data: booking } = await supabase
     .from("bookings")
@@ -93,6 +98,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     .single()
 
   if (!booking) return NextResponse.json({ error: "Not found" }, { status: 404 })
+
+  const role = profile.clearanceLevel
+  if (role === "readonly") return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+
+  if (role === "consultant") {
+    const isOwner = booking.owner_user_id === user.id || booking.assigned_salesperson_id === user.id
+    if (!isOwner) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
 
   const [
     defaultDepositPercentage,
@@ -133,17 +146,20 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   ])
 
   // Map booking → shape matching the existing Job interface so page components are unchanged
-  const allProfiles = (profiles ?? []).map((profile) => ({
-    id: profile.user_id,
-    name: [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.email,
-    email: profile.email,
-    clearanceLevel: profile.clearance_level,
-    isActive: profile.is_active ?? true,
+  const allProfiles = (profiles ?? []).map((p) => ({
+    id: p.user_id,
+    name: [p.name, p.surname].filter(Boolean).join(" ").trim() || p.email,
+    email: p.email,
+    isActive: p.is_active ?? true,
   }))
-  const salespeople = allProfiles.filter(
-    (profile) =>
-      ["admin", "manager", "consultant"].includes(profile.clearanceLevel) && profile.isActive,
-  )
+  const salespeople = (profiles ?? [])
+    .filter((p) => ["admin", "manager", "consultant"].includes(p.clearance_level) && (p.is_active ?? true))
+    .map((p) => ({
+      id: p.user_id,
+      name: [p.name, p.surname].filter(Boolean).join(" ").trim() || p.email,
+      email: p.email,
+      isActive: p.is_active ?? true,
+    }))
   const assignedSalesperson = booking.assigned_salesperson_id
     ? salespeople.find((profile) => profile.id === booking.assigned_salesperson_id) ?? null
     : null
@@ -193,6 +209,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       phone: customer.phone,
       country: customer.country,
       title: customer.title,
+      defaultRateTypeId: customer.default_rate_type_id,
       isRepeatClient: customer.is_repeat_client,
       createdAt: customer.created_at,
         createdAtDisplay: formatDisplayDateTime(customer.created_at),
@@ -713,8 +730,24 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       .maybeSingle()
 
     const role = extractRoleFromJwt(user) ?? actorProfile?.clearance_level ?? null
-    if (role !== "manager" && role !== "admin") {
-      return NextResponse.json({ error: "Manager access required to reassign salesperson" }, { status: 403 })
+    const isManagerOrAdmin = role === "manager" || role === "admin"
+    const canSelfAssign = isManagerOrAdmin || role === "consultant"
+
+    // Self-assign + manager override: a salesperson may take an unassigned job or
+    // release one they already own; assigning to anyone else, or taking a job
+    // owned by another, requires a manager/admin. Read-only roles cannot assign.
+    const currentOwner = booking.assigned_salesperson_id ?? null
+    const target = body.assignedSalespersonId ?? null
+    const isSelfAssign =
+      canSelfAssign &&
+      ((target === user.id && (currentOwner === null || currentOwner === user.id)) ||
+        (target === null && currentOwner === user.id))
+
+    if (!isManagerOrAdmin && !isSelfAssign) {
+      return NextResponse.json(
+        { error: "Manager access required to assign this job to another salesperson" },
+        { status: 403 },
+      )
     }
 
     if (body.assignedSalespersonId) {
@@ -828,6 +861,24 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         after_json: after as Json,
       })
     }
+  }
+
+  if (body.consultant !== undefined || body.ownerUser !== undefined) {
+    const role = extractRoleFromJwt(user) ?? patchActorRole
+    const isManagerOrAdmin = role === "manager" || role === "admin"
+    const isConsultant = role === "consultant"
+    if (!isManagerOrAdmin && !isConsultant) {
+      return NextResponse.json({ error: "Insufficient permissions to change the consultant" }, { status: 403 })
+    }
+    const incoming = body.consultant ?? body.ownerUser ?? null
+    if (isConsultant && incoming !== null && incoming !== "") {
+      const validKeys: Set<string> = new Set(CONSULTANTS.map((c) => c.key))
+      if (!validKeys.has(incoming)) {
+        return NextResponse.json({ error: "Invalid consultant key" }, { status: 400 })
+      }
+    }
+    // Both fields map to the same DB column; consultant takes precedence if both are sent.
+    updates.consultant = incoming || null
   }
 
   if (stageUpdated && Object.keys(updates).length === 1) {

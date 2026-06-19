@@ -29,6 +29,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { ChevronDown, Loader2 } from "lucide-react"
 import { TITLES, COUNTRIES } from "@/lib/form-data"
+import { useRateTypes } from "@/lib/use-data"
 
 interface CreateCustomerDialogProps {
   open: boolean
@@ -49,11 +50,18 @@ interface FormState {
   vipStatus: boolean
   preferences: string
   communicationPreferences: string
+  defaultRateTypeId: string
 }
 
 type FormField = keyof Omit<
   FormState,
-  "notes" | "province" | "dateOfBirth" | "vipStatus" | "preferences" | "communicationPreferences"
+  | "notes"
+  | "province"
+  | "dateOfBirth"
+  | "vipStatus"
+  | "preferences"
+  | "communicationPreferences"
+  | "defaultRateTypeId"
 >
 type FormErrors = Record<FormField, string | null>
 type FormTouched = Partial<Record<FormField, boolean>>
@@ -74,6 +82,7 @@ function getInitialForm(): FormState {
     vipStatus: false,
     preferences: "",
     communicationPreferences: "",
+    defaultRateTypeId: "",
   }
 }
 
@@ -99,6 +108,8 @@ export function CreateCustomerDialog({ open, onOpenChange, onSuccess }: CreateCu
   const [isSaving, setIsSaving] = useState(false)
   const [emailConflictError, setEmailConflictError] = useState<string | null>(null)
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const { data: rateTypesData } = useRateTypes()
+  const rateTypes = (rateTypesData?.rateTypes ?? []).filter((rt) => !rt.archivedAt)
 
   const errors = useMemo(() => validateForm(form), [form])
   const hasErrors = useMemo(() => Object.values(errors).some((e) => e !== null), [errors])
@@ -158,6 +169,7 @@ export function CreateCustomerDialog({ open, onOpenChange, onSuccess }: CreateCu
           communication_preferences: form.communicationPreferences.trim()
             ? form.communicationPreferences.trim()
             : null,
+          default_rate_type_id: form.defaultRateTypeId || null,
         }),
       })
 
@@ -392,6 +404,31 @@ export function CreateCustomerDialog({ open, onOpenChange, onSuccess }: CreateCu
                       maxLength={2000}
                     />
                   </div>
+
+                  {/* Default rate type */}
+                  {rateTypes.length > 0 && (
+                    <div className="col-span-2 space-y-1.5">
+                      <Label htmlFor="defaultRateTypeId">Default rate type</Label>
+                      <Select
+                        value={form.defaultRateTypeId}
+                        onValueChange={(v) => setField("defaultRateTypeId", v)}
+                      >
+                        <SelectTrigger id="defaultRateTypeId" className="h-9">
+                          <SelectValue placeholder="System default" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {rateTypes.map((rt) => (
+                            <SelectItem key={rt.id} value={rt.id}>
+                              {rt.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        Pre-selects the rate version (e.g. Resident) when quoting this customer.
+                      </p>
+                    </div>
+                  )}
 
                   {/* Communication Preferences */}
                   <div className="col-span-2 space-y-1.5">

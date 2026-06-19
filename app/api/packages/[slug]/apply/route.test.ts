@@ -32,17 +32,24 @@ const RENTAL_ROUTE_ID = "99999999-9999-4999-8999-999999999998"
 const TRAIN_SUITE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 const HOTEL_ROOM_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 const TRANSFER_VEHICLE_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+const RATE_TYPE_DEFAULT_ID = "00000000-0000-4000-8000-000000000099"
+const RATE_TYPE_RESIDENT_ID = "00000000-0000-4000-8000-000000000088"
 
 function createUnauthorizedResponse() {
   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 }
 
-function makeRateCard(routeId: string, suiteTypeId: string, pricePerPerson: number) {
+function makeRateCard(
+  routeId: string,
+  suiteTypeId: string,
+  pricePerPerson: number,
+  rateTypeId: string = RATE_TYPE_DEFAULT_ID,
+) {
   return {
     id: crypto.randomUUID(),
     routeId,
     suiteTypeId,
-    rateTypeId: "00000000-0000-4000-8000-000000000099",
+    rateTypeId,
     pricePerPerson,
     childPrice: null,
     infantPrice: null,
@@ -83,12 +90,17 @@ function buildDetail(): PackageDetail {
             name: "Cape Town to Pretoria",
             originLocationId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
             destinationLocationId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+            commissionType: null,
+            commissionValue: null,
             active: true,
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
           },
         ],
-        rateCards: [makeRateCard(TRAIN_ROUTE_ID, TRAIN_SUITE_ID, 1000)],
+        rateCards: [
+          makeRateCard(TRAIN_ROUTE_ID, TRAIN_SUITE_ID, 1000, RATE_TYPE_DEFAULT_ID),
+          makeRateCard(TRAIN_ROUTE_ID, TRAIN_SUITE_ID, 800, RATE_TYPE_RESIDENT_ID),
+        ],
         suiteTypes: [
           {
             id: TRAIN_SUITE_ID,
@@ -116,6 +128,8 @@ function buildDetail(): PackageDetail {
             name: "Full Board",
             originLocationId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
             destinationLocationId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+            commissionType: null,
+            commissionValue: null,
             active: true,
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
@@ -151,6 +165,8 @@ function buildDetail(): PackageDetail {
             destinationLocationId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
             pickupPoint: "Airport",
             dropoffPoint: "Hotel",
+            commissionType: null,
+            commissionValue: null,
             active: true,
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
@@ -197,6 +213,8 @@ function buildDetail(): PackageDetail {
               createdAt: "2026-01-01T00:00:00.000Z",
               updatedAt: "2026-01-01T00:00:00.000Z",
             },
+            commissionType: null,
+            commissionValue: null,
             active: true,
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
@@ -282,6 +300,20 @@ function createSupabaseMock(
         return {
           select: vi.fn(() => ({
             in: vi.fn(async () => ({ data: [], error: null })),
+          })),
+        }
+      }
+
+      if (table === "rate_types") {
+        return {
+          select: vi.fn(() => ({
+            is: vi.fn(async () => ({
+              data: [
+                { id: RATE_TYPE_DEFAULT_ID, code: "RAC", name: "Rack Rate", is_default: true },
+                { id: RATE_TYPE_RESIDENT_ID, code: "RESIDENT", name: "Resident Rate", is_default: false },
+              ],
+              error: null,
+            })),
           })),
         }
       }
@@ -388,7 +420,7 @@ describe("POST /api/packages/[slug]/apply", () => {
     ])
   })
 
-  it("prices selected hotel by suite count and package nights", async () => {
+  it("defaults hotel to 1 room × 1 night when no rooms/nights are given", async () => {
     const response = await postApply({
       jobId: JOB_ID,
       quoteId: QUOTE_ID,
@@ -402,13 +434,40 @@ describe("POST /api/packages/[slug]/apply", () => {
     const payload = await response.json()
 
     expect(response.status).toBe(200)
-    expect(payload.lineItems).toContainEqual({
-      description: "Harbour Hotel - Sea View Room - Full Board",
-      supplierDescription: null,
-      qty: 4,
-      unitPrice: 500,
-      total: 2000,
+    expect(payload.lineItems).toContainEqual(
+      expect.objectContaining({
+        description: "Harbour Hotel - Sea View Room - Full Board — 1 night",
+        qty: 1,
+        unitPrice: 500,
+        total: 500,
+        pricingSnapshot: expect.objectContaining({ unit: "per room per night" }),
+      }),
+    )
+  })
+
+  it("prices hotel by the rooms and nights entered (qty = rooms × nights)", async () => {
+    const response = await postApply({
+      jobId: JOB_ID,
+      quoteId: QUOTE_ID,
+      travelDate: "2026-06-01",
+      selections: [
+        { legId: TRAIN_LEG_ID, selected: true, suiteTypeId: TRAIN_SUITE_ID },
+        { legId: HOTEL_LEG_ID, selected: true, routeId: HOTEL_MEAL_PLAN_ID, suiteTypeId: HOTEL_ROOM_ID, rooms: 2, nights: 7 },
+        { legId: TRANSFER_LEG_ID, selected: false },
+      ],
     })
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(payload.lineItems).toContainEqual(
+      expect.objectContaining({
+        description: "Harbour Hotel - Sea View Room - Full Board — 2 rooms × 7 nights",
+        qty: 14,
+        unitPrice: 500,
+        total: 7000,
+        pricingSnapshot: expect.objectContaining({ unit: "per room per night" }),
+      }),
+    )
   })
 
   it("keeps mixed train and hotel rate card prices separate", async () => {
@@ -444,21 +503,88 @@ describe("POST /api/packages/[slug]/apply", () => {
 
     expect(response.status).toBe(200)
     expect(payload.lineItems).toEqual([
-      {
+      expect.objectContaining({
         description: "Blue Train - Deluxe Suite - Cape Town to Pretoria - Adult",
         supplierDescription: null,
         qty: 2,
         unitPrice: 1000,
         total: 2000,
-      },
-      {
-        description: "Harbour Hotel - Sea View Room - Full Board",
+      }),
+      expect.objectContaining({
+        description: "Harbour Hotel - Sea View Room - Full Board — 1 night",
         supplierDescription: null,
-        qty: 4,
+        qty: 1,
         unitPrice: 500,
-        total: 2000,
-      },
+        total: 500,
+      }),
     ])
+  })
+
+  it("uses the chosen rate type's price when the leg is priced for it", async () => {
+    const response = await postApply({
+      jobId: JOB_ID,
+      quoteId: QUOTE_ID,
+      travelDate: "2026-06-01",
+      rateTypeId: RATE_TYPE_RESIDENT_ID,
+      selections: [
+        { legId: TRAIN_LEG_ID, selected: true, routeId: TRAIN_ROUTE_ID, suiteTypeId: TRAIN_SUITE_ID },
+        { legId: HOTEL_LEG_ID, selected: false },
+        { legId: TRANSFER_LEG_ID, selected: false },
+      ],
+    })
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    const adultLine = payload.lineItems.find((item: { description: string }) =>
+      item.description.endsWith("Adult"),
+    )
+    expect(adultLine.unitPrice).toBe(800)
+  })
+
+  it("falls back to the default rate type for a leg not priced at the chosen type", async () => {
+    const response = await postApply({
+      jobId: JOB_ID,
+      quoteId: QUOTE_ID,
+      travelDate: "2026-06-01",
+      rateTypeId: RATE_TYPE_RESIDENT_ID,
+      selections: [
+        { legId: TRAIN_LEG_ID, selected: true, routeId: TRAIN_ROUTE_ID, suiteTypeId: TRAIN_SUITE_ID },
+        { legId: HOTEL_LEG_ID, selected: true, routeId: HOTEL_MEAL_PLAN_ID, suiteTypeId: HOTEL_ROOM_ID },
+        { legId: TRANSFER_LEG_ID, selected: false },
+      ],
+    })
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    // Train has a Resident card (800); the hotel only has the default (500).
+    const adultLine = payload.lineItems.find((item: { description: string }) =>
+      item.description.endsWith("Adult"),
+    )
+    const hotelLine = payload.lineItems.find((item: { description: string }) =>
+      item.description.startsWith("Harbour Hotel"),
+    )
+    expect(adultLine.unitPrice).toBe(800)
+    expect(hotelLine.unitPrice).toBe(500)
+  })
+
+  it("prices deterministically using the default rate type when none is chosen", async () => {
+    const response = await postApply({
+      jobId: JOB_ID,
+      quoteId: QUOTE_ID,
+      travelDate: "2026-06-01",
+      selections: [
+        { legId: TRAIN_LEG_ID, selected: true, routeId: TRAIN_ROUTE_ID, suiteTypeId: TRAIN_SUITE_ID },
+        { legId: HOTEL_LEG_ID, selected: false },
+        { legId: TRANSFER_LEG_ID, selected: false },
+      ],
+    })
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    const adultLine = payload.lineItems.find((item: { description: string }) =>
+      item.description.endsWith("Adult"),
+    )
+    expect(adultLine.unitPrice).toBe(1000)
   })
 
   it("prices selected transfer as one flat service", async () => {
@@ -475,13 +601,16 @@ describe("POST /api/packages/[slug]/apply", () => {
     const payload = await response.json()
 
     expect(response.status).toBe(200)
-    expect(payload.lineItems).toContainEqual({
-      description: "Airport Transfers - Sedan - Airport to Hotel",
-      supplierDescription: null,
-      qty: 1,
-      unitPrice: 300,
-      total: 300,
-    })
+    expect(payload.lineItems).toContainEqual(
+      expect.objectContaining({
+        description: "Airport Transfers - Sedan - Airport to Hotel",
+        supplierDescription: null,
+        qty: 1,
+        unitPrice: 300,
+        total: 300,
+        pricingSnapshot: expect.objectContaining({ unit: "per vehicle" }),
+      }),
+    )
   })
 
   it("prices selected rental by billable days from the booking transport request", async () => {
@@ -521,13 +650,16 @@ describe("POST /api/packages/[slug]/apply", () => {
     const payload = await response.json()
 
     expect(response.status).toBe(200)
-    expect(payload.lineItems).toContainEqual({
-      description: "Vehicle Rentals - Sedan - Three day vehicle rental - Cape Town Airport -> Cape Town Airport",
-      supplierDescription: null,
-      qty: 2,
-      unitPrice: 1200,
-      total: 2400,
-    })
+    expect(payload.lineItems).toContainEqual(
+      expect.objectContaining({
+        description: "Vehicle Rentals - Sedan - Three day vehicle rental - Cape Town Airport -> Cape Town Airport",
+        supplierDescription: null,
+        qty: 2,
+        unitPrice: 1200,
+        total: 2400,
+        pricingSnapshot: expect.objectContaining({ unit: "per day" }),
+      }),
+    )
   })
 
   it("returns 400 when a required train suite type is missing", async () => {

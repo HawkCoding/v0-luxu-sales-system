@@ -1,7 +1,7 @@
 export interface DraftHydrationContext {
   hasLocalForm: boolean
   isEditing: boolean
-  supplierStatus: "draft" | "active" | "inactive"
+  supplierStatus: "draft" | "active" | "inactive" | "temporary"
   supplierIdentityChanged: boolean
 }
 
@@ -34,7 +34,7 @@ export function shouldHydrateFormFromServer(context: DraftHydrationContext): boo
   if (!context.hasLocalForm) {
     return true
   }
-  if (context.supplierStatus !== "draft") {
+  if (context.supplierStatus !== "draft" && context.supplierStatus !== "temporary") {
     return true
   }
   return !context.isEditing

@@ -10,7 +10,18 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useRole } from "@/lib/role-context"
 import { useState } from "react"
-import { Edit3, Eye, BookOpen } from "lucide-react"
+import { toast } from "sonner"
+import { Edit3, Eye, BookOpen, Plus, Trash2 } from "lucide-react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import type { Template } from "@/lib/types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
 import { VoucherTemplateEditor } from "@/components/voucher-template-editor"
@@ -51,6 +62,12 @@ export default function TemplatesPage() {
   const [saving, setSaving] = useState(false)
   const [preview, setPreview] = useState<Template | null>(null)
   const [showPlaceholders, setShowPlaceholders] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [createName, setCreateName] = useState("")
+  const [createSubject, setCreateSubject] = useState("")
+  const [createBody, setCreateBody] = useState("")
+  const [pendingDelete, setPendingDelete] = useState<Template | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   if (isLoading || !templates) {
     return <div className="p-6"><div className="animate-pulse space-y-3">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-24 bg-secondary rounded-lg" />)}</div></div>
@@ -78,6 +95,48 @@ export default function TemplatesPage() {
     }
   }
 
+  const handleCreate = async () => {
+    setSaving(true)
+    try {
+      const res = await fetch("/api/templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: createName, subject: createSubject, bodyHtml: createBody }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        toast.error(body.error ?? "Failed to create template")
+        return
+      }
+      toast.success("Template created")
+      mutate()
+      setCreating(false)
+      setCreateName("")
+      setCreateSubject("")
+      setCreateBody("")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!pendingDelete) return
+    setDeleting(true)
+    try {
+      const res = await fetch(`/api/templates/${pendingDelete.id}`, { method: "DELETE" })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        toast.error(body.error ?? "Failed to delete template")
+        return
+      }
+      toast.success("Template deleted")
+      mutate()
+      setPendingDelete(null)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   return (
     <div className="p-6 space-y-4 max-w-5xl">
       <div className="flex items-start justify-between">
@@ -85,10 +144,18 @@ export default function TemplatesPage() {
           <h1 className="text-3xl font-semibold text-foreground tracking-tight">Templates</h1>
           <p className="text-base text-muted-foreground mt-2">Email and voucher templates for customer communications</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setShowPlaceholders(true)}>
-          <BookOpen className="w-4 h-4 mr-1.5" />
-          Placeholder Names
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setShowPlaceholders(true)}>
+            <BookOpen className="w-4 h-4 mr-1.5" />
+            Placeholder Names
+          </Button>
+          {can("edit:templates") && (
+            <Button size="sm" onClick={() => setCreating(true)}>
+              <Plus className="w-4 h-4 mr-1.5" />
+              New Template
+            </Button>
+          )}
+        </div>
       </div>
 
       <Tabs defaultValue="email" className="space-y-4">
@@ -106,6 +173,7 @@ export default function TemplatesPage() {
                     <CardTitle className="text-sm font-medium">{t.key.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}</CardTitle>
                     <Badge variant="secondary" className="text-[10px]">v{t.version}</Badge>
                     <Badge variant={t.active ? "default" : "outline"} className="text-[10px]">{t.active ? "Active" : "Inactive"}</Badge>
+                    {t.isSystem && <Badge variant="outline" className="text-[10px]">System</Badge>}
                   </div>
                   <div className="flex items-center gap-1">
                     <Button variant="ghost" size="sm" onClick={() => setPreview(t)}>
@@ -114,6 +182,16 @@ export default function TemplatesPage() {
                     {can("edit:templates") && (
                       <Button variant="ghost" size="sm" onClick={() => startEdit(t)}>
                         <Edit3 className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
+                    {can("edit:templates") && !t.isSystem && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setPendingDelete(t)}
+                        aria-label={`Delete ${t.key} template`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-destructive" />
                       </Button>
                     )}
                   </div>
@@ -173,6 +251,65 @@ export default function TemplatesPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Create Email Template Dialog */}
+      <Dialog open={creating} onOpenChange={(open) => !open && setCreating(false)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>New Template</DialogTitle>
+            <DialogDescription>Create a custom email template. Use placeholder tokens for live data.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Name</label>
+              <Input
+                value={createName}
+                onChange={(e) => setCreateName(e.target.value)}
+                placeholder="e.g. Welcome Email"
+                className="mt-1 text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Subject</label>
+              <Input value={createSubject} onChange={(e) => setCreateSubject(e.target.value)} className="mt-1 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Body (HTML)</label>
+              <Textarea value={createBody} onChange={(e) => setCreateBody(e.target.value)} rows={12} className="mt-1 text-xs font-mono" />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setCreating(false)}>Cancel</Button>
+              <Button
+                size="sm"
+                onClick={handleCreate}
+                disabled={saving || createName.trim().length < 2 || createSubject.trim().length < 1}
+              >
+                {saving ? "Creating..." : "Create"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete confirmation */}
+      <AlertDialog open={!!pendingDelete} onOpenChange={(open) => !open && setPendingDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this template?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDelete
+                ? `“${pendingDelete.key.replace(/_/g, " ")}” will be permanently removed. This cannot be undone.`
+                : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} disabled={deleting}>
+              {deleting ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Preview Email Template Dialog */}
       <Dialog open={!!preview} onOpenChange={(open) => !open && setPreview(null)}>

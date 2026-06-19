@@ -21,7 +21,6 @@ const createQuoteSchema = z
   .object({
     bookingId: z.string().uuid().optional(),
     jobId: z.string().uuid().optional(),
-    itineraryId: z.string().uuid().nullable().optional(),
     status: z.enum(["draft", "pricing_incomplete", "ready", "sent", "accepted"]).optional(),
     validityUntil: z.string().nullable().optional(),
     subtotal: z.number().nonnegative().optional(),
@@ -86,7 +85,6 @@ export async function POST(req: Request) {
     .from("quotes")
     .insert({
       booking_id: bookingId,
-      itinerary_id: body.itineraryId ?? null,
       status: body.status ?? "draft",
       validity_until: computedValidityUntil,
       subtotal: lineItems.length > 0 ? calculatedTotals.subtotal : (body.subtotal ?? 0),

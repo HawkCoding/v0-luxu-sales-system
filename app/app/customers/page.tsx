@@ -79,13 +79,8 @@ export default function CustomersPage() {
 
     const suppliers = new Set<string>()
     customerBookings.forEach((b: any) => {
-      if (b.direction) {
-        if (b.direction.toLowerCase().includes("blue")) {
-          suppliers.add("Blue Train")
-        } else {
-          suppliers.add("Rovos Rail")
-        }
-      }
+      const name = b.supplierName?.trim()
+      if (name) suppliers.add(name)
     })
 
     return {
@@ -96,6 +91,12 @@ export default function CustomersPage() {
       jobs: customerBookings.map((b: any) => ({ ...b, jobNumber: b.bookingNumber })),
     }
   })
+
+  const supplierOptions = (
+    Array.from(
+      new Set(customers.flatMap((c: any) => ((c.suppliers as string[] | undefined) ?? []))),
+    ) as string[]
+  ).sort((a, b) => a.localeCompare(b))
 
   const filtered = customers.filter((c: any) => {
     // Search filter (name, email, phone)
@@ -200,7 +201,7 @@ export default function CustomersPage() {
   }
 
   return (
-    <div className="p-6 space-y-5 max-w-6xl">
+    <div className="p-6 space-y-5 max-w-6xl mx-auto">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold text-foreground tracking-tight">Customers</h1>
@@ -229,7 +230,7 @@ export default function CustomersPage() {
                 Filters
               </div>
               {hasActiveFilters && (
-                <Button variant="default" size="sm" onClick={clearFilters} className="h-8 text-xs">
+                <Button variant="ghost" size="sm" onClick={clearFilters} className="h-8 text-xs">
                   <X className="w-3.5 h-3.5 mr-1.5" />
                   Clear filters
                 </Button>
@@ -271,8 +272,11 @@ export default function CustomersPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Suppliers</SelectItem>
-                    <SelectItem value="Rovos Rail">Rovos Rail</SelectItem>
-                    <SelectItem value="Blue Train">Blue Train</SelectItem>
+                    {supplierOptions.map((name) => (
+                      <SelectItem key={name} value={name}>
+                        {name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -373,20 +377,20 @@ export default function CustomersPage() {
                       <div className="flex items-center gap-2 mb-1">
                         <p className="text-sm font-medium text-foreground">{c.firstName} {c.lastName}</p>
                         {c.vipStatus ? (
-                          <Badge variant="secondary" className="text-[10px] h-4 px-1.5 gap-1">
-                            <Star className="w-2.5 h-2.5" />
+                          <Badge variant="secondary" className="text-xs h-5 px-1.5 gap-1">
+                            <Star className="w-3 h-3" />
                             VIP
                           </Badge>
                         ) : null}
                         {c.isRepeatClient ? (
-                          <Badge variant="outline" className="text-[10px] h-4 px-1.5">
+                          <Badge variant="outline" className="text-xs h-5 px-1.5">
                             Repeat
                           </Badge>
                         ) : null}
                         {c.consultants.length > 0 && (
                           <div className="flex items-center gap-1">
                             {c.consultants.map((cons: string) => (
-                              <Badge key={cons} variant="default" className="text-[10px] h-4 px-1.5 font-bold">
+                              <Badge key={cons} variant="default" className="text-xs h-5 px-1.5 font-bold">
                                 {cons}
                               </Badge>
                             ))}
@@ -397,10 +401,12 @@ export default function CustomersPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    <Badge variant="outline" className="text-[10px] gap-1">
-                      <Globe className="w-2.5 h-2.5" /> {c.country}
-                    </Badge>
-                    <Badge variant="secondary" className="text-[10px]">{c.jobCount} booking{c.jobCount !== 1 ? "s" : ""}</Badge>
+                    {c.country && (
+                      <Badge variant="outline" className="text-xs gap-1">
+                        <Globe className="w-3 h-3" /> {c.country}
+                      </Badge>
+                    )}
+                    <Badge variant="secondary" className="text-xs">{c.jobCount} booking{c.jobCount !== 1 ? "s" : ""}</Badge>
                   </div>
                 </div>
               </CardContent>

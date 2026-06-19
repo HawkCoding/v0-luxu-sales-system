@@ -24,7 +24,7 @@ export function salesPerSalesperson(
 
   const map = new Map<string, SalesPerSalespersonRow>()
   for (const b of filtered) {
-    const key = b.consultant ?? "Unassigned"
+    const key = b.owner_name ?? "Unassigned"
     const existing = map.get(key) ?? {
       consultant: key,
       bookingCount: 0,

@@ -27,7 +27,7 @@ export function outstandingPayments(
     .map((b) => ({
       bookingId: b.id,
       bookingNumber: b.booking_number,
-      consultant: b.consultant,
+      consultant: b.owner_name ?? null,
       departureDate: b.departure_date,
       balance: b.invoice_balance ?? 0,
       stage: b.stage,

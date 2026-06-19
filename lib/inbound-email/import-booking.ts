@@ -32,16 +32,96 @@ function normalizeLookupValue(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
 }
 
-async function findRouteId(supabase: ServiceClient, direction: unknown): Promise<string | null> {
+async function resolveTrainSupplierId(
+  supabase: ServiceClient,
+  supplierName: unknown,
+): Promise<string | null> {
+  if (typeof supplierName !== "string" || !supplierName.trim()) return null
+
+  const normalizedName = normalizeLookupValue(supplierName)
+  const { data: suppliers } = await supabase
+    .from("suppliers")
+    .select("id, name")
+    .eq("kind", "train_operator")
+    .eq("active", true)
+
+  const match = (suppliers ?? []).find((item) => {
+    const normalized = normalizeLookupValue(item.name)
+    return normalized === normalizedName || normalizedName.includes(normalized) || normalized.includes(normalizedName)
+  })
+
+  return match?.id ?? null
+}
+
+/**
+ * Pulls the two endpoint location ids out of free-text direction wording (e.g. "Pretoria to
+ * Cape Town") by scanning the known location names — longest first so "Cape Town" wins over a
+ * bare token — and ordering them by where they first appear. Returns the first two distinct hits.
+ */
+function extractDirectionLocationIds(
+  direction: string,
+  locations: Array<{ id: string; name: string }>,
+): [string, string] | null {
+  const haystack = normalizeLookupValue(direction)
+  if (!haystack) return null
+
+  const hits: Array<{ id: string; index: number }> = []
+  const ordered = [...locations].sort((a, b) => b.name.length - a.name.length)
+  for (const location of ordered) {
+    const needle = normalizeLookupValue(location.name)
+    if (!needle) continue
+    const pattern = new RegExp(`\\b${needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`)
+    const match = pattern.exec(haystack)
+    if (match && !hits.some((hit) => hit.id === location.id)) {
+      hits.push({ id: location.id, index: match.index })
+    }
+  }
+
+  if (hits.length < 2) return null
+  hits.sort((a, b) => a.index - b.index)
+  return [hits[0].id, hits[1].id]
+}
+
+async function findRouteId(
+  supabase: ServiceClient,
+  direction: unknown,
+  supplierId: string | null,
+): Promise<string | null> {
   if (typeof direction !== "string" || !direction.trim()) return null
 
-  const { data: exactRoute } = await supabase
-    .from("routes")
-    .select("id")
-    .ilike("name", direction.trim())
-    .maybeSingle()
+  const { data: locations } = await supabase.from("locations").select("id, name")
+  const endpoints = extractDirectionLocationIds(direction, locations ?? [])
+  if (!endpoints) return null
+  const [firstLocId, secondLocId] = endpoints
 
-  return exactRoute?.id ?? null
+  let routesQuery = supabase
+    .from("routes")
+    .select("id, origin_location_id, destination_location_id, direction_mode")
+    .eq("active", true)
+  if (supplierId) {
+    routesQuery = routesQuery.eq("supplier_id", supplierId)
+  }
+  const { data: routes } = await routesQuery
+
+  const matches = (routes ?? []).filter((route) => {
+    const origin = route.origin_location_id
+    const destination = route.destination_location_id
+    if (!origin || !destination) return false
+    if (route.direction_mode === "one_way") {
+      return origin === firstLocId && destination === secondLocId
+    }
+    // round_trip: order-independent endpoint pair
+    return (
+      (origin === firstLocId && destination === secondLocId) ||
+      (origin === secondLocId && destination === firstLocId)
+    )
+  })
+
+  // With a resolved supplier there should be at most one match. Without one, only auto-link when
+  // the pair is unambiguous; otherwise leave it for manual selection.
+  if (matches.length === 1) return matches[0].id
+  if (supplierId && matches.length > 0) return matches[0].id
+  return null
 }
 
 async function findPackageId(supabase: ServiceClient, packageOption: unknown): Promise<string | null> {
@@ -217,7 +297,8 @@ export async function createEmailBookingFromParsedDraft(
     customerId = newCustomer.id
   }
 
-  const routeId = await findRouteId(supabase, payload.direction)
+  const trainSupplierId = await resolveTrainSupplierId(supabase, parsed.trip.supplier)
+  const routeId = await findRouteId(supabase, payload.direction, trainSupplierId)
   const packageId = await findPackageId(supabase, payload.packageOption)
   const hotelSupplierId = await findHotelSupplierId(supabase, payload.hotelOption)
   const rawPreview = createRawEmailPreview(context.rawText)

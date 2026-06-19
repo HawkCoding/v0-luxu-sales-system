@@ -44,6 +44,11 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { useActiveSuppliers, useLocations } from "@/lib/use-data"
+import {
+  getDestinationLocationIds,
+  getDestinationNames,
+  supplierMatchesDestination,
+} from "@/lib/packages/location-filter"
 import { formatRateCardValidityRange } from "@/lib/rate-card-validity"
 import type { Location, Supplier, SupplierDetail, SupplierRateCard, SupplierRoute, SupplierSuiteType } from "@/lib/types"
 import { CURRENCIES, SUPPLIER_KIND_LABELS, getSupplierVocabulary, type SupplierKind } from "@/lib/types"
@@ -233,9 +238,20 @@ export function PackageWizard() {
   const [step, setStep] = useState(1)
   const [supplierKind, setSupplierKind] = useState<SupplierKind>("train_operator")
   const [selectedSupplierId, setSelectedSupplierId] = useState("")
+  const [showAllSuppliers, setShowAllSuppliers] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
 
-  const filteredSuppliers = suppliers.filter((supplier) => supplier.kind === supplierKind)
+  const destinationLocationIds = getDestinationLocationIds(state.legs)
+  const destinationNames = getDestinationNames(destinationLocationIds, locations)
+  const scopeByDestination =
+    supplierKind !== "train_operator" && destinationLocationIds.length > 0 && !showAllSuppliers
+  const filteredSuppliers = suppliers
+    .filter((supplier) => supplier.kind === supplierKind)
+    .filter(
+      (supplier) =>
+        !scopeByDestination ||
+        supplierMatchesDestination(supplier, destinationLocationIds, locations),
+    )
   const selectedSupplier = suppliers.find((supplier) => supplier.id === selectedSupplierId)
   const hasAnySelection =
     state.legs.length > 0 && state.legs.every((leg) => legHasRequiredSelection(leg))
@@ -450,6 +466,24 @@ export function PackageWizard() {
                     Add leg
                   </Button>
                 </div>
+                {supplierKind !== "train_operator" && destinationLocationIds.length > 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    {scopeByDestination
+                      ? `Showing ${SUPPLIER_KIND_LABELS[supplierKind].toLowerCase()} in ${
+                          destinationNames.length > 0
+                            ? destinationNames.join(", ")
+                            : "the route destination"
+                        }.`
+                      : `Showing all ${SUPPLIER_KIND_LABELS[supplierKind].toLowerCase()}.`}{" "}
+                    <button
+                      type="button"
+                      className="underline underline-offset-2 hover:text-foreground"
+                      onClick={() => setShowAllSuppliers((current) => !current)}
+                    >
+                      {scopeByDestination ? "Show all" : `Show only ${destinationNames.join(", ") || "destination"}`}
+                    </button>
+                  </p>
+                ) : null}
                 <div className="space-y-2">
                   {state.legs.map((leg, index) => (
                     <div key={leg.id} className="flex items-center justify-between rounded-lg border p-3">

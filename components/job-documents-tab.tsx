@@ -5,16 +5,21 @@ import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import type { DocRecord, Enquiry, Job, Customer } from "@/lib/types"
+import type { DocRecord, Enquiry, Job, Customer, Itinerary } from "@/lib/types"
 import { AlertCircle, FileText } from "lucide-react"
 import { GenerateVoucherDialog } from "@/components/generate-voucher-dialog"
+import { GenerateItineraryDialog } from "@/components/generate-itinerary-dialog"
 import { formatDisplayDateTime } from "@/lib/date-format"
+
+const CONFIRMED_STAGES = new Set(["deposit_paid", "final_paid", "voucher_sent", "closed"])
+const VOUCHER_STAGES = new Set(["final_paid", "voucher_sent", "closed"])
 
 interface JobDocumentsTabProps {
   documents: DocRecord[]
   job?: Job
   enquiry?: Enquiry
   customer?: Customer
+  itineraries?: Itinerary[]
   onChange?: () => Promise<void> | void
   loading?: boolean
   error?: Error | null
@@ -25,15 +30,14 @@ export function JobDocumentsTab({
   job,
   enquiry,
   customer,
+  itineraries = [],
   onChange,
   loading = false,
   error = null,
 }: JobDocumentsTabProps) {
-  const canGenerateVoucher =
-    job &&
-    enquiry &&
-    customer &&
-    (job.stage === "final_paid" || job.stage === "voucher_sent" || job.stage === "closed")
+  const canGenerateVoucher = job && enquiry && customer && VOUCHER_STAGES.has(job.stage ?? "")
+  const canGenerateItinerary = job && customer && CONFIRMED_STAGES.has(job.stage ?? "")
+  const existingItinerary = itineraries[0] ?? null
 
   if (loading) {
     return (
@@ -81,6 +85,29 @@ export function JobDocumentsTab({
 
   return (
     <div className="space-y-3">
+      {canGenerateItinerary && (
+        <Card className="border-primary/20 bg-primary/5">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-foreground">Generate Client Itinerary</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Create a personalised trip overview PDF to send to the client
+                </p>
+              </div>
+              <GenerateItineraryDialog
+                jobId={job.id}
+                bookingNumber={job.jobNumber}
+                initialTripTitle={existingItinerary?.name ?? ""}
+                initialTripNotes={existingItinerary?.notes ?? ""}
+                onGenerated={onChange}
+                onSent={onChange}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {canGenerateVoucher && (
         <Card className="border-primary/20 bg-primary/5">
           <CardContent className="p-4">
@@ -102,7 +129,7 @@ export function JobDocumentsTab({
         </Card>
       )}
 
-      {documents.length === 0 && !canGenerateVoucher && (
+      {documents.length === 0 && !canGenerateVoucher && !canGenerateItinerary && (
         <div className="text-center py-8 text-sm text-muted-foreground">No documents generated</div>
       )}
 

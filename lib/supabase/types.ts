@@ -1066,6 +1066,7 @@ export type Database = {
           country: string | null
           created_at: string
           date_of_birth: string | null
+          default_rate_type_id: string | null
           email: string
           first_name: string
           first_travel_date: string | null
@@ -1086,6 +1087,7 @@ export type Database = {
           country?: string | null
           created_at?: string
           date_of_birth?: string | null
+          default_rate_type_id?: string | null
           email: string
           first_name: string
           first_travel_date?: string | null
@@ -1106,6 +1108,7 @@ export type Database = {
           country?: string | null
           created_at?: string
           date_of_birth?: string | null
+          default_rate_type_id?: string | null
           email?: string
           first_name?: string
           first_travel_date?: string | null
@@ -1121,7 +1124,15 @@ export type Database = {
           updated_at?: string
           vip_status?: boolean
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "customers_default_rate_type_id_fkey"
+            columns: ["default_rate_type_id"]
+            isOneToOne: false
+            referencedRelation: "rate_types"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       documents: {
         Row: {
@@ -2260,6 +2271,7 @@ export type Database = {
           created_at: string
           id: string
           is_default: boolean
+          is_standard: boolean
           name: string
           sort_order: number
           updated_at: string
@@ -2270,6 +2282,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_default?: boolean
+          is_standard?: boolean
           name: string
           sort_order?: number
           updated_at?: string
@@ -2280,6 +2293,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_default?: boolean
+          is_standard?: boolean
           name?: string
           sort_order?: number
           updated_at?: string
@@ -2333,9 +2347,7 @@ export type Database = {
         }
         Insert: {
           active?: boolean
-          commission_type?:
-            | Database["public"]["Enums"]["commission_kind"]
-            | null
+          commission_type?: Database["public"]["Enums"]["commission_kind"] | null
           commission_value?: number | null
           created_at?: string
           destination_location_id?: string | null
@@ -2355,9 +2367,7 @@ export type Database = {
         }
         Update: {
           active?: boolean
-          commission_type?:
-            | Database["public"]["Enums"]["commission_kind"]
-            | null
+          commission_type?: Database["public"]["Enums"]["commission_kind"] | null
           commission_value?: number | null
           created_at?: string
           destination_location_id?: string | null
@@ -2654,6 +2664,35 @@ export type Database = {
           },
         ]
       }
+      supplier_kind_default_rate_types: {
+        Row: {
+          created_at: string
+          kind: string
+          rate_type_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          kind: string
+          rate_type_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          kind?: string
+          rate_type_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_kind_default_rate_types_rate_type_id_fkey"
+            columns: ["rate_type_id"]
+            isOneToOne: false
+            referencedRelation: "rate_types"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       supplier_pricing_options: {
         Row: {
           created_at: string
@@ -2694,6 +2733,48 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "supplier_pricing_options_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      supplier_rate_adjustments: {
+        Row: {
+          created_at: string
+          discount_pct: number
+          id: string
+          rate_type_id: string
+          supplier_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          discount_pct?: number
+          id?: string
+          rate_type_id: string
+          supplier_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          discount_pct?: number
+          id?: string
+          rate_type_id?: string
+          supplier_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_rate_adjustments_rate_type_id_fkey"
+            columns: ["rate_type_id"]
+            isOneToOne: false
+            referencedRelation: "rate_types"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_rate_adjustments_supplier_id_fkey"
             columns: ["supplier_id"]
             isOneToOne: false
             referencedRelation: "suppliers"
@@ -2786,9 +2867,7 @@ export type Database = {
           active: boolean
           child_max_age: number | null
           created_at: string
-          default_commission_type:
-            | Database["public"]["Enums"]["commission_kind"]
-            | null
+          default_commission_type: Database["public"]["Enums"]["commission_kind"] | null
           default_commission_value: number | null
           default_time_end: string | null
           default_time_start: string | null
@@ -2814,9 +2893,7 @@ export type Database = {
           active?: boolean
           child_max_age?: number | null
           created_at?: string
-          default_commission_type?:
-            | Database["public"]["Enums"]["commission_kind"]
-            | null
+          default_commission_type?: Database["public"]["Enums"]["commission_kind"] | null
           default_commission_value?: number | null
           default_time_end?: string | null
           default_time_start?: string | null
@@ -2842,9 +2919,7 @@ export type Database = {
           active?: boolean
           child_max_age?: number | null
           created_at?: string
-          default_commission_type?:
-            | Database["public"]["Enums"]["commission_kind"]
-            | null
+          default_commission_type?: Database["public"]["Enums"]["commission_kind"] | null
           default_commission_value?: number | null
           default_time_end?: string | null
           default_time_start?: string | null
@@ -2889,6 +2964,7 @@ export type Database = {
           body_html: string
           created_at: string
           id: string
+          is_system: boolean
           key: string
           subject: string
           updated_at: string
@@ -2899,6 +2975,7 @@ export type Database = {
           body_html: string
           created_at?: string
           id?: string
+          is_system?: boolean
           key: string
           subject: string
           updated_at?: string
@@ -2909,6 +2986,7 @@ export type Database = {
           body_html?: string
           created_at?: string
           id?: string
+          is_system?: boolean
           key?: string
           subject?: string
           updated_at?: string
@@ -3204,6 +3282,7 @@ export type Database = {
         | "summary_pdf"
         | "other"
         | "proof_of_payment"
+        | "itinerary_pdf"
       document_status: "required" | "received" | "generated" | "sent"
       hotel_phase: "pre" | "post" | "none"
       pipeline_stage:
@@ -3388,6 +3467,7 @@ export const Constants = {
         "summary_pdf",
         "other",
         "proof_of_payment",
+        "itinerary_pdf",
       ],
       document_status: ["required", "received", "generated", "sent"],
       hotel_phase: ["pre", "post", "none"],

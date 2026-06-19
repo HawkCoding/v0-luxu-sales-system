@@ -104,6 +104,7 @@ describe("GET /api/rate-types", () => {
         name: "Rack Rate",
         sortOrder: 0,
         isDefault: true,
+        isStandard: false,
         archivedAt: null,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",

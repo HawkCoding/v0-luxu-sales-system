@@ -64,6 +64,9 @@ const PAYMENT_STATUS_LABELS: Record<string, string> = {
   blue: "Credit / refund",
 }
 
+// Display order for the on-board payment-status legend (worst → best, then credits).
+const PAYMENT_LEGEND_ORDER = ["red", "purple", "yellow", "green", "blue"] as const
+
 function isPastOrToday(dateString: string | null): boolean {
   if (!dateString) return false
   const today = new Date()
@@ -416,6 +419,15 @@ export default function PipelinePage() {
                 ))}
               </SelectContent>
             </Select>
+          </div>
+          <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+            <span className="text-xs font-medium text-muted-foreground">Payment status:</span>
+            {PAYMENT_LEGEND_ORDER.map((key) => (
+              <span key={key} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span className={`h-2.5 w-2.5 rounded-full ${PAYMENT_COLORS[key]}`} aria-hidden="true" />
+                {PAYMENT_STATUS_LABELS[key]}
+              </span>
+            ))}
           </div>
           <div className="min-h-0 flex-1 overflow-x-auto">
             <div className="flex min-w-max h-full gap-3 pb-4">

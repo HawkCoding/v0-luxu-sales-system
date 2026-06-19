@@ -12,6 +12,13 @@ export interface BookingInputRow {
   id: string
   booking_number: string
   consultant: string | null
+  assigned_salesperson_id: string | null
+  /**
+   * Resolved owner display name (from assigned_salesperson_id → profiles).
+   * Populated by the report routes before the pure report functions run so
+   * ownership reflects reassignments rather than the legacy `consultant` code.
+   */
+  owner_name?: string | null
   departure_date: string | null
   stage: string
   outcome: string
@@ -39,7 +46,8 @@ export function applyBookingFilter(
   return bookings.filter((b) => {
     if (filter.from && b.created_at < filter.from) return false
     if (filter.to && b.created_at > filter.to + "T23:59:59Z") return false
-    if (filter.consultant && b.consultant !== filter.consultant) return false
+    // The consultant filter value is the owner's user id (assigned_salesperson_id).
+    if (filter.consultant && b.assigned_salesperson_id !== filter.consultant) return false
     if (filter.product && getProductFromBookingNumber(b.booking_number) !== filter.product) return false
     if (filter.stage && getCanonicalPipelineStage(b.stage as Parameters<typeof getCanonicalPipelineStage>[0]) !== filter.stage) return false
     return true

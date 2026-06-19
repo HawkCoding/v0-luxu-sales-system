@@ -1,12 +1,10 @@
-import { isOptionalPackageLegKind } from "@/lib/types"
+import { isOptionalPackageLegKind, SUPPLIER_VOCABULARY } from "@/lib/types"
 import type {
   CommissionBreakdown,
   CommissionKind,
   PackageDetail,
   QuoteLineItem,
   ResolvedCommission,
-  RouteDirection,
-  RouteDirectionMode,
 } from "@/lib/types"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
@@ -23,20 +21,14 @@ export interface PackageLegSelection {
   routeId?: string
   suiteTypeId?: string
   rateTypeId?: string
-  direction?: RouteDirection
+  /** Hotel legs only: number of rooms booked (default 1). */
+  rooms?: number
+  /** Hotel legs only: number of nights stayed (default 1). Independent of journey duration. */
+  nights?: number
   commissionOverride?: {
     type: CommissionKind
     value: number
   } | null
-}
-
-function getDirectionMultiplier(directionMode: RouteDirectionMode, direction: RouteDirection): number {
-  if (directionMode !== "round_trip") return 1
-  return direction === "round_trip" ? 2 : 1
-}
-
-function defaultDirectionFor(directionMode: RouteDirectionMode): RouteDirection {
-  return directionMode === "round_trip" ? "round_trip" : "outbound"
 }
 
 interface TransportRequestRow {
@@ -49,12 +41,24 @@ interface TransportRequestRow {
   rental_details?: { return_at: string | null } | { return_at: string | null }[] | null
 }
 
+interface RateTypeMeta {
+  id: string
+  code: string
+  name: string
+}
+
 interface BuildPackageQuoteLineItemsInput {
   supabase: SupabaseClient<Database>
   packageDetail: PackageDetail
   jobId: string
   travelDate: string
   selections?: PackageLegSelection[]
+  /** Quote-level chosen rate type (e.g. Resident). Applies to every leg unless a leg sets its own. */
+  rateTypeId?: string | null
+  /** System default rate type, used as the fallback when a leg has no card for the chosen type. */
+  fallbackRateTypeId?: string | null
+  /** Optional rate-type metadata for stamping code/name into the pricing snapshot. */
+  rateTypes?: RateTypeMeta[]
 }
 
 interface BuildPackageQuoteLineItemsResult {
@@ -67,6 +71,9 @@ export async function buildPackageQuoteLineItems({
   jobId,
   travelDate,
   selections = [],
+  rateTypeId: quoteRateTypeId = null,
+  fallbackRateTypeId = null,
+  rateTypes = [],
 }: BuildPackageQuoteLineItemsInput): Promise<BuildPackageQuoteLineItemsResult> {
   const { data: job, error: jobError } = await supabase
     .from("bookings")
@@ -171,7 +178,11 @@ export async function buildPackageQuoteLineItems({
   }
 
   const selectionMap = new Map(selections.map((entry) => [entry.legId, entry]))
+  const rateTypeMetaById = new Map(rateTypes.map((rt) => [rt.id, rt]))
   const lineItems: QuoteLineItem[] = []
+  // The rate card resolved for the leg currently being priced; addLineItem
+  // reads it to stamp the rate type into each line's pricing snapshot.
+  let activeRateCard: PackageDetail["legs"][number]["rateCards"][number] | null = null
   const childAges = job.child_ages ?? []
 
   const defaultBuckets = await fetchDefaultAgeBuckets(supabase)
@@ -179,68 +190,25 @@ export async function buildPackageQuoteLineItems({
     new Set(packageDetail.legs.map((leg) => leg.supplierId).filter((id): id is string => Boolean(id))),
   )
   const supplierOverridesById = new Map<string, { infantMaxAge: number | null; childMaxAge: number | null }>()
-  const supplierCommissionDefaultsById = new Map<
-    string,
-    { type: CommissionKind | null; value: number | null }
-  >()
   if (supplierIds.length > 0) {
     const { data: supplierAgeRows } = await supabase
       .from("suppliers")
-      .select("id, infant_max_age, child_max_age, default_commission_type, default_commission_value")
+      .select("id, infant_max_age, child_max_age")
       .in("id", supplierIds)
     for (const row of supplierAgeRows ?? []) {
       supplierOverridesById.set(row.id, {
         infantMaxAge: row.infant_max_age ?? null,
         childMaxAge: row.child_max_age ?? null,
       })
-      const rawType = row.default_commission_type
-      const rawValue = row.default_commission_value
-      const type =
-        rawType === "percent" || rawType === "per_person" ? rawType : null
-      const value =
-        rawValue === null || rawValue === undefined ? null : Number(rawValue)
-      supplierCommissionDefaultsById.set(row.id, { type, value })
-    }
-  }
-
-  const routeIdsForCommission = Array.from(
-    new Set(packageDetail.legs.flatMap((leg) => leg.routes.map((route) => route.id))),
-  )
-  const routeCommissionOverridesById = new Map<
-    string,
-    { type: CommissionKind | null; value: number | null }
-  >()
-  if (routeIdsForCommission.length > 0) {
-    const { data: routeCommissionRows } = await supabase
-      .from("routes")
-      .select("id, commission_type, commission_value")
-      .in("id", routeIdsForCommission)
-    for (const row of routeCommissionRows ?? []) {
-      const rawType = row.commission_type
-      const rawValue = row.commission_value
-      const type =
-        rawType === "percent" || rawType === "per_person" ? rawType : null
-      const value =
-        rawValue === null || rawValue === undefined ? null : Number(rawValue)
-      routeCommissionOverridesById.set(row.id, { type, value })
     }
   }
 
   function commissionFor(
-    leg: PackageDetail["legs"][number],
-    routeId: string | null,
+    _leg: PackageDetail["legs"][number],
+    _routeId: string | null,
     lineOverride?: { type: CommissionKind; value: number } | null,
-  ): ResolvedCommission {
-    if (lineOverride) {
-      return { type: lineOverride.type, value: lineOverride.value, source: "line" }
-    }
-    const supplierDefault = leg.supplierId
-      ? supplierCommissionDefaultsById.get(leg.supplierId) ?? null
-      : null
-    const routeOverride = routeId
-      ? routeCommissionOverridesById.get(routeId) ?? null
-      : null
-    return resolveCommission({ supplierDefault, routeOverride })
+  ) {
+    return resolveCommission({ lineOverride: lineOverride ?? null })
   }
 
   function bucketsForLeg(leg: PackageDetail["legs"][number]): AgeBuckets {
@@ -264,6 +232,8 @@ export async function buildPackageQuoteLineItems({
     supplierDescription?: string | null
     suiteTypeId?: string | null
     commission?: ResolvedCommission | null
+    /** Display-only basis shown next to the quantity (e.g. "per person", "per night"). */
+    unit?: string | null
   }
 
   function addLineItem({
@@ -273,6 +243,7 @@ export async function buildPackageQuoteLineItems({
     supplierDescription,
     suiteTypeId,
     commission,
+    unit,
   }: AddLineItemOptions) {
     if (qty <= 0) return
 
@@ -301,7 +272,9 @@ export async function buildPackageQuoteLineItems({
       total,
     }
 
-    if ((suiteVariants && suiteVariants.length > 0) || commissionBreakdown) {
+    const rateTypeMeta = activeRateCard ? rateTypeMetaById.get(activeRateCard.rateTypeId) : undefined
+
+    if ((suiteVariants && suiteVariants.length > 0) || commissionBreakdown || unit) {
       lineItem.pricingSnapshot = {
         source: "pricing_engine",
         pricingMode: "rate_card",
@@ -316,7 +289,10 @@ export async function buildPackageQuoteLineItems({
         routeName: null,
         suiteTypeId: suiteTypeId ?? null,
         suiteTypeName: null,
-        rateCardId: null,
+        rateCardId: activeRateCard?.id ?? null,
+        rateTypeId: activeRateCard?.rateTypeId ?? null,
+        rateTypeCode: rateTypeMeta?.code ?? null,
+        rateTypeName: rateTypeMeta?.name ?? null,
         travelDate,
         passengerKind: "adult",
         baseUnitPrice: unitPrice,
@@ -325,6 +301,7 @@ export async function buildPackageQuoteLineItems({
         serviceType: null,
         suiteVariants,
         commission: commissionBreakdown,
+        unit: unit ?? null,
       }
     }
 
@@ -353,16 +330,24 @@ export async function buildPackageQuoteLineItems({
     leg: PackageDetail["legs"][number],
     routeId: string,
     suiteTypeId: string,
-    rateTypeId?: string | null,
+    perLegRateTypeId?: string | null,
   ) {
-    return leg.rateCards.find(
+    const candidates = leg.rateCards.filter(
       (rc) =>
         rc.routeId === routeId &&
         rc.suiteTypeId === suiteTypeId &&
-        (!rateTypeId || rc.rateTypeId === rateTypeId) &&
         rc.validFrom <= travelDate &&
         (rc.validTo === null || rc.validTo >= travelDate),
     )
+    if (candidates.length === 0) return undefined
+
+    // Resolve deterministically: a per-leg override beats the quote-level
+    // choice, which beats the system default, which beats any remaining card.
+    const chosen = perLegRateTypeId ?? quoteRateTypeId
+    const byRateType = (rateTypeId: string | null | undefined) =>
+      rateTypeId ? candidates.find((rc) => rc.rateTypeId === rateTypeId) : undefined
+
+    return byRateType(chosen) ?? byRateType(fallbackRateTypeId) ?? candidates[0]
   }
 
   function getRouteName(leg: PackageDetail["legs"][number], routeId: string) {
@@ -423,6 +408,7 @@ export async function buildPackageQuoteLineItems({
       description: `${packageDetail.name} — Package Total`,
       qty: travellerCount,
       unitPrice: packageDetail.fixedPricePerPerson,
+      unit: "per person",
     })
   } else {
     for (const leg of packageDetail.legs) {
@@ -461,6 +447,7 @@ export async function buildPackageQuoteLineItems({
         const legLabel = leg.label ?? leg.supplierName
         throw new Error(`No pricing available for "${legLabel}" on ${travelDate}. Update the package rate cards first.`)
       }
+      activeRateCard = validRateCard
 
       const legLabel = leg.label ?? leg.supplierName
       const routeName = getRouteName(leg, routeId)
@@ -471,16 +458,24 @@ export async function buildPackageQuoteLineItems({
 
       const commission = commissionFor(leg, routeId, selection.commissionOverride ?? null)
 
+      const unit = SUPPLIER_VOCABULARY[leg.supplierKind].priceLabel
+
       if (isHotel) {
-        const nights = Math.max(1, packageDetail.durationNights ?? 1)
-        const qty = Math.max(1, job.no_of_suites) * nights
+        // Hotel rooms and nights are explicit booking inputs (default 1 each),
+        // independent of the journey/package duration. qty = rooms × nights keeps
+        // the qty × unitPrice = total invariant; the description spells out both.
+        const rooms = Math.max(1, selection.rooms ?? 1)
+        const nights = Math.max(1, selection.nights ?? 1)
+        const nightsLabel = `${nights} night${nights === 1 ? "" : "s"}`
+        const stayLabel = rooms === 1 ? nightsLabel : `${rooms} rooms × ${nightsLabel}`
         addLineItem({
-          description,
-          qty,
+          description: `${description} — ${stayLabel}`,
+          qty: rooms * nights,
           unitPrice: validRateCard.pricePerPerson,
           supplierDescription,
           suiteTypeId,
           commission,
+          unit,
         })
       } else if (isTransfer || isVehicleRental) {
         const serviceType = isVehicleRental ? "rental" : "transfer"
@@ -499,6 +494,7 @@ export async function buildPackageQuoteLineItems({
             supplierDescription,
             suiteTypeId,
             commission,
+            unit,
           })
         } else {
           addLineItem({
@@ -508,40 +504,40 @@ export async function buildPackageQuoteLineItems({
             supplierDescription,
             suiteTypeId,
             commission,
+            unit,
           })
         }
       } else {
-        const routeMeta = leg.routes.find((route) => route.id === routeId) ?? null
-        const directionMode: RouteDirectionMode = routeMeta?.directionMode ?? "one_way"
-        const direction: RouteDirection = selection.direction ?? defaultDirectionFor(directionMode)
-        const multiplier = getDirectionMultiplier(directionMode, direction)
         const { adultCount, childCount, infantCount } = countsForBuckets(bucketsForLeg(leg))
         addLineItem({
           description: `${description} - Adult`,
           qty: adultCount,
-          unitPrice: validRateCard.pricePerPerson * multiplier,
+          unitPrice: validRateCard.pricePerPerson,
           supplierDescription,
           suiteTypeId,
           commission,
+          unit,
         })
         addLineItem({
           description: `${description} - Child`,
           qty: childCount,
-          unitPrice: (validRateCard.childPrice ?? validRateCard.pricePerPerson) * multiplier,
+          unitPrice: validRateCard.childPrice ?? validRateCard.pricePerPerson,
           supplierDescription,
           suiteTypeId,
           commission,
+          unit,
         })
         addLineItem({
           description: `${description} - Infant`,
           qty: infantCount,
           unitPrice:
-            (validRateCard.infantPrice ??
-              validRateCard.childPrice ??
-              validRateCard.pricePerPerson) * multiplier,
+            validRateCard.infantPrice ??
+            validRateCard.childPrice ??
+            validRateCard.pricePerPerson,
           supplierDescription,
           suiteTypeId,
           commission,
+          unit,
         })
       }
     }

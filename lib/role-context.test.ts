@@ -18,8 +18,10 @@ describe("canRolePerform", () => {
   it("enforces the expected manager restrictions", () => {
     expect(canRolePerform("manager", "view:reporting")).toBe(true)
     expect(canRolePerform("manager", "edit:suppliers")).toBe(true)
+    // Managers manage email/voucher templates (matches PATCH /api/templates).
+    expect(canRolePerform("manager", "view:templates")).toBe(true)
+    expect(canRolePerform("manager", "edit:templates")).toBe(true)
     expect(canRolePerform("manager", "edit:products")).toBe(false)
-    expect(canRolePerform("manager", "edit:templates")).toBe(false)
     expect(canRolePerform("manager", "edit:settings")).toBe(false)
     expect(canRolePerform("manager", "manage:users")).toBe(false)
   })

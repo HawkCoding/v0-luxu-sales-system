@@ -1,16 +1,18 @@
 import type { Database } from "@/lib/supabase/types"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
+import { normalizeRouteDirectionMode } from "@/lib/routes/route-name"
 import type {
   BookingScheduleSupplierKind,
   BookingSupplierSchedule,
   BookingVehicleRentalDetails,
-  CommissionKind,
   Location,
   Supplier,
   BookingTransportRequest,
   RateType,
   SupplierDetail,
   SupplierEmail,
+  SupplierKind,
+  SupplierRateAdjustment,
   SupplierRateCard,
   SupplierRoute,
   SupplierSuiteType,
@@ -18,6 +20,7 @@ import type {
   TransportRequestServiceType,
   VehicleRentalRouteDetails,
 } from "@/lib/types"
+import { resolveDefaultRateTypeId } from "@/lib/rate-types/default-rate-type"
 
 type BookingTransportRequestRow = Database["public"]["Tables"]["booking_transport_requests"]["Row"]
 type BookingSupplierScheduleRow = Database["public"]["Tables"]["booking_supplier_schedules"]["Row"]
@@ -31,6 +34,8 @@ type RouteRow = Database["public"]["Tables"]["routes"]["Row"]
 type SupplierRow = Database["public"]["Tables"]["suppliers"]["Row"]
 type SupplierEmailRow = Database["public"]["Tables"]["supplier_emails"]["Row"]
 type RateTypeRow = Database["public"]["Tables"]["rate_types"]["Row"]
+type SupplierRateAdjustmentRow = Database["public"]["Tables"]["supplier_rate_adjustments"]["Row"]
+type SupplierKindDefaultRateTypeRow = Database["public"]["Tables"]["supplier_kind_default_rate_types"]["Row"]
 type SuiteTypeRow = Database["public"]["Tables"]["suite_types"]["Row"]
 type VehicleRentalRouteDetailsRow = Database["public"]["Tables"]["vehicle_rental_route_details"]["Row"]
 type BedroomTypeRow = Database["public"]["Tables"]["bedroom_types"]["Row"]
@@ -41,15 +46,10 @@ type SuiteTypeBedroomLayoutRow = Database["public"]["Tables"]["suite_type_bedroo
 type SuiteTypeBathroomTypeRow = Database["public"]["Tables"]["suite_type_bathroom_types"]["Row"]
 
 function normalizeSupplierStatus(value: string): Supplier["status"] {
-  if (value === "draft" || value === "active" || value === "inactive") {
+  if (value === "draft" || value === "active" || value === "inactive" || value === "temporary") {
     return value
   }
   return "inactive"
-}
-
-function normalizeCommissionKind(value: string | null | undefined): CommissionKind | null {
-  if (value === "percent" || value === "per_person") return value
-  return null
 }
 
 function normalizeTransportRequestServiceType(value: string | null): TransportRequestServiceType | null {
@@ -94,6 +94,16 @@ function mapBookingVehicleRentalDetails(
   }
 }
 
+export function buildSupplierSlugBase(name: string): string {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+
+  return slug || "supplier"
+}
+
 export function mapSupplier(row: SupplierRow): Supplier {
   return {
     id: row.id,
@@ -114,11 +124,6 @@ export function mapSupplier(row: SupplierRow): Supplier {
     singleSupplementPct: Number(row.single_supplement_pct ?? 0),
     infantMaxAge: row.infant_max_age ?? null,
     childMaxAge: row.child_max_age ?? null,
-    defaultCommissionType: normalizeCommissionKind(row.default_commission_type),
-    defaultCommissionValue:
-      row.default_commission_value === null || row.default_commission_value === undefined
-        ? null
-        : Number(row.default_commission_value),
     defaultTimeStart: row.default_time_start ?? null,
     defaultTimeEnd: row.default_time_end ?? null,
     createdAt: row.created_at,
@@ -155,12 +160,9 @@ export function mapSupplierRoute(
     pickupPoint: row.pickup_point ?? null,
     dropoffPoint: row.dropoff_point ?? null,
     vehicleRentalDetails: mapVehicleRentalRouteDetails(vehicleRentalDetails),
-    directionMode: row.direction_mode ?? "one_way",
-    commissionType: normalizeCommissionKind(row.commission_type),
-    commissionValue:
-      row.commission_value === null || row.commission_value === undefined
-        ? null
-        : Number(row.commission_value),
+    directionMode: normalizeRouteDirectionMode(row.direction_mode),
+    commissionType: row.commission_type ?? null,
+    commissionValue: row.commission_value != null ? Number(row.commission_value) : null,
     active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -311,6 +313,7 @@ export function mapRateType(row: RateTypeRow): RateType {
     name: row.name,
     sortOrder: row.sort_order ?? 0,
     isDefault: row.is_default,
+    isStandard: row.is_standard ?? false,
     archivedAt: row.archived_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -336,6 +339,8 @@ export interface SupplierDetailMapInput {
   suiteTypeBedroomLayouts?: SuiteTypeBedroomLayoutRow[]
   suiteTypeBathroomTypes?: SuiteTypeBathroomTypeRow[]
   rateTypes?: RateTypeRow[]
+  rateAdjustments?: SupplierRateAdjustmentRow[]
+  kindDefaultRateTypes?: SupplierKindDefaultRateTypeRow[]
 }
 
 function buildSuiteTypeMemberships(
@@ -410,8 +415,14 @@ export function mapSupplierDetail(
     return a.name.localeCompare(b.name)
   })
 
+  const rateTypes = [...(variants.rateTypes ?? [])]
+    .filter((row) => !row.archived_at)
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name))
+    .map(mapRateType)
+
+  const mapped = mapSupplier(supplier)
   return {
-    ...mapSupplier(supplier),
+    ...mapped,
     emails: emails.map(mapSupplierEmail),
     suiteTypes: sortedSuiteTypes.map((row) => mapSupplierSuiteType(row, memberships)),
     routes: routes.map((route) => mapSupplierRoute(route, detailsByRouteId.get(route.id))),
@@ -426,9 +437,18 @@ export function mapSupplierDetail(
     bathroomTypes: [...bathroomTypeRows]
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name))
       .map(mapVariantValue),
-    rateTypes: [...(variants.rateTypes ?? [])]
-      .filter((row) => !row.archived_at)
-      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name))
-      .map(mapRateType),
+    rateTypes: rateTypes,
+    rateAdjustments: (variants.rateAdjustments ?? []).map((row) => ({
+      rateTypeId: row.rate_type_id,
+      discountPct: Number(row.discount_pct ?? 0),
+    })),
+    defaultRateTypeId: resolveDefaultRateTypeId(
+      mapped.kind,
+      (variants.kindDefaultRateTypes ?? []).map((row) => ({
+        kind: row.kind as SupplierKind,
+        rateTypeId: row.rate_type_id,
+      })),
+      rateTypes,
+    ),
   }
 }
