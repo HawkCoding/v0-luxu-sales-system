@@ -183,7 +183,7 @@ export async function POST(req: Request) {
       active: false,
       status: "temporary",
     })
-    .select("id, slug, kind, status, name, email, phone, website, location, location_detail, location_id, location_area_id, description, notes, active, single_supplement_pct, infant_max_age, child_max_age, default_time_start, default_time_end, created_at, updated_at")
+    .select("id, slug, kind, status, name, email, phone, website, location, location_detail, location_id, location_area_id, description, notes, active, single_supplement_pct, infant_max_age, child_max_age, default_time_start, default_time_end, default_commission_type, default_commission_value, created_at, updated_at")
     .single()
 
   if (supplierError || !supplier) {

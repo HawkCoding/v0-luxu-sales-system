@@ -872,7 +872,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     }
     const incoming = body.consultant ?? body.ownerUser ?? null
     if (isConsultant && incoming !== null && incoming !== "") {
-      const validKeys = new Set(CONSULTANTS.map((c) => c.key))
+      const validKeys: Set<string> = new Set(CONSULTANTS.map((c) => c.key))
       if (!validKeys.has(incoming)) {
         return NextResponse.json({ error: "Invalid consultant key" }, { status: 400 })
       }

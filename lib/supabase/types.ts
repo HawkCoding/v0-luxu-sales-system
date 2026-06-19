@@ -2327,6 +2327,8 @@ export type Database = {
       routes: {
         Row: {
           active: boolean
+          commission_type: Database["public"]["Enums"]["commission_kind"] | null
+          commission_value: number | null
           created_at: string
           destination_location_id: string | null
           direction_mode: Database["public"]["Enums"]["route_direction_mode"]
@@ -2345,6 +2347,8 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          commission_type?: Database["public"]["Enums"]["commission_kind"] | null
+          commission_value?: number | null
           created_at?: string
           destination_location_id?: string | null
           direction_mode?: Database["public"]["Enums"]["route_direction_mode"]
@@ -2363,6 +2367,8 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          commission_type?: Database["public"]["Enums"]["commission_kind"] | null
+          commission_value?: number | null
           created_at?: string
           destination_location_id?: string | null
           direction_mode?: Database["public"]["Enums"]["route_direction_mode"]
@@ -2861,6 +2867,8 @@ export type Database = {
           active: boolean
           child_max_age: number | null
           created_at: string
+          default_commission_type: Database["public"]["Enums"]["commission_kind"] | null
+          default_commission_value: number | null
           default_time_end: string | null
           default_time_start: string | null
           description: string | null
@@ -2885,6 +2893,8 @@ export type Database = {
           active?: boolean
           child_max_age?: number | null
           created_at?: string
+          default_commission_type?: Database["public"]["Enums"]["commission_kind"] | null
+          default_commission_value?: number | null
           default_time_end?: string | null
           default_time_start?: string | null
           description?: string | null
@@ -2909,6 +2919,8 @@ export type Database = {
           active?: boolean
           child_max_age?: number | null
           created_at?: string
+          default_commission_type?: Database["public"]["Enums"]["commission_kind"] | null
+          default_commission_value?: number | null
           default_time_end?: string | null
           default_time_start?: string | null
           description?: string | null
@@ -3261,6 +3273,7 @@ export type Database = {
     }
     Enums: {
       booking_purpose: "quote" | "availability" | "reservation"
+      commission_kind: "percent" | "per_person"
       correspondence_status: "sent" | "failed" | "scheduled"
       document_kind:
         | "quote_pdf"
@@ -3445,6 +3458,7 @@ export const Constants = {
   public: {
     Enums: {
       booking_purpose: ["quote", "availability", "reservation"],
+      commission_kind: ["percent", "per_person"],
       correspondence_status: ["sent", "failed", "scheduled"],
       document_kind: [
         "quote_pdf",
