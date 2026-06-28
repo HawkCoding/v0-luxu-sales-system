@@ -125,6 +125,7 @@ describe("supplierSaveSchema", () => {
             {
               routeId: UUID_3,
               suiteTypeId: UUID_2,
+              rateTypeId: UUID_4,
               pricePerPerson: 950,
               childPrice: 300,
               infantPrice: 100,

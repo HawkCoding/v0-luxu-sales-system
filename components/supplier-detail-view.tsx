@@ -473,10 +473,12 @@ function updateRateCardPeriodDateValues(
   periodKey: string,
   updates: Partial<Pick<EditableRateCard, "validFrom" | "validTo">>,
   routeId?: string,
+  rateTypeId?: string,
 ): EditableRateCard[] {
   return rateCards.map((rateCard) =>
     getRatePeriodKey(rateCard.validFrom, rateCard.validTo, rateCard.currency) === periodKey &&
-    (!routeId || rateCard.routeId === routeId)
+    (!routeId || rateCard.routeId === routeId) &&
+    (!rateTypeId || rateCard.rateTypeId === rateTypeId)
       ? { ...rateCard, ...updates }
       : rateCard,
   )
@@ -2766,7 +2768,7 @@ export function SupplierDetailView({
           previousPeriodKey && linkedPreviousValidTo
             ? updateRateCardPeriodDateValues(pkg.rateCards, previousPeriodKey, {
                 validTo: linkedPreviousValidTo,
-              }, route.id)
+              }, route.id, rateTypeId)
             : pkg.rateCards
 
         const newRateCards = availableSuiteTypes.map((suiteType) => ({
@@ -2857,10 +2859,10 @@ export function SupplierDetailView({
 
         if (key === "validFrom" || key === "validTo") {
           nextRateCards = applyBidirectionalPeriodDateLinking(
-            nextRateCards.filter((rateCard) => rateCard.routeId === routeId),
+            nextRateCards.filter((rateCard) => rateCard.routeId === routeId && rateCard.rateTypeId === rateTypeId),
             nextPeriodKey,
             key,
-          ).concat(nextRateCards.filter((rateCard) => rateCard.routeId !== routeId))
+          ).concat(nextRateCards.filter((rateCard) => rateCard.routeId !== routeId || rateCard.rateTypeId !== rateTypeId))
         }
 
         const nextPackage = { ...pkg, rateCards: nextRateCards }
@@ -3023,15 +3025,37 @@ export function SupplierDetailView({
         )
         const targetIds = new Set(targetCards.map((card) => card.id))
         let applied = 0
+        let usedFallback = false
+        let nearestPeriod: string | null = null
 
         const nextRateCards = pkg.rateCards.map((rateCard) => {
           if (!targetIds.has(rateCard.id)) return rateCard
-          const base = baseCards.find(
+          let base = baseCards.find(
             (candidate) =>
               candidate.suiteTypeId === rateCard.suiteTypeId &&
               candidate.validFrom <= rateCard.validFrom &&
               (candidate.validTo === null || candidate.validTo >= rateCard.validFrom),
           )
+          if (!base) {
+            const specialStart = toUtcDate(rateCard.validFrom)
+            const suiteCandidates = baseCards.filter((c) => c.suiteTypeId === rateCard.suiteTypeId)
+            if (specialStart && suiteCandidates.length > 0) {
+              let minDist = Infinity
+              for (const candidate of suiteCandidates) {
+                const candidateDate = toUtcDate(candidate.validFrom)
+                if (!candidateDate) continue
+                const dist = Math.abs(specialStart.getTime() - candidateDate.getTime())
+                if (dist < minDist) {
+                  minDist = dist
+                  base = candidate
+                }
+              }
+              if (base && !usedFallback) {
+                usedFallback = true
+                nearestPeriod = `${base.validFrom}–${base.validTo ?? "ongoing"}`
+              }
+            }
+          }
           if (!base) return rateCard
           applied += 1
           return {
@@ -3045,16 +3069,23 @@ export function SupplierDetailView({
         })
 
         if (applied === 0) {
-          toast.error("No matching default-rate prices found for this period.", {
+          toast.error("No Rack prices found — add Rack rate cards first.", {
             id: "apply-markdown-none",
           })
           return pkg
         }
 
-        toast.success(
-          `Applied ${discountPct}% markdown to ${applied} ${applied === 1 ? "row" : "rows"}.`,
-          { id: "apply-markdown-done" },
-        )
+        if (usedFallback && nearestPeriod) {
+          toast.success(
+            `Applied ${discountPct}% markdown using nearest Rack period (${nearestPeriod}).`,
+            { id: "apply-markdown-done" },
+          )
+        } else {
+          toast.success(
+            `Applied ${discountPct}% markdown to ${applied} ${applied === 1 ? "row" : "rows"}.`,
+            { id: "apply-markdown-done" },
+          )
+        }
         return { ...pkg, rateCards: nextRateCards }
       })
     },
@@ -3279,6 +3310,7 @@ export function SupplierDetailView({
             id: rateCard.id,
             routeId: rateCard.routeId,
             suiteTypeId: rateCard.suiteTypeId,
+            rateTypeId: rateCard.rateTypeId,
             pricePerPerson: rateCard.pricePerPerson,
             childPrice: isTransportSupplier(form.kind) ? null : rateCard.childPrice,
             infantPrice: isTransportSupplier(form.kind) ? null : rateCard.infantPrice,

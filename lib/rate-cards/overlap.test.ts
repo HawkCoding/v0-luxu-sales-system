@@ -6,14 +6,16 @@ const ROUTE_B = "00000000-0000-4000-8000-000000000002"
 const SUITE_A = "00000000-0000-4000-8000-000000000011"
 const SUITE_B = "00000000-0000-4000-8000-000000000012"
 const RATE_TYPE = "00000000-0000-4000-8000-000000000099"
+const RATE_TYPE_B = "00000000-0000-4000-8000-000000000098"
 
 function card(
   routeId: string,
   suiteTypeId: string,
   validFrom: string,
   validTo: string | null,
+  rateTypeId = RATE_TYPE,
 ) {
-  return { rateTypeId: RATE_TYPE, routeId, suiteTypeId, validFrom, validTo }
+  return { rateTypeId, routeId, suiteTypeId, validFrom, validTo }
 }
 
 describe("areRateCardDateRangesOverlapping", () => {
@@ -87,6 +89,15 @@ describe("checkRateCardOverlaps", () => {
       checkRateCardOverlaps([
         card(ROUTE_A, SUITE_A, "2026-01-01", "2026-12-31"),
         card(ROUTE_A, SUITE_B, "2026-01-01", "2026-12-31"),
+      ]),
+    ).not.toThrow()
+  })
+
+  it("allows overlapping dates on different rate types for the same route+suite", () => {
+    expect(() =>
+      checkRateCardOverlaps([
+        card(ROUTE_A, SUITE_A, "2026-01-01", "2026-06-30", RATE_TYPE),
+        card(ROUTE_A, SUITE_A, "2026-01-01", "2026-06-30", RATE_TYPE_B),
       ]),
     ).not.toThrow()
   })

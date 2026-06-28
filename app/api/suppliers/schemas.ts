@@ -39,7 +39,7 @@ export const rateCardSchema = z.object({
   id: z.string().uuid().optional(),
   routeId: z.string().uuid(),
   suiteTypeId: z.string().uuid(),
-  rateTypeId: z.string().uuid().optional(),
+  rateTypeId: z.string().uuid(),
   pricePerPerson: z.number().finite().nonnegative(),
   childPrice: z.number().finite().nonnegative().nullable(),
   infantPrice: z.number().finite().nonnegative().nullable(),
