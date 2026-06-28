@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import useSWR, { useSWRConfig } from "swr"
+import { useSWRConfig } from "swr"
 import {
   ArrowLeft,
   Mail,
@@ -72,13 +72,14 @@ import {
 import { AgeRangeChip } from "@/components/ui/age-range-chip"
 import {
   DEFAULT_AGE_BUCKETS,
+  formatBucketRange,
   resolveAgeBuckets,
   type AgeBuckets,
 } from "@/lib/pricing/age-buckets"
 import { shortenUrl } from "@/lib/url"
 import { applyRateMarkdown } from "@/lib/pricing/rate-markdown"
 import { cn } from "@/lib/utils"
-import { useLocations, useSupplierDetail } from "@/lib/use-data"
+import { useAgeBandsSettings, useLocations, useSupplierDetail, useTrainChildPriceRatio } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
 import { formatRateCardValidityRange } from "@/lib/rate-card-validity"
 import { buildRouteName } from "@/lib/routes/route-name"
@@ -1924,9 +1925,10 @@ function PassengerAgeBandsSection({
 }: PassengerAgeBandsSectionProps) {
   const usingInfantDefault = infantMaxAge === null
   const usingChildDefault = childMaxAge === null
-  const effectiveInfant = infantMaxAge ?? 2
-  const effectiveChild = childMaxAge ?? 12
+  const effectiveInfant = infantMaxAge ?? DEFAULT_AGE_BUCKETS.infantMax
+  const effectiveChild = childMaxAge ?? DEFAULT_AGE_BUCKETS.childMax
   const usingAnyDefault = usingInfantDefault || usingChildDefault
+  const ranges = formatBucketRange({ infantMax: effectiveInfant, childMax: effectiveChild })
 
   return (
     <div className="rounded-lg border p-4 space-y-3">
@@ -1981,15 +1983,15 @@ function PassengerAgeBandsSection({
       <div className="text-xs text-muted-foreground">
         Resolves to:{" "}
         <span className="tabular-nums">
-          Infant 0–{effectiveInfant}
+          Infant {ranges.infant}
           {usingInfantDefault ? " (default)" : ""}
         </span>{" "}
         ·{" "}
         <span className="tabular-nums">
-          Child {effectiveInfant + 1}–{effectiveChild}
+          Child {ranges.child}
           {usingChildDefault ? " (default)" : ""}
         </span>{" "}
-        · <span className="tabular-nums">Adult {effectiveChild + 1}+</span>
+        · <span className="tabular-nums">Adult {ranges.adult}</span>
       </div>
     </div>
   )
@@ -2274,23 +2276,9 @@ export function SupplierDetailView({
   const router = useRouter()
   const { data, isLoading, error, mutate: mutateDetail } = useSupplierDetail(supplierSlug)
   const { data: allLocations = [] } = useLocations()
-  const { data: trainRatioData } = useSWR<{ ratio: number }>(
-    "/api/settings/train-child-price-ratio",
-    async (url: string) => {
-      const res = await fetch(url)
-      if (!res.ok) throw new Error("Failed to load")
-      return res.json()
-    },
-  )
+  const { data: trainRatioData } = useTrainChildPriceRatio()
   const trainChildPriceRatio = trainRatioData?.ratio ?? DEFAULT_TRAIN_CHILD_PRICE_RATIO
-  const { data: ageBandsData } = useSWR<{ infantMaxAge: number; childMaxAge: number }>(
-    "/api/settings/age-bands",
-    async (url: string) => {
-      const res = await fetch(url)
-      if (!res.ok) throw new Error("Failed to load")
-      return res.json()
-    },
-  )
+  const { data: ageBandsData } = useAgeBandsSettings()
   const globalAgeDefaults: AgeBuckets = ageBandsData
     ? { infantMax: ageBandsData.infantMaxAge, childMax: ageBandsData.childMaxAge }
     : DEFAULT_AGE_BUCKETS
@@ -3008,8 +2996,15 @@ export function SupplierDetailView({
       rateTypeId: string,
       discountPct: number,
     ) => {
-      const baseRateTypeId = supplier?.defaultRateTypeId ?? null
-      if (!baseRateTypeId || rateTypeId === baseRateTypeId) return
+      const activeRateTypes = (supplier?.rateTypes ?? []).filter((rt) => !rt.archivedAt)
+      const effectiveDefaultRateTypeId =
+        (supplier?.defaultRateTypeId && activeRateTypes.some((rt) => rt.id === supplier.defaultRateTypeId)
+          ? supplier.defaultRateTypeId
+          : null) ??
+        activeRateTypes.find((rt) => rt.isDefault)?.id ??
+        activeRateTypes[0]?.id ??
+        null
+      if (!effectiveDefaultRateTypeId || rateTypeId === effectiveDefaultRateTypeId) return
 
       updatePackage(packageIndex, (pkg) => {
         const targetCards = pkg.rateCards.filter(
@@ -3021,7 +3016,7 @@ export function SupplierDetailView({
         if (targetCards.length === 0) return pkg
 
         const baseCards = pkg.rateCards.filter(
-          (rateCard) => rateCard.routeId === routeId && rateCard.rateTypeId === baseRateTypeId,
+          (rateCard) => rateCard.routeId === routeId && rateCard.rateTypeId === effectiveDefaultRateTypeId,
         )
         const targetIds = new Set(targetCards.map((card) => card.id))
         let applied = 0
@@ -3068,8 +3063,11 @@ export function SupplierDetailView({
           }
         })
 
+        const baseRateName =
+          activeRateTypes.find((rt) => rt.id === effectiveDefaultRateTypeId)?.name ?? "Rack"
+
         if (applied === 0) {
-          toast.error("No Rack prices found — add Rack rate cards first.", {
+          toast.error(`No ${baseRateName} prices found — add ${baseRateName} rate cards first.`, {
             id: "apply-markdown-none",
           })
           return pkg
@@ -3077,7 +3075,7 @@ export function SupplierDetailView({
 
         if (usedFallback && nearestPeriod) {
           toast.success(
-            `Applied ${discountPct}% markdown using nearest Rack period (${nearestPeriod}).`,
+            `Applied ${discountPct}% markdown using nearest ${baseRateName} period (${nearestPeriod}).`,
             { id: "apply-markdown-done" },
           )
         } else {
@@ -3281,6 +3279,16 @@ export function SupplierDetailView({
     const overlapConflict = findFirstRateCardOverlapConflict(meaningfulPackages, form.suiteTypes)
     if (overlapConflict) {
       toast.error(buildRateCardOverlapConflictMessage(overlapConflict, vocabulary))
+      return
+    }
+
+    const invalidCardCount = form.packages
+      .flatMap((pkg) => pkg.rateCards)
+      .filter((card) => !card.rateTypeId).length
+    if (invalidCardCount > 0) {
+      toast.error(
+        `${invalidCardCount} rate card${invalidCardCount > 1 ? "s are" : " is"} missing a rate type. Select a rate type for each card before publishing.`,
+      )
       return
     }
 

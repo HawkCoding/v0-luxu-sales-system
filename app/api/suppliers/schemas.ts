@@ -28,11 +28,8 @@ const variantValueSchema = z.object({
   archivedAt: z.string().nullable().optional(),
 })
 
-const draftVariantValueSchema = z.object({
-  id: z.string().uuid().optional(),
+const draftVariantValueSchema = variantValueSchema.extend({
   name: z.string().trim().max(200).default(""),
-  sortOrder: z.number().int().nonnegative().default(0),
-  archivedAt: z.string().nullable().optional(),
 })
 
 export const rateCardSchema = z.object({
