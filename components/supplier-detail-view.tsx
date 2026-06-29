@@ -82,6 +82,10 @@ import { cn } from "@/lib/utils"
 import { useAgeBandsSettings, useLocations, useSupplierDetail, useTrainChildPriceRatio } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
 import { formatRateCardValidityRange } from "@/lib/rate-card-validity"
+import {
+  rateCardMatchesPill,
+  resolveRateTypePills,
+} from "@/lib/rate-types/view-rate-type-pills"
 import { buildRouteName } from "@/lib/routes/route-name"
 import {
   getSupplierVocabulary,
@@ -954,15 +958,30 @@ function InfoItem({
 function PackageRateCardMatrix({
   pkg,
   suiteTypes,
+  rateTypes,
+  defaultRateTypeId,
   locationsById,
   vocabulary,
 }: {
   pkg: SupplierPackage
   suiteTypes: SupplierSuiteType[]
+  rateTypes: RateType[]
+  defaultRateTypeId: string | null
   locationsById: Record<string, Location>
   vocabulary: SupplierVocabulary
 }) {
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null)
+  const [selectedRateTypeId, setSelectedRateTypeId] = useState<string | null>(null)
+
+  const { pills: rateTypePills, defaultSelectedId: defaultRateTypePillId } = useMemo(
+    () => resolveRateTypePills(pkg.rateCards, rateTypes, defaultRateTypeId),
+    [pkg.rateCards, rateTypes, defaultRateTypeId],
+  )
+  const effectiveSelectedRateTypeId =
+    selectedRateTypeId && rateTypePills.some((pill) => pill.id === selectedRateTypeId)
+      ? selectedRateTypeId
+      : defaultRateTypePillId
+
   const effectiveSelectedRouteId =
     selectedRouteId && pkg.routes.some((route) => route.id === selectedRouteId)
       ? selectedRouteId
@@ -979,13 +998,49 @@ function PackageRateCardMatrix({
   const routeColumns = effectiveSelectedRouteId
     ? pkg.routes.filter((route) => route.id === effectiveSelectedRouteId)
     : pkg.routes
-  const visibleRateCards = effectiveSelectedRouteId
-    ? pkg.rateCards.filter((rateCard) => rateCard.routeId === effectiveSelectedRouteId)
-    : pkg.rateCards
+  const visibleRateCards = pkg.rateCards.filter((rateCard) => {
+    if (effectiveSelectedRouteId && rateCard.routeId !== effectiveSelectedRouteId) {
+      return false
+    }
+    if (
+      effectiveSelectedRateTypeId &&
+      !rateCardMatchesPill(rateCard, effectiveSelectedRateTypeId, rateTypes)
+    ) {
+      return false
+    }
+    return true
+  })
   const periodGroups = groupRateCardsByPeriod(visibleRateCards)
 
   return (
     <div className="space-y-4">
+      {rateTypePills.length > 0 ? (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Rate type
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {rateTypePills.map((pill) => {
+              const isSelected = effectiveSelectedRateTypeId === pill.id
+
+              return (
+                <Button
+                  key={pill.id}
+                  type="button"
+                  size="sm"
+                  variant={isSelected ? "default" : "outline"}
+                  className="h-7 rounded-full px-3 text-xs"
+                  aria-pressed={isSelected}
+                  onClick={() => setSelectedRateTypeId(pill.id)}
+                >
+                  {pill.name}
+                </Button>
+              )
+            })}
+          </div>
+        </div>
+      ) : null}
+
       {pkg.routes.length > 1 ? (
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -4254,6 +4309,8 @@ export function SupplierDetailView({
                 <PackageRateCardMatrix
                   pkg={supplierRouteRatePackage}
                   suiteTypes={supplier.suiteTypes}
+                  rateTypes={supplier.rateTypes ?? []}
+                  defaultRateTypeId={supplier.defaultRateTypeId ?? null}
                   locationsById={locationsById}
                   vocabulary={activeVocabulary}
                 />
