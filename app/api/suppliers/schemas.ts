@@ -28,6 +28,7 @@ const variantValueSchema = z.object({
   archivedAt: z.string().nullable().optional(),
 })
 
+// Intentionally drops min(1) from variantValueSchema.name — drafts may have an empty name
 const draftVariantValueSchema = variantValueSchema.extend({
   name: z.string().trim().max(200).default(""),
 })

@@ -3004,7 +3004,13 @@ export function SupplierDetailView({
         activeRateTypes.find((rt) => rt.isDefault)?.id ??
         activeRateTypes[0]?.id ??
         null
-      if (!effectiveDefaultRateTypeId || rateTypeId === effectiveDefaultRateTypeId) return
+      if (!effectiveDefaultRateTypeId) {
+        toast.error("No rate types configured — add one in Settings before applying markdown.", {
+          id: "apply-markdown-no-type",
+        })
+        return
+      }
+      if (rateTypeId === effectiveDefaultRateTypeId) return
 
       updatePackage(packageIndex, (pkg) => {
         const targetCards = pkg.rateCards.filter(
@@ -3019,47 +3025,57 @@ export function SupplierDetailView({
           (rateCard) => rateCard.routeId === routeId && rateCard.rateTypeId === effectiveDefaultRateTypeId,
         )
         const targetIds = new Set(targetCards.map((card) => card.id))
-        let applied = 0
-        let usedFallback = false
-        let nearestPeriod: string | null = null
 
-        const nextRateCards = pkg.rateCards.map((rateCard) => {
-          if (!targetIds.has(rateCard.id)) return rateCard
-          let base = baseCards.find(
+        const baseCardsBySuite = new Map<string, EditableRateCard[]>()
+        for (const card of baseCards) {
+          const bucket = baseCardsBySuite.get(card.suiteTypeId) ?? []
+          bucket.push(card)
+          baseCardsBySuite.set(card.suiteTypeId, bucket)
+        }
+
+        const findBaseCard = (
+          rateCard: EditableRateCard,
+        ): { card: EditableRateCard; period: string | null } | undefined => {
+          const suite = baseCardsBySuite.get(rateCard.suiteTypeId) ?? []
+          const exact = suite.find(
             (candidate) =>
-              candidate.suiteTypeId === rateCard.suiteTypeId &&
               candidate.validFrom <= rateCard.validFrom &&
               (candidate.validTo === null || candidate.validTo >= rateCard.validFrom),
           )
-          if (!base) {
-            const specialStart = toUtcDate(rateCard.validFrom)
-            const suiteCandidates = baseCards.filter((c) => c.suiteTypeId === rateCard.suiteTypeId)
-            if (specialStart && suiteCandidates.length > 0) {
-              let minDist = Infinity
-              for (const candidate of suiteCandidates) {
-                const candidateDate = toUtcDate(candidate.validFrom)
-                if (!candidateDate) continue
-                const dist = Math.abs(specialStart.getTime() - candidateDate.getTime())
-                if (dist < minDist) {
-                  minDist = dist
-                  base = candidate
-                }
-              }
-              if (base && !usedFallback) {
-                usedFallback = true
-                nearestPeriod = `${base.validFrom}–${base.validTo ?? "ongoing"}`
-              }
+          if (exact) return { card: exact, period: null }
+          const specialStart = toUtcDate(rateCard.validFrom)
+          if (!specialStart || suite.length === 0) return undefined
+          let nearest: EditableRateCard | undefined
+          let minDist = Infinity
+          for (const candidate of suite) {
+            const candidateDate = toUtcDate(candidate.validFrom)
+            if (!candidateDate) continue
+            const dist = Math.abs(specialStart.getTime() - candidateDate.getTime())
+            if (dist < minDist) {
+              minDist = dist
+              nearest = candidate
             }
           }
-          if (!base) return rateCard
+          return nearest
+            ? { card: nearest, period: `${nearest.validFrom}–${nearest.validTo ?? "ongoing"}` }
+            : undefined
+        }
+
+        let applied = 0
+        const fallbackPeriods = new Set<string>()
+        const nextRateCards = pkg.rateCards.map((rateCard) => {
+          if (!targetIds.has(rateCard.id)) return rateCard
+          const found = findBaseCard(rateCard)
+          if (!found) return rateCard
+          if (found.period) fallbackPeriods.add(found.period)
           applied += 1
           return {
             ...rateCard,
-            pricePerPerson: applyRateMarkdown(base.pricePerPerson, discountPct),
+            pricePerPerson: applyRateMarkdown(found.card.pricePerPerson, discountPct),
             childPrice:
-              base.childPrice === null ? null : applyRateMarkdown(base.childPrice, discountPct),
+              found.card.childPrice === null ? null : applyRateMarkdown(found.card.childPrice, discountPct),
             infantPrice:
-              base.infantPrice === null ? null : applyRateMarkdown(base.infantPrice, discountPct),
+              found.card.infantPrice === null ? null : applyRateMarkdown(found.card.infantPrice, discountPct),
           }
         })
 
@@ -3073,9 +3089,10 @@ export function SupplierDetailView({
           return pkg
         }
 
-        if (usedFallback && nearestPeriod) {
+        if (fallbackPeriods.size > 0) {
+          const periodList = [...fallbackPeriods].join(", ")
           toast.success(
-            `Applied ${discountPct}% markdown using nearest ${baseRateName} period (${nearestPeriod}).`,
+            `Applied ${discountPct}% markdown using nearest ${baseRateName} period${fallbackPeriods.size > 1 ? "s" : ""} (${periodList}).`,
             { id: "apply-markdown-done" },
           )
         } else {
