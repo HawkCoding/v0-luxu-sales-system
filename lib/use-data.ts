@@ -238,3 +238,15 @@ export interface SystemInfo {
 export function useSystemInfo() {
   return useSWR<SystemInfo>("/api/settings/system-info", fetcher, swrOptions)
 }
+
+export function useTrainChildPriceRatio() {
+  return useSWR<{ ratio: number }>("/api/settings/train-child-price-ratio", fetcher, swrOptions)
+}
+
+export function useAgeBandsSettings() {
+  return useSWR<{ infantMaxAge: number; childMaxAge: number }>(
+    "/api/settings/age-bands",
+    fetcher,
+    swrOptions,
+  )
+}

@@ -28,18 +28,16 @@ const variantValueSchema = z.object({
   archivedAt: z.string().nullable().optional(),
 })
 
-const draftVariantValueSchema = z.object({
-  id: z.string().uuid().optional(),
+// Intentionally drops min(1) from variantValueSchema.name — drafts may have an empty name
+const draftVariantValueSchema = variantValueSchema.extend({
   name: z.string().trim().max(200).default(""),
-  sortOrder: z.number().int().nonnegative().default(0),
-  archivedAt: z.string().nullable().optional(),
 })
 
 export const rateCardSchema = z.object({
   id: z.string().uuid().optional(),
   routeId: z.string().uuid(),
   suiteTypeId: z.string().uuid(),
-  rateTypeId: z.string().uuid().optional(),
+  rateTypeId: z.string().uuid(),
   pricePerPerson: z.number().finite().nonnegative(),
   childPrice: z.number().finite().nonnegative().nullable(),
   infantPrice: z.number().finite().nonnegative().nullable(),

@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import useSWR, { useSWRConfig } from "swr"
+import { useSWRConfig } from "swr"
 import {
   ArrowLeft,
   Mail,
@@ -72,13 +72,14 @@ import {
 import { AgeRangeChip } from "@/components/ui/age-range-chip"
 import {
   DEFAULT_AGE_BUCKETS,
+  formatBucketRange,
   resolveAgeBuckets,
   type AgeBuckets,
 } from "@/lib/pricing/age-buckets"
 import { shortenUrl } from "@/lib/url"
 import { applyRateMarkdown } from "@/lib/pricing/rate-markdown"
 import { cn } from "@/lib/utils"
-import { useLocations, useSupplierDetail } from "@/lib/use-data"
+import { useAgeBandsSettings, useLocations, useSupplierDetail, useTrainChildPriceRatio } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
 import { formatRateCardValidityRange } from "@/lib/rate-card-validity"
 import { buildRouteName } from "@/lib/routes/route-name"
@@ -473,10 +474,12 @@ function updateRateCardPeriodDateValues(
   periodKey: string,
   updates: Partial<Pick<EditableRateCard, "validFrom" | "validTo">>,
   routeId?: string,
+  rateTypeId?: string,
 ): EditableRateCard[] {
   return rateCards.map((rateCard) =>
     getRatePeriodKey(rateCard.validFrom, rateCard.validTo, rateCard.currency) === periodKey &&
-    (!routeId || rateCard.routeId === routeId)
+    (!routeId || rateCard.routeId === routeId) &&
+    (!rateTypeId || rateCard.rateTypeId === rateTypeId)
       ? { ...rateCard, ...updates }
       : rateCard,
   )
@@ -1922,9 +1925,10 @@ function PassengerAgeBandsSection({
 }: PassengerAgeBandsSectionProps) {
   const usingInfantDefault = infantMaxAge === null
   const usingChildDefault = childMaxAge === null
-  const effectiveInfant = infantMaxAge ?? 2
-  const effectiveChild = childMaxAge ?? 12
+  const effectiveInfant = infantMaxAge ?? DEFAULT_AGE_BUCKETS.infantMax
+  const effectiveChild = childMaxAge ?? DEFAULT_AGE_BUCKETS.childMax
   const usingAnyDefault = usingInfantDefault || usingChildDefault
+  const ranges = formatBucketRange({ infantMax: effectiveInfant, childMax: effectiveChild })
 
   return (
     <div className="rounded-lg border p-4 space-y-3">
@@ -1979,15 +1983,15 @@ function PassengerAgeBandsSection({
       <div className="text-xs text-muted-foreground">
         Resolves to:{" "}
         <span className="tabular-nums">
-          Infant 0–{effectiveInfant}
+          Infant {ranges.infant}
           {usingInfantDefault ? " (default)" : ""}
         </span>{" "}
         ·{" "}
         <span className="tabular-nums">
-          Child {effectiveInfant + 1}–{effectiveChild}
+          Child {ranges.child}
           {usingChildDefault ? " (default)" : ""}
         </span>{" "}
-        · <span className="tabular-nums">Adult {effectiveChild + 1}+</span>
+        · <span className="tabular-nums">Adult {ranges.adult}</span>
       </div>
     </div>
   )
@@ -2272,23 +2276,9 @@ export function SupplierDetailView({
   const router = useRouter()
   const { data, isLoading, error, mutate: mutateDetail } = useSupplierDetail(supplierSlug)
   const { data: allLocations = [] } = useLocations()
-  const { data: trainRatioData } = useSWR<{ ratio: number }>(
-    "/api/settings/train-child-price-ratio",
-    async (url: string) => {
-      const res = await fetch(url)
-      if (!res.ok) throw new Error("Failed to load")
-      return res.json()
-    },
-  )
+  const { data: trainRatioData } = useTrainChildPriceRatio()
   const trainChildPriceRatio = trainRatioData?.ratio ?? DEFAULT_TRAIN_CHILD_PRICE_RATIO
-  const { data: ageBandsData } = useSWR<{ infantMaxAge: number; childMaxAge: number }>(
-    "/api/settings/age-bands",
-    async (url: string) => {
-      const res = await fetch(url)
-      if (!res.ok) throw new Error("Failed to load")
-      return res.json()
-    },
-  )
+  const { data: ageBandsData } = useAgeBandsSettings()
   const globalAgeDefaults: AgeBuckets = ageBandsData
     ? { infantMax: ageBandsData.infantMaxAge, childMax: ageBandsData.childMaxAge }
     : DEFAULT_AGE_BUCKETS
@@ -2766,7 +2756,7 @@ export function SupplierDetailView({
           previousPeriodKey && linkedPreviousValidTo
             ? updateRateCardPeriodDateValues(pkg.rateCards, previousPeriodKey, {
                 validTo: linkedPreviousValidTo,
-              }, route.id)
+              }, route.id, rateTypeId)
             : pkg.rateCards
 
         const newRateCards = availableSuiteTypes.map((suiteType) => ({
@@ -2857,10 +2847,10 @@ export function SupplierDetailView({
 
         if (key === "validFrom" || key === "validTo") {
           nextRateCards = applyBidirectionalPeriodDateLinking(
-            nextRateCards.filter((rateCard) => rateCard.routeId === routeId),
+            nextRateCards.filter((rateCard) => rateCard.routeId === routeId && rateCard.rateTypeId === rateTypeId),
             nextPeriodKey,
             key,
-          ).concat(nextRateCards.filter((rateCard) => rateCard.routeId !== routeId))
+          ).concat(nextRateCards.filter((rateCard) => rateCard.routeId !== routeId || rateCard.rateTypeId !== rateTypeId))
         }
 
         const nextPackage = { ...pkg, rateCards: nextRateCards }
@@ -3006,8 +2996,21 @@ export function SupplierDetailView({
       rateTypeId: string,
       discountPct: number,
     ) => {
-      const baseRateTypeId = supplier?.defaultRateTypeId ?? null
-      if (!baseRateTypeId || rateTypeId === baseRateTypeId) return
+      const activeRateTypes = (supplier?.rateTypes ?? []).filter((rt) => !rt.archivedAt)
+      const effectiveDefaultRateTypeId =
+        (supplier?.defaultRateTypeId && activeRateTypes.some((rt) => rt.id === supplier.defaultRateTypeId)
+          ? supplier.defaultRateTypeId
+          : null) ??
+        activeRateTypes.find((rt) => rt.isDefault)?.id ??
+        activeRateTypes[0]?.id ??
+        null
+      if (!effectiveDefaultRateTypeId) {
+        toast.error("No rate types configured — add one in Settings before applying markdown.", {
+          id: "apply-markdown-no-type",
+        })
+        return
+      }
+      if (rateTypeId === effectiveDefaultRateTypeId) return
 
       updatePackage(packageIndex, (pkg) => {
         const targetCards = pkg.rateCards.filter(
@@ -3019,42 +3022,85 @@ export function SupplierDetailView({
         if (targetCards.length === 0) return pkg
 
         const baseCards = pkg.rateCards.filter(
-          (rateCard) => rateCard.routeId === routeId && rateCard.rateTypeId === baseRateTypeId,
+          (rateCard) => rateCard.routeId === routeId && rateCard.rateTypeId === effectiveDefaultRateTypeId,
         )
         const targetIds = new Set(targetCards.map((card) => card.id))
-        let applied = 0
 
-        const nextRateCards = pkg.rateCards.map((rateCard) => {
-          if (!targetIds.has(rateCard.id)) return rateCard
-          const base = baseCards.find(
+        const baseCardsBySuite = new Map<string, EditableRateCard[]>()
+        for (const card of baseCards) {
+          const bucket = baseCardsBySuite.get(card.suiteTypeId) ?? []
+          bucket.push(card)
+          baseCardsBySuite.set(card.suiteTypeId, bucket)
+        }
+
+        const findBaseCard = (
+          rateCard: EditableRateCard,
+        ): { card: EditableRateCard; period: string | null } | undefined => {
+          const suite = baseCardsBySuite.get(rateCard.suiteTypeId) ?? []
+          const exact = suite.find(
             (candidate) =>
-              candidate.suiteTypeId === rateCard.suiteTypeId &&
               candidate.validFrom <= rateCard.validFrom &&
               (candidate.validTo === null || candidate.validTo >= rateCard.validFrom),
           )
-          if (!base) return rateCard
+          if (exact) return { card: exact, period: null }
+          const specialStart = toUtcDate(rateCard.validFrom)
+          if (!specialStart || suite.length === 0) return undefined
+          let nearest: EditableRateCard | undefined
+          let minDist = Infinity
+          for (const candidate of suite) {
+            const candidateDate = toUtcDate(candidate.validFrom)
+            if (!candidateDate) continue
+            const dist = Math.abs(specialStart.getTime() - candidateDate.getTime())
+            if (dist < minDist) {
+              minDist = dist
+              nearest = candidate
+            }
+          }
+          return nearest
+            ? { card: nearest, period: `${nearest.validFrom}–${nearest.validTo ?? "ongoing"}` }
+            : undefined
+        }
+
+        let applied = 0
+        const fallbackPeriods = new Set<string>()
+        const nextRateCards = pkg.rateCards.map((rateCard) => {
+          if (!targetIds.has(rateCard.id)) return rateCard
+          const found = findBaseCard(rateCard)
+          if (!found) return rateCard
+          if (found.period) fallbackPeriods.add(found.period)
           applied += 1
           return {
             ...rateCard,
-            pricePerPerson: applyRateMarkdown(base.pricePerPerson, discountPct),
+            pricePerPerson: applyRateMarkdown(found.card.pricePerPerson, discountPct),
             childPrice:
-              base.childPrice === null ? null : applyRateMarkdown(base.childPrice, discountPct),
+              found.card.childPrice === null ? null : applyRateMarkdown(found.card.childPrice, discountPct),
             infantPrice:
-              base.infantPrice === null ? null : applyRateMarkdown(base.infantPrice, discountPct),
+              found.card.infantPrice === null ? null : applyRateMarkdown(found.card.infantPrice, discountPct),
           }
         })
 
+        const baseRateName =
+          activeRateTypes.find((rt) => rt.id === effectiveDefaultRateTypeId)?.name ?? "Rack"
+
         if (applied === 0) {
-          toast.error("No matching default-rate prices found for this period.", {
+          toast.error(`No ${baseRateName} prices found — add ${baseRateName} rate cards first.`, {
             id: "apply-markdown-none",
           })
           return pkg
         }
 
-        toast.success(
-          `Applied ${discountPct}% markdown to ${applied} ${applied === 1 ? "row" : "rows"}.`,
-          { id: "apply-markdown-done" },
-        )
+        if (fallbackPeriods.size > 0) {
+          const periodList = [...fallbackPeriods].join(", ")
+          toast.success(
+            `Applied ${discountPct}% markdown using nearest ${baseRateName} period${fallbackPeriods.size > 1 ? "s" : ""} (${periodList}).`,
+            { id: "apply-markdown-done" },
+          )
+        } else {
+          toast.success(
+            `Applied ${discountPct}% markdown to ${applied} ${applied === 1 ? "row" : "rows"}.`,
+            { id: "apply-markdown-done" },
+          )
+        }
         return { ...pkg, rateCards: nextRateCards }
       })
     },
@@ -3253,6 +3299,16 @@ export function SupplierDetailView({
       return
     }
 
+    const invalidCardCount = form.packages
+      .flatMap((pkg) => pkg.rateCards)
+      .filter((card) => !card.rateTypeId).length
+    if (invalidCardCount > 0) {
+      toast.error(
+        `${invalidCardCount} rate card${invalidCardCount > 1 ? "s are" : " is"} missing a rate type. Select a rate type for each card before publishing.`,
+      )
+      return
+    }
+
     const cleanedRoutes = routeRateGroup.routes
       .filter((route) => route.name.trim())
       .map((route) => ({
@@ -3279,6 +3335,7 @@ export function SupplierDetailView({
             id: rateCard.id,
             routeId: rateCard.routeId,
             suiteTypeId: rateCard.suiteTypeId,
+            rateTypeId: rateCard.rateTypeId,
             pricePerPerson: rateCard.pricePerPerson,
             childPrice: isTransportSupplier(form.kind) ? null : rateCard.childPrice,
             infantPrice: isTransportSupplier(form.kind) ? null : rateCard.infantPrice,
