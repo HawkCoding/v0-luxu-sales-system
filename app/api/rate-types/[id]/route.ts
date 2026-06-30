@@ -95,6 +95,27 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     )
   }
 
+  // Block archiving while rate cards still reference this type — otherwise those
+  // cards become orphans that the supplier editor hides but still submits,
+  // making every supplier save fail with a 409 the manager cannot self-fix.
+  if (parsed.data.archived === true) {
+    const { count, error: refError } = await supabase
+      .from("rate_cards")
+      .select("id", { count: "exact", head: true })
+      .eq("rate_type_id", id)
+    if (refError) {
+      return NextResponse.json({ error: refError.message }, { status: 500 })
+    }
+    if (count && count > 0) {
+      return NextResponse.json(
+        {
+          error: `Cannot archive this rate type — ${count} rate card${count === 1 ? "" : "s"} still use it. Reassign or remove those rates first.`,
+        },
+        { status: 409 },
+      )
+    }
+  }
+
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
   if (typeof parsed.data.name === "string") updates.name = parsed.data.name
   if (typeof parsed.data.sortOrder === "number") updates.sort_order = parsed.data.sortOrder
