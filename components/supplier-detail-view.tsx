@@ -3289,9 +3289,17 @@ export function SupplierDetailView({
     )
 
     const routeRateGroup = form.packages[0] ?? createRoutesRateGroup()
-    const activeRateCards = routeRateGroup.rateCards.filter(
-      (rc) => !rc.rateTypeId || activeRateTypeIds.has(rc.rateTypeId),
-    )
+    // Drop rate cards that reference an archived rate type: the editor hides them
+    // but the server would otherwise reject the whole save (orphaned cards 409).
+    // Only prune when the active rate-type set is actually loaded — if `supplier`
+    // is stale/unhydrated the set is empty, and pruning would blank the payload,
+    // which the server treats as "delete every existing rate card" (route.ts).
+    const activeRateCards =
+      activeRateTypeIds.size > 0
+        ? routeRateGroup.rateCards.filter(
+            (rc) => !rc.rateTypeId || activeRateTypeIds.has(rc.rateTypeId),
+          )
+        : routeRateGroup.rateCards
     const meaningfulPackages = [
       {
         ...routeRateGroup,
@@ -3390,7 +3398,7 @@ export function SupplierDetailView({
             : null,
         directionMode: route.directionMode,
         active: route.active,
-        rateCards: routeRateGroup.rateCards
+        rateCards: activeRateCards
           .filter((rateCard) => rateCard.routeId === route.id)
           .map((rateCard) => ({
             id: rateCard.id,
