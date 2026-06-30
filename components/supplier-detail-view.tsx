@@ -3284,8 +3284,14 @@ export function SupplierDetailView({
         archivedAt: value.archivedAt ?? null,
       }))
     const suiteTypeIds = new Set(cleanedSuiteTypes.map((suiteType) => suiteType.id))
+    const activeRateTypeIds = new Set(
+      (supplier?.rateTypes ?? []).filter((rt) => !rt.archivedAt).map((rt) => rt.id),
+    )
 
     const routeRateGroup = form.packages[0] ?? createRoutesRateGroup()
+    const activeRateCards = routeRateGroup.rateCards.filter(
+      (rc) => !rc.rateTypeId || activeRateTypeIds.has(rc.rateTypeId),
+    )
     const meaningfulPackages = [
       {
         ...routeRateGroup,
@@ -3296,9 +3302,9 @@ export function SupplierDetailView({
             route.destinationLocationId ||
             route.pickupPoint ||
             route.dropoffPoint ||
-            routeRateGroup.rateCards.some((rateCard) => rateCard.routeId === route.id),
+            activeRateCards.some((rateCard) => rateCard.routeId === route.id),
         ),
-        rateCards: routeRateGroup.rateCards,
+        rateCards: activeRateCards,
       },
     ]
 

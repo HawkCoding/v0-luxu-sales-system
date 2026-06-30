@@ -106,7 +106,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (refError) {
       return NextResponse.json({ error: refError.message }, { status: 500 })
     }
-    if (count && count > 0) {
+    if ((count ?? 0) > 0) {
       return NextResponse.json(
         {
           error: `Cannot archive this rate type — ${count} rate card${count === 1 ? "" : "s"} still use it. Reassign or remove those rates first.`,
