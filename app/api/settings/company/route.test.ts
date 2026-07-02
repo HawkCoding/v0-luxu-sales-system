@@ -32,8 +32,9 @@ function makeAuth(overrides: { supabaseUpsertError?: { message: string } | null 
       if (table === "app_settings") {
         return {
           select: vi.fn(() => ({
-            eq: vi.fn(() => ({
-              maybeSingle: vi.fn(async () => ({ data: { value: "Existing Co" }, error: null })),
+            in: vi.fn(async () => ({
+              data: [{ key: "business_name", value: "Existing Co" }],
+              error: null,
             })),
           })),
           upsert: vi.fn(async () => ({ error: upsertError })),
@@ -132,6 +133,7 @@ describe("PATCH /api/settings/company", () => {
         entityType: "Settings",
         entityId: "company",
         action: "settings_changed",
+        before: { business_name: "Existing Co" },
         after: { business_name: "Luxus Travel" },
       }),
     )
