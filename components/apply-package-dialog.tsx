@@ -453,12 +453,6 @@ export function ApplyPackageDialog({
                 const optional = isOptionalLeg(leg.supplierKind)
                 const enabled = selection?.selected ?? !optional
                 const activeSuiteTypes = leg.suiteTypes.filter((st) => st.active)
-                const selectedRoute = leg.routes.find((r) => r.id === selection?.routeId)
-                const routeCommissionInherited =
-                  selectedRoute?.commissionType && selectedRoute.commissionValue != null
-                    ? { type: selectedRoute.commissionType, value: selectedRoute.commissionValue as number }
-                    : null
-
                 return (
                   <div key={leg.id} className="space-y-3 rounded-md border p-3">
                     <div className="flex items-start gap-3">
@@ -601,8 +595,6 @@ export function ApplyPackageDialog({
                               }
                               isEditing
                               label="Commission Override"
-                              inherited={routeCommissionInherited}
-                              inheritedSourceLabel={routeCommissionInherited ? "route" : undefined}
                               onClear={() =>
                                 setLegSelections((prev) => ({
                                   ...prev,

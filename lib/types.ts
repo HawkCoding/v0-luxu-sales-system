@@ -259,7 +259,7 @@ export interface SupplierVocabulary {
   routeHasLocations: boolean
   /** Whether the route exposes the one-way/round-trip Direction selector. Only meaningful for point-to-point journey suppliers where a return trip doubles the fare (trains, airlines). */
   routeHasDirection: boolean
-  /** Whether the route name is auto-derived from origin/destination + direction and locked (not editable). Train operators only. */
+  /** Whether the route name is auto-filled from origin/destination + direction while the name is empty; user edits always win. Train operators only. */
   routeNameAutoDerived: boolean
   showSingleSupplement: boolean
   showDurationNights: boolean
@@ -480,8 +480,6 @@ export interface SupplierRoute {
   dropoffPoint?: string | null
   vehicleRentalDetails?: VehicleRentalRouteDetails | null
   directionMode?: RouteDirectionMode
-  commissionType: CommissionKind | null
-  commissionValue: number | null
   active: boolean
   createdAt: string
   createdAtDisplay?: string
@@ -734,6 +732,7 @@ export interface BookingTransportRequest {
   supplierId: string | null
   routeId: string | null
   suiteTypeId: string | null
+  packageLegId: string | null
   pickupPoint: string
   dropoffPoint: string
   pickupAt: string | null

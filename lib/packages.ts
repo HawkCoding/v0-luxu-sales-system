@@ -91,11 +91,6 @@ export function mapPackageRoute(
     dropoffPoint: row.dropoff_point ?? null,
     vehicleRentalDetails: mapVehicleRentalRouteDetails(vehicleRentalDetails),
     directionMode: normalizeRouteDirectionMode(row.direction_mode),
-    commissionType: row.commission_type ?? null,
-    commissionValue:
-      row.commission_value === null || row.commission_value === undefined
-        ? null
-        : Number(row.commission_value),
     active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

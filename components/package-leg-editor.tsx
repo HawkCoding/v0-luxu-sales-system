@@ -68,8 +68,6 @@ function createRoute(
     pickupPoint: "",
     dropoffPoint: "",
     vehicleRentalDetails: null,
-    commissionType: null,
-    commissionValue: null,
     active: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

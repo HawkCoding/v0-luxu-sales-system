@@ -38,8 +38,6 @@ const supplierRow: SupplierRow = {
   default_time_end: null,
   infant_max_age: null,
   child_max_age: null,
-  default_commission_type: null,
-  default_commission_value: null,
   created_at: "2026-01-01T10:00:00.000Z",
   updated_at: "2026-01-02T11:30:00.000Z",
 }
@@ -54,8 +52,6 @@ const routeRow: RouteRow = {
   dropoff_point: null,
   active: true,
   direction_mode: "one_way",
-  commission_type: null,
-  commission_value: null,
   transport_service_type: null,
   included_km_per_day: null,
   extra_km_price: null,
