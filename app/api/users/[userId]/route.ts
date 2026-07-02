@@ -17,10 +17,19 @@ const patchSchema = z
   .object({
     isActive: z.boolean().optional(),
     clearanceLevel: roleSchema.optional(),
+    name: z.string().trim().min(1).max(120).optional(),
+    surname: z.string().trim().max(120).optional(),
+    email: z.string().trim().toLowerCase().email().optional(),
   })
-  .refine((data) => data.isActive !== undefined || data.clearanceLevel !== undefined, {
-    message: "At least one field required",
-  })
+  .refine(
+    (data) =>
+      data.isActive !== undefined ||
+      data.clearanceLevel !== undefined ||
+      data.name !== undefined ||
+      data.surname !== undefined ||
+      data.email !== undefined,
+    { message: "At least one field required" }
+  )
 
 interface AdminContext {
   adminName: string
@@ -105,15 +114,41 @@ export async function PATCH(
     }
   }
 
+  if (payload.email !== undefined && payload.email !== targetProfile.email) {
+    const { error: authEmailError } = await service.auth.admin.updateUserById(userId, {
+      email: payload.email,
+      email_confirm: true,
+    })
+
+    if (authEmailError) {
+      return NextResponse.json(
+        { error: authEmailError.message || "Failed to update email" },
+        { status: 400 }
+      )
+    }
+  }
+
   const profileUpdates: {
     is_active?: boolean
     clearance_level?: z.infer<typeof roleSchema>
+    name?: string
+    surname?: string | null
+    email?: string
   } = {}
   if (payload.isActive !== undefined) {
     profileUpdates.is_active = payload.isActive
   }
   if (payload.clearanceLevel !== undefined) {
     profileUpdates.clearance_level = payload.clearanceLevel
+  }
+  if (payload.name !== undefined) {
+    profileUpdates.name = payload.name
+  }
+  if (payload.surname !== undefined) {
+    profileUpdates.surname = payload.surname || null
+  }
+  if (payload.email !== undefined) {
+    profileUpdates.email = payload.email
   }
 
   const { error: updateError } = await service.from("profiles").update(profileUpdates).eq("user_id", userId)
@@ -160,10 +195,39 @@ export async function PATCH(
     }
   }
 
+  if (payload.name !== undefined || payload.surname !== undefined || payload.email !== undefined) {
+    try {
+      await service.from("audit_logs").insert({
+        action: "user_details_updated",
+        actor: auth.value.adminName,
+        actor_user_id: auth.value.adminUserId,
+        entity_type: "user",
+        entity_id: userId,
+        meta_json: {
+          previous: {
+            name: targetProfile.name,
+            surname: targetProfile.surname,
+            email: targetProfile.email,
+          },
+          next: {
+            name: payload.name ?? targetProfile.name,
+            surname: payload.surname ?? targetProfile.surname,
+            email: payload.email ?? targetProfile.email,
+          },
+        },
+      })
+    } catch {
+      // non-fatal
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     isActive: payload.isActive ?? (targetProfile.is_active ?? true),
     clearanceLevel: payload.clearanceLevel ?? targetProfile.clearance_level,
+    name: payload.name ?? targetProfile.name,
+    surname: payload.surname ?? targetProfile.surname,
+    email: payload.email ?? targetProfile.email,
   })
 }
 

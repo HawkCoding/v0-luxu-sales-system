@@ -118,7 +118,7 @@ export function ManageLocationsDialog({ open, onOpenChange }: ManageLocationsDia
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="max-w-4xl">
         <DialogHeader>
           <DialogTitle>Manage Locations</DialogTitle>
           <DialogDescription>
@@ -150,8 +150,8 @@ export function ManageLocationsDialog({ open, onOpenChange }: ManageLocationsDia
           </div>
         </div>
 
-        <div className="import-review-scroll max-h-[45vh] overflow-x-scroll rounded-md border">
-          <table className="w-full min-w-[640px] table-fixed caption-bottom text-sm">
+        <div className="import-review-scroll max-h-[45vh] w-full min-w-0 rounded-md border">
+          <table className="w-full table-fixed caption-bottom text-sm">
             <TableHeader className="sticky top-0 z-10 bg-background">
               <TableRow>
                 <TableHead className="w-[48%]">Name</TableHead>

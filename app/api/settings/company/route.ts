@@ -3,6 +3,8 @@ import { requireRole, requireUser } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 
+const SETTING_KEYS = ["business_name", "company_email", "company_phone", "vat_rate"] as const
+
 export async function GET() {
   const auth = await requireUser()
   if (!auth.ok) return auth.response
@@ -10,7 +12,7 @@ export async function GET() {
   const { data, error } = await auth.value.supabase
     .from("app_settings")
     .select("key, value")
-    .eq("key", "business_name")
+    .in("key", SETTING_KEYS)
 
   if (error) return safeSupabaseError("settings-company:list", error)
 
@@ -18,9 +20,16 @@ export async function GET() {
   return Response.json(settings)
 }
 
-const patchSchema = z.object({
-  business_name: z.string().min(1).max(120),
-})
+const patchSchema = z
+  .object({
+    business_name: z.string().min(1).max(120).optional(),
+    company_email: z.string().trim().email().max(160).optional(),
+    company_phone: z.string().trim().min(1).max(40).optional(),
+    vat_rate: z.coerce.number().min(0).max(100).optional(),
+  })
+  .refine((data) => Object.values(data).some((value) => value !== undefined), {
+    message: "At least one field required",
+  })
 
 export async function PATCH(req: Request) {
   const auth = await requireRole(["admin"])
@@ -36,21 +45,33 @@ export async function PATCH(req: Request) {
   const parsed = patchSchema.safeParse(raw)
   if (!parsed.success) return jsonZodError(parsed.error, "Invalid input")
 
-  const { data: existing } = await auth.value.supabase
-    .from("app_settings")
-    .select("value")
-    .eq("key", "business_name")
-    .maybeSingle()
+  const updates = Object.entries(parsed.data).filter(([, value]) => value !== undefined) as [
+    (typeof SETTING_KEYS)[number],
+    string | number,
+  ][]
 
-  const { error } = await auth.value.supabase
+  const { data: existingRows } = await auth.value.supabase
     .from("app_settings")
-    .upsert({
-      key: "business_name",
-      value: parsed.data.business_name,
+    .select("key, value")
+    .in(
+      "key",
+      updates.map(([key]) => key)
+    )
+
+  const existing = Object.fromEntries((existingRows ?? []).map(({ key, value }) => [key, value]))
+
+  const { error } = await auth.value.supabase.from("app_settings").upsert(
+    updates.map(([key, value]) => ({
+      key,
+      value: String(value),
       updated_at: new Date().toISOString(),
-    })
+    }))
+  )
 
   if (error) return safeSupabaseError("settings-company:upsert", error)
+
+  const before = Object.fromEntries(updates.map(([key]) => [key, existing[key] ?? null]))
+  const after = Object.fromEntries(updates.map(([key, value]) => [key, String(value)]))
 
   await writeAuditLog(auth.value.supabase, {
     actor: auth.value.profile.actorName,
@@ -58,10 +79,10 @@ export async function PATCH(req: Request) {
     entityType: "Settings",
     entityId: "company",
     action: "settings_changed",
-    before: { business_name: existing?.value ?? null },
-    after: { business_name: parsed.data.business_name },
-    meta: settingAuditMeta("business_name"),
+    before,
+    after,
+    meta: settingAuditMeta(updates.map(([key]) => key).join(",")),
   })
 
-  return Response.json({ business_name: parsed.data.business_name })
+  return Response.json(after)
 }

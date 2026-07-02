@@ -95,7 +95,7 @@ export function NewSupplierQuickDialog({
     if (!originName || !destinationName) return ""
     return buildRouteName(originName, destinationName, "one_way")
   })()
-  const effectiveRouteName = autoDeriveRouteName ? derivedRouteName : routeName
+  const effectiveRouteName = autoDeriveRouteName ? routeName.trim() || derivedRouteName : routeName
 
   function reset() {
     setKind(defaultKind)
@@ -266,20 +266,17 @@ export function NewSupplierQuickDialog({
 
           <div className="space-y-1.5">
             <Label>{vocab.route} name</Label>
-            {autoDeriveRouteName ? (
-              <div
-                className="flex h-9 items-center rounded-md border border-input bg-muted px-3 text-sm text-muted-foreground"
-                aria-label={`${vocab.route} name`}
-              >
-                {derivedRouteName || <span className="italic">Choose origin and destination</span>}
-              </div>
-            ) : (
-              <Input
-                value={routeName}
-                onChange={(e) => setRouteName(e.target.value)}
-                placeholder={kind === "hotel_property" ? "e.g. Bed & Breakfast" : `e.g. ${vocab.route}`}
-              />
-            )}
+            <Input
+              value={autoDeriveRouteName && routeName.trim() === "" ? derivedRouteName : routeName}
+              onChange={(e) => setRouteName(e.target.value)}
+              placeholder={
+                autoDeriveRouteName
+                  ? "Auto-filled from origin and destination"
+                  : kind === "hotel_property"
+                    ? "e.g. Bed & Breakfast"
+                    : `e.g. ${vocab.route}`
+              }
+            />
           </div>
 
           {needsLocations ? (

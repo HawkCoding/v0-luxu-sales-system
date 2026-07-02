@@ -71,7 +71,8 @@ export async function GET() {
     const users = (profilesWithStatus ?? []).map((p) => ({
       userId: p.user_id,
       email: p.email,
-      name: [p.name, p.surname].filter(Boolean).join(" ").trim() || p.email,
+      firstName: p.name ?? "",
+      lastName: p.surname ?? "",
       clearanceLevel: p.clearance_level,
       isActive: p.is_active ?? true,
       isCurrentUser: p.user_id === auth.value.adminUserId,
@@ -94,7 +95,8 @@ export async function GET() {
   const users = (legacyProfiles ?? []).map((p) => ({
     userId: p.user_id,
     email: p.email,
-    name: [p.name, p.surname].filter(Boolean).join(" ").trim() || p.email,
+    firstName: p.name ?? "",
+    lastName: p.surname ?? "",
     clearanceLevel: p.clearance_level,
     isActive: true,
     isCurrentUser: p.user_id === auth.value.adminUserId,
@@ -194,7 +196,8 @@ export async function POST(request: Request) {
       user: {
         userId: createdUserId,
         email: normalizedEmail,
-        name: [parsed.name, normalizedSurname].filter(Boolean).join(" ").trim() || normalizedEmail,
+        firstName: parsed.name,
+        lastName: normalizedSurname ?? "",
         clearanceLevel: parsed.clearanceLevel,
         isActive: true,
         isCurrentUser: false,

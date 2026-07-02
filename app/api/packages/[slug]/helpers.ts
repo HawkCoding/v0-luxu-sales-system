@@ -6,7 +6,7 @@ import {
   type PackageLegWithSupplier,
 } from "@/lib/packages"
 import type { Database } from "@/lib/supabase/types"
-import type { SupplierKind } from "@/lib/types"
+import { getSupplierVocabulary, isTransportSupplier, type SupplierKind } from "@/lib/types"
 import type { SessionClient } from "../../suppliers/helpers"
 import type { UpsertPackageInput } from "../schemas"
 
@@ -202,37 +202,122 @@ export async function loadPackageDetail(supabase: SupabaseClient<Database>, slug
     }
   }
 
+  const detail = mapPackageDetail(
+    pkg,
+    legs,
+    routes ?? [],
+    packageLegRoutes ?? [],
+    rateCards ?? [],
+    suiteTypes ?? [],
+    vehicleRentalRouteDetails ?? [],
+  )
+
+  await attachSuiteVariantVocab(supabase, detail)
+
   return {
     packageRow: pkg as PackageRow,
     legs,
     packageLegRoutes: packageLegRoutes ?? [],
-    detail: mapPackageDetail(
-      pkg,
-      legs,
-      routes ?? [],
-      packageLegRoutes ?? [],
-      rateCards ?? [],
-      suiteTypes ?? [],
-      vehicleRentalRouteDetails ?? [],
-    ),
+    detail,
   }
+}
+
+/** Populates each leg's suite types with the bedroom type / bedroom layout / bathroom type
+ * options they're associated with (for the package-apply unit picker's dropdowns) — the base
+ * suite_types query doesn't carry this, it's a separate M:N vocabulary layered on afterward. */
+async function attachSuiteVariantVocab(
+  supabase: SupabaseClient<Database>,
+  detail: ReturnType<typeof mapPackageDetail>,
+): Promise<void> {
+  const suiteTypeIds = Array.from(
+    new Set(detail.legs.flatMap((leg) => leg.suiteTypes.map((suiteType) => suiteType.id))),
+  )
+  if (suiteTypeIds.length === 0) return
+
+  const [bedroomTypesResult, bedroomLayoutsResult, bathroomTypesResult] = await Promise.all([
+    supabase
+      .from("suite_type_bedroom_types")
+      .select("suite_type_id, bedroom_types(id, name)")
+      .in("suite_type_id", suiteTypeIds),
+    supabase
+      .from("suite_type_bedroom_layouts")
+      .select("suite_type_id, bedroom_layouts(id, name)")
+      .in("suite_type_id", suiteTypeIds),
+    supabase
+      .from("suite_type_bathroom_types")
+      .select("suite_type_id, bathroom_types(id, name)")
+      .in("suite_type_id", suiteTypeIds),
+  ])
+
+  function groupBy<TKey extends string>(
+    rows: { suite_type_id: string }[] | null | undefined,
+    key: TKey,
+  ): Map<string, { id: string; name: string }[]> {
+    const result = new Map<string, { id: string; name: string }[]>()
+    for (const row of rows ?? []) {
+      const value = (row as unknown as Record<TKey, { id: string; name: string } | null>)[key]
+      if (!value) continue
+      const list = result.get(row.suite_type_id) ?? []
+      list.push(value)
+      result.set(row.suite_type_id, list)
+    }
+    return result
+  }
+
+  const bedroomTypesBySuiteType = groupBy(bedroomTypesResult.data, "bedroom_types")
+  const bedroomLayoutsBySuiteType = groupBy(bedroomLayoutsResult.data, "bedroom_layouts")
+  const bathroomTypesBySuiteType = groupBy(bathroomTypesResult.data, "bathroom_types")
+
+  for (const leg of detail.legs) {
+    for (const suiteType of leg.suiteTypes) {
+      const bedroomTypes = bedroomTypesBySuiteType.get(suiteType.id) ?? []
+      const bedroomLayouts = bedroomLayoutsBySuiteType.get(suiteType.id) ?? []
+      const bathroomTypes = bathroomTypesBySuiteType.get(suiteType.id) ?? []
+      suiteType.bedroomTypeIds = bedroomTypes.map((v) => v.id)
+      suiteType.bedroomTypes = bedroomTypes.map((v) => v.name)
+      suiteType.bedroomLayoutIds = bedroomLayouts.map((v) => v.id)
+      suiteType.bedroomLayouts = bedroomLayouts.map((v) => v.name)
+      suiteType.bathroomTypeIds = bathroomTypes.map((v) => v.id)
+      suiteType.bathroomTypes = bathroomTypes.map((v) => v.name)
+    }
+  }
+}
+
+export async function loadSupplierKinds(
+  supabase: SessionClient,
+  supplierIds: string[],
+): Promise<Map<string, SupplierKind>> {
+  if (supplierIds.length === 0) return new Map()
+  const { data } = await supabase
+    .from("suppliers")
+    .select("id, kind")
+    .in("id", supplierIds)
+  return new Map((data ?? []).map((row) => [row.id, row.kind as SupplierKind]))
 }
 
 export function normalizePackageChildren(
   packageId: string,
   parsed: UpsertPackageInput,
+  kindBySupplierId?: Map<string, SupplierKind>,
 ) {
   const now = new Date().toISOString()
   const legs = parsed.legs.map((leg, index) => {
     const legId = leg.id ?? makeUuid()
+    // Kinds whose route editor has no location fields (hotels, tour operators)
+    // and transport kinds (pickup/drop-off text instead) must never persist
+    // location links — stray ids invisibly block location deletion.
+    const kind = kindBySupplierId?.get(leg.supplierId)
+    const routeUsesLocations = kind
+      ? getSupplierVocabulary(kind).routeHasLocations && !isTransportSupplier(kind)
+      : true
     const routeRows = leg.routes.map((route) => {
       const id = route.id ?? makeUuid()
       const insert: RouteInsert = {
         id,
         supplier_id: leg.supplierId,
         name: route.name.trim(),
-        origin_location_id: route.originLocationId ?? null,
-        destination_location_id: route.destinationLocationId ?? null,
+        origin_location_id: routeUsesLocations ? route.originLocationId ?? null : null,
+        destination_location_id: routeUsesLocations ? route.destinationLocationId ?? null : null,
         pickup_point: route.pickupPoint?.trim() || null,
         dropoff_point: route.dropoffPoint?.trim() || null,
         active: route.active,

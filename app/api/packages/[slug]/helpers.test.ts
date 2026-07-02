@@ -116,4 +116,35 @@ describe("normalizePackageChildren", () => {
       /must reference a route from the same leg/,
     )
   })
+
+  it("scrubs location ids from routes of kinds without location fields", () => {
+    const result = normalizePackageChildren(
+      PACKAGE_ID,
+      buildInput(),
+      new Map([[SUPPLIER_ID, "hotel_property" as const]]),
+    )
+    const newRoute = result.routes.find((r) => r.id === NEW_ROUTE_ID)
+
+    expect(newRoute?.origin_location_id).toBeNull()
+    expect(newRoute?.destination_location_id).toBeNull()
+  })
+
+  it("keeps location ids for kinds with location fields", () => {
+    const result = normalizePackageChildren(
+      PACKAGE_ID,
+      buildInput(),
+      new Map([[SUPPLIER_ID, "train_operator" as const]]),
+    )
+    const newRoute = result.routes.find((r) => r.id === NEW_ROUTE_ID)
+
+    expect(newRoute?.origin_location_id).toBe(DESTINATION_ID)
+    expect(newRoute?.destination_location_id).toBe(ORIGIN_ID)
+  })
+
+  it("keeps location ids when the supplier kind is unknown", () => {
+    const result = normalizePackageChildren(PACKAGE_ID, buildInput(), new Map())
+    const newRoute = result.routes.find((r) => r.id === NEW_ROUTE_ID)
+
+    expect(newRoute?.origin_location_id).toBe(DESTINATION_ID)
+  })
 })

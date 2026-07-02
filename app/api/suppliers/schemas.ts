@@ -3,6 +3,7 @@ import { z } from "zod"
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const PHONE_PATTERN = /^[+\d\s()-]*$/
 const WEBSITE_PATTERN = /^\S+\.\S+$/
+const TIME_PATTERN = /^\d{2}:\d{2}$/
 
 export const dateSchema = z
   .string()
@@ -148,6 +149,8 @@ export const supplierSaveSchema = z.object({
   singleSupplementPct: z.number().finite().min(0).max(1000).default(0),
   infantMaxAge: z.number().int().min(0).max(17).nullable().optional(),
   childMaxAge: z.number().int().min(0).max(17).nullable().optional(),
+  defaultTimeStart: z.string().regex(TIME_PATTERN, "Expected HH:MM").nullable().optional(),
+  defaultTimeEnd: z.string().regex(TIME_PATTERN, "Expected HH:MM").nullable().optional(),
   active: z.boolean(),
   emails: z.array(supplierEmailSchema).default([]),
   suiteTypes: z.array(suiteTypeSchema),
@@ -289,6 +292,8 @@ export const supplierDraftSaveSchema = z.object({
   singleSupplementPct: z.number().finite().min(0).max(1000).default(0),
   infantMaxAge: z.number().int().min(0).max(17).nullable().optional(),
   childMaxAge: z.number().int().min(0).max(17).nullable().optional(),
+  defaultTimeStart: z.string().regex(TIME_PATTERN, "Expected HH:MM").nullable().optional(),
+  defaultTimeEnd: z.string().regex(TIME_PATTERN, "Expected HH:MM").nullable().optional(),
   active: z.boolean().default(true),
   emails: z.array(draftSupplierEmailSchema).default([]),
   suiteTypes: z.array(draftSuiteTypeSchema).default([]),

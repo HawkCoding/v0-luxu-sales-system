@@ -509,10 +509,11 @@ describe("PATCH /api/suppliers/[slug]", () => {
     })
   })
 
-  it("derives and locks the train route name from origin/destination on save", async () => {
+  it("preserves a client-provided train route name and derives only when empty", async () => {
     const ORIGIN_ID = "00000000-0000-4000-8000-0000000000b1"
     const DEST_ID = "00000000-0000-4000-8000-0000000000b2"
     const ROUTE_ID = "00000000-0000-4000-8000-0000000000b3"
+    const ROUTE_ID_2 = "00000000-0000-4000-8000-0000000000b4"
 
     const supplierMaybeSingle = vi.fn(async () => ({
       data: { updated_at: "2026-01-03T00:00:00.000Z" },
@@ -590,7 +591,9 @@ describe("PATCH /api/suppliers/[slug]", () => {
     })
 
     const response = await PATCH(
-      new Request("http://localhost/api/suppliers/test", {
+      // Draft save: the full-save schema rejects empty route names, so the
+      // empty-name → derived fallback is only reachable on drafts.
+      new Request("http://localhost/api/suppliers/test?draft=true", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -608,7 +611,16 @@ describe("PATCH /api/suppliers/[slug]", () => {
           routes: [
             {
               id: ROUTE_ID,
-              name: "totally wrong name typed by user",
+              name: "Custom Journey Name",
+              originLocationId: ORIGIN_ID,
+              destinationLocationId: DEST_ID,
+              directionMode: "round_trip",
+              active: true,
+              rateCards: [],
+            },
+            {
+              id: ROUTE_ID_2,
+              name: "   ",
               originLocationId: ORIGIN_ID,
               destinationLocationId: DEST_ID,
               directionMode: "round_trip",
@@ -624,6 +636,7 @@ describe("PATCH /api/suppliers/[slug]", () => {
 
     expect(response.status).toBe(200)
     const routeRows = routeUpsertPayloads[0] as Array<{ name: string }>
-    expect(routeRows[0].name).toBe("Pretoria ↔ Cape Town")
+    expect(routeRows[0].name).toBe("Custom Journey Name")
+    expect(routeRows[1].name).toBe("Pretoria ↔ Cape Town")
   })
 })

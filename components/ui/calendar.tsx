@@ -15,6 +15,11 @@ import { Button, buttonVariants } from '@/components/ui/button'
 /** Years before/after the current calendar year that the picker may navigate. */
 export const CALENDAR_YEAR_SPAN = 50
 
+/** Earliest year selectable for supplier rate-card validity dates: last year, dynamically. */
+export function getMinSelectableRateYear(): number {
+  return new Date().getFullYear() - 1
+}
+
 export function getCalendarNavMonthBounds(
   referenceYear = new Date().getFullYear(),
 ): { startMonth: Date; endMonth: Date } {

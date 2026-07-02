@@ -15,15 +15,30 @@ import {
   resolveCommission,
 } from "@/lib/pricing/commission"
 
+/** One independent suite/room booked on a hotel or train/tour/airline leg — its own suite type,
+ * bedroom/bathroom configuration, and (train/tour/airline only) its own passenger split. */
+export interface PackageUnitSelection {
+  suiteTypeId: string
+  bedroomTypeId?: string | null
+  bedroomLayoutId?: string | null
+  bathroomTypeId?: string | null
+  /** Train/tour/airline legs only: this unit's share of the booking's adult/child/infant totals. */
+  adultCount?: number
+  childCount?: number
+  infantCount?: number
+}
+
 export interface PackageLegSelection {
   legId: string
   selected?: boolean
   routeId?: string
+  /** Transfer/vehicle-rental legs only: the vehicle category (train/hotel legs use `units`). */
   suiteTypeId?: string
   rateTypeId?: string
-  /** Hotel legs only: number of rooms booked (default 1). */
-  rooms?: number
-  /** Hotel legs only: number of nights stayed (default 1). Independent of journey duration. */
+  /** Train/hotel legs: one entry per independent suite/room booked on this leg. */
+  units?: PackageUnitSelection[]
+  /** Hotel legs only: number of nights stayed (default 1). Independent of journey duration, and
+   * shared across all units on the leg — a stay's night count doesn't split per room. */
   nights?: number
   commissionOverride?: {
     type: CommissionKind
@@ -35,6 +50,7 @@ interface TransportRequestRow {
   service_type: "transfer" | "rental"
   route_id: string | null
   suite_type_id: string | null
+  package_leg_id: string | null
   pickup_point: string
   dropoff_point: string
   pickup_at: string | null
@@ -87,7 +103,7 @@ export async function buildPackageQuoteLineItems({
 
   const { data: transportRequests } = await supabase
     .from("booking_transport_requests")
-    .select("service_type, route_id, suite_type_id, pickup_point, dropoff_point, pickup_at, rental_details:booking_vehicle_rental_details(return_at)")
+    .select("service_type, route_id, suite_type_id, package_leg_id, pickup_point, dropoff_point, pickup_at, rental_details:booking_vehicle_rental_details(return_at)")
     .eq("booking_id", jobId)
     .order("sort_order", { ascending: true })
 
@@ -177,6 +193,51 @@ export async function buildPackageQuoteLineItems({
     return flatValues.length > 0 ? ` — ${flatValues.join(", ")}` : ""
   }
 
+  // Load display names for the SPECIFIC bedroom/layout/bathroom a unit selected (as opposed to
+  // variantSnapshotBySuiteTypeId, which lists everything a suite type could offer) — used to
+  // describe a train/hotel unit's exact configuration rather than every option available.
+  const bedroomTypeIds = new Set<string>()
+  const bedroomLayoutIds = new Set<string>()
+  const bathroomTypeIds = new Set<string>()
+  for (const entry of selections) {
+    for (const unitSelection of entry.units ?? []) {
+      if (unitSelection.bedroomTypeId) bedroomTypeIds.add(unitSelection.bedroomTypeId)
+      if (unitSelection.bedroomLayoutId) bedroomLayoutIds.add(unitSelection.bedroomLayoutId)
+      if (unitSelection.bathroomTypeId) bathroomTypeIds.add(unitSelection.bathroomTypeId)
+    }
+  }
+  const [bedroomTypeNamesResult, bedroomLayoutNamesResult, bathroomTypeNamesResult] = await Promise.all([
+    bedroomTypeIds.size > 0
+      ? supabase.from("bedroom_types").select("id, name").in("id", Array.from(bedroomTypeIds))
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    bedroomLayoutIds.size > 0
+      ? supabase.from("bedroom_layouts").select("id, name").in("id", Array.from(bedroomLayoutIds))
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    bathroomTypeIds.size > 0
+      ? supabase.from("bathroom_types").select("id, name").in("id", Array.from(bathroomTypeIds))
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+  ])
+  const bedroomTypeNameById = new Map((bedroomTypeNamesResult.data ?? []).map((row) => [row.id, row.name]))
+  const bedroomLayoutNameById = new Map((bedroomLayoutNamesResult.data ?? []).map((row) => [row.id, row.name]))
+  const bathroomTypeNameById = new Map((bathroomTypeNamesResult.data ?? []).map((row) => [row.id, row.name]))
+
+  function specificUnitVariantNames(unitSelection: PackageUnitSelection): string[] {
+    const names: string[] = []
+    if (unitSelection.bedroomTypeId) {
+      const name = bedroomTypeNameById.get(unitSelection.bedroomTypeId)
+      if (name) names.push(name)
+    }
+    if (unitSelection.bedroomLayoutId) {
+      const name = bedroomLayoutNameById.get(unitSelection.bedroomLayoutId)
+      if (name) names.push(name)
+    }
+    if (unitSelection.bathroomTypeId) {
+      const name = bathroomTypeNameById.get(unitSelection.bathroomTypeId)
+      if (name) names.push(name)
+    }
+    return names
+  }
+
   const selectionMap = new Map(selections.map((entry) => [entry.legId, entry]))
   const rateTypeMetaById = new Map(rateTypes.map((rt) => [rt.id, rt]))
   const lineItems: QuoteLineItem[] = []
@@ -231,6 +292,9 @@ export async function buildPackageQuoteLineItems({
     unitPrice: number
     supplierDescription?: string | null
     suiteTypeId?: string | null
+    /** A specific unit's chosen bedroom/layout/bathroom names — overrides the suite type's full
+     * list of associated vocab when the unit narrowed its selection to specific values. */
+    variantNames?: string[] | null
     commission?: ResolvedCommission | null
     /** Display-only basis shown next to the quantity (e.g. "per person", "per night"). */
     unit?: string | null
@@ -242,12 +306,16 @@ export async function buildPackageQuoteLineItems({
     unitPrice,
     supplierDescription,
     suiteTypeId,
+    variantNames,
     commission,
     unit,
   }: AddLineItemOptions) {
     if (qty <= 0) return
 
-    const variantSuffix = formatVariantSuffix(suiteTypeId ?? null)
+    const variantSuffix =
+      variantNames && variantNames.length > 0
+        ? ` — ${variantNames.join(", ")}`
+        : formatVariantSuffix(suiteTypeId ?? null)
     const suiteVariants = suiteTypeId ? variantSnapshotBySuiteTypeId.get(suiteTypeId) : undefined
     const lineSubtotal = Math.round(unitPrice * qty * 100) / 100
 
@@ -358,17 +426,12 @@ export async function buildPackageQuoteLineItems({
     return leg.suiteTypes.find((suiteType) => suiteType.id === suiteTypeId)?.name ?? null
   }
 
-  function findTransportRequest(
+  function findTransportRequestsForLeg(
+    legId: string,
     serviceType: "transfer" | "rental",
-    routeId: string,
-    suiteTypeId: string,
-  ): TransportRequestRow | null {
-    return (
-      ((transportRequests ?? []) as TransportRequestRow[]).find(
-        (request) =>
-          request.service_type === serviceType &&
-          (request.route_id === routeId || request.suite_type_id === suiteTypeId),
-      ) ?? null
+  ): TransportRequestRow[] {
+    return ((transportRequests ?? []) as TransportRequestRow[]).filter(
+      (request) => request.package_leg_id === legId && request.service_type === serviceType,
     )
   }
 
@@ -422,84 +485,86 @@ export async function buildPackageQuoteLineItems({
         continue
       }
 
-      const routeId = getRequiredRouteId(leg, selection)
-      if (!routeId) {
+      const requiredRouteId = getRequiredRouteId(leg, selection)
+      if (!requiredRouteId) {
         throw new Error(`No ${isHotel ? "meal plan" : "route"} selected for leg: ${leg.label ?? leg.supplierName}`)
       }
+      const routeId: string = requiredRouteId
 
       const routeBelongsToLeg = leg.routes.some((route) => route.id === routeId)
       if (!routeBelongsToLeg) {
         throw new Error(`Selected route is not available for leg: ${leg.label ?? leg.supplierName}`)
       }
 
-      const suiteTypeId = selection.suiteTypeId
-      if (!suiteTypeId) {
-        throw new Error(`No ${isHotel ? "room type" : "suite type"} selected for leg: ${leg.label ?? leg.supplierName}`)
-      }
-
-      const suiteBelongsToLeg = leg.suiteTypes.some((suiteType) => suiteType.id === suiteTypeId)
-      if (!suiteBelongsToLeg) {
-        throw new Error(`Selected type is not available for leg: ${leg.label ?? leg.supplierName}`)
-      }
-
-      const validRateCard = getValidRateCard(leg, routeId, suiteTypeId, selection.rateTypeId)
-      if (!validRateCard) {
-        const legLabel = leg.label ?? leg.supplierName
-        throw new Error(`No pricing available for "${legLabel}" on ${travelDate}. Update the package rate cards first.`)
-      }
-      activeRateCard = validRateCard
-
       const legLabel = leg.label ?? leg.supplierName
       const routeName = getRouteName(leg, routeId)
-      const suiteTypeName = getSuiteTypeName(leg, suiteTypeId)
-      const descriptionParts = [legLabel, suiteTypeName, routeName].filter(Boolean)
-      const description = descriptionParts.join(" - ")
       const supplierDescription = leg.supplierDescription ?? null
-
       const commission = commissionFor(leg, routeId, selection.commissionOverride ?? null)
-
       const unit = SUPPLIER_VOCABULARY[leg.supplierKind].priceLabel
 
+      function resolveUnit(suiteTypeId: string) {
+        const suiteBelongsToLeg = leg.suiteTypes.some((suiteType) => suiteType.id === suiteTypeId)
+        if (!suiteBelongsToLeg) {
+          throw new Error(`Selected type is not available for leg: ${legLabel}`)
+        }
+        const validRateCard = getValidRateCard(leg, routeId, suiteTypeId, selection.rateTypeId)
+        if (!validRateCard) {
+          throw new Error(`No pricing available for "${legLabel}" on ${travelDate}. Update the package rate cards first.`)
+        }
+        const suiteTypeName = getSuiteTypeName(leg, suiteTypeId)
+        const description = [legLabel, suiteTypeName, routeName].filter(Boolean).join(" - ")
+        return { validRateCard, description }
+      }
+
       if (isHotel) {
-        // Hotel rooms and nights are explicit booking inputs (default 1 each),
-        // independent of the journey/package duration. qty = rooms × nights keeps
-        // the qty × unitPrice = total invariant; the description spells out both.
-        const rooms = Math.max(1, selection.rooms ?? 1)
+        const units = selection.units ?? []
+        if (units.length === 0) {
+          throw new Error(`No room type selected for leg: ${legLabel}`)
+        }
+        // Nights is a leg-level stay length (a booking's stay doesn't split per room); rooms is
+        // implicitly units.length — each unit is an independent room, its own suite/bed/layout/
+        // bathroom, priced qty = nights so qty × unitPrice = total stays correct per room.
         const nights = Math.max(1, selection.nights ?? 1)
         const nightsLabel = `${nights} night${nights === 1 ? "" : "s"}`
-        const stayLabel = rooms === 1 ? nightsLabel : `${rooms} rooms × ${nightsLabel}`
-        addLineItem({
-          description: `${description} — ${stayLabel}`,
-          qty: rooms * nights,
-          unitPrice: validRateCard.pricePerPerson,
-          supplierDescription,
-          suiteTypeId,
-          commission,
-          unit,
-        })
-      } else if (isTransfer || isVehicleRental) {
-        const serviceType = isVehicleRental ? "rental" : "transfer"
-        const transportRequest = findTransportRequest(serviceType, routeId, suiteTypeId)
-        const pointLabel =
-          transportRequest
-            ? `${transportRequest.pickup_point} -> ${transportRequest.dropoff_point}`
-            : null
-        const transportDescription = [description, pointLabel].filter(Boolean).join(" - ")
 
-        if (isVehicleRental) {
+        for (const unitSelection of units) {
+          const { validRateCard, description } = resolveUnit(unitSelection.suiteTypeId)
+          activeRateCard = validRateCard
           addLineItem({
-            description: transportDescription,
-            qty: getBillableRentalDays(transportRequest),
+            description: `${description} — ${nightsLabel}`,
+            qty: nights,
             unitPrice: validRateCard.pricePerPerson,
             supplierDescription,
-            suiteTypeId,
+            suiteTypeId: unitSelection.suiteTypeId,
+            variantNames: specificUnitVariantNames(unitSelection),
             commission,
             unit,
           })
-        } else {
+        }
+      } else if (isTransfer || isVehicleRental) {
+        const suiteTypeId = selection.suiteTypeId
+        if (!suiteTypeId) {
+          throw new Error(`No suite type selected for leg: ${legLabel}`)
+        }
+        const { validRateCard, description } = resolveUnit(suiteTypeId)
+        activeRateCard = validRateCard
+
+        const serviceType = isVehicleRental ? "rental" : "transfer"
+        const matchingRequests = findTransportRequestsForLeg(leg.id, serviceType)
+        // One line item per linked vehicle; if none are linked yet, still price the leg once.
+        const requestsToPrice: (TransportRequestRow | null)[] =
+          matchingRequests.length > 0 ? matchingRequests : [null]
+
+        for (const transportRequest of requestsToPrice) {
+          const pointLabel =
+            transportRequest
+              ? `${transportRequest.pickup_point} -> ${transportRequest.dropoff_point}`
+              : null
+          const transportDescription = [description, pointLabel].filter(Boolean).join(" - ")
+
           addLineItem({
             description: transportDescription,
-            qty: 1,
+            qty: isVehicleRental ? getBillableRentalDays(transportRequest) : 1,
             unitPrice: validRateCard.pricePerPerson,
             supplierDescription,
             suiteTypeId,
@@ -508,37 +573,70 @@ export async function buildPackageQuoteLineItems({
           })
         }
       } else {
-        const { adultCount, childCount, infantCount } = countsForBuckets(bucketsForLeg(leg))
-        addLineItem({
-          description: `${description} - Adult`,
-          qty: adultCount,
-          unitPrice: validRateCard.pricePerPerson,
-          supplierDescription,
-          suiteTypeId,
-          commission,
-          unit,
-        })
-        addLineItem({
-          description: `${description} - Child`,
-          qty: childCount,
-          unitPrice: validRateCard.childPrice ?? validRateCard.pricePerPerson,
-          supplierDescription,
-          suiteTypeId,
-          commission,
-          unit,
-        })
-        addLineItem({
-          description: `${description} - Infant`,
-          qty: infantCount,
-          unitPrice:
-            validRateCard.infantPrice ??
-            validRateCard.childPrice ??
-            validRateCard.pricePerPerson,
-          supplierDescription,
-          suiteTypeId,
-          commission,
-          unit,
-        })
+        const units = selection.units ?? []
+        if (units.length === 0) {
+          throw new Error(`No suite type selected for leg: ${legLabel}`)
+        }
+
+        const totals = countsForBuckets(bucketsForLeg(leg))
+        const summed = units.reduce(
+          (acc, unitSelection) => ({
+            adultCount: acc.adultCount + (unitSelection.adultCount ?? 0),
+            childCount: acc.childCount + (unitSelection.childCount ?? 0),
+            infantCount: acc.infantCount + (unitSelection.infantCount ?? 0),
+          }),
+          { adultCount: 0, childCount: 0, infantCount: 0 },
+        )
+        if (
+          summed.adultCount !== totals.adultCount ||
+          summed.childCount !== totals.childCount ||
+          summed.infantCount !== totals.infantCount
+        ) {
+          throw new Error(
+            `Per-unit passenger counts for leg "${legLabel}" must sum to the booking's traveller totals ` +
+              `(expected ${totals.adultCount} adult, ${totals.childCount} child, ${totals.infantCount} infant).`,
+          )
+        }
+
+        for (const unitSelection of units) {
+          const { validRateCard, description } = resolveUnit(unitSelection.suiteTypeId)
+          activeRateCard = validRateCard
+          const variantNames = specificUnitVariantNames(unitSelection)
+
+          addLineItem({
+            description: `${description} - Adult`,
+            qty: unitSelection.adultCount ?? 0,
+            unitPrice: validRateCard.pricePerPerson,
+            supplierDescription,
+            suiteTypeId: unitSelection.suiteTypeId,
+            variantNames,
+            commission,
+            unit,
+          })
+          addLineItem({
+            description: `${description} - Child`,
+            qty: unitSelection.childCount ?? 0,
+            unitPrice: validRateCard.childPrice ?? validRateCard.pricePerPerson,
+            supplierDescription,
+            suiteTypeId: unitSelection.suiteTypeId,
+            variantNames,
+            commission,
+            unit,
+          })
+          addLineItem({
+            description: `${description} - Infant`,
+            qty: unitSelection.infantCount ?? 0,
+            unitPrice:
+              validRateCard.infantPrice ??
+              validRateCard.childPrice ??
+              validRateCard.pricePerPerson,
+            supplierDescription,
+            suiteTypeId: unitSelection.suiteTypeId,
+            variantNames,
+            commission,
+            unit,
+          })
+        }
       }
     }
   }
