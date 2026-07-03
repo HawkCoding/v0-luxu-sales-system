@@ -90,8 +90,6 @@ function buildDetail(): PackageDetail {
             name: "Cape Town to Pretoria",
             originLocationId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
             destinationLocationId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
-            commissionType: null,
-            commissionValue: null,
             active: true,
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
@@ -128,8 +126,6 @@ function buildDetail(): PackageDetail {
             name: "Full Board",
             originLocationId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
             destinationLocationId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
-            commissionType: null,
-            commissionValue: null,
             active: true,
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
@@ -165,8 +161,6 @@ function buildDetail(): PackageDetail {
             destinationLocationId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
             pickupPoint: "Airport",
             dropoffPoint: "Hotel",
-            commissionType: null,
-            commissionValue: null,
             active: true,
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
@@ -213,8 +207,6 @@ function buildDetail(): PackageDetail {
               createdAt: "2026-01-01T00:00:00.000Z",
               updatedAt: "2026-01-01T00:00:00.000Z",
             },
-            commissionType: null,
-            commissionValue: null,
             active: true,
             createdAt: "2026-01-01T00:00:00.000Z",
             updatedAt: "2026-01-01T00:00:00.000Z",
@@ -243,6 +235,7 @@ function createSupabaseMock(
     service_type: "transfer" | "rental"
     route_id: string | null
     suite_type_id: string | null
+    package_leg_id?: string | null
     pickup_point: string
     dropoff_point: string
     pickup_at: string | null
@@ -255,6 +248,11 @@ function createSupabaseMock(
     child_ages: number[]
     departure_date: string
   }> = {},
+  vocabRows: {
+    bedroomTypes?: Array<{ id: string; name: string }>
+    bedroomLayouts?: Array<{ id: string; name: string }>
+    bathroomTypes?: Array<{ id: string; name: string }>
+  } = {},
 ) {
   return {
     from: vi.fn((table: string) => {
@@ -278,6 +276,16 @@ function createSupabaseMock(
             in: vi.fn(async () => ({ data: [], error: null })),
           })),
         }
+      }
+
+      if (table === "bedroom_types") {
+        return { select: vi.fn(() => ({ in: vi.fn(async () => ({ data: vocabRows.bedroomTypes ?? [], error: null })) })) }
+      }
+      if (table === "bedroom_layouts") {
+        return { select: vi.fn(() => ({ in: vi.fn(async () => ({ data: vocabRows.bedroomLayouts ?? [], error: null })) })) }
+      }
+      if (table === "bathroom_types") {
+        return { select: vi.fn(() => ({ in: vi.fn(async () => ({ data: vocabRows.bathroomTypes ?? [], error: null })) })) }
       }
 
       if (table === "app_settings") {
@@ -405,7 +413,7 @@ describe("POST /api/packages/[slug]/apply", () => {
       quoteId: QUOTE_ID,
       travelDate: "2026-06-01",
       selections: [
-        { legId: TRAIN_LEG_ID, selected: true, suiteTypeId: TRAIN_SUITE_ID },
+        { legId: TRAIN_LEG_ID, selected: true, units: [{ suiteTypeId: TRAIN_SUITE_ID, adultCount: 2, childCount: 1, infantCount: 0 }] },
         { legId: HOTEL_LEG_ID, selected: false },
         { legId: TRANSFER_LEG_ID, selected: false },
       ],
@@ -426,8 +434,8 @@ describe("POST /api/packages/[slug]/apply", () => {
       quoteId: QUOTE_ID,
       travelDate: "2026-06-01",
       selections: [
-        { legId: TRAIN_LEG_ID, selected: true, suiteTypeId: TRAIN_SUITE_ID },
-        { legId: HOTEL_LEG_ID, selected: true, routeId: HOTEL_MEAL_PLAN_ID, suiteTypeId: HOTEL_ROOM_ID },
+        { legId: TRAIN_LEG_ID, selected: true, units: [{ suiteTypeId: TRAIN_SUITE_ID, adultCount: 2, childCount: 1, infantCount: 0 }] },
+        { legId: HOTEL_LEG_ID, selected: true, routeId: HOTEL_MEAL_PLAN_ID, units: [{ suiteTypeId: HOTEL_ROOM_ID }] },
         { legId: TRANSFER_LEG_ID, selected: false },
       ],
     })
@@ -445,29 +453,41 @@ describe("POST /api/packages/[slug]/apply", () => {
     )
   })
 
-  it("prices hotel by the rooms and nights entered (qty = rooms × nights)", async () => {
+  it("prices hotel with N independent rooms as N line items (qty = nights per room)", async () => {
     const response = await postApply({
       jobId: JOB_ID,
       quoteId: QUOTE_ID,
       travelDate: "2026-06-01",
       selections: [
-        { legId: TRAIN_LEG_ID, selected: true, suiteTypeId: TRAIN_SUITE_ID },
-        { legId: HOTEL_LEG_ID, selected: true, routeId: HOTEL_MEAL_PLAN_ID, suiteTypeId: HOTEL_ROOM_ID, rooms: 2, nights: 7 },
+        { legId: TRAIN_LEG_ID, selected: true, units: [{ suiteTypeId: TRAIN_SUITE_ID, adultCount: 2, childCount: 1, infantCount: 0 }] },
+        {
+          legId: HOTEL_LEG_ID,
+          selected: true,
+          routeId: HOTEL_MEAL_PLAN_ID,
+          units: [{ suiteTypeId: HOTEL_ROOM_ID }, { suiteTypeId: HOTEL_ROOM_ID }],
+          nights: 7,
+        },
         { legId: TRANSFER_LEG_ID, selected: false },
       ],
     })
     const payload = await response.json()
 
     expect(response.status).toBe(200)
-    expect(payload.lineItems).toContainEqual(
-      expect.objectContaining({
-        description: "Harbour Hotel - Sea View Room - Full Board — 2 rooms × 7 nights",
-        qty: 14,
-        unitPrice: 500,
-        total: 7000,
-        pricingSnapshot: expect.objectContaining({ unit: "per room per night" }),
-      }),
+    const hotelLines = payload.lineItems.filter((item: { description: string }) =>
+      item.description.startsWith("Harbour Hotel"),
     )
+    expect(hotelLines).toHaveLength(2)
+    for (const line of hotelLines) {
+      expect(line).toEqual(
+        expect.objectContaining({
+          description: "Harbour Hotel - Sea View Room - Full Board — 7 nights",
+          qty: 7,
+          unitPrice: 500,
+          total: 3500,
+          pricingSnapshot: expect.objectContaining({ unit: "per room per night" }),
+        }),
+      )
+    }
   })
 
   it("keeps mixed train and hotel rate card prices separate", async () => {
@@ -494,8 +514,8 @@ describe("POST /api/packages/[slug]/apply", () => {
       quoteId: QUOTE_ID,
       travelDate: "2026-06-01",
       selections: [
-        { legId: TRAIN_LEG_ID, selected: true, routeId: TRAIN_ROUTE_ID, suiteTypeId: TRAIN_SUITE_ID },
-        { legId: HOTEL_LEG_ID, selected: true, routeId: HOTEL_MEAL_PLAN_ID, suiteTypeId: HOTEL_ROOM_ID },
+        { legId: TRAIN_LEG_ID, selected: true, routeId: TRAIN_ROUTE_ID, units: [{ suiteTypeId: TRAIN_SUITE_ID, adultCount: 2, childCount: 0, infantCount: 0 }] },
+        { legId: HOTEL_LEG_ID, selected: true, routeId: HOTEL_MEAL_PLAN_ID, units: [{ suiteTypeId: HOTEL_ROOM_ID }] },
         { legId: TRANSFER_LEG_ID, selected: false },
       ],
     })
@@ -527,7 +547,7 @@ describe("POST /api/packages/[slug]/apply", () => {
       travelDate: "2026-06-01",
       rateTypeId: RATE_TYPE_RESIDENT_ID,
       selections: [
-        { legId: TRAIN_LEG_ID, selected: true, routeId: TRAIN_ROUTE_ID, suiteTypeId: TRAIN_SUITE_ID },
+        { legId: TRAIN_LEG_ID, selected: true, routeId: TRAIN_ROUTE_ID, units: [{ suiteTypeId: TRAIN_SUITE_ID, adultCount: 2, childCount: 1, infantCount: 0 }] },
         { legId: HOTEL_LEG_ID, selected: false },
         { legId: TRANSFER_LEG_ID, selected: false },
       ],
@@ -548,8 +568,8 @@ describe("POST /api/packages/[slug]/apply", () => {
       travelDate: "2026-06-01",
       rateTypeId: RATE_TYPE_RESIDENT_ID,
       selections: [
-        { legId: TRAIN_LEG_ID, selected: true, routeId: TRAIN_ROUTE_ID, suiteTypeId: TRAIN_SUITE_ID },
-        { legId: HOTEL_LEG_ID, selected: true, routeId: HOTEL_MEAL_PLAN_ID, suiteTypeId: HOTEL_ROOM_ID },
+        { legId: TRAIN_LEG_ID, selected: true, routeId: TRAIN_ROUTE_ID, units: [{ suiteTypeId: TRAIN_SUITE_ID, adultCount: 2, childCount: 1, infantCount: 0 }] },
+        { legId: HOTEL_LEG_ID, selected: true, routeId: HOTEL_MEAL_PLAN_ID, units: [{ suiteTypeId: HOTEL_ROOM_ID }] },
         { legId: TRANSFER_LEG_ID, selected: false },
       ],
     })
@@ -573,7 +593,7 @@ describe("POST /api/packages/[slug]/apply", () => {
       quoteId: QUOTE_ID,
       travelDate: "2026-06-01",
       selections: [
-        { legId: TRAIN_LEG_ID, selected: true, routeId: TRAIN_ROUTE_ID, suiteTypeId: TRAIN_SUITE_ID },
+        { legId: TRAIN_LEG_ID, selected: true, routeId: TRAIN_ROUTE_ID, units: [{ suiteTypeId: TRAIN_SUITE_ID, adultCount: 2, childCount: 1, infantCount: 0 }] },
         { legId: HOTEL_LEG_ID, selected: false },
         { legId: TRANSFER_LEG_ID, selected: false },
       ],
@@ -593,7 +613,7 @@ describe("POST /api/packages/[slug]/apply", () => {
       quoteId: QUOTE_ID,
       travelDate: "2026-06-01",
       selections: [
-        { legId: TRAIN_LEG_ID, selected: true, suiteTypeId: TRAIN_SUITE_ID },
+        { legId: TRAIN_LEG_ID, selected: true, units: [{ suiteTypeId: TRAIN_SUITE_ID, adultCount: 2, childCount: 1, infantCount: 0 }] },
         { legId: HOTEL_LEG_ID, selected: false },
         { legId: TRANSFER_LEG_ID, selected: true, routeId: TRANSFER_ROUTE_ID, suiteTypeId: TRANSFER_VEHICLE_ID },
       ],
@@ -623,6 +643,7 @@ describe("POST /api/packages/[slug]/apply", () => {
             service_type: "rental",
             route_id: RENTAL_ROUTE_ID,
             suite_type_id: TRANSFER_VEHICLE_ID,
+            package_leg_id: VEHICLE_RENTAL_LEG_ID,
             pickup_point: "Cape Town Airport",
             dropoff_point: "Cape Town Airport",
             pickup_at: "2026-06-01T10:00:00.000Z",
@@ -642,7 +663,7 @@ describe("POST /api/packages/[slug]/apply", () => {
       quoteId: QUOTE_ID,
       travelDate: "2026-06-01",
       selections: [
-        { legId: TRAIN_LEG_ID, selected: true, suiteTypeId: TRAIN_SUITE_ID },
+        { legId: TRAIN_LEG_ID, selected: true, units: [{ suiteTypeId: TRAIN_SUITE_ID, adultCount: 2, childCount: 1, infantCount: 0 }] },
         { legId: HOTEL_LEG_ID, selected: false },
         { legId: VEHICLE_RENTAL_LEG_ID, selected: true, routeId: RENTAL_ROUTE_ID, suiteTypeId: TRANSFER_VEHICLE_ID },
       ],
@@ -660,6 +681,136 @@ describe("POST /api/packages/[slug]/apply", () => {
         pricingSnapshot: expect.objectContaining({ unit: "per day" }),
       }),
     )
+  })
+
+  it("emits one line item per vehicle when multiple rentals share the same package leg", async () => {
+    helperMocks.requireRole.mockResolvedValue({
+      ok: true,
+      response: null,
+      value: {
+        supabase: createSupabaseMock([
+          {
+            service_type: "rental",
+            route_id: RENTAL_ROUTE_ID,
+            suite_type_id: TRANSFER_VEHICLE_ID,
+            package_leg_id: VEHICLE_RENTAL_LEG_ID,
+            pickup_point: "Cape Town Airport",
+            dropoff_point: "Cape Town Airport",
+            pickup_at: "2026-06-01T10:00:00.000Z",
+            rental_details: { return_at: "2026-06-03T09:00:00.000Z" },
+          },
+          {
+            service_type: "rental",
+            route_id: RENTAL_ROUTE_ID,
+            suite_type_id: TRANSFER_VEHICLE_ID,
+            package_leg_id: VEHICLE_RENTAL_LEG_ID,
+            pickup_point: "Cape Town Airport",
+            dropoff_point: "Sea Point",
+            pickup_at: "2026-06-01T10:00:00.000Z",
+            rental_details: { return_at: "2026-06-02T09:00:00.000Z" },
+          },
+        ]),
+        user: { id: "abababab-abab-4aba-8aba-abababababab" },
+        profile: {
+          clearanceLevel: "consultant",
+          actorName: "Consultant",
+        },
+      },
+    })
+
+    const response = await postApply({
+      jobId: JOB_ID,
+      quoteId: QUOTE_ID,
+      travelDate: "2026-06-01",
+      selections: [
+        { legId: TRAIN_LEG_ID, selected: true, units: [{ suiteTypeId: TRAIN_SUITE_ID, adultCount: 2, childCount: 1, infantCount: 0 }] },
+        { legId: HOTEL_LEG_ID, selected: false },
+        { legId: VEHICLE_RENTAL_LEG_ID, selected: true, routeId: RENTAL_ROUTE_ID, suiteTypeId: TRANSFER_VEHICLE_ID },
+      ],
+    })
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    const rentalLines = payload.lineItems.filter((item: { description: string }) =>
+      item.description.startsWith("Vehicle Rentals"),
+    )
+    expect(rentalLines).toHaveLength(2)
+    expect(rentalLines).toContainEqual(
+      expect.objectContaining({ description: expect.stringContaining("Cape Town Airport -> Cape Town Airport"), qty: 2 }),
+    )
+    expect(rentalLines).toContainEqual(
+      expect.objectContaining({ description: expect.stringContaining("Cape Town Airport -> Sea Point"), qty: 1 }),
+    )
+  })
+
+  it("describes a unit by its specific chosen bedroom/layout/bathroom, not every option the suite type offers", async () => {
+    const BEDROOM_TYPE_ID = "dededede-dede-4ded-8ded-dededededede"
+    const BATHROOM_TYPE_ID = "cececece-cece-4cec-8cec-cececececece"
+    helperMocks.requireRole.mockResolvedValue({
+      ok: true,
+      response: null,
+      value: {
+        supabase: createSupabaseMock([], {}, {
+          bedroomTypes: [{ id: BEDROOM_TYPE_ID, name: "Twin" }],
+          bathroomTypes: [{ id: BATHROOM_TYPE_ID, name: "Ensuite shower" }],
+        }),
+        user: { id: "abababab-abab-4aba-8aba-abababababab" },
+        profile: { clearanceLevel: "consultant", actorName: "Consultant" },
+      },
+    })
+
+    const response = await postApply({
+      jobId: JOB_ID,
+      quoteId: QUOTE_ID,
+      travelDate: "2026-06-01",
+      selections: [
+        {
+          legId: TRAIN_LEG_ID,
+          selected: true,
+          units: [
+            {
+              suiteTypeId: TRAIN_SUITE_ID,
+              bedroomTypeId: BEDROOM_TYPE_ID,
+              bathroomTypeId: BATHROOM_TYPE_ID,
+              adultCount: 2,
+              childCount: 1,
+              infantCount: 0,
+            },
+          ],
+        },
+        { legId: HOTEL_LEG_ID, selected: false },
+        { legId: TRANSFER_LEG_ID, selected: false },
+      ],
+    })
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(payload.lineItems).toContainEqual(
+      expect.objectContaining({
+        description: "Blue Train - Deluxe Suite - Cape Town to Pretoria - Adult — Twin, Ensuite shower",
+      }),
+    )
+  })
+
+  it("returns 400 when per-unit passenger counts don't sum to the booking's traveller totals", async () => {
+    const response = await postApply({
+      jobId: JOB_ID,
+      quoteId: QUOTE_ID,
+      travelDate: "2026-06-01",
+      selections: [
+        {
+          legId: TRAIN_LEG_ID,
+          selected: true,
+          units: [{ suiteTypeId: TRAIN_SUITE_ID, adultCount: 1, childCount: 0, infantCount: 0 }],
+        },
+        { legId: HOTEL_LEG_ID, selected: false },
+        { legId: TRANSFER_LEG_ID, selected: false },
+      ],
+    })
+    const payload = await response.json()
+
+    expect(response.status).toBe(400)
+    expect(payload.error).toMatch(/must sum to the booking's traveller totals/)
   })
 
   it("returns 400 when a required train suite type is missing", async () => {

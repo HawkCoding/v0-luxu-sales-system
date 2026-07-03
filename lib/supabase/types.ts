@@ -351,11 +351,93 @@ export type Database = {
         }
         Relationships: []
       }
+      booking_package_selection_units: {
+        Row: {
+          adult_count: number
+          bathroom_type_id: string | null
+          bedroom_layout_id: string | null
+          bedroom_type_id: string | null
+          child_count: number
+          created_at: string
+          id: string
+          infant_count: number
+          selection_id: string
+          sort_order: number
+          suite_type_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          adult_count?: number
+          bathroom_type_id?: string | null
+          bedroom_layout_id?: string | null
+          bedroom_type_id?: string | null
+          child_count?: number
+          created_at?: string
+          id?: string
+          infant_count?: number
+          selection_id: string
+          sort_order?: number
+          suite_type_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          adult_count?: number
+          bathroom_type_id?: string | null
+          bedroom_layout_id?: string | null
+          bedroom_type_id?: string | null
+          child_count?: number
+          created_at?: string
+          id?: string
+          infant_count?: number
+          selection_id?: string
+          sort_order?: number
+          suite_type_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "booking_package_selection_units_bathroom_type_id_fkey"
+            columns: ["bathroom_type_id"]
+            isOneToOne: false
+            referencedRelation: "bathroom_types"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_package_selection_units_bedroom_layout_id_fkey"
+            columns: ["bedroom_layout_id"]
+            isOneToOne: false
+            referencedRelation: "bedroom_layouts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_package_selection_units_bedroom_type_id_fkey"
+            columns: ["bedroom_type_id"]
+            isOneToOne: false
+            referencedRelation: "bedroom_types"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_package_selection_units_selection_id_fkey"
+            columns: ["selection_id"]
+            isOneToOne: false
+            referencedRelation: "booking_package_selections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_package_selection_units_suite_type_id_fkey"
+            columns: ["suite_type_id"]
+            isOneToOne: false
+            referencedRelation: "suite_types"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       booking_package_selections: {
         Row: {
           booking_id: string
           created_at: string
           id: string
+          nights: number | null
           notes: string | null
           package_leg_id: string
           route_id: string | null
@@ -369,6 +451,7 @@ export type Database = {
           booking_id: string
           created_at?: string
           id?: string
+          nights?: number | null
           notes?: string | null
           package_leg_id: string
           route_id?: string | null
@@ -382,6 +465,7 @@ export type Database = {
           booking_id?: string
           created_at?: string
           id?: string
+          nights?: number | null
           notes?: string | null
           package_leg_id?: string
           route_id?: string | null
@@ -543,6 +627,7 @@ export type Database = {
           id: string
           luggage_count: number | null
           notes: string | null
+          package_leg_id: string | null
           passenger_count: number | null
           pickup_at: string | null
           pickup_point: string
@@ -561,6 +646,7 @@ export type Database = {
           id?: string
           luggage_count?: number | null
           notes?: string | null
+          package_leg_id?: string | null
           passenger_count?: number | null
           pickup_at?: string | null
           pickup_point: string
@@ -579,6 +665,7 @@ export type Database = {
           id?: string
           luggage_count?: number | null
           notes?: string | null
+          package_leg_id?: string | null
           passenger_count?: number | null
           pickup_at?: string | null
           pickup_point?: string
@@ -595,6 +682,13 @@ export type Database = {
             columns: ["booking_id"]
             isOneToOne: false
             referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_transport_requests_package_leg_id_fkey"
+            columns: ["package_leg_id"]
+            isOneToOne: false
+            referencedRelation: "package_legs"
             referencedColumns: ["id"]
           },
           {
@@ -714,6 +808,8 @@ export type Database = {
           stage: Database["public"]["Enums"]["pipeline_stage"]
           supplier_reference: string | null
           terms_accepted: boolean
+          trip_end_date: string | null
+          trip_start_date: string | null
           updated_at: string
           voucher_sent_at: string | null
         }
@@ -778,6 +874,8 @@ export type Database = {
           stage?: Database["public"]["Enums"]["pipeline_stage"]
           supplier_reference?: string | null
           terms_accepted?: boolean
+          trip_end_date?: string | null
+          trip_start_date?: string | null
           updated_at?: string
           voucher_sent_at?: string | null
         }
@@ -842,6 +940,8 @@ export type Database = {
           stage?: Database["public"]["Enums"]["pipeline_stage"]
           supplier_reference?: string | null
           terms_accepted?: boolean
+          trip_end_date?: string | null
+          trip_start_date?: string | null
           updated_at?: string
           voucher_sent_at?: string | null
         }
@@ -1225,6 +1325,30 @@ export type Database = {
           resolved_by?: string | null
           severity?: string
           source?: string
+        }
+        Relationships: []
+      }
+      gravity_forms_submissions: {
+        Row: {
+          form_id: string | null
+          id: string
+          payload: Json
+          processed: boolean
+          received_at: string
+        }
+        Insert: {
+          form_id?: string | null
+          id?: string
+          payload: Json
+          processed?: boolean
+          received_at?: string
+        }
+        Update: {
+          form_id?: string | null
+          id?: string
+          payload?: Json
+          processed?: boolean
+          received_at?: string
         }
         Relationships: []
       }
@@ -2327,8 +2451,6 @@ export type Database = {
       routes: {
         Row: {
           active: boolean
-          commission_type: Database["public"]["Enums"]["commission_kind"] | null
-          commission_value: number | null
           created_at: string
           destination_location_id: string | null
           direction_mode: Database["public"]["Enums"]["route_direction_mode"]
@@ -2347,8 +2469,6 @@ export type Database = {
         }
         Insert: {
           active?: boolean
-          commission_type?: Database["public"]["Enums"]["commission_kind"] | null
-          commission_value?: number | null
           created_at?: string
           destination_location_id?: string | null
           direction_mode?: Database["public"]["Enums"]["route_direction_mode"]
@@ -2367,8 +2487,6 @@ export type Database = {
         }
         Update: {
           active?: boolean
-          commission_type?: Database["public"]["Enums"]["commission_kind"] | null
-          commission_value?: number | null
           created_at?: string
           destination_location_id?: string | null
           direction_mode?: Database["public"]["Enums"]["route_direction_mode"]
@@ -2867,8 +2985,6 @@ export type Database = {
           active: boolean
           child_max_age: number | null
           created_at: string
-          default_commission_type: Database["public"]["Enums"]["commission_kind"] | null
-          default_commission_value: number | null
           default_time_end: string | null
           default_time_start: string | null
           description: string | null
@@ -2893,8 +3009,6 @@ export type Database = {
           active?: boolean
           child_max_age?: number | null
           created_at?: string
-          default_commission_type?: Database["public"]["Enums"]["commission_kind"] | null
-          default_commission_value?: number | null
           default_time_end?: string | null
           default_time_start?: string | null
           description?: string | null
@@ -2919,8 +3033,6 @@ export type Database = {
           active?: boolean
           child_max_age?: number | null
           created_at?: string
-          default_commission_type?: Database["public"]["Enums"]["commission_kind"] | null
-          default_commission_value?: number | null
           default_time_end?: string | null
           default_time_start?: string | null
           description?: string | null
@@ -3273,7 +3385,6 @@ export type Database = {
     }
     Enums: {
       booking_purpose: "quote" | "availability" | "reservation"
-      commission_kind: "percent" | "per_person"
       correspondence_status: "sent" | "failed" | "scheduled"
       document_kind:
         | "quote_pdf"
@@ -3458,7 +3569,6 @@ export const Constants = {
   public: {
     Enums: {
       booking_purpose: ["quote", "availability", "reservation"],
-      commission_kind: ["percent", "per_person"],
       correspondence_status: ["sent", "failed", "scheduled"],
       document_kind: [
         "quote_pdf",

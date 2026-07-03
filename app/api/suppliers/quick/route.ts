@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { mapSupplier } from "@/lib/suppliers"
+import { getHotelDefaultTimes } from "@/lib/suppliers/hotel-default-times"
 import { buildRouteName } from "@/lib/routes/route-name"
 import { requireAuthenticatedUser, resolveUniqueSupplierSlug } from "../helpers"
 import { createServiceClient } from "@/lib/supabase/server"
@@ -150,10 +151,11 @@ export async function POST(req: Request) {
     : ""
 
   const effectiveRouteName = (() => {
-    if (!autoDeriveName) return parsed.routeName.trim()
+    const clientName = parsed.routeName.trim()
+    if (!autoDeriveName || clientName.length > 0) return clientName
     const origin = parsed.originLocationId ? locationNameById.get(parsed.originLocationId) : undefined
     const dest = parsed.destinationLocationId ? locationNameById.get(parsed.destinationLocationId) : undefined
-    return origin && dest ? buildRouteName(origin, dest, "one_way") : parsed.routeName.trim()
+    return origin && dest ? buildRouteName(origin, dest, "one_way") : clientName
   })()
 
   // Use service client for all writes — the consultant role has no direct table write access.
@@ -165,6 +167,9 @@ export async function POST(req: Request) {
   const now = new Date().toISOString()
   const routeId = crypto.randomUUID()
   const suiteTypeId = crypto.randomUUID()
+
+  const hotelDefaultTimes =
+    parsed.kind === "hotel_property" ? await getHotelDefaultTimes(supabase) : null
 
   // Insert supplier as temporary.
   const { data: supplier, error: supplierError } = await adminSupabase
@@ -180,10 +185,12 @@ export async function POST(req: Request) {
       location_id: parsed.locationId ?? null,
       notes: null,
       single_supplement_pct: 0,
+      default_time_start: hotelDefaultTimes?.checkIn ?? null,
+      default_time_end: hotelDefaultTimes?.checkOut ?? null,
       active: false,
       status: "temporary",
     })
-    .select("id, slug, kind, status, name, email, phone, website, location, location_detail, location_id, location_area_id, description, notes, active, single_supplement_pct, infant_max_age, child_max_age, default_time_start, default_time_end, default_commission_type, default_commission_value, created_at, updated_at")
+    .select("id, slug, kind, status, name, email, phone, website, location, location_detail, location_id, location_area_id, description, notes, active, single_supplement_pct, infant_max_age, child_max_age, default_time_start, default_time_end, created_at, updated_at")
     .single()
 
   if (supplierError || !supplier) {

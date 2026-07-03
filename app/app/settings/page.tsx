@@ -54,16 +54,30 @@ import type { Role } from "@/lib/types"
 import { APP_VERSION } from "@/lib/version"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
-import { AlertTriangle, Clock, KeyRound, MoreHorizontal, ShieldCheck, Tag, Trash2, Upload, UserCheck, UserPlus, UserX } from "lucide-react"
+import { AlertTriangle, Clock, KeyRound, MoreHorizontal, Pencil, ShieldCheck, Tag, Trash2, Upload, UserCheck, UserPlus, UserX } from "lucide-react"
 
 interface AppUser {
   userId: string
   email: string
-  name: string
+  firstName: string
+  lastName: string
   clearanceLevel: Role
   isActive: boolean
   isCurrentUser: boolean
 }
+
+function userDisplayName(u: AppUser | null | undefined): string {
+  if (!u) return ""
+  return [u.firstName, u.lastName].filter(Boolean).join(" ").trim() || u.email
+}
+
+interface EditUserForm {
+  name: string
+  surname: string
+  email: string
+}
+
+const EMPTY_EDIT_FORM: EditUserForm = { name: "", surname: "", email: "" }
 
 interface CreateUserForm {
   name: string
@@ -109,6 +123,10 @@ function UserManagementCard() {
   const [roleTarget, setRoleTarget] = useState<AppUser | null>(null)
   const [selectedRole, setSelectedRole] = useState<Role>("consultant")
   const [roleError, setRoleError] = useState("")
+  const [editTarget, setEditTarget] = useState<AppUser | null>(null)
+  const [editForm, setEditForm] = useState<EditUserForm>(EMPTY_EDIT_FORM)
+  const [editError, setEditError] = useState("")
+  const [editingUser, setEditingUser] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<AppUser | null>(null)
   const [deleteConfirmationText, setDeleteConfirmationText] = useState("")
   const [actionUserId, setActionUserId] = useState<string | null>(null)
@@ -273,6 +291,48 @@ function UserManagementCard() {
     }
   }
 
+  const handleConfirmEditDetails = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editTarget) return
+
+    setEditError("")
+    if (!editForm.name.trim()) {
+      setEditError("Name is required")
+      return
+    }
+    if (!editForm.email.trim()) {
+      setEditError("Email is required")
+      return
+    }
+
+    setEditingUser(true)
+    setActionUserId(editTarget.userId)
+    try {
+      const res = await fetch(`/api/users/${editTarget.userId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editForm.name.trim(),
+          surname: editForm.surname.trim(),
+          email: editForm.email.trim(),
+        }),
+      })
+      const data = (await res.json()) as { error?: string }
+      if (!res.ok) {
+        setEditError(data.error || "Failed to update user details")
+        return
+      }
+      toast.success("User details updated")
+      setEditTarget(null)
+      await fetchUsers()
+    } catch {
+      setEditError("Failed to update user details")
+    } finally {
+      setEditingUser(false)
+      setActionUserId(null)
+    }
+  }
+
   const handleConfirmDelete = async () => {
     if (!deleteTarget) return
 
@@ -337,7 +397,7 @@ function UserManagementCard() {
                     className={`flex items-center justify-between gap-4 rounded-md border px-3 py-2 ${u.isActive ? "" : "opacity-60"}`}
                   >
                     <div>
-                      <p className="text-sm font-medium">{u.name || u.email}</p>
+                      <p className="text-sm font-medium">{userDisplayName(u)}</p>
                       <p className="text-xs text-muted-foreground">{u.email}</p>
                       <div className="mt-1 flex items-center gap-1.5">
                         <Badge variant="secondary" className="text-xs capitalize">
@@ -401,6 +461,17 @@ function UserManagementCard() {
                         >
                           <ShieldCheck className="h-4 w-4" />
                           Change role
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => {
+                            setEditTarget(u)
+                            setEditForm({ name: u.firstName, surname: u.lastName, email: u.email })
+                            setEditError("")
+                          }}
+                          disabled={isBusy}
+                        >
+                          <Pencil className="h-4 w-4" />
+                          Edit details
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
@@ -539,7 +610,7 @@ function UserManagementCard() {
           <DialogHeader>
             <DialogTitle>Set password</DialogTitle>
             <DialogDescription>
-              Set a new password for {setPasswordFor?.name || setPasswordFor?.email}. They will
+              Set a new password for {userDisplayName(setPasswordFor)}. They will
               receive an email notifying them who reset it.
             </DialogDescription>
           </DialogHeader>
@@ -585,6 +656,64 @@ function UserManagementCard() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={!!editTarget} onOpenChange={(open) => !open && setEditTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit user details</DialogTitle>
+            <DialogDescription>
+              Update the name, surname, or email address for {userDisplayName(editTarget)}.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleConfirmEditDetails} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-user-name">Name</Label>
+              <Input
+                id="edit-user-name"
+                value={editForm.name}
+                onChange={(e) => setEditForm((prev) => ({ ...prev, name: e.target.value }))}
+                placeholder="First name"
+                autoComplete="given-name"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-user-surname">Surname</Label>
+              <Input
+                id="edit-user-surname"
+                value={editForm.surname}
+                onChange={(e) => setEditForm((prev) => ({ ...prev, surname: e.target.value }))}
+                placeholder="Surname"
+                autoComplete="family-name"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-user-email">Email</Label>
+              <Input
+                id="edit-user-email"
+                type="email"
+                value={editForm.email}
+                onChange={(e) => setEditForm((prev) => ({ ...prev, email: e.target.value }))}
+                placeholder="user@example.com"
+                autoComplete="email"
+              />
+            </div>
+            {editError && <p className="text-sm text-destructive">{editError}</p>}
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setEditTarget(null)}
+                disabled={editingUser}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={editingUser}>
+                {editingUser ? "Saving..." : "Save changes"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       <AlertDialog open={!!statusTarget} onOpenChange={(open) => !open && setStatusTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -593,8 +722,8 @@ function UserManagementCard() {
             </AlertDialogTitle>
             <AlertDialogDescription>
               {statusTarget?.isActive
-                ? `This will deactivate ${statusTarget?.name || statusTarget?.email}. They will no longer be able to sign in until reactivated.`
-                : `This will reactivate ${statusTarget?.name || statusTarget?.email} and allow sign-in again.`}
+                ? `This will deactivate ${userDisplayName(statusTarget)}. They will no longer be able to sign in until reactivated.`
+                : `This will reactivate ${userDisplayName(statusTarget)} and allow sign-in again.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -629,7 +758,7 @@ function UserManagementCard() {
           <DialogHeader>
             <DialogTitle>Change role</DialogTitle>
             <DialogDescription>
-              Update access for {roleTarget?.name || roleTarget?.email}. Current role:{" "}
+              Update access for {userDisplayName(roleTarget)}. Current role:{" "}
               {roleTarget ? formatRoleLabel(roleTarget.clearanceLevel) : ""}
             </DialogDescription>
           </DialogHeader>
@@ -678,7 +807,7 @@ function UserManagementCard() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete user permanently?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently remove {deleteTarget?.name || deleteTarget?.email}. This action
+              This will permanently remove {userDisplayName(deleteTarget)}. This action
               cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -717,29 +846,41 @@ function UserManagementCard() {
 
 function CompanyInfoCard({ canEdit }: { canEdit: boolean }) {
   const [businessName, setBusinessName] = useState("")
-  const [saving, setSaving] = useState(false)
+  const [companyEmail, setCompanyEmail] = useState("")
+  const [companyPhone, setCompanyPhone] = useState("")
+  const [vatRate, setVatRate] = useState("")
+  const [savingField, setSavingField] = useState<string | null>(null)
 
   useEffect(() => {
     fetch("/api/settings/company")
       .then((r) => r.json())
-      .then((d) => { if (d.business_name) setBusinessName(d.business_name) })
+      .then((d) => {
+        if (d.business_name) setBusinessName(d.business_name)
+        if (d.company_email) setCompanyEmail(d.company_email)
+        if (d.company_phone) setCompanyPhone(d.company_phone)
+        if (d.vat_rate) setVatRate(d.vat_rate)
+      })
       .catch(() => {})
   }, [])
 
-  const handleSave = async () => {
-    setSaving(true)
+  const handleSave = async (
+    field: "business_name" | "company_email" | "company_phone" | "vat_rate",
+    value: string,
+    label: string
+  ) => {
+    setSavingField(field)
     try {
       const res = await fetch("/api/settings/company", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ business_name: businessName }),
+        body: JSON.stringify({ [field]: field === "vat_rate" ? Number(value) : value }),
       })
       if (!res.ok) throw new Error()
-      toast.success("Business name saved")
+      toast.success(`${label} saved`)
     } catch {
-      toast.error("Failed to save business name")
+      toast.error(`Failed to save ${label.toLowerCase()}`)
     } finally {
-      setSaving(false)
+      setSavingField(null)
     }
   }
 
@@ -760,23 +901,85 @@ function CompanyInfoCard({ canEdit }: { canEdit: boolean }) {
                 placeholder="Luxus Travel"
               />
               {canEdit && (
-                <Button size="sm" onClick={handleSave} disabled={saving || !businessName.trim()}>
-                  {saving ? "Saving…" : "Save"}
+                <Button
+                  size="sm"
+                  onClick={() => handleSave("business_name", businessName, "Business name")}
+                  disabled={savingField === "business_name" || !businessName.trim()}
+                >
+                  {savingField === "business_name" ? "Saving…" : "Save"}
                 </Button>
               )}
             </div>
           </div>
           <div>
             <label className="text-xs font-medium text-muted-foreground">Email</label>
-            <Input defaultValue="info@luxustravel.co.za" className="mt-1" readOnly />
+            <div className="flex gap-2 mt-1">
+              <Input
+                type="email"
+                value={companyEmail}
+                onChange={(e) => setCompanyEmail(e.target.value)}
+                readOnly={!canEdit}
+                placeholder="info@luxustravel.co.za"
+              />
+              {canEdit && (
+                <Button
+                  size="sm"
+                  onClick={() => handleSave("company_email", companyEmail, "Email")}
+                  disabled={savingField === "company_email" || !companyEmail.trim()}
+                >
+                  {savingField === "company_email" ? "Saving…" : "Save"}
+                </Button>
+              )}
+            </div>
           </div>
           <div>
             <label className="text-xs font-medium text-muted-foreground">Phone</label>
-            <Input defaultValue="+27 12 345 6789" className="mt-1" readOnly />
+            <div className="flex gap-2 mt-1">
+              <Input
+                value={companyPhone}
+                onChange={(e) => setCompanyPhone(e.target.value)}
+                readOnly={!canEdit}
+                placeholder="+27 12 345 6789"
+              />
+              {canEdit && (
+                <Button
+                  size="sm"
+                  onClick={() => handleSave("company_phone", companyPhone, "Phone")}
+                  disabled={savingField === "company_phone" || !companyPhone.trim()}
+                >
+                  {savingField === "company_phone" ? "Saving…" : "Save"}
+                </Button>
+              )}
+            </div>
           </div>
           <div>
-            <label className="text-xs font-medium text-muted-foreground">VAT Rate</label>
-            <Input defaultValue="15%" className="mt-1" readOnly />
+            <label className="text-xs font-medium text-muted-foreground">VAT Rate (%)</label>
+            <div className="flex gap-2 mt-1">
+              <Input
+                type="number"
+                min={0}
+                max={100}
+                step={0.01}
+                inputMode="decimal"
+                value={vatRate}
+                onChange={(e) => setVatRate(e.target.value)}
+                readOnly={!canEdit}
+                placeholder="15"
+              />
+              {canEdit && (
+                <Button
+                  size="sm"
+                  onClick={() => handleSave("vat_rate", vatRate, "VAT rate")}
+                  disabled={
+                    savingField === "vat_rate" ||
+                    vatRate.trim() === "" ||
+                    !Number.isFinite(Number(vatRate))
+                  }
+                >
+                  {savingField === "vat_rate" ? "Saving…" : "Save"}
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </CardContent>
@@ -888,6 +1091,113 @@ function DepositSettingsCard({ canEdit }: { canEdit: boolean }) {
             <p className="text-xs text-destructive">Enter a value between 0 and 100.</p>
           )}
         </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function HotelDefaultTimesCard({ canEdit }: { canEdit: boolean }) {
+  const [checkInTime, setCheckInTime] = useState("14:00")
+  const [checkOutTime, setCheckOutTime] = useState("11:00")
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+
+    fetch("/api/settings/hotel-defaults")
+      .then((response) => response.json())
+      .then((data: { checkInTime?: string; checkOutTime?: string }) => {
+        if (cancelled) return
+        if (typeof data.checkInTime === "string") setCheckInTime(data.checkInTime)
+        if (typeof data.checkOutTime === "string") setCheckOutTime(data.checkOutTime)
+      })
+      .catch(() => {
+        toast.error("Failed to load hotel default times")
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const isValid = checkInTime.trim() !== "" && checkOutTime.trim() !== ""
+
+  const handleSave = async () => {
+    if (!isValid) return
+
+    setSaving(true)
+    try {
+      const res = await fetch("/api/settings/hotel-defaults", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ checkInTime, checkOutTime }),
+      })
+      if (!res.ok) throw new Error()
+
+      const data = (await res.json()) as { checkInTime: string; checkOutTime: string }
+      setCheckInTime(data.checkInTime)
+      setCheckOutTime(data.checkOutTime)
+      toast.success("Hotel default times saved")
+    } catch {
+      toast.error("Failed to save hotel default times")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card className={!canEdit ? "opacity-80" : undefined}>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium">Hotel Defaults</CardTitle>
+        <CardDescription className="text-xs">
+          New hotel suppliers start with these check-in and check-out times; each hotel can override them.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="grid gap-2">
+            <Label htmlFor="hotel-default-check-in" className="text-xs font-medium text-muted-foreground">
+              Check-in time
+            </Label>
+            <Input
+              id="hotel-default-check-in"
+              type="time"
+              value={checkInTime}
+              onChange={(event) => setCheckInTime(event.target.value)}
+              readOnly={!canEdit}
+              disabled={loading}
+              className="w-32"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="hotel-default-check-out" className="text-xs font-medium text-muted-foreground">
+              Check-out time
+            </Label>
+            <Input
+              id="hotel-default-check-out"
+              type="time"
+              value={checkOutTime}
+              onChange={(event) => setCheckOutTime(event.target.value)}
+              readOnly={!canEdit}
+              disabled={loading}
+              className="w-32"
+            />
+          </div>
+          {canEdit && (
+            <Button size="sm" onClick={handleSave} disabled={loading || saving || !isValid}>
+              {saving ? "Saving..." : "Save"}
+            </Button>
+          )}
+        </div>
+        {!canEdit && (
+          <p className="text-xs text-muted-foreground">
+            Salespeople can view these defaults; managers and admins can change them.
+          </p>
+        )}
       </CardContent>
     </Card>
   )
@@ -1509,6 +1819,8 @@ export default function SettingsPage() {
       <CompanyInfoCard canEdit={canEditSettings} />
 
       <DepositSettingsCard canEdit={canEditDepositSettings} />
+
+      <HotelDefaultTimesCard canEdit={canEditDepositSettings} />
 
       <QuoteValidityCard canEdit={canEditDepositSettings} />
 

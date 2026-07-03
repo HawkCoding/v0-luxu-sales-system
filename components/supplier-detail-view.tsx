@@ -36,6 +36,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { BufferedInput } from "@/components/ui/buffered-input"
 import { BufferedTextarea } from "@/components/ui/buffered-textarea"
 import { ContentTransition } from "@/components/ui/content-transition"
+import { getMinSelectableRateYear } from "@/components/ui/calendar"
 import { DatePicker } from "@/components/ui/date-picker"
 import { Label } from "@/components/ui/label"
 import { NumericInput } from "@/components/ui/numeric-input"
@@ -180,6 +181,9 @@ interface SupplierFormState {
   singleSupplementPct: number
   infantMaxAge: number | null
   childMaxAge: number | null
+  /** HH:MM; empty string = unset. Hotel check-in/check-out defaults. */
+  defaultTimeStart: string
+  defaultTimeEnd: string
   rateAdjustments: SupplierRateAdjustment[]
   suiteTypes: EditableSuiteType[]
   packages: EditablePackage[]
@@ -261,16 +265,16 @@ function makeClientId(): string {
   return crypto.randomUUID()
 }
 
-function createEmptyRoute(locations: Location[], kind: SupplierKind): EditableRoute {
-  const origin = locations[0]?.id ?? ""
-  const destination = locations[1]?.id ?? origin
+function createEmptyRoute(kind: SupplierKind): EditableRoute {
   const isTransport = isTransportSupplier(kind)
-
+  // Never pre-select locations: kinds without location fields (hotels, tour
+  // operators) would silently persist whichever locations sort first, and
+  // kinds with visible selects should force an explicit choice.
   return {
     id: makeClientId(),
     name: "",
-    originLocationId: isTransport ? null : origin,
-    destinationLocationId: isTransport ? null : destination,
+    originLocationId: null,
+    destinationLocationId: null,
     pickupPoint: "",
     dropoffPoint: "",
     vehicleRentalDetails:
@@ -351,6 +355,9 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
     singleSupplementPct: supplier.singleSupplementPct,
     infantMaxAge: supplier.infantMaxAge ?? null,
     childMaxAge: supplier.childMaxAge ?? null,
+    // Postgres `time` columns arrive as HH:MM:SS — keep only HH:MM for the inputs.
+    defaultTimeStart: (supplier.defaultTimeStart ?? "").slice(0, 5),
+    defaultTimeEnd: (supplier.defaultTimeEnd ?? "").slice(0, 5),
     rateAdjustments: (supplier.rateAdjustments ?? []).map((adjustment) => ({
       rateTypeId: adjustment.rateTypeId,
       discountPct: adjustment.discountPct,
@@ -1611,6 +1618,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                   <Label>Valid from</Label>
                   <DatePicker
                     value={period.validFrom}
+                    fromYear={getMinSelectableRateYear()}
                     buttonClassName={
                       periodFieldErrors.has(`${period.key}|validFrom`)
                         ? "border-destructive focus-visible:ring-destructive/35"
@@ -1641,6 +1649,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                     ) : null}
                     <DatePicker
                       value={period.validTo ?? ""}
+                      fromYear={getMinSelectableRateYear()}
                       buttonClassName={
                         periodFieldErrors.has(`${period.key}|validTo`)
                           ? "border-destructive focus-visible:ring-destructive/35"
@@ -2056,6 +2065,7 @@ interface RouteEditorRowProps {
   route: EditableRoute
   routeIndex: number
   packageIndex: number
+  kind: SupplierKind
   vocabulary: SupplierVocabulary
   locations: Location[]
   onUpdateRoute: (
@@ -2071,6 +2081,7 @@ const RouteEditorRow = memo(function RouteEditorRow({
   route,
   routeIndex,
   packageIndex,
+  kind,
   vocabulary,
   locations,
   onUpdateRoute,
@@ -2089,7 +2100,7 @@ const RouteEditorRow = memo(function RouteEditorRow({
 
   useEffect(() => {
     if (!autoDeriveName || derivedRouteName === null) return
-    if (route.name === derivedRouteName) return
+    if (route.name.trim() !== "") return
     onUpdateRoute(packageIndex, routeIndex, "name", derivedRouteName)
   }, [autoDeriveName, derivedRouteName, route.name, onUpdateRoute, packageIndex, routeIndex])
 
@@ -2122,15 +2133,14 @@ const RouteEditorRow = memo(function RouteEditorRow({
     >
       <div className="space-y-1.5">
         <Label>{`${vocabulary.route} name`}</Label>
-        {autoDeriveName ? (
-          <div
-            className="flex h-9 items-center rounded-md border border-input bg-muted px-3 text-sm text-muted-foreground"
-            aria-label={`${vocabulary.route} name`}
-          >
-            {derivedRouteName ?? (
-              <span className="italic">Choose origin and destination</span>
-            )}
-          </div>
+        {kind === "tour_operator" ? (
+          // Itinerary text can run long — wrap down instead of scrolling sideways.
+          <BufferedTextarea
+            rows={2}
+            className="resize-none"
+            value={route.name}
+            onValueChange={(value) => onUpdateRoute(packageIndex, routeIndex, "name", value)}
+          />
         ) : (
           <BufferedInput
             value={route.name}
@@ -2708,7 +2718,7 @@ export function SupplierDetailView({
 
       updatePackage(packageIndex, (pkg) => ({
         ...pkg,
-        routes: [...pkg.routes, createEmptyRoute(locations, currentForm.kind)],
+        routes: [...pkg.routes, createEmptyRoute(currentForm.kind)],
       }))
     },
     [locations, updatePackage],
@@ -3441,6 +3451,8 @@ export function SupplierDetailView({
           singleSupplementPct: form.singleSupplementPct,
           infantMaxAge: form.infantMaxAge,
           childMaxAge: form.childMaxAge,
+          defaultTimeStart: form.defaultTimeStart || null,
+          defaultTimeEnd: form.defaultTimeEnd || null,
           rateAdjustments: form.rateAdjustments,
           suiteTypes: cleanedSuiteTypes,
           routes: cleanedRoutes,
@@ -4155,6 +4167,54 @@ export function SupplierDetailView({
                 </div>
               ) : null}
 
+              {form.kind === "hotel_property" ? (
+                <div className="rounded-lg border p-4">
+                  {isEditing ? (
+                    <div className="grid gap-3 sm:grid-cols-[minmax(0,10rem)_minmax(0,10rem)_1fr] sm:items-end">
+                      <div className="space-y-2">
+                        <Label htmlFor="supplier-default-time-start">
+                          {activeVocabulary.scheduleFields?.timeStartLabel ?? "Check-in time"}
+                        </Label>
+                        <BufferedInput
+                          id="supplier-default-time-start"
+                          type="time"
+                          value={form.defaultTimeStart}
+                          onValueChange={(value) => updateField("defaultTimeStart", value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="supplier-default-time-end">
+                          {activeVocabulary.scheduleFields?.timeEndLabel ?? "Check-out time"}
+                        </Label>
+                        <BufferedInput
+                          id="supplier-default-time-end"
+                          type="time"
+                          value={form.defaultTimeEnd}
+                          onValueChange={(value) => updateField("defaultTimeEnd", value)}
+                        />
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        Prefills the check-in and check-out times on new booking schedules for this hotel.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">Check-in / check-out</p>
+                        <p className="text-sm text-muted-foreground">
+                          Default times prefilled on new booking schedules.
+                        </p>
+                      </div>
+                      <Badge variant="outline">
+                        {(supplier.defaultTimeStart ?? "").slice(0, 5) || "—"}
+                        {" / "}
+                        {(supplier.defaultTimeEnd ?? "").slice(0, 5) || "—"}
+                      </Badge>
+                    </div>
+                  )}
+                </div>
+              ) : null}
+
               <PassengerAgeBandsSection
                 isEditing={isEditing}
                 infantMaxAge={isEditing ? form.infantMaxAge : supplier.infantMaxAge}
@@ -4263,6 +4323,7 @@ export function SupplierDetailView({
                         route={route}
                         routeIndex={routeIndex}
                         packageIndex={0}
+                        kind={form.kind}
                         vocabulary={activeVocabulary}
                         locations={locations}
                         onUpdateRoute={updateRoute}

@@ -52,7 +52,7 @@ function buildAcceptableLocationIds(destinationIds: string[], locations: Locatio
 /**
  * Soft match: a supplier is considered "in the destination area" when its tagged
  * location or sub-area falls within the acceptable set. Suppliers with no location
- * tag never match (they surface only under "Show all").
+ * tag are unscoped, not scoped-to-nowhere, so they always match.
  */
 export function supplierMatchesDestination(
   supplier: Pick<Supplier, "locationId" | "locationAreaId">,
@@ -60,6 +60,7 @@ export function supplierMatchesDestination(
   locations: Location[],
 ): boolean {
   if (destinationIds.length === 0) return true
+  if (!supplier.locationId && !supplier.locationAreaId) return true
 
   const acceptable = buildAcceptableLocationIds(destinationIds, locations)
   if (supplier.locationId && acceptable.has(supplier.locationId)) return true

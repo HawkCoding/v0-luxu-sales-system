@@ -8,7 +8,7 @@ import { voucherStyles } from "@/lib/voucher/pdf/styles"
 import { HeaderBanner } from "@/lib/voucher/pdf/sections/header-banner"
 import { VoucherFooter } from "@/lib/voucher/pdf/sections/footer"
 import { ServiceBlock } from "@/lib/voucher/pdf/sections/service-block"
-import { sortedVoucherServiceBlocks } from "@/lib/generate-voucher"
+import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
 
 export interface ItineraryDocumentProps {
   data: ItineraryData
@@ -86,7 +86,7 @@ export function ItineraryDocument({ data, template }: ItineraryDocumentProps) {
     },
   })
 
-  const sorted = sortedVoucherServiceBlocks(data.serviceBlocks)
+  const sorted = sortItineraryBlocksChronologically(data.serviceBlocks)
 
   return (
     <Document

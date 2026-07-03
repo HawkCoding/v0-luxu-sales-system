@@ -4,6 +4,7 @@ import { requireAuthenticatedUser } from "../../suppliers/helpers"
 import {
   hasPackageWriteAccess,
   loadPackageDetail,
+  loadSupplierKinds,
   normalizePackageChildren,
   resolveUniquePackageSlug,
 } from "./helpers"
@@ -81,9 +82,14 @@ export async function PATCH(
     return NextResponse.json({ error: "Failed to validate package slug" }, { status: 500 })
   }
 
+  const supplierKinds = await loadSupplierKinds(
+    supabase,
+    Array.from(new Set(parsed.legs.map((leg) => leg.supplierId))),
+  )
+
   let children
   try {
-    children = normalizePackageChildren(existing.packageRow.id, parsed)
+    children = normalizePackageChildren(existing.packageRow.id, parsed, supplierKinds)
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Invalid package structure" },

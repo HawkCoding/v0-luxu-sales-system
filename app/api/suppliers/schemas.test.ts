@@ -99,6 +99,33 @@ describe("supplierSaveSchema", () => {
     ).toBe(false)
   })
 
+  it("accepts HH:MM default times and null unset", () => {
+    expect(
+      supplierSaveSchema.safeParse({
+        ...buildValidPayload(),
+        kind: "hotel_property",
+        defaultTimeStart: "14:00",
+        defaultTimeEnd: "11:00",
+      }).success,
+    ).toBe(true)
+    expect(
+      supplierSaveSchema.safeParse({
+        ...buildValidPayload(),
+        defaultTimeStart: null,
+        defaultTimeEnd: null,
+      }).success,
+    ).toBe(true)
+  })
+
+  it.each(["14:00:00", "2pm", "9:00", ""])(
+    "rejects malformed default time %#",
+    (value) => {
+      expect(
+        supplierSaveSchema.safeParse({ ...buildValidPayload(), defaultTimeStart: value }).success,
+      ).toBe(false)
+    },
+  )
+
   it("accepts transport services with free-form pickup and drop-off points", () => {
     const parsed = supplierSaveSchema.parse({
       ...buildValidPayload(),

@@ -22,6 +22,16 @@ const extraSchema = z.object({
   commissionOverride: commissionOverrideSchema,
 })
 
+const unitSelectionSchema = z.object({
+  suiteTypeId: z.string().uuid(),
+  bedroomTypeId: z.string().uuid().nullable().optional(),
+  bedroomLayoutId: z.string().uuid().nullable().optional(),
+  bathroomTypeId: z.string().uuid().nullable().optional(),
+  adultCount: z.number().int().nonnegative().default(0),
+  childCount: z.number().int().nonnegative().default(0),
+  infantCount: z.number().int().nonnegative().default(0),
+})
+
 const applyPackageSchema = z.object({
   jobId: z.string().uuid(),
   quoteId: z.string().uuid(),
@@ -32,8 +42,10 @@ const applyPackageSchema = z.object({
       legId: z.string().uuid(),
       selected: z.boolean().default(true),
       routeId: z.string().uuid().optional(),
+      /** Transfer/vehicle-rental legs only: the vehicle category. */
       suiteTypeId: z.string().uuid().optional(),
-      rooms: z.number().int().positive().optional(),
+      /** Hotel/train/tour/airline legs: one entry per independent suite/room booked. */
+      units: z.array(unitSelectionSchema).optional(),
       nights: z.number().int().positive().optional(),
       commissionOverride: commissionOverrideSchema,
     }),

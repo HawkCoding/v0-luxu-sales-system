@@ -156,9 +156,9 @@ export async function DELETE(req: Request) {
 
   const { id } = parsedResult.data
 
-  const { count: linkedRoutes, error: routeCheckError } = await supabase
+  const { data: linkedRoutes, error: routeCheckError } = await supabase
     .from("routes")
-    .select("id", { count: "exact", head: true })
+    .select("id, name, supplier_id")
     .or(`origin_location_id.eq.${id},destination_location_id.eq.${id}`)
 
   if (routeCheckError) {
@@ -168,11 +168,44 @@ export async function DELETE(req: Request) {
     )
   }
 
-  if ((linkedRoutes ?? 0) > 0) {
+  if ((linkedRoutes ?? []).length > 0) {
+    const supplierIds = Array.from(
+      new Set(
+        (linkedRoutes ?? []).flatMap((route) =>
+          route.supplier_id ? [route.supplier_id] : [],
+        ),
+      ),
+    )
+
+    const supplierNames = new Map<string, { name: string; status: string }>()
+    if (supplierIds.length > 0) {
+      const { data: suppliers } = await supabase
+        .from("suppliers")
+        .select("id, name, status")
+        .in("id", supplierIds)
+      for (const supplier of suppliers ?? []) {
+        supplierNames.set(supplier.id, {
+          name: supplier.name,
+          status: supplier.status,
+        })
+      }
+    }
+
+    const blockers = (linkedRoutes ?? []).map((route) => {
+      const supplier = route.supplier_id
+        ? supplierNames.get(route.supplier_id)
+        : undefined
+      const owner = !route.supplier_id
+        ? "no linked supplier"
+        : supplier
+          ? `${supplier.name}${supplier.status !== "active" ? ` (${supplier.status})` : ""}`
+          : "deleted supplier"
+      return `"${route.name}" (${owner})`
+    })
+
     return NextResponse.json(
       {
-        error:
-          "Cannot delete this location because it is used by one or more supplier routes.",
+        error: `Cannot delete this location because it is used by ${blockers.length === 1 ? "route" : "routes"} ${blockers.join(", ")}.`,
       },
       { status: 409 },
     )

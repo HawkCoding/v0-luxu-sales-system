@@ -175,6 +175,39 @@ describe("PUT /api/jobs/[id]/transport-requests", () => {
     expect(res.status).toBe(400)
   })
 
+  it("threads packageLegId through to the replace RPC, normalizing omitted to null", async () => {
+    const supabase = buildSupabase()
+    authMocks.requireRole.mockResolvedValue({
+      ok: true,
+      value: {
+        supabase,
+        user: { id: "u1", email: "u@example.com" },
+        profile: { clearanceLevel: "consultant", actorName: "Jane", name: "Jane", surname: "D", email: "u@example.com" },
+      },
+    })
+    const LEG_ID = "00000000-0000-4000-8000-0000000000a1"
+    const req = new Request("http://localhost", {
+      method: "PUT",
+      body: JSON.stringify({
+        transportRequests: [
+          { serviceType: "transfer", packageLegId: LEG_ID, pickupPoint: "A", dropoffPoint: "B" },
+          { serviceType: "transfer", pickupPoint: "C", dropoffPoint: "D" },
+        ],
+      }),
+      headers: { "Content-Type": "application/json" },
+    })
+    const res = await PUT(req, { params })
+    expect(res.status).toBe(200)
+    expect(supabase.replaceTransportRequests).toHaveBeenCalledWith({
+      p_booking_id: BOOKING_ID,
+      p_transport_requests: [
+        expect.objectContaining({ package_leg_id: LEG_ID }),
+        expect.objectContaining({ package_leg_id: null }),
+      ],
+      p_rental_details: [],
+    })
+  })
+
   it("saves vehicle rental details for rental requests", async () => {
     const supabase = buildSupabase()
     authMocks.requireRole.mockResolvedValue({

@@ -4,6 +4,7 @@ import { createPackageSchema } from "./schemas"
 import {
   hasPackageWriteAccess,
   loadPackageDetail,
+  loadSupplierKinds,
   normalizePackageChildren,
   resolveUniquePackageSlug,
 } from "./[slug]/helpers"
@@ -138,9 +139,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Failed to create package" }, { status: 500 })
   }
 
+  const supplierKinds = await loadSupplierKinds(
+    supabase,
+    Array.from(new Set(parsed.legs.map((leg) => leg.supplierId))),
+  )
+
   let children
   try {
-    children = normalizePackageChildren(pkg.id, parsed)
+    children = normalizePackageChildren(pkg.id, parsed, supplierKinds)
   } catch (error) {
     await supabase.from("packages").delete().eq("id", pkg.id)
     return NextResponse.json(

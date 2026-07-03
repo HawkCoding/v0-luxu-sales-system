@@ -31,6 +31,11 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { PackageLegSelector, type SelectablePackageLeg } from "@/components/package-leg-selector"
+import {
+  getDestinationLocationIds,
+  getDestinationNames,
+  supplierMatchesDestination,
+} from "@/lib/packages/location-filter"
 import { parseStaleVersionConflictPayload } from "@/lib/supplier-save-guard"
 import { useActiveSuppliers, useLocations } from "@/lib/use-data"
 import type { PackageDetail, Supplier, SupplierDetail } from "@/lib/types"
@@ -90,8 +95,15 @@ export function PackageDetailView({ packageDetail }: PackageDetailViewProps) {
   const [addLegKind, setAddLegKind] = useState<SupplierKind>("train_operator")
   const [addLegSupplierId, setAddLegSupplierId] = useState("")
   const [isAddingLeg, setIsAddingLeg] = useState(false)
+  const [showAllSuppliers, setShowAllSuppliers] = useState(false)
 
-  const filteredAddSuppliers = allSuppliers.filter((s) => s.kind === addLegKind)
+  const destinationLocationIds = getDestinationLocationIds(legs)
+  const destinationNames = getDestinationNames(destinationLocationIds, locations)
+  const scopeByDestination =
+    addLegKind !== "train_operator" && destinationLocationIds.length > 0 && !showAllSuppliers
+  const filteredAddSuppliers = allSuppliers
+    .filter((s) => s.kind === addLegKind)
+    .filter((s) => !scopeByDestination || supplierMatchesDestination(s, destinationLocationIds, locations))
   const selectedAddSupplier = allSuppliers.find((s) => s.id === addLegSupplierId)
 
   const supplierKinds = useMemo(
@@ -517,6 +529,24 @@ export function PackageDetailView({ packageDetail }: PackageDetailViewProps) {
                 {isAddingLeg ? "Adding..." : "Add leg"}
               </Button>
             </div>
+            {addLegKind !== "train_operator" && destinationLocationIds.length > 0 ? (
+              <p className="mt-3 text-xs text-muted-foreground">
+                {scopeByDestination
+                  ? `Showing ${SUPPLIER_KIND_LABELS[addLegKind].toLowerCase()} in ${
+                      destinationNames.length > 0
+                        ? destinationNames.join(", ")
+                        : "the route destination"
+                    }.`
+                  : `Showing all ${SUPPLIER_KIND_LABELS[addLegKind].toLowerCase()}.`}{" "}
+                <button
+                  type="button"
+                  className="underline underline-offset-2 hover:text-foreground"
+                  onClick={() => setShowAllSuppliers((current) => !current)}
+                >
+                  {scopeByDestination ? "Show all" : `Show only ${destinationNames.join(", ") || "destination"}`}
+                </button>
+              </p>
+            ) : null}
           </CardContent>
         </Card>
       </section>

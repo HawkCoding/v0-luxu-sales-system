@@ -17,7 +17,7 @@ import {
   type SupplierDraftSaveInput,
   type SupplierSaveInput,
 } from "../schemas"
-import { isTransportSupplier } from "@/lib/types"
+import { getSupplierVocabulary, isTransportSupplier } from "@/lib/types"
 import { buildRouteName } from "@/lib/routes/route-name"
 import { areRateCardDateRangesOverlapping, checkRateCardOverlaps } from "@/lib/rate-cards/overlap"
 
@@ -349,15 +349,20 @@ export async function PATCH(
   const allowedBedroomLayoutIds = new Set(normalizedBedroomLayouts.map((row) => row.id))
   const allowedBathroomTypeIds = new Set(normalizedBathroomTypes.map((row) => row.id))
 
-  // Train routes use a locked, server-derived name (origin/destination + direction) so it stays
-  // constant regardless of what the client sends. Other supplier kinds keep their free-text name.
+  // Train routes auto-fill their name from origin/destination + direction only when the client
+  // sends an empty name; a user-provided name always wins. Other kinds keep their free-text name.
   const autoDeriveRouteName = parsed.kind === "train_operator"
   const locationNameById = new Map(existingDetail.locations.map((location) => [location.id, location.name]))
 
+  // Kinds whose route editor has no location fields (hotels, tour operators)
+  // must never persist location links — stray ids would invisibly block
+  // location deletion.
+  const routeUsesLocations = !isTransport && getSupplierVocabulary(parsed.kind).routeHasLocations
+
   const normalizedRoutes: NormalizedRoute[] = parsed.routes
     .map((route) => {
-      const originLocationId = isTransport ? null : normalizeOptionalUuid(route.originLocationId)
-      const destinationLocationId = isTransport ? null : normalizeOptionalUuid(route.destinationLocationId)
+      const originLocationId = routeUsesLocations ? normalizeOptionalUuid(route.originLocationId) : null
+      const destinationLocationId = routeUsesLocations ? normalizeOptionalUuid(route.destinationLocationId) : null
       const directionMode = route.directionMode ?? "one_way"
       const originName = originLocationId ? locationNameById.get(originLocationId) : undefined
       const destinationName = destinationLocationId ? locationNameById.get(destinationLocationId) : undefined
@@ -368,7 +373,7 @@ export async function PATCH(
       return {
         id: route.id ?? makeUuid(),
         supplier_id: supplierId,
-        name: derivedName ?? route.name.trim(),
+        name: route.name.trim() || (derivedName ?? ""),
         origin_location_id: originLocationId,
         destination_location_id: destinationLocationId,
         pickup_point: isTransport ? normalizeOptionalText(route.pickupPoint) : null,
@@ -383,7 +388,9 @@ export async function PATCH(
       isDraftSave
         ? isTransport
           ? route.name.length > 0 && Boolean(route.pickup_point) && Boolean(route.dropoff_point)
-          : route.name.length > 0 && Boolean(route.origin_location_id) && Boolean(route.destination_location_id)
+          : routeUsesLocations
+            ? route.name.length > 0 && Boolean(route.origin_location_id) && Boolean(route.destination_location_id)
+            : route.name.length > 0
         : true,
     )
 
@@ -626,6 +633,8 @@ export async function PATCH(
     single_supplement_pct: parsed.singleSupplementPct,
     infant_max_age: parsed.infantMaxAge ?? null,
     child_max_age: parsed.childMaxAge ?? null,
+    default_time_start: parsed.defaultTimeStart ?? null,
+    default_time_end: parsed.defaultTimeEnd ?? null,
     active: nextActive,
     status: nextStatus,
   }

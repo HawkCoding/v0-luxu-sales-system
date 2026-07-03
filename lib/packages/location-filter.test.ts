@@ -78,9 +78,9 @@ describe("supplierMatchesDestination", () => {
     )
   })
 
-  it("does not match a supplier with no location tag", () => {
+  it("matches a supplier with no location tag against any destination (unscoped, not scoped-to-nowhere)", () => {
     expect(supplierMatchesDestination(supplier({ locationId: null, locationAreaId: null }), ["ct"], locations)).toBe(
-      false,
+      true,
     )
   })
 

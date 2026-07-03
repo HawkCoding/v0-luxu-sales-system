@@ -50,26 +50,18 @@ function makeClientId(): string {
   return crypto.randomUUID()
 }
 
-function createRoute(
-  supplierId: string,
-  locations: Location[],
-  hasLocations: boolean,
-  isTransport: boolean,
-): EditableSupplierRoute {
-  const origin = hasLocations ? locations[0]?.id ?? "" : ""
-  const destination = hasLocations ? locations[1]?.id ?? origin : ""
-
+function createRoute(supplierId: string): EditableSupplierRoute {
+  // Never pre-select locations — an unnoticed default silently links the
+  // route to whichever locations sort first alphabetically.
   return {
     id: makeClientId(),
     supplierId,
     name: "",
-    originLocationId: isTransport ? null : origin,
-    destinationLocationId: isTransport ? null : destination,
+    originLocationId: null,
+    destinationLocationId: null,
     pickupPoint: "",
     dropoffPoint: "",
     vehicleRentalDetails: null,
-    commissionType: null,
-    commissionValue: null,
     active: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -206,7 +198,7 @@ export function PackageLegEditor({
               onClick={() =>
                 onChange({
                   ...leg,
-                    routes: [...leg.routes, createRoute(leg.supplierId, locations, showLocations, isTransport)],
+                    routes: [...leg.routes, createRoute(leg.supplierId)],
                 })
               }
             >

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { mapSupplier } from "@/lib/suppliers"
+import { getHotelDefaultTimes } from "@/lib/suppliers/hotel-default-times"
 import { allowedRoles, requireAuthenticatedUser, resolveUniqueSupplierSlug } from "./helpers"
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -148,6 +149,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Failed to create supplier" }, { status: 500 })
   }
 
+  const hotelDefaultTimes =
+    parsed.kind === "hotel_property" ? await getHotelDefaultTimes(supabase) : null
+
   const { data: supplier, error } = await supabase
     .from("suppliers")
     .insert({
@@ -161,6 +165,8 @@ export async function POST(req: Request) {
       location_detail: parsed.locationDetail?.trim() || null,
       notes: parsed.notes.trim() || null,
       single_supplement_pct: 0,
+      default_time_start: hotelDefaultTimes?.checkIn ?? null,
+      default_time_end: hotelDefaultTimes?.checkOut ?? null,
       active: false,
     })
     .select("*")
