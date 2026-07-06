@@ -53,7 +53,7 @@ describe("generateVoucherHTML", () => {
       specialRequests: "",
     })
 
-    expect(html).not.toContain("Special Requests:")
+    expect(html).not.toContain("Special Requests")
     expect(html).toContain("LX-2026-001")
   })
 })

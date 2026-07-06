@@ -1,5 +1,6 @@
 import type { Enquiry, ConsultantAbbreviation, VoucherTemplate } from "./types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "./types"
+import { tintWithWhite } from "./voucher/pdf/design-tokens"
 
 export type VoucherServiceType =
   | "train"
@@ -99,9 +100,11 @@ function escapeHtml(value: string | number | null | undefined): string {
   })
 }
 
-function sanitizeFontFamily(value: string): string {
-  const trimmed = value.trim()
-  return /^[\w\s'",-]+$/.test(trimmed) ? trimmed : VOUCHER_TEMPLATE_DEFAULTS.font_family
+// Mirrors resolveVoucherFontPairing in lib/voucher/pdf/fonts.ts, which is
+// server-only; the template option picks the body leaning of the fixed pairing.
+function previewBodyFontStack(fontFamily: string): string {
+  const sansBody = fontFamily === "Arial, sans-serif" || fontFamily === "'Montserrat', Arial, sans-serif"
+  return sansBody ? "'Montserrat', Arial, sans-serif" : "'Playfair Display', Georgia, serif"
 }
 
 function buildHeaderHtml(t: VoucherTemplate): string {
@@ -155,7 +158,7 @@ function buildGuestInfoSection(data: VoucherData): string {
   const specialRequestsHtml = data.specialRequests
     ? `
 
-      <div class="info-label">Special Requests:</div>
+      <div class="info-label">Special Requests</div>
       <div class="info-value">${escapeHtml(data.specialRequests)}</div>`
     : ""
 
@@ -163,19 +166,19 @@ function buildGuestInfoSection(data: VoucherData): string {
   <div class="section">
     <div class="section-title">Guest Information</div>
     <div class="info-grid">
-      <div class="info-label">Guest Names:</div>
+      <div class="info-label">Guest Names</div>
       <div class="info-value">${escapeHtml(data.guestNames)}</div>
 
-      <div class="info-label">Number of Guests:</div>
+      <div class="info-label">Number of Guests</div>
       <div class="info-value">${escapeHtml(data.numberOfGuests)} (${escapeHtml(data.enquiry.noOfAdults)} adults${data.enquiry.noOfChildren ? `, ${escapeHtml(data.enquiry.noOfChildren)} children` : ""})</div>
 
-      <div class="info-label">Contact Email:</div>
+      <div class="info-label">Contact Email</div>
       <div class="info-value">${escapeHtml(data.customerEmail)}</div>
 
-      <div class="info-label">Contact Phone:</div>
+      <div class="info-label">Contact Phone</div>
       <div class="info-value">${escapeHtml(data.customerPhone)}</div>
 
-      <div class="info-label">Consultant:</div>
+      <div class="info-label">Consultant</div>
       <div class="info-value">${escapeHtml(data.consultant)} – ${escapeHtml(data.consultantName)}</div>
 ${specialRequestsHtml}
     </div>
@@ -185,46 +188,46 @@ ${specialRequestsHtml}
 function buildServiceBlockBodyRows(block: VoucherServiceBlock): string {
   const rows: Array<[string, string | number | null | undefined]> = []
   const d = block.serviceData
-  rows.push(["Your Reference:", block.supplierReference ?? "—"])
+  rows.push(["Your Reference", block.supplierReference ?? "—"])
 
   if (block.serviceType === "train") {
-    rows.push(["Route:", d.route ?? "—"])
-    rows.push(["Departure Date:", d.departureDate ?? "—"])
-    rows.push(["Arrival Date:", d.arrivalDate ?? "TBC"])
-    rows.push(["Suite Type:", d.suiteType ?? "—"])
-    if (d.numberOfSuites != null) rows.push(["Number of Suites:", d.numberOfSuites])
-    if (d.mealPlan) rows.push(["Meal Basis:", d.mealPlan])
+    rows.push(["Route", d.route ?? "—"])
+    rows.push(["Departure Date", d.departureDate ?? "—"])
+    rows.push(["Arrival Date", d.arrivalDate ?? "TBC"])
+    rows.push(["Suite Type", d.suiteType ?? "—"])
+    if (d.numberOfSuites != null) rows.push(["Number of Suites", d.numberOfSuites])
+    if (d.mealPlan) rows.push(["Meal Basis", d.mealPlan])
   } else if (block.serviceType === "hotel") {
-    if (d.roomType) rows.push(["Room Type:", d.roomType])
-    if (d.nights != null) rows.push(["Nights:", d.nights])
-    if (d.mealPlan) rows.push(["Meal Plan:", d.mealPlan])
-    if (d.departureDate) rows.push(["Check-In:", d.departureDate])
-    if (d.arrivalDate) rows.push(["Check-Out:", d.arrivalDate])
+    if (d.roomType) rows.push(["Room Type", d.roomType])
+    if (d.nights != null) rows.push(["Nights", d.nights])
+    if (d.mealPlan) rows.push(["Meal Plan", d.mealPlan])
+    if (d.departureDate) rows.push(["Check-In", d.departureDate])
+    if (d.arrivalDate) rows.push(["Check-Out", d.arrivalDate])
   } else if (block.serviceType === "transfer") {
-    if (d.vehicleType) rows.push(["Vehicle:", d.vehicleType])
-    if (d.pickup) rows.push(["Pickup:", d.pickup])
-    if (d.dropoff) rows.push(["Drop-off:", d.dropoff])
-    if (d.departureDate) rows.push(["Date:", d.departureDate])
+    if (d.vehicleType) rows.push(["Vehicle", d.vehicleType])
+    if (d.pickup) rows.push(["Pickup", d.pickup])
+    if (d.dropoff) rows.push(["Drop-off", d.dropoff])
+    if (d.departureDate) rows.push(["Date", d.departureDate])
   } else if (block.serviceType === "tour") {
-    if (d.itinerary) rows.push(["Itinerary:", d.itinerary])
-    if (d.departureDate) rows.push(["Start Date:", d.departureDate])
-    if (d.arrivalDate) rows.push(["End Date:", d.arrivalDate])
+    if (d.itinerary) rows.push(["Itinerary", d.itinerary])
+    if (d.departureDate) rows.push(["Start Date", d.departureDate])
+    if (d.arrivalDate) rows.push(["End Date", d.arrivalDate])
   } else if (block.serviceType === "airline") {
-    if (d.route) rows.push(["Route:", d.route])
-    if (d.cabin) rows.push(["Cabin:", d.cabin])
-    if (d.flightNumber) rows.push(["Flight:", d.flightNumber])
-    if (d.departureDate) rows.push(["Departure:", d.departureDate])
-    if (d.arrivalDate) rows.push(["Arrival:", d.arrivalDate])
+    if (d.route) rows.push(["Route", d.route])
+    if (d.cabin) rows.push(["Cabin", d.cabin])
+    if (d.flightNumber) rows.push(["Flight", d.flightNumber])
+    if (d.departureDate) rows.push(["Departure", d.departureDate])
+    if (d.arrivalDate) rows.push(["Arrival", d.arrivalDate])
   }
 
-  if (d.notes) rows.push(["Notes:", d.notes])
+  if (d.notes) rows.push(["Notes", d.notes])
 
   const contactParts: string[] = []
   if (block.contactDetails.phone) contactParts.push(`Phone: ${block.contactDetails.phone}`)
   if (block.contactDetails.email) contactParts.push(`Email: ${block.contactDetails.email}`)
   if (block.contactDetails.location) contactParts.push(`Location: ${block.contactDetails.location}`)
   if (contactParts.length > 0) {
-    rows.push(["Contact:", contactParts.join(" • ")])
+    rows.push(["Contact", contactParts.join(" • ")])
   }
 
   return rows
@@ -267,25 +270,25 @@ function buildServiceProviderSection(data: VoucherData): string {
       <div class="provider-name">${escapeHtml(data.supplierName)}</div>
 ${descriptionHtml}
       <div class="info-grid">
-        <div class="info-label">Your Reference:</div>
+        <div class="info-label">Your Reference</div>
         <div class="info-value">${escapeHtml(data.voucherNumber)}</div>
 
-        <div class="info-label">Route:</div>
+        <div class="info-label">Route</div>
         <div class="info-value">${escapeHtml(data.route)}</div>
 
-        <div class="info-label">Departure Date:</div>
+        <div class="info-label">Departure Date</div>
         <div class="info-value">${escapeHtml(data.departure)}</div>
 
-        <div class="info-label">Arrival Date:</div>
+        <div class="info-label">Arrival Date</div>
         <div class="info-value">${escapeHtml(data.arrival || "TBC")}</div>
 
-        <div class="info-label">Suite Type:</div>
+        <div class="info-label">Suite Type</div>
         <div class="info-value">${escapeHtml(data.suiteType)}</div>
 
-        <div class="info-label">Number of Suites:</div>
+        <div class="info-label">Number of Suites</div>
         <div class="info-value">${escapeHtml(data.enquiry.noOfSuites)}</div>
 
-        <div class="info-label">Meal Basis:</div>
+        <div class="info-label">Meal Basis</div>
         <div class="info-value">Full Board (All meals included)</div>
       </div>
     </div>
@@ -293,10 +296,12 @@ ${descriptionHtml}
 }
 
 function buildFooterSection(t: VoucherTemplate): string {
-  const parts = [t.footer_company, t.footer_phone, t.footer_email].filter(Boolean)
+  const contact = [t.footer_phone, t.footer_email].filter(Boolean)
   return `
   <div class="section footer-section">
-    <div class="footer-contact">${parts.map((part) => escapeHtml(part)).join(" &bull; ")}</div>
+    <div class="footer-rule"></div>
+${t.footer_company ? `    <div class="footer-company">${escapeHtml(t.footer_company)}</div>` : ""}
+${contact.length > 0 ? `    <div class="footer-contact">${contact.map((part) => escapeHtml(part)).join(" &middot; ")}</div>` : ""}
   </div>`
 }
 
@@ -319,110 +324,205 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
     })
     .join("\n")
 
+  // Preview mirrors lib/voucher/pdf/styles.ts pt-for-pt; the PDF is the
+  // source of truth — update both when the design changes.
+  const rule = tintWithWhite(t.accent_colour, 0.45)
+  const ruleFaint = tintWithWhite(t.section_bg, 0.3)
+  const frameOuter = tintWithWhite(t.accent_colour, 0.9)
+  const frameInner = tintWithWhite(t.accent_colour, 0.35)
+
   return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <title>Travel Voucher – ${escapeHtml(data.voucherNumber)}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
   <style>
     @page { size: A4; margin: 20mm; }
     body {
-      font-family: ${sanitizeFontFamily(t.font_family)};
-      font-size: 11pt;
-      line-height: 1.4;
-      color: #333;
+      font-family: ${previewBodyFontStack(t.font_family)};
+      font-size: 10pt;
+      line-height: 1.5;
+      color: #2B2B2B;
       margin: 0;
-      padding: 0;
+      padding: 52pt 60pt 72pt;
+      position: relative;
     }
+    .frame-outer, .frame-inner { position: absolute; pointer-events: none; }
+    .frame-outer { inset: 20pt; border: 0.75pt solid ${frameOuter}; }
+    .frame-inner { inset: 24pt; border: 0.5pt solid ${frameInner}; }
 
     /* Header variants */
-    .header { margin-bottom: 20px; }
-    .header-split { display: flex; align-items: stretch; border-bottom: 2px solid ${t.accent_colour}; }
+    .header { margin-bottom: 24pt; }
+    .header-split { display: flex; align-items: stretch; border-bottom: 0.5pt solid ${rule}; padding-bottom: 12pt; }
     .header-logo-side { width: 120px; min-width: 120px; display: flex; align-items: center; justify-content: center; padding: 8px; background: #fff; }
     .header-logo { max-width: 100px; max-height: 80px; object-fit: contain; }
     .header-banner-side { flex: 1; position: relative; overflow: hidden; }
     .header-banner { width: 100%; height: 100px; object-fit: cover; display: block; }
-    .header-text-overlay { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.45); padding: 6px 12px; }
-    .header-text-overlay .product-line { color: #fff; font-size: 10pt; font-weight: bold; letter-spacing: 1px; margin: 0; }
-    .header-text-overlay .header-subtitle { color: rgba(255,255,255,0.85); font-size: 8pt; font-style: italic; margin: 0; }
+    .header-text-overlay { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.35); padding: 8px 16px; }
+    .header-text-overlay .product-line { color: #fff; margin: 0; }
+    .header-text-overlay .header-subtitle { color: rgba(255,255,255,0.85); margin: 2pt 0 0; }
 
-    .header-logo-only { text-align: center; padding-bottom: 10px; border-bottom: 2px solid ${t.accent_colour}; }
+    .header-logo-only { text-align: center; padding-bottom: 12pt; border-bottom: 0.5pt solid ${rule}; }
     .header-logo-center { max-height: 70px; object-fit: contain; margin-bottom: 6px; }
 
+    .header-banner-only { border-bottom: 0.5pt solid ${rule}; padding-bottom: 8pt; }
     .header-banner-only .header-banner-full { width: 100%; max-height: 110px; object-fit: cover; display: block; }
-    .header-text-below { text-align: center; padding: 6px 0; border-bottom: 2px solid ${t.accent_colour}; }
+    .header-text-below { text-align: center; padding: 8pt 0; }
 
-    .header-text-only { text-align: center; padding-bottom: 10px; border-bottom: 2px solid ${t.accent_colour}; }
+    .header-text-only { text-align: center; padding-bottom: 12pt; border-bottom: 0.5pt solid ${rule}; }
 
-    .product-line { font-size: 9pt; font-weight: bold; color: ${t.accent_colour}; letter-spacing: 1px; margin-top: 5px; }
-    .header-subtitle { font-size: 9pt; color: #666; font-style: italic; margin-top: 3px; }
+    .product-line {
+      font-family: 'Montserrat', Arial, sans-serif;
+      font-size: 8.5pt;
+      font-weight: 600;
+      color: ${t.accent_colour};
+      letter-spacing: 2pt;
+      text-transform: uppercase;
+      margin-top: 8pt;
+    }
+    .header-subtitle {
+      font-family: 'Playfair Display', Georgia, serif;
+      font-size: 9pt;
+      color: #6B6B6B;
+      font-style: italic;
+      margin-top: 4pt;
+    }
 
-    /* Voucher number banner */
+    /* Masthead row */
     .voucher-number-row {
       display: flex;
       justify-content: space-between;
-      align-items: center;
-      margin: 16px 0 8px;
+      align-items: flex-end;
+      margin: 24pt 0 12pt;
     }
-    h1 { font-size: 18pt; color: ${t.accent_colour}; margin: 0; }
-    .voucher-badge {
-      border: 2px solid ${t.accent_colour};
-      padding: 4px 12px;
-      font-size: 11pt;
-      font-weight: bold;
+    h1 {
+      font-family: 'Playfair Display', Georgia, serif;
+      font-size: 22pt;
+      font-weight: 700;
+      letter-spacing: 3pt;
+      text-transform: uppercase;
       color: ${t.accent_colour};
-      border-radius: 3px;
+      margin: 0;
+    }
+    .voucher-stub {
+      border: 0.75pt solid ${t.accent_colour};
+      border-left-style: dashed;
+      padding: 6pt 12pt;
+      text-align: center;
+    }
+    .voucher-stub-label {
+      font-family: 'Montserrat', Arial, sans-serif;
+      font-size: 7.5pt;
+      font-weight: 600;
+      letter-spacing: 1.5pt;
+      text-transform: uppercase;
+      color: #6B6B6B;
+    }
+    .voucher-stub-number {
+      font-family: 'Playfair Display', Georgia, serif;
+      font-size: 14pt;
+      font-weight: 700;
+      color: ${t.accent_colour};
+      margin-top: 2pt;
     }
 
     .guidance {
-      background: #f8f9fa;
-      border-left: 3px solid ${t.section_bg};
-      padding: 10px 15px;
-      margin: 14px 0;
+      font-family: 'Playfair Display', Georgia, serif;
       font-size: 9pt;
-      color: #555;
       font-style: italic;
+      line-height: 1.6;
+      color: #6B6B6B;
+      margin: 8pt 0 24pt;
+      padding-right: 48pt;
     }
 
-    .section { margin-bottom: 20px; }
+    .section { margin-bottom: 24pt; }
     .section-title {
-      font-size: 11pt;
-      font-weight: bold;
-      color: #fff;
-      background: ${t.section_bg};
-      padding: 5px 10px;
-      margin-bottom: 8px;
-      border-radius: 2px;
+      font-family: 'Montserrat', Arial, sans-serif;
+      font-size: 8.5pt;
+      font-weight: 600;
+      letter-spacing: 2pt;
+      text-transform: uppercase;
+      color: ${t.section_bg};
+      border-bottom: 0.5pt solid ${ruleFaint};
+      padding-bottom: 6pt;
+      margin-bottom: 12pt;
     }
     .info-grid {
       display: grid;
-      grid-template-columns: 150px 1fr;
-      gap: 6px 12px;
+      grid-template-columns: 140pt 1fr;
+      gap: 8pt 12pt;
     }
-    .info-label { font-weight: bold; color: #555; font-size: 10pt; }
-    .info-value { color: #333; font-size: 10pt; }
+    .info-label {
+      font-family: 'Montserrat', Arial, sans-serif;
+      font-size: 8.5pt;
+      font-weight: 600;
+      letter-spacing: 1pt;
+      text-transform: uppercase;
+      color: #6B6B6B;
+      padding-top: 1pt;
+    }
+    .info-value { color: #2B2B2B; font-size: 10pt; }
 
     .provider-box {
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      padding: 14px;
-      background: #fafafa;
+      border: 0.75pt solid ${ruleFaint};
+      padding: 16pt;
     }
-    .provider-name { font-size: 13pt; font-weight: bold; color: ${t.accent_colour}; margin-bottom: 6px; }
-    .provider-description { font-size: 10pt; color: #555; font-style: italic; margin-bottom: 10px; }
+    .provider-name {
+      font-family: 'Playfair Display', Georgia, serif;
+      font-size: 13pt;
+      font-weight: 700;
+      color: ${t.accent_colour};
+      margin-bottom: 12pt;
+    }
+    .provider-description {
+      font-family: 'Playfair Display', Georgia, serif;
+      font-size: 9.5pt;
+      color: #6B6B6B;
+      font-style: italic;
+      margin-bottom: 12pt;
+    }
 
-    .footer-section { margin-top: 30px; padding-top: 14px; border-top: 1px solid #ddd; }
-    .footer-contact { text-align: center; font-size: 9pt; color: #666; }
+    .footer-section { margin-top: 8pt; text-align: center; }
+    .footer-rule { width: 64pt; border-top: 0.5pt solid ${rule}; margin: 0 auto 12pt; }
+    .footer-company {
+      font-family: 'Montserrat', Arial, sans-serif;
+      font-size: 8.5pt;
+      font-weight: 600;
+      letter-spacing: 1.5pt;
+      text-transform: uppercase;
+      color: ${t.accent_colour};
+    }
+    .footer-contact {
+      font-family: 'Montserrat', Arial, sans-serif;
+      font-size: 7.5pt;
+      color: #6B6B6B;
+      margin-top: 4pt;
+    }
 
-    .page-number { text-align: center; font-size: 8pt; color: #999; margin-top: 20px; }
+    .page-number {
+      font-family: 'Montserrat', Arial, sans-serif;
+      text-align: center;
+      font-size: 7.5pt;
+      color: #9A9A9A;
+      margin-top: 20pt;
+    }
   </style>
 </head>
 <body>
+  <div class="frame-outer"></div>
+  <div class="frame-inner"></div>
 ${buildHeaderHtml(t)}
 
   <div class="voucher-number-row">
     <h1>TRAVEL VOUCHERS</h1>
-    <div class="voucher-badge">Voucher no. ${escapeHtml(data.voucherNumber)}</div>
+    <div class="voucher-stub">
+      <div class="voucher-stub-label">Voucher no.</div>
+      <div class="voucher-stub-number">${escapeHtml(data.voucherNumber)}</div>
+    </div>
   </div>
 
 ${t.guidance_text ? `<div class="guidance">${escapeHtml(t.guidance_text)}</div>` : ""}

@@ -25,6 +25,7 @@ import {
 import type { Template } from "@/lib/types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
 import { VoucherTemplateEditor } from "@/components/voucher-template-editor"
+import { DocumentTextSettingsEditor } from "@/components/document-text-settings-editor"
 
 const EMAIL_PLACEHOLDERS = [
   { token: "{{jobNumber}}",     description: "Job/booking reference number (e.g. BT-2026-0001)" },
@@ -162,6 +163,7 @@ export default function TemplatesPage() {
         <TabsList>
           <TabsTrigger value="email">Email Templates</TabsTrigger>
           <TabsTrigger value="voucher">Voucher Template</TabsTrigger>
+          <TabsTrigger value="documents">Documents</TabsTrigger>
         </TabsList>
 
         <TabsContent value="email" className="space-y-3">
@@ -223,6 +225,20 @@ export default function TemplatesPage() {
                   canEdit={can("edit:templates")}
                 />
               )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="documents">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg">Document Wording</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Customise the wording used in quote PDFs, invoice emails, and quote emails.
+              </p>
+            </CardHeader>
+            <CardContent className="pb-6">
+              <DocumentTextSettingsEditor canEdit={can("edit:templates")} />
             </CardContent>
           </Card>
         </TabsContent>

@@ -5,6 +5,7 @@ import { formatDisplayDate } from "@/lib/date-format"
 import { calculateInvoiceBalance } from "@/lib/invoices/calculate-balance"
 import { renderInvoiceEmail } from "@/lib/invoices/render-invoice-email"
 import { logError } from "@/lib/error-log"
+import { getDocumentTextSettings } from "@/lib/settings-access"
 
 export const runtime = "nodejs"
 
@@ -143,6 +144,7 @@ export async function POST(req: Request) {
 
   const customer = Array.isArray(booking.customer) ? booking.customer[0] : booking.customer
   const customerName = [customer?.first_name, customer?.last_name].filter(Boolean).join(" ").trim()
+  const documentText = await getDocumentTextSettings(supabase)
   const bodyHtml = await renderInvoiceEmail({
     customerName,
     invoiceNumber: invoice.invoice_number,
@@ -150,6 +152,8 @@ export async function POST(req: Request) {
     invoiceKind: "final",
     amount: formatMoney(invoice.amount, invoice.currency),
     dueDate: formatDisplayDate(invoice.due_date),
+    introText: documentText.invoice_email_intro_final,
+    closingText: documentText.invoice_email_closing,
     lines: [
       { label: "Quote total", value: formatMoney(balance.quoteTotal, invoice.currency) },
       { label: "Payments received", value: formatMoney(balance.totalPaid, invoice.currency) },

@@ -431,7 +431,7 @@ export function isTransportSupplier(kind: SupplierKind): boolean {
 }
 
 export function isOptionalPackageLegKind(kind: SupplierKind): boolean {
-  return kind === "hotel_property" || kind === "transfers" || kind === "vehicle_rental"
+  return kind !== "train_operator"
 }
 
 export interface Location {

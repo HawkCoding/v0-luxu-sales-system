@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { renderQuoteEmail } from "@/lib/quotes/render-quote-email"
 import { createSessionClient } from "@/lib/supabase/server"
+import { getDocumentTextSettings } from "@/lib/settings-access"
 
 const previewSchema = z.object({
   introText: z.string().trim().min(1).optional(),
@@ -63,14 +64,14 @@ export async function POST(req: Request, { params }: RouteParams) {
   const customer = Array.isArray(booking?.customer) ? booking?.customer[0] : booking?.customer
   const customerName = [customer?.first_name, customer?.last_name].filter(Boolean).join(" ").trim()
   const quoteNumber = quote.quote_number ?? `${booking?.booking_number ?? "QUOTE"}-Q1`
-  const introText =
-    parsed.data.introText ??
-    "Thank you for your enquiry. We are pleased to share your Luxus Travel & Tours quote for review."
+  const documentText = await getDocumentTextSettings(supabase)
+  const introText = parsed.data.introText ?? documentText.quote_email_default_intro
   const subject = parsed.data.subject ?? `Quote ${quoteNumber} - Luxus Travel & Tours`
 
   const html = await renderQuoteEmail({
     customerName,
     introText,
+    acceptText: documentText.quote_email_accept_text,
     quote: {
       quoteNumber,
       quoteDate: quote.created_at?.slice(0, 10) ?? todayDateString(),

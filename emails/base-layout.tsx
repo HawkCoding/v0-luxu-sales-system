@@ -13,9 +13,10 @@ import type { ReactNode } from "react"
 interface BaseLayoutProps {
   preview: string
   children: ReactNode
+  footerTagline?: string
 }
 
-export function BaseLayout({ preview, children }: BaseLayoutProps) {
+export function BaseLayout({ preview, children, footerTagline }: BaseLayoutProps) {
   return (
     <Html>
       <Head />
@@ -33,7 +34,7 @@ export function BaseLayout({ preview, children }: BaseLayoutProps) {
           <Section style={content}>{children}</Section>
           <Section style={footer}>
             <Text style={footerText}>Luxus Travel & Tours</Text>
-            <Text style={footerText}>Luxury train journeys, handled with care.</Text>
+            <Text style={footerText}>{footerTagline?.trim() || "Luxury train journeys, handled with care."}</Text>
           </Section>
         </Container>
       </Body>

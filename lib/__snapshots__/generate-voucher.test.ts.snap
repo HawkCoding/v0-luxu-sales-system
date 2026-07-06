@@ -6,100 +6,185 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
 <head>
   <meta charset="utf-8">
   <title>Travel Voucher – LX-2026-001</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
   <style>
     @page { size: A4; margin: 20mm; }
     body {
-      font-family: Georgia, serif;
-      font-size: 11pt;
-      line-height: 1.4;
-      color: #333;
+      font-family: 'Playfair Display', Georgia, serif;
+      font-size: 10pt;
+      line-height: 1.5;
+      color: #2B2B2B;
       margin: 0;
-      padding: 0;
+      padding: 52pt 60pt 72pt;
+      position: relative;
     }
+    .frame-outer, .frame-inner { position: absolute; pointer-events: none; }
+    .frame-outer { inset: 20pt; border: 0.75pt solid #233f4e; }
+    .frame-inner { inset: 24pt; border: 0.5pt solid #aab4ba; }
 
     /* Header variants */
-    .header { margin-bottom: 20px; }
-    .header-split { display: flex; align-items: stretch; border-bottom: 2px solid #0B2A3A; }
+    .header { margin-bottom: 24pt; }
+    .header-split { display: flex; align-items: stretch; border-bottom: 0.5pt solid #919fa6; padding-bottom: 12pt; }
     .header-logo-side { width: 120px; min-width: 120px; display: flex; align-items: center; justify-content: center; padding: 8px; background: #fff; }
     .header-logo { max-width: 100px; max-height: 80px; object-fit: contain; }
     .header-banner-side { flex: 1; position: relative; overflow: hidden; }
     .header-banner { width: 100%; height: 100px; object-fit: cover; display: block; }
-    .header-text-overlay { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.45); padding: 6px 12px; }
-    .header-text-overlay .product-line { color: #fff; font-size: 10pt; font-weight: bold; letter-spacing: 1px; margin: 0; }
-    .header-text-overlay .header-subtitle { color: rgba(255,255,255,0.85); font-size: 8pt; font-style: italic; margin: 0; }
+    .header-text-overlay { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.35); padding: 8px 16px; }
+    .header-text-overlay .product-line { color: #fff; margin: 0; }
+    .header-text-overlay .header-subtitle { color: rgba(255,255,255,0.85); margin: 2pt 0 0; }
 
-    .header-logo-only { text-align: center; padding-bottom: 10px; border-bottom: 2px solid #0B2A3A; }
+    .header-logo-only { text-align: center; padding-bottom: 12pt; border-bottom: 0.5pt solid #919fa6; }
     .header-logo-center { max-height: 70px; object-fit: contain; margin-bottom: 6px; }
 
+    .header-banner-only { border-bottom: 0.5pt solid #919fa6; padding-bottom: 8pt; }
     .header-banner-only .header-banner-full { width: 100%; max-height: 110px; object-fit: cover; display: block; }
-    .header-text-below { text-align: center; padding: 6px 0; border-bottom: 2px solid #0B2A3A; }
+    .header-text-below { text-align: center; padding: 8pt 0; }
 
-    .header-text-only { text-align: center; padding-bottom: 10px; border-bottom: 2px solid #0B2A3A; }
+    .header-text-only { text-align: center; padding-bottom: 12pt; border-bottom: 0.5pt solid #919fa6; }
 
-    .product-line { font-size: 9pt; font-weight: bold; color: #0B2A3A; letter-spacing: 1px; margin-top: 5px; }
-    .header-subtitle { font-size: 9pt; color: #666; font-style: italic; margin-top: 3px; }
+    .product-line {
+      font-family: 'Montserrat', Arial, sans-serif;
+      font-size: 8.5pt;
+      font-weight: 600;
+      color: #0B2A3A;
+      letter-spacing: 2pt;
+      text-transform: uppercase;
+      margin-top: 8pt;
+    }
+    .header-subtitle {
+      font-family: 'Playfair Display', Georgia, serif;
+      font-size: 9pt;
+      color: #6B6B6B;
+      font-style: italic;
+      margin-top: 4pt;
+    }
 
-    /* Voucher number banner */
+    /* Masthead row */
     .voucher-number-row {
       display: flex;
       justify-content: space-between;
-      align-items: center;
-      margin: 16px 0 8px;
+      align-items: flex-end;
+      margin: 24pt 0 12pt;
     }
-    h1 { font-size: 18pt; color: #0B2A3A; margin: 0; }
-    .voucher-badge {
-      border: 2px solid #0B2A3A;
-      padding: 4px 12px;
-      font-size: 11pt;
-      font-weight: bold;
+    h1 {
+      font-family: 'Playfair Display', Georgia, serif;
+      font-size: 22pt;
+      font-weight: 700;
+      letter-spacing: 3pt;
+      text-transform: uppercase;
       color: #0B2A3A;
-      border-radius: 3px;
+      margin: 0;
+    }
+    .voucher-stub {
+      border: 0.75pt solid #0B2A3A;
+      border-left-style: dashed;
+      padding: 6pt 12pt;
+      text-align: center;
+    }
+    .voucher-stub-label {
+      font-family: 'Montserrat', Arial, sans-serif;
+      font-size: 7.5pt;
+      font-weight: 600;
+      letter-spacing: 1.5pt;
+      text-transform: uppercase;
+      color: #6B6B6B;
+    }
+    .voucher-stub-number {
+      font-family: 'Playfair Display', Georgia, serif;
+      font-size: 14pt;
+      font-weight: 700;
+      color: #0B2A3A;
+      margin-top: 2pt;
     }
 
     .guidance {
-      background: #f8f9fa;
-      border-left: 3px solid #1a3a4a;
-      padding: 10px 15px;
-      margin: 14px 0;
+      font-family: 'Playfair Display', Georgia, serif;
       font-size: 9pt;
-      color: #555;
       font-style: italic;
+      line-height: 1.6;
+      color: #6B6B6B;
+      margin: 8pt 0 24pt;
+      padding-right: 48pt;
     }
 
-    .section { margin-bottom: 20px; }
+    .section { margin-bottom: 24pt; }
     .section-title {
-      font-size: 11pt;
-      font-weight: bold;
-      color: #fff;
-      background: #1a3a4a;
-      padding: 5px 10px;
-      margin-bottom: 8px;
-      border-radius: 2px;
+      font-family: 'Montserrat', Arial, sans-serif;
+      font-size: 8.5pt;
+      font-weight: 600;
+      letter-spacing: 2pt;
+      text-transform: uppercase;
+      color: #1a3a4a;
+      border-bottom: 0.5pt solid #bac4c9;
+      padding-bottom: 6pt;
+      margin-bottom: 12pt;
     }
     .info-grid {
       display: grid;
-      grid-template-columns: 150px 1fr;
-      gap: 6px 12px;
+      grid-template-columns: 140pt 1fr;
+      gap: 8pt 12pt;
     }
-    .info-label { font-weight: bold; color: #555; font-size: 10pt; }
-    .info-value { color: #333; font-size: 10pt; }
+    .info-label {
+      font-family: 'Montserrat', Arial, sans-serif;
+      font-size: 8.5pt;
+      font-weight: 600;
+      letter-spacing: 1pt;
+      text-transform: uppercase;
+      color: #6B6B6B;
+      padding-top: 1pt;
+    }
+    .info-value { color: #2B2B2B; font-size: 10pt; }
 
     .provider-box {
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      padding: 14px;
-      background: #fafafa;
+      border: 0.75pt solid #bac4c9;
+      padding: 16pt;
     }
-    .provider-name { font-size: 13pt; font-weight: bold; color: #0B2A3A; margin-bottom: 6px; }
-    .provider-description { font-size: 10pt; color: #555; font-style: italic; margin-bottom: 10px; }
+    .provider-name {
+      font-family: 'Playfair Display', Georgia, serif;
+      font-size: 13pt;
+      font-weight: 700;
+      color: #0B2A3A;
+      margin-bottom: 12pt;
+    }
+    .provider-description {
+      font-family: 'Playfair Display', Georgia, serif;
+      font-size: 9.5pt;
+      color: #6B6B6B;
+      font-style: italic;
+      margin-bottom: 12pt;
+    }
 
-    .footer-section { margin-top: 30px; padding-top: 14px; border-top: 1px solid #ddd; }
-    .footer-contact { text-align: center; font-size: 9pt; color: #666; }
+    .footer-section { margin-top: 8pt; text-align: center; }
+    .footer-rule { width: 64pt; border-top: 0.5pt solid #919fa6; margin: 0 auto 12pt; }
+    .footer-company {
+      font-family: 'Montserrat', Arial, sans-serif;
+      font-size: 8.5pt;
+      font-weight: 600;
+      letter-spacing: 1.5pt;
+      text-transform: uppercase;
+      color: #0B2A3A;
+    }
+    .footer-contact {
+      font-family: 'Montserrat', Arial, sans-serif;
+      font-size: 7.5pt;
+      color: #6B6B6B;
+      margin-top: 4pt;
+    }
 
-    .page-number { text-align: center; font-size: 8pt; color: #999; margin-top: 20px; }
+    .page-number {
+      font-family: 'Montserrat', Arial, sans-serif;
+      text-align: center;
+      font-size: 7.5pt;
+      color: #9A9A9A;
+      margin-top: 20pt;
+    }
   </style>
 </head>
 <body>
+  <div class="frame-outer"></div>
+  <div class="frame-inner"></div>
 
   <div class="header header-text-only">
     <div class="product-line">THE BLUE TRAIN • ROVOS RAIL • KRUGER SHALATI</div>
@@ -108,7 +193,10 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
 
   <div class="voucher-number-row">
     <h1>TRAVEL VOUCHERS</h1>
-    <div class="voucher-badge">Voucher no. LX-2026-001</div>
+    <div class="voucher-stub">
+      <div class="voucher-stub-label">Voucher no.</div>
+      <div class="voucher-stub-number">LX-2026-001</div>
+    </div>
   </div>
 
 <div class="guidance">Please hand to your service provider. Pre-payment was made by Luxus Travel &amp; Tours for all services mentioned below. Guests must settle extras direct with the service providers.</div>
@@ -117,23 +205,23 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
   <div class="section">
     <div class="section-title">Guest Information</div>
     <div class="info-grid">
-      <div class="info-label">Guest Names:</div>
+      <div class="info-label">Guest Names</div>
       <div class="info-value">John and Jane Smith</div>
 
-      <div class="info-label">Number of Guests:</div>
+      <div class="info-label">Number of Guests</div>
       <div class="info-value">2 (2 adults)</div>
 
-      <div class="info-label">Contact Email:</div>
+      <div class="info-label">Contact Email</div>
       <div class="info-value">john@example.com</div>
 
-      <div class="info-label">Contact Phone:</div>
+      <div class="info-label">Contact Phone</div>
       <div class="info-value">+27 82 555 1234</div>
 
-      <div class="info-label">Consultant:</div>
+      <div class="info-label">Consultant</div>
       <div class="info-value">LB – Leonie</div>
 
 
-      <div class="info-label">Special Requests:</div>
+      <div class="info-label">Special Requests</div>
       <div class="info-value">Anniversary celebration</div>
     </div>
   </div>
@@ -144,32 +232,34 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
       <div class="provider-name">Rovos Rail</div>
 
       <div class="info-grid">
-        <div class="info-label">Your Reference:</div>
+        <div class="info-label">Your Reference</div>
         <div class="info-value">LX-2026-001</div>
 
-        <div class="info-label">Route:</div>
+        <div class="info-label">Route</div>
         <div class="info-value">Pretoria to Cape Town</div>
 
-        <div class="info-label">Departure Date:</div>
+        <div class="info-label">Departure Date</div>
         <div class="info-value">15 April 2026</div>
 
-        <div class="info-label">Arrival Date:</div>
+        <div class="info-label">Arrival Date</div>
         <div class="info-value">17 April 2026</div>
 
-        <div class="info-label">Suite Type:</div>
+        <div class="info-label">Suite Type</div>
         <div class="info-value">Royal Double Suite</div>
 
-        <div class="info-label">Number of Suites:</div>
+        <div class="info-label">Number of Suites</div>
         <div class="info-value">1</div>
 
-        <div class="info-label">Meal Basis:</div>
+        <div class="info-label">Meal Basis</div>
         <div class="info-value">Full Board (All meals included)</div>
       </div>
     </div>
   </div>
 
   <div class="section footer-section">
-    <div class="footer-contact">Luxus Travel &amp; Tours</div>
+    <div class="footer-rule"></div>
+    <div class="footer-company">Luxus Travel &amp; Tours</div>
+
   </div>
 
   <div class="page-number">Page 1 of 1</div>

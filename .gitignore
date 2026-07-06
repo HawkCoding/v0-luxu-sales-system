@@ -19,6 +19,7 @@ coverage/
 # Temporary files
 tmp-*.sql
 tmp-db-sync/
+tmp/
 
 # Cursor IDE
 .cursor/debug-*.log

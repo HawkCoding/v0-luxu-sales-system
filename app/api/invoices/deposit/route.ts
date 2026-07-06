@@ -5,6 +5,7 @@ import { formatDisplayDate } from "@/lib/date-format"
 import { calculateDepositAmount, normalizeDepositPercentage } from "@/lib/pipeline/constants"
 import { renderInvoiceEmail } from "@/lib/invoices/render-invoice-email"
 import { logError } from "@/lib/error-log"
+import { getDocumentTextSettings } from "@/lib/settings-access"
 
 export const runtime = "nodejs"
 
@@ -129,6 +130,7 @@ export async function POST(req: Request) {
 
   const customer = Array.isArray(booking.customer) ? booking.customer[0] : booking.customer
   const customerName = [customer?.first_name, customer?.last_name].filter(Boolean).join(" ").trim()
+  const documentText = await getDocumentTextSettings(supabase)
   const bodyHtml = await renderInvoiceEmail({
     customerName,
     invoiceNumber: invoice.invoice_number,
@@ -137,6 +139,8 @@ export async function POST(req: Request) {
     amount: formatMoney(invoice.amount, invoice.currency),
     depositPercentage: invoice.deposit_percentage,
     dueDate: formatDisplayDate(invoice.due_date),
+    introText: documentText.invoice_email_intro_deposit,
+    closingText: documentText.invoice_email_closing,
     lines: [
       { label: "Quote total", value: formatMoney(quote.total, invoice.currency) },
       { label: "Invoice status", value: "Draft" },

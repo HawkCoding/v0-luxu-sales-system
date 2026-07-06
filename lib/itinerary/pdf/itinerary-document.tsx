@@ -3,7 +3,7 @@ import { StyleSheet } from "@react-pdf/renderer"
 import type { ItineraryData } from "@/lib/itinerary/build-itinerary"
 import type { VoucherTemplate } from "@/lib/types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
-import { registerVoucherFonts, resolveVoucherFontFamily } from "@/lib/voucher/pdf/fonts"
+import { registerVoucherFonts, resolveVoucherFontPairing } from "@/lib/voucher/pdf/fonts"
 import { voucherStyles } from "@/lib/voucher/pdf/styles"
 import { HeaderBanner } from "@/lib/voucher/pdf/sections/header-banner"
 import { VoucherFooter } from "@/lib/voucher/pdf/sections/footer"
@@ -23,11 +23,10 @@ export function ItineraryDocument({ data, template }: ItineraryDocumentProps) {
   registerVoucherFonts()
 
   const t = normalizeTemplate(template)
-  const fontFamily = resolveVoucherFontFamily(t.font_family)
   const styles = voucherStyles({
     accentColour: t.accent_colour,
     sectionBg: t.section_bg,
-    fontFamily,
+    fonts: resolveVoucherFontPairing(t.font_family),
   })
 
   const extra = StyleSheet.create({

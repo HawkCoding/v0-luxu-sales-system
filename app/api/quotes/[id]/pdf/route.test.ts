@@ -112,6 +112,13 @@ function buildAuth() {
       if (table === "audit_logs") {
         return { insert: auditInsert }
       }
+      if (table === "app_settings") {
+        return {
+          select: vi.fn(() => ({
+            in: vi.fn(async () => ({ data: [], error: null })),
+          })),
+        }
+      }
       throw new Error(`Unexpected table: ${table}`)
     }),
     storage: {

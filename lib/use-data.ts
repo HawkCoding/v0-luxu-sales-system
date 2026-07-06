@@ -230,6 +230,20 @@ export function useVoucherTemplate() {
   return useSWR<VoucherTemplate>("/api/voucher-template", fetcher, swrOptions)
 }
 
+export interface DocumentTextSettings {
+  quote_doc_title: string
+  quote_doc_footer_text: string
+  quote_email_default_intro: string
+  quote_email_accept_text: string
+  invoice_email_intro_deposit: string
+  invoice_email_intro_final: string
+  invoice_email_closing: string
+}
+
+export function useDocumentTextSettings() {
+  return useSWR<DocumentTextSettings>("/api/settings/document-text", fetcher, swrOptions)
+}
+
 export interface SystemInfo {
   dataMode: string
   emailProvider: string

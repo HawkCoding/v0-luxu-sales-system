@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/dialog"
 import { PreviewAndSendDialog } from "@/components/preview-and-send-dialog"
 import type { DocRecord } from "@/lib/types"
-import { SendVoucherButton } from "@/components/booking-package-section"
+import { SendVoucherButton } from "@/components/send-voucher-button"
 
 interface GenerateVoucherDialogProps {
   open?: boolean

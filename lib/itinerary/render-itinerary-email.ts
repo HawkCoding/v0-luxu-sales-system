@@ -1,7 +1,9 @@
 import { render } from "@react-email/render"
 import { createElement } from "react"
 import { ItineraryEmail, type ItineraryEmailProps } from "@/emails/itinerary-email"
+import { getEmailFooterTagline } from "@/lib/settings-access"
 
 export async function renderItineraryEmail(props: ItineraryEmailProps): Promise<string> {
-  return render(createElement(ItineraryEmail, props))
+  const footerTagline = await getEmailFooterTagline()
+  return render(createElement(ItineraryEmail, { ...props, footerTagline }))
 }

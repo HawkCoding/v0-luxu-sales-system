@@ -7,6 +7,7 @@ export interface ItineraryEmailProps {
   tripTitle: string
   departure: string
   consultantName: string
+  footerTagline?: string
 }
 
 export function ItineraryEmail({
@@ -15,9 +16,10 @@ export function ItineraryEmail({
   tripTitle,
   departure,
   consultantName,
+  footerTagline,
 }: ItineraryEmailProps) {
   return (
-    <BaseLayout preview={`Your itinerary for ${tripTitle || bookingNumber}`}>
+    <BaseLayout preview={`Your itinerary for ${tripTitle || bookingNumber}`} footerTagline={footerTagline}>
       <Heading style={heading}>Your travel itinerary</Heading>
       <Text style={paragraph}>Dear {customerName || "traveller"},</Text>
       <Text style={paragraph}>
