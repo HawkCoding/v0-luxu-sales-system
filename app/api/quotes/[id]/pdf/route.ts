@@ -2,6 +2,7 @@ import { requireRole } from "@/lib/api/auth"
 import { jsonError, safeSupabaseError } from "@/lib/api/responses"
 import { renderQuotePdf } from "@/lib/quotes/render-quote-pdf"
 import { logError } from "@/lib/error-log"
+import { getDocumentTextSettings } from "@/lib/settings-access"
 
 export const runtime = "nodejs"
 
@@ -48,9 +49,13 @@ export async function POST(_req: Request, { params }: RouteParams) {
   const customer = Array.isArray(booking?.customer) ? booking.customer[0] : booking?.customer
   const customerName = [customer?.first_name, customer?.last_name].filter(Boolean).join(" ").trim()
 
+  const documentText = await getDocumentTextSettings(supabase)
+
   let pdfBuffer: Buffer
   try {
     pdfBuffer = await renderQuotePdf({
+      title: documentText.quote_doc_title,
+      footerText: documentText.quote_doc_footer_text,
       quoteNumber: quote.quote_number ?? id,
       bookingNumber: booking?.booking_number ?? "",
       customerName,

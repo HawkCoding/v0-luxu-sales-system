@@ -542,13 +542,6 @@ export async function buildPackageQuoteLineItems({
           })
         }
       } else if (isTransfer || isVehicleRental) {
-        const suiteTypeId = selection.suiteTypeId
-        if (!suiteTypeId) {
-          throw new Error(`No suite type selected for leg: ${legLabel}`)
-        }
-        const { validRateCard, description } = resolveUnit(suiteTypeId)
-        activeRateCard = validRateCard
-
         const serviceType = isVehicleRental ? "rental" : "transfer"
         const matchingRequests = findTransportRequestsForLeg(leg.id, serviceType)
         // One line item per linked vehicle; if none are linked yet, still price the leg once.
@@ -556,6 +549,15 @@ export async function buildPackageQuoteLineItems({
           matchingRequests.length > 0 ? matchingRequests : [null]
 
         for (const transportRequest of requestsToPrice) {
+          // Each transport row can carry its own vehicle category; the leg-level selection is
+          // the fallback for rows that don't set one.
+          const suiteTypeId = transportRequest?.suite_type_id ?? selection.suiteTypeId
+          if (!suiteTypeId) {
+            throw new Error(`No suite type selected for leg: ${legLabel}`)
+          }
+          const { validRateCard, description } = resolveUnit(suiteTypeId)
+          activeRateCard = validRateCard
+
           const pointLabel =
             transportRequest
               ? `${transportRequest.pickup_point} -> ${transportRequest.dropoff_point}`

@@ -22,6 +22,7 @@ export interface QuotePdfData {
   currency?: string
   title?: string
   statusLabel?: string
+  footerText?: string
 }
 
 function formatMoney(amount: number, currency = "ZAR"): string {
@@ -201,7 +202,16 @@ const styles = StyleSheet.create({
   },
 })
 
-export function QuoteDocument({ quoteNumber, bookingNumber, customerName, quoteDate, validUntil, lineItems, subtotal, vat, total, currency = "ZAR", title = "PROVISIONAL QUOTATION", statusLabel = "Provisional" }: QuotePdfData) {
+const DEFAULT_FOOTER_TEXT =
+  "This quotation is valid until {{validUntil}} and is subject to availability. Prices are quoted in {{currency}}. Luxus Travel & Tours — Luxury Rail Journeys."
+
+function resolveFooterText(template: string, validUntil: string | null, currency: string): string {
+  return template
+    .replaceAll("{{validUntil}}", formatDate(validUntil))
+    .replaceAll("{{currency}}", currency)
+}
+
+export function QuoteDocument({ quoteNumber, bookingNumber, customerName, quoteDate, validUntil, lineItems, subtotal, vat, total, currency = "ZAR", title = "PROVISIONAL QUOTATION", statusLabel = "Provisional", footerText = DEFAULT_FOOTER_TEXT }: QuotePdfData) {
   return (
     <Document
       author="Luxus Travel & Tours"
@@ -295,9 +305,7 @@ export function QuoteDocument({ quoteNumber, bookingNumber, customerName, quoteD
           </View>
         </View>
 
-        <Text style={styles.footer}>
-          This quotation is valid until {formatDate(validUntil)} and is subject to availability. Prices are quoted in {currency}. Luxus Travel & Tours — Luxury Rail Journeys.
-        </Text>
+        <Text style={styles.footer}>{resolveFooterText(footerText, validUntil, currency)}</Text>
       </Page>
     </Document>
   )

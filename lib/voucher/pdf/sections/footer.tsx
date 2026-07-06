@@ -10,11 +10,13 @@ interface VoucherFooterProps {
 }
 
 export function VoucherFooter({ template, styles }: VoucherFooterProps) {
-  const contact = [template.footer_company, template.footer_phone, template.footer_email].filter(Boolean).join(" - ")
+  const contact = [template.footer_phone, template.footer_email].filter(Boolean).join(" · ")
 
   return (
     <View style={[styles.section, styles.footerSection]}>
-      <Text style={styles.footerContact}>{contact}</Text>
+      <View style={styles.footerRule} />
+      {template.footer_company ? <Text style={styles.footerCompany}>{template.footer_company}</Text> : null}
+      {contact ? <Text style={styles.footerContact}>{contact}</Text> : null}
     </View>
   )
 }

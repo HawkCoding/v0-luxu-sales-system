@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { Boxes, Search } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+import { Boxes, Search, X } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -15,7 +15,6 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Checkbox } from "@/components/ui/checkbox"
 import {
   Select,
   SelectContent,
@@ -25,7 +24,7 @@ import {
 } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { useActivePackages, useRateTypes } from "@/lib/use-data"
-import type { Package, PackageDetail, QuoteLineItem } from "@/lib/types"
+import type { BookingTransportRequest, Package, PackageDetail, QuoteLineItem } from "@/lib/types"
 import { SUPPLIER_KIND_LABELS } from "@/lib/types"
 import { PresenceAvatars } from "@/components/presence-avatars"
 import { useRecordPresence } from "@/hooks/use-record-presence"
@@ -34,7 +33,21 @@ import { CommissionControl, type CommissionControlValue } from "@/components/sup
 import { CommissionBadge } from "@/components/quotes/commission-badge"
 import { QuoteLineSupplierPicker, type QuoteExtraSelection } from "@/components/quote-line-supplier-picker"
 import { getDestinationLocationIds } from "@/lib/packages/location-filter"
-import { X } from "lucide-react"
+import { SuiteLegEditor } from "@/components/packages/suite-leg-editor"
+import { TransportLegEditor } from "@/components/packages/transport-leg-editor"
+import type { PassengerTotals } from "@/lib/packages/passenger-totals"
+import {
+  buildDefaultLegStates,
+  hydrateFromSaved,
+  PASSENGER_SPLIT_SUPPLIER_KINDS,
+  toApplySelections,
+  toPackageSelectionsPatch,
+  toTransportRequestsPut,
+  validateConfigureState,
+  type ApplyCommissionOverride,
+  type ApplyLegState,
+  type SavedPackageState,
+} from "@/lib/packages/apply-dialog-state"
 
 interface ApplyPackageDialogProps {
   jobId: string
@@ -75,69 +88,18 @@ function formatPrice(amount: number | null, currency: string) {
   }
 }
 
+function addNights(date: string, nights: number): string {
+  const parsed = new Date(`${date}T00:00:00Z`)
+  if (Number.isNaN(parsed.getTime())) return date
+  parsed.setUTCDate(parsed.getUTCDate() + nights)
+  return parsed.toISOString().slice(0, 10)
+}
+
 type Step = "pick" | "configure" | "confirm"
 
-interface LegSelectionState {
-  selected: boolean
-  routeId: string
-  suiteTypeId: string
-  /** Hotel legs only: number of rooms booked (default 1). */
-  rooms: number
-  /** Hotel legs only: number of nights stayed (default 1). */
-  nights: number
-  commissionOverride?: CommissionControlValue
-  showCommissionOverride?: boolean
-}
-
-function isOptionalLeg(kind: PackageDetail["legs"][number]["supplierKind"]): boolean {
-  return kind === "hotel_property" || kind === "transfers" || kind === "vehicle_rental"
-}
-
-function getRouteLabel(kind: PackageDetail["legs"][number]["supplierKind"]): string {
-  if (kind === "hotel_property") return "meal plan"
-  if (kind === "transfers") return "transfer"
-  if (kind === "vehicle_rental") return "rental route"
-  return "route"
-}
-
-function getSuiteLabel(kind: PackageDetail["legs"][number]["supplierKind"]): string {
-  if (kind === "hotel_property") return "room type"
-  if (kind === "transfers" || kind === "vehicle_rental") return "vehicle type"
-  if (kind === "airline") return "cabin"
-  return "suite type"
-}
-
-function buildDefaultSelections(detail: PackageDetail): Record<string, LegSelectionState> {
-  return Object.fromEntries(
-    detail.legs.map((leg) => {
-      const activeSuiteTypes = leg.suiteTypes.filter((suiteType) => suiteType.active)
-      const onlyRoute = leg.routes.length === 1 ? leg.routes[0] : undefined
-      return [
-        leg.id,
-        {
-          selected: !isOptionalLeg(leg.supplierKind),
-          routeId: onlyRoute ? onlyRoute.id : "",
-          suiteTypeId: activeSuiteTypes.length === 1 ? activeSuiteTypes[0].id : "",
-          rooms: 1,
-          nights: 1,
-          commissionOverride: { type: null, value: null },
-          showCommissionOverride: false,
-        },
-      ]
-    }),
-  )
-}
-
-function getEmptySelection(selected: boolean): LegSelectionState {
-  return {
-    selected,
-    routeId: "",
-    suiteTypeId: "",
-    rooms: 1,
-    nights: 1,
-    commissionOverride: { type: null, value: null },
-    showCommissionOverride: false,
-  }
+interface LegCommissionState {
+  value: CommissionControlValue
+  show: boolean
 }
 
 export function ApplyPackageDialog({
@@ -160,12 +122,19 @@ export function ApplyPackageDialog({
   const [selectedPackage, setSelectedPackage] = useState<Package | null>(null)
   const [packageDetail, setPackageDetail] = useState<PackageDetail | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
-  const [legSelections, setLegSelections] = useState<Record<string, LegSelectionState>>({})
+  const [savedState, setSavedState] = useState<SavedPackageState | null>(null)
+  const [existingTransportRequests, setExistingTransportRequests] = useState<BookingTransportRequest[]>([])
+  const [legStates, setLegStates] = useState<ApplyLegState[]>([])
+  const [totalsBySupplierId, setTotalsBySupplierId] = useState<Record<string, PassengerTotals>>({})
+  const [tripStartDate, setTripStartDate] = useState("")
+  const [tripEndDate, setTripEndDate] = useState("")
+  const [commissionByLegId, setCommissionByLegId] = useState<Record<string, LegCommissionState>>({})
   const [rateTypeId, setRateTypeId] = useState("")
   const [previewLineItems, setPreviewLineItems] = useState<QuoteLineItem[]>([])
   const [extras, setExtras] = useState<QuoteExtraSelection[]>([])
   const [validating, setValidating] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
+  const [validationErrors, setValidationErrors] = useState<string[]>([])
   const { others, setEditing } = useRecordPresence("quote", open ? quoteId : undefined)
   const {
     save: saveQuote,
@@ -199,16 +168,54 @@ export function ApplyPackageDialog({
     }
   }, [step, rateTypeId, customerDefaultRateTypeId, systemDefaultRateTypeId])
 
+  // Load the booking's saved package configuration when the dialog opens, so re-opening
+  // pre-fills everything the last apply (or the Gravity Forms intake) persisted.
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const [packageRes, transportRes] = await Promise.all([
+          fetch(`/api/jobs/${jobId}/package`),
+          fetch(`/api/jobs/${jobId}/transport-requests`),
+        ])
+        if (cancelled) return
+        setSavedState(packageRes.ok ? ((await packageRes.json()) as SavedPackageState) : null)
+        setExistingTransportRequests(
+          transportRes.ok ? ((await transportRes.json()) as BookingTransportRequest[]) : [],
+        )
+      } catch {
+        if (!cancelled) {
+          setSavedState(null)
+          setExistingTransportRequests([])
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [open, jobId])
+
+  const sortedLegs = useMemo(
+    () => (packageDetail?.legs ?? []).slice().sort((a, b) => a.sortOrder - b.sortOrder),
+    [packageDetail],
+  )
+
   function reset() {
     setStep("pick")
     setSearch("")
     setSelectedPackage(null)
     setPackageDetail(null)
-    setLegSelections({})
+    setLegStates([])
+    setTotalsBySupplierId({})
+    setTripStartDate("")
+    setTripEndDate("")
+    setCommissionByLegId({})
     setRateTypeId("")
     setPreviewLineItems([])
     setExtras([])
     setApplyError(null)
+    setValidationErrors([])
     clearQuoteConflict()
   }
 
@@ -225,7 +232,41 @@ export function ApplyPackageDialog({
       if (!res.ok) throw new Error("Failed to load package details")
       const detail: PackageDetail = await res.json()
       setPackageDetail(detail)
-      setLegSelections(buildDefaultSelections(detail))
+
+      const splitSupplierIds = Array.from(
+        new Set(
+          detail.legs
+            .filter((leg) => PASSENGER_SPLIT_SUPPLIER_KINDS.has(leg.supplierKind))
+            .map((leg) => leg.supplierId),
+        ),
+      )
+      let totals: Record<string, PassengerTotals> = {}
+      if (splitSupplierIds.length > 0) {
+        const totalsRes = await fetch(
+          `/api/jobs/${jobId}/passenger-totals?supplierIds=${splitSupplierIds.join(",")}`,
+        )
+        if (totalsRes.ok) {
+          totals = ((await totalsRes.json()) as { totalsBySupplierId: Record<string, PassengerTotals> })
+            .totalsBySupplierId
+        }
+      }
+      setTotalsBySupplierId(totals)
+
+      const isSavedPackage = savedState?.packageId === pkg.id
+      const startDate = (isSavedPackage ? savedState?.tripStartDate : null) ?? travelDate ?? ""
+      const endDate =
+        (isSavedPackage ? savedState?.tripEndDate : null) ??
+        (startDate && detail.durationNights ? addNights(startDate, detail.durationNights) : "")
+      setTripStartDate(startDate)
+      setTripEndDate(endDate)
+
+      const stateOptions = { tripStartDate: startDate || null, totalsBySupplierId: totals }
+      setLegStates(
+        isSavedPackage && savedState
+          ? hydrateFromSaved(detail, savedState, existingTransportRequests, stateOptions)
+          : buildDefaultLegStates(detail, stateOptions),
+      )
+      setCommissionByLegId({})
       setRateTypeId(customerDefaultRateTypeId || systemDefaultRateTypeId || "")
       setStep("configure")
     } catch {
@@ -235,49 +276,86 @@ export function ApplyPackageDialog({
     }
   }
 
-  const allSelectionsComplete =
-    packageDetail !== null &&
-    packageDetail.legs.every((leg) => {
-      const selection = legSelections[leg.id]
-      if (!selection) return false
-      if (isOptionalLeg(leg.supplierKind) && !selection.selected) return true
-      const hasRoute = leg.routes.length <= 1 || Boolean(selection.routeId)
-      return hasRoute && Boolean(selection.suiteTypeId)
-    })
+  function updateLegState(next: ApplyLegState) {
+    setLegStates((prev) => prev.map((state) => (state.legId === next.legId ? next : state)))
+  }
+
+  const tripDatesValid = Boolean(tripStartDate) && Boolean(tripEndDate) && tripEndDate >= tripStartDate
 
   async function validateAndPreview() {
     if (!selectedPackage || !packageDetail) return
+
+    const problems = validateConfigureState(packageDetail, legStates, { totalsBySupplierId })
+    if (!tripDatesValid) {
+      problems.unshift("Trip start and end dates are required (end on or after start)")
+    }
+    setValidationErrors(problems)
+    if (problems.length > 0) return
+
     setValidating(true)
     setApplyError(null)
 
-    const selections = packageDetail.legs.map((leg) => {
-      const state = legSelections[leg.id]
-      const override = state?.commissionOverride
-      const commissionOverride =
-        override && override.type !== null && override.value !== null && Number.isFinite(override.value)
-          ? { type: override.type, value: override.value }
-          : undefined
-      return {
-        legId: leg.id,
-        selected: state?.selected ?? !isOptionalLeg(leg.supplierKind),
-        routeId: state?.routeId || undefined,
-        suiteTypeId: state?.suiteTypeId || undefined,
-        rooms: leg.supplierKind === "hotel_property" ? Math.max(1, state?.rooms ?? 1) : undefined,
-        nights: leg.supplierKind === "hotel_property" ? Math.max(1, state?.nights ?? 1) : undefined,
-        commissionOverride,
-      }
-    })
-
     try {
+      // 1. Assign the package + trip dates to the booking (reseeds selections on package change).
+      const assignRes = await fetch(`/api/jobs/${jobId}/package`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ packageId: selectedPackage.id, tripStartDate, tripEndDate }),
+      })
+      if (!assignRes.ok) {
+        const body = await assignRes.json().catch(() => ({}))
+        setApplyError(`Could not assign package to booking: ${body.error ?? assignRes.statusText}`)
+        return
+      }
+
+      // 2. Persist per-leg selections and suite units (voucher generation reads these).
+      const patchRes = await fetch(`/api/jobs/${jobId}/package-selections`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toPackageSelectionsPatch(legStates)),
+      })
+      if (!patchRes.ok) {
+        const body = await patchRes.json().catch(() => ({}))
+        setApplyError(`Could not save package selections: ${body.error ?? patchRes.statusText}`)
+        return
+      }
+
+      // 3. Persist transport requests — pricing reads them from the DB in the next step.
+      const transportPut = toTransportRequestsPut(legStates, existingTransportRequests)
+      const transportRes = await fetch(`/api/jobs/${jobId}/transport-requests`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(transportPut),
+      })
+      if (!transportRes.ok) {
+        const body = await transportRes.json().catch(() => ({}))
+        setApplyError(`Could not save transport details: ${body.error ?? transportRes.statusText}`)
+        return
+      }
+      const savedTransportRows = (await transportRes.json().catch(() => null)) as
+        | BookingTransportRequest[]
+        | null
+      if (savedTransportRows) setExistingTransportRequests(savedTransportRows)
+
+      // 4. Price the quote from the persisted configuration.
+      const commissionOverrides: Record<string, ApplyCommissionOverride | null> = {}
+      for (const [legId, state] of Object.entries(commissionByLegId)) {
+        const override = state.value
+        commissionOverrides[legId] =
+          override.type !== null && override.value !== null && Number.isFinite(override.value)
+            ? { type: override.type, value: override.value }
+            : null
+      }
+
       const res = await fetch(`/api/packages/${selectedPackage.slug}/apply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           jobId,
           quoteId,
-          travelDate: travelDate ?? new Date().toISOString().slice(0, 10),
+          travelDate: tripStartDate,
           rateTypeId: rateTypeId || undefined,
-          selections,
+          selections: toApplySelections(legStates, commissionOverrides),
           extras: extras.map((extra) => ({
             supplierId: extra.supplierId,
             routeId: extra.routeId,
@@ -301,25 +379,10 @@ export function ApplyPackageDialog({
     }
   }
 
-  async function applyToQuote() {
+  async function applyToQuote(options?: { ignoreExpectedUpdatedAt: boolean }) {
     if (previewLineItems.length === 0) return
     try {
-      await saveQuote({ lineItems: lineItemsToSave })
-      toast.success(`Package "${selectedPackage?.name}" applied to quote`)
-      setOpen(false)
-      reset()
-      onApplied()
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to apply package"
-      setApplyError(message)
-      toast.error(message)
-    }
-  }
-
-  async function applyToQuoteAnyway() {
-    if (previewLineItems.length === 0) return
-    try {
-      await saveQuote({ lineItems: lineItemsToSave }, { ignoreExpectedUpdatedAt: true })
+      await saveQuote({ lineItems: lineItemsToSave }, options)
       toast.success(`Package "${selectedPackage?.name}" applied to quote`)
       setOpen(false)
       reset()
@@ -339,7 +402,7 @@ export function ApplyPackageDialog({
           Apply Package
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-4xl">
         {step === "pick" && (
           <>
             <DialogHeader>
@@ -348,7 +411,7 @@ export function ApplyPackageDialog({
                 <PresenceAvatars users={others} />
               </DialogTitle>
               <DialogDescription>
-                Select a package to pre-fill this quote with pricing from its rate cards.
+                Select a package to configure suites, passengers, and transport, then price this quote.
               </DialogDescription>
             </DialogHeader>
 
@@ -376,7 +439,12 @@ export function ApplyPackageDialog({
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="font-medium">{pkg.name}</p>
+                        <p className="flex items-center gap-1.5 font-medium">
+                          {pkg.name}
+                          {savedState?.packageId === pkg.id ? (
+                            <Badge variant="outline" className="text-[10px]">On booking</Badge>
+                          ) : null}
+                        </p>
                         {pkg.trainRouteName ? (
                           <p className="text-xs text-muted-foreground">{pkg.trainRouteName}</p>
                         ) : null}
@@ -415,216 +483,108 @@ export function ApplyPackageDialog({
                 <PresenceAvatars users={others} />
               </DialogTitle>
               <DialogDescription>
-                Select the package options that apply to this quote.
+                Configure the trip, suites, and transport. Saving here updates the booking and prices the quote.
               </DialogDescription>
             </DialogHeader>
 
-            {!travelDate && (
-              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                This job has no departure date set. Pricing will be validated against today&apos;s date.
-              </p>
-            )}
-
-            {rateTypes.length > 0 && (
+            <div className="grid gap-3 md:grid-cols-3">
               <div className="space-y-1.5">
-                <Label htmlFor="apply-rate-type">Rate type</Label>
-                <Select value={rateTypeId} onValueChange={setRateTypeId}>
-                  <SelectTrigger id="apply-rate-type" className="h-9">
-                    <SelectValue placeholder="System default" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {rateTypes.map((rt) => (
-                      <SelectItem key={rt.id} value={rt.id}>
-                        {rt.name}
-                        {rt.isDefault ? " (default)" : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Applies to every leg; a leg without this rate falls back to the default.
-                </p>
+                <Label htmlFor="apply-trip-start">Trip start date</Label>
+                <Input
+                  id="apply-trip-start"
+                  type="date"
+                  value={tripStartDate}
+                  onChange={(event) => setTripStartDate(event.target.value)}
+                />
               </div>
-            )}
+              <div className="space-y-1.5">
+                <Label htmlFor="apply-trip-end">Trip end date</Label>
+                <Input
+                  id="apply-trip-end"
+                  type="date"
+                  value={tripEndDate}
+                  onChange={(event) => setTripEndDate(event.target.value)}
+                />
+              </div>
+              {rateTypes.length > 0 && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="apply-rate-type">Rate type</Label>
+                  <Select value={rateTypeId} onValueChange={setRateTypeId}>
+                    <SelectTrigger id="apply-rate-type" className="h-9">
+                      <SelectValue placeholder="System default" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {rateTypes.map((rt) => (
+                        <SelectItem key={rt.id} value={rt.id}>
+                          {rt.name}
+                          {rt.isDefault ? " (default)" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Applies to every leg; a leg without this rate falls back to the default.
+                  </p>
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Covers the full trip, start to finish — not just this package&apos;s legs — so we track how long the
+              customer was with us across everything booked.
+            </p>
 
             <div className="space-y-4">
-              {packageDetail.legs.map((leg) => {
-                const selection = legSelections[leg.id]
-                const optional = isOptionalLeg(leg.supplierKind)
-                const enabled = selection?.selected ?? !optional
-                const activeSuiteTypes = leg.suiteTypes.filter((st) => st.active)
+              {sortedLegs.map((leg) => {
+                const state = legStates.find((candidate) => candidate.legId === leg.id)
+                if (!state) return null
+                const commission = commissionByLegId[leg.id]
                 return (
-                  <div key={leg.id} className="space-y-3 rounded-md border p-3">
-                    <div className="flex items-start gap-3">
-                      {optional ? (
-                        <Checkbox
-                          checked={enabled}
-                          onCheckedChange={(checked) =>
-                            setLegSelections((prev) => ({
-                              ...prev,
-                              [leg.id]: {
-                                ...(prev[leg.id] ?? getEmptySelection(!optional)),
-                                selected: checked === true,
-                              },
-                            }))
-                          }
-                          className="mt-1"
-                        />
-                      ) : null}
-                      <div className="min-w-0 flex-1">
-                        <Label>{leg.label ?? leg.supplierName}</Label>
-                        {optional ? (
-                          <p className="text-xs text-muted-foreground">Optional {SUPPLIER_KIND_LABELS[leg.supplierKind].toLowerCase()}</p>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    {enabled ? (
-                      <div className="space-y-3">
-                        <div className="grid gap-3 md:grid-cols-2">
-                          {leg.routes.length > 1 ||
-                          leg.supplierKind === "hotel_property" ||
-                          leg.supplierKind === "transfers" ||
-                          leg.supplierKind === "vehicle_rental" ? (
-                            <div className="space-y-1.5">
-                              <Label className="capitalize">{getRouteLabel(leg.supplierKind)}</Label>
-                              <Select
-                                value={selection?.routeId ?? ""}
-                                onValueChange={(value) => {
-                                  setLegSelections((prev) => ({
-                                    ...prev,
-                                    [leg.id]: {
-                                      ...(prev[leg.id] ?? getEmptySelection(!optional)),
-                                      routeId: value,
-                                    },
-                                  }))
-                                }}
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder={`Select ${getRouteLabel(leg.supplierKind)}`} />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {leg.routes.map((route) => (
-                                    <SelectItem key={route.id} value={route.id}>
-                                      {route.name}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          ) : null}
-
-                          <div className="space-y-1.5">
-                            <Label className="capitalize">{getSuiteLabel(leg.supplierKind)}</Label>
-                            {activeSuiteTypes.length === 0 ? (
-                              <p className="text-xs text-muted-foreground">No {getSuiteLabel(leg.supplierKind)} configured</p>
-                            ) : (
-                              <Select
-                                value={selection?.suiteTypeId ?? ""}
-                                onValueChange={(value) =>
-                                  setLegSelections((prev) => ({
-                                    ...prev,
-                                    [leg.id]: { ...(prev[leg.id] ?? getEmptySelection(!optional)), suiteTypeId: value },
-                                  }))
-                                }
-                              >
-                                <SelectTrigger>
-                                  <SelectValue placeholder={`Select ${getSuiteLabel(leg.supplierKind)}`} />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {activeSuiteTypes.map((st) => (
-                                    <SelectItem key={st.id} value={st.id}>
-                                      {st.name}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            )}
-                          </div>
-                        </div>
-
-                        {leg.supplierKind === "hotel_property" ? (
-                          <div className="grid gap-3 md:grid-cols-2">
-                            <div className="space-y-1.5">
-                              <Label htmlFor={`rooms-${leg.id}`}>Rooms</Label>
-                              <Input
-                                id={`rooms-${leg.id}`}
-                                type="number"
-                                min={1}
-                                value={selection?.rooms ?? 1}
-                                onChange={(e) => {
-                                  const next = Math.max(1, Math.floor(Number(e.target.value) || 1))
-                                  setLegSelections((prev) => ({
-                                    ...prev,
-                                    [leg.id]: { ...(prev[leg.id] ?? getEmptySelection(!optional)), rooms: next },
-                                  }))
-                                }}
-                              />
-                            </div>
-                            <div className="space-y-1.5">
-                              <Label htmlFor={`nights-${leg.id}`}>Nights</Label>
-                              <Input
-                                id={`nights-${leg.id}`}
-                                type="number"
-                                min={1}
-                                value={selection?.nights ?? 1}
-                                onChange={(e) => {
-                                  const next = Math.max(1, Math.floor(Number(e.target.value) || 1))
-                                  setLegSelections((prev) => ({
-                                    ...prev,
-                                    [leg.id]: { ...(prev[leg.id] ?? getEmptySelection(!optional)), nights: next },
-                                  }))
-                                }}
-                              />
-                            </div>
-                          </div>
-                        ) : null}
-
-                        <div>
-                          {selection?.showCommissionOverride ? (
-                            <CommissionControl
-                              value={selection.commissionOverride ?? { type: null, value: null }}
-                              onChange={(next) =>
-                                setLegSelections((prev) => ({
-                                  ...prev,
-                                  [leg.id]: {
-                                    ...(prev[leg.id] ?? getEmptySelection(!optional)),
-                                    commissionOverride: next,
-                                  },
-                                }))
-                              }
-                              isEditing
-                              label="Commission Override"
-                              onClear={() =>
-                                setLegSelections((prev) => ({
-                                  ...prev,
-                                  [leg.id]: {
-                                    ...(prev[leg.id] ?? getEmptySelection(!optional)),
-                                    commissionOverride: { type: null, value: null },
-                                    showCommissionOverride: false,
-                                  },
-                                }))
-                              }
-                              clearLabel="Remove"
-                            />
-                          ) : (
-                            <button
-                              type="button"
-                              className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
-                              onClick={() =>
-                                setLegSelections((prev) => ({
-                                  ...prev,
-                                  [leg.id]: {
-                                    ...(prev[leg.id] ?? getEmptySelection(!optional)),
-                                    showCommissionOverride: true,
-                                  },
-                                }))
-                              }
-                            >
-                              + Override commission
-                            </button>
-                          )}
-                        </div>
+                  <div key={leg.id} className="space-y-2">
+                    {state.kind === "transport" ? (
+                      <TransportLegEditor leg={leg} value={state} onChange={updateLegState} />
+                    ) : (
+                      <SuiteLegEditor
+                        leg={leg}
+                        value={state}
+                        onChange={updateLegState}
+                        expectedTotals={totalsBySupplierId[leg.supplierId] ?? null}
+                      />
+                    )}
+                    {state.selected ? (
+                      <div className="pl-3">
+                        {commission?.show ? (
+                          <CommissionControl
+                            value={commission.value}
+                            onChange={(next) =>
+                              setCommissionByLegId((prev) => ({
+                                ...prev,
+                                [leg.id]: { value: next, show: true },
+                              }))
+                            }
+                            isEditing
+                            label="Commission Override"
+                            onClear={() =>
+                              setCommissionByLegId((prev) => ({
+                                ...prev,
+                                [leg.id]: { value: { type: null, value: null }, show: false },
+                              }))
+                            }
+                            clearLabel="Remove"
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                            onClick={() =>
+                              setCommissionByLegId((prev) => ({
+                                ...prev,
+                                [leg.id]: { value: prev[leg.id]?.value ?? { type: null, value: null }, show: true },
+                              }))
+                            }
+                          >
+                            + Override commission
+                          </button>
+                        )}
                       </div>
                     ) : null}
                   </div>
@@ -673,6 +633,14 @@ export function ApplyPackageDialog({
               />
             </div>
 
+            {validationErrors.length > 0 && (
+              <ul className="space-y-1 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {validationErrors.map((error) => (
+                  <li key={error}>{error}</li>
+                ))}
+              </ul>
+            )}
+
             {applyError && (
               <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 {applyError}
@@ -680,14 +648,11 @@ export function ApplyPackageDialog({
             )}
 
             <DialogFooter>
-              <Button variant="outline" onClick={() => { setStep("pick"); setApplyError(null) }}>
+              <Button variant="outline" onClick={() => { setStep("pick"); setApplyError(null); setValidationErrors([]) }}>
                 Back
               </Button>
-              <Button
-                onClick={validateAndPreview}
-                disabled={!allSelectionsComplete || validating}
-              >
-                {validating ? "Checking pricing…" : "Next"}
+              <Button onClick={validateAndPreview} disabled={validating}>
+                {validating ? "Saving & pricing…" : "Next"}
               </Button>
             </DialogFooter>
           </>
@@ -728,7 +693,7 @@ export function ApplyPackageDialog({
                         <div>
                           {li.description}
                           {li.pricingSnapshot?.isExtra ? (
-                            <Badge variant="outline" className="ml-1.5 text-[9px] align-middle">Extra</Badge>
+                            <Badge variant="outline" className="ml-1.5 align-middle text-[9px]">Extra</Badge>
                           ) : null}
                         </div>
                         {li.pricingSnapshot?.rateTypeName && (
@@ -771,11 +736,11 @@ export function ApplyPackageDialog({
                 Back
               </Button>
               {quoteConflict && (
-                <Button variant="outline" onClick={applyToQuoteAnyway} disabled={applying}>
+                <Button variant="outline" onClick={() => applyToQuote({ ignoreExpectedUpdatedAt: true })} disabled={applying}>
                   Save anyway
                 </Button>
               )}
-              <Button onClick={applyToQuote} disabled={applying}>
+              <Button onClick={() => applyToQuote()} disabled={applying}>
                 {applying ? "Applying…" : existingLineItemCount > 0 ? "Replace & apply" : "Apply to quote"}
               </Button>
             </DialogFooter>

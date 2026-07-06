@@ -7,6 +7,7 @@ import { addJobNumberingMetadata, allocateJobNumberForBooking, type JobNumberAll
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
 import { buildPackageQuoteLineItems, calculateQuoteTotals } from "@/lib/quotes/build-from-package"
 import { buildQuoteNumber } from "@/lib/quotes/quote-number"
+import { isOptionalPackageLegKind } from "@/lib/types"
 import type { PackageDetail, QuoteLineItem } from "@/lib/types"
 import { createServiceClient, createSessionClient } from "@/lib/supabase/server"
 import type { Json } from "@/lib/supabase/types"
@@ -192,10 +193,9 @@ function buildDefaultPackageSelections(packageDetail: PackageDetail, suiteTypeNa
   const normalizedSuiteTypeNames = suiteTypeNames.map(normalizeLookupValue).filter(Boolean)
 
   return packageDetail.legs.map((leg) => {
-    const isOptional =
-      leg.supplierKind === "hotel_property" ||
-      leg.supplierKind === "transfers" ||
-      leg.supplierKind === "vehicle_rental"
+    // Only the rail leg is auto-included; every other leg is opt-in and stays
+    // deselected until a consultant turns it on. Mirrors the Apply Package dialog.
+    const isOptional = isOptionalPackageLegKind(leg.supplierKind)
     const activeSuiteTypes = leg.suiteTypes.filter((suiteType) => suiteType.active)
     const matchedSuiteType = activeSuiteTypes.find((suiteType) =>
       normalizedSuiteTypeNames.includes(normalizeLookupValue(suiteType.name)),

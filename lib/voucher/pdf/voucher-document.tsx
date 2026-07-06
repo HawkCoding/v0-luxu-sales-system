@@ -3,7 +3,7 @@ import type { VoucherData } from "@/lib/generate-voucher"
 import { sortedVoucherServiceBlocks } from "@/lib/generate-voucher"
 import type { VoucherSectionKey, VoucherTemplate } from "@/lib/types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
-import { registerVoucherFonts, resolveVoucherFontFamily } from "./fonts"
+import { registerVoucherFonts, resolveVoucherFontPairing } from "./fonts"
 import { voucherStyles } from "./styles"
 import { HeaderBanner } from "./sections/header-banner"
 import { GuestInfo } from "./sections/guest-info"
@@ -44,7 +44,7 @@ export function VoucherDocument({ data, template }: VoucherDocumentProps) {
   const styles = voucherStyles({
     accentColour: t.accent_colour,
     sectionBg: t.section_bg,
-    fontFamily: resolveVoucherFontFamily(t.font_family),
+    fonts: resolveVoucherFontPairing(t.font_family),
   })
   const sectionOrder = t.section_order.length > 0 ? t.section_order : VOUCHER_TEMPLATE_DEFAULTS.section_order
   const hiddenSections = new Set(t.hidden_sections)
@@ -56,11 +56,17 @@ export function VoucherDocument({ data, template }: VoucherDocumentProps) {
       title={`Travel Voucher - ${data.voucherNumber}`}
     >
       <Page size="A4" style={styles.page}>
+        <View fixed style={styles.frameOuter} />
+        <View fixed style={styles.frameInner} />
+
         <HeaderBanner template={t} styles={styles} />
 
         <View style={styles.voucherNumberRow}>
           <Text style={styles.title}>TRAVEL VOUCHERS</Text>
-          <Text style={styles.voucherBadge}>Voucher no. {data.voucherNumber}</Text>
+          <View style={styles.voucherStub}>
+            <Text style={styles.voucherStubLabel}>Voucher no.</Text>
+            <Text style={styles.voucherStubNumber}>{data.voucherNumber}</Text>
+          </View>
         </View>
 
         {t.guidance_text ? <Text style={styles.guidance}>{t.guidance_text}</Text> : null}

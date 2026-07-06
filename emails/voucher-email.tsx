@@ -8,6 +8,7 @@ export interface VoucherEmailProps {
   departure: string
   consultantName: string
   introText?: string
+  footerTagline?: string
 }
 
 export function VoucherEmail({
@@ -17,9 +18,10 @@ export function VoucherEmail({
   departure,
   consultantName,
   introText,
+  footerTagline,
 }: VoucherEmailProps) {
   return (
-    <BaseLayout preview={`Travel voucher for ${bookingNumber}`}>
+    <BaseLayout preview={`Travel voucher for ${bookingNumber}`} footerTagline={footerTagline}>
       <Heading style={heading}>Your travel voucher</Heading>
       <Text style={paragraph}>Dear {customerName || "traveller"},</Text>
       <Text style={paragraph}>

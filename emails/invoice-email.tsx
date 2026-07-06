@@ -16,6 +16,8 @@ export interface InvoiceEmailProps {
   dueDate?: string | null
   lines?: InvoiceEmailLine[]
   introText?: string
+  closingText?: string
+  footerTagline?: string
 }
 
 export function InvoiceEmail({
@@ -28,12 +30,14 @@ export function InvoiceEmail({
   dueDate,
   lines = [],
   introText,
+  closingText,
+  footerTagline,
 }: InvoiceEmailProps) {
   const invoiceLabel = invoiceKind === "deposit" ? "Deposit invoice" : "Final invoice"
   const preview = `${invoiceLabel} ${invoiceNumber} for ${bookingNumber}`
 
   return (
-    <BaseLayout preview={preview}>
+    <BaseLayout preview={preview} footerTagline={footerTagline}>
       <Heading style={heading}>{invoiceLabel}</Heading>
       <Text style={paragraph}>Dear {customerName || "traveller"},</Text>
       <Text style={paragraph}>
@@ -81,8 +85,8 @@ export function InvoiceEmail({
       ) : null}
 
       <Text style={paragraph}>
-        Once payment has been received, we will update your booking and continue preparing the
-        next step of your journey.
+        {closingText?.trim() ||
+          "Once payment has been received, we will update your booking and continue preparing the next step of your journey."}
       </Text>
     </BaseLayout>
   )

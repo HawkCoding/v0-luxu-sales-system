@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { NextResponse } from "next/server"
-import { createSessionClient } from "@/lib/supabase/server"
+import { createServiceClient, createSessionClient } from "@/lib/supabase/server"
 import type { Database } from "@/lib/supabase/types"
 
 export interface SettingsAccessContext {
@@ -192,6 +192,59 @@ export async function getAttachmentMaxSizeMb(
     .maybeSingle()
   const parsed = Number(data?.value ?? "")
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_ATTACHMENT_MAX_SIZE_MB
+}
+
+export const DOCUMENT_TEXT_SETTING_KEYS = [
+  "quote_doc_title",
+  "quote_doc_footer_text",
+  "quote_email_default_intro",
+  "quote_email_accept_text",
+  "invoice_email_intro_deposit",
+  "invoice_email_intro_final",
+  "invoice_email_closing",
+] as const
+
+export type DocumentTextSettings = Record<(typeof DOCUMENT_TEXT_SETTING_KEYS)[number], string>
+
+const DOCUMENT_TEXT_DEFAULTS: DocumentTextSettings = {
+  quote_doc_title: "PROVISIONAL QUOTATION",
+  quote_doc_footer_text:
+    "This quotation is valid until {{validUntil}} and is subject to availability. Prices are quoted in {{currency}}. Luxus Travel & Tours — Luxury Rail Journeys.",
+  quote_email_default_intro:
+    "Thank you for your enquiry. We are pleased to share your Luxus Travel & Tours quote for review.",
+  quote_email_accept_text:
+    "To accept this quote, please reply to this email and we will prepare the next booking steps for you.",
+  invoice_email_intro_deposit: "Please find the deposit invoice for your Luxus booking below.",
+  invoice_email_intro_final: "Please find the final invoice for your Luxus booking below.",
+  invoice_email_closing:
+    "Once payment has been received, we will update your booking and continue preparing the next step of your journey.",
+}
+
+export async function getDocumentTextSettings(
+  supabase: SupabaseClient<Database>,
+): Promise<DocumentTextSettings> {
+  const { data } = await supabase
+    .from("app_settings")
+    .select("key, value")
+    .in("key", DOCUMENT_TEXT_SETTING_KEYS)
+
+  const map = Object.fromEntries((data ?? []).map((r) => [r.key, r.value]))
+
+  return Object.fromEntries(
+    DOCUMENT_TEXT_SETTING_KEYS.map((key) => [key, map[key]?.trim() || DOCUMENT_TEXT_DEFAULTS[key]]),
+  ) as DocumentTextSettings
+}
+
+const DEFAULT_EMAIL_FOOTER_TAGLINE = "Luxury train journeys, handled with care."
+
+export async function getEmailFooterTagline(): Promise<string> {
+  const supabase = createServiceClient()
+  const { data } = await supabase
+    .from("app_settings")
+    .select("value")
+    .eq("key", "email_footer_tagline")
+    .maybeSingle()
+  return data?.value?.trim() || DEFAULT_EMAIL_FOOTER_TAGLINE
 }
 
 export async function getAttachmentAllowedMimeTypes(

@@ -28,6 +28,8 @@ export interface QuoteEmailProps {
   customerName: string
   introText: string
   quote: QuoteEmailQuote
+  acceptText?: string
+  footerTagline?: string
 }
 
 function formatMoney(amount: number): string {
@@ -55,9 +57,9 @@ function renderMultilineText(value: string): string[] {
     .filter(Boolean)
 }
 
-export function QuoteEmail({ customerName, introText, quote }: QuoteEmailProps) {
+export function QuoteEmail({ customerName, introText, quote, acceptText, footerTagline }: QuoteEmailProps) {
   return (
-    <BaseLayout preview={`Quote ${quote.quoteNumber} from Luxus Travel & Tours`}>
+    <BaseLayout preview={`Quote ${quote.quoteNumber} from Luxus Travel & Tours`} footerTagline={footerTagline}>
       <Heading style={heading}>Your luxury rail quote</Heading>
       <Text style={text}>Dear {customerName || "traveller"},</Text>
       {renderMultilineText(introText).map((line) => (
@@ -112,8 +114,8 @@ export function QuoteEmail({ customerName, introText, quote }: QuoteEmailProps) 
 
       <Hr style={rule} />
       <Text style={text}>
-        To accept this quote, please reply to this email and we will prepare the next booking
-        steps for you.
+        {acceptText?.trim() ||
+          "To accept this quote, please reply to this email and we will prepare the next booking steps for you."}
       </Text>
     </BaseLayout>
   )

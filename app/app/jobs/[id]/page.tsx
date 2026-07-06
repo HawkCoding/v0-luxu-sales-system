@@ -47,7 +47,6 @@ import { StageTransitionModal } from "@/components/stage-transition-modal"
 import { GenerateDepositInvoiceDialog } from "@/components/generate-deposit-invoice-dialog"
 import { GenerateFinalInvoiceDialog } from "@/components/generate-final-invoice-dialog"
 import { GenerateVoucherDialog } from "@/components/generate-voucher-dialog"
-import { BookingPackageSection } from "@/components/booking-package-section"
 import { PresenceAvatars } from "@/components/presence-avatars"
 import { useRecordPresence } from "@/hooks/use-record-presence"
 import { useVersionedSave } from "@/hooks/use-versioned-save"
@@ -63,7 +62,6 @@ interface JobPatchResponse {
 
 type JobDetailTab =
   | "enquiry"
-  | "package"
   | "quotes"
   | "payments"
   | "correspondence"
@@ -74,7 +72,6 @@ type JobDetailTab =
 
 const JOB_DETAIL_TABS = new Set<JobDetailTab>([
   "enquiry",
-  "package",
   "quotes",
   "payments",
   "correspondence",
@@ -804,7 +801,6 @@ export default function JobDetailPage() {
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(parseJobDetailTab(value))} className="space-y-4">
         <TabsList className="bg-secondary/50">
           <TabsTrigger value="enquiry" className="text-xs">Enquiry</TabsTrigger>
-          <TabsTrigger value="package" className="text-xs">Package</TabsTrigger>
           <TabsTrigger value="quotes" className="text-xs">Quotes ({quotes.length})</TabsTrigger>
           <TabsTrigger value="payments" className="text-xs">Payments ({payments.length})</TabsTrigger>
           <TabsTrigger value="correspondence" className="text-xs">Emails Sent ({correspondence.length})</TabsTrigger>
@@ -827,9 +823,6 @@ export default function JobDetailPage() {
             onTransportRequestsChange={mutate}
             onFieldsUpdated={mutate}
           />
-        </TabsContent>
-        <TabsContent value="package">
-          <BookingPackageSection jobId={id} />
         </TabsContent>
         <TabsContent value="quotes">
           <JobQuotesTab
