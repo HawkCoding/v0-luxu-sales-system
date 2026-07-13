@@ -172,10 +172,16 @@ export async function getAttachmentMaxSizeMb(
 }
 
 // Email wording lives in the templates table (Templates page); these keys
-// only cover text rendered into the quote PDF itself.
+// only cover text rendered into the generated PDFs themselves.
 export const DOCUMENT_TEXT_SETTING_KEYS = [
   "quote_doc_title",
   "quote_doc_footer_text",
+  "voucher_doc_title",
+  "invoice_doc_deposit_title",
+  "invoice_doc_final_title",
+  "invoice_doc_footer_text",
+  "itinerary_doc_journey_heading",
+  "itinerary_doc_intro_text",
 ] as const
 
 export type DocumentTextSettings = Record<(typeof DOCUMENT_TEXT_SETTING_KEYS)[number], string>
@@ -184,6 +190,13 @@ const DOCUMENT_TEXT_DEFAULTS: DocumentTextSettings = {
   quote_doc_title: "PROVISIONAL QUOTATION",
   quote_doc_footer_text:
     "This quotation is valid until {{validUntil}} and is subject to availability. Prices are quoted in {{currency}}. Luxus Travel & Tours — Luxury Rail Journeys.",
+  voucher_doc_title: "TRAVEL VOUCHERS",
+  invoice_doc_deposit_title: "DEPOSIT INVOICE",
+  invoice_doc_final_title: "FINAL INVOICE",
+  invoice_doc_footer_text: "Luxus Travel & Tours — Luxury Rail Journeys",
+  itinerary_doc_journey_heading: "Your Journey",
+  // Optional paragraph; empty means the itinerary renders without an intro.
+  itinerary_doc_intro_text: "",
 }
 
 export async function getDocumentTextSettings(

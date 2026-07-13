@@ -91,6 +91,13 @@ describe("GET /api/settings/document-text", () => {
     expect(res.status).toBe(200)
     expect(body.quote_doc_title).toBe("OLD TITLE")
     expect(body.quote_doc_footer_text).toBeTruthy()
+    // New PDF wording keys fall back to their defaults.
+    expect(body.voucher_doc_title).toBe("TRAVEL VOUCHERS")
+    expect(body.invoice_doc_deposit_title).toBe("DEPOSIT INVOICE")
+    expect(body.invoice_doc_final_title).toBe("FINAL INVOICE")
+    expect(body.invoice_doc_footer_text).toBeTruthy()
+    expect(body.itinerary_doc_journey_heading).toBe("Your Journey")
+    expect(body.itinerary_doc_intro_text).toBe("")
     // Email wording now lives in the templates table, not settings.
     expect(body.quote_email_accept_text).toBeUndefined()
     expect(body.invoice_email_closing).toBeUndefined()
@@ -126,6 +133,38 @@ describe("PATCH /api/settings/document-text", () => {
 
     const res = await PATCH(makeRequest({ quote_doc_title: "" }))
     expect(res.status).toBe(400)
+  })
+
+  it("returns 400 for blank voucher title", async () => {
+    makeAuth()
+
+    const res = await PATCH(makeRequest({ voucher_doc_title: "" }))
+    expect(res.status).toBe(400)
+  })
+
+  it("accepts an empty itinerary intro (clears the paragraph)", async () => {
+    makeAuth()
+
+    const res = await PATCH(makeRequest({ itinerary_doc_intro_text: "" }))
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(body).toMatchObject({ itinerary_doc_intro_text: "" })
+  })
+
+  it("persists new PDF wording keys", async () => {
+    makeAuth()
+
+    const res = await PATCH(
+      makeRequest({ voucher_doc_title: "SERVICE VOUCHERS", invoice_doc_footer_text: "Custom footer" }),
+    )
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(body).toMatchObject({
+      voucher_doc_title: "SERVICE VOUCHERS",
+      invoice_doc_footer_text: "Custom footer",
+    })
   })
 
   it("returns 200 and persists the field", async () => {

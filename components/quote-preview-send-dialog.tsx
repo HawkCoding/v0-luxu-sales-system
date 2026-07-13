@@ -14,10 +14,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import dynamic from "next/dynamic"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
+import { Skeleton } from "@/components/ui/skeleton"
 import { replaceContentSlot } from "@/lib/templates/content-slot"
+
+const HtmlBodyEditor = dynamic(
+  () => import("@/components/ui/html-body-editor").then((m) => m.HtmlBodyEditor),
+  { ssr: false, loading: () => <Skeleton className="min-h-64" /> },
+)
 import type { Quote } from "@/lib/types"
 
 interface QuotePreviewSendDialogProps {
@@ -164,7 +170,7 @@ export function QuotePreviewSendDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid min-h-0 gap-4 md:grid-cols-[320px_1fr]">
+        <div className="grid min-h-0 gap-4 md:grid-cols-[420px_1fr]">
           <div className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor={`quote-subject-${quote.id}`}>Subject</Label>
@@ -177,11 +183,10 @@ export function QuotePreviewSendDialog({
             {content !== null && (
               <div className="space-y-1.5">
                 <Label htmlFor={`quote-body-${quote.id}`}>Email body (this send only)</Label>
-                <Textarea
+                <HtmlBodyEditor
                   id={`quote-body-${quote.id}`}
-                  className="min-h-64 font-mono text-xs"
                   value={content}
-                  onChange={(event) => setContent(event.target.value)}
+                  onChange={setContent}
                 />
                 <p className="text-xs text-muted-foreground">
                   Default wording is edited on the Templates page (Quote Email template).

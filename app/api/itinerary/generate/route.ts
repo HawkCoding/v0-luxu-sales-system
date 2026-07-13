@@ -6,6 +6,7 @@ import { formatDisplayDateLong } from "@/lib/date-format"
 import { buildItineraryData } from "@/lib/itinerary/build-itinerary"
 import { checkItineraryReadiness } from "@/lib/itinerary/check-readiness"
 import { renderItineraryPdf } from "@/lib/itinerary/render-pdf"
+import { getDocumentTextSettings } from "@/lib/settings-access"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { CONSULTANTS, VOUCHER_TEMPLATE_DEFAULTS, type ConsultantAbbreviation, type VoucherTemplate } from "@/lib/types"
 import { firstRecord } from "@/lib/utils"
@@ -92,6 +93,7 @@ export async function POST(req: Request) {
   const [
     { data: bookingRaw, error: bookingError },
     { data: templateRaw },
+    documentText,
   ] = await Promise.all([
     supabase
       .from("bookings")
@@ -105,6 +107,7 @@ export async function POST(req: Request) {
       .select("id, logo_url, banner_url, header_text, product_line, accent_colour, section_bg, font_family, section_order, hidden_sections, footer_company, footer_phone, footer_email, guidance_text")
       .limit(1)
       .maybeSingle(),
+    getDocumentTextSettings(supabase),
   ])
 
   if (bookingError || !bookingRaw) return jsonError("Booking not found", 404)
@@ -154,7 +157,12 @@ export async function POST(req: Request) {
 
   let pdfBuffer: Buffer
   try {
-    pdfBuffer = await renderItineraryPdf({ data: itineraryData, template })
+    pdfBuffer = await renderItineraryPdf({
+      data: itineraryData,
+      template,
+      journeyHeading: documentText.itinerary_doc_journey_heading,
+      introText: documentText.itinerary_doc_intro_text,
+    })
   } catch (error) {
     console.error("itinerary:render-pdf", error)
     return jsonError("Itinerary PDF could not be rendered", 500)

@@ -5,7 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
+import { Skeleton } from "@/components/ui/skeleton"
+import dynamic from "next/dynamic"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useRole } from "@/lib/role-context"
@@ -27,6 +28,30 @@ import type { Template } from "@/lib/types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
 import { VoucherTemplateEditor } from "@/components/voucher-template-editor"
 import { DocumentTextSettingsEditor } from "@/components/document-text-settings-editor"
+import { PdfPreviewButtons } from "@/components/pdf-preview-buttons"
+
+const HtmlBodyEditor = dynamic(
+  () => import("@/components/ui/html-body-editor").then((m) => m.HtmlBodyEditor),
+  { ssr: false, loading: () => <Skeleton className="min-h-64" /> },
+)
+
+// Block-kind tokens for a template key ({{quoteSummaryTable}}, {{bankingDetails}})
+// must be treated as opaque blocks so they serialize back at block level.
+function blockTokensFor(key: string): string[] {
+  return getTokenSpecs(key)
+    .filter((s) => s.kind === "block")
+    .map((s) => s.name)
+}
+
+// Custom templates have no registry entry, so offer every known block token —
+// a user hand-typing {{bankingDetails}} still gets block treatment.
+const ALL_BLOCK_TOKENS: string[] = (() => {
+  const set = new Set<string>()
+  for (const specs of Object.values(TEMPLATE_TOKENS)) {
+    for (const spec of specs) if (spec.kind === "block") set.add(spec.name)
+  }
+  return [...set]
+})()
 
 // Union of all system-template tokens for the reference dialog — the token
 // registry (lib/templates/registry.ts) is the source of truth.
@@ -246,10 +271,15 @@ export default function TemplatesPage() {
         <TabsContent value="voucher">
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-lg">Voucher Template</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Customise the visual design and content of voucher PDFs sent to guests.
-              </p>
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <CardTitle className="text-lg">Voucher Template</CardTitle>
+                  <p className="text-sm text-muted-foreground mt-1.5">
+                    Customise the visual design and content of voucher PDFs sent to guests.
+                  </p>
+                </div>
+                {can("edit:templates") && <PdfPreviewButtons types={["voucher", "itinerary"]} />}
+              </div>
             </CardHeader>
             <CardContent className="pb-20">
               {voucherLoading ? (
@@ -269,10 +299,15 @@ export default function TemplatesPage() {
         <TabsContent value="documents">
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-lg">Document Wording</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Customise the wording used in quote PDFs, invoice emails, and quote emails.
-              </p>
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <CardTitle className="text-lg">Document Wording</CardTitle>
+                  <p className="text-sm text-muted-foreground mt-1.5">
+                    Customise the wording rendered into quote, voucher, invoice, and itinerary PDFs.
+                  </p>
+                </div>
+                {can("edit:templates") && <PdfPreviewButtons />}
+              </div>
             </CardHeader>
             <CardContent className="pb-6">
               <DocumentTextSettingsEditor canEdit={can("edit:templates")} />
@@ -283,10 +318,10 @@ export default function TemplatesPage() {
 
       {/* Edit Email Template Dialog */}
       <Dialog open={!!editing} onOpenChange={(open) => !open && setEditing(null)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Edit Template</DialogTitle>
-            <DialogDescription>Modify the template subject and HTML body.</DialogDescription>
+            <DialogDescription>Modify the template subject and body.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div>
@@ -294,8 +329,14 @@ export default function TemplatesPage() {
               <Input value={editSubject} onChange={(e) => setEditSubject(e.target.value)} className="mt-1 text-sm" />
             </div>
             <div>
-              <label className="text-xs font-medium text-muted-foreground">Body (HTML)</label>
-              <Textarea value={editBody} onChange={(e) => setEditBody(e.target.value)} rows={12} className="mt-1 text-xs font-mono" />
+              <label className="text-xs font-medium text-muted-foreground">Body</label>
+              <div className="mt-1">
+                <HtmlBodyEditor
+                  value={editBody}
+                  onChange={setEditBody}
+                  blockTokens={editing ? blockTokensFor(editing.key) : ALL_BLOCK_TOKENS}
+                />
+              </div>
             </div>
             {editing && getTokenSpecs(editing.key).length > 0 && (
               <div>
@@ -327,7 +368,7 @@ export default function TemplatesPage() {
 
       {/* Create Email Template Dialog */}
       <Dialog open={creating} onOpenChange={(open) => !open && setCreating(false)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>New Template</DialogTitle>
             <DialogDescription>Create a custom email template. Use placeholder tokens for live data.</DialogDescription>
@@ -347,8 +388,10 @@ export default function TemplatesPage() {
               <Input value={createSubject} onChange={(e) => setCreateSubject(e.target.value)} className="mt-1 text-sm" />
             </div>
             <div>
-              <label className="text-xs font-medium text-muted-foreground">Body (HTML)</label>
-              <Textarea value={createBody} onChange={(e) => setCreateBody(e.target.value)} rows={12} className="mt-1 text-xs font-mono" />
+              <label className="text-xs font-medium text-muted-foreground">Body</label>
+              <div className="mt-1">
+                <HtmlBodyEditor value={createBody} onChange={setCreateBody} blockTokens={ALL_BLOCK_TOKENS} />
+              </div>
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" size="sm" onClick={() => setCreating(false)}>Cancel</Button>

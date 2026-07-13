@@ -7,6 +7,7 @@ import { VoucherDocument } from "./pdf/voucher-document"
 export interface RenderVoucherPdfInput {
   data: VoucherData
   template?: VoucherTemplate | null
+  docTitle?: string
 }
 
 const SLOW_RENDER_THRESHOLD_MS = 2_000

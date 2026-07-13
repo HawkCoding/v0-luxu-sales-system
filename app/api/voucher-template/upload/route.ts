@@ -7,7 +7,6 @@ const ALLOWED_KINDS = ["logo", "banner"] as const
 type UploadKind = (typeof ALLOWED_KINDS)[number]
 
 const BUCKET = "voucher-assets"
-const DIRECT_UPLOAD_MIME = "image/svg+xml"
 const CROPPED_MIME_BY_KIND: Record<UploadKind, "image/png" | "image/webp"> = {
   logo: "image/png",
   banner: "image/webp",
@@ -15,7 +14,6 @@ const CROPPED_MIME_BY_KIND: Record<UploadKind, "image/png" | "image/webp"> = {
 const EXTENSION_BY_MIME: Record<string, string> = {
   "image/png": "png",
   "image/webp": "webp",
-  "image/svg+xml": "svg",
 }
 
 function isUploadKind(value: string | null): value is UploadKind {
@@ -23,7 +21,6 @@ function isUploadKind(value: string | null): value is UploadKind {
 }
 
 function isAllowedVoucherAsset(file: File, kind: UploadKind): boolean {
-  if (file.type === DIRECT_UPLOAD_MIME) return true
   return file.type === CROPPED_MIME_BY_KIND[kind]
 }
 
@@ -59,8 +56,8 @@ export async function POST(req: Request) {
       {
         error:
           kind === "banner"
-            ? "Banner uploads must be cropped to WebP or provided as SVG."
-            : "Logo uploads must be cropped to PNG or provided as SVG.",
+            ? "Banner uploads must be cropped to WebP."
+            : "Logo uploads must be cropped to PNG.",
       },
       { status: 400 },
     )
