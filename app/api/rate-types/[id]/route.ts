@@ -1,3 +1,4 @@
+import { safeSupabaseError } from "@/lib/api/responses"
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
@@ -61,7 +62,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     .maybeSingle()
 
   if (existingError) {
-    return NextResponse.json({ error: existingError.message }, { status: 500 })
+    return safeSupabaseError("rate-types/[id]", existingError)
   }
   if (!existing) {
     return NextResponse.json({ error: "Rate type not found" }, { status: 404 })
@@ -74,7 +75,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       .update({ is_default: false })
       .neq("id", id)
     if (clearError) {
-      return NextResponse.json({ error: clearError.message }, { status: 500 })
+      return safeSupabaseError("rate-types/[id]", clearError)
     }
   }
 
@@ -104,7 +105,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       .select("id", { count: "exact", head: true })
       .eq("rate_type_id", id)
     if (refError) {
-      return NextResponse.json({ error: refError.message }, { status: 500 })
+      return safeSupabaseError("rate-types/[id]", refError)
     }
     if ((count ?? 0) > 0) {
       return NextResponse.json(
@@ -132,7 +133,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     .single()
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return safeSupabaseError("rate-types/[id]", error)
   }
 
   return NextResponse.json(mapRateType(data))

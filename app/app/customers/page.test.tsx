@@ -3,7 +3,7 @@ import { renderToString } from "react-dom/server"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const customersPageMock = vi.hoisted(() => ({
-  useAllData: vi.fn(),
+  useData: vi.fn(),
 }))
 
 vi.mock("@/lib/use-data", () => customersPageMock)
@@ -80,11 +80,11 @@ function renderCustomersPage(): string {
 
 describe("CustomersPage", () => {
   beforeEach(() => {
-    customersPageMock.useAllData.mockReset()
+    customersPageMock.useData.mockReset()
   })
 
   it("renders the loading state", () => {
-    customersPageMock.useAllData.mockReturnValue({
+    customersPageMock.useData.mockReturnValue({
       data: undefined,
       isLoading: true,
       error: null,
@@ -95,7 +95,7 @@ describe("CustomersPage", () => {
   })
 
   it("renders the error state", () => {
-    customersPageMock.useAllData.mockReturnValue({
+    customersPageMock.useData.mockReturnValue({
       data: undefined,
       isLoading: false,
       error: new Error("Failed to load"),
@@ -106,7 +106,7 @@ describe("CustomersPage", () => {
   })
 
   it("renders the empty state", () => {
-    customersPageMock.useAllData.mockReturnValue({
+    customersPageMock.useData.mockReturnValue({
       data: { customers: [], bookings: [] },
       isLoading: false,
       error: null,
@@ -117,7 +117,7 @@ describe("CustomersPage", () => {
   })
 
   it("renders customers with repeat status in the success state", () => {
-    customersPageMock.useAllData.mockReturnValue({
+    customersPageMock.useData.mockReturnValue({
       data: {
         customers: [
           {

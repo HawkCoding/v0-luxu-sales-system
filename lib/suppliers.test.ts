@@ -52,6 +52,7 @@ const routeRow: RouteRow = {
   dropoff_point: null,
   active: true,
   direction_mode: "one_way",
+  duration_days: null,
   transport_service_type: null,
   included_km_per_day: null,
   extra_km_price: null,

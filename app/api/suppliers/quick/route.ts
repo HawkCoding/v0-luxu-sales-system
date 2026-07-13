@@ -210,6 +210,7 @@ export async function POST(req: Request) {
     pickup_point: isTransport ? parsed.pickupPoint.trim() : null,
     dropoff_point: isTransport ? parsed.dropoffPoint.trim() : null,
     direction_mode: "one_way",
+    duration_days: null,
     active: true,
     created_at: now,
     updated_at: now,

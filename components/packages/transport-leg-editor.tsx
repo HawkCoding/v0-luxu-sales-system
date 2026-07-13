@@ -105,6 +105,12 @@ export function TransportLegEditor({ leg, value, onChange }: TransportLegEditorP
         </div>
       </div>
 
+      {value.selected && leg.routes.length === 0 ? (
+        <p className="max-w-[280px] rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          No routes configured for {leg.supplierName} — add one under Suppliers before booking it.
+        </p>
+      ) : null}
+
       {value.selected && leg.routes.length > 1 ? (
         <div className="max-w-[280px] space-y-1.5">
           <Label>{isRental ? "Rental route" : "Transfer route"}</Label>
@@ -184,7 +190,14 @@ export function TransportLegEditor({ leg, value, onChange }: TransportLegEditorP
                     </SelectContent>
                   </Select>
                 </div>
-              ) : null}
+              ) : (
+                <div className="space-y-1.5 md:col-span-2">
+                  <Label>Vehicle category</Label>
+                  <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                    No vehicle categories configured for {leg.supplierName} — add one under Suppliers before booking it.
+                  </p>
+                </div>
+              )}
               <div className="space-y-1.5">
                 <Label>Passengers</Label>
                 <NumericInput

@@ -132,6 +132,7 @@ async function findPackageId(supabase: ServiceClient, packageOption: unknown): P
     .from("packages")
     .select("id, name")
     .eq("active", true)
+    .is("booking_id", null)
 
   const match = (packages ?? []).find((item) => {
     const normalizedName = normalizeLookupValue(item.name)

@@ -1,3 +1,4 @@
+import { safeSupabaseError } from "@/lib/api/responses"
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
@@ -54,7 +55,7 @@ export async function GET() {
     .select("kind, rate_type_id")
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return safeSupabaseError("rate-types/supplier-defaults", error)
   }
 
   const defaults: SupplierKindDefaultRateType[] = (data ?? []).map((row) => ({
@@ -95,7 +96,7 @@ export async function PUT(req: Request) {
     .in("id", rateTypeIds)
 
   if (rateTypeError) {
-    return NextResponse.json({ error: rateTypeError.message }, { status: 500 })
+    return safeSupabaseError("rate-types/supplier-defaults", rateTypeError)
   }
 
   const valid = new Set((rateTypes ?? []).filter((rt) => !rt.archived_at).map((rt) => rt.id))
@@ -116,7 +117,7 @@ export async function PUT(req: Request) {
     )
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return safeSupabaseError("rate-types/supplier-defaults", error)
   }
 
   const defaults: SupplierKindDefaultRateType[] = parsed.data.defaults.map((entry) => ({

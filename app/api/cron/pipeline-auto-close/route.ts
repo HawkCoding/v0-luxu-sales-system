@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { renderThankYouEmail } from "@/lib/email-templates/thank-you"
+import { composeEmail } from "@/lib/templates/compose-email"
 import { applyTransition } from "@/lib/pipeline/apply-transition"
 import { createServiceClient } from "@/lib/supabase/server"
 import type { PipelineStage, Source } from "@/lib/types"
@@ -90,20 +90,28 @@ export async function GET(request: Request) {
       today.getTime() <= thankYouCatchupDeadline.getTime() &&
       !thankYouBookingIds.has(booking.id)
     ) {
-      const rendered = renderThankYouEmail({
-        customerFirstName: booking.customer?.first_name ?? "",
-        routeName: booking.route?.name ?? "",
-        tripEndDate: tripEndDate.toISOString().slice(0, 10),
-        consultantName: booking.consultant ?? "The Luxus team",
+      // Draft from the editable thank_you template — sent later with one
+      // click from the dashboard's scheduled-email queue.
+      const composed = await composeEmail(supabase, "thank_you", {
+        tokens: {
+          customerName: booking.customer?.first_name ?? "Valued Guest",
+          jobNumber: booking.booking_number,
+          routeName: booking.route?.name ?? "your journey",
+          tripEndDate: tripEndDate.toISOString().slice(0, 10),
+          consultantName: booking.consultant ?? "The Luxus team",
+        },
       })
+      if (!composed) {
+        return NextResponse.json({ error: "Thank-you template could not be resolved" }, { status: 500 })
+      }
       const { error: correspondenceError } = await supabase.from("correspondences").insert({
         booking_id: booking.id,
         channel: "email",
         kind: "thank_you",
         status: "scheduled",
         scheduled_at: new Date().toISOString(),
-        subject: rendered.subject,
-        body_html: rendered.bodyHtml,
+        subject: composed.subject,
+        body_html: composed.bodyHtml,
       })
 
       if (correspondenceError) {

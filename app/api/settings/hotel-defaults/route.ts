@@ -1,3 +1,4 @@
+import { safeSupabaseError } from "@/lib/api/responses"
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import {
@@ -107,7 +108,7 @@ export async function PATCH(req: Request) {
     { key: HOTEL_DEFAULT_CHECK_OUT_TIME_SETTING_KEY, value: checkOutTime, updated_at: now },
   ])
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeSupabaseError("settings/hotel-defaults", error)
 
   await writeAuditLog(context.value.supabase, {
     actor: context.value.actorName,

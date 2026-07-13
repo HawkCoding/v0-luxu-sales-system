@@ -15,7 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import type { PackageLeg } from "@/lib/types"
-import { isOptionalPackageLegKind } from "@/lib/types"
+import { getSupplierVocabulary, isOptionalPackageLegKind } from "@/lib/types"
 import type { PassengerTotals } from "@/lib/packages/passenger-totals"
 import {
   createDraftUnit,
@@ -36,6 +36,7 @@ interface SuiteLegEditorProps {
 
 export function SuiteLegEditor({ leg, value, onChange, expectedTotals }: SuiteLegEditorProps) {
   const isHotel = leg.supplierKind === "hotel_property"
+  const vocab = getSupplierVocabulary(leg.supplierKind)
   const optional = isOptionalPackageLegKind(leg.supplierKind)
   const showPassengerSplit = PASSENGER_SPLIT_SUPPLIER_KINDS.has(leg.supplierKind)
   const activeSuiteTypes = leg.suiteTypes.filter((suiteType) => suiteType.active)
@@ -172,7 +173,7 @@ export function SuiteLegEditor({ leg, value, onChange, expectedTotals }: SuiteLe
             return (
               <div key={unit.id} className="grid gap-3 rounded-md border p-3 md:grid-cols-2 xl:grid-cols-3">
                 <div className="space-y-1.5">
-                  <Label>{isHotel ? "Room type" : "Suite type"}</Label>
+                  <Label>{vocab.suiteType}</Label>
                   <Select
                     value={unit.suiteTypeId ?? NONE_VALUE}
                     onValueChange={(next) => updateUnit(unit.id, { suiteTypeId: next === NONE_VALUE ? null : next })}

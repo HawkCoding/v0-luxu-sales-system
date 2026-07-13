@@ -1,3 +1,4 @@
+import { safeSupabaseError } from "@/lib/api/responses"
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
@@ -75,7 +76,7 @@ export async function GET() {
     .eq("key", QUOTE_VALIDITY_DAYS_SETTING_KEY)
     .maybeSingle()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeSupabaseError("settings/quote-validity", error)
 
   return NextResponse.json({
     quoteValidityDays: parseQuoteValidityDays(data?.value),
@@ -117,7 +118,7 @@ export async function PATCH(req: Request) {
       updated_at: new Date().toISOString(),
     })
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeSupabaseError("settings/quote-validity", error)
 
   await writeAuditLog(context.value.supabase, {
     actor: context.value.actorName,

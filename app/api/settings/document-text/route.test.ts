@@ -90,7 +90,10 @@ describe("GET /api/settings/document-text", () => {
 
     expect(res.status).toBe(200)
     expect(body.quote_doc_title).toBe("OLD TITLE")
-    expect(body.quote_email_accept_text).toContain("accept this quote")
+    expect(body.quote_doc_footer_text).toBeTruthy()
+    // Email wording now lives in the templates table, not settings.
+    expect(body.quote_email_accept_text).toBeUndefined()
+    expect(body.invoice_email_closing).toBeUndefined()
   })
 })
 

@@ -1,10 +1,11 @@
-"use client"
+﻿"use client"
 
 import Link from "next/link"
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
 import { InboundEmailSettings } from "@/components/inbound-email-settings"
 import { BackupSettings } from "@/components/backup-settings"
+import { BankingSettingsEditor } from "@/components/banking-settings-editor"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -157,8 +158,8 @@ function UserManagementCard() {
     e.preventDefault()
     setSubmitError("")
     if (!setPasswordFor) return
-    if (newPassword.length < 6) {
-      setSubmitError("Password must be at least 6 characters")
+    if (newPassword.length < 10) {
+      setSubmitError("Password must be at least 10 characters")
       return
     }
     if (newPassword !== confirmPassword) {
@@ -199,8 +200,8 @@ function UserManagementCard() {
       setCreateError("Email is required")
       return
     }
-    if (createForm.password.length < 6) {
-      setCreateError("Password must be at least 6 characters")
+    if (createForm.password.length < 10) {
+      setCreateError("Password must be at least 10 characters")
       return
     }
     if (createForm.password !== createForm.confirmPassword) {
@@ -906,7 +907,7 @@ function CompanyInfoCard({ canEdit }: { canEdit: boolean }) {
                   onClick={() => handleSave("business_name", businessName, "Business name")}
                   disabled={savingField === "business_name" || !businessName.trim()}
                 >
-                  {savingField === "business_name" ? "Saving…" : "Save"}
+                  {savingField === "business_name" ? "Savingâ€¦" : "Save"}
                 </Button>
               )}
             </div>
@@ -927,7 +928,7 @@ function CompanyInfoCard({ canEdit }: { canEdit: boolean }) {
                   onClick={() => handleSave("company_email", companyEmail, "Email")}
                   disabled={savingField === "company_email" || !companyEmail.trim()}
                 >
-                  {savingField === "company_email" ? "Saving…" : "Save"}
+                  {savingField === "company_email" ? "Savingâ€¦" : "Save"}
                 </Button>
               )}
             </div>
@@ -947,7 +948,7 @@ function CompanyInfoCard({ canEdit }: { canEdit: boolean }) {
                   onClick={() => handleSave("company_phone", companyPhone, "Phone")}
                   disabled={savingField === "company_phone" || !companyPhone.trim()}
                 >
-                  {savingField === "company_phone" ? "Saving…" : "Save"}
+                  {savingField === "company_phone" ? "Savingâ€¦" : "Save"}
                 </Button>
               )}
             </div>
@@ -976,7 +977,7 @@ function CompanyInfoCard({ canEdit }: { canEdit: boolean }) {
                     !Number.isFinite(Number(vatRate))
                   }
                 >
-                  {savingField === "vat_rate" ? "Saving…" : "Save"}
+                  {savingField === "vat_rate" ? "Savingâ€¦" : "Save"}
                 </Button>
               )}
             </div>
@@ -1315,8 +1316,8 @@ function DefaultAgeBandsCard({ canEdit }: { canEdit: boolean }) {
           </div>
         </div>
         <p className="text-xs text-muted-foreground">
-          Resolves to: Infant <span className="tabular-nums">0–{Number.isFinite(infantValue) ? infantValue : "?"}</span>,
-          Child <span className="tabular-nums">{Number.isFinite(infantValue) ? infantValue + 1 : "?"}–{Number.isFinite(childValue) ? childValue : "?"}</span>,
+          Resolves to: Infant <span className="tabular-nums">0â€“{Number.isFinite(infantValue) ? infantValue : "?"}</span>,
+          Child <span className="tabular-nums">{Number.isFinite(infantValue) ? infantValue + 1 : "?"}â€“{Number.isFinite(childValue) ? childValue : "?"}</span>,
           Adult <span className="tabular-nums">{Number.isFinite(childValue) ? childValue + 1 : "?"}+</span>
         </p>
         {canEdit && (
@@ -1331,7 +1332,7 @@ function DefaultAgeBandsCard({ canEdit }: { canEdit: boolean }) {
         )}
         {!isValid && (
           <p className="text-xs text-destructive">
-            Infant max must be ≤ child max, and both must be between 0 and 17.
+            Infant max must be â‰¤ child max, and both must be between 0 and 17.
           </p>
         )}
       </CardContent>
@@ -1581,7 +1582,6 @@ function SessionTimeoutSettingsCard({ canEdit }: { canEdit: boolean }) {
 function QuoteFollowUpSettingsCard({ canEdit }: { canEdit: boolean }) {
   const [enabled, setEnabled] = useState(true)
   const [cadenceInput, setCadenceInput] = useState("3,7")
-  const [emailTemplate, setEmailTemplate] = useState("")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -1589,11 +1589,10 @@ function QuoteFollowUpSettingsCard({ canEdit }: { canEdit: boolean }) {
     let cancelled = false
     fetch("/api/settings/quote-follow-up")
       .then((r) => r.json())
-      .then((d: { enabled?: boolean; cadence?: number[]; template?: string }) => {
+      .then((d: { enabled?: boolean; cadence?: number[] }) => {
         if (cancelled) return
         if (typeof d.enabled === "boolean") setEnabled(d.enabled)
         if (Array.isArray(d.cadence)) setCadenceInput(d.cadence.join(","))
-        if (typeof d.template === "string") setEmailTemplate(d.template)
       })
       .catch(() => toast.error("Failed to load quote follow-up settings"))
       .finally(() => { if (!cancelled) setLoading(false) })
@@ -1613,7 +1612,7 @@ function QuoteFollowUpSettingsCard({ canEdit }: { canEdit: boolean }) {
       const res = await fetch("/api/settings/quote-follow-up", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled, cadence: parsedCadence, template: emailTemplate }),
+        body: JSON.stringify({ enabled, cadence: parsedCadence }),
       })
       if (!res.ok) throw new Error()
       toast.success("Quote follow-up settings saved")
@@ -1665,20 +1664,13 @@ function QuoteFollowUpSettingsCard({ canEdit }: { canEdit: boolean }) {
           )}
         </div>
 
-        <div className="space-y-1">
-          <Label htmlFor="follow-up-template" className="text-xs font-medium text-muted-foreground">
-            Email body template (HTML — supports {"{{customerName}}"}, {"{{jobNumber}}"}, {"{{lastSentDate}}"})
-          </Label>
-          <Textarea
-            id="follow-up-template"
-            value={emailTemplate}
-            onChange={(e) => setEmailTemplate(e.target.value)}
-            readOnly={!canEdit}
-            disabled={loading}
-            rows={5}
-            className="font-mono text-xs"
-          />
-        </div>
+        <p className="text-xs text-muted-foreground">
+          The follow-up email wording is edited on the{" "}
+          <Link href="/app/templates" className="underline underline-offset-2 hover:text-foreground">
+            Templates page
+          </Link>{" "}
+          (Follow Up template).
+        </p>
 
         {canEdit && (
           <Button
@@ -1817,6 +1809,18 @@ export default function SettingsPage() {
       </div>
 
       <CompanyInfoCard canEdit={canEditSettings} />
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">Banking Details</CardTitle>
+          <CardDescription className="text-xs">
+            Shown on invoice PDFs and in invoice/reminder emails ({"{{bankingDetails}}"} template token).
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <BankingSettingsEditor canEdit={canEditDepositSettings} />
+        </CardContent>
+      </Card>
 
       <DepositSettingsCard canEdit={canEditDepositSettings} />
 

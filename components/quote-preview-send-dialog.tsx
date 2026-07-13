@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { Loader2, Mail, RotateCcw, Send } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+import { Loader2, Mail, Send } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { useOptimisticSend } from "@/hooks/use-optimistic-send"
@@ -17,6 +17,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { replaceContentSlot } from "@/lib/templates/content-slot"
 import type { Quote } from "@/lib/types"
 
 interface QuotePreviewSendDialogProps {
@@ -29,32 +30,38 @@ interface QuotePreviewSendDialogProps {
 
 interface PreviewResponse {
   html?: string
+  bodyContentHtml?: string
   subject?: string
-  introText?: string
   quoteNumber?: string
+  warnings?: string[]
   error?: string
 }
-
-const DEFAULT_INTRO =
-  "Thank you for your enquiry. We are pleased to share your Luxus Travel & Tours quote for review."
 
 export function QuotePreviewSendDialog({
   quote,
   bookingNumber,
-  customerName,
   emailImportNeedsReview = false,
   onSent,
 }: QuotePreviewSendDialogProps) {
   const [open, setOpen] = useState(false)
   const [subject, setSubject] = useState("")
-  const [introText, setIntroText] = useState(DEFAULT_INTRO)
   const [html, setHtml] = useState("")
+  const [content, setContent] = useState<string | null>(null)
+  const [warnings, setWarnings] = useState<string[]>([])
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const optimisticSend = useOptimisticSend()
 
-  async function loadPreview(nextIntroText = introText, nextSubject = subject) {
+  // The email is composed server-side from the quote_email template; edits
+  // here are spliced into the branded wrapper for this send only.
+  const finalHtml = useMemo(() => {
+    if (!html) return ""
+    if (content === null) return html
+    return replaceContentSlot(html, content) ?? content
+  }, [html, content])
+
+  async function loadPreview() {
     setLoadingPreview(true)
     setError(null)
 
@@ -62,10 +69,7 @@ export function QuotePreviewSendDialog({
       const response = await fetch(`/api/quotes/${quote.id}/email-preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          introText: nextIntroText,
-          subject: nextSubject || undefined,
-        }),
+        body: JSON.stringify({}),
       })
       const payload = (await response.json()) as PreviewResponse
 
@@ -74,8 +78,9 @@ export function QuotePreviewSendDialog({
       }
 
       setHtml(payload.html)
-      setSubject(payload.subject ?? nextSubject)
-      setIntroText(payload.introText ?? nextIntroText)
+      setContent(payload.bodyContentHtml ?? null)
+      setSubject(payload.subject ?? `Quote ${payload.quoteNumber ?? bookingNumber}`)
+      setWarnings(payload.warnings ?? [])
     } catch (previewError) {
       const message = previewError instanceof Error ? previewError.message : "Failed to render quote preview"
       setError(message)
@@ -86,18 +91,10 @@ export function QuotePreviewSendDialog({
 
   useEffect(() => {
     if (open) {
-      const quoteNumber = quote.quoteNumber || bookingNumber
-      const nextSubject = `Quote ${quoteNumber} - Luxus Travel & Tours`
-      setSubject(nextSubject)
-      setIntroText(DEFAULT_INTRO)
-      void loadPreview(DEFAULT_INTRO, nextSubject)
+      void loadPreview()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, quote.id])
-
-  async function handleRefreshPreview() {
-    await loadPreview(introText, subject)
-  }
 
   async function handleSend() {
     if (emailImportNeedsReview) {
@@ -105,7 +102,7 @@ export function QuotePreviewSendDialog({
       return
     }
 
-    if (!html) {
+    if (!finalHtml) {
       setError("Preview the quote email before sending.")
       return
     }
@@ -114,7 +111,7 @@ export function QuotePreviewSendDialog({
     setError(null)
 
     const capturedSubject = subject
-    const capturedHtml = html
+    const capturedHtml = finalHtml
     // Close dialog immediately for Gmail-style undo flow.
     setOpen(false)
     setSending(false)
@@ -162,7 +159,8 @@ export function QuotePreviewSendDialog({
         <DialogHeader>
           <DialogTitle>Preview & Send Quote</DialogTitle>
           <DialogDescription>
-            Review the customer email before sending {quote.quoteNumber || bookingNumber}.
+            Review the customer email before sending {quote.quoteNumber || bookingNumber}. The quote
+            PDF is attached automatically.
           </DialogDescription>
         </DialogHeader>
 
@@ -176,28 +174,27 @@ export function QuotePreviewSendDialog({
                 onChange={(event) => setSubject(event.target.value)}
               />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor={`quote-intro-${quote.id}`}>Intro text</Label>
-              <Textarea
-                id={`quote-intro-${quote.id}`}
-                className="min-h-40"
-                value={introText}
-                onChange={(event) => setIntroText(event.target.value)}
-              />
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleRefreshPreview}
-              disabled={loadingPreview || sending}
-            >
-              {loadingPreview ? (
-                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-              ) : (
-                <RotateCcw className="mr-1.5 h-4 w-4" />
-              )}
-              Refresh Preview
-            </Button>
+            {content !== null && (
+              <div className="space-y-1.5">
+                <Label htmlFor={`quote-body-${quote.id}`}>Email body (this send only)</Label>
+                <Textarea
+                  id={`quote-body-${quote.id}`}
+                  className="min-h-64 font-mono text-xs"
+                  value={content}
+                  onChange={(event) => setContent(event.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Default wording is edited on the Templates page (Quote Email template).
+                </p>
+              </div>
+            )}
+            {warnings.length > 0 && (
+              <div className="rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400" role="alert">
+                {warnings.map((warning) => (
+                  <p key={warning}>{warning}</p>
+                ))}
+              </div>
+            )}
             {error ? (
               <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 {error}
@@ -211,12 +208,12 @@ export function QuotePreviewSendDialog({
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Rendering preview...
               </div>
-            ) : html ? (
+            ) : finalHtml ? (
               <iframe
                 title="Quote email preview"
                 className="h-[60vh] w-full bg-white"
                 sandbox=""
-                srcDoc={html}
+                srcDoc={finalHtml}
               />
             ) : (
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -230,7 +227,7 @@ export function QuotePreviewSendDialog({
           <Button variant="outline" onClick={() => setOpen(false)} disabled={sending}>
             Cancel
           </Button>
-          <Button onClick={handleSend} disabled={sending || loadingPreview || !html}>
+          <Button onClick={handleSend} disabled={sending || loadingPreview || !finalHtml}>
             {sending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Send className="mr-1.5 h-4 w-4" />}
             Send
           </Button>

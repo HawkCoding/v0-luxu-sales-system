@@ -237,7 +237,7 @@ export function CustomerDetailView({
     try {
       const updated = await saveCustomer(payload, options)
       await mutate()
-      await mutateGlobal("/api/data")
+      await mutateGlobal((key) => typeof key === "string" && key.startsWith("/api/data"))
       setIsEditing(false)
       setEditingStartedUpdatedAt(updated.updatedAt)
       setHasExternalUpdate(false)
@@ -278,7 +278,7 @@ export function CustomerDetailView({
       }
 
       await mutate()
-      await mutateGlobal("/api/data")
+      await mutateGlobal((key) => typeof key === "string" && key.startsWith("/api/data"))
       setIsAddingLinkedAccount(false)
       toast.success("Linked account saved")
     } catch (error) {
@@ -308,7 +308,7 @@ export function CustomerDetailView({
       }
 
       await mutate()
-      await mutateGlobal("/api/data")
+      await mutateGlobal((key) => typeof key === "string" && key.startsWith("/api/data"))
       setEditingLinkedAccountId(null)
       toast.success("Linked account updated")
     } catch (error) {
@@ -334,7 +334,7 @@ export function CustomerDetailView({
       }
 
       await mutate()
-      await mutateGlobal("/api/data")
+      await mutateGlobal((key) => typeof key === "string" && key.startsWith("/api/data"))
       toast.success("Linked account removed")
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not delete linked account"

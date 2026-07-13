@@ -38,7 +38,13 @@ interface GenerateItineraryResponse {
     contentBase64: string
     dataUrl: string
   }
-  email: { to: string; subject: string; bodyHtml: string }
+  email: {
+    to: string
+    subject: string
+    bodyHtml: string
+    bodyContentHtml?: string
+    warnings?: string[]
+  }
   error?: string
 }
 
@@ -193,6 +199,8 @@ export function GenerateItineraryDialog({
           bookingId={jobId}
           initialSubject={generated.email.subject}
           bodyHtml={generated.email.bodyHtml}
+          bodyContentHtml={generated.email.bodyContentHtml}
+          to={generated.email.to}
           kind="itinerary"
           attachments={[
             {

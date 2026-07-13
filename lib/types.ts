@@ -259,6 +259,8 @@ export interface SupplierVocabulary {
   routeHasLocations: boolean
   /** Whether the route exposes the one-way/round-trip Direction selector. Only meaningful for point-to-point journey suppliers where a return trip doubles the fare (trains, airlines). */
   routeHasDirection: boolean
+  /** Whether the route exposes a "Duration (days)" input for admins to record how long the journey takes. Train operators only; feeds the itinerary. */
+  routeHasDuration: boolean
   /** Whether the route name is auto-filled from origin/destination + direction while the name is empty; user edits always win. Train operators only. */
   routeNameAutoDerived: boolean
   showSingleSupplement: boolean
@@ -287,6 +289,7 @@ const JOURNEY_SUPPLIER_VOCABULARY: SupplierVocabulary = {
   priceLabel: "per person sharing",
   routeHasLocations: true,
   routeHasDirection: true,
+  routeHasDuration: true,
   routeNameAutoDerived: true,
   showSingleSupplement: true,
   showDurationNights: true,
@@ -317,6 +320,7 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     priceLabel: "per room per night",
     routeHasLocations: false,
     routeHasDirection: false,
+    routeHasDuration: false,
     routeNameAutoDerived: false,
     showSingleSupplement: false,
     showDurationNights: false,
@@ -344,6 +348,7 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     priceLabel: "per vehicle",
     routeHasLocations: true,
     routeHasDirection: true,
+    routeHasDuration: false,
     routeNameAutoDerived: false,
     showSingleSupplement: false,
     showDurationNights: false,
@@ -365,6 +370,7 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     priceLabel: "per day",
     routeHasLocations: true,
     routeHasDirection: false,
+    routeHasDuration: false,
     routeNameAutoDerived: false,
     showSingleSupplement: false,
     showDurationNights: false,
@@ -392,6 +398,7 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     priceLabel: "per person",
     routeHasLocations: false,
     routeHasDirection: false,
+    routeHasDuration: false,
     routeNameAutoDerived: false,
     showSingleSupplement: true,
     showDurationNights: true,
@@ -413,6 +420,7 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     priceLabel: "per person",
     routeHasLocations: true,
     routeHasDirection: true,
+    routeHasDuration: false,
     routeNameAutoDerived: false,
     showSingleSupplement: true,
     showDurationNights: false,
@@ -480,6 +488,8 @@ export interface SupplierRoute {
   dropoffPoint?: string | null
   vehicleRentalDetails?: VehicleRentalRouteDetails | null
   directionMode?: RouteDirectionMode
+  /** Trip length in whole days; train routes only, null otherwise. */
+  durationDays?: number | null
   active: boolean
   createdAt: string
   createdAtDisplay?: string

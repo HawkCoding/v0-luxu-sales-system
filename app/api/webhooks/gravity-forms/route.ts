@@ -1,14 +1,8 @@
 import { NextResponse } from "next/server"
-import { createHash, timingSafeEqual } from "node:crypto"
+import { isAuthorizedWebhookRequest } from "@/lib/api/webhook-secret"
 import { createServiceClient } from "@/lib/supabase/server"
 import { logError } from "@/lib/error-log"
 import type { Json } from "@/lib/supabase/types"
-
-function secretsMatch(provided: string, expected: string): boolean {
-  const providedHash = createHash("sha256").update(provided).digest()
-  const expectedHash = createHash("sha256").update(expected).digest()
-  return timingSafeEqual(providedHash, expectedHash)
-}
 
 function extractFormId(payload: Json): string | null {
   if (payload && typeof payload === "object" && !Array.isArray(payload) && "form_id" in payload) {
@@ -21,10 +15,7 @@ function extractFormId(payload: Json): string | null {
 // Raw intake only — field-to-column mapping into customers/bookings is a
 // follow-up once the web dev confirms each form's field-ID layout.
 export async function POST(request: Request): Promise<Response> {
-  const expectedSecret = process.env.GRAVITY_FORMS_WEBHOOK_SECRET
-  const providedSecret = request.headers.get("x-webhook-secret")
-
-  if (!expectedSecret || !providedSecret || !secretsMatch(providedSecret, expectedSecret)) {
+  if (!isAuthorizedWebhookRequest(request, process.env.GRAVITY_FORMS_WEBHOOK_SECRET)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 

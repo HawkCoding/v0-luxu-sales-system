@@ -6,7 +6,7 @@ import { formatDisplayDateLong } from "@/lib/date-format"
 import { buildItineraryData } from "@/lib/itinerary/build-itinerary"
 import { checkItineraryReadiness } from "@/lib/itinerary/check-readiness"
 import { renderItineraryPdf } from "@/lib/itinerary/render-pdf"
-import { renderItineraryEmail } from "@/lib/itinerary/render-itinerary-email"
+import { composeEmail } from "@/lib/templates/compose-email"
 import { CONSULTANTS, VOUCHER_TEMPLATE_DEFAULTS, type ConsultantAbbreviation, type VoucherTemplate } from "@/lib/types"
 import { firstRecord } from "@/lib/utils"
 
@@ -246,13 +246,16 @@ export async function POST(req: Request) {
   })
 
   const customerName = [customer.first_name, customer.last_name].filter(Boolean).join(" ").trim()
-  const bodyHtml = await renderItineraryEmail({
-    customerName,
-    bookingNumber: booking.booking_number,
-    tripTitle,
-    departure,
-    consultantName: consultant.name,
+  const composed = await composeEmail(supabase, "itinerary_email", {
+    tokens: {
+      customerName: customerName || "Valued Guest",
+      jobNumber: booking.booking_number,
+      tripTitle,
+      departureDate: departure,
+      consultantName: consultant.name,
+    },
   })
+  if (!composed) return jsonError("Itinerary email template could not be resolved", 500)
 
   const pdfBase64 = pdfBuffer.toString("base64")
 
@@ -277,8 +280,10 @@ export async function POST(req: Request) {
     },
     email: {
       to: customer.email,
-      subject: `Your travel itinerary — ${tripTitle || booking.booking_number}`,
-      bodyHtml,
+      subject: composed.subject,
+      bodyHtml: composed.bodyHtml,
+      bodyContentHtml: composed.bodyContentHtml,
+      warnings: composed.warnings,
     },
   })
 }

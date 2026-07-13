@@ -1,6 +1,6 @@
 "use client"
 
-import { useAllData } from "@/lib/use-data"
+import { useData } from "@/lib/use-data"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -19,7 +19,7 @@ const STATUS_BADGE: Record<string, { variant: "default" | "secondary" | "outline
 }
 
 export default function QuotesPage() {
-  const { data, isLoading } = useAllData()
+  const { data, isLoading } = useData(["bookings", "customers", "itineraries", "quotes"])
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
 

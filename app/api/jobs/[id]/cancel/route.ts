@@ -1,3 +1,4 @@
+import { safeSupabaseError } from "@/lib/api/responses"
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
@@ -144,7 +145,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     .select("id, booking_number, stage, updated_at")
     .single()
 
-  if (updateError) return NextResponse.json({ error: updateError.message }, { status: 500 })
+  if (updateError) return safeSupabaseError("jobs/[id]/cancel", updateError)
 
   // Insert negative payment row and recalc balance when a refund is issued
   if (body.refundStatus === "refunded" && finalRefundAmount != null && finalRefundAmount > 0) {

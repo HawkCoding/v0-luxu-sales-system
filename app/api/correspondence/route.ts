@@ -4,8 +4,11 @@ import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDateTime } from "@/lib/date-format"
 import { getEmailFromAddress } from "@/lib/email/from"
+import { resolveSalespersonSender } from "@/lib/email/resolve-sender"
 import { sendEmail } from "@/lib/email/transport"
 import { applyTransition } from "@/lib/pipeline/apply-transition"
+import { ensureQuotePdf, QUOTE_BUCKET } from "@/lib/quotes/ensure-quote-pdf"
+import { composeEmail } from "@/lib/templates/compose-email"
 import type { Json } from "@/lib/supabase/types"
 import type { PipelineStage } from "@/lib/types"
 import { checkVoucherReadiness } from "@/lib/voucher/check-readiness"
@@ -51,6 +54,8 @@ const correspondenceSchema = z
     bodyHtml: z.string().max(200_000).optional(),
     kind: z.string().trim().min(1).max(80).optional(),
     quoteId: z.string().uuid().optional(),
+    voucherId: z.string().uuid().optional(),
+    scheduledCorrespondenceId: z.string().uuid().optional(),
     text: z.string().max(200_000).optional(),
     sentAt: z.string().datetime({ offset: true }).optional(),
     moveStage: z.enum(PIPELINE_STAGE_VALUES).optional(),
@@ -102,7 +107,7 @@ export async function POST(req: Request) {
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
     .select(
-      "id, booking_number, stage, source, raw_text, updated_at, customer_id, consultant, departure_date, duration_nights, invoice_balance, customer:customers(email)",
+      "id, booking_number, stage, source, raw_text, updated_at, customer_id, consultant, departure_date, duration_nights, invoice_balance, assigned_salesperson_id, customer:customers(email, first_name, last_name)",
     )
     .eq("id", bookingId)
     .single()
@@ -127,7 +132,28 @@ export async function POST(req: Request) {
 
   const recipient = parsed.data.to ?? customerRecord?.email
 
-  const from = await getEmailFromAddress(supabase)
+  // If this send fulfils a scheduled correspondence, verify it exists up front
+  // so we never send the email and then fail to record it.
+  if (parsed.data.scheduledCorrespondenceId) {
+    const { data: scheduledRow } = await supabase
+      .from("correspondences")
+      .select("id, status")
+      .eq("id", parsed.data.scheduledCorrespondenceId)
+      .eq("booking_id", bookingId)
+      .maybeSingle()
+
+    if (!scheduledRow) {
+      return jsonError("Scheduled correspondence not found", 404)
+    }
+    if (scheduledRow.status !== "scheduled") {
+      return jsonError("Correspondence has already been processed", 409)
+    }
+  }
+
+  // Send through the assigned salesperson's mailbox when configured;
+  // fall back to the office-wide From address.
+  const sender = await resolveSalespersonSender(supabase, booking.assigned_salesperson_id)
+  const from = sender.fromAddress ?? (await getEmailFromAddress(supabase))
   const subject = parsed.data.subject.trim()
   const bodyHtml = parsed.data.bodyHtml?.trim() || null
   const text = parsed.data.text?.trim() || (bodyHtml ? getPlainTextFromHtml(bodyHtml) : null)
@@ -135,34 +161,35 @@ export async function POST(req: Request) {
   const baseAttachments: NonNullable<typeof parsed.data.attachments> = parsed.data.attachments ?? []
 
   if (parsed.data.kind === "quote" && parsed.data.quoteId) {
+    // A quote email must always carry its PDF — generate it if missing.
+    let storagePath: string
     try {
-      const { data: quoteDoc } = await supabase
-        .from("quotes")
-        .select("quote_number, pdf_document_id, documents:pdf_document_id(storage_path)")
-        .eq("id", parsed.data.quoteId)
-        .maybeSingle()
-
-      const docRow = Array.isArray(quoteDoc?.documents) ? quoteDoc.documents[0] : quoteDoc?.documents
-      if (docRow?.storage_path) {
-        const storagePath: string = docRow.storage_path
-        const objectPath = storagePath.startsWith("quotes/") ? storagePath.slice("quotes/".length) : storagePath
-        const { data: blob, error: dlError } = await supabase.storage.from("quotes").download(objectPath)
-        if (dlError || !blob) {
-          console.error("correspondence:quote-pdf-download", dlError)
-        } else {
-          const arrayBuffer = await blob.arrayBuffer()
-          const base64 = Buffer.from(arrayBuffer).toString("base64")
-          const safeNumber = (quoteDoc?.quote_number ?? parsed.data.quoteId).replace(/[^a-zA-Z0-9_\-]/g, "_")
-          baseAttachments.unshift({
-            filename: `quote-${safeNumber}.pdf`,
-            contentBase64: base64,
-            contentType: "application/pdf",
-          })
-        }
-      }
+      const ensured = await ensureQuotePdf(supabase, parsed.data.quoteId, {
+        actorName: profile.actorName,
+        actorUserId: auth.value.user.id,
+      })
+      storagePath = ensured.storagePath
     } catch (err) {
-      console.error("correspondence:quote-pdf-attach", err)
+      console.error("correspondence:quote-pdf-ensure", err)
+      return jsonError("Quote PDF could not be generated — email not sent", 500)
     }
+
+    const objectPath = storagePath.startsWith(`${QUOTE_BUCKET}/`)
+      ? storagePath.slice(QUOTE_BUCKET.length + 1)
+      : storagePath
+    const { data: blob, error: dlError } = await supabase.storage.from(QUOTE_BUCKET).download(objectPath)
+    if (dlError || !blob) {
+      console.error("correspondence:quote-pdf-download", dlError)
+      return jsonError("Quote PDF could not be attached — email not sent", 500)
+    }
+
+    const arrayBuffer = await blob.arrayBuffer()
+    const filename = objectPath.split("/").pop() ?? "quote.pdf"
+    baseAttachments.unshift({
+      filename,
+      contentBase64: Buffer.from(arrayBuffer).toString("base64"),
+      contentType: "application/pdf",
+    })
   }
 
   const sendResult = await sendEmail({
@@ -171,6 +198,7 @@ export async function POST(req: Request) {
     subject,
     html: bodyHtml,
     text,
+    salespersonCredentialId: sender.salespersonCredentialId,
     attachments: baseAttachments.map((attachment) => ({
       filename: attachment.filename,
       content: attachment.contentBase64,
@@ -187,24 +215,36 @@ export async function POST(req: Request) {
       : [recipient]
     : null
 
-  const { data: cor, error } = await supabase
-    .from("correspondences")
-    .insert({
-      booking_id: bookingId,
-      channel: parsed.data.channel ?? "email",
-      kind: parsed.data.kind ?? null,
-      subject,
-      body_html: bodyHtml,
-      status: success ? "sent" : "failed",
-      sent_at: success ? parsed.data.sentAt ?? now : null,
-      error: sendResult.error,
-      provider_message_id: sendResult.providerMessageId,
-      recipients: recipientsArray,
-    })
-    .select(
-      "id, booking_id, channel, kind, subject, body_html, status, sent_at, error, provider_message_id, recipients",
-    )
-    .single()
+  const correspondenceValues = {
+    channel: parsed.data.channel ?? "email",
+    kind: parsed.data.kind ?? null,
+    subject,
+    body_html: bodyHtml,
+    status: success ? ("sent" as const) : ("failed" as const),
+    sent_at: success ? parsed.data.sentAt ?? now : null,
+    error: sendResult.error,
+    provider_message_id: sendResult.providerMessageId,
+    recipients: recipientsArray,
+  }
+
+  const correspondenceColumns =
+    "id, booking_id, channel, kind, subject, body_html, status, sent_at, error, provider_message_id, recipients"
+
+  // Fulfilling a scheduled correspondence updates that row in place instead
+  // of inserting a duplicate.
+  const { data: cor, error } = parsed.data.scheduledCorrespondenceId
+    ? await supabase
+        .from("correspondences")
+        .update(correspondenceValues)
+        .eq("id", parsed.data.scheduledCorrespondenceId)
+        .eq("booking_id", bookingId)
+        .select(correspondenceColumns)
+        .single()
+    : await supabase
+        .from("correspondences")
+        .insert({ booking_id: bookingId, ...correspondenceValues })
+        .select(correspondenceColumns)
+        .single()
 
   if (error || !cor) return safeSupabaseError("correspondence:insert", error)
 
@@ -236,6 +276,18 @@ export async function POST(req: Request) {
       action: "quote_sent",
       after: { status: "sent", sent_at: parsed.data.sentAt ?? now } as Json,
     })
+  }
+
+  if (parsed.data.voucherId) {
+    const { error: voucherUpdateError } = await supabase
+      .from("vouchers")
+      .update({ sent_at: parsed.data.sentAt ?? now })
+      .eq("id", parsed.data.voucherId)
+      .eq("booking_id", bookingId)
+
+    if (voucherUpdateError) {
+      console.error("correspondence:update-voucher", voucherUpdateError)
+    }
   }
 
   const sentAction = correspondenceSentAuditAction(parsed.data.kind, parsed.data.moveStage)
@@ -333,14 +385,33 @@ export async function POST(req: Request) {
     if (auditError) return safeSupabaseError("correspondence:audit", auditError)
   }
 
-  await supabase.from("correspondences").insert({
-    booking_id: bookingId,
-    channel: "email",
-    subject: `Follow-up: ${subject}`,
-    body_html: "<p>Scheduled follow-up</p>",
-    status: "scheduled",
-    scheduled_at: new Date(Date.now() + 48 * 3600000).toISOString(),
-  })
+  // Draft a scheduled follow-up 48h out — quote emails only, composed from the
+  // editable follow_up template so the draft is a real, sendable email.
+  if (parsed.data.kind === "quote") {
+    const customerName =
+      [customerRecord?.first_name, customerRecord?.last_name].filter(Boolean).join(" ").trim() ||
+      "Valued Guest"
+    const followUp = await composeEmail(supabase, "follow_up", {
+      tokens: {
+        customerName,
+        jobNumber: booking.booking_number,
+        lastSentDate: (parsed.data.sentAt ?? now).slice(0, 10),
+      },
+    })
+
+    if (followUp) {
+      await supabase.from("correspondences").insert({
+        booking_id: bookingId,
+        channel: "email",
+        kind: "quote_follow_up",
+        subject: followUp.subject,
+        body_html: followUp.bodyHtml,
+        status: "scheduled",
+        scheduled_at: new Date(Date.now() + 48 * 3600000).toISOString(),
+        recipients: recipientsArray,
+      })
+    }
+  }
 
   return Response.json({
     id: cor.id,

@@ -484,7 +484,11 @@ insert into public.suite_types (id,supplier_id,name,passenger_capacity,luggage_c
   -- Cape Executive Transfers (vehicle classes)
   ('00000000-0000-0000-0000-000000005281','00000000-0000-0000-0000-000000002015','Luxury Sedan',3,3,'Chauffeured executive sedan, up to 3 guests.',0,true,'2025-08-10T08:12:00Z','2025-08-10T08:12:00Z'),
   ('00000000-0000-0000-0000-000000005282','00000000-0000-0000-0000-000000002015','Premium SUV',4,4,'Chauffeured SUV, up to 4 guests.',1,true,'2025-08-10T08:12:00Z','2025-08-10T08:12:00Z'),
-  ('00000000-0000-0000-0000-000000005283','00000000-0000-0000-0000-000000002015','Mercedes Viano',7,6,'Luxury van for groups up to 7 guests.',2,true,'2025-08-10T08:12:00Z','2025-08-10T08:12:00Z')
+  ('00000000-0000-0000-0000-000000005283','00000000-0000-0000-0000-000000002015','Mercedes Viano',7,6,'Luxury van for groups up to 7 guests.',2,true,'2025-08-10T08:12:00Z','2025-08-10T08:12:00Z'),
+  -- Zambezi Transfers (vehicle classes)
+  ('00000000-0000-0000-0000-000000005291','00000000-0000-0000-0000-000000002007','Sedan',3,3,'Airport transfer sedan, up to 3 guests.',0,true,'2025-08-10T08:12:00Z','2025-08-10T08:12:00Z'),
+  -- Rovos Rail Transfers (vehicle classes)
+  ('00000000-0000-0000-0000-000000005294','00000000-0000-0000-0000-000000002008','Luxury Sedan',3,3,'Chauffeured sedan with porter service, up to 3 guests.',0,true,'2025-08-10T08:12:00Z','2025-08-10T08:12:00Z')
 on conflict (id) do nothing;
 
 -- Hotel meal-plan routes + Blue Train journey route
@@ -501,7 +505,9 @@ on conflict (id) do nothing;
 -- Transport routes (transfer / rental) with service metadata
 insert into public.routes (id,supplier_id,name,origin_location_id,destination_location_id,direction_mode,transport_service_type,pickup_point,dropoff_point,active,created_at,updated_at) values
   ('00000000-0000-0000-0000-000000004271','00000000-0000-0000-0000-000000002014','Self-Drive Hire — Gauteng','00000000-0000-0000-0000-000000001001','00000000-0000-0000-0000-000000001001','one_way','rental','Pretoria / OR Tambo','Pretoria / OR Tambo',true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
-  ('00000000-0000-0000-0000-000000004281','00000000-0000-0000-0000-000000002015','Airport ↔ V&A Waterfront','00000000-0000-0000-0000-000000001002','00000000-0000-0000-0000-000000001002','one_way','transfer','Cape Town International Airport','V&A Waterfront',true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z')
+  ('00000000-0000-0000-0000-000000004281','00000000-0000-0000-0000-000000002015','Airport ↔ V&A Waterfront','00000000-0000-0000-0000-000000001002','00000000-0000-0000-0000-000000001002','one_way','transfer','Cape Town International Airport','V&A Waterfront',true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
+  ('00000000-0000-0000-0000-000000004291','00000000-0000-0000-0000-000000002007','Victoria Falls Airport ↔ Lodge','00000000-0000-0000-0000-000000001004','00000000-0000-0000-0000-000000001004','one_way','transfer','Victoria Falls Airport','Lodge',true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
+  ('00000000-0000-0000-0000-000000004292','00000000-0000-0000-0000-000000002008','OR Tambo / Pretoria Hotel ↔ Capital Park Station','00000000-0000-0000-0000-000000001001','00000000-0000-0000-0000-000000001001','one_way','transfer','OR Tambo / Pretoria Hotel','Capital Park Station',true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z')
 on conflict (id) do nothing;
 
 -- Vehicle-rental terms for the self-drive route
@@ -545,7 +551,11 @@ insert into public.rate_cards (id,route_id,suite_type_id,rate_type_id,price_per_
   -- Cape Executive Transfers (per transfer)
   ('00000000-0000-0000-0000-000000007481','00000000-0000-0000-0000-000000004281','00000000-0000-0000-0000-000000005281',(select id from public.rate_types where code='RAC'),950,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
   ('00000000-0000-0000-0000-000000007482','00000000-0000-0000-0000-000000004281','00000000-0000-0000-0000-000000005282',(select id from public.rate_types where code='RAC'),1350,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007483','00000000-0000-0000-0000-000000004281','00000000-0000-0000-0000-000000005283',(select id from public.rate_types where code='RAC'),1850,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z')
+  ('00000000-0000-0000-0000-000000007483','00000000-0000-0000-0000-000000004281','00000000-0000-0000-0000-000000005283',(select id from public.rate_types where code='RAC'),1850,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  -- Zambezi Transfers (per transfer)
+  ('00000000-0000-0000-0000-000000007491','00000000-0000-0000-0000-000000004291','00000000-0000-0000-0000-000000005291',(select id from public.rate_types where code='RAC'),450,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  -- Rovos Rail Transfers (per transfer)
+  ('00000000-0000-0000-0000-000000007492','00000000-0000-0000-0000-000000004292','00000000-0000-0000-0000-000000005294',(select id from public.rate_types where code='RAC'),850,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z')
 on conflict (id) do nothing;
 
 -- ============================================================
@@ -660,11 +670,17 @@ on conflict (id) do nothing;
 -- ============================================================
 
 insert into public.templates (id,key,subject,body_html,version,active,is_system,created_at,updated_at) values
-  ('00000000-0000-0000-0000-000000007001','quote_email','Your Quote — {{jobNumber}}','<p>Dear {{customerName}},</p><p>Please find attached your personalised quotation for the <strong>{{direction}}</strong> journey departing <strong>{{departureDate}}</strong>.</p><p>This quote is valid until <strong>{{validityDate}}</strong>. Total: <strong>R {{total}}</strong></p><p>Kind regards,<br/>Luxus Travel &amp; Tours</p>',2,true,true,'2025-08-12T08:00:00Z','2025-08-12T08:00:00Z'),
+  ('00000000-0000-0000-0000-000000007001','quote_email','Your Quote — {{jobNumber}}','<p>Dear {{customerName}},</p><p>Thank you for your enquiry. We are pleased to share your Luxus Travel &amp; Tours quote for <strong>{{direction}}</strong>, departing <strong>{{departureDate}}</strong>.</p>{{quoteSummaryTable}}<p>This quote is valid until <strong>{{validityDate}}</strong>. The full quotation is also attached as a PDF.</p><p>To accept this quote, please reply to this email and we will prepare the next booking steps for you.</p><p>Kind regards,<br/>Luxus Travel &amp; Tours</p>',3,true,true,'2025-08-12T08:00:00Z','2025-08-12T08:00:00Z'),
   ('00000000-0000-0000-0000-000000007002','follow_up','Following up on your enquiry — {{jobNumber}}','<p>Dear {{customerName}},</p><p>We are following up on the quotation sent on <strong>{{lastSentDate}}</strong>. Availability on peak dates can be limited — we would love to secure your suite.</p><p>Kind regards,<br/>Luxus Travel &amp; Tours</p>',1,true,true,'2025-08-12T08:00:00Z','2025-08-12T08:00:00Z'),
-  ('00000000-0000-0000-0000-000000007003','deposit_request','Deposit Invoice — {{jobNumber}}','<p>Dear {{customerName}},</p><p>Thank you for confirming your reservation. A deposit of <strong>R {{depositAmount}}</strong> (25%) is required to secure your booking. Please find your invoice attached.</p><p>Kind regards,<br/>Luxus Travel &amp; Tours</p>',1,true,true,'2025-08-12T08:00:00Z','2025-08-12T08:00:00Z'),
-  ('00000000-0000-0000-0000-000000007004','voucher_email','Your Travel Voucher — {{jobNumber}}','<p>Dear {{customerName}},</p><p>Your travel voucher for the <strong>{{direction}}</strong> journey is attached. Please present it to your service provider on arrival. Safe travels!</p><p>Warm regards,<br/>Luxus Travel &amp; Tours</p>',1,true,true,'2025-08-12T08:00:00Z','2025-08-12T08:00:00Z')
-on conflict (id) do update set key=excluded.key,subject=excluded.subject,
+  ('00000000-0000-0000-0000-000000007003','deposit_request','Deposit Invoice — {{jobNumber}}','<p>Dear {{customerName}},</p><p>Thank you for confirming your reservation. A deposit of <strong>R {{depositAmount}}</strong> ({{depositPercentage}}%) is required to secure your booking, due by <strong>{{dueDate}}</strong>. Invoice <strong>{{invoiceNumber}}</strong> is attached.</p>{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>',2,true,true,'2025-08-12T08:00:00Z','2025-08-12T08:00:00Z'),
+  ('00000000-0000-0000-0000-000000007004','voucher_email','Your Travel Voucher — {{jobNumber}}','<p>Dear {{customerName}},</p><p>Your travel voucher for the <strong>{{direction}}</strong> journey is attached, together with your itinerary. Please present the voucher to your service provider on arrival. Safe travels!</p><p>Warm regards,<br/>Luxus Travel &amp; Tours</p>',1,true,true,'2025-08-12T08:00:00Z','2025-08-12T08:00:00Z'),
+  ('00000000-0000-0000-0000-000000007005','final_invoice','Final Invoice — {{jobNumber}}','<p>Dear {{customerName}},</p><p>Please find attached your final invoice <strong>{{invoiceNumber}}</strong> for <strong>R {{amountDue}}</strong>, due by <strong>{{dueDate}}</strong>.</p>{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>',1,true,true,'2025-08-12T08:00:00Z','2025-08-12T08:00:00Z'),
+  ('00000000-0000-0000-0000-000000007006','payment_reminder','Payment Reminder — Invoice {{invoiceNumber}}','<p>Dear {{customerName}},</p><p>This is a friendly reminder that invoice <strong>{{invoiceNumber}}</strong> for <strong>R {{amountDue}}</strong> is due by <strong>{{dueDate}}</strong>. Please find the invoice attached.</p>{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>',1,true,true,'2025-08-12T08:00:00Z','2025-08-12T08:00:00Z'),
+  ('00000000-0000-0000-0000-000000007007','itinerary_email','Your Itinerary — {{jobNumber}}','<p>Dear {{customerName}},</p><p>Please find attached your itinerary for <strong>{{tripTitle}}</strong>, departing <strong>{{departureDate}}</strong>.</p><p>Warm regards,<br/>Luxus Travel &amp; Tours</p>',1,true,true,'2025-08-12T08:00:00Z','2025-08-12T08:00:00Z'),
+  ('00000000-0000-0000-0000-000000007008','thank_you','Thank you for travelling with us — {{jobNumber}}','<p>Dear {{customerName}},</p><p>We hope you had a wonderful journey on <strong>{{routeName}}</strong>. Thank you for travelling with Luxus Travel &amp; Tours — it was a privilege to arrange your trip.</p><p>We would love to welcome you aboard again.</p><p>Warm regards,<br/>{{consultantName}}<br/>Luxus Travel &amp; Tours</p>',1,true,true,'2025-08-12T08:00:00Z','2025-08-12T08:00:00Z')
+-- Conflict target is `key` (unique index): the unify-email-templates migration
+-- pre-inserts the newer system keys with generated ids on a fresh reset.
+on conflict (key) do update set subject=excluded.subject,
   body_html=excluded.body_html,version=excluded.version,active=excluded.active,is_system=excluded.is_system,updated_at=excluded.updated_at;
 
 -- ============================================================
@@ -682,11 +698,8 @@ insert into public.app_settings (key,value,updated_at) values
   ('backup_storage_bucket','backups','2025-08-01T08:00:00Z'),
   ('read_only_exports_allowed','false','2025-08-01T08:00:00Z'),
   ('payment_reference_required','false','2025-08-01T08:00:00Z'),
-  ('payment_reminder_enabled','true','2025-08-01T08:00:00Z'),
-  ('payment_reminder_cadence','[3,7,14]','2025-08-01T08:00:00Z'),
   ('quote_follow_up_enabled','true','2025-08-01T08:00:00Z'),
   ('quote_follow_up_cadence','[3,7]','2025-08-01T08:00:00Z'),
-  ('quote_follow_up_template','<p>Dear {{customerName}},</p><p>We are following up on the quotation sent on <strong>{{lastSentDate}}</strong>. Availability on peak dates can be limited — we would love to secure your suite.</p><p>Kind regards,<br/>Luxus Travel &amp; Tours</p>','2025-08-01T08:00:00Z'),
   ('quote_acceptance_after_expiry','blocked','2025-08-01T08:00:00Z'),
   ('session_timeout_minutes','480','2025-08-01T08:00:00Z'),
   ('business_name','Luxus Travel and Tours','2025-08-01T08:00:00Z'),

@@ -1,6 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { writeAuditLog } from "@/lib/audit-write"
+import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
+import { getBankingSettings } from "@/lib/settings-access"
 import type { Database } from "@/lib/supabase/types"
+import { composeEmail } from "@/lib/templates/compose-email"
 import type { PipelineStage } from "@/lib/types"
 import { calculateDepositAmount, getDefaultDepositPercentage } from "./constants"
 import { getCrossedForwardStages, type LostContext, type ManualConfirmations } from "./validate-transition"
@@ -184,16 +187,45 @@ export async function applyTransition(
     if (shouldScheduleDepositCorrespondence) {
       const defaultDepositPercentage = await getDefaultDepositPercentage(supabase)
       const depositAmount = latestQuote?.total ? calculateDepositAmount(latestQuote.total, defaultDepositPercentage) : null
-      const subject = `Deposit invoice for ${input.booking.booking_number}`
-      const amountLine = depositAmount === null ? "" : `<p>Deposit amount: ${depositAmount.toFixed(2)}</p>`
+
+      // Draft the deposit email from the editable deposit_request template so
+      // the scheduled correspondence is a real, sendable email.
+      let customerName = "Valued Guest"
+      if (input.booking.customer_id) {
+        const { data: customer } = await supabase
+          .from("customers")
+          .select("first_name, last_name")
+          .eq("id", input.booking.customer_id)
+          .maybeSingle()
+        const name = [customer?.first_name, customer?.last_name].filter(Boolean).join(" ").trim()
+        if (name) customerName = name
+      }
+
+      const dueDate = new Date(nowIso)
+      dueDate.setDate(dueDate.getDate() + 7)
+      const banking = await getBankingSettings(supabase)
+      const composed = await composeEmail(supabase, "deposit_request", {
+        tokens: {
+          customerName,
+          jobNumber: input.booking.booking_number,
+          invoiceNumber: `${input.booking.booking_number}-DEP1`,
+          depositAmount: depositAmount === null ? "TBC" : depositAmount.toFixed(2),
+          depositPercentage: String(defaultDepositPercentage),
+          dueDate: dueDate.toISOString().slice(0, 10),
+        },
+        blocks: { bankingDetails: buildBankingDetailsBlock(banking) },
+      })
+
       const { error: correspondenceError } = await supabase.from("correspondences").insert({
         booking_id: input.booking.id,
         channel: "email",
         kind: "invoice",
         status: "scheduled",
         scheduled_at: nowIso,
-        subject,
-        body_html: `<p>Thank you for choosing Luxus. Please find your deposit invoice attached.</p>${amountLine}`,
+        subject: composed?.subject ?? `Deposit invoice for ${input.booking.booking_number}`,
+        body_html:
+          composed?.bodyHtml ??
+          "<p>Thank you for choosing Luxus. Please find your deposit invoice attached.</p>",
       })
 
       if (correspondenceError) throw new Error(correspondenceError.message)

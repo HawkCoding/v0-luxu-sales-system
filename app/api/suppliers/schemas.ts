@@ -79,6 +79,7 @@ export const routeSchema = z.object({
   dropoffPoint: z.string().trim().max(500).nullable().optional(),
   vehicleRentalDetails: vehicleRentalRouteDetailsSchema.nullable().optional(),
   directionMode: routeDirectionModeSchema.default("one_way"),
+  durationDays: z.number().int().min(1).nullable().optional(),
   active: z.boolean(),
   rateCards: z.array(rateCardSchema).default([]),
 })
@@ -253,6 +254,7 @@ export const draftRouteSchema = z.object({
   dropoffPoint: z.string().trim().max(500).nullable().default(null),
   vehicleRentalDetails: vehicleRentalRouteDetailsSchema.nullable().default(null),
   directionMode: routeDirectionModeSchema.default("one_way"),
+  durationDays: z.number().int().min(1).nullable().default(null),
   active: z.boolean().default(true),
   rateCards: z.array(draftRateCardSchema).default([]),
 })

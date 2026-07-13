@@ -6,7 +6,7 @@ import { formatDisplayDateLong } from "@/lib/date-format"
 import type { VoucherData } from "@/lib/generate-voucher"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 import { checkVoucherReadiness } from "@/lib/voucher/check-readiness"
-import { renderVoucherEmail } from "@/lib/voucher/render-voucher-email"
+import { composeEmail } from "@/lib/templates/compose-email"
 import { renderVoucherPdf } from "@/lib/voucher/render-pdf"
 import { CONSULTANTS, VOUCHER_TEMPLATE_DEFAULTS, type ConsultantAbbreviation, type VoucherTemplate } from "@/lib/types"
 import type { Database, Json } from "@/lib/supabase/types"
@@ -340,13 +340,17 @@ export async function POST(req: Request) {
   })
 
   const customerName = [customer.first_name, customer.last_name].filter(Boolean).join(" ").trim()
-  const bodyHtml = await renderVoucherEmail({
-    customerName,
-    bookingNumber: booking.booking_number,
-    route,
-    departure: voucherData.departure,
-    consultantName: consultant.name,
+  const composed = await composeEmail(supabase, "voucher_email", {
+    tokens: {
+      customerName: customerName || "Valued Guest",
+      jobNumber: booking.booking_number,
+      direction: route,
+      voucherNumber: booking.booking_number,
+      departureDate: voucherData.departure,
+      consultantName: consultant.name,
+    },
   })
+  if (!composed) return jsonError("Voucher email template could not be resolved", 500)
 
   return Response.json({
     document: {
@@ -372,8 +376,10 @@ export async function POST(req: Request) {
     },
     email: {
       to: customer.email,
-      subject: `Travel voucher ${booking.booking_number}`,
-      bodyHtml,
+      subject: composed.subject,
+      bodyHtml: composed.bodyHtml,
+      bodyContentHtml: composed.bodyContentHtml,
+      warnings: composed.warnings,
     },
   })
 }

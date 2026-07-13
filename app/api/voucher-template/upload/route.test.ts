@@ -214,7 +214,8 @@ describe("POST /api/voucher-template/upload", () => {
     const payload = await response.json()
 
     expect(response.status).toBe(500)
-    expect(payload.error).toBe("update failed")
+    // Raw Supabase error messages are no longer leaked to clients.
+    expect(payload.error).toBe("Database error")
   })
 
   it("uploads SVG assets directly", async () => {

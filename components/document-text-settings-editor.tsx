@@ -21,11 +21,6 @@ interface FieldConfig {
 const FIELDS: FieldConfig[] = [
   { key: "quote_doc_title", label: "Quote PDF title", group: "Quote document", multiline: false },
   { key: "quote_doc_footer_text", label: "Quote PDF footer (supports {{validUntil}}, {{currency}})", group: "Quote document", multiline: true },
-  { key: "quote_email_default_intro", label: "Quote email default intro", group: "Quote email", multiline: true },
-  { key: "quote_email_accept_text", label: "Quote email acceptance line", group: "Quote email", multiline: true },
-  { key: "invoice_email_intro_deposit", label: "Deposit invoice email intro", group: "Invoice email", multiline: true },
-  { key: "invoice_email_intro_final", label: "Final invoice email intro", group: "Invoice email", multiline: true },
-  { key: "invoice_email_closing", label: "Invoice email closing", group: "Invoice email", multiline: true },
 ]
 
 export function DocumentTextSettingsEditor({ canEdit }: DocumentTextSettingsEditorProps) {

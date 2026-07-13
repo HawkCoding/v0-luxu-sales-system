@@ -1,6 +1,6 @@
 "use client"
 
-import { usePipeline, useAllData } from "@/lib/use-data"
+import { usePipeline, useData } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
 import { depositPercentageToRate } from "@/lib/pipeline/constants"
 import {
@@ -81,7 +81,7 @@ export default function PipelinePage() {
   // stage selector, and audit button. The selector uses the same gated transition flow.
   const router = useRouter()
   const { data: jobs, isLoading: loadingJobs, error: jobsError, mutate: mutateJobs } = usePipeline()
-  const { data, isLoading: loadingAll, error: allDataError, mutate: mutateAll } = useAllData()
+  const { data, isLoading: loadingAll, error: allDataError, mutate: mutateAll } = useData(["auditLogs", "bookings", "customers", "payments", "quotes", "settings"])
   const { can } = useRole()
   const [draggedJob, setDraggedJob] = useState<string | null>(null)
   const [dragOverStage, setDragOverStage] = useState<string | null>(null)

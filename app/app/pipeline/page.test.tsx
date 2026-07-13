@@ -3,7 +3,7 @@ import { render, screen, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const pipelinePageMocks = vi.hoisted(() => ({
-  useAllData: vi.fn(),
+  useData: vi.fn(),
   usePipeline: vi.fn(),
 }))
 
@@ -70,14 +70,14 @@ function renderPipelinePage() {
 describe("PipelinePage Kanban accessibility", () => {
   beforeEach(() => {
     pipelinePageMocks.usePipeline.mockReset()
-    pipelinePageMocks.useAllData.mockReset()
+    pipelinePageMocks.useData.mockReset()
     pipelinePageMocks.usePipeline.mockReturnValue({
       data: [pipelineJob],
       isLoading: false,
       error: null,
       mutate: vi.fn(),
     })
-    pipelinePageMocks.useAllData.mockReturnValue({
+    pipelinePageMocks.useData.mockReturnValue({
       data: {
         bookings: [],
         customers: [],

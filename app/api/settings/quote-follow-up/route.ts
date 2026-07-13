@@ -1,18 +1,19 @@
+import { safeSupabaseError } from "@/lib/api/responses"
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { requireManagerSettingsAccess } from "@/lib/settings-access"
 import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 
+// Follow-up email wording is edited on the Templates page (templates table,
+// key: follow_up). This route only manages the enabled flag and cadence.
 const KEYS = {
   enabled: "quote_follow_up_enabled",
   cadence: "quote_follow_up_cadence",
-  template: "quote_follow_up_template",
 } as const
 
 const patchSchema = z.object({
   enabled: z.boolean().optional(),
   cadence: z.array(z.number().int().min(1)).optional(),
-  template: z.string().min(1).optional(),
 })
 
 export async function GET() {
@@ -39,7 +40,6 @@ export async function GET() {
   return NextResponse.json({
     enabled: map[KEYS.enabled] !== "false",
     cadence,
-    template: map[KEYS.template] ?? "",
   })
 }
 
@@ -64,7 +64,7 @@ export async function PATCH(req: Request) {
     )
   }
 
-  const { enabled, cadence, template } = parsed.data
+  const { enabled, cadence } = parsed.data
 
   // Fetch before-values for audit
   const { data: existing } = await supabase
@@ -80,16 +80,13 @@ export async function PATCH(req: Request) {
   if (cadence !== undefined) {
     upserts.push({ key: KEYS.cadence, value: JSON.stringify(cadence), updated_at: new Date().toISOString() })
   }
-  if (template !== undefined) {
-    upserts.push({ key: KEYS.template, value: template, updated_at: new Date().toISOString() })
-  }
 
   if (upserts.length === 0) {
     return NextResponse.json({ error: "No fields to update" }, { status: 400 })
   }
 
   const { error } = await supabase.from("app_settings").upsert(upserts)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeSupabaseError("settings/quote-follow-up", error)
 
   const after: Record<string, string> = {}
   for (const u of upserts) after[u.key] = u.value
@@ -108,6 +105,5 @@ export async function PATCH(req: Request) {
   return NextResponse.json({
     enabled: enabled ?? before[KEYS.enabled] !== "false",
     cadence: cadence ?? JSON.parse(before[KEYS.cadence] ?? "[3,7]"),
-    template: template ?? (before[KEYS.template] ?? ""),
   })
 }

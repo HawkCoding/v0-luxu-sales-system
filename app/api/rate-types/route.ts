@@ -1,3 +1,4 @@
+import { safeSupabaseError } from "@/lib/api/responses"
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
@@ -49,7 +50,7 @@ export async function GET() {
     .order("name", { ascending: true })
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return safeSupabaseError("rate-types", error)
   }
 
   return NextResponse.json({
@@ -87,7 +88,7 @@ export async function POST(req: Request) {
     .limit(1)
 
   if (existingError) {
-    return NextResponse.json({ error: existingError.message }, { status: 500 })
+    return safeSupabaseError("rate-types", existingError)
   }
 
   const nextSortOrder = (existing?.[0]?.sort_order ?? -1) + 1
@@ -107,7 +108,7 @@ export async function POST(req: Request) {
     if (error.code === "23505") {
       return NextResponse.json({ error: "A rate type with that code already exists." }, { status: 409 })
     }
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return safeSupabaseError("rate-types", error)
   }
 
   return NextResponse.json(mapRateType(data), { status: 201 })

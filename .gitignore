@@ -47,3 +47,6 @@ test-results/
 
 # Portal clone working files (DB dumps, secrets) - never commit
 .portal-clone/
+
+# QA screenshots (untracked 2026-07-12; binary artefacts don't belong in git)
+qa-screenshots/

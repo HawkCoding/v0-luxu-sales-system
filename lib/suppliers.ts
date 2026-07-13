@@ -161,6 +161,7 @@ export function mapSupplierRoute(
     dropoffPoint: row.dropoff_point ?? null,
     vehicleRentalDetails: mapVehicleRentalRouteDetails(vehicleRentalDetails),
     directionMode: normalizeRouteDirectionMode(row.direction_mode),
+    durationDays: row.duration_days ?? null,
     active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

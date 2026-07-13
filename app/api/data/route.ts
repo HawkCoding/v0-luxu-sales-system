@@ -18,6 +18,27 @@ import { getAuditCutoffDate } from "@/lib/audit"
 import { getDefaultDepositPercentage } from "@/lib/pipeline/constants"
 import { buildRepeatCustomerIdSet } from "@/lib/customer-repeat-status"
 
+const ENTITIES = [
+  "settings",
+  "customers",
+  "bookings",
+  "bookingSuites",
+  "payments",
+  "quotes",
+  "itineraries",
+  "documents",
+  "correspondences",
+  "auditLogs",
+  "pipelineHistory",
+  "templates",
+] as const
+
+type Entity = (typeof ENTITIES)[number]
+
+function isEntity(value: string): value is Entity {
+  return (ENTITIES as readonly string[]).includes(value)
+}
+
 function addDaysToDateString(value: string, days: number): string {
   const [year = "1970", month = "1", day = "1"] = value.split("-")
   const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)))
@@ -25,10 +46,32 @@ function addDaysToDateString(value: string, days: number): string {
   return date.toISOString().slice(0, 10)
 }
 
-export async function GET() {
+// GET /api/data?include=bookings,customers
+// Without ?include this returns every entity (legacy full-dataset shape).
+// With ?include only the requested entities are queried and returned, so pages
+// pay only for the tables they actually render.
+export async function GET(req: Request) {
   const supabase = await createSessionClient()
+
+  const url = new URL(req.url)
+  const includeParam = url.searchParams.get("include")
+  const requested: ReadonlySet<Entity> = includeParam
+    ? new Set(includeParam.split(",").map((e) => e.trim()).filter(isEntity))
+    : new Set(ENTITIES)
+
+  if (requested.size === 0) {
+    return NextResponse.json({ error: "include lists no known entities" }, { status: 400 })
+  }
+
+  const want = (entity: Entity) => requested.has(entity)
+
+  // Customer mapping needs bookings rows to compute the repeat-client flag.
+  const needBookingRows = want("bookings") || want("customers")
+  // Booking mapping resolves assigned-salesperson names from profiles.
+  const needProfiles = want("bookings")
+
   const auditCutoff = getAuditCutoffDate().toISOString()
-  const defaultDepositPercentage = await getDefaultDepositPercentage(supabase)
+  const defaultDepositPercentage = want("settings") ? await getDefaultDepositPercentage(supabase) : null
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -40,6 +83,8 @@ export async function GET() {
         .single()
     : { data: null }
   const canReadAuditLogs = profile?.clearance_level === "admin" || profile?.clearance_level === "manager"
+
+  const emptyResult = Promise.resolve({ data: [] })
 
   const [
     { data: customers },
@@ -56,32 +101,53 @@ export async function GET() {
     { data: pipelineHistory },
     { data: templates },
   ] = await Promise.all([
-    supabase.from("customers").select(CUSTOMER_COLUMNS).order("created_at", { ascending: false }),
-    supabase
-      .from("bookings")
-      .select(BOOKING_WITH_SUPPLIER_COLUMNS)
-      .order("created_at", { ascending: false }),
-    supabase.from("profiles").select("user_id, name, surname, email, clearance_level, is_active"),
-    supabase.from("booking_suites").select(BOOKING_SUITE_COLUMNS),
-    supabase.from("payments").select(PAYMENT_COLUMNS).order("received_at", { ascending: false }),
-    supabase.from("quotes").select(QUOTE_COLUMNS).order("created_at", { ascending: false }),
-    supabase.from("quote_line_items").select(QUOTE_LINE_ITEM_COLUMNS).order("sort_order", { ascending: true }),
-    supabase.from("itineraries").select(ITINERARY_COLUMNS).order("created_at", { ascending: false }),
-    supabase.from("documents").select(DOCUMENT_COLUMNS).order("created_at", { ascending: false }),
-    supabase.from("correspondences").select(CORRESPONDENCE_COLUMNS).order("created_at", { ascending: false }),
-    canReadAuditLogs
+    want("customers")
+      ? supabase.from("customers").select(CUSTOMER_COLUMNS).order("created_at", { ascending: false })
+      : emptyResult,
+    needBookingRows
+      ? supabase
+          .from("bookings")
+          .select(BOOKING_WITH_SUPPLIER_COLUMNS)
+          .order("created_at", { ascending: false })
+      : emptyResult,
+    needProfiles
+      ? supabase.from("profiles").select("user_id, name, surname, email, clearance_level, is_active")
+      : emptyResult,
+    want("bookingSuites") ? supabase.from("booking_suites").select(BOOKING_SUITE_COLUMNS) : emptyResult,
+    want("payments")
+      ? supabase.from("payments").select(PAYMENT_COLUMNS).order("received_at", { ascending: false })
+      : emptyResult,
+    want("quotes")
+      ? supabase.from("quotes").select(QUOTE_COLUMNS).order("created_at", { ascending: false })
+      : emptyResult,
+    want("quotes")
+      ? supabase.from("quote_line_items").select(QUOTE_LINE_ITEM_COLUMNS).order("sort_order", { ascending: true })
+      : emptyResult,
+    want("itineraries")
+      ? supabase.from("itineraries").select(ITINERARY_COLUMNS).order("created_at", { ascending: false })
+      : emptyResult,
+    want("documents")
+      ? supabase.from("documents").select(DOCUMENT_COLUMNS).order("created_at", { ascending: false })
+      : emptyResult,
+    want("correspondences")
+      ? supabase.from("correspondences").select(CORRESPONDENCE_COLUMNS).order("created_at", { ascending: false })
+      : emptyResult,
+    want("auditLogs") && canReadAuditLogs
       ? supabase
           .from("audit_logs")
           .select("id, actor, actor_user_id, entity_type, entity_id, action, before_json, after_json, meta_json, created_at")
           .gte("created_at", auditCutoff)
           .order("created_at", { ascending: false })
           .limit(1000)
-      : Promise.resolve({ data: [] }),
-    supabase.from("pipeline_history").select(PIPELINE_HISTORY_COLUMNS).order("moved_at", { ascending: false }),
-    supabase.from("templates").select(TEMPLATE_COLUMNS).order("key", { ascending: true }),
+      : emptyResult,
+    want("pipelineHistory")
+      ? supabase.from("pipeline_history").select(PIPELINE_HISTORY_COLUMNS).order("moved_at", { ascending: false })
+      : emptyResult,
+    want("templates")
+      ? supabase.from("templates").select(TEMPLATE_COLUMNS).order("key", { ascending: true })
+      : emptyResult,
   ])
 
-  // Embed line items into each quote
   const profileByUserId = new Map(
     (profiles ?? []).map((profile) => [
       profile.user_id,
@@ -99,17 +165,19 @@ export async function GET() {
 
   // Resolve supplier names for historically-imported bookings (which reference a
   // supplier id inside extracted_json rather than via a route/hotel relation).
-  const historicalSupplierIds = Array.from(
-    new Set(
-      (bookings ?? [])
-        .map(
-          (b) =>
-            (b.extracted_json as { historical_import?: { supplier_id?: string } } | null)
-              ?.historical_import?.supplier_id,
-        )
-        .filter((id): id is string => typeof id === "string" && id.length > 0),
-    ),
-  )
+  const historicalSupplierIds = want("bookings")
+    ? Array.from(
+        new Set(
+          (bookings ?? [])
+            .map(
+              (b) =>
+                (b.extracted_json as { historical_import?: { supplier_id?: string } } | null)
+                  ?.historical_import?.supplier_id,
+            )
+            .filter((id): id is string => typeof id === "string" && id.length > 0),
+        ),
+      )
+    : []
   const supplierNamesById = new Map<string, string>()
   if (historicalSupplierIds.length > 0) {
     const { data: historicalSuppliers } = await supabase
@@ -119,47 +187,14 @@ export async function GET() {
     ;(historicalSuppliers ?? []).forEach((s) => supplierNamesById.set(s.id, s.name))
   }
 
-  const quotesWithLines = (quotes ?? []).map((q) => ({
-    id: q.id,
-    bookingId: q.booking_id,
-    itineraryId: q.itinerary_id,
-    status: q.status,
-    quoteNumber: q.quote_number,
-    parentQuoteId: q.parent_quote_id,
-    validityUntil: q.validity_until,
-    validityUntilDisplay: formatDisplayDate(q.validity_until),
-    subtotal: q.subtotal,
-    vat: q.vat,
-    total: q.total,
-    lastSentAt: q.last_sent_at,
-    lastSentAtDisplay: formatDisplayDateTime(q.last_sent_at),
-    overridePin: q.override_pin,
-    overrideReason: q.override_reason,
-    noPackageMatch: q.no_package_match,
-    createdAt: q.created_at,
-    updatedAt: q.updated_at,
-    createdAtDisplay: formatDisplayDateTime(q.created_at),
-    updatedAtDisplay: formatDisplayDateTime(q.updated_at),
-    lineItems: (quoteLineItems ?? [])
-      .filter((li) => li.quote_id === q.id)
-      .map((li) => ({
-        id: li.id,
-        description: li.description,
-        supplierDescription: li.supplier_description,
-        qty: li.qty,
-        unitPrice: li.unit_price,
-        total: li.total,
-        pricingSnapshot: li.pricing_snapshot,
-        sortOrder: li.sort_order,
-      })),
-  }))
+  const response: Record<string, unknown> = {}
 
-  return NextResponse.json({
-    settings: {
-      defaultDepositPercentage,
-    },
+  if (want("settings")) {
+    response.settings = { defaultDepositPercentage }
+  }
 
-    customers: (customers ?? []).map((c) => ({
+  if (want("customers")) {
+    response.customers = (customers ?? []).map((c) => ({
       id: c.id,
       firstName: c.first_name,
       lastName: c.last_name,
@@ -182,9 +217,11 @@ export async function GET() {
       updatedAt: c.updated_at,
       createdAtDisplay: formatDisplayDateTime(c.created_at),
       updatedAtDisplay: formatDisplayDateTime(c.updated_at),
-    })),
+    }))
+  }
 
-    bookings: (bookings ?? []).map((b) => ({
+  if (want("bookings")) {
+    response.bookings = (bookings ?? []).map((b) => ({
       id: b.id,
       bookingNumber: b.booking_number,
       customerId: b.customer_id,
@@ -270,17 +307,21 @@ export async function GET() {
       outcomeSetAt: b.outcome_set_at,
       outcomeSetAtDisplay: formatDisplayDateTime(b.outcome_set_at),
       outcomeSetBy: b.outcome_set_by,
-    })),
+    }))
+  }
 
-    bookingSuites: (bookingSuites ?? []).map((s) => ({
+  if (want("bookingSuites")) {
+    response.bookingSuites = (bookingSuites ?? []).map((s) => ({
       id: s.id,
       bookingId: s.booking_id,
       suiteNumber: s.suite_number,
       suiteTypeId: s.suite_type_id,
       suiteTypeName: s.suite_type_name,
-    })),
+    }))
+  }
 
-    payments: (payments ?? []).map((p) => ({
+  if (want("payments")) {
+    response.payments = (payments ?? []).map((p) => ({
       id: p.id,
       bookingId: p.booking_id,
       amount: p.amount,
@@ -291,11 +332,48 @@ export async function GET() {
       notes: p.notes,
       createdAt: p.created_at,
       createdAtDisplay: formatDisplayDateTime(p.created_at),
-    })),
+    }))
+  }
 
-    quotes: quotesWithLines,
+  if (want("quotes")) {
+    response.quotes = (quotes ?? []).map((q) => ({
+      id: q.id,
+      bookingId: q.booking_id,
+      itineraryId: q.itinerary_id,
+      status: q.status,
+      quoteNumber: q.quote_number,
+      parentQuoteId: q.parent_quote_id,
+      validityUntil: q.validity_until,
+      validityUntilDisplay: formatDisplayDate(q.validity_until),
+      subtotal: q.subtotal,
+      vat: q.vat,
+      total: q.total,
+      lastSentAt: q.last_sent_at,
+      lastSentAtDisplay: formatDisplayDateTime(q.last_sent_at),
+      overridePin: q.override_pin,
+      overrideReason: q.override_reason,
+      noPackageMatch: q.no_package_match,
+      createdAt: q.created_at,
+      updatedAt: q.updated_at,
+      createdAtDisplay: formatDisplayDateTime(q.created_at),
+      updatedAtDisplay: formatDisplayDateTime(q.updated_at),
+      lineItems: (quoteLineItems ?? [])
+        .filter((li) => li.quote_id === q.id)
+        .map((li) => ({
+          id: li.id,
+          description: li.description,
+          supplierDescription: li.supplier_description,
+          qty: li.qty,
+          unitPrice: li.unit_price,
+          total: li.total,
+          pricingSnapshot: li.pricing_snapshot,
+          sortOrder: li.sort_order,
+        })),
+    }))
+  }
 
-    itineraries: (itineraries ?? []).map((i) => ({
+  if (want("itineraries")) {
+    response.itineraries = (itineraries ?? []).map((i) => ({
       id: i.id,
       bookingId: i.booking_id,
       name: i.name,
@@ -306,9 +384,11 @@ export async function GET() {
       updatedAt: i.updated_at,
       createdAtDisplay: formatDisplayDateTime(i.created_at),
       updatedAtDisplay: formatDisplayDateTime(i.updated_at),
-    })),
+    }))
+  }
 
-    documents: (documents ?? []).map((d) => ({
+  if (want("documents")) {
+    response.documents = (documents ?? []).map((d) => ({
       id: d.id,
       bookingId: d.booking_id,
       kind: d.kind,
@@ -316,9 +396,11 @@ export async function GET() {
       storagePath: d.storage_path,
       createdAt: d.created_at,
       createdAtDisplay: formatDisplayDateTime(d.created_at),
-    })),
+    }))
+  }
 
-    correspondences: (correspondences ?? []).map((c) => ({
+  if (want("correspondences")) {
+    response.correspondences = (correspondences ?? []).map((c) => ({
       id: c.id,
       bookingId: c.booking_id,
       channel: c.channel,
@@ -334,9 +416,11 @@ export async function GET() {
       providerMessageId: c.provider_message_id,
       createdAt: c.created_at,
       createdAtDisplay: formatDisplayDateTime(c.created_at),
-    })),
+    }))
+  }
 
-    auditLogs: (auditLogs ?? []).map((a) => ({
+  if (want("auditLogs")) {
+    response.auditLogs = (auditLogs ?? []).map((a) => ({
       id: a.id,
       actor: a.actor,
       actorUserId: a.actor_user_id ?? undefined,
@@ -348,9 +432,11 @@ export async function GET() {
       metaJson: a.meta_json ? JSON.stringify(a.meta_json) : undefined,
       createdAt: a.created_at,
       createdAtDisplay: formatDisplayDateTime(a.created_at),
-    })),
+    }))
+  }
 
-    pipelineHistory: (pipelineHistory ?? []).map((h) => ({
+  if (want("pipelineHistory")) {
+    response.pipelineHistory = (pipelineHistory ?? []).map((h) => ({
       id: h.id,
       bookingId: h.booking_id,
       fromStage: h.from_stage,
@@ -358,9 +444,11 @@ export async function GET() {
       movedBy: h.moved_by,
       movedAt: h.moved_at,
       movedAtDisplay: formatDisplayDateTime(h.moved_at),
-    })),
+    }))
+  }
 
-    templates: (templates ?? []).map((t) => ({
+  if (want("templates")) {
+    response.templates = (templates ?? []).map((t) => ({
       id: t.id,
       key: t.key,
       subject: t.subject,
@@ -368,8 +456,12 @@ export async function GET() {
       version: t.version,
       active: t.active,
       isSystem: t.is_system,
-    })),
+    }))
+  }
 
-    rateCards: [],
-  })
+  if (!includeParam) {
+    response.rateCards = []
+  }
+
+  return NextResponse.json(response)
 }

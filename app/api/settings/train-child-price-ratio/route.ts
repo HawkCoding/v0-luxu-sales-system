@@ -1,3 +1,4 @@
+import { safeSupabaseError } from "@/lib/api/responses"
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
@@ -64,7 +65,7 @@ export async function GET() {
     .eq("key", TRAIN_CHILD_PRICE_RATIO_SETTING_KEY)
     .maybeSingle()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeSupabaseError("settings/train-child-price-ratio", error)
 
   return NextResponse.json({
     ratio: parseTrainChildPriceRatio(data?.value),
@@ -104,7 +105,7 @@ export async function PATCH(req: Request) {
     .maybeSingle()
 
   if (existingError) {
-    return NextResponse.json({ error: existingError.message }, { status: 500 })
+    return safeSupabaseError("settings/train-child-price-ratio", existingError)
   }
 
   const { error } = await context.value.supabase.from("app_settings").upsert({
@@ -113,7 +114,7 @@ export async function PATCH(req: Request) {
     updated_at: new Date().toISOString(),
   })
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeSupabaseError("settings/train-child-price-ratio", error)
 
   const auditResult = await writeAuditLog(context.value.supabase, {
     actor: context.value.actorName,

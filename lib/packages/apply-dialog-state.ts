@@ -436,11 +436,16 @@ export function validateConfigureState(
     if (!leg) continue
     const legLabel = leg.label ?? leg.supplierName
 
-    if (leg.routes.length > 1 && !state.routeId) {
+    if (leg.routes.length === 0) {
+      errors.push(`${legLabel}: no ${leg.supplierKind === "hotel_property" ? "meal plans" : "routes"} configured for this supplier — add one in Suppliers first`)
+    } else if (leg.routes.length > 1 && !state.routeId) {
       errors.push(`${legLabel}: select a ${leg.supplierKind === "hotel_property" ? "meal plan" : "route"}`)
     }
 
     if (state.kind === "transport") {
+      if (leg.suiteTypes.length === 0) {
+        errors.push(`${legLabel}: no vehicle categories configured for this supplier — add one in Suppliers first`)
+      }
       state.requests.forEach((request, index) => {
         const label = state.requests.length > 1 ? `${legLabel} #${index + 1}` : legLabel
         if (!request.pickupPoint.trim()) errors.push(`${label}: pickup point is required`)

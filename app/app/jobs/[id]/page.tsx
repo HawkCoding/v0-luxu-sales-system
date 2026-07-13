@@ -46,6 +46,7 @@ import { CancelBookingDialog } from "@/components/cancel-booking-dialog"
 import { StageTransitionModal } from "@/components/stage-transition-modal"
 import { GenerateDepositInvoiceDialog } from "@/components/generate-deposit-invoice-dialog"
 import { GenerateFinalInvoiceDialog } from "@/components/generate-final-invoice-dialog"
+import { SendPaymentReminderButton } from "@/components/send-payment-reminder-button"
 import { GenerateVoucherDialog } from "@/components/generate-voucher-dialog"
 import { PresenceAvatars } from "@/components/presence-avatars"
 import { useRecordPresence } from "@/hooks/use-record-presence"
@@ -765,6 +766,25 @@ export default function JobDetailPage() {
           </AlertDescription>
         </Alert>
       )}
+
+      {can("send:correspondence") &&
+        invoices.some((invoice: { status: string }) => invoice.status === "sent") && (
+          <div className="flex justify-end gap-2">
+            {invoices
+              .filter((invoice: { status: string }) => invoice.status === "sent")
+              .map((invoice: { id: string; invoiceNumber: string }) => (
+                <SendPaymentReminderButton
+                  key={invoice.id}
+                  invoiceId={invoice.id}
+                  invoiceNumber={invoice.invoiceNumber}
+                  bookingId={id}
+                  onSent={async () => {
+                    await mutate()
+                  }}
+                />
+              ))}
+          </div>
+        )}
 
       {can("send:correspondence") && (!hasSentDepositInvoice || !hasSentFinalInvoice) && (
         <div className="flex justify-end gap-2">

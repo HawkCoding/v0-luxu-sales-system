@@ -27,6 +27,7 @@ export async function GET() {
     supabase
       .from("packages")
       .select("*")
+      .is("booking_id", null)
       .order("name", { ascending: true }),
     supabase
       .from("package_legs")

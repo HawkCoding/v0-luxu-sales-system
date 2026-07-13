@@ -1,6 +1,6 @@
 "use client"
 
-import { useAllData } from "@/lib/use-data"
+import { useData } from "@/lib/use-data"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -8,20 +8,41 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
-import { FileText, Search, Filter, X } from "lucide-react"
+import { Download, FileText, Loader2, Search, Filter, X } from "lucide-react"
 import Link from "next/link"
 import { useState } from "react"
+import { toast } from "sonner"
 import { CONSULTANTS, type ConsultantAbbreviation } from "@/lib/types"
 import { formatDisplayDate } from "@/lib/date-format"
 
 export default function DocumentsPage() {
-  const { data, isLoading } = useAllData()
+  const { data, isLoading } = useData(["bookings", "customers", "documents"])
   const [search, setSearch] = useState("")
   const [docTypeFilter, setDocTypeFilter] = useState("all")
   const [supplierFilter, setSupplierFilter] = useState("all")
   const [consultantFilter, setConsultantFilter] = useState<"all" | ConsultantAbbreviation>("all")
   const [generatedDateFrom, setGeneratedDateFrom] = useState<Date | undefined>(undefined)
   const [generatedDateTo, setGeneratedDateTo] = useState<Date | undefined>(undefined)
+  const [downloadingId, setDownloadingId] = useState<string | null>(null)
+
+  const handleDownload = async (event: React.MouseEvent, documentId: string) => {
+    // The card is wrapped in a booking link — keep the click on the button.
+    event.preventDefault()
+    event.stopPropagation()
+    setDownloadingId(documentId)
+    try {
+      const res = await fetch(`/api/documents/${documentId}`)
+      const payload = (await res.json().catch(() => null)) as { signedUrl?: string; error?: string } | null
+      if (!res.ok || !payload?.signedUrl) {
+        throw new Error(payload?.error ?? "Document could not be downloaded")
+      }
+      window.open(payload.signedUrl, "_blank", "noopener")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Document could not be downloaded")
+    } finally {
+      setDownloadingId(null)
+    }
+  }
 
   if (isLoading || !data) {
     return <div className="p-6"><div className="animate-pulse space-y-3">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-14 bg-secondary rounded-lg" />)}</div></div>
@@ -249,7 +270,11 @@ export default function DocumentsPage() {
                           .replace(/\b\w/g, (l: string) => l.toUpperCase())
                           .replace(/\bPdf\b/g, "PDF")}
                       </span>
-                      <Badge variant="outline" className="text-xs">PDF</Badge>
+                      {d.storagePath ? (
+                        <Badge variant="outline" className="text-xs">PDF</Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-xs text-muted-foreground">No file</Badge>
+                      )}
                       {d.consultant && (
                         <Badge variant="default" className="text-xs h-5 px-1.5 font-bold">
                           {d.consultant}
@@ -266,9 +291,27 @@ export default function DocumentsPage() {
                     </p>
                   </div>
                 </div>
-                <span className="text-xs text-muted-foreground flex-shrink-0">
-                  {formatDisplayDate(d.generatedAt)}
-                </span>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {d.storagePath && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8"
+                      onClick={(event) => handleDownload(event, d.id)}
+                      disabled={downloadingId === d.id}
+                      aria-label={`Download ${d.kind.replace(/_/g, " ")}`}
+                    >
+                      {downloadingId === d.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Download className="w-3.5 h-3.5" />
+                      )}
+                    </Button>
+                  )}
+                  <span className="text-xs text-muted-foreground">
+                    {formatDisplayDate(d.generatedAt)}
+                  </span>
+                </div>
               </CardContent>
             </Card>
           </Link>
