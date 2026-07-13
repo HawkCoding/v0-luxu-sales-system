@@ -1,3 +1,4 @@
+import { safeSupabaseError } from "@/lib/api/responses"
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { formatDisplayDateTime } from "@/lib/date-format"
@@ -104,7 +105,7 @@ export async function POST(req: Request) {
     .select("id, actor, entity_type, entity_id, action, created_at")
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeSupabaseError("audit", error)
 
   return NextResponse.json({
     id: data.id,

@@ -1,3 +1,4 @@
+import { safeSupabaseError } from "@/lib/api/responses"
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import {
@@ -72,7 +73,7 @@ export async function GET() {
     .eq("key", SESSION_TIMEOUT_SETTING_KEY)
     .maybeSingle()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeSupabaseError("settings/session-timeout", error)
 
   const sessionTimeoutMinutes = parseSessionTimeoutMinutes(data?.value)
   return NextResponse.json({
@@ -117,7 +118,7 @@ export async function PATCH(req: Request) {
       updated_at: new Date().toISOString(),
     })
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeSupabaseError("settings/session-timeout", error)
 
   await writeAuditLog(context.value.supabase, {
     actor: context.value.actorName,

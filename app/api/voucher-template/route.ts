@@ -1,3 +1,4 @@
+import { safeSupabaseError } from "@/lib/api/responses"
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
@@ -74,7 +75,7 @@ export async function PATCH(req: Request) {
     .eq("id", existing.id)
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return safeSupabaseError("voucher-template", error)
   }
 
   return NextResponse.json({ success: true })

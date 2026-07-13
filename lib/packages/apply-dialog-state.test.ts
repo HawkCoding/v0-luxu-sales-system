@@ -73,6 +73,9 @@ const transferLeg = leg({
   id: "leg-transfer",
   supplierKind: "transfers",
   sortOrder: 3,
+  routes: [
+    { id: "route-transfer-1", supplierId: "supplier-leg-transfer", name: "Airport - Hotel", active: true, createdAt: "", updatedAt: "" },
+  ] as PackageLeg["routes"],
   suiteTypes: [
     { id: "vehicle-1", supplierId: "supplier-leg-transfer", name: "Sedan", active: true, createdAt: "", updatedAt: "" },
   ] as PackageLeg["suiteTypes"],
@@ -363,6 +366,19 @@ describe("validateConfigureState", () => {
     expect(errors.some((e) => e.includes("pickup point"))).toBe(true)
     expect(errors.some((e) => e.includes("vehicle category"))).toBe(true)
     expect(errors.some((e) => e.includes("must sum"))).toBe(true) // split defaulted to 0s
+  })
+
+  it("flags a leg whose supplier has zero routes or zero vehicle categories configured", () => {
+    const noRouteLeg = leg({ id: "leg-no-route", supplierKind: "transfers", sortOrder: 4 })
+    const noRoutePkg = detail([noRouteLeg])
+    const states = buildDefaultLegStates(noRoutePkg, { tripStartDate: null })
+    const noRoute = transportState(states, "leg-no-route")
+    noRoute.selected = true
+    noRoute.requests[0] = { ...noRoute.requests[0], pickupPoint: "Airport", dropoffPoint: "Hotel" }
+
+    const errors = validateConfigureState(noRoutePkg, states)
+    expect(errors.some((e) => e.includes("no routes configured"))).toBe(true)
+    expect(errors.some((e) => e.includes("no vehicle categories configured"))).toBe(true)
   })
 
   it("skips validation for unselected legs and requires rental return date", () => {

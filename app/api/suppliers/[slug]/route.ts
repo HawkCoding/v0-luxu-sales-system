@@ -30,6 +30,7 @@ interface NormalizedRoute {
   pickup_point: string | null
   dropoff_point: string | null
   direction_mode: "one_way" | "round_trip" | "loop"
+  duration_days: number | null
   active: boolean
   created_at: string
   updated_at: string
@@ -358,6 +359,7 @@ export async function PATCH(
   // must never persist location links — stray ids would invisibly block
   // location deletion.
   const routeUsesLocations = !isTransport && getSupplierVocabulary(parsed.kind).routeHasLocations
+  const routeUsesDuration = getSupplierVocabulary(parsed.kind).routeHasDuration
 
   const normalizedRoutes: NormalizedRoute[] = parsed.routes
     .map((route) => {
@@ -379,6 +381,7 @@ export async function PATCH(
         pickup_point: isTransport ? normalizeOptionalText(route.pickupPoint) : null,
         dropoff_point: isTransport ? normalizeOptionalText(route.dropoffPoint) : null,
         direction_mode: directionMode,
+        duration_days: routeUsesDuration ? route.durationDays ?? null : null,
         active: route.active,
         created_at: now,
         updated_at: now,

@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
-import { renderQuoteEmail } from "@/lib/quotes/render-quote-email"
 import { createSessionClient } from "@/lib/supabase/server"
-import { getDocumentTextSettings } from "@/lib/settings-access"
+import { composeEmail } from "@/lib/templates/compose-email"
+import { buildQuoteSummaryBlock, formatMoney } from "@/lib/quotes/quote-summary-block"
 
+// Composes the quote email from the editable quote_email template (Templates
+// page) with the line-item summary injected as the {{quoteSummaryTable}} block.
 const previewSchema = z.object({
-  introText: z.string().trim().min(1).optional(),
   subject: z.string().trim().min(1).optional(),
 })
 
@@ -28,7 +29,7 @@ export async function POST(req: Request, { params }: RouteParams) {
   }
 
   const { id } = await params
-  const parsed = previewSchema.safeParse(await req.json())
+  const parsed = previewSchema.safeParse(await req.json().catch(() => ({})))
 
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
@@ -37,7 +38,7 @@ export async function POST(req: Request, { params }: RouteParams) {
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, booking_id, quote_number, validity_until, subtotal, vat, total, created_at, booking:bookings(booking_number, customer:customers(first_name, last_name))",
+      "id, booking_id, quote_number, validity_until, subtotal, vat, total, created_at, booking:bookings(booking_number, departure_date, route:routes(name), customer:customers(first_name, last_name))",
     )
     .eq("id", id)
     .single()
@@ -62,32 +63,53 @@ export async function POST(req: Request, { params }: RouteParams) {
 
   const booking = Array.isArray(quote.booking) ? quote.booking[0] : quote.booking
   const customer = Array.isArray(booking?.customer) ? booking?.customer[0] : booking?.customer
-  const customerName = [customer?.first_name, customer?.last_name].filter(Boolean).join(" ").trim()
+  const route = Array.isArray(booking?.route) ? booking?.route[0] : booking?.route
+  const customerName =
+    [customer?.first_name, customer?.last_name].filter(Boolean).join(" ").trim() || "traveller"
   const quoteNumber = quote.quote_number ?? `${booking?.booking_number ?? "QUOTE"}-Q1`
-  const documentText = await getDocumentTextSettings(supabase)
-  const introText = parsed.data.introText ?? documentText.quote_email_default_intro
-  const subject = parsed.data.subject ?? `Quote ${quoteNumber} - Luxus Travel & Tours`
+  const quoteDate = quote.created_at?.slice(0, 10) ?? todayDateString()
 
-  const html = await renderQuoteEmail({
-    customerName,
-    introText,
-    acceptText: documentText.quote_email_accept_text,
-    quote: {
-      quoteNumber,
-      quoteDate: quote.created_at?.slice(0, 10) ?? todayDateString(),
-      validUntil: quote.validity_until,
-      subtotal: quote.subtotal,
-      vat: quote.vat,
-      total: quote.total,
-      lineItems: lineItems.map((item) => ({
-        description: item.description,
-        supplierDescription: item.supplier_description ?? null,
-        qty: item.qty,
-        unitPrice: item.unit_price,
-        total: item.total,
-      })),
-    },
+  const quoteSummaryTable = buildQuoteSummaryBlock({
+    quoteNumber,
+    quoteDate,
+    validUntil: quote.validity_until,
+    subtotal: quote.subtotal,
+    vat: quote.vat,
+    total: quote.total,
+    lineItems: lineItems.map((item) => ({
+      description: item.description,
+      supplierDescription: item.supplier_description ?? null,
+      qty: item.qty,
+      unitPrice: item.unit_price,
+      total: item.total,
+    })),
   })
 
-  return NextResponse.json({ html, subject, introText, quoteNumber })
+  const composed = await composeEmail(supabase, "quote_email", {
+    tokens: {
+      customerName,
+      jobNumber: booking?.booking_number ?? "",
+      quoteNumber,
+      quoteDate,
+      validityDate: quote.validity_until ?? "To be confirmed",
+      departureDate: booking?.departure_date ?? "To be confirmed",
+      direction: route?.name ?? "your journey",
+      total: formatMoney(quote.total),
+    },
+    blocks: { quoteSummaryTable },
+  })
+
+  if (!composed) {
+    return NextResponse.json({ error: "Quote email template could not be resolved" }, { status: 500 })
+  }
+
+  const subject = parsed.data.subject ?? composed.subject
+
+  return NextResponse.json({
+    html: composed.bodyHtml,
+    bodyContentHtml: composed.bodyContentHtml,
+    subject,
+    quoteNumber,
+    warnings: composed.warnings,
+  })
 }

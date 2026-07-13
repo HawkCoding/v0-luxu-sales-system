@@ -18,10 +18,6 @@
       "schedule": "0 4 * * *"
     },
     {
-      "path": "/api/cron/payment-reminders",
-      "schedule": "0 8 * * *"
-    },
-    {
       "path": "/api/cron/quote-follow-ups",
       "schedule": "0 9 * * *"
     }

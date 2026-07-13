@@ -1,3 +1,4 @@
+import { safeSupabaseError } from "@/lib/api/responses"
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { requireManagerSettingsAccess } from "@/lib/settings-access"
@@ -30,7 +31,7 @@ export async function GET(req: Request) {
     if (resolved !== undefined) countQuery = countQuery.eq("resolved", resolved === "true")
 
     const { count: total, error } = await countQuery
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    if (error) return safeSupabaseError("error-logs", error)
     return NextResponse.json({ count: total ?? 0 })
   }
 
@@ -42,7 +43,7 @@ export async function GET(req: Request) {
   if (resolved !== undefined) query = query.eq("resolved", resolved === "true")
 
   const { data, error } = await query.order("created_at", { ascending: false })
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeSupabaseError("error-logs", error)
 
   return NextResponse.json({ errorLogs: data ?? [] })
 }

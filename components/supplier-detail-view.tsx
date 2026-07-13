@@ -125,6 +125,7 @@ interface EditableRoute {
   dropoffPoint: string | null
   vehicleRentalDetails: Omit<VehicleRentalRouteDetails, "routeId" | "createdAt" | "updatedAt"> | null
   directionMode: RouteDirectionMode
+  durationDays: number | null
   active: boolean
 }
 
@@ -287,6 +288,7 @@ function createEmptyRoute(kind: SupplierKind): EditableRoute {
           }
         : null,
     directionMode: "one_way",
+    durationDays: null,
     active: true,
   }
 }
@@ -411,6 +413,7 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
               }
             : null,
           directionMode: route.directionMode ?? "one_way",
+          durationDays: route.durationDays ?? null,
           active: route.active,
         })),
         rateCards: supplier.rateCards.map((rateCard) => ({
@@ -2127,7 +2130,9 @@ const RouteEditorRow = memo(function RouteEditorRow({
         isTransport
           ? "md:grid-cols-2 xl:grid-cols-5"
           : vocabulary.routeHasLocations
-            ? "md:grid-cols-2 xl:grid-cols-[1.5fr_1fr_1fr_1fr_auto]"
+            ? vocabulary.routeHasDuration
+              ? "md:grid-cols-2 xl:grid-cols-[1.5fr_1fr_1fr_1fr_1fr_auto]"
+              : "md:grid-cols-2 xl:grid-cols-[1.5fr_1fr_1fr_1fr_auto]"
             : "md:grid-cols-[1.5fr_1fr_auto]"
       }`}
     >
@@ -2272,6 +2277,19 @@ const RouteEditorRow = memo(function RouteEditorRow({
               <SelectItem value="round_trip">Two way</SelectItem>
             </SelectContent>
           </Select>
+        </div>
+      ) : null}
+      {vocabulary.routeHasDuration ? (
+        <div className="min-w-0 space-y-1.5">
+          <Label>Duration (days)</Label>
+          <NumericInput
+            min="1"
+            step="1"
+            nullable
+            placeholder="e.g. 2"
+            value={route.durationDays}
+            onValueChange={(value) => onUpdateRoute(packageIndex, routeIndex, "durationDays", value)}
+          />
         </div>
       ) : null}
       <div className="flex h-9 items-center gap-3 self-end">

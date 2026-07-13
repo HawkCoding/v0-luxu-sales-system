@@ -13,6 +13,9 @@ function rowsForBlock(block: VoucherServiceBlock): Array<[string, string | numbe
 
   if (block.serviceType === "train") {
     rows.push(["Route", d.route ?? "—"])
+    if (d.durationDays != null) {
+      rows.push(["Duration", `${d.durationDays} ${d.durationDays === 1 ? "day" : "days"}`])
+    }
     rows.push(["Departure Date", d.departureDate ?? "—"])
     rows.push(["Arrival Date", d.arrivalDate ?? "TBC"])
     rows.push(["Suite Type", d.suiteType ?? "—"])

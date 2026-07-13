@@ -42,6 +42,13 @@ interface GenerateFinalInvoiceResponse {
     to: string
     subject: string
     bodyHtml: string
+    bodyContentHtml?: string
+    warnings?: string[]
+  }
+  attachment?: {
+    filename: string
+    contentBase64: string
+    contentType?: string
   }
   error?: string
 }
@@ -231,7 +238,10 @@ export function GenerateFinalInvoiceDialog({
           bookingId={jobId}
           initialSubject={generated.email.subject}
           bodyHtml={generated.email.bodyHtml}
+          bodyContentHtml={generated.email.bodyContentHtml}
+          to={generated.email.to}
           kind="invoice"
+          attachments={generated.attachment ? [generated.attachment] : undefined}
           onSent={handleSent}
         />
       ) : null}

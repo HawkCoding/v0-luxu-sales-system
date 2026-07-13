@@ -1,21 +1,72 @@
 "use client"
 
+import { useState } from "react"
 import useSWR from "swr"
-import { useAllData } from "@/lib/use-data"
+import { toast } from "sonner"
+import { useData } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
 import { getCanonicalPipelineStage, getPipelineStageLabel, PIPELINE_STAGES, type PipelineStage } from "@/lib/types"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
-import { AlertTriangle, Briefcase, Clock, CreditCard, FileText, MessageSquare, Users } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { PreviewAndSendDialog } from "@/components/preview-and-send-dialog"
+import { AlertTriangle, Briefcase, Clock, CreditCard, FileText, Loader2, Send, X } from "lucide-react"
 import Link from "next/link"
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
+interface ScheduledEmailDetail {
+  id: string
+  bookingId: string
+  bookingNumber: string | null
+  kind: string | null
+  subject: string
+  bodyHtml: string | null
+  to: string
+  error?: string
+}
+
 export default function DashboardPage() {
-  const { data, isLoading } = useAllData()
+  const { data, isLoading, mutate } = useData(["bookings", "correspondences", "customers"])
   const { data: errorLogCountData } = useSWR<{ count: number }>("/api/error-logs?resolved=false&count=true", fetcher)
   const unresolvedErrors = errorLogCountData?.count ?? 0
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [sendTarget, setSendTarget] = useState<ScheduledEmailDetail | null>(null)
+  const [sendOpen, setSendOpen] = useState(false)
+
+  async function openScheduledSend(correspondenceId: string) {
+    setBusyId(correspondenceId)
+    try {
+      const res = await fetch(`/api/correspondence/${correspondenceId}`)
+      const payload = (await res.json()) as ScheduledEmailDetail
+      if (!res.ok) throw new Error(payload.error ?? "Scheduled email could not be loaded")
+      setSendTarget(payload)
+      setSendOpen(true)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Scheduled email could not be loaded")
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function dismissScheduled(correspondenceId: string) {
+    setBusyId(correspondenceId)
+    try {
+      const res = await fetch(`/api/correspondence/${correspondenceId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "dismiss" }),
+      })
+      const payload = (await res.json().catch(() => ({}))) as { error?: string }
+      if (!res.ok) throw new Error(payload.error ?? "Scheduled email could not be dismissed")
+      toast.success("Scheduled email dismissed")
+      await mutate()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Scheduled email could not be dismissed")
+    } finally {
+      setBusyId(null)
+    }
+  }
 
   if (isLoading || !data) {
     return <div className="p-6"><div className="animate-pulse space-y-4">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-24 bg-bg-raised rounded-lg" />)}</div></div>
@@ -55,9 +106,6 @@ export default function DashboardPage() {
         <StatCard icon={FileText} label="Quotes Sent" value={quotedJobs} href="/app/pipeline" />
         <StatCard icon={CreditCard} label="Deposits Paid" value={depositsPaid} href="/app/payments" />
         <StatCard icon={CreditCard} label="Full Payment" value={fullPayments} href="/app/payments" />
-        <StatCard icon={AlertTriangle} label="Unresolved Errors" value={unresolvedErrors} href="/app/settings/error-log" />
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         <StatCard icon={AlertTriangle} label="Unresolved Errors" value={unresolvedErrors} href="/app/settings/error-log" />
       </div>
 
@@ -114,27 +162,47 @@ export default function DashboardPage() {
             upcomingFollowups.map((cor: { id: string; subject: string; scheduledAt?: string; bookingId: string }) => {
               const booking = data.bookings.find((b: { id: string }) => b.id === cor.bookingId)
               const customer = booking ? data.customers.find((c: { id: string }) => c.id === booking.customerId) : null
+              const busy = busyId === cor.id
 
               return (
-                <Link
+                <div
                   key={cor.id}
-                  href={`/app/bookings/${cor.bookingId}`}
-                  className="flex items-center justify-between py-4 border-b border-stroke last:border-0 hover:bg-bg-raised -mx-4 px-4 rounded transition-colors group"
+                  className="flex items-center justify-between gap-3 py-4 border-b border-stroke last:border-0 -mx-4 px-4"
                 >
-                  <div className="space-y-1 flex-1 min-w-0">
-                    <p className="font-medium text-text-heading group-hover:text-accent-link transition-colors">{cor.subject}</p>
+                  <Link href={`/app/bookings/${cor.bookingId}`} className="space-y-1 flex-1 min-w-0 group">
+                    <p className="font-medium text-text-heading group-hover:text-accent-link transition-colors truncate">
+                      {cor.subject}
+                    </p>
                     <div className="flex items-center gap-3 text-sm text-text-muted">
                       <span className="font-medium">{booking?.bookingNumber || "N/A"}</span>
                       <span>•</span>
                       <span>{customer ? `${customer.firstName} ${customer.lastName}` : "Unknown"}</span>
                     </div>
-                  </div>
-                  <div className="text-right flex-shrink-0 ml-4">
+                  </Link>
+                  <div className="flex items-center gap-2 flex-shrink-0">
                     <Badge variant="outline" className="text-sm font-medium">
                       {cor.scheduledAt ? formatDisplayDate(cor.scheduledAt) : "-"}
                     </Badge>
+                    <Button
+                      size="sm"
+                      onClick={() => openScheduledSend(cor.id)}
+                      disabled={busy}
+                      aria-label={`Send scheduled email: ${cor.subject}`}
+                    >
+                      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                      Send
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => dismissScheduled(cor.id)}
+                      disabled={busy}
+                      aria-label={`Dismiss scheduled email: ${cor.subject}`}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
                   </div>
-                </Link>
+                </div>
               )
             })
           ) : (
@@ -145,6 +213,25 @@ export default function DashboardPage() {
           )}
         </CardContent>
       </Card>
+
+      {sendTarget ? (
+        <PreviewAndSendDialog
+          open={sendOpen}
+          onOpenChange={setSendOpen}
+          title="Send scheduled email"
+          description={`${sendTarget.bookingNumber ?? "Booking"} — review before sending.`}
+          bookingId={sendTarget.bookingId}
+          initialSubject={sendTarget.subject}
+          bodyHtml={sendTarget.bodyHtml ?? ""}
+          to={sendTarget.to}
+          kind={sendTarget.kind ?? "email"}
+          scheduledCorrespondenceId={sendTarget.id}
+          onSent={async () => {
+            setSendTarget(null)
+            await mutate()
+          }}
+        />
+      ) : null}
     </div>
   )
 }

@@ -59,7 +59,10 @@ interface SelectionJoinRow {
     location: string | null
     kind: SupplierKind | string | null
   }> | null
-  routes: { name: string | null } | { name: string | null }[] | null
+  routes:
+    | { name: string | null; duration_days: number | null }
+    | { name: string | null; duration_days: number | null }[]
+    | null
   suite_types: { name: string | null } | { name: string | null }[] | null
 }
 
@@ -78,7 +81,7 @@ export async function buildVoucherServiceBlocks(
       `id, package_leg_id, selected, supplier_id, route_id, suite_type_id, service_date, notes,
        package_legs(sort_order, label),
        suppliers(name, phone, email, website, location, kind),
-       routes(name),
+       routes(name, duration_days),
        suite_types(name)`,
     )
     .eq("booking_id", context.bookingId)
@@ -108,6 +111,7 @@ export async function buildVoucherServiceBlocks(
         route: route?.name ?? null,
         suiteType: suite?.name ?? null,
         departureDate: row.service_date ?? null,
+        durationDays: route?.duration_days ?? null,
         notes: row.notes ?? null,
       }
 

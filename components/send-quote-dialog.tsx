@@ -200,7 +200,7 @@ export function SendQuoteDialog({
       const selection = legSelections[leg.id]
       if (!selection) return false
       if (isOptionalLeg(leg.supplierKind) && !selection.selected) return true
-      const hasRoute = leg.routes.length <= 1 || Boolean(selection.routeId)
+      const hasRoute = leg.routes.length === 1 || Boolean(selection.routeId)
       return hasRoute && Boolean(selection.suiteTypeId)
     })
 
@@ -344,21 +344,24 @@ export function SendQuoteDialog({
 
       setSendingStepIndex(1)
 
-      const subject = `Quote ${quoteNumber ?? bookingNumber} - Luxus Travel & Tours`
+      // Email is composed server-side from the quote_email template.
       const previewResponse = await fetch(`/api/quotes/${quoteId}/email-preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subject,
-          introText:
-            "Thank you for your enquiry. We are pleased to share your Luxus Travel & Tours quote for review.",
-        }),
+        body: JSON.stringify({}),
       })
-      const previewPayload = (await previewResponse.json()) as { html?: string; error?: string }
+      const previewPayload = (await previewResponse.json()) as {
+        html?: string
+        subject?: string
+        error?: string
+      }
 
       if (!previewResponse.ok || !previewPayload.html) {
         throw new Error(previewPayload.error ?? "Failed to render quote email")
       }
+
+      const subject =
+        previewPayload.subject ?? `Quote ${quoteNumber ?? bookingNumber} - Luxus Travel & Tours`
 
       setSendingStepIndex(2)
       const correspondenceResponse = await fetch("/api/correspondence", {
@@ -524,32 +527,35 @@ export function SendQuoteDialog({
 
                     {enabled ? (
                       <div className="grid gap-3 md:grid-cols-2">
-                        {leg.routes.length > 1 ||
-                        leg.supplierKind === "hotel_property" ||
-                        leg.supplierKind === "transfers" ||
-                        leg.supplierKind === "vehicle_rental" ? (
+                        {leg.routes.length !== 1 ? (
                           <div className="space-y-1.5">
                             <Label className="capitalize">{getRouteLabel(leg.supplierKind)}</Label>
-                            <Select
-                              value={selection?.routeId ?? ""}
-                              onValueChange={(value) =>
-                                setLegSelections((current) => ({
-                                  ...current,
-                                  [leg.id]: { ...(current[leg.id] ?? getEmptySelection(!optional)), routeId: value },
-                                }))
-                              }
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder={`Select ${getRouteLabel(leg.supplierKind)}`} />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {leg.routes.map((route) => (
-                                  <SelectItem key={route.id} value={route.id}>
-                                    {route.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            {leg.routes.length === 0 ? (
+                              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                                No {getRouteLabel(leg.supplierKind)}s configured for this supplier.
+                              </p>
+                            ) : (
+                              <Select
+                                value={selection?.routeId ?? ""}
+                                onValueChange={(value) =>
+                                  setLegSelections((current) => ({
+                                    ...current,
+                                    [leg.id]: { ...(current[leg.id] ?? getEmptySelection(!optional)), routeId: value },
+                                  }))
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder={`Select ${getRouteLabel(leg.supplierKind)}`} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {leg.routes.map((route) => (
+                                    <SelectItem key={route.id} value={route.id}>
+                                      {route.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            )}
                           </div>
                         ) : null}
 

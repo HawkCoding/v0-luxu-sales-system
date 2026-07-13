@@ -4,6 +4,7 @@ import { z } from "zod"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { detectCountryInText, loadCountryAliasMap, normalizeCountry } from "@/lib/countries"
 import { addJobNumberingMetadata, allocateJobNumberForBooking, type JobNumberAllocation } from "@/lib/job-numbering"
+import { isAuthorizedWebhookRequest } from "@/lib/api/webhook-secret"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
 import { buildPackageQuoteLineItems, calculateQuoteTotals } from "@/lib/quotes/build-from-package"
 import { buildQuoteNumber } from "@/lib/quotes/quote-number"
@@ -152,6 +153,7 @@ async function findPackageId(supabase: ServiceClient, packageOption: unknown): P
     .from("packages")
     .select("id, name")
     .eq("active", true)
+    .is("booking_id", null)
 
   const match = (packages ?? []).find((item) => {
     const normalizedName = normalizeLookupValue(item.name)
@@ -319,6 +321,18 @@ export async function GET(req: Request) {
   if (authError || !user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const url = new URL(req.url)
+
+  // Lightweight badge count: ?count=true returns just the open-enquiry total
+  // so the app shell doesn't need the full enquiry list (or /api/data).
+  if (url.searchParams.get("count") === "true") {
+    const { count, error: countError } = await supabase
+      .from("bookings")
+      .select("id", { count: "exact", head: true })
+      .eq("stage", "enquiry")
+    if (countError) return NextResponse.json({ error: "Failed to count enquiries" }, { status: 500 })
+    return NextResponse.json({ count: count ?? 0 })
+  }
+
   const filterResult = enquiryFilterSchema.safeParse(url.searchParams.get("filter") ?? undefined)
   if (!filterResult.success) {
     return NextResponse.json({ error: "Invalid filter value" }, { status: 400 })
@@ -407,22 +421,124 @@ export async function GET(req: Request) {
   return NextResponse.json({ enquiries })
 }
 
-export async function POST(req: Request) {
-  const body = await req.json()
+// A lenient UUID: invalid values become null instead of rejecting the whole
+// enquiry — losing a customer enquiry over a malformed reference id is worse
+// than dropping the reference.
+const lenientUuid = z.string().uuid().nullish().catch(null)
 
-  // Use the service-role client — this route is public (web form & paste import)
-  // so there is no authenticated user session to rely on.
-  const supabase = createServiceClient()
+const travellerInputSchema = z.object({
+  name: z.string().trim().max(120).nullish(),
+  surname: z.string().trim().max(120).nullish(),
+  prefix: z.string().trim().max(40).nullish(),
+  idPassport: z.string().trim().max(80).nullish(),
+  dateOfBirth: z.string().trim().max(40).nullish(),
+})
+
+const transportRequestInputSchema = z.object({
+  serviceType: z.string().trim().max(20).nullish(),
+  pickupPoint: z.string().trim().max(500).nullish(),
+  dropoffPoint: z.string().trim().max(500).nullish(),
+  supplierId: lenientUuid,
+  routeId: lenientUuid,
+  suiteTypeId: lenientUuid,
+  pickupAt: z.string().trim().max(60).nullish(),
+  returnAt: z.string().trim().max(60).nullish(),
+  passengerCount: z.number().int().min(0).max(1000).nullish().catch(null),
+  luggageCount: z.number().int().min(0).max(1000).nullish().catch(null),
+  flightNumber: z.string().trim().max(40).nullish(),
+  notes: z.string().max(2000).nullish(),
+  rentalDetails: z
+    .object({
+      returnAt: z.string().trim().max(60).nullish(),
+      returnCutoffTime: z.string().trim().max(40).nullish(),
+    })
+    .nullish(),
+})
+
+const enquiryBodySchema = z.object({
+  email: z.string().trim().max(255).nullish(),
+  name: z.string().trim().max(120).nullish(),
+  surname: z.string().trim().max(120).nullish(),
+  title: z.string().trim().max(40).nullish(),
+  contactNumber: z.string().trim().max(100).nullish(),
+  country: z.string().trim().max(120).nullish(),
+  province: z.string().trim().max(120).nullish(),
+  rawText: z.string().max(100_000).nullish(),
+  // Only honoured for authenticated sessions — see POST below.
+  linkedCustomerId: z.string().uuid().nullish().catch(null),
+  direction: z.string().trim().max(255).nullish(),
+  packageOption: z.string().trim().max(255).nullish(),
+  hotelOption: z.string().trim().max(255).nullish(),
+  supplierId: lenientUuid,
+  supplier: z.string().trim().max(255).nullish(),
+  purpose: z.enum(["quote", "availability", "reservation"]).nullish().catch(null),
+  departureDate: z.string().trim().max(40).nullish(),
+  noOfAdults: z.number().int().min(0).max(500).nullish().catch(null),
+  noOfChildren: z.number().int().min(0).max(500).nullish().catch(null),
+  noOfSuites: z.number().int().min(0).max(500).nullish().catch(null),
+  childAges: z.array(z.coerce.number().int().min(0).max(30)).max(50).nullish().catch(null),
+  termsAccepted: z.boolean().nullish().catch(null),
+  extendStay: z.union([z.string().max(10), z.boolean()]).nullish().catch(null),
+  extraNights: z.union([z.number(), z.string().max(10)]).nullish().catch(null),
+  additionalServices: z.union([z.boolean(), z.string().max(255)]).nullish().catch(null),
+  additionalServicesDetails: z.string().max(5000).nullish(),
+  promotionCode: z.string().trim().max(100).nullish(),
+  flightBooking: z.string().trim().max(255).nullish(),
+  flightDepartureDate: z.string().trim().max(40).nullish(),
+  extractedJson: z.record(z.unknown()).nullish(),
+  suiteSelections: z
+    .array(
+      z.object({
+        suiteTypeId: lenientUuid,
+        suiteTypeName: z.string().trim().max(255).nullish(),
+      }),
+    )
+    .max(50)
+    .nullish(),
+  suiteTypes: z.array(z.string().max(255)).max(50).nullish(),
+  travellers: z.array(travellerInputSchema).max(100).nullish(),
+  childTravellers: z.array(travellerInputSchema).max(100).nullish(),
+  transportRequests: z.array(transportRequestInputSchema).max(50).nullish(),
+})
+
+export async function POST(req: Request) {
+  // Callers are either logged-in staff (paste import / internal forms) or the
+  // public website form, which must present the shared webhook secret.
   const sessionClient = await createSessionClient()
   const {
     data: { user },
   } = await sessionClient.auth.getUser()
+  const isWebhookCaller = isAuthorizedWebhookRequest(req, process.env.ENQUIRY_WEBHOOK_SECRET)
 
-  const normalizedEmail = body.email?.toLowerCase().trim()
+  if (!user && !isWebhookCaller) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  let rawBody: unknown
+  try {
+    rawBody = await req.json()
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 })
+  }
+
+  const parsedBody = enquiryBodySchema.safeParse(rawBody)
+  if (!parsedBody.success) {
+    return NextResponse.json(
+      { error: "Invalid request body", details: parsedBody.error.flatten().fieldErrors },
+      { status: 400 },
+    )
+  }
+  const body = parsedBody.data
+
+  // Service-role client: the public web form has no user session, and staff
+  // sessions may lack RLS access to every table this intake touches.
+  const supabase = createServiceClient()
+
+  const normalizedEmail = typeof body.email === "string" ? body.email.toLowerCase().trim() : undefined
   const normalizedCustomerFirstName =
-    typeof body.name === "string" ? normalizeFirstName(body.name) : body.name
+    typeof body.name === "string" ? normalizeFirstName(body.name) : null
   const normalizedCustomerLastName =
-    typeof body.surname === "string" ? normalizeLastName(body.surname) : body.surname
+    typeof body.surname === "string" ? normalizeLastName(body.surname) : null
   const countryAliasMap = await loadCountryAliasMap(supabase)
 
   const submittedCountry = typeof body.country === "string" ? body.country : null
@@ -437,8 +553,11 @@ export async function POST(req: Request) {
   )
 
   // --- 1. Upsert customer (match on email, or use linkedCustomerId when set) ---
+  // linkedCustomerId lets a caller attach the enquiry to an existing customer,
+  // so it is only honoured for authenticated staff sessions — never for the
+  // public web form, which could otherwise write into arbitrary customer records.
   const linkedCustomerId =
-    typeof body.linkedCustomerId === "string" && body.linkedCustomerId.trim().length > 0
+    user && typeof body.linkedCustomerId === "string" && body.linkedCustomerId.trim().length > 0
       ? body.linkedCustomerId.trim()
       : null
   const { customerId, customerIsRepeatClient } = await resolveEnquiryCustomer(supabase, {
@@ -473,10 +592,8 @@ export async function POST(req: Request) {
       rawText: normalizeNullableText(body.rawText),
     })
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to allocate job number" },
-      { status: 500 },
-    )
+    console.error("enquiries:allocateJobNumber", error)
+    return NextResponse.json({ error: "Failed to allocate job number" }, { status: 500 })
   }
   const existingExtractedJson =
     body.extractedJson && typeof body.extractedJson === "object" && !Array.isArray(body.extractedJson)
@@ -704,9 +821,9 @@ export async function POST(req: Request) {
 }
 
 interface ResolveEnquiryCustomerInput {
-  normalizedEmail: string
-  firstName: string
-  lastName: string
+  normalizedEmail: string | undefined
+  firstName: string | null
+  lastName: string | null
   phone: string | null
   country: string | null
   title: string | null
@@ -739,11 +856,13 @@ export async function resolveEnquiryCustomer(
     }
   }
 
-  const { data: existingCustomer } = await supabase
-    .from("customers")
-    .select("id")
-    .eq("email", input.normalizedEmail)
-    .maybeSingle()
+  const { data: existingCustomer } = input.normalizedEmail
+    ? await supabase
+        .from("customers")
+        .select("id")
+        .eq("email", input.normalizedEmail)
+        .maybeSingle()
+    : { data: null }
 
   if (existingCustomer) {
     const { data: priorCompletedBookings } = await supabase
@@ -757,8 +876,8 @@ export async function resolveEnquiryCustomer(
     await supabase
       .from("customers")
       .update({
-        first_name: input.firstName,
-        last_name: input.lastName,
+        first_name: input.firstName ?? undefined,
+        last_name: input.lastName ?? undefined,
         phone: input.phone,
         country: input.country,
         title: input.title,
@@ -772,9 +891,9 @@ export async function resolveEnquiryCustomer(
   const { data: newCustomer, error: customerError } = await supabase
     .from("customers")
     .insert({
-      first_name: input.firstName,
-      last_name: input.lastName,
-      email: input.normalizedEmail,
+      first_name: input.firstName ?? "",
+      last_name: input.lastName ?? "",
+      email: input.normalizedEmail ?? "",
       phone: input.phone,
       country: input.country,
       title: input.title,

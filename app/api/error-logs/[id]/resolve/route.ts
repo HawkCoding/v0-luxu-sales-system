@@ -1,3 +1,4 @@
+import { safeSupabaseError } from "@/lib/api/responses"
 import { NextResponse } from "next/server"
 import { requireManagerSettingsAccess } from "@/lib/settings-access"
 
@@ -37,7 +38,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
     .select("id, severity, source, message, resolved, resolved_by, resolved_at, created_at")
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeSupabaseError("error-logs/[id]/resolve", error)
 
   return NextResponse.json({ errorLog: data })
 }

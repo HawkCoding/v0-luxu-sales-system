@@ -12,6 +12,15 @@ vi.mock("@/lib/pipeline/apply-transition", () => ({
   })),
 }))
 
+vi.mock("@/lib/templates/compose-email", () => ({
+  composeEmail: vi.fn(async () => ({
+    subject: "Thank you for travelling with us — RR-2026-0001",
+    bodyHtml: "<html><p>thank you</p></html>",
+    bodyContentHtml: "<p>thank you</p>",
+    warnings: [],
+  })),
+}))
+
 interface TestBooking {
   id: string
   booking_number: string

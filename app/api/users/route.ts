@@ -1,4 +1,4 @@
-/**
+﻿/**
  * GET /api/users
  *
  * Admin-only:
@@ -17,7 +17,7 @@ const createUserSchema = z.object({
   surname: z.string().trim().max(120).optional(),
   email: z.string().trim().email("Invalid email address"),
   clearanceLevel: roleSchema,
-  password: z.string().min(6, "Password must be at least 6 characters"),
+  password: z.string().min(10, "Password must be at least 10 characters"),
 })
 
 interface AdminContext {

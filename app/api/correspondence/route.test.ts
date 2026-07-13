@@ -11,6 +11,15 @@ const emailMocks = vi.hoisted(() => ({
 const transitionMocks = vi.hoisted(() => ({
   applyTransition: vi.fn(),
 }))
+const quotePdfMocks = vi.hoisted(() => ({
+  ensureQuotePdf: vi.fn(),
+}))
+const senderMocks = vi.hoisted(() => ({
+  resolveSalespersonSender: vi.fn(),
+}))
+const templateMocks = vi.hoisted(() => ({
+  composeEmail: vi.fn(),
+}))
 
 vi.mock("@/lib/api/auth", () => ({
   requireRole: authMocks.requireRole,
@@ -27,6 +36,19 @@ vi.mock("@/lib/email/from", () => ({
 
 vi.mock("@/lib/pipeline/apply-transition", () => ({
   applyTransition: transitionMocks.applyTransition,
+}))
+
+vi.mock("@/lib/quotes/ensure-quote-pdf", () => ({
+  ensureQuotePdf: quotePdfMocks.ensureQuotePdf,
+  QUOTE_BUCKET: "quotes",
+}))
+
+vi.mock("@/lib/email/resolve-sender", () => ({
+  resolveSalespersonSender: senderMocks.resolveSalespersonSender,
+}))
+
+vi.mock("@/lib/templates/compose-email", () => ({
+  composeEmail: templateMocks.composeEmail,
 }))
 
 import { POST } from "./route"
@@ -211,6 +233,27 @@ describe("POST /api/correspondence", () => {
     emailMocks.getEmailFromAddress.mockReset()
     transitionMocks.applyTransition.mockReset()
     emailMocks.getEmailFromAddress.mockResolvedValue("noreply@example.com")
+    senderMocks.resolveSalespersonSender.mockReset()
+    senderMocks.resolveSalespersonSender.mockResolvedValue({
+      fromAddress: null,
+      salespersonCredentialId: null,
+    })
+    quotePdfMocks.ensureQuotePdf.mockReset()
+    quotePdfMocks.ensureQuotePdf.mockResolvedValue({
+      documentId: "doc-1",
+      bookingId: BOOKING_ID,
+      storagePath: "quotes/BT-2026-0001-Q1/quote-BT-2026-0001-Q1.pdf",
+      status: "generated",
+      createdAt: "2026-05-01T00:00:00.000Z",
+      regenerated: false,
+    })
+    templateMocks.composeEmail.mockReset()
+    templateMocks.composeEmail.mockResolvedValue({
+      subject: "Following up on your enquiry — BT-2026-0001",
+      bodyHtml: "<html><p>follow up</p></html>",
+      bodyContentHtml: "<p>follow up</p>",
+      warnings: [],
+    })
     emailMocks.sendEmail.mockResolvedValue({
       success: true,
       provider: "mailpit",
@@ -460,29 +503,7 @@ describe("POST /api/correspondence", () => {
     expect(body.recipients).toEqual(["c@example.com"])
   })
 
-  it("attaches quote PDF when pdf_document_id is set on the quote", async () => {
-    const mocks = buildAuth({ quotePdfStoragePath: "quotes/BT-2026-0001-Q1/quote-BT-2026-0001-Q1.pdf" })
-    const res = await POST(
-      postJson({
-        bookingId: BOOKING_ID,
-        subject: "Your quote",
-        kind: "quote",
-        quoteId: QUOTE_ID,
-      }),
-    )
-
-    expect(res.status).toBe(200)
-    expect(mocks.storageDownload).toHaveBeenCalledWith("BT-2026-0001-Q1/quote-BT-2026-0001-Q1.pdf")
-    expect(emailMocks.sendEmail).toHaveBeenCalledWith(
-      expect.objectContaining({
-        attachments: expect.arrayContaining([
-          expect.objectContaining({ filename: "quote-BT-2026-0001-Q1.pdf", contentType: "application/pdf" }),
-        ]),
-      }),
-    )
-  })
-
-  it("sends quote email without PDF attachment when no pdf_document_id is set", async () => {
+  it("ensures the quote PDF exists and attaches it to the quote email", async () => {
     const mocks = buildAuth()
     const res = await POST(
       postJson({
@@ -494,9 +515,52 @@ describe("POST /api/correspondence", () => {
     )
 
     expect(res.status).toBe(200)
-    expect(mocks.storageDownload).not.toHaveBeenCalled()
+    expect(quotePdfMocks.ensureQuotePdf).toHaveBeenCalledWith(
+      expect.anything(),
+      QUOTE_ID,
+      expect.objectContaining({ actorName: "Jane Doe", actorUserId: "u1" }),
+    )
+    expect(mocks.storageDownload).toHaveBeenCalledWith("BT-2026-0001-Q1/quote-BT-2026-0001-Q1.pdf")
     expect(emailMocks.sendEmail).toHaveBeenCalledWith(
-      expect.objectContaining({ attachments: [] }),
+      expect.objectContaining({
+        attachments: expect.arrayContaining([
+          expect.objectContaining({ filename: "quote-BT-2026-0001-Q1.pdf", contentType: "application/pdf" }),
+        ]),
+      }),
+    )
+  })
+
+  it("returns 500 and does not send when the quote PDF cannot be generated", async () => {
+    quotePdfMocks.ensureQuotePdf.mockRejectedValue(new Error("Quote PDF could not be rendered"))
+    const mocks = buildAuth()
+    const res = await POST(
+      postJson({
+        bookingId: BOOKING_ID,
+        subject: "Your quote",
+        kind: "quote",
+        quoteId: QUOTE_ID,
+      }),
+    )
+
+    expect(res.status).toBe(500)
+    expect(emailMocks.sendEmail).not.toHaveBeenCalled()
+    expect(mocks.correspondenceInsertChain).not.toHaveBeenCalled()
+  })
+
+  it("routes the send through the salesperson's SMTP credential when configured", async () => {
+    senderMocks.resolveSalespersonSender.mockResolvedValue({
+      fromAddress: "jane@luxustravel.co.za",
+      salespersonCredentialId: "cred-1",
+    })
+    buildAuth()
+    const res = await POST(postJson({ bookingId: BOOKING_ID, subject: "Hello" }))
+
+    expect(res.status).toBe(200)
+    expect(emailMocks.sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from: "jane@luxustravel.co.za",
+        salespersonCredentialId: "cred-1",
+      }),
     )
   })
 

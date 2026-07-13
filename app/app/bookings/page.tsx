@@ -1,6 +1,6 @@
 "use client"
 
-import { useAllData } from "@/lib/use-data"
+import { useData } from "@/lib/use-data"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -16,7 +16,7 @@ import { formatDisplayDate } from "@/lib/date-format"
 import { isVisibleInBookings } from "@/lib/booking-visibility"
 
 export default function BookingsPage() {
-  const { data, isLoading, error, mutate } = useAllData()
+  const { data, isLoading, error, mutate } = useData(["bookings", "customers", "payments", "quotes"])
   const [search, setSearch] = useState("")
   const [supplierFilter, setSupplierFilter] = useState("all")
   const [paymentStatusFilter, setPaymentStatusFilter] = useState("all")

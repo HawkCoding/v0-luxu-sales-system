@@ -1,6 +1,6 @@
 "use client"
 
-import { useAllData } from "@/lib/use-data"
+import { useData } from "@/lib/use-data"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -17,7 +17,7 @@ const STATUS_CONFIG: Record<string, { icon: typeof Mail; color: string }> = {
 }
 
 export default function CorrespondencePage() {
-  const { data, isLoading } = useAllData()
+  const { data, isLoading } = useData(["bookings", "correspondences", "customers"])
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
 

@@ -688,7 +688,7 @@ export function CustomerBulkImportPanel() {
       setResult(nextResult)
       setRetryableChunks(failed)
       if (failed.length === 0) importRunConfigRef.current = null
-      if (importedBookings > 0 || createdCustomers > 0) await mutate("/api/data")
+      if (importedBookings > 0 || createdCustomers > 0) await mutate((key) => typeof key === "string" && key.startsWith("/api/data"))
 
       if (failed.length > 0) {
         toast.error("Import partially complete", {
@@ -770,7 +770,7 @@ export function CustomerBulkImportPanel() {
 
       setRetryableChunks(remainingFailed)
       if (remainingFailed.length === 0) importRunConfigRef.current = null
-      if (importedDelta > 0 || createdDelta > 0) await mutate("/api/data")
+      if (importedDelta > 0 || createdDelta > 0) await mutate((key) => typeof key === "string" && key.startsWith("/api/data"))
 
       setResult((current) => {
         if (!current) return current

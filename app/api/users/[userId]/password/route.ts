@@ -56,9 +56,9 @@ export async function POST(
   }
 
   const newPassword = typeof body.newPassword === "string" ? body.newPassword.trim() : ""
-  if (!newPassword || newPassword.length < 6) {
+  if (!newPassword || newPassword.length < 10) {
     return NextResponse.json(
-      { error: "newPassword is required and must be at least 6 characters" },
+      { error: "newPassword is required and must be at least 10 characters" },
       { status: 400 }
     )
   }

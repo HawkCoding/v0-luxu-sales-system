@@ -1,8 +1,10 @@
 "use client"
 
 import { useState } from "react"
+import { Loader2, Send } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { PreviewAndSendDialog } from "@/components/preview-and-send-dialog"
 
 interface SendVoucherButtonProps {
   voucherId: string | null
@@ -11,33 +13,84 @@ interface SendVoucherButtonProps {
   onSent?: () => Promise<void> | void
 }
 
-export function SendVoucherButton({ voucherId, bookingNumber, disabled, onSent }: SendVoucherButtonProps) {
-  const [sending, setSending] = useState(false)
+interface PreparedVoucherSend {
+  voucher: { id: string; voucherNumber: string; jobId: string }
+  email: {
+    to: string
+    subject: string
+    bodyHtml: string
+    bodyContentHtml?: string
+    warnings?: string[]
+  }
+  attachments: Array<{
+    filename: string
+    contentBase64: string
+    contentType?: string
+  }>
+  error?: string
+  details?: { missingItinerary?: boolean }
+}
 
-  async function handleSend() {
+export function SendVoucherButton({ voucherId, bookingNumber, disabled, onSent }: SendVoucherButtonProps) {
+  const [loading, setLoading] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [prepared, setPrepared] = useState<PreparedVoucherSend | null>(null)
+
+  async function prepare() {
     if (!voucherId) {
       toast.error("Generate the voucher PDF before sending")
       return
     }
-    setSending(true)
+    setLoading(true)
     try {
-      const response = await fetch(`/api/vouchers/${voucherId}/send`, { method: "POST" })
-      const body = await response.json().catch(() => ({}))
+      const response = await fetch(`/api/vouchers/${voucherId}/prepare-send`, { method: "POST" })
+      const payload = (await response.json().catch(() => ({}))) as PreparedVoucherSend
       if (!response.ok) {
-        throw new Error(body.error ?? "Voucher could not be sent")
+        if (payload.details?.missingItinerary) {
+          throw new Error("Generate the itinerary first — the voucher email includes both PDFs")
+        }
+        throw new Error(payload.error ?? "Voucher email could not be prepared")
       }
-      toast.success(`Voucher ${bookingNumber} sent`)
-      await onSent?.()
+      setPrepared(payload)
+      setPreviewOpen(true)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Voucher could not be sent")
+      toast.error(error instanceof Error ? error.message : "Voucher email could not be prepared")
     } finally {
-      setSending(false)
+      setLoading(false)
     }
   }
 
   return (
-    <Button size="sm" variant="default" disabled={disabled || sending || !voucherId} onClick={handleSend}>
-      {sending ? "Sending…" : "Send Voucher"}
-    </Button>
+    <>
+      <Button size="sm" variant="default" disabled={disabled || loading || !voucherId} onClick={prepare}>
+        {loading ? (
+          <Loader2 data-icon="inline-start" className="animate-spin" />
+        ) : (
+          <Send data-icon="inline-start" />
+        )}
+        {loading ? "Preparing…" : "Send Voucher"}
+      </Button>
+
+      {prepared ? (
+        <PreviewAndSendDialog
+          open={previewOpen}
+          onOpenChange={setPreviewOpen}
+          title="Send travel voucher"
+          description={`Voucher and itinerary for ${bookingNumber} — review before sending.`}
+          bookingId={prepared.voucher.jobId}
+          initialSubject={prepared.email.subject}
+          bodyHtml={prepared.email.bodyHtml}
+          bodyContentHtml={prepared.email.bodyContentHtml}
+          to={prepared.email.to}
+          kind="voucher"
+          moveStage="voucher_sent"
+          voucherId={prepared.voucher.id}
+          attachments={prepared.attachments}
+          onSent={async () => {
+            await onSent?.()
+          }}
+        />
+      ) : null}
+    </>
   )
 }

@@ -1,3 +1,4 @@
+import { safeSupabaseError } from "@/lib/api/responses"
 import { NextResponse } from "next/server"
 import { createSessionClient } from "@/lib/supabase/server"
 import { MAX_IMAGE_BYTES, MAX_IMAGE_MB } from "@/lib/upload-limits"
@@ -78,7 +79,7 @@ export async function POST(req: Request) {
     })
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+    return safeSupabaseError("voucher-template/upload", error)
   }
 
   const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(path)
@@ -104,7 +105,7 @@ export async function POST(req: Request) {
     .eq("id", existing.id)
 
   if (templateUpdateError) {
-    return NextResponse.json({ error: templateUpdateError.message }, { status: 500 })
+    return safeSupabaseError("voucher-template/upload", templateUpdateError)
   }
 
   return NextResponse.json({ url })

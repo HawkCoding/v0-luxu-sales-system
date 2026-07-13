@@ -10,7 +10,7 @@ import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
 import {
   LayoutDashboard, Kanban, Briefcase, Users,
-  TicketsPlane, FolderOpen, Mail, Hotel, CalendarCheck,
+  FolderOpen, Mail, Hotel, CalendarCheck,
   FileCode, BarChart3, ClipboardList, Settings, Search,
   ChevronDown, ChevronLeft, ChevronUp, Menu, LogOut, Sun, Moon,
 } from "lucide-react"
@@ -19,7 +19,7 @@ import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
 import { ConnectionErrorBanner } from "@/components/connection-error-banner"
 import { SessionTimeoutGuard } from "@/components/session-timeout-guard"
-import { useAllData } from "@/lib/use-data"
+import { useEnquiryCount } from "@/lib/use-data"
 import { useRealtimeSync } from "@/hooks/use-realtime-sync"
 import { APP_VERSION } from "@/lib/version"
 import type { User } from "@/lib/auth-context"
@@ -35,7 +35,6 @@ const navItems = [
   { label: "Bookings", href: "/app/bookings", icon: CalendarCheck, permission: "view:jobs" },
   { label: "Customers", href: "/app/customers", icon: Users, permission: "view:customers" },
   { label: "Suppliers", href: "/app/suppliers", icon: Hotel, permission: "view:suppliers" },
-  { label: "Packages", href: "/app/packages", icon: TicketsPlane, permission: "view:packages" },
   { label: "Documents", href: "/app/documents", icon: FolderOpen, permission: "view:documents" },
   { label: "Emails Sent", href: "/app/correspondence", icon: Mail, permission: "view:correspondence" },
   { type: "separator" as const, label: "Admin" },
@@ -56,7 +55,7 @@ function AppShell({ children }: { children: ReactNode }) {
   const { user, loading: authLoading, logout } = useAuth()
   const { role, setRole, can } = useRole()
   const { theme, setTheme } = useTheme()
-  const { data, error: dataError } = useAllData()
+  const { data: enquiryCountData, error: dataError } = useEnquiryCount()
   const { data: companySettings } = useSWR("/api/settings/company", fetcher)
   const businessName: string = companySettings?.business_name || "Luxus Travel"
   const [collapsed, setCollapsed] = useState(false)
@@ -73,7 +72,7 @@ function AppShell({ children }: { children: ReactNode }) {
   const sidebarNavRef = useRef<HTMLElement | null>(null)
   const isDarkMode = theme === "dark"
 
-  const enquiriesCount = data?.bookings?.filter((b: any) => b.stage === "enquiry").length || 0
+  const enquiriesCount = enquiryCountData?.count ?? 0
 
   const { data: errorLogCountData } = useSWR<{ count: number }>(
     "/api/error-logs?resolved=false&count=true",

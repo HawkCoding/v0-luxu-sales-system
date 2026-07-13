@@ -1,6 +1,6 @@
 "use client"
 
-import { useAllData } from "@/lib/use-data"
+import { useData } from "@/lib/use-data"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { DatePicker } from "@/components/ui/date-picker"
@@ -19,7 +19,7 @@ import { formatDisplayDate } from "@/lib/date-format"
 import { getPipelineStageLabel } from "@/lib/types"
 
 export default function PaymentsPage() {
-  const { data, isLoading, mutate } = useAllData()
+  const { data, isLoading, mutate } = useData(["bookings", "customers", "payments", "quotes"])
   const { user } = useAuth()
   const [search, setSearch] = useState("")
   const [addOpen, setAddOpen] = useState(false)

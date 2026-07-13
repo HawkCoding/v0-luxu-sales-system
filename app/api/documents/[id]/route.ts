@@ -6,15 +6,24 @@ const ATTACHMENTS_BUCKET = "attachments"
 const PAYMENT_PROOFS_BUCKET = "payment-proofs"
 const SIGNED_URL_EXPIRY_SECONDS = 3600
 
-function bucketForPath(path: string, kind: string): string {
+// Generated PDFs store bucket-prefixed paths (e.g. "quotes/BT-1_Q1/quote.pdf")
+// in dedicated buckets; the itinerary PDF shares the vouchers bucket.
+const PREFIXED_BUCKETS = ["quotes", "vouchers", "invoices"] as const
+
+function resolveStorageLocation(path: string, kind: string): { bucket: string; objectPath: string } {
+  for (const bucket of PREFIXED_BUCKETS) {
+    if (path.startsWith(`${bucket}/`)) {
+      return { bucket, objectPath: path.slice(bucket.length + 1) }
+    }
+  }
   // Legacy payment-proof rows (created before the attachments bucket) live at
   // `{booking_id}/{payment_id}/proof.{ext}` in the payment-proofs bucket.
   // New uploads (all kinds, including proof_of_payment via /api/documents/upload)
   // live at `{booking_id}/{kind}/...` in the attachments bucket.
   if (kind === "proof_of_payment" && !path.includes("/proof_of_payment/")) {
-    return PAYMENT_PROOFS_BUCKET
+    return { bucket: PAYMENT_PROOFS_BUCKET, objectPath: path }
   }
-  return ATTACHMENTS_BUCKET
+  return { bucket: ATTACHMENTS_BUCKET, objectPath: path }
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -36,10 +45,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   if (!doc) return jsonError("Document not found", 404)
   if (!doc.storage_path) return jsonError("Document has no stored file", 404)
 
-  const bucket = bucketForPath(doc.storage_path, doc.kind)
+  const { bucket, objectPath } = resolveStorageLocation(doc.storage_path, doc.kind)
   const { data: signed, error: signError } = await supabase.storage
     .from(bucket)
-    .createSignedUrl(doc.storage_path, SIGNED_URL_EXPIRY_SECONDS)
+    .createSignedUrl(objectPath, SIGNED_URL_EXPIRY_SECONDS)
 
   if (signError || !signed) return safeSupabaseError("documents:get:sign", signError)
 
@@ -70,8 +79,8 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   if (!doc) return jsonError("Document not found", 404)
 
   if (doc.storage_path) {
-    const bucket = bucketForPath(doc.storage_path, doc.kind)
-    const { error: removeError } = await supabase.storage.from(bucket).remove([doc.storage_path])
+    const { bucket, objectPath } = resolveStorageLocation(doc.storage_path, doc.kind)
+    const { error: removeError } = await supabase.storage.from(bucket).remove([objectPath])
     if (removeError) return safeSupabaseError("documents:delete:remove", removeError)
   }
 

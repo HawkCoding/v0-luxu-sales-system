@@ -1,3 +1,4 @@
+import { safeSupabaseError } from "@/lib/api/responses"
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
@@ -921,7 +922,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return staleVersionResponse("booking", current?.updated_at ?? booking.updated_at)
   }
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeSupabaseError("jobs/[id]", error)
 
   return NextResponse.json({
     id: updated.id,
@@ -969,7 +970,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   })
 
   const { error } = await supabase.from("bookings").delete().eq("id", id)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeSupabaseError("jobs/[id]", error)
 
   return NextResponse.json({ ok: true })
 }

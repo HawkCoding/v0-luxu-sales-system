@@ -3,6 +3,8 @@ import type { Database } from "@/lib/supabase/types"
 import { getQuoteFollowUpSettings } from "@/lib/settings-access"
 import { logError } from "@/lib/error-log"
 import { sendEmail } from "@/lib/email/transport"
+import { composeFromTemplate } from "@/lib/templates/compose-email"
+import { getTemplate } from "@/lib/templates/get-template"
 
 export interface FollowUpWorkerResult {
   processed: number
@@ -11,20 +13,19 @@ export interface FollowUpWorkerResult {
   failed: number
 }
 
-function renderTemplate(template: string, vars: Record<string, string>): string {
-  return Object.entries(vars).reduce(
-    (t, [k, v]) => t.replaceAll(`{{${k}}}`, v),
-    template,
-  )
-}
-
 export async function runQuoteFollowUpWorker(
   supabase: SupabaseClient<Database>,
 ): Promise<FollowUpWorkerResult> {
-  const { enabled, cadence, template } = await getQuoteFollowUpSettings(supabase)
+  const { enabled, cadence } = await getQuoteFollowUpSettings(supabase)
 
   if (!enabled) {
     return { processed: 0, sent: 0, skipped: 0, failed: 0 }
+  }
+
+  // Single fetch per run — every follow-up in this run uses the same template.
+  const template = await getTemplate(supabase, "follow_up")
+  if (!template) {
+    throw new Error("Follow-up template could not be resolved")
   }
 
   const today = new Date()
@@ -100,8 +101,18 @@ export async function runQuoteFollowUpWorker(
       continue
     }
 
-    // Skip if booking has progressed past quote_sent stage
-    const terminalStages = new Set(["deposit_invoice_sent", "deposit_paid", "final_paid", "voucher_sent", "closed"])
+    // Skip if booking has progressed past quote_sent stage.
+    // Canonical stages plus their legacy aliases (payment_schedule → deposit_requested,
+    // trip_active → voucher_sent) since older bookings may still carry legacy values.
+    const terminalStages = new Set([
+      "deposit_requested",
+      "payment_schedule",
+      "deposit_paid",
+      "final_paid",
+      "voucher_sent",
+      "trip_active",
+      "closed",
+    ])
     const terminalOutcomes = new Set(["lost", "cancelled"])
     if (
       terminalStages.has(booking.stage ?? "") ||
@@ -176,11 +187,12 @@ export async function runQuoteFollowUpWorker(
         continue
       }
 
-      const subject = `Following up on your enquiry — ${booking.booking_number}`
-      const bodyHtml = renderTemplate(template, {
-        customerName,
-        jobNumber: booking.booking_number,
-        lastSentDate: lastSentDateStr,
+      const { subject, bodyHtml } = await composeFromTemplate(template, {
+        tokens: {
+          customerName,
+          jobNumber: booking.booking_number,
+          lastSentDate: lastSentDateStr,
+        },
       })
 
       // Send the email

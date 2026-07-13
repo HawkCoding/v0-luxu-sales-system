@@ -232,6 +232,45 @@ describe("route directionMode", () => {
   })
 })
 
+describe("route durationDays", () => {
+  function trainRouteWithDuration(durationDays: unknown) {
+    return {
+      ...buildValidPayload(),
+      kind: "train_operator" as const,
+      routes: [
+        {
+          id: UUID_3,
+          name: "Pretoria ↔ Cape Town",
+          originLocationId: UUID_3,
+          destinationLocationId: UUID_4,
+          directionMode: "one_way",
+          durationDays,
+          active: true,
+          rateCards: [],
+        },
+      ],
+    }
+  }
+
+  it("accepts a positive integer duration", () => {
+    const result = supplierSaveSchema.safeParse(trainRouteWithDuration(2))
+    expect(result.success).toBe(true)
+  })
+
+  it("accepts a null duration", () => {
+    expect(supplierSaveSchema.safeParse(trainRouteWithDuration(null)).success).toBe(true)
+  })
+
+  it("rejects zero and negative durations", () => {
+    expect(supplierSaveSchema.safeParse(trainRouteWithDuration(0)).success).toBe(false)
+    expect(supplierSaveSchema.safeParse(trainRouteWithDuration(-1)).success).toBe(false)
+  })
+
+  it("rejects fractional durations", () => {
+    expect(supplierSaveSchema.safeParse(trainRouteWithDuration(1.5)).success).toBe(false)
+  })
+})
+
 describe("supplierDraftSaveSchema", () => {
   it("allows sparse payloads with defaults", () => {
     const parsed = supplierDraftSaveSchema.parse({ kind: "airline" })

@@ -8,15 +8,26 @@ import { getSupabase } from "@/lib/supabase/client"
 type RealtimeTable = RealtimeInvalidationEntity
 
 const TABLE_PREFIXES: Record<RealtimeTable, readonly string[]> = {
-  bookings: ["/api/data", "/api/jobs"],
-  quotes: ["/api/data", "/api/quotes"],
-  customers: ["/api/data", "/api/customers"],
+  bookings: ["/api/jobs", "/api/pipeline", "/api/enquiries"],
+  quotes: ["/api/quotes"],
+  customers: ["/api/customers"],
 }
 
-function makePredicate(prefixes: readonly string[]) {
+// /api/data keys carry an ?include= entity list; only refetch the ones that
+// actually contain the changed table instead of every dataset on every change.
+const TABLE_DATA_ENTITY: Record<RealtimeTable, string> = {
+  bookings: "bookings",
+  quotes: "quotes",
+  customers: "customers",
+}
+
+function makePredicate(table: RealtimeTable) {
+  const prefixes = TABLE_PREFIXES[table]
+  const dataEntity = TABLE_DATA_ENTITY[table]
   return (key: unknown): boolean =>
     typeof key === "string" &&
-    prefixes.some((prefix) => key === prefix || key.startsWith(`${prefix}/`) || key.startsWith(`${prefix}?`))
+    (prefixes.some((prefix) => key === prefix || key.startsWith(`${prefix}/`) || key.startsWith(`${prefix}?`)) ||
+      (key.startsWith("/api/data") && key.includes(dataEntity)))
 }
 
 export function useRealtimeSync(): void {
@@ -24,7 +35,7 @@ export function useRealtimeSync(): void {
 
   const invalidate = useCallback(
     (table: RealtimeTable) => {
-      void mutate(makePredicate(TABLE_PREFIXES[table]))
+      void mutate(makePredicate(table))
     },
     [mutate],
   )
@@ -50,7 +61,7 @@ export function useRealtimeSync(): void {
           if (table) {
             invalidate(table)
           } else {
-            void mutate("/api/data")
+            void mutate((key) => typeof key === "string" && key.startsWith("/api/data"))
           }
           return
         }

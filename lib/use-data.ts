@@ -89,8 +89,25 @@ const swrOptions = {
   },
 }
 
-export function useAllData() {
-  return useSWR("/api/data", fetcher, swrOptions)
+export type DataEntity =
+  | "settings"
+  | "customers"
+  | "bookings"
+  | "bookingSuites"
+  | "payments"
+  | "quotes"
+  | "itineraries"
+  | "documents"
+  | "correspondences"
+  | "auditLogs"
+  | "pipelineHistory"
+  | "templates"
+
+// Scoped replacement for the removed useAllData(): pages declare exactly which
+// entities they render and /api/data only queries those tables.
+export function useData(entities: readonly DataEntity[]) {
+  const key = `/api/data?include=${[...entities].sort().join(",")}`
+  return useSWR(key, fetcher, swrOptions)
 }
 
 export type EnquiryFilter =
@@ -115,6 +132,12 @@ export interface EnquiryListItem extends Booking {
 export function useEnquiries(filter?: EnquiryFilter | string) {
   const url = filter ? `/api/enquiries?filter=${encodeURIComponent(filter)}` : "/api/enquiries"
   return useSWR<{ enquiries: EnquiryListItem[] }>(url, fetcher, swrOptions)
+}
+
+// Lightweight open-enquiry total for the sidebar badge — avoids pulling the
+// full dataset into the app shell.
+export function useEnquiryCount() {
+  return useSWR<{ count: number }>("/api/enquiries?count=true", fetcher, swrOptions)
 }
 
 export function useAuditLogs(filters: AuditLogFilters) {
@@ -233,11 +256,6 @@ export function useVoucherTemplate() {
 export interface DocumentTextSettings {
   quote_doc_title: string
   quote_doc_footer_text: string
-  quote_email_default_intro: string
-  quote_email_accept_text: string
-  invoice_email_intro_deposit: string
-  invoice_email_intro_final: string
-  invoice_email_closing: string
 }
 
 export function useDocumentTextSettings() {

@@ -1,6 +1,6 @@
 "use client"
 
-import { useAllData } from "@/lib/use-data"
+import { useData } from "@/lib/use-data"
 import { Card, CardContent } from "@/components/ui/card"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -43,7 +43,7 @@ function getCustomerIdFromPath(pathname: string): string | null {
 }
 
 export default function CustomersPage() {
-  const { data, isLoading, error, mutate } = useAllData()
+  const { data, isLoading, error, mutate } = useData(["bookings", "customers"])
   const { can } = useRole()
   const searchParams = useSearchParams()
   const [search, setSearch] = useState("")

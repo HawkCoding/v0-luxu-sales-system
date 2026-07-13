@@ -1,3 +1,4 @@
+import { safeSupabaseError } from "@/lib/api/responses"
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
@@ -61,7 +62,7 @@ export async function GET() {
     .select("key, value")
     .in("key", [AGE_SETTINGS_KEYS.INFANT, AGE_SETTINGS_KEYS.CHILD])
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeSupabaseError("settings/age-bands", error)
 
   const map = new Map<string, string>((data ?? []).map((row) => [row.key, row.value]))
   return NextResponse.json({
@@ -95,7 +96,7 @@ export async function PATCH(req: Request) {
     .from("app_settings")
     .select("key, value")
     .in("key", [AGE_SETTINGS_KEYS.INFANT, AGE_SETTINGS_KEYS.CHILD])
-  if (existingError) return NextResponse.json({ error: existingError.message }, { status: 500 })
+  if (existingError) return safeSupabaseError("settings/age-bands", existingError)
 
   const existingMap = new Map<string, string>((existing ?? []).map((row) => [row.key, row.value]))
   const now = new Date().toISOString()
@@ -113,7 +114,7 @@ export async function PATCH(req: Request) {
   ]
 
   const { error } = await context.value.supabase.from("app_settings").upsert(rows)
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeSupabaseError("settings/age-bands", error)
 
   const auditResult = await writeAuditLog(context.value.supabase, {
     actor: context.value.actorName,

@@ -1,6 +1,36 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { Database } from "@/lib/supabase/types"
+
+const EMPTY_BANKING = {
+  bank_name: "",
+  bank_account_name: "",
+  bank_account_number: "",
+  bank_branch_code: "",
+  bank_swift_code: "",
+  payment_reference_hint: "",
+  company_address: "",
+  company_reg_number: "",
+  company_vat_number: "",
+}
+
+vi.mock("@/lib/settings-access", () => ({
+  getBankingSettings: vi.fn(async () => EMPTY_BANKING),
+}))
+
+const composeMocks = vi.hoisted(() => ({
+  composeEmail: vi.fn(async () => ({
+    subject: "Deposit Invoice — BT-2026-0001",
+    bodyHtml: "<html><p>deposit</p></html>",
+    bodyContentHtml: "<p>deposit</p>",
+    warnings: [],
+  })),
+}))
+
+vi.mock("@/lib/templates/compose-email", () => ({
+  composeEmail: composeMocks.composeEmail,
+}))
+
 import { applyTransition } from "../apply-transition"
 
 interface Operation {
@@ -285,7 +315,19 @@ describe("applyTransition", () => {
           booking_id: "booking-3",
           kind: "invoice",
           status: "scheduled",
-          body_html: expect.stringContaining("308.64"),
+          subject: "Deposit Invoice — BT-2026-0001",
+        }),
+      }),
+    )
+    // Draft body is composed from the deposit_request template with the
+    // calculated deposit amount (25% of 1234.56).
+    expect(composeMocks.composeEmail).toHaveBeenCalledWith(
+      expect.anything(),
+      "deposit_request",
+      expect.objectContaining({
+        tokens: expect.objectContaining({
+          jobNumber: "BT-2026-0003",
+          depositAmount: "308.64",
         }),
       }),
     )

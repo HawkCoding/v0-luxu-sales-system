@@ -15,9 +15,54 @@ vi.mock("@/lib/api/auth", () => ({
   requireRole: authMocks.requireRole,
 }))
 
-vi.mock("@/lib/invoices/render-invoice-email", () => ({
-  renderInvoiceEmail: vi.fn(async () => "<p>invoice</p>"),
+vi.mock("@/lib/invoices/ensure-invoice-pdf", () => ({
+  // Mirrors the real helper's side effect: a documents row for the PDF.
+  ensureInvoicePdf: vi.fn(async (supabase: never, { invoice }: { invoice: { booking_id: string; invoice_number: string } }) => {
+    const client = supabase as unknown as {
+      from: (table: string) => { insert: (row: Record<string, unknown>) => PromiseLike<unknown> }
+    }
+    await client.from("documents").insert({
+      booking_id: invoice.booking_id,
+      kind: "invoice_pdf",
+      status: "generated",
+      storage_path: `invoices/${invoice.invoice_number}/invoice-${invoice.invoice_number}.pdf`,
+    })
+    return {
+      documentId: "doc-1",
+      storagePath: `invoices/${invoice.invoice_number}/invoice-${invoice.invoice_number}.pdf`,
+      filename: `invoice-${invoice.invoice_number}.pdf`,
+      contentBase64: Buffer.from("pdf").toString("base64"),
+    }
+  }),
+  INVOICE_BUCKET: "invoices",
 }))
+
+vi.mock("@/lib/templates/compose-email", () => ({
+  composeEmail: vi.fn(async () => ({
+    subject: "Invoice",
+    bodyHtml: "<html><p>invoice</p></html>",
+    bodyContentHtml: "<p>invoice</p>",
+    warnings: [],
+  })),
+}))
+
+vi.mock("@/lib/settings-access", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/settings-access")>()
+  return {
+    ...actual,
+    getBankingSettings: vi.fn(async () => ({
+      bank_name: "",
+      bank_account_name: "",
+      bank_account_number: "",
+      bank_branch_code: "",
+      bank_swift_code: "",
+      payment_reference_hint: "",
+      company_address: "",
+      company_reg_number: "",
+      company_vat_number: "",
+    })),
+  }
+})
 
 import { POST as startQuote } from "@/app/api/jobs/[id]/start-quote/route"
 import { POST as createQuote } from "@/app/api/quotes/route"

@@ -11,10 +11,6 @@ vi.mock("@/lib/api/auth", () => ({
   requireRole: authMocks.requireRole,
 }))
 
-vi.mock("@/lib/invoices/render-invoice-email", () => ({
-  renderInvoiceEmail: vi.fn(async () => "<p>invoice</p>"),
-}))
-
 import { POST as clearImportReview } from "@/app/api/jobs/[id]/clear-import-review/route"
 import { POST as startQuote } from "@/app/api/jobs/[id]/start-quote/route"
 import { POST as createQuote } from "@/app/api/quotes/route"

@@ -33,6 +33,7 @@ export interface VoucherServiceBlockData {
   itinerary?: string | null
   cabin?: string | null
   flightNumber?: string | null
+  durationDays?: number | null
   notes?: string | null
 }
 

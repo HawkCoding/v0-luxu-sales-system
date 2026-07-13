@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const settingsMocks = vi.hoisted(() => ({
   getQuoteFollowUpSettings: vi.fn(),
+  getEmailFooterTagline: vi.fn(),
 }))
 
 const emailMocks = vi.hoisted(() => ({
@@ -12,8 +13,13 @@ const logErrorMocks = vi.hoisted(() => ({
   logError: vi.fn(),
 }))
 
+const templateMocks = vi.hoisted(() => ({
+  getTemplate: vi.fn(),
+}))
+
 vi.mock("@/lib/settings-access", () => ({
   getQuoteFollowUpSettings: settingsMocks.getQuoteFollowUpSettings,
+  getEmailFooterTagline: settingsMocks.getEmailFooterTagline,
 }))
 
 vi.mock("@/lib/email/transport", () => ({
@@ -22,6 +28,10 @@ vi.mock("@/lib/email/transport", () => ({
 
 vi.mock("@/lib/error-log", () => ({
   logError: logErrorMocks.logError,
+}))
+
+vi.mock("@/lib/templates/get-template", () => ({
+  getTemplate: templateMocks.getTemplate,
 }))
 
 import { runQuoteFollowUpWorker } from "./follow-up-worker"
@@ -132,14 +142,19 @@ describe("runQuoteFollowUpWorker", () => {
     settingsMocks.getQuoteFollowUpSettings.mockResolvedValue({
       enabled: true,
       cadence: [3, 7],
-      template: "<p>Dear {{customerName}}, quote {{jobNumber}} was sent on {{lastSentDate}}.</p>",
+    })
+    settingsMocks.getEmailFooterTagline.mockResolvedValue("Test tagline")
+    templateMocks.getTemplate.mockResolvedValue({
+      key: "follow_up",
+      subject: "Following up on your enquiry — {{jobNumber}}",
+      bodyHtml: "<p>Dear {{customerName}}, quote {{jobNumber}} was sent on {{lastSentDate}}.</p>",
     })
     emailMocks.sendEmail.mockResolvedValue({ success: true, provider: "mailpit", providerMessageId: "msg1", error: null })
     logErrorMocks.logError.mockResolvedValue(undefined)
   })
 
   it("returns zeros when follow-ups are globally disabled", async () => {
-    settingsMocks.getQuoteFollowUpSettings.mockResolvedValue({ enabled: false, cadence: [3, 7], template: "" })
+    settingsMocks.getQuoteFollowUpSettings.mockResolvedValue({ enabled: false, cadence: [3, 7] })
     const { supabase } = makeSupabase()
     const result = await runQuoteFollowUpWorker(supabase as never)
     expect(result).toEqual({ processed: 0, sent: 0, skipped: 0, failed: 0 })
@@ -191,6 +206,37 @@ describe("runQuoteFollowUpWorker", () => {
     const result = await runQuoteFollowUpWorker(supabase as never)
     expect(result.sent).toBe(0)
     expect(emailMocks.sendEmail).not.toHaveBeenCalled()
+  })
+
+  it("skips booking at deposit_requested stage (regression: legacy stage-name bug)", async () => {
+    const { supabase } = makeSupabase({
+      sentQuotes: [{ id: QUOTE_ID, booking_id: BOOKING_ID, last_sent_at: daysBefore(5), follow_ups_disabled: false }],
+      bookingData: makeBooking({ stage: "deposit_requested" }),
+    })
+
+    const result = await runQuoteFollowUpWorker(supabase as never)
+    expect(result.sent).toBe(0)
+    expect(emailMocks.sendEmail).not.toHaveBeenCalled()
+  })
+
+  it("renders subject and body from the follow_up template", async () => {
+    const { supabase } = makeSupabase({
+      sentQuotes: [{ id: QUOTE_ID, booking_id: BOOKING_ID, last_sent_at: daysBefore(5), follow_ups_disabled: false }],
+      bookingData: makeBooking(),
+    })
+
+    await runQuoteFollowUpWorker(supabase as never)
+    expect(templateMocks.getTemplate).toHaveBeenCalledWith(expect.anything(), "follow_up")
+    expect(emailMocks.sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subject: "Following up on your enquiry — RR-2026-0001",
+        html: expect.stringContaining("Dear Jane Smith, quote RR-2026-0001"),
+      }),
+    )
+    // Full branded wrapper with the editable-content slot markers
+    const html = emailMocks.sendEmail.mock.calls[0][0].html as string
+    expect(html).toContain("<!--LUXUS_CONTENT_START-->")
+    expect(html).toContain("Test tagline")
   })
 
   it("skips booking with cancelled outcome", async () => {

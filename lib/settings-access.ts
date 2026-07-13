@@ -103,35 +103,15 @@ export async function getPaymentReferenceRequired(
   return data?.value === "true"
 }
 
-export async function getPaymentReminderSettings(
+// Follow-up email wording lives in the templates table (key: follow_up) —
+// only the enabled flag and cadence are app settings.
+export async function getQuoteFollowUpSettings(
   supabase: SupabaseClient<Database>,
 ): Promise<{ enabled: boolean; cadence: number[] }> {
   const { data: rows } = await supabase
     .from("app_settings")
     .select("key, value")
-    .in("key", ["payment_reminder_enabled", "payment_reminder_cadence"])
-
-  const map = Object.fromEntries((rows ?? []).map((r) => [r.key, r.value]))
-
-  const enabled = map["payment_reminder_enabled"] === "true"
-  let cadence: number[] = [3, 7, 14]
-  try {
-    const parsed: unknown = JSON.parse(map["payment_reminder_cadence"] ?? "")
-    if (Array.isArray(parsed)) cadence = parsed.filter((v): v is number => typeof v === "number")
-  } catch {
-    // use default cadence
-  }
-
-  return { enabled, cadence }
-}
-
-export async function getQuoteFollowUpSettings(
-  supabase: SupabaseClient<Database>,
-): Promise<{ enabled: boolean; cadence: number[]; template: string }> {
-  const { data: rows } = await supabase
-    .from("app_settings")
-    .select("key, value")
-    .in("key", ["quote_follow_up_enabled", "quote_follow_up_cadence", "quote_follow_up_template"])
+    .in("key", ["quote_follow_up_enabled", "quote_follow_up_cadence"])
 
   const map = Object.fromEntries((rows ?? []).map((r) => [r.key, r.value]))
 
@@ -143,11 +123,8 @@ export async function getQuoteFollowUpSettings(
   } catch {
     // use default cadence
   }
-  const template =
-    map["quote_follow_up_template"] ??
-    "<p>Dear {{customerName}},</p><p>We are following up on the quotation sent on <strong>{{lastSentDate}}</strong>. We would love to secure your booking.</p><p>Kind regards,<br/>Luxus Travel &amp; Tours</p>"
 
-  return { enabled, cadence, template }
+  return { enabled, cadence }
 }
 
 export async function getDepositRefundable(
@@ -194,14 +171,11 @@ export async function getAttachmentMaxSizeMb(
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_ATTACHMENT_MAX_SIZE_MB
 }
 
+// Email wording lives in the templates table (Templates page); these keys
+// only cover text rendered into the quote PDF itself.
 export const DOCUMENT_TEXT_SETTING_KEYS = [
   "quote_doc_title",
   "quote_doc_footer_text",
-  "quote_email_default_intro",
-  "quote_email_accept_text",
-  "invoice_email_intro_deposit",
-  "invoice_email_intro_final",
-  "invoice_email_closing",
 ] as const
 
 export type DocumentTextSettings = Record<(typeof DOCUMENT_TEXT_SETTING_KEYS)[number], string>
@@ -210,14 +184,6 @@ const DOCUMENT_TEXT_DEFAULTS: DocumentTextSettings = {
   quote_doc_title: "PROVISIONAL QUOTATION",
   quote_doc_footer_text:
     "This quotation is valid until {{validUntil}} and is subject to availability. Prices are quoted in {{currency}}. Luxus Travel & Tours — Luxury Rail Journeys.",
-  quote_email_default_intro:
-    "Thank you for your enquiry. We are pleased to share your Luxus Travel & Tours quote for review.",
-  quote_email_accept_text:
-    "To accept this quote, please reply to this email and we will prepare the next booking steps for you.",
-  invoice_email_intro_deposit: "Please find the deposit invoice for your Luxus booking below.",
-  invoice_email_intro_final: "Please find the final invoice for your Luxus booking below.",
-  invoice_email_closing:
-    "Once payment has been received, we will update your booking and continue preparing the next step of your journey.",
 }
 
 export async function getDocumentTextSettings(
@@ -233,6 +199,37 @@ export async function getDocumentTextSettings(
   return Object.fromEntries(
     DOCUMENT_TEXT_SETTING_KEYS.map((key) => [key, map[key]?.trim() || DOCUMENT_TEXT_DEFAULTS[key]]),
   ) as DocumentTextSettings
+}
+
+// Banking + company registration details rendered on invoice PDFs and into
+// the {{bankingDetails}} email-template block. Empty values are omitted.
+export const BANKING_SETTING_KEYS = [
+  "bank_name",
+  "bank_account_name",
+  "bank_account_number",
+  "bank_branch_code",
+  "bank_swift_code",
+  "payment_reference_hint",
+  "company_address",
+  "company_reg_number",
+  "company_vat_number",
+] as const
+
+export type BankingSettings = Record<(typeof BANKING_SETTING_KEYS)[number], string>
+
+export async function getBankingSettings(
+  supabase: SupabaseClient<Database>,
+): Promise<BankingSettings> {
+  const { data } = await supabase
+    .from("app_settings")
+    .select("key, value")
+    .in("key", BANKING_SETTING_KEYS)
+
+  const map = Object.fromEntries((data ?? []).map((r) => [r.key, r.value]))
+
+  return Object.fromEntries(
+    BANKING_SETTING_KEYS.map((key) => [key, map[key]?.trim() || ""]),
+  ) as BankingSettings
 }
 
 const DEFAULT_EMAIL_FOOTER_TAGLINE = "Luxury train journeys, handled with care."

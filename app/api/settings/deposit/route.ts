@@ -1,3 +1,4 @@
+import { safeSupabaseError } from "@/lib/api/responses"
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import {
@@ -67,7 +68,7 @@ export async function GET() {
     .eq("key", DEFAULT_DEPOSIT_PERCENTAGE_SETTING_KEY)
     .maybeSingle()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeSupabaseError("settings/deposit", error)
 
   return NextResponse.json({
     defaultDepositPercentage: parseDepositPercentage(data?.value),
@@ -109,7 +110,7 @@ export async function PATCH(req: Request) {
       updated_at: new Date().toISOString(),
     })
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) return safeSupabaseError("settings/deposit", error)
 
   await writeAuditLog(context.value.supabase, {
     actor: context.value.actorName,

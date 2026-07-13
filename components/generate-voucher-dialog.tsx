@@ -49,6 +49,8 @@ interface GenerateVoucherResponse {
     to: string
     subject: string
     bodyHtml: string
+    bodyContentHtml?: string
+    warnings?: string[]
   }
   error?: string
 }
@@ -170,8 +172,11 @@ export function GenerateVoucherDialog({
           bookingId={jobId}
           initialSubject={generated.email.subject}
           bodyHtml={generated.email.bodyHtml}
+          bodyContentHtml={generated.email.bodyContentHtml}
+          to={generated.email.to}
           kind="voucher"
           moveStage="voucher_sent"
+          voucherId={generated.voucherRecord?.id}
           attachments={[
             {
               filename: generated.voucher.filename,

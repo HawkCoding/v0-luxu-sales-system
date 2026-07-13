@@ -1,0 +1,82 @@
+import type { SupabaseClient } from "@supabase/supabase-js"
+import type { Database } from "@/lib/supabase/types"
+import { isSystemTemplateKey, type SystemTemplateKey } from "@/lib/templates/registry"
+
+export interface EmailTemplate {
+  key: string
+  subject: string
+  bodyHtml: string
+}
+
+// Code-level fallbacks so a send never fails because a template row was
+// deactivated or deleted. Kept in sync with the seeded system templates.
+export const DEFAULT_TEMPLATES: Record<SystemTemplateKey, { subject: string; bodyHtml: string }> = {
+  quote_email: {
+    subject: "Your Quote — {{jobNumber}}",
+    bodyHtml:
+      "<p>Dear {{customerName}},</p><p>Thank you for your enquiry. We are pleased to share your Luxus Travel &amp; Tours quote for <strong>{{direction}}</strong>, departing <strong>{{departureDate}}</strong>.</p>{{quoteSummaryTable}}<p>This quote is valid until <strong>{{validityDate}}</strong>. The full quotation is also attached as a PDF.</p><p>To accept this quote, please reply to this email and we will prepare the next booking steps for you.</p><p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
+  },
+  follow_up: {
+    subject: "Following up on your enquiry — {{jobNumber}}",
+    bodyHtml:
+      "<p>Dear {{customerName}},</p><p>We are following up on the quotation sent on <strong>{{lastSentDate}}</strong>. Availability on peak dates can be limited — we would love to secure your suite.</p><p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
+  },
+  deposit_request: {
+    subject: "Deposit Invoice — {{jobNumber}}",
+    bodyHtml:
+      "<p>Dear {{customerName}},</p><p>Thank you for confirming your reservation. A deposit of <strong>R {{depositAmount}}</strong> ({{depositPercentage}}%) is required to secure your booking, due by <strong>{{dueDate}}</strong>. Invoice <strong>{{invoiceNumber}}</strong> is attached.</p>{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
+  },
+  final_invoice: {
+    subject: "Final Invoice — {{jobNumber}}",
+    bodyHtml:
+      "<p>Dear {{customerName}},</p><p>Please find attached your final invoice <strong>{{invoiceNumber}}</strong> for <strong>R {{amountDue}}</strong>, due by <strong>{{dueDate}}</strong>.</p>{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
+  },
+  payment_reminder: {
+    subject: "Payment Reminder — Invoice {{invoiceNumber}}",
+    bodyHtml:
+      "<p>Dear {{customerName}},</p><p>This is a friendly reminder that invoice <strong>{{invoiceNumber}}</strong> for <strong>R {{amountDue}}</strong> is due by <strong>{{dueDate}}</strong>. Please find the invoice attached.</p>{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
+  },
+  voucher_email: {
+    subject: "Your Travel Voucher — {{jobNumber}}",
+    bodyHtml:
+      "<p>Dear {{customerName}},</p><p>Your travel voucher for the <strong>{{direction}}</strong> journey is attached, together with your itinerary. Please present the voucher to your service provider on arrival. Safe travels!</p><p>Warm regards,<br/>Luxus Travel &amp; Tours</p>",
+  },
+  itinerary_email: {
+    subject: "Your Itinerary — {{jobNumber}}",
+    bodyHtml:
+      "<p>Dear {{customerName}},</p><p>Please find attached your itinerary for <strong>{{tripTitle}}</strong>, departing <strong>{{departureDate}}</strong>.</p><p>Warm regards,<br/>Luxus Travel &amp; Tours</p>",
+  },
+  thank_you: {
+    subject: "Thank you for travelling with us — {{jobNumber}}",
+    bodyHtml:
+      "<p>Dear {{customerName}},</p><p>We hope you had a wonderful journey on <strong>{{routeName}}</strong>. Thank you for travelling with Luxus Travel &amp; Tours — it was a privilege to arrange your trip.</p><p>We would love to welcome you aboard again.</p><p>Warm regards,<br/>{{consultantName}}<br/>Luxus Travel &amp; Tours</p>",
+  },
+}
+
+/**
+ * Fetch the active template for a key. System keys always resolve — falling
+ * back to the code-level default when the DB row is missing or inactive.
+ * Custom keys return null when not found.
+ */
+export async function getTemplate(
+  supabase: SupabaseClient<Database>,
+  key: string,
+): Promise<EmailTemplate | null> {
+  const { data } = await supabase
+    .from("templates")
+    .select("key, subject, body_html")
+    .eq("key", key)
+    .eq("active", true)
+    .maybeSingle()
+
+  if (data) {
+    return { key: data.key, subject: data.subject, bodyHtml: data.body_html }
+  }
+
+  if (isSystemTemplateKey(key)) {
+    const fallback = DEFAULT_TEMPLATES[key]
+    return { key, subject: fallback.subject, bodyHtml: fallback.bodyHtml }
+  }
+
+  return null
+}

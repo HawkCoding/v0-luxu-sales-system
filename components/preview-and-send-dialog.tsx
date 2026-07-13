@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { Send } from "lucide-react"
+import { useMemo, useState } from "react"
+import { Paperclip, Send } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -13,7 +13,10 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Textarea } from "@/components/ui/textarea"
 import { useOptimisticSend } from "@/hooks/use-optimistic-send"
+import { extractContentSlot, replaceContentSlot } from "@/lib/templates/content-slot"
 
 interface PreviewAndSendDialogProps {
   open: boolean
@@ -22,9 +25,21 @@ interface PreviewAndSendDialogProps {
   description: string
   bookingId: string
   initialSubject: string
+  /** Full email HTML (branded wrapper). */
   bodyHtml: string
+  /**
+   * Editable inner content. When omitted, it is extracted from bodyHtml's
+   * content-slot markers; if neither exists the Edit tab is hidden.
+   */
+  bodyContentHtml?: string
   kind: string
   moveStage?: string
+  /** Initial recipient override; defaults to the customer's email server-side. */
+  to?: string
+  quoteId?: string
+  voucherId?: string
+  /** Scheduled correspondence row this send fulfils (updated in place server-side). */
+  scheduledCorrespondenceId?: string
   attachments?: Array<{
     filename: string
     contentBase64: string
@@ -41,19 +56,41 @@ export function PreviewAndSendDialog({
   bookingId,
   initialSubject,
   bodyHtml,
+  bodyContentHtml,
   kind,
   moveStage,
+  to,
+  quoteId,
+  voucherId,
+  scheduledCorrespondenceId,
   attachments,
   onSent,
 }: PreviewAndSendDialogProps) {
   const [subject, setSubject] = useState(initialSubject)
+  const [recipient, setRecipient] = useState(to ?? "")
+  const initialContent = useMemo(
+    () => bodyContentHtml ?? extractContentSlot(bodyHtml),
+    [bodyContentHtml, bodyHtml],
+  )
+  const [content, setContent] = useState<string | null>(initialContent)
   const [sending, setSending] = useState(false)
   const optimisticSend = useOptimisticSend()
+
+  const canEditBody = initialContent !== null
+
+  // Splice the edited content back into the branded wrapper for live preview
+  // and for the actual send. Falls back to the raw content if markers vanish.
+  const finalHtml = useMemo(() => {
+    if (!canEditBody || content === null) return bodyHtml
+    return replaceContentSlot(bodyHtml, content) ?? content
+  }, [bodyHtml, canEditBody, content])
 
   async function handleSend() {
     if (!subject.trim()) return
     setSending(true)
     const capturedSubject = subject
+    const capturedHtml = finalHtml
+    const capturedRecipient = recipient.trim()
     // Close dialog immediately for Gmail-style undo flow. The send fires
     // ~5s later via the optimistic-send hook; if the user clicks Undo on
     // the toast, the fetch never runs.
@@ -72,8 +109,12 @@ export function PreviewAndSendDialog({
             bookingId,
             kind,
             subject: capturedSubject,
-            bodyHtml,
+            bodyHtml: capturedHtml,
             moveStage,
+            to: capturedRecipient || undefined,
+            quoteId,
+            voucherId,
+            scheduledCorrespondenceId,
             sentAt: new Date().toISOString(),
             attachments,
           }),
@@ -91,6 +132,17 @@ export function PreviewAndSendDialog({
     }
   }
 
+  const previewFrame = (
+    <div className="max-h-[420px] overflow-auto rounded-md border bg-background">
+      <iframe
+        className="h-[420px] w-full bg-white"
+        sandbox=""
+        srcDoc={finalHtml}
+        title="Email preview"
+      />
+    </div>
+  )
+
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !sending && onOpenChange(nextOpen)}>
       <DialogContent className="sm:max-w-3xl">
@@ -100,23 +152,72 @@ export function PreviewAndSendDialog({
         </DialogHeader>
 
         <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="preview-send-subject">Subject</Label>
-            <Input
-              id="preview-send-subject"
-              value={subject}
-              onChange={(event) => setSubject(event.target.value)}
-              disabled={sending}
-            />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="preview-send-subject">Subject</Label>
+              <Input
+                id="preview-send-subject"
+                value={subject}
+                onChange={(event) => setSubject(event.target.value)}
+                disabled={sending}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="preview-send-to">To</Label>
+              <Input
+                id="preview-send-to"
+                type="email"
+                value={recipient}
+                onChange={(event) => setRecipient(event.target.value)}
+                placeholder="Customer email (default)"
+                disabled={sending}
+              />
+            </div>
           </div>
-          <div className="max-h-[420px] overflow-auto rounded-md border bg-background">
-            <iframe
-              className="h-[420px] w-full bg-white"
-              sandbox=""
-              srcDoc={bodyHtml}
-              title="Email preview"
-            />
-          </div>
+
+          {attachments && attachments.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {attachments.map((attachment) => (
+                <span
+                  key={attachment.filename}
+                  className="inline-flex items-center gap-1 rounded-md border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                >
+                  <Paperclip className="h-3 w-3" aria-hidden />
+                  {attachment.filename}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {canEditBody ? (
+            <Tabs defaultValue="preview">
+              <TabsList>
+                <TabsTrigger value="preview">Preview</TabsTrigger>
+                <TabsTrigger value="edit">Edit</TabsTrigger>
+              </TabsList>
+              <TabsContent value="preview">{previewFrame}</TabsContent>
+              <TabsContent value="edit">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="preview-send-body" className="sr-only">
+                    Email body (HTML)
+                  </Label>
+                  <Textarea
+                    id="preview-send-body"
+                    value={content ?? ""}
+                    onChange={(event) => setContent(event.target.value)}
+                    rows={14}
+                    className="font-mono text-xs"
+                    disabled={sending}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Edits apply to this email only. Change the default wording on the Templates page.
+                  </p>
+                </div>
+              </TabsContent>
+            </Tabs>
+          ) : (
+            previewFrame
+          )}
         </div>
 
         <DialogFooter>

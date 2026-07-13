@@ -1,6 +1,6 @@
 "use client"
 
-import { useAllData, useEnquiries, type EnquiryFilter, type EnquiryListItem } from "@/lib/use-data"
+import { useEnquiries, type EnquiryFilter, type EnquiryListItem } from "@/lib/use-data"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -45,7 +45,6 @@ export default function EnquiriesPage() {
   const activeFilter = (searchParams.get("filter") as EnquiryFilter | null) ?? undefined
 
   const { data: enquiriesData, isLoading, error, mutate: mutateEnquiries } = useEnquiries(activeFilter)
-  const { data: allData, mutate: mutateAllData } = useAllData()
   const { can } = useRole()
 
   const [search, setSearch] = useState("")
@@ -66,8 +65,7 @@ export default function EnquiriesPage() {
 
   const refreshAll = useCallback(() => {
     mutateEnquiries()
-    mutateAllData()
-  }, [mutateEnquiries, mutateAllData])
+  }, [mutateEnquiries])
 
   if (isLoading) {
     return (
@@ -107,15 +105,16 @@ export default function EnquiriesPage() {
     return matchSearch && matchSource
   })
 
-  const handleDownloadAudit = (ev: React.MouseEvent, enquiry: EnquiryListItem) => {
+  const handleDownloadAudit = async (ev: React.MouseEvent, enquiry: EnquiryListItem) => {
     ev.preventDefault()
     ev.stopPropagation()
     try {
-      const jobAuditLogs = ((allData as { auditLogs?: AuditLog[] } | undefined)?.auditLogs ?? []).filter(
-        (log) =>
-          log.entityId === enquiry.id || (log.entityType === "Booking" && log.entityId === enquiry.id),
+      const response = await fetch(
+        `/api/audit?entityType=Booking&entityId=${encodeURIComponent(enquiry.id)}&pageSize=250`,
       )
-      downloadAuditLog(jobAuditLogs, enquiry.bookingNumber)
+      if (!response.ok) throw new Error("Failed to load audit logs")
+      const payload = (await response.json()) as { logs?: AuditLog[] }
+      downloadAuditLog(payload.logs ?? [], enquiry.bookingNumber)
       toast.success("Audit log downloaded")
     } catch {
       toast.error("Failed to download audit log")

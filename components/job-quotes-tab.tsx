@@ -9,7 +9,7 @@ import { toast } from "sonner"
 import type { Quote } from "@/lib/types"
 import { useRole } from "@/lib/role-context"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
-import { ApplyPackageDialog } from "@/components/apply-package-dialog"
+import { BuildBookingDialog } from "@/components/build-booking-dialog"
 import { AddQuoteLineDialog } from "@/components/add-quote-line-dialog"
 import { SendQuoteDialog } from "@/components/send-quote-dialog"
 import { CreateQuoteDialog } from "@/components/create-quote-dialog"
@@ -294,7 +294,7 @@ export function JobQuotesTab({
                           onAdded={mutate}
                         />
                       )}
-                      <ApplyPackageDialog
+                      <BuildBookingDialog
                         jobId={jobId}
                         quoteId={q.id}
                         travelDate={travelDate}

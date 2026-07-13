@@ -9,8 +9,41 @@ vi.mock("@/lib/api/auth", () => ({
   requireRole: authMocks.requireRole,
 }))
 
-vi.mock("@/lib/invoices/render-invoice-email", () => ({
-  renderInvoiceEmail: vi.fn(async () => "<p>invoice</p>"),
+const pdfMocks = vi.hoisted(() => ({
+  ensureInvoicePdf: vi.fn(async () => ({
+    documentId: "doc-1",
+    storagePath: "invoices/BT-2026-0001-DEP1/invoice-BT-2026-0001-DEP1.pdf",
+    filename: "invoice-BT-2026-0001-DEP1.pdf",
+    contentBase64: Buffer.from("pdf").toString("base64"),
+  })),
+}))
+
+vi.mock("@/lib/invoices/ensure-invoice-pdf", () => ({
+  ensureInvoicePdf: pdfMocks.ensureInvoicePdf,
+  INVOICE_BUCKET: "invoices",
+}))
+
+vi.mock("@/lib/templates/compose-email", () => ({
+  composeEmail: vi.fn(async () => ({
+    subject: "Deposit Invoice — BT-2026-0001",
+    bodyHtml: "<html><p>invoice</p></html>",
+    bodyContentHtml: "<p>invoice</p>",
+    warnings: [],
+  })),
+}))
+
+vi.mock("@/lib/settings-access", () => ({
+  getBankingSettings: vi.fn(async () => ({
+    bank_name: "Example Bank",
+    bank_account_name: "",
+    bank_account_number: "",
+    bank_branch_code: "",
+    bank_swift_code: "",
+    payment_reference_hint: "",
+    company_address: "",
+    company_reg_number: "",
+    company_vat_number: "",
+  })),
 }))
 
 import { POST } from "./route"
@@ -60,7 +93,10 @@ describe("POST /api/invoices/deposit", () => {
     mockAuthOk(supabase)
 
     const res = await POST(postJson({ jobId: BOOKING_ID, depositPercentage: 25 }))
-    const body = (await res.json()) as { invoice: { amount: number; invoiceNumber: string } }
+    const body = (await res.json()) as {
+      invoice: { amount: number; invoiceNumber: string }
+      attachment: { filename: string }
+    }
 
     expect(res.status).toBe(200)
     // 25% of the accepted quote (1000), never the sent quote (9999)
@@ -69,9 +105,12 @@ describe("POST /api/invoices/deposit", () => {
     expect(store.rows("invoices")[0]).toEqual(
       expect.objectContaining({ kind: "deposit", quote_id: "quote-accepted", amount: 250 }),
     )
-    expect(store.rows("documents")[0]).toEqual(
-      expect.objectContaining({ kind: "invoice_pdf" }),
+    // The real PDF pipeline (render + upload + documents row) is delegated
+    expect(pdfMocks.ensureInvoicePdf).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ bookingNumber: "BT-2026-0001" }),
     )
+    expect(body.attachment.filename).toBe("invoice-BT-2026-0001-DEP1.pdf")
   })
 
   it("returns 422 when there is no priced accepted quote", async () => {

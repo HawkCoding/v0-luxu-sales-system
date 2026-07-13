@@ -12,8 +12,13 @@ vi.mock("@/lib/voucher/render-pdf", () => ({
   renderVoucherPdf: vi.fn(async () => Buffer.from("pdf")),
 }))
 
-vi.mock("@/lib/voucher/render-voucher-email", () => ({
-  renderVoucherEmail: vi.fn(async () => "<p>voucher</p>"),
+vi.mock("@/lib/templates/compose-email", () => ({
+  composeEmail: vi.fn(async () => ({
+    subject: "Your Travel Voucher — BT-2026-0001",
+    bodyHtml: "<html><p>voucher</p></html>",
+    bodyContentHtml: "<p>voucher</p>",
+    warnings: [],
+  })),
 }))
 
 const buildBlocksMock = vi.hoisted(() => vi.fn())

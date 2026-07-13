@@ -19,11 +19,6 @@ const patchSchema = z
   .object({
     quote_doc_title: z.string().trim().min(1).max(80).optional(),
     quote_doc_footer_text: z.string().trim().min(1).max(500).optional(),
-    quote_email_default_intro: z.string().trim().min(1).max(1000).optional(),
-    quote_email_accept_text: z.string().trim().min(1).max(1000).optional(),
-    invoice_email_intro_deposit: z.string().trim().min(1).max(1000).optional(),
-    invoice_email_intro_final: z.string().trim().min(1).max(1000).optional(),
-    invoice_email_closing: z.string().trim().min(1).max(1000).optional(),
   })
   .refine((data) => Object.values(data).some((value) => value !== undefined), {
     message: "At least one field required",

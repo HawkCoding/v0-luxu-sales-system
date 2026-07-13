@@ -2,7 +2,7 @@ import { z } from "zod"
 import { requireRole, requireUser } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { writeAuditLog } from "@/lib/audit-write"
-import type { Database } from "@/lib/supabase/types"
+import { seedSelectionsForLegs } from "./seed"
 
 export const runtime = "nodejs"
 
@@ -66,17 +66,6 @@ const setPackageSchema = z
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tripEndDate"], message: "Trip end date must be on or after the trip start date" })
     }
   })
-
-type BookingPackageSelectionInsert =
-  Database["public"]["Tables"]["booking_package_selections"]["Insert"]
-type BookingPackageSelectionUnitInsert =
-  Database["public"]["Tables"]["booking_package_selection_units"]["Insert"]
-type BookingTransportRequestInsert =
-  Database["public"]["Tables"]["booking_transport_requests"]["Insert"]
-type BookingVehicleRentalDetailInsert =
-  Database["public"]["Tables"]["booking_vehicle_rental_details"]["Insert"]
-
-const TRANSPORT_SUPPLIER_KINDS = new Set(["transfers", "vehicle_rental"])
 
 export async function POST(req: Request, { params }: RouteParams) {
   const auth = await requireRole(["admin", "manager", "consultant"])
@@ -155,75 +144,13 @@ export async function POST(req: Request, { params }: RouteParams) {
       if (legsError) return safeSupabaseError("booking-package:load-legs", legsError)
 
       if (legs && legs.length > 0) {
-        const rows: BookingPackageSelectionInsert[] = legs.map((leg) => ({
-          booking_id: id,
-          package_leg_id: leg.id,
-          selected: true,
-          supplier_id: leg.supplier_id,
-          service_date: newTripStartDate,
-        }))
-
-        const { data: insertedSelections, error: insertError } = await supabase
-          .from("booking_package_selections")
-          .insert(rows)
-          .select("id, package_leg_id")
-
-        if (insertError) return safeSupabaseError("booking-package:seed-selections", insertError)
-
-        // Seed one blank unit per non-transport leg so the UI has a row to fill in immediately.
-        const selectionIdByLegId = new Map((insertedSelections ?? []).map((row) => [row.package_leg_id, row.id]))
-        const unitLegs = legs.filter((leg) => !TRANSPORT_SUPPLIER_KINDS.has(leg.supplier?.kind ?? ""))
-        if (unitLegs.length > 0) {
-          const unitRows: BookingPackageSelectionUnitInsert[] = unitLegs
-            .map((leg) => selectionIdByLegId.get(leg.id))
-            .filter((selectionId): selectionId is string => Boolean(selectionId))
-            .map((selectionId) => ({ selection_id: selectionId, sort_order: 0 }))
-
-          if (unitRows.length > 0) {
-            const { error: unitInsertError } = await supabase
-              .from("booking_package_selection_units")
-              .insert(unitRows)
-
-            if (unitInsertError) return safeSupabaseError("booking-package:seed-units", unitInsertError)
-          }
-        }
-
-        const transportLegs = legs.filter((leg) => TRANSPORT_SUPPLIER_KINDS.has(leg.supplier?.kind ?? ""))
-
-        if (transportLegs.length > 0) {
-          const transportRows: BookingTransportRequestInsert[] = transportLegs.map((leg) => ({
-            booking_id: id,
-            package_leg_id: leg.id,
-            supplier_id: leg.supplier_id,
-            service_type: leg.supplier?.kind === "vehicle_rental" ? "rental" : "transfer",
-            pickup_point: "",
-            dropoff_point: "",
-            pickup_at: newTripStartDate ? `${newTripStartDate}T00:00:00+00:00` : null,
-            sort_order: 0,
-          }))
-
-          const { data: insertedTransportRows, error: transportInsertError } = await supabase
-            .from("booking_transport_requests")
-            .insert(transportRows)
-            .select("id, service_type")
-
-          if (transportInsertError) return safeSupabaseError("booking-package:seed-transport-requests", transportInsertError)
-
-          const rentalDetailRows: BookingVehicleRentalDetailInsert[] = (insertedTransportRows ?? [])
-            .filter((row) => row.service_type === "rental")
-            .map((row) => ({
-              transport_request_id: row.id,
-              return_at: newTripEndDate ? `${newTripEndDate}T00:00:00+00:00` : null,
-            }))
-
-          if (rentalDetailRows.length > 0) {
-            const { error: rentalInsertError } = await supabase
-              .from("booking_vehicle_rental_details")
-              .insert(rentalDetailRows)
-
-            if (rentalInsertError) return safeSupabaseError("booking-package:seed-rental-details", rentalInsertError)
-          }
-        }
+        const seedResult = await seedSelectionsForLegs(
+          supabase,
+          id,
+          legs.map((leg) => ({ id: leg.id, supplier_id: leg.supplier_id, kind: leg.supplier?.kind ?? null })),
+          { tripStartDate: newTripStartDate, tripEndDate: newTripEndDate },
+        )
+        if (seedResult.error) return safeSupabaseError("booking-package:seed-selections", seedResult.error)
       }
     }
   }

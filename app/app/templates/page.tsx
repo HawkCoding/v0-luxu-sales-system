@@ -9,9 +9,10 @@ import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useRole } from "@/lib/role-context"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import { Edit3, Eye, BookOpen, Plus, Trash2 } from "lucide-react"
+import { getTokenSpecs, TEMPLATE_TOKENS, type TemplateTokenSpec } from "@/lib/templates/registry"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,16 +28,17 @@ import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
 import { VoucherTemplateEditor } from "@/components/voucher-template-editor"
 import { DocumentTextSettingsEditor } from "@/components/document-text-settings-editor"
 
-const EMAIL_PLACEHOLDERS = [
-  { token: "{{jobNumber}}",     description: "Job/booking reference number (e.g. BT-2026-0001)" },
-  { token: "{{customerName}}", description: "Full name of the customer" },
-  { token: "{{direction}}",     description: "Travel route direction" },
-  { token: "{{departureDate}}", description: "Departure date of the trip" },
-  { token: "{{validityDate}}", description: "Date the quote expires (14 days from issue)" },
-  { token: "{{total}}",         description: "Total quoted price" },
-  { token: "{{lastSentDate}}", description: "Date the quote was last sent to the customer" },
-  { token: "{{depositAmount}}", description: "Deposit amount due (from the configured default percentage)" },
-]
+// Union of all system-template tokens for the reference dialog — the token
+// registry (lib/templates/registry.ts) is the source of truth.
+const EMAIL_PLACEHOLDERS: { token: string; description: string }[] = (() => {
+  const seen = new Map<string, string>()
+  for (const specs of Object.values(TEMPLATE_TOKENS)) {
+    for (const spec of specs) {
+      if (!seen.has(spec.name)) seen.set(spec.name, spec.description)
+    }
+  }
+  return [...seen.entries()].map(([name, description]) => ({ token: `{{${name}}}`, description }))
+})()
 
 const VOUCHER_PLACEHOLDERS = [
   { token: "{voucher_number}",   description: "Unique voucher identifier" },
@@ -69,6 +71,41 @@ export default function TemplatesPage() {
   const [createBody, setCreateBody] = useState("")
   const [pendingDelete, setPendingDelete] = useState<Template | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null)
+  const [previewWarnings, setPreviewWarnings] = useState<string[]>([])
+  const [previewLoading, setPreviewLoading] = useState(false)
+
+  // Server-render a branded preview (sample token values) whenever a template
+  // is opened for preview; fall back to the raw body if the request fails.
+  useEffect(() => {
+    if (!preview) {
+      setPreviewHtml(null)
+      setPreviewWarnings([])
+      return
+    }
+    let cancelled = false
+    setPreviewLoading(true)
+    fetch("/api/templates/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: preview.key, subject: preview.subject, bodyHtml: preview.bodyHtml }),
+    })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("preview failed"))))
+      .then((d: { html?: string; warnings?: string[] }) => {
+        if (cancelled) return
+        setPreviewHtml(typeof d.html === "string" ? d.html : null)
+        setPreviewWarnings(Array.isArray(d.warnings) ? d.warnings : [])
+      })
+      .catch(() => {
+        if (!cancelled) setPreviewHtml(null)
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [preview])
 
   if (isLoading || !templates) {
     return <div className="p-6"><div className="animate-pulse space-y-3">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-24 bg-secondary rounded-lg" />)}</div></div>
@@ -260,6 +297,26 @@ export default function TemplatesPage() {
               <label className="text-xs font-medium text-muted-foreground">Body (HTML)</label>
               <Textarea value={editBody} onChange={(e) => setEditBody(e.target.value)} rows={12} className="mt-1 text-xs font-mono" />
             </div>
+            {editing && getTokenSpecs(editing.key).length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-muted-foreground mb-1.5">
+                  Available tokens — click to insert
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {getTokenSpecs(editing.key).map((spec: TemplateTokenSpec) => (
+                    <button
+                      key={spec.name}
+                      type="button"
+                      title={spec.description}
+                      onClick={() => setEditBody((b) => `${b}{{${spec.name}}}`)}
+                      className="text-xs font-mono bg-muted hover:bg-accent px-1.5 py-0.5 rounded border border-border focus-visible:outline-2 focus-visible:outline-ring"
+                    >
+                      {`{{${spec.name}}}`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="flex justify-end gap-2">
               <Button variant="outline" size="sm" onClick={() => setEditing(null)}>Cancel</Button>
               <Button size="sm" onClick={handleSave} disabled={saving}>{saving ? "Saving..." : "Save"}</Button>
@@ -334,8 +391,25 @@ export default function TemplatesPage() {
             <DialogTitle>Template Preview</DialogTitle>
             <DialogDescription>{preview?.subject}</DialogDescription>
           </DialogHeader>
-          <div className="border border-border rounded-md p-4 bg-card">
-            <div className="text-sm" dangerouslySetInnerHTML={{ __html: preview?.bodyHtml || "" }} />
+          {previewWarnings.length > 0 && (
+            <div className="text-xs text-amber-600 dark:text-amber-500 space-y-0.5" role="alert">
+              {previewWarnings.map((w) => (
+                <p key={w}>{w}</p>
+              ))}
+            </div>
+          )}
+          <div className="border border-border rounded-md bg-card overflow-hidden">
+            {/* Sandboxed iframe (no scripts, no same-origin) so template HTML cannot run in the app's session */}
+            {previewLoading ? (
+              <div className="w-full h-72 animate-pulse bg-secondary" />
+            ) : (
+              <iframe
+                title="Template preview"
+                sandbox=""
+                srcDoc={previewHtml ?? preview?.bodyHtml ?? ""}
+                className="w-full h-96 border-0 bg-white"
+              />
+            )}
           </div>
         </DialogContent>
       </Dialog>

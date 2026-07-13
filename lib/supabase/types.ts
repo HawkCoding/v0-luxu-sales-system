@@ -1641,6 +1641,7 @@ export type Database = {
           id: string
           invoice_number: string
           kind: string
+          pdf_document_id: string | null
           quote_id: string | null
           sent_at: string | null
           status: string
@@ -1657,6 +1658,7 @@ export type Database = {
           id?: string
           invoice_number: string
           kind: string
+          pdf_document_id?: string | null
           quote_id?: string | null
           sent_at?: string | null
           status?: string
@@ -1673,6 +1675,7 @@ export type Database = {
           id?: string
           invoice_number?: string
           kind?: string
+          pdf_document_id?: string | null
           quote_id?: string | null
           sent_at?: string | null
           status?: string
@@ -1684,6 +1687,13 @@ export type Database = {
             columns: ["booking_id"]
             isOneToOne: false
             referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoices_pdf_document_id_fkey"
+            columns: ["pdf_document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
             referencedColumns: ["id"]
           },
           {
@@ -1873,6 +1883,7 @@ export type Database = {
       packages: {
         Row: {
           active: boolean
+          booking_id: string | null
           created_at: string
           currency: string
           description: string | null
@@ -1887,6 +1898,7 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          booking_id?: string | null
           created_at?: string
           currency?: string
           description?: string | null
@@ -1901,6 +1913,7 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          booking_id?: string | null
           created_at?: string
           currency?: string
           description?: string | null
@@ -1913,7 +1926,15 @@ export type Database = {
           slug?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "packages_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       payment_reminders: {
         Row: {
@@ -2455,6 +2476,7 @@ export type Database = {
           destination_location_id: string | null
           direction_mode: Database["public"]["Enums"]["route_direction_mode"]
           dropoff_point: string | null
+          duration_days: number | null
           extra_km_price: number | null
           id: string
           included_km_per_day: number | null
@@ -2473,6 +2495,7 @@ export type Database = {
           destination_location_id?: string | null
           direction_mode?: Database["public"]["Enums"]["route_direction_mode"]
           dropoff_point?: string | null
+          duration_days?: number | null
           extra_km_price?: number | null
           id?: string
           included_km_per_day?: number | null
@@ -2491,6 +2514,7 @@ export type Database = {
           destination_location_id?: string | null
           direction_mode?: Database["public"]["Enums"]["route_direction_mode"]
           dropoff_point?: string | null
+          duration_days?: number | null
           extra_km_price?: number | null
           id?: string
           included_km_per_day?: number | null
@@ -3385,7 +3409,7 @@ export type Database = {
     }
     Enums: {
       booking_purpose: "quote" | "availability" | "reservation"
-      correspondence_status: "sent" | "failed" | "scheduled"
+      correspondence_status: "sent" | "failed" | "scheduled" | "cancelled"
       document_kind:
         | "quote_pdf"
         | "invoice_pdf"
@@ -3569,7 +3593,7 @@ export const Constants = {
   public: {
     Enums: {
       booking_purpose: ["quote", "availability", "reservation"],
-      correspondence_status: ["sent", "failed", "scheduled"],
+      correspondence_status: ["sent", "failed", "scheduled", "cancelled"],
       document_kind: [
         "quote_pdf",
         "invoice_pdf",

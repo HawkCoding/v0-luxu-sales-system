@@ -3,7 +3,7 @@
 import { useCallback } from "react"
 import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import useSWR from "swr"
-import { useAllData } from "@/lib/use-data"
+import { useData } from "@/lib/use-data"
 import { useRole } from "@/lib/role-context"
 import {
   getCanonicalPipelineStage,
@@ -56,7 +56,7 @@ function formatRand(amount: number): string {
 }
 
 export default function ReportingPage() {
-  const { data, isLoading } = useAllData()
+  const { data, isLoading } = useData(["bookings", "customers", "payments", "quotes"])
   const { can } = useRole()
   const canExport = can("export:reporting")
 

@@ -3,9 +3,11 @@ import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDate } from "@/lib/date-format"
 import { calculateDepositAmount, normalizeDepositPercentage } from "@/lib/pipeline/constants"
-import { renderInvoiceEmail } from "@/lib/invoices/render-invoice-email"
+import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
+import { ensureInvoicePdf } from "@/lib/invoices/ensure-invoice-pdf"
 import { logError } from "@/lib/error-log"
-import { getDocumentTextSettings } from "@/lib/settings-access"
+import { composeEmail } from "@/lib/templates/compose-email"
+import { getBankingSettings } from "@/lib/settings-access"
 
 export const runtime = "nodejs"
 
@@ -110,15 +112,6 @@ export async function POST(req: Request) {
       .single()
 
     if (error || !data) throw error ?? new Error("Invoice insert did not return a row")
-
-    const { error: documentError } = await supabase.from("documents").insert({
-      booking_id: parsed.data.jobId,
-      kind: "invoice_pdf",
-      status: "generated",
-      storage_path: `invoices/${data.id}`,
-    })
-
-    if (documentError) throw documentError
     return data
   })().catch((error: unknown) => {
     console.error("supabase:deposit-invoice:create", error)
@@ -130,22 +123,51 @@ export async function POST(req: Request) {
 
   const customer = Array.isArray(booking.customer) ? booking.customer[0] : booking.customer
   const customerName = [customer?.first_name, customer?.last_name].filter(Boolean).join(" ").trim()
-  const documentText = await getDocumentTextSettings(supabase)
-  const bodyHtml = await renderInvoiceEmail({
-    customerName,
-    invoiceNumber: invoice.invoice_number,
-    bookingNumber: booking.booking_number,
-    invoiceKind: "deposit",
-    amount: formatMoney(invoice.amount, invoice.currency),
-    depositPercentage: invoice.deposit_percentage,
-    dueDate: formatDisplayDate(invoice.due_date),
-    introText: documentText.invoice_email_intro_deposit,
-    closingText: documentText.invoice_email_closing,
-    lines: [
-      { label: "Quote total", value: formatMoney(quote.total, invoice.currency) },
-      { label: "Invoice status", value: "Draft" },
-    ],
+
+  // Render + store the invoice PDF and return it as an email attachment.
+  let pdf
+  try {
+    pdf = await ensureInvoicePdf(supabase, {
+      invoice: {
+        id: invoice.id,
+        booking_id: invoice.booking_id,
+        kind: "deposit",
+        invoice_number: invoice.invoice_number,
+        amount: invoice.amount,
+        currency: invoice.currency,
+        due_date: invoice.due_date,
+        created_at: invoice.created_at,
+        status: invoice.status,
+      },
+      bookingNumber: booking.booking_number,
+      customerName,
+      lines: [
+        { label: "Quote total", value: formatMoney(quote.total, invoice.currency) },
+        {
+          label: `Deposit (${invoice.deposit_percentage ?? depositPercentage}%)`,
+          value: formatMoney(invoice.amount, invoice.currency),
+        },
+      ],
+    })
+  } catch (error) {
+    console.error("deposit-invoice:pdf", error)
+    return jsonError("Deposit invoice PDF could not be generated", 500)
+  }
+
+  const banking = await getBankingSettings(supabase)
+  const composed = await composeEmail(supabase, "deposit_request", {
+    tokens: {
+      customerName: customerName || "Valued Guest",
+      jobNumber: booking.booking_number,
+      invoiceNumber: invoice.invoice_number,
+      depositAmount: formatMoney(invoice.amount, invoice.currency),
+      depositPercentage: String(invoice.deposit_percentage ?? depositPercentage),
+      dueDate: formatDisplayDate(invoice.due_date),
+    },
+    blocks: { bankingDetails: buildBankingDetailsBlock(banking) },
   })
+
+  if (!composed) return jsonError("Deposit invoice email template could not be resolved", 500)
 
   return Response.json({
     invoice: {
@@ -165,8 +187,15 @@ export async function POST(req: Request) {
     },
     email: {
       to: customer?.email ?? "",
-      subject: `Deposit invoice ${invoice.invoice_number}`,
-      bodyHtml,
+      subject: composed.subject,
+      bodyHtml: composed.bodyHtml,
+      bodyContentHtml: composed.bodyContentHtml,
+      warnings: composed.warnings,
+    },
+    attachment: {
+      filename: pdf.filename,
+      contentBase64: pdf.contentBase64,
+      contentType: "application/pdf",
     },
   })
 }
