@@ -147,6 +147,14 @@ function buildAuth({ stage, invoiceBalance, existingDocumentId, existingVoucherI
       if (table === "travellers") return createSelectResult([])
       if (table === "voucher_template") return createSelectResult(null)
 
+      if (table === "app_settings") {
+        return {
+          select: vi.fn(() => ({
+            in: vi.fn(async () => ({ data: [], error: null })),
+          })),
+        }
+      }
+
       if (table === "documents") {
         const existingDoc = existingDocumentId ? { id: existingDocumentId } : null
         return {

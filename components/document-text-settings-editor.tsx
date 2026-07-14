@@ -16,11 +16,19 @@ interface FieldConfig {
   label: string
   group: string
   multiline: boolean
+  /** Saving an empty value is allowed (clears the text). */
+  allowEmpty?: boolean
 }
 
 const FIELDS: FieldConfig[] = [
   { key: "quote_doc_title", label: "Quote PDF title", group: "Quote document", multiline: false },
   { key: "quote_doc_footer_text", label: "Quote PDF footer (supports {{validUntil}}, {{currency}})", group: "Quote document", multiline: true },
+  { key: "voucher_doc_title", label: "Voucher PDF title", group: "Voucher document", multiline: false },
+  { key: "invoice_doc_deposit_title", label: "Deposit invoice title", group: "Invoice document", multiline: false },
+  { key: "invoice_doc_final_title", label: "Final invoice title", group: "Invoice document", multiline: false },
+  { key: "invoice_doc_footer_text", label: "Invoice PDF footer", group: "Invoice document", multiline: true },
+  { key: "itinerary_doc_journey_heading", label: "Itinerary journey heading", group: "Itinerary document", multiline: false },
+  { key: "itinerary_doc_intro_text", label: "Itinerary intro paragraph (leave empty to omit)", group: "Itinerary document", multiline: true, allowEmpty: true },
 ]
 
 export function DocumentTextSettingsEditor({ canEdit }: DocumentTextSettingsEditorProps) {
@@ -32,15 +40,16 @@ export function DocumentTextSettingsEditor({ canEdit }: DocumentTextSettingsEdit
     if (data) setValues(data)
   }, [data])
 
-  const handleSave = async (field: keyof DocumentTextSettings, label: string) => {
-    const value = values[field]?.trim()
-    if (!value) return
-    setSavingField(field)
+  const handleSave = async (field: FieldConfig) => {
+    const { key, label } = field
+    const value = values[key]?.trim() ?? ""
+    if (!value && !field.allowEmpty) return
+    setSavingField(key)
     try {
       const res = await fetch("/api/settings/document-text", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [field]: value }),
+        body: JSON.stringify({ [key]: value }),
       })
       if (!res.ok) throw new Error()
       toast.success(`${label} saved`)
@@ -100,8 +109,8 @@ export function DocumentTextSettingsEditor({ canEdit }: DocumentTextSettingsEdit
                 {canEdit && (
                   <Button
                     size="sm"
-                    onClick={() => handleSave(field.key, field.label)}
-                    disabled={savingField === field.key || !values[field.key]?.trim()}
+                    onClick={() => handleSave(field)}
+                    disabled={savingField === field.key || (!field.allowEmpty && !values[field.key]?.trim())}
                   >
                     {savingField === field.key ? "Saving…" : "Save"}
                   </Button>

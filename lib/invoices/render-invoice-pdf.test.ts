@@ -34,6 +34,25 @@ describe("renderInvoicePdf smoke", () => {
     expect(buffer.subarray(0, 5).toString("utf8")).toBe("%PDF-")
   })
 
+  it("renders custom titles and footer text", async () => {
+    const buffer = await renderInvoicePdf({
+      invoiceNumber: "BT-2026-0001-DEP1",
+      bookingNumber: "BT-2026-0001",
+      customerName: "Jane Smith",
+      kind: "deposit",
+      issueDate: "2026-07-12",
+      dueDate: "2026-07-19",
+      lines: [{ label: "Quote total", value: "R 58 900,00" }],
+      amountDue: 14725,
+      banking,
+      depositTitle: "BOOKING DEPOSIT",
+      finalTitle: "BALANCE DUE",
+      footerText: "Custom footer wording",
+    })
+
+    expect(buffer.subarray(0, 5).toString("utf8")).toBe("%PDF-")
+  })
+
   it("renders a final invoice without banking details configured", async () => {
     const buffer = await renderInvoicePdf({
       invoiceNumber: "BT-2026-0001-FIN1",

@@ -14,6 +14,7 @@ import { VoucherFooter } from "./sections/footer"
 export interface VoucherDocumentProps {
   data: VoucherData
   template?: VoucherTemplate | null
+  docTitle?: string
 }
 
 function normalizeTemplate(template?: VoucherTemplate | null): VoucherTemplate {
@@ -37,7 +38,7 @@ function sectionFor(key: VoucherSectionKey, data: VoucherData, template: Voucher
   return null
 }
 
-export function VoucherDocument({ data, template }: VoucherDocumentProps) {
+export function VoucherDocument({ data, template, docTitle = "TRAVEL VOUCHERS" }: VoucherDocumentProps) {
   registerVoucherFonts()
 
   const t = normalizeTemplate(template)
@@ -62,7 +63,7 @@ export function VoucherDocument({ data, template }: VoucherDocumentProps) {
         <HeaderBanner template={t} styles={styles} />
 
         <View style={styles.voucherNumberRow}>
-          <Text style={styles.title}>TRAVEL VOUCHERS</Text>
+          <Text style={styles.title}>{docTitle}</Text>
           <View style={styles.voucherStub}>
             <Text style={styles.voucherStubLabel}>Voucher no.</Text>
             <Text style={styles.voucherStubNumber}>{data.voucherNumber}</Text>

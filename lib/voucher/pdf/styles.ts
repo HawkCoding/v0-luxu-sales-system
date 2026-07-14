@@ -61,9 +61,9 @@ export function voucherStyles({
       width: 120,
     },
     headerLogo: {
-      maxHeight: 80,
-      maxWidth: 100,
+      height: 80,
       objectFit: "contain",
+      width: 100,
     },
     headerBannerSide: {
       flex: 1,
@@ -91,9 +91,9 @@ export function voucherStyles({
       paddingBottom: 12,
     },
     headerLogoCenter: {
-      maxHeight: 70,
-      maxWidth: 180,
+      height: 70,
       objectFit: "contain",
+      width: 180,
     },
     headerBannerOnly: {
       borderBottomColor: t.rule,

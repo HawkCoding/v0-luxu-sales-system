@@ -13,13 +13,20 @@ import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
 export interface ItineraryDocumentProps {
   data: ItineraryData
   template?: VoucherTemplate | null
+  journeyHeading?: string
+  introText?: string
 }
 
 function normalizeTemplate(t?: VoucherTemplate | null): VoucherTemplate {
   return { ...VOUCHER_TEMPLATE_DEFAULTS, ...t }
 }
 
-export function ItineraryDocument({ data, template }: ItineraryDocumentProps) {
+export function ItineraryDocument({
+  data,
+  template,
+  journeyHeading = "Your Journey",
+  introText,
+}: ItineraryDocumentProps) {
   registerVoucherFonts()
 
   const t = normalizeTemplate(template)
@@ -73,6 +80,12 @@ export function ItineraryDocument({ data, template }: ItineraryDocumentProps) {
       paddingHorizontal: 14,
       paddingVertical: 10,
     },
+    introText: {
+      color: "#444444",
+      fontSize: 10,
+      lineHeight: 1.5,
+      marginBottom: 14,
+    },
     journeyHeading: {
       backgroundColor: t.section_bg,
       borderRadius: 2,
@@ -110,13 +123,17 @@ export function ItineraryDocument({ data, template }: ItineraryDocumentProps) {
           <Text style={extra.guestValue}>{data.departure}</Text>
         </View>
 
+        {introText?.trim() ? (
+          <Text style={extra.introText}>{introText.trim()}</Text>
+        ) : null}
+
         {data.tripNotes ? (
           <Text style={extra.notesBox}>{data.tripNotes}</Text>
         ) : null}
 
         {sorted.length > 0 ? (
           <>
-            <Text style={extra.journeyHeading}>Your Journey</Text>
+            <Text style={extra.journeyHeading}>{journeyHeading}</Text>
             {sorted.map((block, idx) => (
               <ServiceBlock
                 key={`${block.serviceType}-${idx}`}

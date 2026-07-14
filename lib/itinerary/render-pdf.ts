@@ -7,6 +7,8 @@ import { ItineraryDocument } from "./pdf/itinerary-document"
 export interface RenderItineraryPdfInput {
   data: ItineraryData
   template?: VoucherTemplate | null
+  journeyHeading?: string
+  introText?: string
 }
 
 const SLOW_RENDER_THRESHOLD_MS = 2_000

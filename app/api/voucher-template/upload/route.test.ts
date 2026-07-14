@@ -218,7 +218,7 @@ describe("POST /api/voucher-template/upload", () => {
     expect(payload.error).toBe("Database error")
   })
 
-  it("uploads SVG assets directly", async () => {
+  it("rejects SVG logo uploads", async () => {
     const supabase = createSupabase()
     createSessionClientMock.mockResolvedValue(supabase)
 
@@ -228,13 +228,27 @@ describe("POST /api/voucher-template/upload", () => {
         file: makeFile("logo.svg", "image/svg+xml", "<svg />"),
       }),
     )
+    const payload = await response.json()
 
-    expect(response.status).toBe(200)
-    expect(supabase.uploads).toEqual([
-      { path: "logo.svg", contentType: "image/svg+xml", upsert: true },
-    ])
-    expect(supabase.updates[0]).toMatchObject({
-      logo_url: expect.stringContaining("/voucher-assets/logo.svg?t="),
-    })
+    expect(response.status).toBe(400)
+    expect(payload.error).toBe("Logo uploads must be cropped to PNG.")
+    expect(supabase.uploads).toEqual([])
+  })
+
+  it("rejects SVG banner uploads", async () => {
+    const supabase = createSupabase()
+    createSessionClientMock.mockResolvedValue(supabase)
+
+    const response = await POST(
+      createUploadRequest({
+        kind: "banner",
+        file: makeFile("banner.svg", "image/svg+xml", "<svg />"),
+      }),
+    )
+    const payload = await response.json()
+
+    expect(response.status).toBe(400)
+    expect(payload.error).toBe("Banner uploads must be cropped to WebP.")
+    expect(supabase.uploads).toEqual([])
   })
 })

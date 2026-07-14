@@ -19,6 +19,9 @@ export interface InvoicePdfData {
   currency?: string
   statusLabel?: string
   banking: BankingSettings
+  depositTitle?: string
+  finalTitle?: string
+  footerText?: string
 }
 
 function formatMoney(amount: number, currency = "ZAR"): string {
@@ -209,8 +212,11 @@ export function InvoiceDocument({
   currency = "ZAR",
   statusLabel = "Draft",
   banking,
+  depositTitle = "DEPOSIT INVOICE",
+  finalTitle = "FINAL INVOICE",
+  footerText = "Luxus Travel & Tours — Luxury Rail Journeys",
 }: InvoicePdfData) {
-  const title = kind === "deposit" ? "DEPOSIT INVOICE" : "FINAL INVOICE"
+  const title = kind === "deposit" ? depositTitle : finalTitle
   const bankingRows = BANKING_ROWS.filter(({ key }) => banking[key])
   const companyFooterParts = [
     banking.company_address,
@@ -284,7 +290,7 @@ export function InvoiceDocument({
         ) : null}
 
         <Text style={styles.footer}>
-          {["Luxus Travel & Tours — Luxury Rail Journeys", ...companyFooterParts].join("  •  ")}
+          {[footerText, ...companyFooterParts].join("  •  ")}
         </Text>
       </Page>
     </Document>

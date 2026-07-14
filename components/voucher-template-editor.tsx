@@ -160,13 +160,8 @@ function ImageUploadZone({ label, kind, currentUrl, onUploaded, disabled }: Imag
         return
       }
 
-      if (file.type === "image/svg+xml") {
-        await uploadFile(file)
-        return
-      }
-
       if (!RASTER_IMAGE_TYPES.includes(file.type as (typeof RASTER_IMAGE_TYPES)[number])) {
-        toast.error("Please upload a PNG, JPG, WebP, or SVG image.")
+        toast.error("Please upload a PNG, JPG, or WebP image.")
         return
       }
 
@@ -242,7 +237,7 @@ function ImageUploadZone({ label, kind, currentUrl, onUploaded, disabled }: Imag
         <input
           ref={inputRef}
           type="file"
-          accept="image/png,image/jpeg,image/webp,image/svg+xml"
+          accept="image/png,image/jpeg,image/webp"
           className="hidden"
           disabled={disabled || uploading}
           onChange={(e) => {
@@ -269,7 +264,7 @@ function ImageUploadZone({ label, kind, currentUrl, onUploaded, disabled }: Imag
             <DialogDescription>
               {isBanner
                 ? "Drag the image to choose the banner area. The saved banner will be 1200 x 300 pixels."
-                : "Drag the image to choose the logo area. SVG files are uploaded without cropping."}
+                : "Drag the image to choose the logo area."}
             </DialogDescription>
           </DialogHeader>
           <div
@@ -448,7 +443,7 @@ export function VoucherTemplateEditor({ initial, canEdit }: Props) {
           </div>
         </div>
         <p className="text-xs text-muted-foreground mt-2">
-          Logo appears left; banner fills the right side of the header. PNG, JPG, WebP or SVG, max 5 MB.
+          Logo appears left; banner fills the right side of the header. PNG, JPG or WebP, max 5 MB.
         </p>
       </section>
 

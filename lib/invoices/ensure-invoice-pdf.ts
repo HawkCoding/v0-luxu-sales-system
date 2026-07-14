@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { renderInvoicePdf, type InvoicePdfLine } from "@/lib/invoices/render-invoice-pdf"
-import { getBankingSettings } from "@/lib/settings-access"
+import { getBankingSettings, getDocumentTextSettings } from "@/lib/settings-access"
 import { logError } from "@/lib/error-log"
 
 export const INVOICE_BUCKET = "invoices"
@@ -45,7 +45,10 @@ export async function ensureInvoicePdf(
   supabase: SupabaseClient<Database>,
   { invoice, bookingNumber, customerName, lines }: EnsureInvoicePdfInput,
 ): Promise<EnsuredInvoicePdf> {
-  const banking = await getBankingSettings(supabase)
+  const [banking, documentText] = await Promise.all([
+    getBankingSettings(supabase),
+    getDocumentTextSettings(supabase),
+  ])
 
   let pdfBuffer: Buffer
   try {
@@ -61,6 +64,9 @@ export async function ensureInvoicePdf(
       currency: invoice.currency,
       statusLabel: invoice.status === "draft" ? "Draft" : invoice.status,
       banking,
+      depositTitle: documentText.invoice_doc_deposit_title,
+      finalTitle: documentText.invoice_doc_final_title,
+      footerText: documentText.invoice_doc_footer_text,
     })
   } catch (err) {
     void logError({

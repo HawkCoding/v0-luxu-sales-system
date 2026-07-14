@@ -8,6 +8,7 @@ import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 import { checkVoucherReadiness } from "@/lib/voucher/check-readiness"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { renderVoucherPdf } from "@/lib/voucher/render-pdf"
+import { getDocumentTextSettings } from "@/lib/settings-access"
 import { CONSULTANTS, VOUCHER_TEMPLATE_DEFAULTS, type ConsultantAbbreviation, type VoucherTemplate } from "@/lib/types"
 import type { Database, Json } from "@/lib/supabase/types"
 
@@ -98,6 +99,7 @@ export async function POST(req: Request) {
     { data: suites, error: suitesError },
     { data: travellers, error: travellersError },
     { data: templateRaw },
+    documentText,
   ] = await Promise.all([
     supabase
       .from("bookings")
@@ -121,6 +123,7 @@ export async function POST(req: Request) {
       .select("id, logo_url, banner_url, header_text, product_line, accent_colour, section_bg, font_family, section_order, hidden_sections, footer_company, footer_phone, footer_email, guidance_text")
       .limit(1)
       .maybeSingle(),
+    getDocumentTextSettings(supabase),
   ])
 
   if (bookingError || !bookingRaw) return jsonError("Booking not found", 404)
@@ -205,7 +208,11 @@ export async function POST(req: Request) {
 
   let pdfBuffer: Buffer
   try {
-    pdfBuffer = await renderVoucherPdf({ data: voucherData, template })
+    pdfBuffer = await renderVoucherPdf({
+      data: voucherData,
+      template,
+      docTitle: documentText.voucher_doc_title,
+    })
   } catch (error) {
     console.error("voucher:render-pdf", error)
     return jsonError("Voucher PDF could not be rendered", 500)

@@ -367,6 +367,32 @@ body {
   }
 }
 
+/* Rich-text email body editor surface. Tailwind Preflight zeroes list styles
+   and paragraph margins, so restore email-ish typography inside the editor. */
+.prose-email {
+  color: var(--luxu-text-body);
+}
+.prose-email p {
+  margin: 0 0 1em;
+}
+.prose-email p:last-child {
+  margin-bottom: 0;
+}
+.prose-email ul {
+  list-style: disc;
+  padding-left: 1.5em;
+  margin: 0 0 1em;
+}
+.prose-email ol {
+  list-style: decimal;
+  padding-left: 1.5em;
+  margin: 0 0 1em;
+}
+.prose-email a {
+  color: var(--primary);
+  text-decoration: underline;
+}
+
 [data-sonner-toast] {
   color: var(--normal-text);
 }

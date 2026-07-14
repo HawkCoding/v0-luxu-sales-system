@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import dynamic from "next/dynamic"
 import { Paperclip, Send } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -14,9 +15,14 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Textarea } from "@/components/ui/textarea"
+import { Skeleton } from "@/components/ui/skeleton"
 import { useOptimisticSend } from "@/hooks/use-optimistic-send"
 import { extractContentSlot, replaceContentSlot } from "@/lib/templates/content-slot"
+
+const HtmlBodyEditor = dynamic(
+  () => import("@/components/ui/html-body-editor").then((m) => m.HtmlBodyEditor),
+  { ssr: false, loading: () => <Skeleton className="min-h-64" /> },
+)
 
 interface PreviewAndSendDialogProps {
   open: boolean
@@ -145,7 +151,7 @@ export function PreviewAndSendDialog({
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => !sending && onOpenChange(nextOpen)}>
-      <DialogContent className="sm:max-w-3xl">
+      <DialogContent className="sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
@@ -201,12 +207,10 @@ export function PreviewAndSendDialog({
                   <Label htmlFor="preview-send-body" className="sr-only">
                     Email body (HTML)
                   </Label>
-                  <Textarea
+                  <HtmlBodyEditor
                     id="preview-send-body"
                     value={content ?? ""}
-                    onChange={(event) => setContent(event.target.value)}
-                    rows={14}
-                    className="font-mono text-xs"
+                    onChange={setContent}
                     disabled={sending}
                   />
                   <p className="text-xs text-muted-foreground">
