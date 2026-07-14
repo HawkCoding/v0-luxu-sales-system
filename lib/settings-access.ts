@@ -176,6 +176,7 @@ export async function getAttachmentMaxSizeMb(
 export const DOCUMENT_TEXT_SETTING_KEYS = [
   "quote_doc_title",
   "quote_doc_footer_text",
+  "quote_doc_includes_heading",
   "voucher_doc_title",
   "invoice_doc_deposit_title",
   "invoice_doc_final_title",
@@ -190,6 +191,7 @@ const DOCUMENT_TEXT_DEFAULTS: DocumentTextSettings = {
   quote_doc_title: "PROVISIONAL QUOTATION",
   quote_doc_footer_text:
     "This quotation is valid until {{validUntil}} and is subject to availability. Prices are quoted in {{currency}}. Luxus Travel & Tours — Luxury Rail Journeys.",
+  quote_doc_includes_heading: "Your Package Includes",
   voucher_doc_title: "TRAVEL VOUCHERS",
   invoice_doc_deposit_title: "DEPOSIT INVOICE",
   invoice_doc_final_title: "FINAL INVOICE",

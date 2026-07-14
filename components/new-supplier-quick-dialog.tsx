@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useState } from "react"
 import { toast } from "sonner"
@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
+import { DatePicker } from "@/components/ui/date-picker"
 import { Label } from "@/components/ui/label"
 import { NumericInput } from "@/components/ui/numeric-input"
 import {
@@ -178,7 +179,7 @@ export function NewSupplierQuickDialog({
 
       await mutate("/api/suppliers")
       toast.success(
-        `${name.trim()} added as a temporary supplier — a manager can activate it in Suppliers`,
+        `${name.trim()} added as a temporary supplier â€” a manager can activate it in Suppliers`,
       )
       onCreated({
         supplierId: payload.supplierId!,
@@ -252,7 +253,7 @@ export function NewSupplierQuickDialog({
                   {locations.map((location) => (
                     <SelectItem key={location.id} value={location.id}>
                       {location.parentLocationId
-                        ? `${cityLocations.find((c) => c.id === location.parentLocationId)?.name ?? "?"} · ${location.name}`
+                        ? `${cityLocations.find((c) => c.id === location.parentLocationId)?.name ?? "?"} Â· ${location.name}`
                         : location.name}
                     </SelectItem>
                   ))}
@@ -359,11 +360,10 @@ export function NewSupplierQuickDialog({
             {priceExpires && (
               <div className="space-y-1.5">
                 <Label>Valid until</Label>
-                <Input
-                  type="date"
+                <DatePicker
                   value={validTo}
-                  min={validFrom}
-                  onChange={(e) => setValidTo(e.target.value)}
+                  minDate={validFrom}
+                  onChange={(value) => setValidTo(value ?? "")}
                 />
               </div>
             )}
@@ -375,7 +375,7 @@ export function NewSupplierQuickDialog({
             Cancel
           </Button>
           <Button onClick={handleSave} disabled={saving}>
-            {saving ? "Saving…" : "Create & use"}
+            {saving ? "Savingâ€¦" : "Create & use"}
           </Button>
         </DialogFooter>
       </DialogContent>

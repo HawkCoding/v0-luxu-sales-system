@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { formatDisplayDateTime } from "@/lib/date-format"
 import type { BackupRecord } from "@/lib/types"
 
 function formatBytes(bytes: number | null): string {
@@ -28,13 +29,7 @@ function formatBytes(bytes: number | null): string {
 }
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString("en-ZA", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
+  return formatDisplayDateTime(iso)
 }
 
 interface BackupRecordWithCreator extends BackupRecord {

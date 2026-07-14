@@ -1,5 +1,12 @@
-import type { BookingTransportRequest, PackageDetail, PackageLeg, SupplierKind } from "@/lib/types"
+import type {
+  BookingTransportRequest,
+  HotelDateAnchor,
+  PackageDetail,
+  PackageLeg,
+  SupplierKind,
+} from "@/lib/types"
 import type { PassengerTotals } from "@/lib/packages/passenger-totals"
+import { findAnchorTrainLeg, resolveHotelStayDates } from "@/lib/packages/hotel-dates"
 
 /**
  * Pure state model for the Apply Package dialog's configure step.
@@ -39,6 +46,8 @@ export interface SuiteLegState {
   serviceDate: string | null
   /** Hotel legs only. */
   nights: number | null
+  /** Hotel legs only: `pre`/`post` derive serviceDate from the train leg, `custom` leaves it manual. */
+  dateAnchor: HotelDateAnchor | null
   notes: string | null
   units: SuiteUnitState[]
 }
@@ -76,6 +85,7 @@ export interface SavedSelectionRow {
   suite_type_id: string | null
   service_date: string | null
   nights: number | null
+  date_anchor: string | null
   notes: string | null
   units: SavedSelectionUnitRow[]
 }
@@ -148,6 +158,13 @@ export function buildDefaultLegStates(
   detail: PackageDetail,
   options: BuildDefaultLegStatesOptions,
 ): ApplyLegState[] {
+  return applyAnchoredHotelDates(detail, buildRawDefaultLegStates(detail, options))
+}
+
+function buildRawDefaultLegStates(
+  detail: PackageDetail,
+  options: BuildDefaultLegStatesOptions,
+): ApplyLegState[] {
   return sortedLegs(detail).map((leg) => {
     if (TRANSPORT_SUPPLIER_KINDS.has(leg.supplierKind)) {
       return {
@@ -164,6 +181,8 @@ export function buildDefaultLegStates(
       ? options.totalsBySupplierId?.[leg.supplierId]
       : undefined
 
+    const isHotel = leg.supplierKind === "hotel_property"
+
     return {
       kind: "suite",
       legId: leg.id,
@@ -171,10 +190,60 @@ export function buildDefaultLegStates(
       selected: leg.supplierKind === "train_operator",
       routeId: defaultRouteId(leg),
       serviceDate: options.tripStartDate,
-      nights: leg.supplierKind === "hotel_property" ? 1 : null,
+      nights: isHotel ? 1 : null,
+      // An un-anchored hotel keeps today's behaviour: a manually picked service date.
+      dateAnchor: isHotel ? leg.dateAnchor ?? "custom" : null,
       notes: null,
       units: [createDraftUnit(totals)],
     } satisfies SuiteLegState
+  })
+}
+
+function normalizeSavedAnchor(value: string | null): HotelDateAnchor | null {
+  return value === "pre" || value === "post" || value === "custom" ? value : null
+}
+
+/** The train leg a hotel leg's dates hang off, plus the departure date and route length currently
+ * chosen on it. Returns null for legs that aren't anchored hotels or have no train to anchor to. */
+export function getHotelAnchorContext(
+  detail: PackageDetail,
+  states: ApplyLegState[],
+  hotelLegId: string,
+): { trainLeg: PackageLeg; departureDate: string | null; durationDays: number | null } | null {
+  const state = states.find((candidate) => candidate.legId === hotelLegId)
+  if (state?.kind !== "suite" || state.supplierKind !== "hotel_property") return null
+
+  const trainLeg = findAnchorTrainLeg(detail.legs, hotelLegId, state.dateAnchor)
+  if (!trainLeg) return null
+
+  const trainState = states.find((candidate) => candidate.legId === trainLeg.id)
+  const routeId = trainState?.routeId ?? null
+  const route =
+    trainLeg.routes.find((candidate) => candidate.id === routeId) ??
+    (trainLeg.routes.length === 1 ? trainLeg.routes[0] : undefined)
+
+  return {
+    trainLeg,
+    departureDate: trainState?.kind === "suite" ? trainState.serviceDate : null,
+    durationDays: route?.durationDays ?? null,
+  }
+}
+
+/** Recomputes the service date of every pre/post-anchored hotel leg from its train leg. Runs after
+ * any state change so editing the train's departure date or a hotel's nights re-dates the stay. */
+export function applyAnchoredHotelDates(
+  detail: PackageDetail,
+  states: ApplyLegState[],
+): ApplyLegState[] {
+  return states.map((state) => {
+    if (state.kind !== "suite" || state.supplierKind !== "hotel_property") return state
+    if (state.dateAnchor !== "pre" && state.dateAnchor !== "post") return state
+
+    const context = getHotelAnchorContext(detail, states, state.legId)
+    const dates = resolveHotelStayDates(state.dateAnchor, state.nights ?? 1, context)
+    if (!dates || dates.checkIn === state.serviceDate) return state
+
+    return { ...state, serviceDate: dates.checkIn }
   })
 }
 
@@ -187,9 +256,9 @@ export function hydrateFromSaved(
   options: BuildDefaultLegStatesOptions,
 ): ApplyLegState[] {
   const selectionByLegId = new Map(saved.selections.map((row) => [row.package_leg_id, row]))
-  const defaults = buildDefaultLegStates(detail, options)
+  const defaults = buildRawDefaultLegStates(detail, options)
 
-  return defaults.map((fallback) => {
+  const hydrated = defaults.map((fallback) => {
     const row = selectionByLegId.get(fallback.legId)
 
     if (fallback.kind === "transport") {
@@ -221,16 +290,22 @@ export function hydrateFromSaved(
         infantCount: unit.infant_count,
       }))
 
+    const isHotel = fallback.supplierKind === "hotel_property"
+
     return {
       ...fallback,
       selected: row.selected,
       routeId: row.route_id ?? fallback.routeId,
       serviceDate: row.service_date ?? fallback.serviceDate,
-      nights: fallback.supplierKind === "hotel_property" ? row.nights ?? fallback.nights : null,
+      nights: isHotel ? row.nights ?? fallback.nights : null,
+      // No saved anchor (pre-existing booking, or seeded by intake) falls back to the package's.
+      dateAnchor: isHotel ? normalizeSavedAnchor(row.date_anchor) ?? fallback.dateAnchor : null,
       notes: row.notes,
       units: units.length > 0 ? units : fallback.units,
     } satisfies SuiteLegState
   })
+
+  return applyAnchoredHotelDates(detail, hydrated)
 }
 
 /** PATCH /api/jobs/[id]/package-selections body. */
@@ -241,6 +316,7 @@ export interface PackageSelectionsPatchBody {
     routeId: string | null
     serviceDate?: string | null
     nights?: number | null
+    dateAnchor?: HotelDateAnchor | null
     notes?: string | null
     units?: Array<{
       id?: string
@@ -272,6 +348,7 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
         routeId: state.routeId,
         serviceDate: state.serviceDate,
         nights: state.supplierKind === "hotel_property" ? Math.max(1, state.nights ?? 1) : null,
+        dateAnchor: state.supplierKind === "hotel_property" ? state.dateAnchor : null,
         notes: state.notes,
         units: state.units.map((unit, index) => ({
           id: unit.id.startsWith("draft-") ? undefined : unit.id,
@@ -473,6 +550,12 @@ export function validateConfigureState(
 
     if (state.supplierKind === "hotel_property" && (state.nights ?? 0) < 1) {
       errors.push(`${legLabel}: nights must be at least 1`)
+    }
+
+    // An anchored hotel with no date means the train leg it hangs off has no departure date yet
+    // (or the package has no train leg at all) — the salesperson has to set the date themselves.
+    if (state.supplierKind === "hotel_property" && !state.serviceDate) {
+      errors.push(`${legLabel}: check-in date is required`)
     }
 
     if (PASSENGER_SPLIT_SUPPLIER_KINDS.has(state.supplierKind)) {

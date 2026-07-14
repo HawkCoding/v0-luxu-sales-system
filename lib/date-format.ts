@@ -26,8 +26,8 @@ export function formatDisplayDate(value: string | Date | null | undefined): stri
   const parsed = parseDateInput(value)
   if (!parsed) return ""
 
-  const day = parsed.getDate()
-  const month = parsed.getMonth() + 1
+  const day = pad(parsed.getDate())
+  const month = pad(parsed.getMonth() + 1)
   const year = parsed.getFullYear()
 
   return `${day}/${month}/${year}`

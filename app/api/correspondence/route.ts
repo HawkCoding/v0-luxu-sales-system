@@ -2,7 +2,7 @@ import { z } from "zod"
 import { writeAuditLog } from "@/lib/audit-write"
 import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
-import { formatDisplayDateTime } from "@/lib/date-format"
+import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { getEmailFromAddress } from "@/lib/email/from"
 import { resolveSalespersonSender } from "@/lib/email/resolve-sender"
 import { sendEmail } from "@/lib/email/transport"
@@ -161,12 +161,14 @@ export async function POST(req: Request) {
   const baseAttachments: NonNullable<typeof parsed.data.attachments> = parsed.data.attachments ?? []
 
   if (parsed.data.kind === "quote" && parsed.data.quoteId) {
-    // A quote email must always carry its PDF — generate it if missing.
+    // A quote email must always carry its PDF — re-render on every send so the
+    // attachment reflects the current layout and quote data.
     let storagePath: string
     try {
       const ensured = await ensureQuotePdf(supabase, parsed.data.quoteId, {
         actorName: profile.actorName,
         actorUserId: auth.value.user.id,
+        force: true,
       })
       storagePath = ensured.storagePath
     } catch (err) {
@@ -395,7 +397,7 @@ export async function POST(req: Request) {
       tokens: {
         customerName,
         jobNumber: booking.booking_number,
-        lastSentDate: (parsed.data.sentAt ?? now).slice(0, 10),
+        lastSentDate: formatDisplayDate((parsed.data.sentAt ?? now).slice(0, 10)),
       },
     })
 

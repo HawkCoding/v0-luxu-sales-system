@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { formatDisplayDate } from "@/lib/date-format"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { applyTransition } from "@/lib/pipeline/apply-transition"
 import { createServiceClient } from "@/lib/supabase/server"
@@ -97,7 +98,7 @@ export async function GET(request: Request) {
           customerName: booking.customer?.first_name ?? "Valued Guest",
           jobNumber: booking.booking_number,
           routeName: booking.route?.name ?? "your journey",
-          tripEndDate: tripEndDate.toISOString().slice(0, 10),
+          tripEndDate: formatDisplayDate(tripEndDate),
           consultantName: booking.consultant ?? "The Luxus team",
         },
       })

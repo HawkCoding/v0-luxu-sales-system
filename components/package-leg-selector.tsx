@@ -17,6 +17,24 @@ export interface SelectablePackageLeg extends EditablePackageLeg {
   selectedRouteIds: string[]
 }
 
+const HOTEL_ANCHOR_OPTIONS: { value: "pre" | "post" | null; label: string; hint: string }[] = [
+  {
+    value: "pre",
+    label: "Pre-train",
+    hint: "Check-in falls the night(s) before the train departs — 2 nights means checking in two days before.",
+  },
+  {
+    value: "post",
+    label: "Post-train",
+    hint: "Check-in falls on the day the train arrives.",
+  },
+  {
+    value: null,
+    label: "Ask each time",
+    hint: "No default — the salesperson picks the check-in date when applying the package.",
+  },
+]
+
 interface PackageLegSelectorProps {
   leg: SelectablePackageLeg
   locations: Location[]
@@ -104,8 +122,35 @@ export function PackageLegSelector({
       <CardContent className="space-y-3">
         <h3 className="text-sm font-semibold">{isHotel ? "Hotel option" : vocab.routePlural}</h3>
         {isHotel ? (
-          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-            This hotel is included as an option. Room type and meal plan are selected when applying the package to a quote.
+          <div className="space-y-3">
+            <div className="space-y-2 rounded-lg border p-3">
+              <div className="space-y-0.5">
+                <Label>Stay position</Label>
+                <p className="text-xs text-muted-foreground">
+                  Sets the check-in date automatically when this package is applied to a quote.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {HOTEL_ANCHOR_OPTIONS.map((option) => (
+                  <Button
+                    key={option.label}
+                    type="button"
+                    size="sm"
+                    variant={leg.dateAnchor === option.value ? "default" : "outline"}
+                    aria-pressed={leg.dateAnchor === option.value}
+                    onClick={() => onChange({ ...leg, dateAnchor: option.value })}
+                  >
+                    {option.label}
+                  </Button>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {HOTEL_ANCHOR_OPTIONS.find((option) => option.value === leg.dateAnchor)?.hint}
+              </p>
+            </div>
+            <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+              This hotel is included as an option. Room type and meal plan are selected when applying the package to a quote.
+            </div>
           </div>
         ) : leg.routes.length > 0 ? (
           <div className="space-y-2">

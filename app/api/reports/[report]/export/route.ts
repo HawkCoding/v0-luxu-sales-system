@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
+import { formatDisplayDate } from "@/lib/date-format"
 import { getReadOnlyExportsAllowed } from "@/lib/settings-access"
 import { salesPerSalesperson } from "@/lib/reports/sales-per-salesperson"
 import { conversionRate } from "@/lib/reports/conversion-rate"
@@ -63,7 +64,13 @@ function buildCsv(report: ReportName, data: unknown[]): string {
       }[]
       return toCsv(
         ["Booking Number", "Consultant", "Departure Date", "Balance (R)", "Stage"],
-        rows.map((r) => [r.bookingNumber, r.consultant ?? "", r.departureDate ?? "", r.balance, r.stage]),
+        rows.map((r) => [
+          r.bookingNumber,
+          r.consultant ?? "",
+          formatDisplayDate(r.departureDate),
+          r.balance,
+          r.stage,
+        ]),
       )
     }
     case "enquiries-by-source": {

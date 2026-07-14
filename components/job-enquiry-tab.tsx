@@ -5,6 +5,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Input } from "@/components/ui/input"
+import { DatePicker } from "@/components/ui/date-picker"
+import { DateTimePicker } from "@/components/ui/date-time-picker"
 import { Label } from "@/components/ui/label"
 import { NumericInput } from "@/components/ui/numeric-input"
 import {
@@ -52,20 +54,6 @@ interface JobEnquiryTabProps {
   onQuoteStarted?: () => Promise<void> | void
   onTransportRequestsChange?: () => void
   onFieldsUpdated?: () => void | Promise<void>
-}
-
-function toDateTimeLocalValue(value: string | null | undefined): string {
-  if (!value) return ""
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ""
-  const offsetMs = date.getTimezoneOffset() * 60 * 1000
-  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16)
-}
-
-function fromDateTimeLocalValue(value: string | null | undefined): string | null {
-  if (!value) return null
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? null : date.toISOString()
 }
 
 function createEmptyTransportRequest(sortOrder: number): EditableTransportRequest {
@@ -637,16 +625,13 @@ export function JobEnquiryTab({
                     <div className="space-y-1.5">
                       <Label>Pickup date/time</Label>
                       <div className="flex gap-2">
-                        <Input
-                          type="datetime-local"
-                          value={toDateTimeLocalValue(request.pickupAt)}
-                          onChange={(event) =>
-                            updateTransportRequest(
-                              request.id,
-                              "pickupAt",
-                              fromDateTimeLocalValue(event.target.value),
-                            )
+                        <DateTimePicker
+                          value={request.pickupAt}
+                          onChange={(pickupAt) =>
+                            updateTransportRequest(request.id, "pickupAt", pickupAt)
                           }
+                          aria-label="Pickup date"
+                          className="flex-1"
                         />
                         <Button
                           type="button"
@@ -664,15 +649,11 @@ export function JobEnquiryTab({
                       <div className="space-y-1.5">
                         <Label>Return date/time</Label>
                         <div className="flex gap-2">
-                          <Input
-                            type="datetime-local"
-                            value={toDateTimeLocalValue(request.rentalDetails?.returnAt)}
-                            onChange={(event) =>
-                              updateRentalDetails(
-                                request.id,
-                                { returnAt: fromDateTimeLocalValue(event.target.value) },
-                              )
-                            }
+                          <DateTimePicker
+                            value={request.rentalDetails?.returnAt}
+                            onChange={(returnAt) => updateRentalDetails(request.id, { returnAt })}
+                            aria-label="Return date"
+                            className="flex-1"
                           />
                           <Button
                             type="button"
@@ -1076,18 +1057,16 @@ function SupplierScheduleSection({
                   </div>
                   <div className="space-y-1.5">
                     <Label>{fields?.dateFromLabel ?? "Start date"}</Label>
-                    <Input
-                      type="date"
+                    <DatePicker
                       value={schedule.dateFrom}
-                      onChange={(event) => onUpdate(schedule.id, "dateFrom", event.target.value)}
+                      onChange={(value) => onUpdate(schedule.id, "dateFrom", value ?? "")}
                     />
                   </div>
                   <div className="space-y-1.5">
                     <Label>{fields?.dateToLabel ?? "End date"}</Label>
-                    <Input
-                      type="date"
+                    <DatePicker
                       value={schedule.dateTo}
-                      onChange={(event) => onUpdate(schedule.id, "dateTo", event.target.value)}
+                      onChange={(value) => onUpdate(schedule.id, "dateTo", value ?? "")}
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -1162,8 +1141,8 @@ function SupplierScheduleSummary({
             <p className="text-sm font-medium">{title}</p>
           </div>
           <div className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
-            <Field label={fields?.dateFromLabel ?? "Start date"} value={schedule.dateFromDisplay ?? schedule.dateFrom} />
-            <Field label={fields?.dateToLabel ?? "End date"} value={schedule.dateToDisplay ?? schedule.dateTo} />
+            <Field label={fields?.dateFromLabel ?? "Start date"} value={schedule.dateFromDisplay ?? formatDisplayDate(schedule.dateFrom)} />
+            <Field label={fields?.dateToLabel ?? "End date"} value={schedule.dateToDisplay ?? formatDisplayDate(schedule.dateTo)} />
             <Field label={fields?.timeStartLabel ?? "Start time"} value={schedule.timeStart ?? "Not set"} />
             <Field label={fields?.timeEndLabel ?? "End time"} value={schedule.timeEnd ?? "Not set"} />
           </div>
@@ -1211,7 +1190,7 @@ function TravellerRow({ traveller, index }: { traveller: Traveller; index: numbe
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 py-2 border-b border-border last:border-0">
       <Field label={`Traveller ${index}`} value={`${traveller.prefix} ${traveller.name} ${traveller.surname}`} />
       <Field label="ID/Passport" value={traveller.idPassport} />
-      <Field label="Date of Birth" value={traveller.dateOfBirth} />
+      <Field label="Date of Birth" value={formatDisplayDate(traveller.dateOfBirth)} />
     </div>
   )
 }

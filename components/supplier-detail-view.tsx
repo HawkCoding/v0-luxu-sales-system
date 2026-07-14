@@ -649,7 +649,7 @@ function buildRateCardConflictMessage(
   conflict: RateCardConflict,
   vocabulary: SupplierVocabulary,
 ): string {
-  return `Duplicate rate for ${vocabulary.suiteType.toLowerCase()} "${conflict.suiteTypeName}", ${vocabulary.route.toLowerCase()} "${conflict.routeName}", start date ${conflict.validFrom}. Keep only one row for that combination.`
+  return `Duplicate rate for ${vocabulary.suiteType.toLowerCase()} "${conflict.suiteTypeName}", ${vocabulary.route.toLowerCase()} "${conflict.routeName}", start date ${formatDisplayDate(conflict.validFrom)}. Keep only one row for that combination.`
 }
 
 function buildRouteDeletionConfirmationMessage({
@@ -810,7 +810,8 @@ function findFirstInvertedDateRangeConflict(
 }
 
 function buildRateCardDateRangeLabel(range: RateCardDateRange): string {
-  return `${range.validFrom} to ${range.validTo ?? "open ended"}`
+  const to = range.validTo ? formatDisplayDate(range.validTo) : "open ended"
+  return `${formatDisplayDate(range.validFrom)} to ${to}`
 }
 
 function buildRateCardOverlapConflictMessage(
@@ -3140,7 +3141,10 @@ export function SupplierDetailView({
             }
           }
           return nearest
-            ? { card: nearest, period: `${nearest.validFrom}–${nearest.validTo ?? "ongoing"}` }
+            ? {
+                card: nearest,
+                period: formatRateCardValidityRange(nearest.validFrom, nearest.validTo),
+              }
             : undefined
         }
 

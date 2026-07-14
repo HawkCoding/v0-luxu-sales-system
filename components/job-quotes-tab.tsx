@@ -7,11 +7,11 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { toast } from "sonner"
 import type { Quote } from "@/lib/types"
+import { isMissingPricing } from "@/lib/quotes/pricing-engine"
 import { useRole } from "@/lib/role-context"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { BuildBookingDialog } from "@/components/build-booking-dialog"
 import { AddQuoteLineDialog } from "@/components/add-quote-line-dialog"
-import { SendQuoteDialog } from "@/components/send-quote-dialog"
 import { CreateQuoteDialog } from "@/components/create-quote-dialog"
 import { QuotePreviewSendDialog } from "@/components/quote-preview-send-dialog"
 import { FileDown, Link2, Loader2, RotateCcw, Send, Trash2, X } from "lucide-react"
@@ -34,8 +34,6 @@ interface JobQuotesTabProps {
   jobId: string
   bookingNumber: string
   travelDate: string | null
-  noOfAdults: number
-  noOfChildren: number
   customerName: string
   customerDefaultRateTypeId?: string | null
   emailImportNeedsReview?: boolean
@@ -47,15 +45,13 @@ export function JobQuotesTab({
   jobId,
   bookingNumber,
   travelDate,
-  noOfAdults,
-  noOfChildren,
   customerName,
   customerDefaultRateTypeId,
   emailImportNeedsReview = false,
   mutate,
 }: JobQuotesTabProps) {
   const { can } = useRole()
-  const [sendQuoteOpen, setSendQuoteOpen] = useState(false)
+  const [previewSendOpen, setPreviewSendOpen] = useState(false)
   const [revisingQuoteId, setRevisingQuoteId] = useState<string | null>(null)
   const [cancellingQuoteId, setCancellingQuoteId] = useState<string | null>(null)
   const [generatingLinkForId, setGeneratingLinkForId] = useState<string | null>(null)
@@ -86,23 +82,9 @@ export function JobQuotesTab({
       setRemovingLineKey(null)
     }
   }
-  const sendQuoteDialog = (
-    <SendQuoteDialog
-      open={sendQuoteOpen}
-      onOpenChange={setSendQuoteOpen}
-      bookingId={jobId}
-      bookingNumber={bookingNumber}
-      departureDate={travelDate}
-      noOfAdults={noOfAdults}
-      noOfChildren={noOfChildren}
-      customerName={customerName}
-      emailImportNeedsReview={emailImportNeedsReview}
-      onSent={() => {
-        mutate()
-        setSendQuoteOpen(false)
-      }}
-    />
-  )
+  // Quotes arrive oldest-first from the API; the send button targets the newest sendable one.
+  const latestSendableQuote =
+    [...quotes].reverse().find((q) => EDITABLE_QUOTE_STATUSES.includes(q.status)) ?? null
 
   async function reviseQuote(quoteId: string) {
     setRevisingQuoteId(quoteId)
@@ -180,13 +162,8 @@ export function JobQuotesTab({
         {can("edit:quotes") && (
           <div className="flex flex-wrap justify-center gap-2">
             <CreateQuoteDialog jobId={jobId} onCreated={mutate} />
-            <Button size="sm" onClick={() => setSendQuoteOpen(true)}>
-              <Send className="w-3.5 h-3.5 mr-1.5" />
-              Send Quote
-            </Button>
           </div>
         )}
-        {sendQuoteDialog}
       </div>
     )
   }
@@ -196,16 +173,31 @@ export function JobQuotesTab({
       {can("edit:quotes") && (
         <div className="flex justify-end gap-2">
           <CreateQuoteDialog jobId={jobId} onCreated={mutate} />
-          <Button size="sm" onClick={() => setSendQuoteOpen(true)}>
+          <Button
+            size="sm"
+            disabled={!latestSendableQuote}
+            title={latestSendableQuote ? undefined : "Create a quote first"}
+            onClick={() => setPreviewSendOpen(true)}
+          >
             <Send className="w-3.5 h-3.5 mr-1.5" />
             Send Quote
           </Button>
         </div>
       )}
-      {sendQuoteDialog}
+      {latestSendableQuote && (
+        <QuotePreviewSendDialog
+          quote={latestSendableQuote}
+          bookingNumber={bookingNumber}
+          customerName={customerName}
+          emailImportNeedsReview={emailImportNeedsReview}
+          open={previewSendOpen}
+          onOpenChange={setPreviewSendOpen}
+          onSent={mutate}
+        />
+      )}
       {quotes.map(q => {
         const badge = STATUS_BADGE[q.status] || { variant: "outline" as const, label: q.status }
-        const hasIncomplete = q.lineItems.some(li => li.unitPrice === 0)
+        const hasIncomplete = q.lineItems.some(isMissingPricing)
         const canEditLines = can("edit:quotes") && EDITABLE_QUOTE_STATUSES.includes(q.status)
 
         return (
@@ -338,8 +330,12 @@ export function JobQuotesTab({
                             <div className="text-[10px] text-muted-foreground">{li.pricingSnapshot.unit}</div>
                           ) : null}
                         </td>
-                        <td className={`py-2 text-xs text-right ${li.unitPrice === 0 ? "text-destructive font-medium" : "text-muted-foreground"}`}>
-                          {li.unitPrice === 0 ? "TBD" : `R ${li.unitPrice.toLocaleString()}`}
+                        <td className={`py-2 text-xs text-right ${isMissingPricing(li) ? "text-destructive font-medium" : "text-muted-foreground"}`}>
+                          {li.unitPrice === 0
+                            ? isMissingPricing(li)
+                              ? "TBD"
+                              : "Included"
+                            : `R ${li.unitPrice.toLocaleString()}`}
                         </td>
                         <td className="py-2 text-xs text-right text-foreground font-medium">R {li.total.toLocaleString()}</td>
                         {canEditLines && (

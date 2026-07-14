@@ -139,6 +139,7 @@ function payloadFromState(state: WizardState) {
         supplierId: leg.supplierId,
         label: leg.label.trim() || null,
         sortOrder: leg.sortOrder ?? index,
+        dateAnchor: leg.supplierKind === "hotel_property" ? leg.dateAnchor : null,
         routes:
           leg.supplierKind === "hotel_property"
             ? []
@@ -273,6 +274,8 @@ export function PackageWizard() {
         supplierKind: selectedSupplier.kind,
         label: selectedSupplier.name,
         sortOrder: state.legs.length,
+        // Hotels are usually the night before the train — safe default, still switchable per leg.
+        dateAnchor: selectedSupplier.kind === "hotel_property" ? "pre" : null,
         routes: routes.map((route) => ({ ...route, existing: true })),
         rateCards: rateCards
           .filter((rateCard) => supplierRouteIds.has(rateCard.routeId))

@@ -39,6 +39,7 @@ export const packageLegSchema = z.object({
   supplierId: z.string().uuid(),
   label: z.string().trim().max(200).nullable().optional(),
   sortOrder: z.number().int().nonnegative().default(0),
+  dateAnchor: z.enum(["pre", "post"]).nullable().optional(),
   routes: z.array(packageRouteSchema).default([]),
   rateCards: z.array(packageRateCardSchema).default([]),
 })

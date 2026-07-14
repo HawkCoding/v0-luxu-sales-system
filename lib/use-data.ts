@@ -256,6 +256,7 @@ export function useVoucherTemplate() {
 export interface DocumentTextSettings {
   quote_doc_title: string
   quote_doc_footer_text: string
+  quote_doc_includes_heading: string
   voucher_doc_title: string
   invoice_doc_deposit_title: string
   invoice_doc_final_title: string

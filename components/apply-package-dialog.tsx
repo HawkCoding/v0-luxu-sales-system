@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useEffect, useMemo, useState } from "react"
 import { Boxes, Search, X } from "lucide-react"
@@ -14,6 +14,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { DatePicker } from "@/components/ui/date-picker"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -33,11 +34,13 @@ import { CommissionControl, type CommissionControlValue } from "@/components/sup
 import { CommissionBadge } from "@/components/quotes/commission-badge"
 import { QuoteLineSupplierPicker, type QuoteExtraSelection } from "@/components/quote-line-supplier-picker"
 import { getDestinationLocationIds } from "@/lib/packages/location-filter"
-import { SuiteLegEditor } from "@/components/packages/suite-leg-editor"
+import { SuiteLegEditor, type HotelAnchorContext } from "@/components/packages/suite-leg-editor"
 import { TransportLegEditor } from "@/components/packages/transport-leg-editor"
 import type { PassengerTotals } from "@/lib/packages/passenger-totals"
 import {
+  applyAnchoredHotelDates,
   buildDefaultLegStates,
+  getHotelAnchorContext,
   hydrateFromSaved,
   PASSENGER_SPLIT_SUPPLIER_KINDS,
   toApplySelections,
@@ -54,10 +57,10 @@ interface ApplyPackageDialogProps {
   quoteId: string
   travelDate: string | null
   existingLineItemCount: number
-  /** Existing quote lines — manual/extra lines (snapshot.isExtra) are preserved across re-apply. */
+  /** Existing quote lines â€” manual/extra lines (snapshot.isExtra) are preserved across re-apply. */
   existingLineItems?: QuoteLineItem[]
   expectedUpdatedAt?: string
-  /** Customer's default rate type — pre-selects the rate version when applying a package. */
+  /** Customer's default rate type â€” pre-selects the rate version when applying a package. */
   customerDefaultRateTypeId?: string | null
   onApplied: () => void
 }
@@ -276,8 +279,24 @@ export function ApplyPackageDialog({
     }
   }
 
+  // Anchored hotel dates are derived, so every edit re-runs them: changing the train's departure
+  // date or a hotel's night count immediately re-dates the stays that hang off it.
   function updateLegState(next: ApplyLegState) {
-    setLegStates((prev) => prev.map((state) => (state.legId === next.legId ? next : state)))
+    setLegStates((prev) => {
+      const merged = prev.map((state) => (state.legId === next.legId ? next : state))
+      return packageDetail ? applyAnchoredHotelDates(packageDetail, merged) : merged
+    })
+  }
+
+  function hotelAnchorContext(legId: string): HotelAnchorContext | null {
+    if (!packageDetail) return null
+    const context = getHotelAnchorContext(packageDetail, legStates, legId)
+    if (!context) return null
+    return {
+      trainLabel: context.trainLeg.label ?? context.trainLeg.supplierName,
+      departureDate: context.departureDate,
+      durationDays: context.durationDays,
+    }
   }
 
   const tripDatesValid = Boolean(tripStartDate) && Boolean(tripEndDate) && tripEndDate >= tripStartDate
@@ -320,7 +339,7 @@ export function ApplyPackageDialog({
         return
       }
 
-      // 3. Persist transport requests — pricing reads them from the DB in the next step.
+      // 3. Persist transport requests â€” pricing reads them from the DB in the next step.
       const transportPut = toTransportRequestsPut(legStates, existingTransportRequests)
       const transportRes = await fetch(`/api/jobs/${jobId}/transport-requests`, {
         method: "PUT",
@@ -455,7 +474,7 @@ export function ApplyPackageDialog({
                         ) : pkg.priceTo !== null ? (
                           <p className="text-xs font-medium">
                             {pkg.priceFrom !== null
-                              ? `${formatPrice(pkg.priceFrom, pkg.currency)} – ${formatPrice(pkg.priceTo, pkg.currency)} pp`
+                              ? `${formatPrice(pkg.priceFrom, pkg.currency)} â€“ ${formatPrice(pkg.priceTo, pkg.currency)} pp`
                               : `${formatPrice(pkg.priceTo, pkg.currency)} pp`}
                           </p>
                         ) : null}
@@ -490,20 +509,18 @@ export function ApplyPackageDialog({
             <div className="grid gap-3 md:grid-cols-3">
               <div className="space-y-1.5">
                 <Label htmlFor="apply-trip-start">Trip start date</Label>
-                <Input
+                <DatePicker
                   id="apply-trip-start"
-                  type="date"
                   value={tripStartDate}
-                  onChange={(event) => setTripStartDate(event.target.value)}
+                  onChange={(value) => setTripStartDate(value ?? "")}
                 />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="apply-trip-end">Trip end date</Label>
-                <Input
+                <DatePicker
                   id="apply-trip-end"
-                  type="date"
                   value={tripEndDate}
-                  onChange={(event) => setTripEndDate(event.target.value)}
+                  onChange={(value) => setTripEndDate(value ?? "")}
                 />
               </div>
               {rateTypes.length > 0 && (
@@ -529,7 +546,7 @@ export function ApplyPackageDialog({
               )}
             </div>
             <p className="text-xs text-muted-foreground">
-              Covers the full trip, start to finish — not just this package&apos;s legs — so we track how long the
+              Covers the full trip, start to finish â€” not just this package&apos;s legs â€” so we track how long the
               customer was with us across everything booked.
             </p>
 
@@ -548,6 +565,7 @@ export function ApplyPackageDialog({
                         value={state}
                         onChange={updateLegState}
                         expectedTotals={totalsBySupplierId[leg.supplierId] ?? null}
+                        anchorContext={hotelAnchorContext(leg.id)}
                       />
                     )}
                     {state.selected ? (
@@ -596,7 +614,7 @@ export function ApplyPackageDialog({
               <div>
                 <Label>Extras (optional)</Label>
                 <p className="text-xs text-muted-foreground">
-                  Add items this package doesn&apos;t include — e.g. an extra hotel, transfer, or rental the client requested.
+                  Add items this package doesn&apos;t include â€” e.g. an extra hotel, transfer, or rental the client requested.
                 </p>
               </div>
               {extras.length > 0 ? (
@@ -609,9 +627,9 @@ export function ApplyPackageDialog({
                       <div className="min-w-0">
                         <span className="font-medium">{extra.supplierName}</span>
                         <span className="text-muted-foreground">
-                          {" · "}
-                          {extra.routeName} · {extra.suiteTypeName}
-                          {extra.quantity ? ` ×${extra.quantity}` : ""}
+                          {" Â· "}
+                          {extra.routeName} Â· {extra.suiteTypeName}
+                          {extra.quantity ? ` Ã—${extra.quantity}` : ""}
                         </span>
                       </div>
                       <button
@@ -652,7 +670,7 @@ export function ApplyPackageDialog({
                 Back
               </Button>
               <Button onClick={validateAndPreview} disabled={validating}>
-                {validating ? "Saving & pricing…" : "Next"}
+                {validating ? "Saving & pricingâ€¦" : "Next"}
               </Button>
             </DialogFooter>
           </>
@@ -741,7 +759,7 @@ export function ApplyPackageDialog({
                 </Button>
               )}
               <Button onClick={() => applyToQuote()} disabled={applying}>
-                {applying ? "Applying…" : existingLineItemCount > 0 ? "Replace & apply" : "Apply to quote"}
+                {applying ? "Applyingâ€¦" : existingLineItemCount > 0 ? "Replace & apply" : "Apply to quote"}
               </Button>
             </DialogFooter>
           </>

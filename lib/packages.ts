@@ -77,6 +77,10 @@ export function mapPackageListItem(
   }
 }
 
+export function normalizeLegDateAnchor(value: string | null | undefined): "pre" | "post" | null {
+  return value === "pre" || value === "post" ? value : null
+}
+
 export function mapPackageRoute(
   row: RouteRow,
   vehicleRentalDetails?: VehicleRentalRouteDetailsRow | null,
@@ -91,6 +95,8 @@ export function mapPackageRoute(
     dropoffPoint: row.dropoff_point ?? null,
     vehicleRentalDetails: mapVehicleRentalRouteDetails(vehicleRentalDetails),
     directionMode: normalizeRouteDirectionMode(row.direction_mode),
+    // Train routes carry their length here; hotel post-stay dates are derived from it.
+    durationDays: row.duration_days ?? null,
     active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -166,6 +172,7 @@ export function mapPackageLeg(
     supplierKind: row.supplierKind,
     label: row.label,
     sortOrder: row.sort_order,
+    dateAnchor: normalizeLegDateAnchor(row.date_anchor),
     routes: eligibleRoutes.map((route) => mapPackageRoute(route, detailsByRouteId.get(route.id))),
     rateCards: rateCards
       .filter((rateCard) => legRouteIds.has(rateCard.route_id))

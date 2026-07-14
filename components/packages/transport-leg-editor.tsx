@@ -4,6 +4,7 @@ import { Plus, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
+import { DateTimePicker } from "@/components/ui/date-time-picker"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { NumericInput } from "@/components/ui/numeric-input"
@@ -21,20 +22,6 @@ import {
 } from "@/lib/packages/apply-dialog-state"
 
 const NONE_VALUE = "__none"
-
-export function toDateTimeLocalValue(value: string | null | undefined): string {
-  if (!value) return ""
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ""
-  const offsetMs = date.getTimezoneOffset() * 60 * 1000
-  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16)
-}
-
-export function fromDateTimeLocalValue(value: string): string | null {
-  if (!value) return null
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? null : date.toISOString()
-}
 
 interface TransportLegEditorProps {
   leg: PackageLeg
@@ -150,21 +137,19 @@ export function TransportLegEditor({ leg, value, onChange }: TransportLegEditorP
               </div>
               <div className="space-y-1.5">
                 <Label>Pickup date/time</Label>
-                <Input
-                  type="datetime-local"
-                  value={toDateTimeLocalValue(request.pickupAt)}
-                  onChange={(event) => updateRequest(request.id, { pickupAt: fromDateTimeLocalValue(event.target.value) })}
+                <DateTimePicker
+                  value={request.pickupAt}
+                  onChange={(pickupAt) => updateRequest(request.id, { pickupAt })}
+                  aria-label="Pickup date"
                 />
               </div>
               {isRental ? (
                 <div className="space-y-1.5">
                   <Label>Return date/time</Label>
-                  <Input
-                    type="datetime-local"
-                    value={toDateTimeLocalValue(request.rentalDetails?.returnAt)}
-                    onChange={(event) =>
-                      updateRentalDetails(request.id, { returnAt: fromDateTimeLocalValue(event.target.value) })
-                    }
+                  <DateTimePicker
+                    value={request.rentalDetails?.returnAt}
+                    onChange={(returnAt) => updateRentalDetails(request.id, { returnAt })}
+                    aria-label="Return date"
                   />
                 </div>
               ) : null}

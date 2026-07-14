@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import Link from "next/link"
 import { useMemo, useState } from "react"
@@ -6,7 +6,7 @@ import { Activity, Archive, ChevronLeft, ChevronRight, Download } from "lucide-r
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
+import { DatePicker } from "@/components/ui/date-picker"
 import {
   Select,
   SelectContent,
@@ -101,7 +101,7 @@ export function AuditLogView({ scope }: AuditLogViewProps) {
         <div>
           <h1 className="text-2xl font-semibold text-foreground tracking-tight">{title}</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            {description} · {total} entries
+            {description} Â· {total} entries
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -138,18 +138,18 @@ export function AuditLogView({ scope }: AuditLogViewProps) {
             ))}
           </SelectContent>
         </Select>
-        <Input
-          type="date"
+        <DatePicker
           value={from}
-          onChange={(event) => handleFilterChange(setFrom)(event.target.value)}
-          className="h-9 text-sm"
+          onChange={(value) => handleFilterChange(setFrom)(value ?? "")}
+          placeholder="From date"
+          buttonClassName="h-9 text-sm"
           aria-label="From date"
         />
-        <Input
-          type="date"
+        <DatePicker
           value={to}
-          onChange={(event) => handleFilterChange(setTo)(event.target.value)}
-          className="h-9 text-sm"
+          onChange={(value) => handleFilterChange(setTo)(value ?? "")}
+          placeholder="To date"
+          buttonClassName="h-9 text-sm"
           aria-label="To date"
         />
       </div>

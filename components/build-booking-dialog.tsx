@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import { useEffect, useMemo, useState } from "react"
 import { Boxes, ChevronDown, ChevronUp, X } from "lucide-react"
@@ -13,7 +13,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
+import { DatePicker } from "@/components/ui/date-picker"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -54,10 +54,10 @@ interface BuildBookingDialogProps {
   quoteId: string
   travelDate: string | null
   existingLineItemCount: number
-  /** Existing quote lines — manual/extra lines (snapshot.isExtra) are preserved across re-apply. */
+  /** Existing quote lines â€” manual/extra lines (snapshot.isExtra) are preserved across re-apply. */
   existingLineItems?: QuoteLineItem[]
   expectedUpdatedAt?: string
-  /** Customer's default rate type — pre-selects the rate version when pricing. */
+  /** Customer's default rate type â€” pre-selects the rate version when pricing. */
   customerDefaultRateTypeId?: string | null
   onApplied: () => void
 }
@@ -342,7 +342,7 @@ export function BuildBookingDialog({
         savedState && savedState.packageId === built.packageId
           ? hydrateFromSaved(built.packageDetail, savedState, existingTransportRequests, stateOptions)
           : buildDefaultLegStates(built.packageDetail, stateOptions)
-      // Every service the salesperson explicitly added should start selected — unlike the
+      // Every service the salesperson explicitly added should start selected â€” unlike the
       // predefined-package flow (which defaults optional legs to unselected), a leg the user
       // just picked here has no "optional" concept; only respect an existing saved deselection.
       setLegStates(states.map((state) => (savedLegIds.has(state.legId) ? state : { ...state, selected: true })))
@@ -383,7 +383,7 @@ export function BuildBookingDialog({
         return
       }
 
-      // 2. Persist transport requests — pricing reads them from the DB in the next step.
+      // 2. Persist transport requests â€” pricing reads them from the DB in the next step.
       const transportPut = toTransportRequestsPut(legStates, existingTransportRequests)
       const transportRes = await fetch(`/api/jobs/${jobId}/transport-requests`, {
         method: "PUT",
@@ -474,7 +474,7 @@ export function BuildBookingDialog({
                 <PresenceAvatars users={others} />
               </DialogTitle>
               <DialogDescription>
-                Add each service the customer is booking — train, hotel, transfers, rentals — then
+                Add each service the customer is booking â€” train, hotel, transfers, rentals â€” then
                 configure the fine detail and price the quote.
               </DialogDescription>
             </DialogHeader>
@@ -482,12 +482,11 @@ export function BuildBookingDialog({
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="build-trip-start">Trip start date</Label>
-                <Input
+                <DatePicker
                   id="build-trip-start"
-                  type="date"
                   value={tripStartDate}
-                  onChange={(event) => {
-                    const startDate = event.target.value
+                  onChange={(value) => {
+                    const startDate = value ?? ""
                     setTripStartDate(startDate)
                     if (startDate && !tripEndDate) setTripEndDate(addNights(startDate, 1))
                   }}
@@ -495,11 +494,10 @@ export function BuildBookingDialog({
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="build-trip-end">Trip end date</Label>
-                <Input
+                <DatePicker
                   id="build-trip-end"
-                  type="date"
                   value={tripEndDate}
-                  onChange={(event) => setTripEndDate(event.target.value)}
+                  onChange={(value) => setTripEndDate(value ?? "")}
                 />
               </div>
             </div>
@@ -585,7 +583,7 @@ export function BuildBookingDialog({
 
             <DialogFooter>
               <Button onClick={buildServices} disabled={building || services.length === 0}>
-                {building ? "Saving…" : "Next"}
+                {building ? "Savingâ€¦" : "Next"}
               </Button>
             </DialogFooter>
           </>
@@ -689,7 +687,7 @@ export function BuildBookingDialog({
               <div>
                 <Label>Extras (optional)</Label>
                 <p className="text-xs text-muted-foreground">
-                  Add anything else the client requested — e.g. an extra hotel, transfer, or rental.
+                  Add anything else the client requested â€” e.g. an extra hotel, transfer, or rental.
                 </p>
               </div>
               {extras.length > 0 ? (
@@ -702,9 +700,9 @@ export function BuildBookingDialog({
                       <div className="min-w-0">
                         <span className="font-medium">{extra.supplierName}</span>
                         <span className="text-muted-foreground">
-                          {" · "}
-                          {extra.routeName} · {extra.suiteTypeName}
-                          {extra.quantity ? ` ×${extra.quantity}` : ""}
+                          {" Â· "}
+                          {extra.routeName} Â· {extra.suiteTypeName}
+                          {extra.quantity ? ` Ã—${extra.quantity}` : ""}
                         </span>
                       </div>
                       <button
@@ -745,7 +743,7 @@ export function BuildBookingDialog({
                 Back
               </Button>
               <Button onClick={validateAndPreview} disabled={validating}>
-                {validating ? "Saving & pricing…" : "Next"}
+                {validating ? "Saving & pricingâ€¦" : "Next"}
               </Button>
             </DialogFooter>
           </>
@@ -834,7 +832,7 @@ export function BuildBookingDialog({
                 </Button>
               )}
               <Button onClick={() => applyToQuote()} disabled={applying}>
-                {applying ? "Applying…" : existingLineItemCount > 0 ? "Replace & apply" : "Apply to quote"}
+                {applying ? "Applyingâ€¦" : existingLineItemCount > 0 ? "Replace & apply" : "Apply to quote"}
               </Button>
             </DialogFooter>
           </>

@@ -850,8 +850,6 @@ export default function JobDetailPage() {
             jobId={id}
             bookingNumber={job.jobNumber}
             travelDate={enquiry?.departureDate ?? null}
-            noOfAdults={enquiry?.noOfAdults ?? 0}
-            noOfChildren={enquiry?.noOfChildren ?? 0}
             customerName={`${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()}
             customerDefaultRateTypeId={customer?.defaultRateTypeId ?? null}
             emailImportNeedsReview={needsEmailReview}

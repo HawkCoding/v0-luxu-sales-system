@@ -14,7 +14,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Input } from "@/components/ui/input"
+import { DatePicker } from "@/components/ui/date-picker"
 
 interface CreateQuoteDialogProps {
   jobId: string
@@ -87,11 +87,10 @@ export function CreateQuoteDialog({ jobId, onCreated }: CreateQuoteDialogProps) 
         <div className="space-y-4 py-2">
           <div className="space-y-1.5">
             <Label htmlFor="validity">Valid until</Label>
-            <Input
+            <DatePicker
               id="validity"
-              type="date"
               value={validityUntil}
-              onChange={e => setValidityUntil(e.target.value)}
+              onChange={value => setValidityUntil(value ?? "")}
             />
           </div>
 

@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import type { PackageDetail, PackageLeg, SupplierKind, SupplierRateCard } from "@/lib/types"
 import { buildPackageQuoteLineItems } from "@/lib/quotes/build-from-package"
+import { isMissingPricing } from "@/lib/quotes/pricing-engine"
 
 const JOB_ID = "00000000-0000-4000-8000-00000000aaaa"
 
@@ -66,6 +67,7 @@ function leg(partial: Partial<PackageLeg> & { id: string; supplierKind: Supplier
     supplierDescription: null,
     label: null,
     sortOrder: 0,
+    dateAnchor: null,
     routes: [],
     rateCards: [],
     suiteTypes: [],
@@ -147,6 +149,31 @@ describe("buildPackageQuoteLineItems", () => {
     expect(lineItems[0].unitPrice).toBe(900)
     expect(lineItems[1].description).toContain("Sedan")
     expect(lineItems[1].unitPrice).toBe(500)
+  })
+
+  it("marks fixed-price package legs as inclusions so they aren't read as unpriced", async () => {
+    const trainLeg = leg({ id: "leg-train", supplierKind: "train_operator", label: "The Blue Train" })
+    const packageDetail = { ...detail([trainLeg]), fixedPricePerPerson: 24800 }
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase(),
+      packageDetail,
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [{ legId: "leg-train", selected: true }],
+    })
+
+    expect(lineItems).toHaveLength(2)
+
+    const [legLine, totalLine] = lineItems
+    expect(legLine.description).toBe("The Blue Train")
+    expect(legLine.unitPrice).toBe(0)
+    expect(legLine.pricingSnapshot?.pricingMode).toBe("fixed_package")
+    expect(isMissingPricing(legLine)).toBe(false)
+
+    expect(totalLine.description).toContain("Package Total")
+    expect(totalLine.unitPrice).toBe(24800)
+    expect(isMissingPricing(totalLine)).toBe(false)
   })
 
   it("throws when a transfer row and the leg selection both lack a vehicle category", async () => {

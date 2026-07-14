@@ -1,5 +1,6 @@
 import type { AuditLog } from "./types"
 import { getAuditDisplay } from "./audit-display"
+import { formatDisplayDateTime } from "./date-format"
 
 export function exportAuditToText(auditLogs: AuditLog[], jobNumber: string): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
@@ -7,7 +8,7 @@ export function exportAuditToText(auditLogs: AuditLog[], jobNumber: string): str
   
   lines.push(`AUDIT TRAIL EXPORT`)
   lines.push(`Job Number: ${jobNumber}`)
-  lines.push(`Export Date: ${new Date().toLocaleString()}`)
+  lines.push(`Export Date: ${formatDisplayDateTime(new Date())}`)
   lines.push(`Total Entries: ${auditLogs.length}`)
   lines.push(``)
   lines.push(`${'='.repeat(80)}`)
@@ -19,7 +20,7 @@ export function exportAuditToText(auditLogs: AuditLog[], jobNumber: string): str
     auditLogs.forEach((log, index) => {
       lines.push(`Entry #${index + 1}`)
       lines.push(`-`.repeat(40))
-      lines.push(`Timestamp: ${new Date(log.createdAt).toLocaleString()}`)
+      lines.push(`Timestamp: ${formatDisplayDateTime(log.createdAt)}`)
       lines.push(`Actor: ${log.actor}`)
       lines.push(`Action: ${log.action}`)
       lines.push(`Entity: ${log.entityType} (ID: ${log.entityId})`)
@@ -105,7 +106,7 @@ export function exportAuditToCsv(auditLogs: AuditLog[]): string {
     const display = getAuditDisplay(log)
 
     return [
-      new Date(log.createdAt).toISOString(),
+      formatDisplayDateTime(log.createdAt),
       log.actor,
       log.action,
       display.title,

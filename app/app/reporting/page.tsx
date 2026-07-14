@@ -5,6 +5,8 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import useSWR from "swr"
 import { useData } from "@/lib/use-data"
 import { useRole } from "@/lib/role-context"
+import { formatDisplayDate } from "@/lib/date-format"
+import { DatePicker } from "@/components/ui/date-picker"
 import {
   getCanonicalPipelineStage,
   PIPELINE_STAGES,
@@ -391,7 +393,7 @@ export default function ReportingPage() {
                     </p>
                   </div>
                   <span className="shrink-0 text-xs font-medium text-muted-foreground">
-                    {booking.departureDateDisplay ?? booking.departureDate}
+                    {booking.departureDateDisplay ?? formatDisplayDate(booking.departureDate)}
                   </span>
                 </div>
               ))
@@ -419,22 +421,24 @@ export default function ReportingPage() {
             <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
               From
             </label>
-            <input
-              type="date"
+            <DatePicker
               value={filterFrom}
-              onChange={(e) => updateFilter("from", e.target.value)}
-              className="h-8 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              onChange={(value) => updateFilter("from", value ?? "")}
+              placeholder="Any"
+              className="w-40"
+              buttonClassName="h-8"
             />
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
               To
             </label>
-            <input
-              type="date"
+            <DatePicker
               value={filterTo}
-              onChange={(e) => updateFilter("to", e.target.value)}
-              className="h-8 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              onChange={(value) => updateFilter("to", value ?? "")}
+              placeholder="Any"
+              className="w-40"
+              buttonClassName="h-8"
             />
           </div>
           <div className="flex flex-col gap-1">
@@ -596,7 +600,7 @@ export default function ReportingPage() {
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-foreground truncate">{row.bookingNumber}</p>
                   <p className="text-xs text-muted-foreground">
-                    {row.consultant ?? "Unassigned"} · {row.departureDate ?? "No date"}
+                    {row.consultant ?? "Unassigned"} · {formatDisplayDate(row.departureDate) || "No date"}
                   </p>
                 </div>
                 <span className="shrink-0 text-sm font-medium text-foreground">

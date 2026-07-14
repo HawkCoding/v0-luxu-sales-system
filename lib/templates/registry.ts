@@ -91,10 +91,11 @@ export const TEMPLATE_TOKENS: Record<SystemTemplateKey, TemplateTokenSpec[]> = {
     { name: "total", description: "Total quoted price (formatted)", kind: "scalar", sample: "R 58 900,00" },
     {
       name: "quoteSummaryTable",
-      description: "Quote meta, line-item table, and totals (system-generated)",
+      description:
+        "Quote meta (journey dates, guests), VAT-inclusive total, inclusions, and package itinerary (system-generated)",
       kind: "block",
       sample:
-        '<div style="margin:18px 0;padding:14px 16px;background:#fbf8f3;border:1px solid #e8dfd2;"><p style="margin:0;"><strong>Quote number:</strong> BT-2026-0001-Q1</p><p style="margin:6px 0 0;"><strong>Sample line:</strong> Deluxe Suite × 2 — R 58 900,00</p></div>',
+        '<div style="margin:18px 0;padding:14px 16px;background:#fbf8f3;border:1px solid #e8dfd2;"><p style="margin:0;"><strong>Quote number:</strong> BT-2026-0001-Q1</p><p style="margin:6px 0 0;"><strong>Journey:</strong> 18 – 22 July 2026</p><p style="margin:6px 0 0;"><strong>Guests:</strong> 2 Adults</p><p style="margin:6px 0 0;font-weight:700;">TOTAL for 2 Adults: R 86 300,00 (VAT inclusive)</p></div>',
     },
   ],
   follow_up: [

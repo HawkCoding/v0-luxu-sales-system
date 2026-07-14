@@ -458,12 +458,38 @@ export async function buildPackageQuoteLineItems({
       const selection = getLegSelection(leg)
       const isOptional = isOptionalPackageLegKind(leg.supplierKind)
       if (isOptional && !selection.selected) continue
+      // Zero-priced on purpose: the leg is an inclusion of the package, and the
+      // whole price sits on the "Package Total" line below. The snapshot marks
+      // it as such so it isn't mistaken for a line nobody got round to pricing.
       lineItems.push({
         description: leg.label ?? leg.supplierName,
         supplierDescription: leg.supplierDescription ?? null,
         qty: travellerCount,
         unitPrice: 0,
         total: 0,
+        pricingSnapshot: {
+          source: "pricing_engine",
+          pricingMode: "fixed_package",
+          packageId: packageDetail.id,
+          packageName: packageDetail.name,
+          legId: leg.id,
+          legLabel: leg.label ?? null,
+          supplierId: leg.supplierId ?? null,
+          supplierName: leg.supplierName ?? null,
+          supplierKind: leg.supplierKind ?? null,
+          routeId: null,
+          routeName: null,
+          suiteTypeId: null,
+          suiteTypeName: null,
+          rateCardId: null,
+          travelDate,
+          passengerKind: "included",
+          baseUnitPrice: 0,
+          markupPct: 0,
+          singleSupplementPct: null,
+          serviceType: null,
+          unit: null,
+        },
       })
     }
 

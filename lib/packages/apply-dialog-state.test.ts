@@ -20,6 +20,7 @@ function leg(partial: Partial<PackageLeg> & { id: string; supplierKind: Supplier
     supplierDescription: null,
     label: null,
     sortOrder: 0,
+    dateAnchor: null,
     routes: [],
     rateCards: [],
     suiteTypes: [],
@@ -145,6 +146,7 @@ describe("hydrateFromSaved", () => {
       {
         id: "sel-train",
         package_leg_id: "leg-train",
+        date_anchor: null,
         selected: true,
         supplier_id: "supplier-leg-train",
         route_id: "route-1",
@@ -180,6 +182,7 @@ describe("hydrateFromSaved", () => {
       {
         id: "sel-transfer",
         package_leg_id: "leg-transfer",
+        date_anchor: null,
         selected: false,
         supplier_id: "supplier-leg-transfer",
         route_id: null,

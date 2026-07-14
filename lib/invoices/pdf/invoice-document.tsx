@@ -1,4 +1,5 @@
 import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer"
+import { formatDisplayDate } from "@/lib/date-format"
 import type { BankingSettings } from "@/lib/settings-access"
 
 export interface InvoicePdfLine {
@@ -37,12 +38,7 @@ function formatMoney(amount: number, currency = "ZAR"): string {
 }
 
 function formatDate(value: string | null): string {
-  if (!value) return "To be confirmed"
-  return new Intl.DateTimeFormat("en-ZA", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(new Date(`${value.slice(0, 10)}T00:00:00`))
+  return formatDisplayDate(value?.slice(0, 10)) || "To be confirmed"
 }
 
 const styles = StyleSheet.create({

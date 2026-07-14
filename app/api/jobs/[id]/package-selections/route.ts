@@ -39,6 +39,7 @@ const updateSelectionSchema = z.object({
     .nullable()
     .optional(),
   nights: z.number().int().positive().nullable().optional(),
+  dateAnchor: z.enum(["pre", "post", "custom"]).nullable().optional(),
   notes: z.string().nullable().optional(),
   units: z.array(selectionUnitSchema).optional(),
 })
@@ -57,7 +58,7 @@ type BookingPackageSelectionUnitInsert =
   Database["public"]["Tables"]["booking_package_selection_units"]["Insert"]
 
 const SELECTIONS_WITH_UNITS_SELECT =
-  "id, booking_id, package_leg_id, selected, supplier_id, route_id, suite_type_id, service_date, nights, notes, " +
+  "id, booking_id, package_leg_id, selected, supplier_id, route_id, suite_type_id, service_date, nights, date_anchor, notes, " +
   "units:booking_package_selection_units(id, suite_type_id, bedroom_type_id, bedroom_layout_id, bathroom_type_id, adult_count, child_count, infant_count, sort_order)"
 
 export async function PATCH(req: Request, { params }: RouteParams) {
@@ -176,6 +177,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     if (selection.routeId !== undefined) updatePayload.route_id = selection.routeId
     if (selection.serviceDate !== undefined) updatePayload.service_date = selection.serviceDate
     if (selection.nights !== undefined) updatePayload.nights = selection.nights
+    if (selection.dateAnchor !== undefined) updatePayload.date_anchor = selection.dateAnchor
     if (selection.notes !== undefined) updatePayload.notes = selection.notes
 
     if (Object.keys(updatePayload).length === 0) continue

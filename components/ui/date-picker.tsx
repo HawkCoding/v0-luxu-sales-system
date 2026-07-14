@@ -21,6 +21,10 @@ interface DatePickerProps {
   align?: React.ComponentProps<typeof PopoverContent>['align']
   fromYear?: number
   toYear?: number
+  /** ISO date (yyyy-mm-dd); earlier days are not selectable. */
+  minDate?: string | null
+  /** Accessible name when no visible <Label> is wired to `id`. */
+  'aria-label'?: string
 }
 
 const DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
@@ -55,9 +59,12 @@ export function DatePicker({
   align = 'start',
   fromYear,
   toYear,
+  minDate,
+  'aria-label': ariaLabel,
 }: DatePickerProps) {
   const [open, setOpen] = React.useState(false)
   const selectedDate = parseDateOnly(value)
+  const minSelectable = parseDateOnly(minDate)
   const { startMonth: navStart, endMonth: navEnd } = getCalendarNavMonthBounds()
   const startMonth = fromYear != null ? new Date(fromYear, 0, 1) : undefined
   const endMonth = toYear != null ? new Date(toYear, 11, 31) : undefined
@@ -71,6 +78,7 @@ export function DatePicker({
             type="button"
             variant="outline"
             disabled={disabled}
+            aria-label={ariaLabel}
             className={cn(
               'h-10 w-full justify-start text-left font-normal',
               !selectedDate && 'text-muted-foreground',
@@ -87,6 +95,7 @@ export function DatePicker({
             selected={selectedDate}
             startMonth={startMonth ?? navStart}
             endMonth={endMonth ?? navEnd}
+            disabled={minSelectable ? { before: minSelectable } : undefined}
             onSelect={(date) => {
               if (!date) {
                 onChange(undefined)

@@ -74,6 +74,7 @@ export async function GET(
         ...sampleQuotePdfData(),
         title: documentText.quote_doc_title,
         footerText: documentText.quote_doc_footer_text,
+        packageIncludesHeading: documentText.quote_doc_includes_heading,
       })
     } else {
       const [banking, documentText] = await Promise.all([

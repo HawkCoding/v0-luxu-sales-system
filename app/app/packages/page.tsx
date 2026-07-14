@@ -70,6 +70,7 @@ export default async function PackagesPage() {
     supplier_id: leg.supplier_id,
     label: leg.label,
     sort_order: leg.sort_order,
+    date_anchor: leg.date_anchor,
     created_at: leg.created_at,
     supplierName: leg.suppliers?.name ?? "Unknown supplier",
     supplierDescription: leg.suppliers?.description ?? null,

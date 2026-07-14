@@ -53,6 +53,7 @@ function buildLegState(packageDetail: PackageDetail): SelectablePackageLeg[] {
     supplierKind: leg.supplierKind,
     label: leg.label ?? "",
     sortOrder: leg.sortOrder,
+    dateAnchor: leg.dateAnchor,
     routes: leg.routes.map((route) => ({ ...route, existing: true })),
     rateCards: leg.rateCards.map((rateCard) => ({ ...rateCard, existing: true })),
     suiteTypes: leg.suiteTypes,
@@ -186,6 +187,7 @@ export function PackageDetailView({ packageDetail }: PackageDetailViewProps) {
       supplierId: leg.supplierId,
       label: leg.label.trim() || null,
       sortOrder: leg.sortOrder ?? index,
+      dateAnchor: leg.supplierKind === "hotel_property" ? leg.dateAnchor : null,
       routes:
         leg.supplierKind === "hotel_property"
           ? []
@@ -304,6 +306,7 @@ export function PackageDetailView({ packageDetail }: PackageDetailViewProps) {
           supplierKind: selectedAddSupplier.kind,
           label: selectedAddSupplier.name,
           sortOrder: current.length,
+          dateAnchor: selectedAddSupplier.kind === "hotel_property" ? "pre" : null,
           routes: routes.map((route) => ({ ...route, existing: true })),
           rateCards: rateCards
             .filter((rateCard) => supplierRouteIds.has(rateCard.routeId))

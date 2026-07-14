@@ -28,7 +28,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { toast } from "sonner"
 import { downloadAuditLog } from "@/lib/export-audit"
 import { formatDisplayDate } from "@/lib/date-format"
-import { SendQuoteDialog } from "@/components/send-quote-dialog"
 import type { AuditLog } from "@/lib/types"
 
 const FILTER_CHIPS: { value: EnquiryFilter; label: string }[] = [
@@ -50,7 +49,6 @@ export default function EnquiriesPage() {
   const [search, setSearch] = useState("")
   const [sourceFilter, setSourceFilter] = useState("all")
   const [newEnquiryOpen, setNewEnquiryOpen] = useState(false)
-  const [dialogOpenId, setDialogOpenId] = useState<string | null>(null)
 
   const setFilter = useCallback(
     (value: EnquiryFilter | undefined) => {
@@ -312,7 +310,7 @@ export default function EnquiriesPage() {
                         <Alert className="mt-3 py-2">
                           <AlertCircle className="h-3 w-3" />
                           <AlertDescription className="text-xs">
-                            To proceed with this enquiry, click Send Quote.
+                            To proceed with this enquiry, click Open Job to build and send a quote.
                           </AlertDescription>
                         </Alert>
                       )}
@@ -322,25 +320,12 @@ export default function EnquiriesPage() {
                     <div className="text-right">
                       <p className="text-xs text-muted-foreground mt-0.5">Created {formatDisplayDate(e.createdAt)}</p>
                     </div>
-                    <Button size="sm" onClick={() => setDialogOpenId(e.id)} className="w-full">
-                      <Send className="w-3.5 h-3.5 mr-1.5" />
-                      Send Quote
+                    <Button size="sm" asChild className="w-full">
+                      <Link href={`/app/jobs/${e.id}`}>
+                        <Send className="w-3.5 h-3.5 mr-1.5" />
+                        Open Job
+                      </Link>
                     </Button>
-                    <SendQuoteDialog
-                      open={dialogOpenId === e.id}
-                      onOpenChange={(open) => setDialogOpenId(open ? e.id : null)}
-                      bookingId={e.id}
-                      bookingNumber={e.bookingNumber}
-                      departureDate={e.departureDate}
-                      noOfAdults={e.noOfAdults}
-                      noOfChildren={e.noOfChildren}
-                      customerName={`${title} ${surname}`.trim()}
-                      emailImportNeedsReview={e.emailImportNeedsReview}
-                      onSent={() => {
-                        refreshAll()
-                        setDialogOpenId(null)
-                      }}
-                    />
                     {e.emailImportNeedsReview && (
                       <Button
                         size="sm"
