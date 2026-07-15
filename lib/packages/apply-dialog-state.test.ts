@@ -210,6 +210,7 @@ describe("hydrateFromSaved", () => {
     passengerCount: 3,
     luggageCount: 2,
     flightNumber: "SA123",
+    priceOverride: null,
     notes: null,
     sortOrder: 0,
     createdAt: "",
@@ -299,6 +300,21 @@ describe("toTransportRequestsPut", () => {
     const body = toTransportRequestsPut(states, [])
     expect(body.transportRequests).toEqual([])
   })
+
+  it("round-trips the per-request price override", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: null })
+    const transfer = transportState(states, "leg-transfer")
+    transfer.selected = true
+    transfer.requests[0] = {
+      ...transfer.requests[0],
+      pickupPoint: "Airport",
+      dropoffPoint: "Hotel",
+      priceOverride: 1250.5,
+    }
+
+    const body = toTransportRequestsPut(states, [])
+    expect(body.transportRequests[0].priceOverride).toBe(1250.5)
+  })
 })
 
 describe("toApplySelections", () => {
@@ -371,7 +387,7 @@ describe("validateConfigureState", () => {
     expect(errors.some((e) => e.includes("must sum"))).toBe(true) // split defaulted to 0s
   })
 
-  it("flags a leg whose supplier has zero routes or zero vehicle categories configured", () => {
+  it("does not require routes on transport legs but still flags missing vehicle categories", () => {
     const noRouteLeg = leg({ id: "leg-no-route", supplierKind: "transfers", sortOrder: 4 })
     const noRoutePkg = detail([noRouteLeg])
     const states = buildDefaultLegStates(noRoutePkg, { tripStartDate: null })
@@ -380,7 +396,9 @@ describe("validateConfigureState", () => {
     noRoute.requests[0] = { ...noRoute.requests[0], pickupPoint: "Airport", dropoffPoint: "Hotel" }
 
     const errors = validateConfigureState(noRoutePkg, states)
-    expect(errors.some((e) => e.includes("no routes configured"))).toBe(true)
+    // Routes are only quick-fill templates for transfers — never required.
+    expect(errors.some((e) => e.includes("no routes configured"))).toBe(false)
+    expect(errors.some((e) => e.includes("select a route"))).toBe(false)
     expect(errors.some((e) => e.includes("no vehicle categories configured"))).toBe(true)
   })
 

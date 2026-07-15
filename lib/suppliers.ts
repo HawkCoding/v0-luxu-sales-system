@@ -258,6 +258,7 @@ export function mapBookingTransportRequest(row: BookingTransportRequestWithRenta
     passengerCount: row.passenger_count ?? null,
     luggageCount: row.luggage_count ?? null,
     flightNumber: row.flight_number ?? null,
+    priceOverride: row.price_override ?? null,
     notes: row.notes ?? null,
     sortOrder: row.sort_order,
     createdAt: row.created_at,

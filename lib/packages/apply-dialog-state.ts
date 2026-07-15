@@ -133,6 +133,7 @@ export function createDraftTransportRequest(leg: PackageLeg): BookingTransportRe
     passengerCount: null,
     luggageCount: null,
     flightNumber: null,
+    priceOverride: null,
     notes: null,
     sortOrder: 0,
     createdAt: now,
@@ -405,6 +406,7 @@ export interface TransportRequestsPutBody {
     passengerCount: number | null
     luggageCount: number | null
     flightNumber: string | null
+    priceOverride: number | null
     notes: string | null
     sortOrder: number
   }>
@@ -444,6 +446,7 @@ export function toTransportRequestsPut(
       passengerCount: request.passengerCount,
       luggageCount: request.luggageCount,
       flightNumber: request.flightNumber,
+      priceOverride: request.priceOverride,
       notes: request.notes,
       sortOrder: index,
     })),
@@ -539,10 +542,14 @@ export function validateConfigureState(
     if (!leg) continue
     const legLabel = leg.label ?? leg.supplierName
 
-    if (leg.routes.length === 0) {
-      errors.push(`${legLabel}: no ${leg.supplierKind === "hotel_property" ? "meal plans" : "routes"} configured for this supplier — add one in Suppliers first`)
-    } else if (leg.routes.length > 1 && !state.routeId) {
-      errors.push(`${legLabel}: select a ${leg.supplierKind === "hotel_property" ? "meal plan" : "route"}`)
+    // Transport legs don't require a route: preset routes are only quick-fill templates for the
+    // pickup/drop-off fields, and pricing comes from the vehicle-category rate card.
+    if (state.kind !== "transport") {
+      if (leg.routes.length === 0) {
+        errors.push(`${legLabel}: no ${leg.supplierKind === "hotel_property" ? "meal plans" : "routes"} configured for this supplier — add one in Suppliers first`)
+      } else if (leg.routes.length > 1 && !state.routeId) {
+        errors.push(`${legLabel}: select a ${leg.supplierKind === "hotel_property" ? "meal plan" : "route"}`)
+      }
     }
 
     if (state.kind === "transport") {
