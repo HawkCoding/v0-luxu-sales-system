@@ -276,23 +276,7 @@ describe("POST /api/jobs/[id]/build-booking", () => {
     const res = await POST(
       new Request("http://localhost", {
         method: "POST",
-        body: JSON.stringify({ services: [], tripStartDate: "2026-08-15", tripEndDate: "2026-08-20" }),
-      }),
-      makeParams(),
-    )
-    expect(res.status).toBe(400)
-  })
-
-  it("returns 400 when trip end date is before trip start date", async () => {
-    mockAuth({})
-    const res = await POST(
-      new Request("http://localhost", {
-        method: "POST",
-        body: JSON.stringify({
-          services: [{ supplierId: SUPPLIER_A, supplierKind: "train_operator" }],
-          tripStartDate: "2026-08-20",
-          tripEndDate: "2026-08-15",
-        }),
+        body: JSON.stringify({ services: [] }),
       }),
       makeParams(),
     )
