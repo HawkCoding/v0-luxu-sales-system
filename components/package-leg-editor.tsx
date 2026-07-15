@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { DatePicker } from "@/components/ui/date-picker"
 import { Label } from "@/components/ui/label"
 import { NumericInput } from "@/components/ui/numeric-input"
 import {
@@ -34,6 +35,8 @@ export interface EditablePackageLeg {
   supplierKind: SupplierKind
   label: string
   sortOrder: number
+  /** Hotel legs only — the default stay position the apply dialog derives check-in dates from. */
+  dateAnchor: "pre" | "post" | null
   routes: EditableSupplierRoute[]
   rateCards: EditableSupplierRateCard[]
   suiteTypes: SupplierSuiteType[]
@@ -463,26 +466,25 @@ export function PackageLegEditor({
                   <div className={rateCardLabelClass}>
                     <Label>Valid from</Label>
                   </div>
-                  <Input
-                    type="date"
-                    className={compactDateInputClass}
+                  <DatePicker
+                    buttonClassName={compactDateInputClass}
                     value={rateCard.validFrom}
-                    onChange={(event) => updateRateCard(rateCard.id, "validFrom", event.target.value)}
+                    onChange={(value) => updateRateCard(rateCard.id, "validFrom", value ?? "")}
                     disabled={rateCard.existing}
+                    aria-label="Valid from"
                   />
                 </div>
                 <div className={rateCardFieldClass}>
                   <div className={rateCardLabelClass}>
                     <Label>Valid to</Label>
                   </div>
-                  <Input
-                    type="date"
-                    className={compactDateInputClass}
+                  <DatePicker
+                    buttonClassName={compactDateInputClass}
                     value={rateCard.validTo ?? ""}
-                    onChange={(event) =>
-                      updateRateCard(rateCard.id, "validTo", event.target.value || null)
-                    }
+                    minDate={rateCard.validFrom}
+                    onChange={(value) => updateRateCard(rateCard.id, "validTo", value || null)}
                     disabled={rateCard.existing}
+                    aria-label="Valid to"
                   />
                 </div>
                 {rateCard.existing ? (

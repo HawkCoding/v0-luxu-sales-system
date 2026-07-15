@@ -5,8 +5,16 @@ const settingsMocks = vi.hoisted(() => ({
   getEmailFooterTagline: vi.fn(),
 }))
 
+const brandingMocks = vi.hoisted(() => ({
+  getEmailLogoUrl: vi.fn(),
+}))
+
 vi.mock("@/lib/settings-access", () => ({
   getEmailFooterTagline: settingsMocks.getEmailFooterTagline,
+}))
+
+vi.mock("@/lib/email/branding", () => ({
+  getEmailLogoUrl: brandingMocks.getEmailLogoUrl,
 }))
 
 import { composeEmail, composeFromTemplate } from "./compose-email"
@@ -15,6 +23,28 @@ describe("composeFromTemplate", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     settingsMocks.getEmailFooterTagline.mockResolvedValue("Test tagline")
+    brandingMocks.getEmailLogoUrl.mockResolvedValue("https://cdn.example.com/logo.png")
+  })
+
+  it("renders the branded logo in the email header", async () => {
+    const composed = await composeFromTemplate(
+      { subject: "Hi", bodyHtml: "<p>Body</p>" },
+      { tokens: {} },
+    )
+
+    expect(composed.bodyHtml).toContain("https://cdn.example.com/logo.png")
+  })
+
+  it("falls back to a text wordmark when no logo URL is available", async () => {
+    brandingMocks.getEmailLogoUrl.mockResolvedValue(null)
+
+    const composed = await composeFromTemplate(
+      { subject: "Hi", bodyHtml: "<p>Body</p>" },
+      { tokens: {} },
+    )
+
+    expect(composed.bodyHtml).not.toContain("<img")
+    expect(composed.bodyHtml).toContain("Luxus Travel")
   })
 
   it("renders a full branded email with slot markers around the content", async () => {
@@ -50,6 +80,7 @@ describe("composeEmail", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     settingsMocks.getEmailFooterTagline.mockResolvedValue("Test tagline")
+    brandingMocks.getEmailLogoUrl.mockResolvedValue("https://cdn.example.com/logo.png")
   })
 
   function makeSupabase(row: { key: string; subject: string; body_html: string } | null) {

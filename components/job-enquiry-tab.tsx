@@ -5,7 +5,20 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Input } from "@/components/ui/input"
+import { DatePicker } from "@/components/ui/date-picker"
+import { DateTimePicker } from "@/components/ui/date-time-picker"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
+import { QuoteValidityPicker } from "@/components/ui/quote-validity-picker"
+import { QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
+import { DEFAULT_QUOTE_VALIDITY_DAYS, isoDateDaysFromNow } from "@/lib/quotes/quote-validity"
 import { NumericInput } from "@/components/ui/numeric-input"
 import {
   Select,
@@ -52,20 +65,6 @@ interface JobEnquiryTabProps {
   onQuoteStarted?: () => Promise<void> | void
   onTransportRequestsChange?: () => void
   onFieldsUpdated?: () => void | Promise<void>
-}
-
-function toDateTimeLocalValue(value: string | null | undefined): string {
-  if (!value) return ""
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ""
-  const offsetMs = date.getTimezoneOffset() * 60 * 1000
-  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16)
-}
-
-function fromDateTimeLocalValue(value: string | null | undefined): string | null {
-  if (!value) return null
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? null : date.toISOString()
 }
 
 function createEmptyTransportRequest(sortOrder: number): EditableTransportRequest {
@@ -146,6 +145,10 @@ export function JobEnquiryTab({
   const [isSavingSupplierSchedules, setIsSavingSupplierSchedules] = useState(false)
   const [isStartingQuote, setIsStartingQuote] = useState(false)
   const [startQuoteFailures, setStartQuoteFailures] = useState<GateFailure[]>([])
+  const [startQuoteDialogOpen, setStartQuoteDialogOpen] = useState(false)
+  const [startQuoteValidityUntil, setStartQuoteValidityUntil] = useState<string>(
+    isoDateDaysFromNow(DEFAULT_QUOTE_VALIDITY_DAYS),
+  )
 
   useEffect(() => {
     setTransportRequests(initialTransportRequests)
@@ -167,13 +170,21 @@ export function JobEnquiryTab({
     setIsStartingQuote(true)
     setStartQuoteFailures([])
     try {
-      const response = await fetch(`/api/jobs/${enquiry.jobId}/start-quote`, { method: "POST" })
+      const response = await fetch(`/api/jobs/${enquiry.jobId}/start-quote`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // Validity is hidden: the server stamps the silent org default.
+        body: JSON.stringify(
+          QUOTE_VALIDITY_ENABLED ? { validityUntil: startQuoteValidityUntil } : {},
+        ),
+      })
       const payload = (await response.json().catch(() => ({}))) as {
         failures?: GateFailure[]
         error?: string
       }
 
       if (response.status === 422 && Array.isArray(payload.failures)) {
+        setStartQuoteDialogOpen(false)
         setStartQuoteFailures(payload.failures)
         return
       }
@@ -182,6 +193,7 @@ export function JobEnquiryTab({
         throw new Error(payload.error ?? "Could not start quote")
       }
 
+      setStartQuoteDialogOpen(false)
       await onQuoteStarted?.()
       toast.success("Draft quote created")
     } catch (error) {
@@ -189,6 +201,13 @@ export function JobEnquiryTab({
     } finally {
       setIsStartingQuote(false)
     }
+  }
+
+  function handleStartQuoteDialogOpenChange(next: boolean) {
+    if (next) {
+      setStartQuoteValidityUntil(isoDateDaysFromNow(DEFAULT_QUOTE_VALIDITY_DAYS))
+    }
+    setStartQuoteDialogOpen(next)
   }
 
   const updateTransportRequest = <K extends keyof EditableTransportRequest>(
@@ -422,13 +441,54 @@ export function JobEnquiryTab({
               <p className="text-sm font-medium text-foreground">Ready to quote</p>
               <p className="text-sm text-muted-foreground">Create a draft quote once the enquiry details are complete.</p>
             </div>
-            <Button type="button" size="sm" onClick={startQuote} disabled={isStartingQuote}>
+            <Button
+              type="button"
+              size="sm"
+              disabled={isStartingQuote}
+              onClick={() =>
+                QUOTE_VALIDITY_ENABLED ? handleStartQuoteDialogOpenChange(true) : startQuote()
+              }
+            >
               <Plus className="mr-2 h-4 w-4" />
-              {isStartingQuote ? "Starting" : "Start Quote"}
+              {!QUOTE_VALIDITY_ENABLED && isStartingQuote ? "Starting…" : "Start Quote"}
             </Button>
           </CardContent>
         </Card>
       )}
+
+      {/* Only reachable when QUOTE_VALIDITY_ENABLED — the button above skips it otherwise. */}
+      <Dialog open={startQuoteDialogOpen} onOpenChange={handleStartQuoteDialogOpenChange}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Start Quote</DialogTitle>
+            <DialogDescription>
+              Choose how long this quote should stay valid, then start drafting it.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-1.5 py-2">
+            <Label htmlFor="start-quote-validity">Valid until</Label>
+            <QuoteValidityPicker
+              id="start-quote-validity"
+              value={startQuoteValidityUntil}
+              onChange={value => setStartQuoteValidityUntil(value ?? "")}
+            />
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setStartQuoteDialogOpen(false)}
+              disabled={isStartingQuote}
+            >
+              Cancel
+            </Button>
+            <Button onClick={startQuote} disabled={isStartingQuote}>
+              {isStartingQuote ? "Starting…" : "Start Quote"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {startQuoteFailures.length > 0 && (
         <Alert>
@@ -637,16 +697,13 @@ export function JobEnquiryTab({
                     <div className="space-y-1.5">
                       <Label>Pickup date/time</Label>
                       <div className="flex gap-2">
-                        <Input
-                          type="datetime-local"
-                          value={toDateTimeLocalValue(request.pickupAt)}
-                          onChange={(event) =>
-                            updateTransportRequest(
-                              request.id,
-                              "pickupAt",
-                              fromDateTimeLocalValue(event.target.value),
-                            )
+                        <DateTimePicker
+                          value={request.pickupAt}
+                          onChange={(pickupAt) =>
+                            updateTransportRequest(request.id, "pickupAt", pickupAt)
                           }
+                          aria-label="Pickup date"
+                          className="flex-1"
                         />
                         <Button
                           type="button"
@@ -664,15 +721,11 @@ export function JobEnquiryTab({
                       <div className="space-y-1.5">
                         <Label>Return date/time</Label>
                         <div className="flex gap-2">
-                          <Input
-                            type="datetime-local"
-                            value={toDateTimeLocalValue(request.rentalDetails?.returnAt)}
-                            onChange={(event) =>
-                              updateRentalDetails(
-                                request.id,
-                                { returnAt: fromDateTimeLocalValue(event.target.value) },
-                              )
-                            }
+                          <DateTimePicker
+                            value={request.rentalDetails?.returnAt}
+                            onChange={(returnAt) => updateRentalDetails(request.id, { returnAt })}
+                            aria-label="Return date"
+                            className="flex-1"
                           />
                           <Button
                             type="button"
@@ -1076,18 +1129,16 @@ function SupplierScheduleSection({
                   </div>
                   <div className="space-y-1.5">
                     <Label>{fields?.dateFromLabel ?? "Start date"}</Label>
-                    <Input
-                      type="date"
+                    <DatePicker
                       value={schedule.dateFrom}
-                      onChange={(event) => onUpdate(schedule.id, "dateFrom", event.target.value)}
+                      onChange={(value) => onUpdate(schedule.id, "dateFrom", value ?? "")}
                     />
                   </div>
                   <div className="space-y-1.5">
                     <Label>{fields?.dateToLabel ?? "End date"}</Label>
-                    <Input
-                      type="date"
+                    <DatePicker
                       value={schedule.dateTo}
-                      onChange={(event) => onUpdate(schedule.id, "dateTo", event.target.value)}
+                      onChange={(value) => onUpdate(schedule.id, "dateTo", value ?? "")}
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -1162,8 +1213,8 @@ function SupplierScheduleSummary({
             <p className="text-sm font-medium">{title}</p>
           </div>
           <div className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
-            <Field label={fields?.dateFromLabel ?? "Start date"} value={schedule.dateFromDisplay ?? schedule.dateFrom} />
-            <Field label={fields?.dateToLabel ?? "End date"} value={schedule.dateToDisplay ?? schedule.dateTo} />
+            <Field label={fields?.dateFromLabel ?? "Start date"} value={schedule.dateFromDisplay ?? formatDisplayDate(schedule.dateFrom)} />
+            <Field label={fields?.dateToLabel ?? "End date"} value={schedule.dateToDisplay ?? formatDisplayDate(schedule.dateTo)} />
             <Field label={fields?.timeStartLabel ?? "Start time"} value={schedule.timeStart ?? "Not set"} />
             <Field label={fields?.timeEndLabel ?? "End time"} value={schedule.timeEnd ?? "Not set"} />
           </div>
@@ -1211,7 +1262,7 @@ function TravellerRow({ traveller, index }: { traveller: Traveller; index: numbe
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 py-2 border-b border-border last:border-0">
       <Field label={`Traveller ${index}`} value={`${traveller.prefix} ${traveller.name} ${traveller.surname}`} />
       <Field label="ID/Passport" value={traveller.idPassport} />
-      <Field label="Date of Birth" value={traveller.dateOfBirth} />
+      <Field label="Date of Birth" value={formatDisplayDate(traveller.dateOfBirth)} />
     </div>
   )
 }

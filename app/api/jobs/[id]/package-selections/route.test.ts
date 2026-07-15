@@ -75,6 +75,7 @@ function buildSupabase(state: MockState = {}) {
               }),
             })),
           })),
+          update: vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) })),
         }
       }
       if (table === "package_legs") {
@@ -107,6 +108,10 @@ function buildSupabase(state: MockState = {}) {
             if (columns.includes("units:booking_package_selection_units")) {
               return { eq: vi.fn(async () => ({ data: [], error: null })) }
             }
+            // recomputeBookingTripDates: selected/service_date/nights/route_id, resolved directly off .eq()
+            if (columns.includes("service_date")) {
+              return { eq: vi.fn(async () => ({ data: [], error: null })) }
+            }
             return {
               eq: vi.fn(() => ({
                 in: vi.fn(async (_col: string, legIds: string[]) => ({
@@ -119,6 +124,9 @@ function buildSupabase(state: MockState = {}) {
             }
           }),
         }
+      }
+      if (table === "booking_transport_requests") {
+        return { select: vi.fn(() => ({ eq: vi.fn(async () => ({ data: [], error: null })) })) }
       }
       if (table === "booking_package_selection_units") {
         return {

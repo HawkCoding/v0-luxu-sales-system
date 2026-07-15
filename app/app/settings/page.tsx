@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 
 import Link from "next/link"
 import { useCallback, useEffect, useState } from "react"
@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { InboundEmailSettings } from "@/components/inbound-email-settings"
 import { BackupSettings } from "@/components/backup-settings"
 import { BankingSettingsEditor } from "@/components/banking-settings-editor"
+import { BACKUPS_ENABLED, QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -907,7 +908,7 @@ function CompanyInfoCard({ canEdit }: { canEdit: boolean }) {
                   onClick={() => handleSave("business_name", businessName, "Business name")}
                   disabled={savingField === "business_name" || !businessName.trim()}
                 >
-                  {savingField === "business_name" ? "Savingâ€¦" : "Save"}
+                  {savingField === "business_name" ? "Saving…" : "Save"}
                 </Button>
               )}
             </div>
@@ -928,7 +929,7 @@ function CompanyInfoCard({ canEdit }: { canEdit: boolean }) {
                   onClick={() => handleSave("company_email", companyEmail, "Email")}
                   disabled={savingField === "company_email" || !companyEmail.trim()}
                 >
-                  {savingField === "company_email" ? "Savingâ€¦" : "Save"}
+                  {savingField === "company_email" ? "Saving…" : "Save"}
                 </Button>
               )}
             </div>
@@ -948,7 +949,7 @@ function CompanyInfoCard({ canEdit }: { canEdit: boolean }) {
                   onClick={() => handleSave("company_phone", companyPhone, "Phone")}
                   disabled={savingField === "company_phone" || !companyPhone.trim()}
                 >
-                  {savingField === "company_phone" ? "Savingâ€¦" : "Save"}
+                  {savingField === "company_phone" ? "Saving…" : "Save"}
                 </Button>
               )}
             </div>
@@ -977,7 +978,7 @@ function CompanyInfoCard({ canEdit }: { canEdit: boolean }) {
                     !Number.isFinite(Number(vatRate))
                   }
                 >
-                  {savingField === "vat_rate" ? "Savingâ€¦" : "Save"}
+                  {savingField === "vat_rate" ? "Saving…" : "Save"}
                 </Button>
               )}
             </div>
@@ -1316,8 +1317,8 @@ function DefaultAgeBandsCard({ canEdit }: { canEdit: boolean }) {
           </div>
         </div>
         <p className="text-xs text-muted-foreground">
-          Resolves to: Infant <span className="tabular-nums">0â€“{Number.isFinite(infantValue) ? infantValue : "?"}</span>,
-          Child <span className="tabular-nums">{Number.isFinite(infantValue) ? infantValue + 1 : "?"}â€“{Number.isFinite(childValue) ? childValue : "?"}</span>,
+          Resolves to: Infant <span className="tabular-nums">0–{Number.isFinite(infantValue) ? infantValue : "?"}</span>,
+          Child <span className="tabular-nums">{Number.isFinite(infantValue) ? infantValue + 1 : "?"}–{Number.isFinite(childValue) ? childValue : "?"}</span>,
           Adult <span className="tabular-nums">{Number.isFinite(childValue) ? childValue + 1 : "?"}+</span>
         </p>
         {canEdit && (
@@ -1826,7 +1827,7 @@ export default function SettingsPage() {
 
       <HotelDefaultTimesCard canEdit={canEditDepositSettings} />
 
-      <QuoteValidityCard canEdit={canEditDepositSettings} />
+      {QUOTE_VALIDITY_ENABLED && <QuoteValidityCard canEdit={canEditDepositSettings} />}
 
       <TrainChildPriceRatioCard canEdit={role === "admin"} />
 
@@ -1899,7 +1900,7 @@ export default function SettingsPage() {
 
       {canEditSettings && <InboundEmailSettings />}
 
-      {canEditDepositSettings && <BackupSettings isAdmin={role === "admin"} />}
+      {BACKUPS_ENABLED && canEditDepositSettings && <BackupSettings isAdmin={role === "admin"} />}
 
       <Card className={canEditSettings ? undefined : "opacity-70"}>
         <CardHeader className="pb-2">

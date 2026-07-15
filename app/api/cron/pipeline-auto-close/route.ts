@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { formatDisplayDate } from "@/lib/date-format"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { applyTransition } from "@/lib/pipeline/apply-transition"
 import { createServiceClient } from "@/lib/supabase/server"
@@ -17,6 +18,7 @@ interface MaintenanceBooking {
   consultant: string | null
   departure_date: string | null
   duration_nights: number | null
+  trip_end_date: string | null
   customer: { first_name: string | null } | null
   route: { name: string | null } | null
 }
@@ -49,7 +51,7 @@ export async function GET(request: Request) {
   const { data: bookings, error: bookingsError } = await supabase
     .from("bookings")
     .select(
-      "id, booking_number, stage, source, raw_text, updated_at, customer_id, consultant, departure_date, duration_nights, customer:customers(first_name), route:routes(name)",
+      "id, booking_number, stage, source, raw_text, updated_at, customer_id, consultant, departure_date, duration_nights, trip_end_date, customer:customers(first_name), route:routes(name)",
     )
     .in("stage", ["voucher_sent", "trip_active"])
     .not("departure_date", "is", null)
@@ -80,7 +82,11 @@ export async function GET(request: Request) {
   for (const booking of maintenanceBookings) {
     if (!booking.departure_date) continue
 
-    const tripEndDate = addDays(dateFromDatabaseDate(booking.departure_date), booking.duration_nights ?? 0)
+    // Prefer the derived trip end (covers hotel stays/rentals past the train's arrival);
+    // fall back to departure + nights for bookings never re-saved since the field existed.
+    const tripEndDate = booking.trip_end_date
+      ? dateFromDatabaseDate(booking.trip_end_date)
+      : addDays(dateFromDatabaseDate(booking.departure_date), booking.duration_nights ?? 0)
     const thankYouDueDate = addDays(tripEndDate, 3)
     const thankYouCatchupDeadline = addDays(tripEndDate, 3 + THANK_YOU_CATCHUP_WINDOW_DAYS)
     const closeDueDate = addDays(tripEndDate, 7)
@@ -97,7 +103,7 @@ export async function GET(request: Request) {
           customerName: booking.customer?.first_name ?? "Valued Guest",
           jobNumber: booking.booking_number,
           routeName: booking.route?.name ?? "your journey",
-          tripEndDate: tripEndDate.toISOString().slice(0, 10),
+          tripEndDate: formatDisplayDate(tripEndDate),
           consultantName: booking.consultant ?? "The Luxus team",
         },
       })

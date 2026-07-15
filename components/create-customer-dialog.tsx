@@ -17,6 +17,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import { Input } from "@/components/ui/input"
+import { DatePicker } from "@/components/ui/date-picker"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -368,11 +369,12 @@ export function CreateCustomerDialog({ open, onOpenChange, onSuccess }: CreateCu
                   {/* Date of Birth */}
                   <div className="space-y-1.5">
                     <Label htmlFor="dateOfBirth">Date of birth</Label>
-                    <Input
+                    <DatePicker
                       id="dateOfBirth"
-                      type="date"
                       value={form.dateOfBirth}
-                      onChange={(e) => setField("dateOfBirth", e.target.value)}
+                      onChange={(value) => setField("dateOfBirth", value ?? "")}
+                      fromYear={1920}
+                      toYear={new Date().getFullYear()}
                     />
                   </div>
 

@@ -40,6 +40,7 @@ function leg(
     supplierKind: "train_operator",
     label: `Leg ${id}`,
     sortOrder: 0,
+    dateAnchor: null,
     routes: [],
     rateCards,
     suiteTypes: [],

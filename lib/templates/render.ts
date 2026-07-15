@@ -1,7 +1,8 @@
 // Pure token-substitution engine for email templates.
 //
-// Templates use {{tokenName}} placeholders. Scalar values are HTML-escaped;
-// block values (pre-built HTML fragments) are inserted raw and only into the
+// Templates use {{tokenName}} placeholders. Scalar values are HTML-escaped
+// in the body (HTML) but inserted raw in the subject (plain text); block
+// values (pre-built HTML fragments) are inserted raw and only into the
 // body, never the subject. Tokens present in the template but not supplied
 // are left visible and reported as warnings so the salesperson catches them
 // in the preview instead of the customer catching them in their inbox.
@@ -38,10 +39,11 @@ function substitute(
   blocks: Record<string, string>,
   allowBlocks: boolean,
   unknown: Set<string>,
+  escape: boolean,
 ): string {
   return text.replace(TOKEN_RE, (match, name: string) => {
     if (Object.prototype.hasOwnProperty.call(tokens, name)) {
-      return escapeHtml(tokens[name])
+      return escape ? escapeHtml(tokens[name]) : tokens[name]
     }
     if (allowBlocks && Object.prototype.hasOwnProperty.call(blocks, name)) {
       return blocks[name]
@@ -55,8 +57,8 @@ export function renderTemplate(input: RenderTemplateInput): RenderedTemplate {
   const blocks = input.blocks ?? {}
   const unknown = new Set<string>()
 
-  const subject = substitute(input.subject, input.tokens, blocks, false, unknown)
-  const bodyHtml = substitute(input.bodyHtml, input.tokens, blocks, true, unknown)
+  const subject = substitute(input.subject, input.tokens, blocks, false, unknown, false)
+  const bodyHtml = substitute(input.bodyHtml, input.tokens, blocks, true, unknown, true)
 
   const warnings = [...unknown].sort().map((name) => `Unreplaced token: {{${name}}}`)
 

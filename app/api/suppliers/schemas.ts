@@ -65,6 +65,13 @@ const vehicleRentalRouteDetailsSchema = z.object({
 
 const routeDirectionModeSchema = z.enum(["one_way", "round_trip"])
 
+/** Client-facing inclusion/exclusion bullets; blanks are dropped so the UI can post empty rows. */
+const bulletListSchema = z
+  .array(z.string().trim().max(300))
+  .max(30)
+  .transform((values) => values.filter(Boolean))
+  .default([])
+
 export const rateAdjustmentSchema = z.object({
   rateTypeId: z.string().uuid(),
   discountPct: z.number().finite().min(0).max(100),
@@ -152,6 +159,8 @@ export const supplierSaveSchema = z.object({
   childMaxAge: z.number().int().min(0).max(17).nullable().optional(),
   defaultTimeStart: z.string().regex(TIME_PATTERN, "Expected HH:MM").nullable().optional(),
   defaultTimeEnd: z.string().regex(TIME_PATTERN, "Expected HH:MM").nullable().optional(),
+  inclusions: bulletListSchema,
+  exclusions: bulletListSchema,
   active: z.boolean(),
   emails: z.array(supplierEmailSchema).default([]),
   suiteTypes: z.array(suiteTypeSchema),
@@ -296,6 +305,8 @@ export const supplierDraftSaveSchema = z.object({
   childMaxAge: z.number().int().min(0).max(17).nullable().optional(),
   defaultTimeStart: z.string().regex(TIME_PATTERN, "Expected HH:MM").nullable().optional(),
   defaultTimeEnd: z.string().regex(TIME_PATTERN, "Expected HH:MM").nullable().optional(),
+  inclusions: bulletListSchema,
+  exclusions: bulletListSchema,
   active: z.boolean().default(true),
   emails: z.array(draftSupplierEmailSchema).default([]),
   suiteTypes: z.array(draftSuiteTypeSchema).default([]),

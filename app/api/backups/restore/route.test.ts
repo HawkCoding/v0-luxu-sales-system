@@ -27,6 +27,9 @@ vi.mock("@/lib/supabase/server", () => ({
   createSessionClient: vi.fn(),
 }))
 
+// Backups are feature-flagged off in production; force-enable so the route logic stays covered.
+vi.mock("@/lib/feature-flags", () => ({ BACKUPS_ENABLED: true }))
+
 import { POST } from "./route"
 
 // ── Helpers ────────────────────────────────────────────────────────────────

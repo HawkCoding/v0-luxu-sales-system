@@ -4,6 +4,7 @@ import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { DatePicker } from "@/components/ui/date-picker"
 import { Label } from "@/components/ui/label"
 import { Pencil, Save, X } from "lucide-react"
 import { toast } from "sonner"
@@ -155,11 +156,10 @@ export function EnquiryParsedFieldsEditor({
               <Label htmlFor="pfe-departure" className="text-xs text-muted-foreground">
                 Departure Date
               </Label>
-              <Input
+              <DatePicker
                 id="pfe-departure"
-                type="date"
                 value={draft.departureDate ?? ""}
-                onChange={(e) => setDraft((d) => ({ ...d, departureDate: e.target.value || null }))}
+                onChange={(value) => setDraft((d) => ({ ...d, departureDate: value || null }))}
               />
             </div>
           </div>

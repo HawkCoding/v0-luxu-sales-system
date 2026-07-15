@@ -35,17 +35,22 @@ import { QuoteLineSupplierPicker, type QuoteExtraSelection } from "@/components/
 import { getDestinationLocationIds } from "@/lib/packages/location-filter"
 import { SuiteLegEditor } from "@/components/packages/suite-leg-editor"
 import { TransportLegEditor } from "@/components/packages/transport-leg-editor"
+import { TripDateSummary } from "@/components/packages/trip-date-summary"
 import type { PassengerTotals } from "@/lib/packages/passenger-totals"
+import { deriveTripDateRangeFromStates } from "@/lib/packages/trip-date-range"
 import {
+  applyAnchoredHotelDates,
   buildDefaultLegStates,
   hydrateFromSaved,
   PASSENGER_SPLIT_SUPPLIER_KINDS,
   toApplySelections,
+  toHotelAnchorContext,
   toPackageSelectionsPatch,
   toTransportRequestsPut,
   validateConfigureState,
   type ApplyCommissionOverride,
   type ApplyLegState,
+  type HotelAnchorContext,
   type SavedPackageState,
 } from "@/lib/packages/apply-dialog-state"
 
@@ -88,13 +93,6 @@ function formatPrice(amount: number | null, currency: string) {
   }
 }
 
-function addNights(date: string, nights: number): string {
-  const parsed = new Date(`${date}T00:00:00Z`)
-  if (Number.isNaN(parsed.getTime())) return date
-  parsed.setUTCDate(parsed.getUTCDate() + nights)
-  return parsed.toISOString().slice(0, 10)
-}
-
 type Step = "pick" | "configure" | "confirm"
 
 interface LegCommissionState {
@@ -126,8 +124,6 @@ export function ApplyPackageDialog({
   const [existingTransportRequests, setExistingTransportRequests] = useState<BookingTransportRequest[]>([])
   const [legStates, setLegStates] = useState<ApplyLegState[]>([])
   const [totalsBySupplierId, setTotalsBySupplierId] = useState<Record<string, PassengerTotals>>({})
-  const [tripStartDate, setTripStartDate] = useState("")
-  const [tripEndDate, setTripEndDate] = useState("")
   const [commissionByLegId, setCommissionByLegId] = useState<Record<string, LegCommissionState>>({})
   const [rateTypeId, setRateTypeId] = useState("")
   const [previewLineItems, setPreviewLineItems] = useState<QuoteLineItem[]>([])
@@ -208,8 +204,6 @@ export function ApplyPackageDialog({
     setPackageDetail(null)
     setLegStates([])
     setTotalsBySupplierId({})
-    setTripStartDate("")
-    setTripEndDate("")
     setCommissionByLegId({})
     setRateTypeId("")
     setPreviewLineItems([])
@@ -253,12 +247,8 @@ export function ApplyPackageDialog({
       setTotalsBySupplierId(totals)
 
       const isSavedPackage = savedState?.packageId === pkg.id
+      // The job's enquiry travel date seeds default service dates; everything stays editable.
       const startDate = (isSavedPackage ? savedState?.tripStartDate : null) ?? travelDate ?? ""
-      const endDate =
-        (isSavedPackage ? savedState?.tripEndDate : null) ??
-        (startDate && detail.durationNights ? addNights(startDate, detail.durationNights) : "")
-      setTripStartDate(startDate)
-      setTripEndDate(endDate)
 
       const stateOptions = { tripStartDate: startDate || null, totalsBySupplierId: totals }
       setLegStates(
@@ -276,18 +266,28 @@ export function ApplyPackageDialog({
     }
   }
 
+  // Anchored hotel dates are derived, so every edit re-runs them: changing the train's departure
+  // date or a hotel's night count immediately re-dates the stays that hang off it.
   function updateLegState(next: ApplyLegState) {
-    setLegStates((prev) => prev.map((state) => (state.legId === next.legId ? next : state)))
+    setLegStates((prev) => {
+      const merged = prev.map((state) => (state.legId === next.legId ? next : state))
+      return packageDetail ? applyAnchoredHotelDates(packageDetail, merged) : merged
+    })
   }
 
-  const tripDatesValid = Boolean(tripStartDate) && Boolean(tripEndDate) && tripEndDate >= tripStartDate
+  function hotelAnchorContext(legId: string): HotelAnchorContext | null {
+    if (!packageDetail) return null
+    return toHotelAnchorContext(packageDetail, legStates, legId)
+  }
 
   async function validateAndPreview() {
     if (!selectedPackage || !packageDetail) return
 
     const problems = validateConfigureState(packageDetail, legStates, { totalsBySupplierId })
-    if (!tripDatesValid) {
-      problems.unshift("Trip start and end dates are required (end on or after start)")
+    // Pricing needs at least one dated service (rate cards match on the derived trip start).
+    const derivedRange = deriveTripDateRangeFromStates(packageDetail, legStates)
+    if (problems.length === 0 && !derivedRange.start) {
+      problems.push("Add a date to at least one service — trip dates are worked out from them")
     }
     setValidationErrors(problems)
     if (problems.length > 0) return
@@ -296,11 +296,12 @@ export function ApplyPackageDialog({
     setApplyError(null)
 
     try {
-      // 1. Assign the package + trip dates to the booking (reseeds selections on package change).
+      // 1. Assign the package to the booking (reseeds selections on package change). Trip dates
+      // are derived server-side from the per-service dates saved in the next step.
       const assignRes = await fetch(`/api/jobs/${jobId}/package`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ packageId: selectedPackage.id, tripStartDate, tripEndDate }),
+        body: JSON.stringify({ packageId: selectedPackage.id }),
       })
       if (!assignRes.ok) {
         const body = await assignRes.json().catch(() => ({}))
@@ -353,7 +354,7 @@ export function ApplyPackageDialog({
         body: JSON.stringify({
           jobId,
           quoteId,
-          travelDate: tripStartDate,
+          travelDate: derivedRange.start,
           rateTypeId: rateTypeId || undefined,
           selections: toApplySelections(legStates, commissionOverrides),
           extras: extras.map((extra) => ({
@@ -487,51 +488,29 @@ export function ApplyPackageDialog({
               </DialogDescription>
             </DialogHeader>
 
-            <div className="grid gap-3 md:grid-cols-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="apply-trip-start">Trip start date</Label>
-                <Input
-                  id="apply-trip-start"
-                  type="date"
-                  value={tripStartDate}
-                  onChange={(event) => setTripStartDate(event.target.value)}
-                />
+            <TripDateSummary detail={packageDetail} states={legStates} />
+
+            {rateTypes.length > 0 && (
+              <div className="max-w-xs space-y-1.5">
+                <Label htmlFor="apply-rate-type">Rate type</Label>
+                <Select value={rateTypeId} onValueChange={setRateTypeId}>
+                  <SelectTrigger id="apply-rate-type" className="h-9">
+                    <SelectValue placeholder="System default" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {rateTypes.map((rt) => (
+                      <SelectItem key={rt.id} value={rt.id}>
+                        {rt.name}
+                        {rt.isDefault ? " (default)" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Applies to every leg; a leg without this rate falls back to the default.
+                </p>
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="apply-trip-end">Trip end date</Label>
-                <Input
-                  id="apply-trip-end"
-                  type="date"
-                  value={tripEndDate}
-                  onChange={(event) => setTripEndDate(event.target.value)}
-                />
-              </div>
-              {rateTypes.length > 0 && (
-                <div className="space-y-1.5">
-                  <Label htmlFor="apply-rate-type">Rate type</Label>
-                  <Select value={rateTypeId} onValueChange={setRateTypeId}>
-                    <SelectTrigger id="apply-rate-type" className="h-9">
-                      <SelectValue placeholder="System default" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {rateTypes.map((rt) => (
-                        <SelectItem key={rt.id} value={rt.id}>
-                          {rt.name}
-                          {rt.isDefault ? " (default)" : ""}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Applies to every leg; a leg without this rate falls back to the default.
-                  </p>
-                </div>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Covers the full trip, start to finish — not just this package&apos;s legs — so we track how long the
-              customer was with us across everything booked.
-            </p>
+            )}
 
             <div className="space-y-4">
               {sortedLegs.map((leg) => {
@@ -548,6 +527,7 @@ export function ApplyPackageDialog({
                         value={state}
                         onChange={updateLegState}
                         expectedTotals={totalsBySupplierId[leg.supplierId] ?? null}
+                        anchorContext={hotelAnchorContext(leg.id)}
                       />
                     )}
                     {state.selected ? (
@@ -611,7 +591,7 @@ export function ApplyPackageDialog({
                         <span className="text-muted-foreground">
                           {" · "}
                           {extra.routeName} · {extra.suiteTypeName}
-                          {extra.quantity ? ` ×${extra.quantity}` : ""}
+                          {extra.quantity ? ` Ã—${extra.quantity}` : ""}
                         </span>
                       </div>
                       <button
@@ -682,8 +662,8 @@ export function ApplyPackageDialog({
                   <tr className="border-b text-left text-xs font-medium text-muted-foreground">
                     <th className="px-3 py-2">Description</th>
                     <th className="px-3 py-2 text-right">Qty</th>
-                    <th className="px-3 py-2 text-right">Unit price</th>
-                    <th className="px-3 py-2 text-right">Total</th>
+                    <th className="px-3 py-2 text-right whitespace-nowrap min-w-[100px]">Unit price</th>
+                    <th className="px-3 py-2 text-right whitespace-nowrap min-w-[100px]">Total</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -717,8 +697,8 @@ export function ApplyPackageDialog({
                           <div className="text-[11px] text-muted-foreground">{li.pricingSnapshot.unit}</div>
                         ) : null}
                       </td>
-                      <td className="px-3 py-2 text-right text-xs">R {li.unitPrice.toLocaleString()}</td>
-                      <td className="px-3 py-2 text-right text-xs font-medium">R {li.total.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right text-xs whitespace-nowrap">R {li.unitPrice.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right text-xs font-medium whitespace-nowrap">R {li.total.toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -9,6 +9,7 @@ import type {
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { fetchDefaultAgeBuckets, resolveAgeBuckets, type AgeBuckets } from "@/lib/pricing/age-buckets"
+import { dateOnly } from "@/lib/packages/trip-date-range"
 import {
   buildCommissionBreakdown,
   calculateCommissionAmount,
@@ -35,6 +36,9 @@ export interface PackageLegSelection {
   /** Transfer/vehicle-rental legs only: the vehicle category (train/hotel legs use `units`). */
   suiteTypeId?: string
   rateTypeId?: string
+  /** This leg's own service date (YYYY-MM-DD) — rate cards are matched against it, falling back
+   * to the quote-level travelDate when unset. */
+  serviceDate?: string | null
   /** Train/hotel legs: one entry per independent suite/room booked on this leg. */
   units?: PackageUnitSelection[]
   /** Hotel legs only: number of nights stayed (default 1). Independent of journey duration, and
@@ -244,6 +248,15 @@ export async function buildPackageQuoteLineItems({
   // The rate card resolved for the leg currently being priced; addLineItem
   // reads it to stamp the rate type into each line's pricing snapshot.
   let activeRateCard: PackageDetail["legs"][number]["rateCards"][number] | null = null
+  // The leg + route currently being priced. addLineItem stamps these into the
+  // snapshot so downstream (e.g. resolvePrimaryRoute → booking.route_id sync)
+  // can recover which journey a quote is for.
+  let activeLeg: PackageDetail["legs"][number] | null = null
+  let activeRouteId: string | null = null
+  let activeRouteName: string | null = null
+  // The date the current line's rate card was matched against (the leg's own service date, or
+  // the quote-level travelDate when the leg has none).
+  let activePricingDate: string = travelDate
   const childAges = job.child_ages ?? []
 
   const defaultBuckets = await fetchDefaultAgeBuckets(supabase)
@@ -348,20 +361,20 @@ export async function buildPackageQuoteLineItems({
         pricingMode: "rate_card",
         packageId: packageDetail.id,
         packageName: packageDetail.name,
-        legId: null,
-        legLabel: null,
-        supplierId: null,
-        supplierName: null,
-        supplierKind: null,
-        routeId: null,
-        routeName: null,
+        legId: activeLeg?.id ?? null,
+        legLabel: activeLeg?.label ?? activeLeg?.supplierName ?? null,
+        supplierId: activeLeg?.supplierId ?? null,
+        supplierName: activeLeg?.supplierName ?? null,
+        supplierKind: activeLeg?.supplierKind ?? null,
+        routeId: activeRouteId,
+        routeName: activeRouteName,
         suiteTypeId: suiteTypeId ?? null,
         suiteTypeName: null,
         rateCardId: activeRateCard?.id ?? null,
         rateTypeId: activeRateCard?.rateTypeId ?? null,
         rateTypeCode: rateTypeMeta?.code ?? null,
         rateTypeName: rateTypeMeta?.name ?? null,
-        travelDate,
+        travelDate: activePricingDate,
         passengerKind: "adult",
         baseUnitPrice: unitPrice,
         markupPct: 0,
@@ -398,14 +411,15 @@ export async function buildPackageQuoteLineItems({
     leg: PackageDetail["legs"][number],
     routeId: string,
     suiteTypeId: string,
+    pricingDate: string,
     perLegRateTypeId?: string | null,
   ) {
     const candidates = leg.rateCards.filter(
       (rc) =>
         rc.routeId === routeId &&
         rc.suiteTypeId === suiteTypeId &&
-        rc.validFrom <= travelDate &&
-        (rc.validTo === null || rc.validTo >= travelDate),
+        rc.validFrom <= pricingDate &&
+        (rc.validTo === null || rc.validTo >= pricingDate),
     )
     if (candidates.length === 0) return undefined
 
@@ -458,12 +472,38 @@ export async function buildPackageQuoteLineItems({
       const selection = getLegSelection(leg)
       const isOptional = isOptionalPackageLegKind(leg.supplierKind)
       if (isOptional && !selection.selected) continue
+      // Zero-priced on purpose: the leg is an inclusion of the package, and the
+      // whole price sits on the "Package Total" line below. The snapshot marks
+      // it as such so it isn't mistaken for a line nobody got round to pricing.
       lineItems.push({
         description: leg.label ?? leg.supplierName,
         supplierDescription: leg.supplierDescription ?? null,
         qty: travellerCount,
         unitPrice: 0,
         total: 0,
+        pricingSnapshot: {
+          source: "pricing_engine",
+          pricingMode: "fixed_package",
+          packageId: packageDetail.id,
+          packageName: packageDetail.name,
+          legId: leg.id,
+          legLabel: leg.label ?? null,
+          supplierId: leg.supplierId ?? null,
+          supplierName: leg.supplierName ?? null,
+          supplierKind: leg.supplierKind ?? null,
+          routeId: null,
+          routeName: null,
+          suiteTypeId: null,
+          suiteTypeName: null,
+          rateCardId: null,
+          travelDate,
+          passengerKind: "included",
+          baseUnitPrice: 0,
+          markupPct: 0,
+          singleSupplementPct: null,
+          serviceType: null,
+          unit: null,
+        },
       })
     }
 
@@ -498,18 +538,25 @@ export async function buildPackageQuoteLineItems({
 
       const legLabel = leg.label ?? leg.supplierName
       const routeName = getRouteName(leg, routeId)
+      activeLeg = leg
+      activeRouteId = routeId
+      activeRouteName = routeName
+      // Each leg prices off its own service date so e.g. a pre-stay hotel in a different
+      // rate-card season than the train still gets the right card.
+      const legPricingDate = selection.serviceDate ?? travelDate
+      activePricingDate = legPricingDate
       const supplierDescription = leg.supplierDescription ?? null
       const commission = commissionFor(leg, routeId, selection.commissionOverride ?? null)
       const unit = SUPPLIER_VOCABULARY[leg.supplierKind].priceLabel
 
-      function resolveUnit(suiteTypeId: string) {
+      function resolveUnit(suiteTypeId: string, pricingDate: string = legPricingDate) {
         const suiteBelongsToLeg = leg.suiteTypes.some((suiteType) => suiteType.id === suiteTypeId)
         if (!suiteBelongsToLeg) {
           throw new Error(`Selected type is not available for leg: ${legLabel}`)
         }
-        const validRateCard = getValidRateCard(leg, routeId, suiteTypeId, selection.rateTypeId)
+        const validRateCard = getValidRateCard(leg, routeId, suiteTypeId, pricingDate, selection.rateTypeId)
         if (!validRateCard) {
-          throw new Error(`No pricing available for "${legLabel}" on ${travelDate}. Update the package rate cards first.`)
+          throw new Error(`No pricing available for "${legLabel}" on ${pricingDate}. Update the package rate cards first.`)
         }
         const suiteTypeName = getSuiteTypeName(leg, suiteTypeId)
         const description = [legLabel, suiteTypeName, routeName].filter(Boolean).join(" - ")
@@ -550,12 +597,15 @@ export async function buildPackageQuoteLineItems({
 
         for (const transportRequest of requestsToPrice) {
           // Each transport row can carry its own vehicle category; the leg-level selection is
-          // the fallback for rows that don't set one.
+          // the fallback for rows that don't set one. Likewise its pickup date is the row's
+          // own pricing date.
           const suiteTypeId = transportRequest?.suite_type_id ?? selection.suiteTypeId
           if (!suiteTypeId) {
             throw new Error(`No suite type selected for leg: ${legLabel}`)
           }
-          const { validRateCard, description } = resolveUnit(suiteTypeId)
+          const requestPricingDate = dateOnly(transportRequest?.pickup_at) ?? legPricingDate
+          activePricingDate = requestPricingDate
+          const { validRateCard, description } = resolveUnit(suiteTypeId, requestPricingDate)
           activeRateCard = validRateCard
 
           const pointLabel =

@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest"
-import type { PackageDetail } from "@/lib/types"
+import type { PackageDetail, QuoteLineItem } from "@/lib/types"
 import {
   buildPackagePricing,
   calculateQuoteTotals,
   getValidRateCard,
   inferSingleAdultCount,
+  isMissingPricing,
 } from "@/lib/quotes/pricing-engine"
 
 const PACKAGE_ID = "00000000-0000-4000-8000-000000000001"
@@ -68,6 +69,7 @@ function packageDetail(overrides: Partial<PackageDetail> = {}): PackageDetail {
         supplierName: "Blue Train",
         supplierDescription: null,
         supplierKind: "train_operator",
+        dateAnchor: null,
         label: "Blue Train",
         sortOrder: 0,
         routes: [
@@ -101,6 +103,7 @@ function packageDetail(overrides: Partial<PackageDetail> = {}): PackageDetail {
         supplierName: "Rovos Rail",
         supplierDescription: null,
         supplierKind: "train_operator",
+        dateAnchor: null,
         label: "Rovos Rail",
         sortOrder: 1,
         routes: [
@@ -208,6 +211,7 @@ describe("pricing engine", () => {
           supplierName: "Silo Hotel",
           supplierDescription: null,
           supplierKind: "hotel_property",
+          dateAnchor: null,
           label: "Silo Hotel",
           sortOrder: 1,
           routes: [
@@ -241,6 +245,7 @@ describe("pricing engine", () => {
           supplierName: "Airport Transfers",
           supplierDescription: null,
           supplierKind: "transfers",
+          dateAnchor: null,
           label: "Airport Transfers",
           sortOrder: 2,
           routes: [
@@ -274,6 +279,7 @@ describe("pricing engine", () => {
           supplierName: "Vehicle Rentals",
           supplierDescription: null,
           supplierKind: "vehicle_rental",
+          dateAnchor: null,
           label: "Vehicle Rentals",
           sortOrder: 3,
           routes: [
@@ -380,5 +386,39 @@ describe("getValidRateCard — date range selection", () => {
   it("returns undefined when travel date is after validTo on a closed range", () => {
     const result = getValidRateCard(leg([rc("2026-01-01", "2026-12-31")]), ROUTE, SUITE, "2027-01-01")
     expect(result).toBeUndefined()
+  })
+})
+
+describe("isMissingPricing", () => {
+  const line = (overrides: Partial<QuoteLineItem>): QuoteLineItem => ({
+    description: "Line",
+    qty: 1,
+    unitPrice: 0,
+    total: 0,
+    ...overrides,
+  })
+
+  it("flags a zero-priced line with no pricing snapshot", () => {
+    expect(isMissingPricing(line({ unitPrice: 0 }))).toBe(true)
+  })
+
+  it("does not flag a fixed-price package inclusion", () => {
+    const inclusion = line({
+      unitPrice: 0,
+      pricingSnapshot: { pricingMode: "fixed_package" } as QuoteLineItem["pricingSnapshot"],
+    })
+    expect(isMissingPricing(inclusion)).toBe(false)
+  })
+
+  it("does not flag a line that has a price", () => {
+    expect(isMissingPricing(line({ unitPrice: 24800, total: 24800 }))).toBe(false)
+  })
+
+  it("flags an unpriced extra even on a fixed-price package quote", () => {
+    const unpricedExtra = line({
+      unitPrice: 0,
+      pricingSnapshot: { pricingMode: "rate_card", isExtra: true } as QuoteLineItem["pricingSnapshot"],
+    })
+    expect(isMissingPricing(unpricedExtra)).toBe(true)
   })
 })

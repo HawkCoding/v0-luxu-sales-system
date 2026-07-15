@@ -44,6 +44,21 @@ describe("toEditorHtml", () => {
     expect(html).toContain("{{customerName}}")
     expect(html).not.toContain("data-preserved-block")
   })
+
+  it("names an opaque placeholder from the element's data-label when present", () => {
+    const src = '<p>a</p><div style="color:red" data-label="Total price">TOTAL: R 1</div><p>b</p>'
+    const { html } = toEditorHtml(src, BLOCK_TOKENS)
+    expect(html).toContain('data-label="Total price"')
+  })
+
+  it("falls back to a text snippet, then the tag name, for unlabelled opaque blocks", () => {
+    const withText = toEditorHtml('<p>a</p><div style="color:red">Quote number: BT-1</div>', BLOCK_TOKENS)
+    expect(withText.html).toContain("Quote number: BT-1")
+    expect(withText.html).not.toContain('data-label="Div"')
+
+    const bare = toEditorHtml('<p>a</p><hr style="border:none"/>', BLOCK_TOKENS)
+    expect(bare.html).toContain('data-label="Divider line"')
+  })
 })
 
 describe("fromEditorHtml", () => {

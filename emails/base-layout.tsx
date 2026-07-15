@@ -14,9 +14,11 @@ interface BaseLayoutProps {
   preview: string
   children: ReactNode
   footerTagline?: string
+  /** Absolute URL of the brand logo; null renders a text wordmark instead. */
+  logoUrl?: string | null
 }
 
-export function BaseLayout({ preview, children, footerTagline }: BaseLayoutProps) {
+export function BaseLayout({ preview, children, footerTagline, logoUrl }: BaseLayoutProps) {
   return (
     <Html>
       <Head />
@@ -24,12 +26,11 @@ export function BaseLayout({ preview, children, footerTagline }: BaseLayoutProps
       <Body style={body}>
         <Container style={container}>
           <Section style={header}>
-            <Img
-              alt="Luxus Travel & Tours"
-              height="48"
-              src="https://www.luxustravelandtours.co.za/wp-content/uploads/2023/06/luxus-logo.png"
-              style={logo}
-            />
+            {logoUrl ? (
+              <Img alt="Luxus Travel & Tours" height="48" src={logoUrl} style={logo} />
+            ) : (
+              <Text style={wordmark}>Luxus Travel &amp; Tours</Text>
+            )}
           </Section>
           <Section style={content}>{children}</Section>
           <Section style={footer}>
@@ -63,6 +64,15 @@ const header = {
 const logo = {
   display: "block",
   objectFit: "contain" as const,
+}
+
+const wordmark = {
+  margin: "0",
+  color: "#2f2a24",
+  fontSize: "20px",
+  lineHeight: "28px",
+  fontWeight: "bold" as const,
+  letterSpacing: "0.4px",
 }
 
 const content = {

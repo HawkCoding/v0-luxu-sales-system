@@ -1,6 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { renderQuotePdf } from "@/lib/quotes/render-quote-pdf"
+import { resolveJourneyDates } from "@/lib/quotes/quote-presentation"
+import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
+import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { getDocumentTextSettings } from "@/lib/settings-access"
 import { logError } from "@/lib/error-log"
 
@@ -41,7 +44,7 @@ export async function ensureQuotePdf(
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, booking_id, quote_number, status, validity_until, subtotal, vat, total, created_at, pdf_document_id, booking:bookings(id, booking_number, customer:customers(first_name, last_name))",
+      "id, booking_id, quote_number, status, validity_until, subtotal, vat, total, created_at, pdf_document_id, booking:bookings(id, booking_number, no_of_adults, no_of_children, trip_start_date, trip_end_date, departure_date, duration_nights, customer:customers(first_name, last_name))",
     )
     .eq("id", quoteId)
     .single()
@@ -85,30 +88,49 @@ export async function ensureQuotePdf(
 
   const documentText = await getDocumentTextSettings(supabase)
 
+  // Itinerary degrades to an empty section rather than blocking the PDF —
+  // correspondence relies on a quote email never going out without its PDF.
+  let itineraryBlocks: VoucherServiceBlock[] = []
+  try {
+    const { blocks } = await buildVoucherServiceBlocks(supabase, {
+      bookingId: quote.booking_id,
+      additionalServicesDetails: null,
+    })
+    itineraryBlocks = blocks
+  } catch (err) {
+    void logError({
+      severity: "Warning",
+      source: "quote-pdf",
+      message: "Quote itinerary blocks could not be loaded",
+      details: { quoteId, error: err instanceof Error ? err.message : String(err) },
+    })
+  }
+
+  const journey = resolveJourneyDates({
+    trip_start_date: booking?.trip_start_date ?? null,
+    trip_end_date: booking?.trip_end_date ?? null,
+    departure_date: booking?.departure_date ?? null,
+    duration_nights: booking?.duration_nights ?? null,
+  })
+
   let pdfBuffer: Buffer
   try {
     pdfBuffer = await renderQuotePdf({
       title: documentText.quote_doc_title,
       footerText: documentText.quote_doc_footer_text,
+      packageIncludesHeading: documentText.quote_doc_includes_heading,
+      packageExcludesHeading: documentText.quote_doc_excludes_heading,
+      packageExcludesDefault: documentText.quote_doc_excludes_default,
       quoteNumber: quote.quote_number ?? quoteId,
-      bookingNumber: booking?.booking_number ?? "",
       customerName,
       quoteDate: quote.created_at.slice(0, 10),
       validUntil: quote.validity_until,
-      lineItems: (lineItems ?? []).map((li) => ({
-        description: li.description,
-        supplierDescription: li.supplier_description,
-        qty: li.qty,
-        unit:
-          li.pricing_snapshot && typeof li.pricing_snapshot === "object"
-            ? ((li.pricing_snapshot as { unit?: string | null }).unit ?? null)
-            : null,
-        unitPrice: li.unit_price,
-        total: li.total,
-      })),
-      subtotal: quote.subtotal,
-      vat: quote.vat,
+      journeyStart: journey.start,
+      journeyEnd: journey.end,
+      adults: booking?.no_of_adults ?? 0,
+      children: booking?.no_of_children ?? 0,
       total: quote.total,
+      itineraryBlocks,
     })
   } catch (err) {
     void logError({

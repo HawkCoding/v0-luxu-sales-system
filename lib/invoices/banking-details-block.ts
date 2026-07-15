@@ -33,9 +33,10 @@ export function buildBankingDetailsBlock(settings: BankingSettings): string {
     )
     .join("<br/>")
 
+  // data-label names the locked placeholder card in the send-dialog editor.
   return (
     `<div style="margin:18px 0;padding:14px 16px;background-color:#fbf8f3;border:1px solid #e8dfd2;` +
-    `color:#312b24;font-size:13px;line-height:20px;">` +
+    `color:#312b24;font-size:13px;line-height:20px;" data-label="Banking details">` +
     `<p style="margin:0 0 6px;"><strong>Banking details</strong></p>` +
     `<p style="margin:0;">${lines}</p>` +
     `</div>`

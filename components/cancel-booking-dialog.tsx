@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
+import { DatePicker } from "@/components/ui/date-picker"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
@@ -239,11 +240,10 @@ export function CancelBookingDialog({
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="refund-date">Refunded at</Label>
-                    <Input
+                    <DatePicker
                       id="refund-date"
-                      type="date"
                       value={refundedAt}
-                      onChange={(event) => setRefundedAt(event.target.value)}
+                      onChange={(value) => setRefundedAt(value ?? "")}
                     />
                   </div>
                   <div className="space-y-1.5 sm:col-span-2">

@@ -157,7 +157,7 @@ class SmokeReport {
     const map: [string, number][] = [
       ["Dashboard stat cards — no NaN, no perpetual loading, Unresolved Errors card", 1],
       ["Settings nav badge appears when unresolved errors exist; disappears when resolved", 2],
-      ["Quote PDF — magic bytes, PROVISIONAL QUOTATION, booking number, line items, validity", 3],
+      ["Quote PDF — magic bytes, QUOTATION, line items, validity", 3],
       ["Invoice PDF — structural assertions", 4],
       ["Voucher PDF — magic bytes, TRAVEL VOUCHERS, service blocks, End of Services footer", 5],
       ["File upload — small PDF accepted, oversized rejected, disallowed MIME rejected", 6],

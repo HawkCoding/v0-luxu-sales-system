@@ -436,6 +436,7 @@ export type Database = {
         Row: {
           booking_id: string
           created_at: string
+          date_anchor: string | null
           id: string
           nights: number | null
           notes: string | null
@@ -450,6 +451,7 @@ export type Database = {
         Insert: {
           booking_id: string
           created_at?: string
+          date_anchor?: string | null
           id?: string
           nights?: number | null
           notes?: string | null
@@ -464,6 +466,7 @@ export type Database = {
         Update: {
           booking_id?: string
           created_at?: string
+          date_anchor?: string | null
           id?: string
           nights?: number | null
           notes?: string | null
@@ -1841,6 +1844,7 @@ export type Database = {
       package_legs: {
         Row: {
           created_at: string
+          date_anchor: string | null
           id: string
           label: string | null
           package_id: string
@@ -1849,6 +1853,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          date_anchor?: string | null
           id?: string
           label?: string | null
           package_id: string
@@ -1857,6 +1862,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          date_anchor?: string | null
           id?: string
           label?: string | null
           package_id?: string
@@ -3013,7 +3019,9 @@ export type Database = {
           default_time_start: string | null
           description: string | null
           email: string | null
+          exclusions: string[]
           id: string
+          inclusions: string[]
           infant_max_age: number | null
           kind: Database["public"]["Enums"]["supplier_kind"]
           location: string | null
@@ -3037,7 +3045,9 @@ export type Database = {
           default_time_start?: string | null
           description?: string | null
           email?: string | null
+          exclusions?: string[]
           id?: string
+          inclusions?: string[]
           infant_max_age?: number | null
           kind: Database["public"]["Enums"]["supplier_kind"]
           location?: string | null
@@ -3061,7 +3071,9 @@ export type Database = {
           default_time_start?: string | null
           description?: string | null
           email?: string | null
+          exclusions?: string[]
           id?: string
+          inclusions?: string[]
           infant_max_age?: number | null
           kind?: Database["public"]["Enums"]["supplier_kind"]
           location?: string | null

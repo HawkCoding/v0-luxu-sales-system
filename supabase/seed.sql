@@ -68,6 +68,25 @@ insert into public.locations (id,name,country,region_code,created_at,updated_at)
 on conflict (id) do update set name=excluded.name,country=excluded.country,
   region_code=excluded.region_code,updated_at=excluded.updated_at;
 
+-- Sub-areas within cities (location_area_id target on suppliers). The location_areas
+-- migration seeds these via a self-referential INSERT...SELECT that only fires when
+-- `locations` already has data — on a fresh reset it runs before this file populates
+-- the table above, so it silently inserts nothing. Seeding them here directly is what
+-- actually makes city sub-areas exist after `db:reset`.
+insert into public.locations (id,name,country,region_code,parent_location_id,created_at,updated_at) values
+  ('00000000-0000-0000-0000-000000001011','CBD','South Africa','ZA-WC','00000000-0000-0000-0000-000000001002','2025-08-10T08:00:00Z','2025-08-10T08:00:00Z'),
+  ('00000000-0000-0000-0000-000000001012','Waterfront','South Africa','ZA-WC','00000000-0000-0000-0000-000000001002','2025-08-10T08:00:00Z','2025-08-10T08:00:00Z'),
+  ('00000000-0000-0000-0000-000000001013','Newlands','South Africa','ZA-WC','00000000-0000-0000-0000-000000001002','2025-08-10T08:00:00Z','2025-08-10T08:00:00Z'),
+  ('00000000-0000-0000-0000-000000001014','Sea Point','South Africa','ZA-WC','00000000-0000-0000-0000-000000001002','2025-08-10T08:00:00Z','2025-08-10T08:00:00Z'),
+  ('00000000-0000-0000-0000-000000001021','CBD','South Africa','ZA-GP','00000000-0000-0000-0000-000000001001','2025-08-10T08:00:00Z','2025-08-10T08:00:00Z'),
+  ('00000000-0000-0000-0000-000000001022','Hatfield','South Africa','ZA-GP','00000000-0000-0000-0000-000000001001','2025-08-10T08:00:00Z','2025-08-10T08:00:00Z'),
+  ('00000000-0000-0000-0000-000000001023','Menlyn','South Africa','ZA-GP','00000000-0000-0000-0000-000000001001','2025-08-10T08:00:00Z','2025-08-10T08:00:00Z'),
+  ('00000000-0000-0000-0000-000000001024','Brooklyn','South Africa','ZA-GP','00000000-0000-0000-0000-000000001001','2025-08-10T08:00:00Z','2025-08-10T08:00:00Z'),
+  ('00000000-0000-0000-0000-000000001031','CBD','South Africa','ZA-KZN','00000000-0000-0000-0000-000000001003','2025-08-10T08:00:00Z','2025-08-10T08:00:00Z'),
+  ('00000000-0000-0000-0000-000000001032','Umhlanga','South Africa','ZA-KZN','00000000-0000-0000-0000-000000001003','2025-08-10T08:00:00Z','2025-08-10T08:00:00Z')
+on conflict (id) do update set name=excluded.name,country=excluded.country,
+  region_code=excluded.region_code,parent_location_id=excluded.parent_location_id,updated_at=excluded.updated_at;
+
 -- ============================================================
 -- SECTION 3: CUSTOMERS (18)
 -- ============================================================
@@ -157,142 +176,186 @@ on conflict (id) do update set
   is_repeat_client=excluded.is_repeat_client,updated_at=excluded.updated_at;
 
 -- ============================================================
--- SECTION 4: SUPPLIERS (10)
+-- SECTION 4: SUPPLIERS (15)
 -- INSERT triggers set status='draft'. UPDATE below activates them.
+-- Trimmed from 19 → 15: dropped Irene Country Lodge, Swakopmund Hotel,
+-- The Capital Pearls and Ivory Manor Boutique Hotel — none were referenced
+-- by any package leg, hotel offer or booking, and none had any suite/route/
+-- rate-card data, so they were empty shells. The remaining suppliers are
+-- fully populated: location detail + sub-area, per-supplier check-in/out
+-- (or departure/arrival) overrides, age-band overrides where realistic,
+-- and inclusions/exclusions bullet lists.
 -- ============================================================
 
 insert into public.suppliers (
   id,name,slug,kind,email,phone,website,
-  location,location_id,description,notes,
-  single_supplement_pct,active,created_at,updated_at
+  location,location_id,location_area_id,location_detail,description,notes,
+  single_supplement_pct,infant_max_age,child_max_age,
+  default_time_start,default_time_end,inclusions,exclusions,
+  active,created_at,updated_at
 ) values
   ('00000000-0000-0000-0000-000000002001','Rovos Rail','rovos-rail','train_operator',
    'sales@rovosrail.com','+27123270000','https://www.rovos.com',
-   'Pretoria','00000000-0000-0000-0000-000000001001',
+   'Pretoria','00000000-0000-0000-0000-000000001001',null,'Rovos Rail Station, Capital Park',
    'The Pride of Africa — the world''s most luxurious train. All-inclusive journeys through Southern and East Africa.',
    'Primary rail supplier. Sales: Marietjie. Lead time: 6–12 months for peak season.',
-   50,true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
+   50,null,null,'16:00','09:00',
+   ARRAY['All meals and select fine wines, spirits and beverages on board','Off-train excursions as per itinerary','Laundry service','Butler service in Deluxe and Royal suites']::text[],
+   ARRAY['Premium and vintage wines from the connoisseur''s list','Spa treatments','Gratuities for train staff and guides','Travel insurance']::text[],
+   true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
   ('00000000-0000-0000-0000-000000002010', 'Blue Train', 'blue-train', 'train_operator',
    'reservations@bluetrain.co.za','+27123340000','https://www.bluetrain.co.za',
-   'Pretoria','00000000-0000-0000-0000-000000001001',
-   'Luxury rail operator for the Pretoria and Cape Town corridor.',
-   'Primary Blue Train luxury rail supplier.',
-   50,true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
-  ('00000000-0000-0000-0000-000000002002','Irene Country Lodge','irene-country-lodge','hotel_property',
-   'reservations@irenecountrylodge.co.za','+27126670000','https://www.autograph-hotels.marriott.com',
-   'Pretoria','00000000-0000-0000-0000-000000001001',
-   'Elegant country estate 20 minutes from Rovos Rail station. Ideal pre-departure overnight.',
-   'Marriott Autograph Collection. Pre-departure packages available.',
-   50,true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
+   'Pretoria','00000000-0000-0000-0000-000000001001',null,'Pretoria Station, Railway Street',
+   'Iconic luxury rail operator running scheduled departures from Pretoria to Cape Town, Durban and Victoria Falls. Butler service, fine dining and full-board included on every suite.',
+   'Secondary rail supplier alongside Rovos Rail. Sales: Nomvula. Lead time: 3–6 months for peak season (Aug–Oct). Group rates available for 6+ suites.',
+   50,1,11,'08:30','17:00',
+   ARRAY['All meals, high tea and selected beverages on board','Butler service','Off-train excursion at Kimberley (Big Hole tour) where applicable','Turn-down service']::text[],
+   ARRAY['Premium champagne and top-shelf spirits','Spa and salon treatments','Gratuities','Airport transfers']::text[],
+   true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
   ('00000000-0000-0000-0000-000000002003','The Victoria Falls Hotel','the-victoria-falls-hotel','hotel_property',
    'bookings@victoriafallshotel.com','+26313447000','https://www.victoriafallshotel.com',
-   'Victoria Falls','00000000-0000-0000-0000-000000001004',
+   'Victoria Falls','00000000-0000-0000-0000-000000001004',null,'Mallet Drive, Victoria Falls',
    'Historic colonial-era hotel with direct views of the Falls. Post-journey extension partner.',
    'Preferred post-journey hotel for Victoria Falls route.',
-   50,true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
-  ('00000000-0000-0000-0000-000000002004','Swakopmund Hotel','swakopmund-hotel','hotel_property',
-   'reservations@swakopmundhotel.com','+26464410000','https://www.legacyhotels.co.za',
-   'Swakopmund','00000000-0000-0000-0000-000000001005',
-   'Legacy Hotels property in the heart of Swakopmund. Post-Namibia Desert Journey stopover.',
-   'Post-journey partner for Namibia route. Good rates for 2-night stays.',
-   50,true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
-  ('00000000-0000-0000-0000-000000002005','The Capital Pearls','the-capital-pearls','hotel_property',
-   'reservations@thecapital.co.za','+27310350000','https://www.thecapital.co.za',
-   'Durban','00000000-0000-0000-0000-000000001003',
-   'Upscale Umhlanga hotel overlooking the Indian Ocean. Pre-departure for Durban route.',
-   'Pre-departure partner for Durban Coastal Escape.',
-   50,true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
-  ('00000000-0000-0000-0000-000000002006','Ivory Manor Boutique Hotel','ivory-manor-boutique-hotel','hotel_property',
-   'reservations@ivorymanor.co.za','+27121110000','https://www.ivorymanor.co.za',
-   'Pretoria','00000000-0000-0000-0000-000000001001',
-   'Boutique 5-star hotel in Pretoria. Intimate pre-departure experience preferred by VIP clients.',
-   'Walking distance to Capital Park station. Highly personal service.',
-   50,true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
+   50,null,null,'14:00','10:00',
+   ARRAY['Full English breakfast daily','Complimentary WiFi','Access to the Livingstone Room lounge and gardens','Historical hotel tour']::text[],
+   ARRAY['Minibar items','Spa treatments','Laundry service','Gratuities']::text[],
+   true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
   ('00000000-0000-0000-0000-000000002007','Zambezi Transfers','zambezi-transfers','transfers',
    'ops@zambezitransfers.com','+263777100200','https://www.zambezitransfers.com',
-   'Victoria Falls','00000000-0000-0000-0000-000000001004',
+   'Victoria Falls','00000000-0000-0000-0000-000000001004',null,'Victoria Falls Airport',
    'Specialist ground transfer operator at Victoria Falls Airport and inter-lodge transfers.',
    'Reliable airport transfer partner. Also arranges sunset cruises.',
-   0,true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
+   0,null,null,null,null,
+   ARRAY['Meet and greet at arrivals','Luggage assistance','Bottled water on board']::text[],
+   ARRAY['Waiting time beyond 60 minutes of flight landing','Tolls and parking fees outside the standard route']::text[],
+   true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
   ('00000000-0000-0000-0000-000000002008','Rovos Rail Transfers','rovos-rail-transfers','transfers',
    'transfers@rovosrail.com','+27123270001','https://www.rovos.com',
-   'Pretoria','00000000-0000-0000-0000-000000001001',
+   'Pretoria','00000000-0000-0000-0000-000000001001',null,'OR Tambo International Airport / Pretoria hotels',
    'Rovos Rail''s luxury ground transfer service from OR Tambo or Pretoria hotels to the station.',
    'Preferred for VIP clients. Includes porter service and luggage handling.',
-   0,true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
+   0,null,null,null,null,
+   ARRAY['Porter and luggage handling','Bottled water on board']::text[],
+   ARRAY['Waiting time beyond 60 minutes','Detours outside the standard route']::text[],
+   true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
   ('00000000-0000-0000-0000-000000002009','Winelands Excursions','winelands-excursions','tour_operator',
    'bookings@winelandsexcursions.co.za','+27218760000','https://www.winelandsexcursions.co.za',
-   'Cape Town','00000000-0000-0000-0000-000000001002',
+   'Cape Town','00000000-0000-0000-0000-000000001002',null,'Stellenbosch, Cape Winelands',
    'Award-winning Cape Winelands day tour operator. Full-day and half-day private tours.',
    'Popular add-on for Cape Town Classic arrivals.',
-   0,true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
+   0,null,15,null,null,
+   ARRAY['Private vehicle and driver-guide','Tastings at two to three estates','Bottled water throughout the day']::text[],
+   ARRAY['Lunch (available at an additional cost)','Wine purchases','Gratuities for the guide']::text[],
+   true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
   ('00000000-0000-0000-0000-000000002011','Sheraton Pretoria Hotel','sheraton-pretoria-hotel','hotel_property',
    'reservations@sheratonpretoria.co.za','+27124298000','https://www.marriott.com/sheraton-pretoria',
    'Pretoria','00000000-0000-0000-0000-000000001001',
+   (select id from public.locations where name='CBD' and parent_location_id=(select id from public.locations where name='Pretoria')),
+   'Church Street, Arcadia',
    'Landmark five-star hotel overlooking the Union Buildings. Spacious rooms and a polished pre-departure base in the capital.',
    'Reliable larger-group option. 20 minutes from Rovos Rail station. Good corporate rates.',
-   50,true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
+   50,null,null,'14:00','11:00',
+   ARRAY['Full breakfast buffet','Complimentary WiFi','Access to gym and outdoor pool']::text[],
+   ARRAY['Minibar and room service charges','Spa treatments','Parking']::text[],
+   true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
   ('00000000-0000-0000-0000-000000002012','Villa Sterne Boutique Hotel','villa-sterne-boutique-hotel','hotel_property',
    'reservations@villasterne.co.za','+27124405281','https://www.villasterne.com',
    'Pretoria','00000000-0000-0000-0000-000000001001',
+   (select id from public.locations where name='Brooklyn' and parent_location_id=(select id from public.locations where name='Pretoria')),
+   'Waterkloof',
    'Intimate art-filled boutique hotel in leafy Waterkloof. Suites, spa, and fine dining for a refined pre-departure overnight.',
    'Boutique scale, high personal service. Preferred by couples and VIP clients.',
-   50,true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
+   50,1,11,'15:00','10:00',
+   ARRAY['Full breakfast','Evening canapés and sherry','Use of the spa pool and gardens']::text[],
+   ARRAY['Spa treatments','Minibar','Gratuities']::text[],
+   true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
   ('00000000-0000-0000-0000-000000002013','Castello di Monte','castello-di-monte','hotel_property',
    'reservations@castellodimonte.co.za','+27123484467','https://www.castellodimonte.co.za',
    'Pretoria','00000000-0000-0000-0000-000000001001',
+   (select id from public.locations where name='Menlyn' and parent_location_id=(select id from public.locations where name='Pretoria')),
+   'Waterkloof Ridge',
    'Tuscan-style luxury boutique hotel in Waterkloof Ridge with panoramic city views. Elegant suites and award-winning hospitality.',
    'Quiet, upscale setting. Good for guests wanting privacy before the journey.',
-   50,true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
+   50,null,null,'15:00','11:00',
+   ARRAY['Full breakfast','Welcome drink on arrival','Complimentary WiFi']::text[],
+   ARRAY['Minibar','Spa treatments','Gratuities']::text[],
+   true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
   ('00000000-0000-0000-0000-000000002014','First Car Rental','first-car-rental','vehicle_rental',
    'reservations@firstcarrental.co.za','+27861173727','https://www.firstcarrental.co.za',
-   'Pretoria','00000000-0000-0000-0000-000000001001',
+   'Pretoria','00000000-0000-0000-0000-000000001001',null,'OR Tambo International Airport, Pretoria branch',
    'National self-drive car rental with a premium fleet. Nationwide branch network and airport collection points.',
    'Self-drive option for guests extending their stay. Premium and SUV classes available.',
-   0,true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
+   0,null,null,'07:00','18:00',
+   ARRAY['Unlimited mileage on standard rentals','Basic insurance cover','24-hour roadside assistance']::text[],
+   ARRAY['Fuel','Additional driver fee','Cross-border permit fees']::text[],
+   true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
   ('00000000-0000-0000-0000-000000002015','Cape Executive Transfers','cape-executive-transfers','transfers',
    'bookings@capeexecutivetransfers.co.za','+27214180000','https://www.capeexecutivetransfers.co.za',
-   'Cape Town','00000000-0000-0000-0000-000000001002',
+   'Cape Town','00000000-0000-0000-0000-000000001002',null,'Cape Town International Airport',
    'Private chauffeured transfers and drop-offs across the Cape. Airport, hotel, and station runs in luxury vehicles.',
    'Preferred ground transfer partner in Cape Town. Meet-and-greet and luggage handling included.',
-   0,true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
+   0,null,null,null,null,
+   ARRAY['Meet and greet at arrivals','Luggage assistance','Bottled water on board']::text[],
+   ARRAY['Waiting time beyond 60 minutes','Tolls and parking fees outside the standard route']::text[],
+   true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
   ('00000000-0000-0000-0000-000000002016','Mount Nelson, A Belmond Hotel','mount-nelson-a-belmond-hotel','hotel_property',
    'reservations.mnh@belmond.com','+27214831000','https://www.belmond.com/mount-nelson',
    'Cape Town','00000000-0000-0000-0000-000000001002',
+   (select id from public.locations where name='CBD' and parent_location_id=(select id from public.locations where name='Cape Town')),
+   'Gardens',
    'Iconic ''Pink Lady'' set in nine acres of gardens beneath Table Mountain. A Cape Town institution since 1899.',
    'Flagship Cape Town stay. Book early for peak season. Famous afternoon tea.',
-   50,true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
+   50,null,null,'14:00','11:00',
+   ARRAY['Full breakfast','Traditional afternoon tea','Access to the gardens and pools']::text[],
+   ARRAY['Minibar','Spa treatments','Gratuities']::text[],
+   true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
   ('00000000-0000-0000-0000-000000002017','The Silo Hotel','the-silo-hotel','hotel_property',
    'reservations@thesilohotel.com','+27246700000','https://www.theroyalportfolio.com/the-silo',
    'Cape Town','00000000-0000-0000-0000-000000001002',
+   (select id from public.locations where name='Waterfront' and parent_location_id=(select id from public.locations where name='Cape Town')),
+   'Silo Square, V&A Waterfront',
    'Dramatic luxury hotel built into a converted grain silo above the Zeitz MOCAA museum at the V&A Waterfront.',
    'High-demand design hotel. Rooftop bar and harbour views. Limited rooms — confirm early.',
-   50,true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
+   50,null,null,'15:00','11:00',
+   ARRAY['Full breakfast','Rooftop pool and bar access','Complimentary WiFi']::text[],
+   ARRAY['Minibar','Spa treatments','Gratuities']::text[],
+   true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
   ('00000000-0000-0000-0000-000000002018','Cape Grace','cape-grace','hotel_property',
    'reservations@capegrace.com','+27214107100','https://www.capegrace.com',
    'Cape Town','00000000-0000-0000-0000-000000001002',
+   (select id from public.locations where name='Waterfront' and parent_location_id=(select id from public.locations where name='Cape Town')),
+   'West Quay Road, V&A Waterfront',
    'Elegant waterfront hotel on a private quay at the V&A Waterfront, with renowned whisky bar and personal service.',
    'Classic luxury waterfront stay. Walking distance to shops and harbour cruises.',
-   50,true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
+   50,null,null,'14:00','11:00',
+   ARRAY['Full breakfast','Whisky bar tasting on arrival','Complimentary WiFi']::text[],
+   ARRAY['Minibar','Spa treatments','Gratuities']::text[],
+   true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z'),
   ('00000000-0000-0000-0000-000000002019','Cape Peninsula Tours','cape-peninsula-tours','tour_operator',
    'reservations@capepeninsulatours.co.za','+27214550000','https://www.capepeninsulatours.co.za',
-   'Cape Town','00000000-0000-0000-0000-000000001002',
+   'Cape Town','00000000-0000-0000-0000-000000001002',null,'Cape Town city centre',
    'Specialist Cape Peninsula day-tour operator. Cape Point, Boulders Beach penguins, Chapman''s Peak Drive, and Table Mountain — shared and private options.',
    'Strong guest reviews for the penguin colony visit. Preferred add-on for Cape Town Classic arrivals alongside Winelands Excursions.',
-   0,true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z')
+   0,null,null,null,null,
+   ARRAY['Private or shared vehicle with driver-guide','Entrance fees for Boulders Beach penguin colony','Bottled water throughout the tour']::text[],
+   ARRAY['Cape Point Nature Reserve entrance fee','Lunch','Gratuities for the guide']::text[],
+   true,'2025-08-10T08:05:00Z','2025-08-10T08:05:00Z')
 on conflict (id) do update set
   name=excluded.name,slug=excluded.slug,kind=excluded.kind,
   email=excluded.email,phone=excluded.phone,website=excluded.website,
   location=excluded.location,location_id=excluded.location_id,
+  location_area_id=excluded.location_area_id,location_detail=excluded.location_detail,
   description=excluded.description,notes=excluded.notes,
   single_supplement_pct=excluded.single_supplement_pct,
+  infant_max_age=excluded.infant_max_age,child_max_age=excluded.child_max_age,
+  default_time_start=excluded.default_time_start,default_time_end=excluded.default_time_end,
+  inclusions=excluded.inclusions,exclusions=excluded.exclusions,
   active=excluded.active,updated_at=excluded.updated_at;
 
 -- Trigger UPDATE to move status from 'draft' → 'active' for active suppliers
 update public.suppliers set active = true where id in (
-  '00000000-0000-0000-0000-000000002001','00000000-0000-0000-0000-000000002002',
-  '00000000-0000-0000-0000-000000002003','00000000-0000-0000-0000-000000002004',
-  '00000000-0000-0000-0000-000000002005','00000000-0000-0000-0000-000000002006',
+  '00000000-0000-0000-0000-000000002001','00000000-0000-0000-0000-000000002003',
   '00000000-0000-0000-0000-000000002007','00000000-0000-0000-0000-000000002008',
   '00000000-0000-0000-0000-000000002009','00000000-0000-0000-0000-000000002010',
   '00000000-0000-0000-0000-000000002011','00000000-0000-0000-0000-000000002012',
@@ -306,13 +369,8 @@ insert into public.supplier_emails (id,supplier_id,email,label,created_at) value
   ('00000000-0000-0000-0000-000000002101','00000000-0000-0000-0000-000000002001','sales@rovosrail.com','Reservations','2025-08-10T08:10:00Z'),
   ('00000000-0000-0000-0000-000000002102','00000000-0000-0000-0000-000000002001','operations@rovosrail.com','Operations','2025-08-10T08:10:00Z'),
   ('00000000-0000-0000-0000-000000002103','00000000-0000-0000-0000-000000002001','accounts@rovosrail.com','Accounts','2025-08-10T08:10:00Z'),
-  ('00000000-0000-0000-0000-000000002104','00000000-0000-0000-0000-000000002002','reservations@irenecountrylodge.co.za','Reservations','2025-08-10T08:10:00Z'),
   ('00000000-0000-0000-0000-000000002105','00000000-0000-0000-0000-000000002003','bookings@victoriafallshotel.com','Reservations','2025-08-10T08:10:00Z'),
   ('00000000-0000-0000-0000-000000002106','00000000-0000-0000-0000-000000002003','accounts@victoriafallshotel.com','Accounts','2025-08-10T08:10:00Z'),
-  ('00000000-0000-0000-0000-000000002107','00000000-0000-0000-0000-000000002004','reservations@swakopmundhotel.com','Reservations','2025-08-10T08:10:00Z'),
-  ('00000000-0000-0000-0000-000000002108','00000000-0000-0000-0000-000000002005','reservations@thecapital.co.za','Reservations','2025-08-10T08:10:00Z'),
-  ('00000000-0000-0000-0000-000000002109','00000000-0000-0000-0000-000000002006','reservations@ivorymanor.co.za','Reservations','2025-08-10T08:10:00Z'),
-  ('00000000-0000-0000-0000-000000002110','00000000-0000-0000-0000-000000002006','concierge@ivorymanor.co.za','General','2025-08-10T08:10:00Z'),
   ('00000000-0000-0000-0000-000000002111','00000000-0000-0000-0000-000000002007','ops@zambezitransfers.com','Operations','2025-08-10T08:10:00Z'),
   ('00000000-0000-0000-0000-000000002112','00000000-0000-0000-0000-000000002008','transfers@rovosrail.com','General','2025-08-10T08:10:00Z'),
   ('00000000-0000-0000-0000-000000002113','00000000-0000-0000-0000-000000002009','bookings@winelandsexcursions.co.za','Reservations','2025-08-10T08:10:00Z'),
@@ -393,27 +451,29 @@ insert into public.suite_type_bathroom_types (suite_type_id,bathroom_type_id) va
   ('00000000-0000-0000-0000-000000005003','00000000-0000-0000-0000-0000000051c3')
 on conflict do nothing;
 
--- Routes: one row per bidirectional pair, priced per direction.
-insert into public.routes (id,supplier_id,name,origin_location_id,destination_location_id,direction_mode,active,created_at,updated_at) values
-  ('00000000-0000-0000-0000-000000004001','00000000-0000-0000-0000-000000002001','Pretoria ↔ Cape Town',     '00000000-0000-0000-0000-000000001001','00000000-0000-0000-0000-000000001002','round_trip',true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
-  ('00000000-0000-0000-0000-000000004003','00000000-0000-0000-0000-000000002001','Pretoria ↔ Durban',         '00000000-0000-0000-0000-000000001001','00000000-0000-0000-0000-000000001003','round_trip',true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
-  ('00000000-0000-0000-0000-000000004005','00000000-0000-0000-0000-000000002001','Pretoria ↔ Victoria Falls', '00000000-0000-0000-0000-000000001001','00000000-0000-0000-0000-000000001004','round_trip',true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
-  ('00000000-0000-0000-0000-000000004007','00000000-0000-0000-0000-000000002001','Pretoria ↔ Swakopmund',     '00000000-0000-0000-0000-000000001001','00000000-0000-0000-0000-000000001005','round_trip',true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
-  ('00000000-0000-0000-0000-000000004009','00000000-0000-0000-0000-000000002001','Cape Town ↔ Dar es Salaam', '00000000-0000-0000-0000-000000001002','00000000-0000-0000-0000-000000001006','round_trip',true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z')
+-- Routes: one row per bidirectional pair, priced per direction. duration_days is the
+-- rail journey length in nights, used to anchor post-stay hotel check-in dates.
+insert into public.routes (id,supplier_id,name,origin_location_id,destination_location_id,direction_mode,duration_days,active,created_at,updated_at) values
+  ('00000000-0000-0000-0000-000000004001','00000000-0000-0000-0000-000000002001','Pretoria ↔ Cape Town',     '00000000-0000-0000-0000-000000001001','00000000-0000-0000-0000-000000001002','round_trip',3,true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
+  ('00000000-0000-0000-0000-000000004003','00000000-0000-0000-0000-000000002001','Pretoria ↔ Durban',         '00000000-0000-0000-0000-000000001001','00000000-0000-0000-0000-000000001003','round_trip',2,true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
+  ('00000000-0000-0000-0000-000000004005','00000000-0000-0000-0000-000000002001','Pretoria ↔ Victoria Falls', '00000000-0000-0000-0000-000000001001','00000000-0000-0000-0000-000000001004','round_trip',3,true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
+  ('00000000-0000-0000-0000-000000004007','00000000-0000-0000-0000-000000002001','Pretoria ↔ Swakopmund',     '00000000-0000-0000-0000-000000001001','00000000-0000-0000-0000-000000001005','round_trip',3,true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
+  ('00000000-0000-0000-0000-000000004009','00000000-0000-0000-0000-000000002001','Cape Town ↔ Dar es Salaam', '00000000-0000-0000-0000-000000001002','00000000-0000-0000-0000-000000001006','round_trip',13,true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z')
 on conflict (id) do nothing;
 
 -- Rate cards: one per (route, suite, rate_type). All seeded under the default RAC type.
-insert into public.rate_cards (id,route_id,suite_type_id,rate_type_id,price_per_person,currency,valid_from,valid_to,created_at) values
-  ('00000000-0000-0000-0000-000000007201','00000000-0000-0000-0000-000000004001','00000000-0000-0000-0000-000000005001',(select id from public.rate_types where code='RAC'),24900,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007202','00000000-0000-0000-0000-000000004001','00000000-0000-0000-0000-000000005002',(select id from public.rate_types where code='RAC'),38500,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007203','00000000-0000-0000-0000-000000004001','00000000-0000-0000-0000-000000005003',(select id from public.rate_types where code='RAC'),62000,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007204','00000000-0000-0000-0000-000000004003','00000000-0000-0000-0000-000000005001',(select id from public.rate_types where code='RAC'),18500,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007205','00000000-0000-0000-0000-000000004005','00000000-0000-0000-0000-000000005002',(select id from public.rate_types where code='RAC'),48500,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007206','00000000-0000-0000-0000-000000004005','00000000-0000-0000-0000-000000005003',(select id from public.rate_types where code='RAC'),72000,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007207','00000000-0000-0000-0000-000000004007','00000000-0000-0000-0000-000000005002',(select id from public.rate_types where code='RAC'),55000,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007208','00000000-0000-0000-0000-000000004007','00000000-0000-0000-0000-000000005003',(select id from public.rate_types where code='RAC'),78000,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007209','00000000-0000-0000-0000-000000004009','00000000-0000-0000-0000-000000005002',(select id from public.rate_types where code='RAC'),64000,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007210','00000000-0000-0000-0000-000000004009','00000000-0000-0000-0000-000000005003',(select id from public.rate_types where code='RAC'),82500,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z')
+-- child_price ≈ 50% of adult (matches the app's auto-fill default ratio), infant_price ≈ 15%.
+insert into public.rate_cards (id,route_id,suite_type_id,rate_type_id,price_per_person,child_price,infant_price,currency,valid_from,valid_to,created_at) values
+  ('00000000-0000-0000-0000-000000007201','00000000-0000-0000-0000-000000004001','00000000-0000-0000-0000-000000005001',(select id from public.rate_types where code='RAC'),24900,12450,3750,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007202','00000000-0000-0000-0000-000000004001','00000000-0000-0000-0000-000000005002',(select id from public.rate_types where code='RAC'),38500,19250,5750,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007203','00000000-0000-0000-0000-000000004001','00000000-0000-0000-0000-000000005003',(select id from public.rate_types where code='RAC'),62000,31000,9300,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007204','00000000-0000-0000-0000-000000004003','00000000-0000-0000-0000-000000005001',(select id from public.rate_types where code='RAC'),18500,9250,2750,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007205','00000000-0000-0000-0000-000000004005','00000000-0000-0000-0000-000000005002',(select id from public.rate_types where code='RAC'),48500,24250,7250,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007206','00000000-0000-0000-0000-000000004005','00000000-0000-0000-0000-000000005003',(select id from public.rate_types where code='RAC'),72000,36000,10800,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007207','00000000-0000-0000-0000-000000004007','00000000-0000-0000-0000-000000005002',(select id from public.rate_types where code='RAC'),55000,27500,8250,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007208','00000000-0000-0000-0000-000000004007','00000000-0000-0000-0000-000000005003',(select id from public.rate_types where code='RAC'),78000,39000,11700,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007209','00000000-0000-0000-0000-000000004009','00000000-0000-0000-0000-000000005002',(select id from public.rate_types where code='RAC'),64000,32000,9600,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007210','00000000-0000-0000-0000-000000004009','00000000-0000-0000-0000-000000005003',(select id from public.rate_types where code='RAC'),82500,41250,12400,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z')
 on conflict (id) do nothing;
 
 insert into public.supplier_pricing_options (id,supplier_id,name,single_price,double_price,family_price,currency,is_primary,created_at,updated_at) values
@@ -445,7 +505,8 @@ on conflict (id) do nothing;
 -- Blue Train contact emails (previously had none)
 insert into public.supplier_emails (id,supplier_id,email,label,created_at) values
   ('00000000-0000-0000-0000-000000002124','00000000-0000-0000-0000-000000002010','reservations@bluetrain.co.za','Reservations','2025-08-10T08:10:00Z'),
-  ('00000000-0000-0000-0000-000000002125','00000000-0000-0000-0000-000000002010','accounts@bluetrain.co.za','Accounts','2025-08-10T08:10:00Z')
+  ('00000000-0000-0000-0000-000000002125','00000000-0000-0000-0000-000000002010','accounts@bluetrain.co.za','Accounts','2025-08-10T08:10:00Z'),
+  ('00000000-0000-0000-0000-000000002130','00000000-0000-0000-0000-000000002010','groups@bluetrain.co.za','Operations','2025-08-10T08:10:00Z')
 on conflict (id) do nothing;
 
 -- Suite / room / vehicle types for the newly-priced suppliers
@@ -453,6 +514,7 @@ insert into public.suite_types (id,supplier_id,name,passenger_capacity,luggage_c
   -- Blue Train (train suites)
   ('00000000-0000-0000-0000-000000005201','00000000-0000-0000-0000-000000002010','Deluxe Suite',2,2,'En-suite cabin with lounge seating, twin or double.',0,true,'2025-08-10T08:12:00Z','2025-08-10T08:12:00Z'),
   ('00000000-0000-0000-0000-000000005202','00000000-0000-0000-0000-000000002010','Luxury Suite',2,2,'Larger suite with full bath and private lounge.',1,true,'2025-08-10T08:12:00Z','2025-08-10T08:12:00Z'),
+  ('00000000-0000-0000-0000-000000005203','00000000-0000-0000-0000-000000002010','Presidential Suite',2,3,'Top-tier suite spanning the full width of the carriage, with lounge, study nook and butler call button.',2,true,'2025-08-10T08:12:00Z','2025-08-10T08:12:00Z'),
   -- Sheraton Pretoria (rooms)
   ('00000000-0000-0000-0000-000000005211','00000000-0000-0000-0000-000000002011','Classic Room',2,2,'Elegant room with city or garden outlook.',0,true,'2025-08-10T08:12:00Z','2025-08-10T08:12:00Z'),
   ('00000000-0000-0000-0000-000000005212','00000000-0000-0000-0000-000000002011','Executive Room',2,2,'Upgraded room with lounge access.',1,true,'2025-08-10T08:12:00Z','2025-08-10T08:12:00Z'),
@@ -488,18 +550,166 @@ insert into public.suite_types (id,supplier_id,name,passenger_capacity,luggage_c
   -- Zambezi Transfers (vehicle classes)
   ('00000000-0000-0000-0000-000000005291','00000000-0000-0000-0000-000000002007','Sedan',3,3,'Airport transfer sedan, up to 3 guests.',0,true,'2025-08-10T08:12:00Z','2025-08-10T08:12:00Z'),
   -- Rovos Rail Transfers (vehicle classes)
-  ('00000000-0000-0000-0000-000000005294','00000000-0000-0000-0000-000000002008','Luxury Sedan',3,3,'Chauffeured sedan with porter service, up to 3 guests.',0,true,'2025-08-10T08:12:00Z','2025-08-10T08:12:00Z')
+  ('00000000-0000-0000-0000-000000005294','00000000-0000-0000-0000-000000002008','Luxury Sedan',3,3,'Chauffeured sedan with porter service, up to 3 guests.',0,true,'2025-08-10T08:12:00Z','2025-08-10T08:12:00Z'),
+  -- The Victoria Falls Hotel (rooms) — historic property, previously had no priced room types
+  ('00000000-0000-0000-0000-000000005321','00000000-0000-0000-0000-000000002003','Stable Courtyard Room',2,2,'Cosy room in the converted historic stables, overlooking the courtyard.',0,true,'2025-08-10T08:12:00Z','2025-08-10T08:12:00Z'),
+  ('00000000-0000-0000-0000-000000005322','00000000-0000-0000-0000-000000002003','Stately Room',2,2,'Spacious room in the main hotel wing with garden or partial Falls views.',1,true,'2025-08-10T08:12:00Z','2025-08-10T08:12:00Z'),
+  ('00000000-0000-0000-0000-000000005323','00000000-0000-0000-0000-000000002003','Falls View Suite',2,3,'Signature suite with a private balcony facing the spray of the Falls.',2,true,'2025-08-10T08:12:00Z','2025-08-10T08:12:00Z')
 on conflict (id) do nothing;
 
+-- Bedroom / Bed Configuration / Bathroom vocabulary for the hotel_property suppliers.
+-- Previously only the two train_operator suppliers had this — every hotel's suite
+-- types had nothing to pick from in the package leg editor's variant chip pickers.
+insert into public.bedroom_types (id,supplier_id,name,sort_order) values
+  ('00000000-0000-0000-0000-000000005311','00000000-0000-0000-0000-000000002011','Twin',0),
+  ('00000000-0000-0000-0000-000000005312','00000000-0000-0000-0000-000000002011','King',1),
+  ('00000000-0000-0000-0000-000000005411','00000000-0000-0000-0000-000000002012','Twin',0),
+  ('00000000-0000-0000-0000-000000005412','00000000-0000-0000-0000-000000002012','King',1),
+  ('00000000-0000-0000-0000-000000005511','00000000-0000-0000-0000-000000002013','Twin',0),
+  ('00000000-0000-0000-0000-000000005512','00000000-0000-0000-0000-000000002013','King',1),
+  ('00000000-0000-0000-0000-000000005611','00000000-0000-0000-0000-000000002016','Twin',0),
+  ('00000000-0000-0000-0000-000000005612','00000000-0000-0000-0000-000000002016','King',1),
+  ('00000000-0000-0000-0000-000000005711','00000000-0000-0000-0000-000000002017','Twin',0),
+  ('00000000-0000-0000-0000-000000005712','00000000-0000-0000-0000-000000002017','King',1),
+  ('00000000-0000-0000-0000-000000005811','00000000-0000-0000-0000-000000002018','Twin',0),
+  ('00000000-0000-0000-0000-000000005812','00000000-0000-0000-0000-000000002018','King',1),
+  ('00000000-0000-0000-0000-000000005911','00000000-0000-0000-0000-000000002003','Twin',0),
+  ('00000000-0000-0000-0000-000000005912','00000000-0000-0000-0000-000000002003','King',1)
+on conflict (id) do nothing;
+
+insert into public.bedroom_layouts (id,supplier_id,name,sort_order) values
+  ('00000000-0000-0000-0000-000000005321','00000000-0000-0000-0000-000000002011','2 Twin Beds',0),
+  ('00000000-0000-0000-0000-000000005322','00000000-0000-0000-0000-000000002011','1 King Bed',1),
+  ('00000000-0000-0000-0000-000000005323','00000000-0000-0000-0000-000000002011','King + Sofa Bed',2),
+  ('00000000-0000-0000-0000-000000005421','00000000-0000-0000-0000-000000002012','2 Twin Beds',0),
+  ('00000000-0000-0000-0000-000000005422','00000000-0000-0000-0000-000000002012','1 King Bed',1),
+  ('00000000-0000-0000-0000-000000005423','00000000-0000-0000-0000-000000002012','King + Sofa Bed',2),
+  ('00000000-0000-0000-0000-000000005521','00000000-0000-0000-0000-000000002013','2 Twin Beds',0),
+  ('00000000-0000-0000-0000-000000005522','00000000-0000-0000-0000-000000002013','1 King Bed',1),
+  ('00000000-0000-0000-0000-000000005523','00000000-0000-0000-0000-000000002013','King + Sofa Bed',2),
+  ('00000000-0000-0000-0000-000000005621','00000000-0000-0000-0000-000000002016','2 Twin Beds',0),
+  ('00000000-0000-0000-0000-000000005622','00000000-0000-0000-0000-000000002016','1 King Bed',1),
+  ('00000000-0000-0000-0000-000000005623','00000000-0000-0000-0000-000000002016','King + Sofa Bed',2),
+  ('00000000-0000-0000-0000-000000005721','00000000-0000-0000-0000-000000002017','2 Twin Beds',0),
+  ('00000000-0000-0000-0000-000000005722','00000000-0000-0000-0000-000000002017','1 King Bed',1),
+  ('00000000-0000-0000-0000-000000005723','00000000-0000-0000-0000-000000002017','King + Sofa Bed',2),
+  ('00000000-0000-0000-0000-000000005821','00000000-0000-0000-0000-000000002018','2 Twin Beds',0),
+  ('00000000-0000-0000-0000-000000005822','00000000-0000-0000-0000-000000002018','1 King Bed',1),
+  ('00000000-0000-0000-0000-000000005823','00000000-0000-0000-0000-000000002018','King + Sofa Bed',2),
+  ('00000000-0000-0000-0000-000000005921','00000000-0000-0000-0000-000000002003','2 Twin Beds',0),
+  ('00000000-0000-0000-0000-000000005922','00000000-0000-0000-0000-000000002003','1 King Bed',1),
+  ('00000000-0000-0000-0000-000000005923','00000000-0000-0000-0000-000000002003','King + Sofa Bed',2)
+on conflict (id) do nothing;
+
+insert into public.bathroom_types (id,supplier_id,name,sort_order) values
+  ('00000000-0000-0000-0000-000000005331','00000000-0000-0000-0000-000000002011','En-suite Shower',0),
+  ('00000000-0000-0000-0000-000000005332','00000000-0000-0000-0000-000000002011','En-suite Bath',1),
+  ('00000000-0000-0000-0000-000000005333','00000000-0000-0000-0000-000000002011','Shower & Bath',2),
+  ('00000000-0000-0000-0000-000000005431','00000000-0000-0000-0000-000000002012','En-suite Shower',0),
+  ('00000000-0000-0000-0000-000000005432','00000000-0000-0000-0000-000000002012','En-suite Bath',1),
+  ('00000000-0000-0000-0000-000000005433','00000000-0000-0000-0000-000000002012','Shower & Bath',2),
+  ('00000000-0000-0000-0000-000000005531','00000000-0000-0000-0000-000000002013','En-suite Shower',0),
+  ('00000000-0000-0000-0000-000000005532','00000000-0000-0000-0000-000000002013','En-suite Bath',1),
+  ('00000000-0000-0000-0000-000000005533','00000000-0000-0000-0000-000000002013','Shower & Bath',2),
+  ('00000000-0000-0000-0000-000000005631','00000000-0000-0000-0000-000000002016','En-suite Shower',0),
+  ('00000000-0000-0000-0000-000000005632','00000000-0000-0000-0000-000000002016','En-suite Bath',1),
+  ('00000000-0000-0000-0000-000000005633','00000000-0000-0000-0000-000000002016','Shower & Bath',2),
+  ('00000000-0000-0000-0000-000000005731','00000000-0000-0000-0000-000000002017','En-suite Shower',0),
+  ('00000000-0000-0000-0000-000000005732','00000000-0000-0000-0000-000000002017','En-suite Bath',1),
+  ('00000000-0000-0000-0000-000000005733','00000000-0000-0000-0000-000000002017','Shower & Bath',2),
+  ('00000000-0000-0000-0000-000000005831','00000000-0000-0000-0000-000000002018','En-suite Shower',0),
+  ('00000000-0000-0000-0000-000000005832','00000000-0000-0000-0000-000000002018','En-suite Bath',1),
+  ('00000000-0000-0000-0000-000000005833','00000000-0000-0000-0000-000000002018','Shower & Bath',2),
+  ('00000000-0000-0000-0000-000000005931','00000000-0000-0000-0000-000000002003','En-suite Shower',0),
+  ('00000000-0000-0000-0000-000000005932','00000000-0000-0000-0000-000000002003','En-suite Bath',1),
+  ('00000000-0000-0000-0000-000000005933','00000000-0000-0000-0000-000000002003','Shower & Bath',2)
+on conflict (id) do nothing;
+
+-- Suite ↔ vocabulary joins: entry room = Twin/Double bed + shower only;
+-- mid suite = King bed + shower or bath; top suite = King + sofa bed + both.
+insert into public.suite_type_bedroom_types (suite_type_id,bedroom_type_id) values
+  ('00000000-0000-0000-0000-000000005211','00000000-0000-0000-0000-000000005311'),('00000000-0000-0000-0000-000000005212','00000000-0000-0000-0000-000000005312'),('00000000-0000-0000-0000-000000005213','00000000-0000-0000-0000-000000005312'),
+  ('00000000-0000-0000-0000-000000005221','00000000-0000-0000-0000-000000005411'),('00000000-0000-0000-0000-000000005222','00000000-0000-0000-0000-000000005412'),('00000000-0000-0000-0000-000000005223','00000000-0000-0000-0000-000000005412'),
+  ('00000000-0000-0000-0000-000000005231','00000000-0000-0000-0000-000000005511'),('00000000-0000-0000-0000-000000005232','00000000-0000-0000-0000-000000005512'),('00000000-0000-0000-0000-000000005233','00000000-0000-0000-0000-000000005512'),
+  ('00000000-0000-0000-0000-000000005241','00000000-0000-0000-0000-000000005611'),('00000000-0000-0000-0000-000000005242','00000000-0000-0000-0000-000000005612'),('00000000-0000-0000-0000-000000005243','00000000-0000-0000-0000-000000005612'),
+  ('00000000-0000-0000-0000-000000005251','00000000-0000-0000-0000-000000005711'),('00000000-0000-0000-0000-000000005252','00000000-0000-0000-0000-000000005712'),('00000000-0000-0000-0000-000000005253','00000000-0000-0000-0000-000000005712'),
+  ('00000000-0000-0000-0000-000000005261','00000000-0000-0000-0000-000000005811'),('00000000-0000-0000-0000-000000005262','00000000-0000-0000-0000-000000005812'),('00000000-0000-0000-0000-000000005263','00000000-0000-0000-0000-000000005812'),
+  ('00000000-0000-0000-0000-000000005321','00000000-0000-0000-0000-000000005911'),('00000000-0000-0000-0000-000000005322','00000000-0000-0000-0000-000000005912'),('00000000-0000-0000-0000-000000005323','00000000-0000-0000-0000-000000005912')
+on conflict do nothing;
+
+insert into public.suite_type_bedroom_layouts (suite_type_id,bedroom_layout_id) values
+  ('00000000-0000-0000-0000-000000005211','00000000-0000-0000-0000-000000005321'),('00000000-0000-0000-0000-000000005212','00000000-0000-0000-0000-000000005322'),('00000000-0000-0000-0000-000000005213','00000000-0000-0000-0000-000000005323'),
+  ('00000000-0000-0000-0000-000000005221','00000000-0000-0000-0000-000000005421'),('00000000-0000-0000-0000-000000005222','00000000-0000-0000-0000-000000005422'),('00000000-0000-0000-0000-000000005223','00000000-0000-0000-0000-000000005423'),
+  ('00000000-0000-0000-0000-000000005231','00000000-0000-0000-0000-000000005521'),('00000000-0000-0000-0000-000000005232','00000000-0000-0000-0000-000000005522'),('00000000-0000-0000-0000-000000005233','00000000-0000-0000-0000-000000005523'),
+  ('00000000-0000-0000-0000-000000005241','00000000-0000-0000-0000-000000005621'),('00000000-0000-0000-0000-000000005242','00000000-0000-0000-0000-000000005622'),('00000000-0000-0000-0000-000000005243','00000000-0000-0000-0000-000000005623'),
+  ('00000000-0000-0000-0000-000000005251','00000000-0000-0000-0000-000000005721'),('00000000-0000-0000-0000-000000005252','00000000-0000-0000-0000-000000005722'),('00000000-0000-0000-0000-000000005253','00000000-0000-0000-0000-000000005723'),
+  ('00000000-0000-0000-0000-000000005261','00000000-0000-0000-0000-000000005821'),('00000000-0000-0000-0000-000000005262','00000000-0000-0000-0000-000000005822'),('00000000-0000-0000-0000-000000005263','00000000-0000-0000-0000-000000005823'),
+  ('00000000-0000-0000-0000-000000005321','00000000-0000-0000-0000-000000005921'),('00000000-0000-0000-0000-000000005322','00000000-0000-0000-0000-000000005922'),('00000000-0000-0000-0000-000000005323','00000000-0000-0000-0000-000000005923')
+on conflict do nothing;
+
+insert into public.suite_type_bathroom_types (suite_type_id,bathroom_type_id) values
+  ('00000000-0000-0000-0000-000000005211','00000000-0000-0000-0000-000000005331'),('00000000-0000-0000-0000-000000005212','00000000-0000-0000-0000-000000005332'),('00000000-0000-0000-0000-000000005213','00000000-0000-0000-0000-000000005333'),
+  ('00000000-0000-0000-0000-000000005221','00000000-0000-0000-0000-000000005431'),('00000000-0000-0000-0000-000000005222','00000000-0000-0000-0000-000000005432'),('00000000-0000-0000-0000-000000005223','00000000-0000-0000-0000-000000005433'),
+  ('00000000-0000-0000-0000-000000005231','00000000-0000-0000-0000-000000005531'),('00000000-0000-0000-0000-000000005232','00000000-0000-0000-0000-000000005532'),('00000000-0000-0000-0000-000000005233','00000000-0000-0000-0000-000000005533'),
+  ('00000000-0000-0000-0000-000000005241','00000000-0000-0000-0000-000000005631'),('00000000-0000-0000-0000-000000005242','00000000-0000-0000-0000-000000005632'),('00000000-0000-0000-0000-000000005243','00000000-0000-0000-0000-000000005633'),
+  ('00000000-0000-0000-0000-000000005251','00000000-0000-0000-0000-000000005731'),('00000000-0000-0000-0000-000000005252','00000000-0000-0000-0000-000000005732'),('00000000-0000-0000-0000-000000005253','00000000-0000-0000-0000-000000005733'),
+  ('00000000-0000-0000-0000-000000005261','00000000-0000-0000-0000-000000005831'),('00000000-0000-0000-0000-000000005262','00000000-0000-0000-0000-000000005832'),('00000000-0000-0000-0000-000000005263','00000000-0000-0000-0000-000000005833'),
+  ('00000000-0000-0000-0000-000000005321','00000000-0000-0000-0000-000000005931'),('00000000-0000-0000-0000-000000005322','00000000-0000-0000-0000-000000005932'),('00000000-0000-0000-0000-000000005323','00000000-0000-0000-0000-000000005933')
+on conflict do nothing;
+
+-- Blue Train variant vocabulary (bedroom/layout/bathroom options for its suites)
+insert into public.bedroom_types (id,supplier_id,name,sort_order) values
+  ('00000000-0000-0000-0000-0000000052a1','00000000-0000-0000-0000-000000002010','Twin',0),
+  ('00000000-0000-0000-0000-0000000052a2','00000000-0000-0000-0000-000000002010','Double',1)
+on conflict (id) do nothing;
+
+insert into public.bedroom_layouts (id,supplier_id,name,sort_order) values
+  ('00000000-0000-0000-0000-0000000052b1','00000000-0000-0000-0000-000000002010','Lengthwise',0),
+  ('00000000-0000-0000-0000-0000000052b2','00000000-0000-0000-0000-000000002010','Crosswise',1)
+on conflict (id) do nothing;
+
+insert into public.bathroom_types (id,supplier_id,name,sort_order) values
+  ('00000000-0000-0000-0000-0000000052c1','00000000-0000-0000-0000-000000002010','Shower',0),
+  ('00000000-0000-0000-0000-0000000052c2','00000000-0000-0000-0000-000000002010','Bath',1),
+  ('00000000-0000-0000-0000-0000000052c3','00000000-0000-0000-0000-000000002010','Both',2)
+on conflict (id) do nothing;
+
+-- Suite ↔ vocabulary joins for Blue Train
+insert into public.suite_type_bedroom_types (suite_type_id,bedroom_type_id) values
+  ('00000000-0000-0000-0000-000000005201','00000000-0000-0000-0000-0000000052a1'),
+  ('00000000-0000-0000-0000-000000005201','00000000-0000-0000-0000-0000000052a2'),
+  ('00000000-0000-0000-0000-000000005202','00000000-0000-0000-0000-0000000052a1'),
+  ('00000000-0000-0000-0000-000000005202','00000000-0000-0000-0000-0000000052a2'),
+  ('00000000-0000-0000-0000-000000005203','00000000-0000-0000-0000-0000000052a2')
+on conflict do nothing;
+
+insert into public.suite_type_bedroom_layouts (suite_type_id,bedroom_layout_id) values
+  ('00000000-0000-0000-0000-000000005201','00000000-0000-0000-0000-0000000052b1'),
+  ('00000000-0000-0000-0000-000000005202','00000000-0000-0000-0000-0000000052b1'),
+  ('00000000-0000-0000-0000-000000005202','00000000-0000-0000-0000-0000000052b2'),
+  ('00000000-0000-0000-0000-000000005203','00000000-0000-0000-0000-0000000052b1'),
+  ('00000000-0000-0000-0000-000000005203','00000000-0000-0000-0000-0000000052b2')
+on conflict do nothing;
+
+insert into public.suite_type_bathroom_types (suite_type_id,bathroom_type_id) values
+  ('00000000-0000-0000-0000-000000005201','00000000-0000-0000-0000-0000000052c1'),
+  ('00000000-0000-0000-0000-000000005202','00000000-0000-0000-0000-0000000052c1'),
+  ('00000000-0000-0000-0000-000000005202','00000000-0000-0000-0000-0000000052c2'),
+  ('00000000-0000-0000-0000-000000005203','00000000-0000-0000-0000-0000000052c3')
+on conflict do nothing;
+
 -- Hotel meal-plan routes + Blue Train journey route
-insert into public.routes (id,supplier_id,name,origin_location_id,destination_location_id,direction_mode,active,created_at,updated_at) values
-  ('00000000-0000-0000-0000-000000004201','00000000-0000-0000-0000-000000002010','Pretoria ↔ Cape Town','00000000-0000-0000-0000-000000001001','00000000-0000-0000-0000-000000001002','round_trip',true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
-  ('00000000-0000-0000-0000-000000004211','00000000-0000-0000-0000-000000002011','Bed & Breakfast','00000000-0000-0000-0000-000000001001','00000000-0000-0000-0000-000000001001','one_way',true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
-  ('00000000-0000-0000-0000-000000004221','00000000-0000-0000-0000-000000002012','Bed & Breakfast','00000000-0000-0000-0000-000000001001','00000000-0000-0000-0000-000000001001','one_way',true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
-  ('00000000-0000-0000-0000-000000004231','00000000-0000-0000-0000-000000002013','Bed & Breakfast','00000000-0000-0000-0000-000000001001','00000000-0000-0000-0000-000000001001','one_way',true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
-  ('00000000-0000-0000-0000-000000004241','00000000-0000-0000-0000-000000002016','Bed & Breakfast','00000000-0000-0000-0000-000000001002','00000000-0000-0000-0000-000000001002','one_way',true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
-  ('00000000-0000-0000-0000-000000004251','00000000-0000-0000-0000-000000002017','Bed & Breakfast','00000000-0000-0000-0000-000000001002','00000000-0000-0000-0000-000000001002','one_way',true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
-  ('00000000-0000-0000-0000-000000004261','00000000-0000-0000-0000-000000002018','Bed & Breakfast','00000000-0000-0000-0000-000000001002','00000000-0000-0000-0000-000000001002','one_way',true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z')
+insert into public.routes (id,supplier_id,name,origin_location_id,destination_location_id,direction_mode,duration_days,active,created_at,updated_at) values
+  ('00000000-0000-0000-0000-000000004201','00000000-0000-0000-0000-000000002010','Pretoria ↔ Cape Town','00000000-0000-0000-0000-000000001001','00000000-0000-0000-0000-000000001002','round_trip',1,true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
+  ('00000000-0000-0000-0000-000000004401','00000000-0000-0000-0000-000000002010','Pretoria ↔ Durban','00000000-0000-0000-0000-000000001001','00000000-0000-0000-0000-000000001003','round_trip',1,true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
+  ('00000000-0000-0000-0000-000000004402','00000000-0000-0000-0000-000000002010','Pretoria ↔ Victoria Falls','00000000-0000-0000-0000-000000001001','00000000-0000-0000-0000-000000001004','round_trip',2,true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
+  ('00000000-0000-0000-0000-000000004211','00000000-0000-0000-0000-000000002011','Bed & Breakfast','00000000-0000-0000-0000-000000001001','00000000-0000-0000-0000-000000001001','one_way',null,true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
+  ('00000000-0000-0000-0000-000000004221','00000000-0000-0000-0000-000000002012','Bed & Breakfast','00000000-0000-0000-0000-000000001001','00000000-0000-0000-0000-000000001001','one_way',null,true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
+  ('00000000-0000-0000-0000-000000004231','00000000-0000-0000-0000-000000002013','Bed & Breakfast','00000000-0000-0000-0000-000000001001','00000000-0000-0000-0000-000000001001','one_way',null,true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
+  ('00000000-0000-0000-0000-000000004241','00000000-0000-0000-0000-000000002016','Bed & Breakfast','00000000-0000-0000-0000-000000001002','00000000-0000-0000-0000-000000001002','one_way',null,true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
+  ('00000000-0000-0000-0000-000000004251','00000000-0000-0000-0000-000000002017','Bed & Breakfast','00000000-0000-0000-0000-000000001002','00000000-0000-0000-0000-000000001002','one_way',null,true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
+  ('00000000-0000-0000-0000-000000004261','00000000-0000-0000-0000-000000002018','Bed & Breakfast','00000000-0000-0000-0000-000000001002','00000000-0000-0000-0000-000000001002','one_way',null,true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z'),
+  ('00000000-0000-0000-0000-000000004321','00000000-0000-0000-0000-000000002003','Bed & Breakfast','00000000-0000-0000-0000-000000001004','00000000-0000-0000-0000-000000001004','one_way',null,true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z')
 on conflict (id) do nothing;
 
 -- Transport routes (transfer / rental) with service metadata
@@ -516,46 +726,59 @@ insert into public.vehicle_rental_route_details (route_id,included_km_per_day,ex
 on conflict (route_id) do nothing;
 
 -- Rate cards (one per route × type, under the default RAC rate type)
-insert into public.rate_cards (id,route_id,suite_type_id,rate_type_id,price_per_person,currency,valid_from,valid_to,created_at) values
+-- child_price ≈ 50% of adult, infant_price ≈ 15%, matching the app's auto-fill default ratio.
+insert into public.rate_cards (id,route_id,suite_type_id,rate_type_id,price_per_person,child_price,infant_price,currency,valid_from,valid_to,created_at) values
   -- Blue Train (per person, per journey)
-  ('00000000-0000-0000-0000-000000007401','00000000-0000-0000-0000-000000004201','00000000-0000-0000-0000-000000005201',(select id from public.rate_types where code='RAC'),29950,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007402','00000000-0000-0000-0000-000000004201','00000000-0000-0000-0000-000000005202',(select id from public.rate_types where code='RAC'),44500,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007401','00000000-0000-0000-0000-000000004201','00000000-0000-0000-0000-000000005201',(select id from public.rate_types where code='RAC'),29950,15000,4500,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007402','00000000-0000-0000-0000-000000004201','00000000-0000-0000-0000-000000005202',(select id from public.rate_types where code='RAC'),44500,22250,6700,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007403','00000000-0000-0000-0000-000000004201','00000000-0000-0000-0000-000000005203',(select id from public.rate_types where code='RAC'),68500,34250,10300,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007601','00000000-0000-0000-0000-000000004401','00000000-0000-0000-0000-000000005201',(select id from public.rate_types where code='RAC'),19950,10000,3000,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007602','00000000-0000-0000-0000-000000004401','00000000-0000-0000-0000-000000005202',(select id from public.rate_types where code='RAC'),31500,15750,4700,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007603','00000000-0000-0000-0000-000000004401','00000000-0000-0000-0000-000000005203',(select id from public.rate_types where code='RAC'),49500,24750,7400,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007604','00000000-0000-0000-0000-000000004402','00000000-0000-0000-0000-000000005201',(select id from public.rate_types where code='RAC'),52500,26250,7900,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007605','00000000-0000-0000-0000-000000004402','00000000-0000-0000-0000-000000005202',(select id from public.rate_types where code='RAC'),79500,39750,11900,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007606','00000000-0000-0000-0000-000000004402','00000000-0000-0000-0000-000000005203',(select id from public.rate_types where code='RAC'),115000,57500,17250,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
   -- Sheraton Pretoria (per room, per night)
-  ('00000000-0000-0000-0000-000000007411','00000000-0000-0000-0000-000000004211','00000000-0000-0000-0000-000000005211',(select id from public.rate_types where code='RAC'),3200,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007412','00000000-0000-0000-0000-000000004211','00000000-0000-0000-0000-000000005212',(select id from public.rate_types where code='RAC'),4500,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007413','00000000-0000-0000-0000-000000004211','00000000-0000-0000-0000-000000005213',(select id from public.rate_types where code='RAC'),6800,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007411','00000000-0000-0000-0000-000000004211','00000000-0000-0000-0000-000000005211',(select id from public.rate_types where code='RAC'),3200,1600,500,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007412','00000000-0000-0000-0000-000000004211','00000000-0000-0000-0000-000000005212',(select id from public.rate_types where code='RAC'),4500,2250,700,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007413','00000000-0000-0000-0000-000000004211','00000000-0000-0000-0000-000000005213',(select id from public.rate_types where code='RAC'),6800,3400,1000,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
   -- Villa Sterne
-  ('00000000-0000-0000-0000-000000007421','00000000-0000-0000-0000-000000004221','00000000-0000-0000-0000-000000005221',(select id from public.rate_types where code='RAC'),3800,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007422','00000000-0000-0000-0000-000000004221','00000000-0000-0000-0000-000000005222',(select id from public.rate_types where code='RAC'),5200,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007423','00000000-0000-0000-0000-000000004221','00000000-0000-0000-0000-000000005223',(select id from public.rate_types where code='RAC'),8500,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007421','00000000-0000-0000-0000-000000004221','00000000-0000-0000-0000-000000005221',(select id from public.rate_types where code='RAC'),3800,1900,600,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007422','00000000-0000-0000-0000-000000004221','00000000-0000-0000-0000-000000005222',(select id from public.rate_types where code='RAC'),5200,2600,800,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007423','00000000-0000-0000-0000-000000004221','00000000-0000-0000-0000-000000005223',(select id from public.rate_types where code='RAC'),8500,4250,1300,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
   -- Castello di Monte
-  ('00000000-0000-0000-0000-000000007431','00000000-0000-0000-0000-000000004231','00000000-0000-0000-0000-000000005231',(select id from public.rate_types where code='RAC'),3600,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007432','00000000-0000-0000-0000-000000004231','00000000-0000-0000-0000-000000005232',(select id from public.rate_types where code='RAC'),5000,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007433','00000000-0000-0000-0000-000000004231','00000000-0000-0000-0000-000000005233',(select id from public.rate_types where code='RAC'),7800,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007431','00000000-0000-0000-0000-000000004231','00000000-0000-0000-0000-000000005231',(select id from public.rate_types where code='RAC'),3600,1800,550,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007432','00000000-0000-0000-0000-000000004231','00000000-0000-0000-0000-000000005232',(select id from public.rate_types where code='RAC'),5000,2500,750,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007433','00000000-0000-0000-0000-000000004231','00000000-0000-0000-0000-000000005233',(select id from public.rate_types where code='RAC'),7800,3900,1200,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
   -- Mount Nelson
-  ('00000000-0000-0000-0000-000000007441','00000000-0000-0000-0000-000000004241','00000000-0000-0000-0000-000000005241',(select id from public.rate_types where code='RAC'),9500,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007442','00000000-0000-0000-0000-000000004241','00000000-0000-0000-0000-000000005242',(select id from public.rate_types where code='RAC'),13500,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007443','00000000-0000-0000-0000-000000004241','00000000-0000-0000-0000-000000005243',(select id from public.rate_types where code='RAC'),22000,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007441','00000000-0000-0000-0000-000000004241','00000000-0000-0000-0000-000000005241',(select id from public.rate_types where code='RAC'),9500,4750,1400,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007442','00000000-0000-0000-0000-000000004241','00000000-0000-0000-0000-000000005242',(select id from public.rate_types where code='RAC'),13500,6750,2000,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007443','00000000-0000-0000-0000-000000004241','00000000-0000-0000-0000-000000005243',(select id from public.rate_types where code='RAC'),22000,11000,3300,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
   -- The Silo
-  ('00000000-0000-0000-0000-000000007451','00000000-0000-0000-0000-000000004251','00000000-0000-0000-0000-000000005251',(select id from public.rate_types where code='RAC'),18000,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007452','00000000-0000-0000-0000-000000004251','00000000-0000-0000-0000-000000005252',(select id from public.rate_types where code='RAC'),24000,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007453','00000000-0000-0000-0000-000000004251','00000000-0000-0000-0000-000000005253',(select id from public.rate_types where code='RAC'),65000,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007451','00000000-0000-0000-0000-000000004251','00000000-0000-0000-0000-000000005251',(select id from public.rate_types where code='RAC'),18000,9000,2700,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007452','00000000-0000-0000-0000-000000004251','00000000-0000-0000-0000-000000005252',(select id from public.rate_types where code='RAC'),24000,12000,3600,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007453','00000000-0000-0000-0000-000000004251','00000000-0000-0000-0000-000000005253',(select id from public.rate_types where code='RAC'),65000,32500,9750,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
   -- Cape Grace
-  ('00000000-0000-0000-0000-000000007461','00000000-0000-0000-0000-000000004261','00000000-0000-0000-0000-000000005261',(select id from public.rate_types where code='RAC'),11000,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007462','00000000-0000-0000-0000-000000004261','00000000-0000-0000-0000-000000005262',(select id from public.rate_types where code='RAC'),15000,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007463','00000000-0000-0000-0000-000000004261','00000000-0000-0000-0000-000000005263',(select id from public.rate_types where code='RAC'),26000,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  -- First Car Rental (per vehicle, per day)
-  ('00000000-0000-0000-0000-000000007471','00000000-0000-0000-0000-000000004271','00000000-0000-0000-0000-000000005271',(select id from public.rate_types where code='RAC'),650,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007472','00000000-0000-0000-0000-000000004271','00000000-0000-0000-0000-000000005272',(select id from public.rate_types where code='RAC'),1450,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007473','00000000-0000-0000-0000-000000004271','00000000-0000-0000-0000-000000005273',(select id from public.rate_types where code='RAC'),1950,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007461','00000000-0000-0000-0000-000000004261','00000000-0000-0000-0000-000000005261',(select id from public.rate_types where code='RAC'),11000,5500,1650,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007462','00000000-0000-0000-0000-000000004261','00000000-0000-0000-0000-000000005262',(select id from public.rate_types where code='RAC'),15000,7500,2250,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007463','00000000-0000-0000-0000-000000004261','00000000-0000-0000-0000-000000005263',(select id from public.rate_types where code='RAC'),26000,13000,3900,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  -- The Victoria Falls Hotel (previously had zero rate cards despite being the
+  -- Victoria Falls Explorer package's post-journey hotel on ~30 seeded bookings)
+  ('00000000-0000-0000-0000-000000007521','00000000-0000-0000-0000-000000004321','00000000-0000-0000-0000-000000005321',(select id from public.rate_types where code='RAC'),4200,2100,630,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007522','00000000-0000-0000-0000-000000004321','00000000-0000-0000-0000-000000005322',(select id from public.rate_types where code='RAC'),6800,3400,1020,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007523','00000000-0000-0000-0000-000000004321','00000000-0000-0000-0000-000000005323',(select id from public.rate_types where code='RAC'),13500,6750,2025,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  -- First Car Rental (per vehicle, per day) — transport kinds never carry child/infant pricing
+  ('00000000-0000-0000-0000-000000007471','00000000-0000-0000-0000-000000004271','00000000-0000-0000-0000-000000005271',(select id from public.rate_types where code='RAC'),650,null,null,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007472','00000000-0000-0000-0000-000000004271','00000000-0000-0000-0000-000000005272',(select id from public.rate_types where code='RAC'),1450,null,null,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007473','00000000-0000-0000-0000-000000004271','00000000-0000-0000-0000-000000005273',(select id from public.rate_types where code='RAC'),1950,null,null,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
   -- Cape Executive Transfers (per transfer)
-  ('00000000-0000-0000-0000-000000007481','00000000-0000-0000-0000-000000004281','00000000-0000-0000-0000-000000005281',(select id from public.rate_types where code='RAC'),950,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007482','00000000-0000-0000-0000-000000004281','00000000-0000-0000-0000-000000005282',(select id from public.rate_types where code='RAC'),1350,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007483','00000000-0000-0000-0000-000000004281','00000000-0000-0000-0000-000000005283',(select id from public.rate_types where code='RAC'),1850,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007481','00000000-0000-0000-0000-000000004281','00000000-0000-0000-0000-000000005281',(select id from public.rate_types where code='RAC'),950,null,null,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007482','00000000-0000-0000-0000-000000004281','00000000-0000-0000-0000-000000005282',(select id from public.rate_types where code='RAC'),1350,null,null,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007483','00000000-0000-0000-0000-000000004281','00000000-0000-0000-0000-000000005283',(select id from public.rate_types where code='RAC'),1850,null,null,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
   -- Zambezi Transfers (per transfer)
-  ('00000000-0000-0000-0000-000000007491','00000000-0000-0000-0000-000000004291','00000000-0000-0000-0000-000000005291',(select id from public.rate_types where code='RAC'),450,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007491','00000000-0000-0000-0000-000000004291','00000000-0000-0000-0000-000000005291',(select id from public.rate_types where code='RAC'),450,null,null,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
   -- Rovos Rail Transfers (per transfer)
-  ('00000000-0000-0000-0000-000000007492','00000000-0000-0000-0000-000000004292','00000000-0000-0000-0000-000000005294',(select id from public.rate_types where code='RAC'),850,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z')
+  ('00000000-0000-0000-0000-000000007492','00000000-0000-0000-0000-000000004292','00000000-0000-0000-0000-000000005294',(select id from public.rate_types where code='RAC'),850,null,null,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z')
 on conflict (id) do nothing;
 
 -- ============================================================
@@ -586,35 +809,36 @@ insert into public.routes (id,supplier_id,name,origin_location_id,destination_lo
   ('00000000-0000-0000-0000-000000004313','00000000-0000-0000-0000-000000002019','Table Mountain & City Bowl Half-Day',null,null,'one_way',true,'2025-08-10T08:15:00Z','2025-08-10T08:15:00Z')
 on conflict (id) do nothing;
 
-insert into public.rate_cards (id,route_id,suite_type_id,rate_type_id,price_per_person,currency,valid_from,valid_to,created_at) values
+insert into public.rate_cards (id,route_id,suite_type_id,rate_type_id,price_per_person,child_price,infant_price,currency,valid_from,valid_to,created_at) values
   -- Winelands Excursions
-  ('00000000-0000-0000-0000-000000007501','00000000-0000-0000-0000-000000004301','00000000-0000-0000-0000-000000005301',(select id from public.rate_types where code='RAC'),1450,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007502','00000000-0000-0000-0000-000000004301','00000000-0000-0000-0000-000000005302',(select id from public.rate_types where code='RAC'),2450,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007503','00000000-0000-0000-0000-000000004302','00000000-0000-0000-0000-000000005301',(select id from public.rate_types where code='RAC'),1350,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007504','00000000-0000-0000-0000-000000004302','00000000-0000-0000-0000-000000005302',(select id from public.rate_types where code='RAC'),2300,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007505','00000000-0000-0000-0000-000000004303','00000000-0000-0000-0000-000000005303',(select id from public.rate_types where code='RAC'),4200,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007501','00000000-0000-0000-0000-000000004301','00000000-0000-0000-0000-000000005301',(select id from public.rate_types where code='RAC'),1450,725,220,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007502','00000000-0000-0000-0000-000000004301','00000000-0000-0000-0000-000000005302',(select id from public.rate_types where code='RAC'),2450,1225,370,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007503','00000000-0000-0000-0000-000000004302','00000000-0000-0000-0000-000000005301',(select id from public.rate_types where code='RAC'),1350,675,200,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007504','00000000-0000-0000-0000-000000004302','00000000-0000-0000-0000-000000005302',(select id from public.rate_types where code='RAC'),2300,1150,350,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007505','00000000-0000-0000-0000-000000004303','00000000-0000-0000-0000-000000005303',(select id from public.rate_types where code='RAC'),4200,2100,630,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
   -- Cape Peninsula Tours
-  ('00000000-0000-0000-0000-000000007511','00000000-0000-0000-0000-000000004311','00000000-0000-0000-0000-000000005311',(select id from public.rate_types where code='RAC'),950,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007512','00000000-0000-0000-0000-000000004311','00000000-0000-0000-0000-000000005312',(select id from public.rate_types where code='RAC'),1850,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007513','00000000-0000-0000-0000-000000004311','00000000-0000-0000-0000-000000005313',(select id from public.rate_types where code='RAC'),3200,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007514','00000000-0000-0000-0000-000000004312','00000000-0000-0000-0000-000000005311',(select id from public.rate_types where code='RAC'),650,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007515','00000000-0000-0000-0000-000000004312','00000000-0000-0000-0000-000000005312',(select id from public.rate_types where code='RAC'),1350,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007516','00000000-0000-0000-0000-000000004313','00000000-0000-0000-0000-000000005312',(select id from public.rate_types where code='RAC'),1250,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
-  ('00000000-0000-0000-0000-000000007517','00000000-0000-0000-0000-000000004313','00000000-0000-0000-0000-000000005313',(select id from public.rate_types where code='RAC'),2400,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z')
+  ('00000000-0000-0000-0000-000000007511','00000000-0000-0000-0000-000000004311','00000000-0000-0000-0000-000000005311',(select id from public.rate_types where code='RAC'),950,475,140,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007512','00000000-0000-0000-0000-000000004311','00000000-0000-0000-0000-000000005312',(select id from public.rate_types where code='RAC'),1850,925,280,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007513','00000000-0000-0000-0000-000000004311','00000000-0000-0000-0000-000000005313',(select id from public.rate_types where code='RAC'),3200,1600,480,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007514','00000000-0000-0000-0000-000000004312','00000000-0000-0000-0000-000000005311',(select id from public.rate_types where code='RAC'),650,325,100,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007515','00000000-0000-0000-0000-000000004312','00000000-0000-0000-0000-000000005312',(select id from public.rate_types where code='RAC'),1350,675,200,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007516','00000000-0000-0000-0000-000000004313','00000000-0000-0000-0000-000000005312',(select id from public.rate_types where code='RAC'),1250,625,190,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z'),
+  ('00000000-0000-0000-0000-000000007517','00000000-0000-0000-0000-000000004313','00000000-0000-0000-0000-000000005313',(select id from public.rate_types where code='RAC'),2400,1200,360,'ZAR','2026-01-01',null,'2025-08-12T08:20:00Z')
 on conflict (id) do nothing;
 
 -- Example supplier rate adjustments: which non-default rates apply to a supplier
 -- and how much cheaper they are than that supplier's default rate. Rovos / Blue
--- Train default to Rack Rate (train); Irene Country Lodge defaults to Standard
--- Tour Operator (hotel), so its applicable rates are cheaper still.
+-- Train default to Rack Rate (train); Mount Nelson defaults to Standard Tour
+-- Operator (hotel), so its applicable rates are cheaper still.
 insert into public.supplier_rate_adjustments (supplier_id, rate_type_id, discount_pct)
 select s.supplier_id, rt.id, s.discount_pct
 from (values
   ('00000000-0000-0000-0000-000000002001'::uuid, 'STO',      20),
   ('00000000-0000-0000-0000-000000002001'::uuid, 'RESIDENT', 50),
   ('00000000-0000-0000-0000-000000002010'::uuid, 'STO',      15),
-  ('00000000-0000-0000-0000-000000002002'::uuid, 'NETT',     10),
-  ('00000000-0000-0000-0000-000000002002'::uuid, 'RESIDENT', 35)
+  ('00000000-0000-0000-0000-000000002010'::uuid, 'RESIDENT', 45),
+  ('00000000-0000-0000-0000-000000002016'::uuid, 'NETT',     10),
+  ('00000000-0000-0000-0000-000000002016'::uuid, 'RESIDENT', 30)
 ) as s(supplier_id, code, discount_pct)
 join public.rate_types rt on rt.code = s.code
 on conflict (supplier_id, rate_type_id) do nothing;
@@ -631,23 +855,26 @@ on conflict (id) do update set slug=excluded.slug,name=excluded.name,description
   duration_nights=excluded.duration_nights,single_supplement_pct=excluded.single_supplement_pct,
   markup_pct=excluded.markup_pct,currency=excluded.currency,active=excluded.active,updated_at=excluded.updated_at;
 
-insert into public.package_legs (id,package_id,supplier_id,label,sort_order,created_at) values
-  ('00000000-0000-0000-0000-000000003102','00000000-0000-0000-0000-000000003002','00000000-0000-0000-0000-000000002001','Main Rail Journey: Rovos Rail, Pretoria to Victoria Falls',1,'2025-08-10T08:14:00Z'),
-  ('00000000-0000-0000-0000-000000003109','00000000-0000-0000-0000-000000003002','00000000-0000-0000-0000-000000002003','Post-journey Hotel: The Victoria Falls Hotel, Victoria Falls',2,'2025-08-10T08:14:00Z'),
-  ('00000000-0000-0000-0000-000000003110','00000000-0000-0000-0000-000000003008','00000000-0000-0000-0000-000000002001','Main Rail Journey: Rovos Rail, Pretoria to Cape Town',1,'2025-08-10T08:14:00Z'),
-  ('00000000-0000-0000-0000-000000003111','00000000-0000-0000-0000-000000003008','00000000-0000-0000-0000-000000002011','Pre-departure Hotel: Sheraton Pretoria Hotel, Pretoria',2,'2025-08-10T08:14:00Z'),
-  ('00000000-0000-0000-0000-000000003112','00000000-0000-0000-0000-000000003008','00000000-0000-0000-0000-000000002012','Pre-departure Hotel: Villa Sterne Boutique Hotel, Pretoria',3,'2025-08-10T08:14:00Z'),
-  ('00000000-0000-0000-0000-000000003113','00000000-0000-0000-0000-000000003008','00000000-0000-0000-0000-000000002013','Pre-departure Hotel: Castello di Monte, Pretoria',4,'2025-08-10T08:14:00Z'),
-  ('00000000-0000-0000-0000-000000003114','00000000-0000-0000-0000-000000003008','00000000-0000-0000-0000-000000002015','Airport / Station Transfer: Cape Executive Transfers, Cape Town',5,'2025-08-10T08:14:00Z'),
-  ('00000000-0000-0000-0000-000000003115','00000000-0000-0000-0000-000000003008','00000000-0000-0000-0000-000000002014','Self-drive Car Rental: First Car Rental, Cape Town',6,'2025-08-10T08:14:00Z'),
-  ('00000000-0000-0000-0000-000000003116','00000000-0000-0000-0000-000000003008','00000000-0000-0000-0000-000000002016','Cape Town Stay: Mount Nelson, A Belmond Hotel, Cape Town',7,'2025-08-10T08:14:00Z'),
-  ('00000000-0000-0000-0000-000000003117','00000000-0000-0000-0000-000000003008','00000000-0000-0000-0000-000000002017','Cape Town Stay: The Silo Hotel, Cape Town',8,'2025-08-10T08:14:00Z'),
-  ('00000000-0000-0000-0000-000000003118','00000000-0000-0000-0000-000000003008','00000000-0000-0000-0000-000000002018','Cape Town Stay: Cape Grace, Cape Town',9,'2025-08-10T08:14:00Z')
+-- date_anchor mirrors hotel_offers.phase below: 'post' = check-in derives from the
+-- train's arrival date (+ duration_days), 'pre' = check-out derives from departure date.
+insert into public.package_legs (id,package_id,supplier_id,label,sort_order,date_anchor,created_at) values
+  ('00000000-0000-0000-0000-000000003102','00000000-0000-0000-0000-000000003002','00000000-0000-0000-0000-000000002001','Main Rail Journey: Rovos Rail, Pretoria to Victoria Falls',1,null,'2025-08-10T08:14:00Z'),
+  ('00000000-0000-0000-0000-000000003109','00000000-0000-0000-0000-000000003002','00000000-0000-0000-0000-000000002003','Post-journey Hotel: The Victoria Falls Hotel, Victoria Falls',2,'post','2025-08-10T08:14:00Z'),
+  ('00000000-0000-0000-0000-000000003110','00000000-0000-0000-0000-000000003008','00000000-0000-0000-0000-000000002001','Main Rail Journey: Rovos Rail, Pretoria to Cape Town',1,null,'2025-08-10T08:14:00Z'),
+  ('00000000-0000-0000-0000-000000003111','00000000-0000-0000-0000-000000003008','00000000-0000-0000-0000-000000002011','Pre-departure Hotel: Sheraton Pretoria Hotel, Pretoria',2,'pre','2025-08-10T08:14:00Z'),
+  ('00000000-0000-0000-0000-000000003112','00000000-0000-0000-0000-000000003008','00000000-0000-0000-0000-000000002012','Pre-departure Hotel: Villa Sterne Boutique Hotel, Pretoria',3,'pre','2025-08-10T08:14:00Z'),
+  ('00000000-0000-0000-0000-000000003113','00000000-0000-0000-0000-000000003008','00000000-0000-0000-0000-000000002013','Pre-departure Hotel: Castello di Monte, Pretoria',4,'pre','2025-08-10T08:14:00Z'),
+  ('00000000-0000-0000-0000-000000003114','00000000-0000-0000-0000-000000003008','00000000-0000-0000-0000-000000002015','Airport / Station Transfer: Cape Executive Transfers, Cape Town',5,null,'2025-08-10T08:14:00Z'),
+  ('00000000-0000-0000-0000-000000003115','00000000-0000-0000-0000-000000003008','00000000-0000-0000-0000-000000002014','Self-drive Car Rental: First Car Rental, Cape Town',6,null,'2025-08-10T08:14:00Z'),
+  ('00000000-0000-0000-0000-000000003116','00000000-0000-0000-0000-000000003008','00000000-0000-0000-0000-000000002016','Cape Town Stay: Mount Nelson, A Belmond Hotel, Cape Town',7,'post','2025-08-10T08:14:00Z'),
+  ('00000000-0000-0000-0000-000000003117','00000000-0000-0000-0000-000000003008','00000000-0000-0000-0000-000000002017','Cape Town Stay: The Silo Hotel, Cape Town',8,'post','2025-08-10T08:14:00Z'),
+  ('00000000-0000-0000-0000-000000003118','00000000-0000-0000-0000-000000003008','00000000-0000-0000-0000-000000002018','Cape Town Stay: Cape Grace, Cape Town',9,'post','2025-08-10T08:14:00Z')
 
-on conflict (id) do nothing;
+on conflict (id) do update set date_anchor=excluded.date_anchor;
 
 insert into public.package_leg_routes (package_leg_id,route_id,created_at) values
   ('00000000-0000-0000-0000-000000003102','00000000-0000-0000-0000-000000004005','2025-08-10T08:15:00Z'),
+  ('00000000-0000-0000-0000-000000003109','00000000-0000-0000-0000-000000004321','2025-08-10T08:15:00Z'),
   ('00000000-0000-0000-0000-000000003110','00000000-0000-0000-0000-000000004001','2025-08-10T08:15:00Z'),
   ('00000000-0000-0000-0000-000000003114','00000000-0000-0000-0000-000000004281','2025-08-10T08:15:00Z'),
   ('00000000-0000-0000-0000-000000003115','00000000-0000-0000-0000-000000004271','2025-08-10T08:15:00Z')
@@ -670,7 +897,7 @@ on conflict (id) do nothing;
 -- ============================================================
 
 insert into public.templates (id,key,subject,body_html,version,active,is_system,created_at,updated_at) values
-  ('00000000-0000-0000-0000-000000007001','quote_email','Your Quote — {{jobNumber}}','<p>Dear {{customerName}},</p><p>Thank you for your enquiry. We are pleased to share your Luxus Travel &amp; Tours quote for <strong>{{direction}}</strong>, departing <strong>{{departureDate}}</strong>.</p>{{quoteSummaryTable}}<p>This quote is valid until <strong>{{validityDate}}</strong>. The full quotation is also attached as a PDF.</p><p>To accept this quote, please reply to this email and we will prepare the next booking steps for you.</p><p>Kind regards,<br/>Luxus Travel &amp; Tours</p>',3,true,true,'2025-08-12T08:00:00Z','2025-08-12T08:00:00Z'),
+  ('00000000-0000-0000-0000-000000007001','quote_email','{{supplierName}}/{{clientSurname}}-{{direction}}-{{departureDateShort}}','<p>Dear {{customerName}},</p><p>Thank you for your enquiry.</p><p>We are pleased to share your Luxus Travel &amp; Tours quote for <strong>{{direction}}</strong>, departing <strong>{{departureDate}}</strong>.</p>{{quoteSummaryTable}}<p>The full quotation is also attached as a PDF.</p><p>To accept this quote, please reply to this email and we will prepare the next booking steps for you.</p><p>Kind regards,<br/>Luxus Travel &amp; Tours</p>',5,true,true,'2025-08-12T08:00:00Z','2025-08-12T08:00:00Z'),
   ('00000000-0000-0000-0000-000000007002','follow_up','Following up on your enquiry — {{jobNumber}}','<p>Dear {{customerName}},</p><p>We are following up on the quotation sent on <strong>{{lastSentDate}}</strong>. Availability on peak dates can be limited — we would love to secure your suite.</p><p>Kind regards,<br/>Luxus Travel &amp; Tours</p>',1,true,true,'2025-08-12T08:00:00Z','2025-08-12T08:00:00Z'),
   ('00000000-0000-0000-0000-000000007003','deposit_request','Deposit Invoice — {{jobNumber}}','<p>Dear {{customerName}},</p><p>Thank you for confirming your reservation. A deposit of <strong>R {{depositAmount}}</strong> ({{depositPercentage}}%) is required to secure your booking, due by <strong>{{dueDate}}</strong>. Invoice <strong>{{invoiceNumber}}</strong> is attached.</p>{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>',2,true,true,'2025-08-12T08:00:00Z','2025-08-12T08:00:00Z'),
   ('00000000-0000-0000-0000-000000007004','voucher_email','Your Travel Voucher — {{jobNumber}}','<p>Dear {{customerName}},</p><p>Your travel voucher for the <strong>{{direction}}</strong> journey is attached, together with your itinerary. Please present the voucher to your service provider on arrival. Safe travels!</p><p>Warm regards,<br/>Luxus Travel &amp; Tours</p>',1,true,true,'2025-08-12T08:00:00Z','2025-08-12T08:00:00Z'),
@@ -703,7 +930,11 @@ insert into public.app_settings (key,value,updated_at) values
   ('quote_acceptance_after_expiry','blocked','2025-08-01T08:00:00Z'),
   ('session_timeout_minutes','480','2025-08-01T08:00:00Z'),
   ('business_name','Luxus Travel and Tours','2025-08-01T08:00:00Z'),
-  ('deposit_refundable','false','2025-08-01T08:00:00Z')
+  ('deposit_refundable','false','2025-08-01T08:00:00Z'),
+  ('hotel_default_check_in_time','14:00','2025-08-01T08:00:00Z'),
+  ('hotel_default_check_out_time','11:00','2025-08-01T08:00:00Z'),
+  ('default_infant_max_age','2','2025-08-01T08:00:00Z'),
+  ('default_child_max_age','12','2025-08-01T08:00:00Z')
 on conflict (key) do update set value=excluded.value,updated_at=excluded.updated_at;
 
 update public.voucher_template set

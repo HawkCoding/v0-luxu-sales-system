@@ -176,6 +176,9 @@ export async function getAttachmentMaxSizeMb(
 export const DOCUMENT_TEXT_SETTING_KEYS = [
   "quote_doc_title",
   "quote_doc_footer_text",
+  "quote_doc_includes_heading",
+  "quote_doc_excludes_heading",
+  "quote_doc_excludes_default",
   "voucher_doc_title",
   "invoice_doc_deposit_title",
   "invoice_doc_final_title",
@@ -187,9 +190,14 @@ export const DOCUMENT_TEXT_SETTING_KEYS = [
 export type DocumentTextSettings = Record<(typeof DOCUMENT_TEXT_SETTING_KEYS)[number], string>
 
 const DOCUMENT_TEXT_DEFAULTS: DocumentTextSettings = {
-  quote_doc_title: "PROVISIONAL QUOTATION",
+  quote_doc_title: "QUOTATION",
   quote_doc_footer_text:
-    "This quotation is valid until {{validUntil}} and is subject to availability. Prices are quoted in {{currency}}. Luxus Travel & Tours — Luxury Rail Journeys.",
+    "This quotation is subject to availability. Prices are quoted in {{currency}}. Luxus Travel & Tours — Luxury Rail Journeys.",
+  quote_doc_includes_heading: "Your Package Includes",
+  quote_doc_excludes_heading: "Your Package Excludes",
+  // Appended after the suppliers' own exclusions. Seeded to "Services not mentioned." by
+  // migration; the default here is empty so clearing it in Settings actually omits the line.
+  quote_doc_excludes_default: "",
   voucher_doc_title: "TRAVEL VOUCHERS",
   invoice_doc_deposit_title: "DEPOSIT INVOICE",
   invoice_doc_final_title: "FINAL INVOICE",

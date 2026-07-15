@@ -37,22 +37,28 @@ function routeParams() {
   return { params: Promise.resolve({ id: BOOKING_ID }) }
 }
 
-function postRequest() {
-  return new Request(`http://localhost/api/jobs/${BOOKING_ID}/start-quote`, { method: "POST" })
+function postRequest(body?: { validityUntil?: string | null }) {
+  return new Request(`http://localhost/api/jobs/${BOOKING_ID}/start-quote`, {
+    method: "POST",
+    headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  })
 }
 
 interface SeedOptions {
   booking?: MockRow | null
   customer?: MockRow | null
   existingQuotes?: MockRow[]
+  appSettings?: MockRow[]
 }
 
 function seedSupabase(options: SeedOptions = {}) {
-  const { booking = webFormBooking, customer = completeCustomer, existingQuotes = [] } = options
+  const { booking = webFormBooking, customer = completeCustomer, existingQuotes = [], appSettings = [] } = options
   return createSupabaseMock({
     bookings: booking ? [booking] : [],
     customers: customer ? [customer] : [],
     quotes: existingQuotes,
+    app_settings: appSettings,
   })
 }
 
@@ -136,18 +142,45 @@ describe("POST /api/jobs/[id]/start-quote", () => {
     expect(store.rows("quotes")).toHaveLength(0)
   })
 
-  it("creates the first draft quote when all gates pass", async () => {
+  it("creates the first draft quote when all gates pass, defaulting validity to 14 days", async () => {
     const { supabase, store } = seedSupabase()
     mockAuthOk(supabase)
 
-    const res = await POST(postRequest(), routeParams())
+    const res = await POST(postRequest({}), routeParams())
     const body = (await res.json()) as { quote: { quote_number: string; status: string } }
 
     expect(res.status).toBe(200)
     expect(body.quote.quote_number).toBe("BT-2026-0001-Q1")
     expect(body.quote.status).toBe("draft")
+    const expectedValidity = new Date(Date.now() + 14 * 86_400_000).toISOString().slice(0, 10)
     expect(store.rows("quotes")[0]).toEqual(
-      expect.objectContaining({ booking_id: BOOKING_ID, status: "draft", total: 0 }),
+      expect.objectContaining({ booking_id: BOOKING_ID, status: "draft", total: 0, validity_until: expectedValidity }),
+    )
+  })
+
+  it("computes validity from the org's configured quote_validity_days setting when no date is provided", async () => {
+    const { supabase, store } = seedSupabase({
+      appSettings: [{ key: "quote_validity_days", value: "30" }],
+    })
+    mockAuthOk(supabase)
+
+    const res = await POST(postRequest({}), routeParams())
+    expect(res.status).toBe(200)
+
+    const expectedValidity = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10)
+    expect(store.rows("quotes")[0]).toEqual(
+      expect.objectContaining({ validity_until: expectedValidity }),
+    )
+  })
+
+  it("uses the explicit validityUntil from the request body when provided", async () => {
+    const { supabase, store } = seedSupabase()
+    mockAuthOk(supabase)
+
+    const res = await POST(postRequest({ validityUntil: "2026-12-31" }), routeParams())
+    expect(res.status).toBe(200)
+    expect(store.rows("quotes")[0]).toEqual(
+      expect.objectContaining({ validity_until: "2026-12-31" }),
     )
   })
 

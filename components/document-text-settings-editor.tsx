@@ -22,7 +22,10 @@ interface FieldConfig {
 
 const FIELDS: FieldConfig[] = [
   { key: "quote_doc_title", label: "Quote PDF title", group: "Quote document", multiline: false },
-  { key: "quote_doc_footer_text", label: "Quote PDF footer (supports {{validUntil}}, {{currency}})", group: "Quote document", multiline: true },
+  { key: "quote_doc_footer_text", label: "Quote PDF footer (supports {{currency}})", group: "Quote document", multiline: true },
+  { key: "quote_doc_includes_heading", label: "Quote itinerary heading", group: "Quote document", multiline: false },
+  { key: "quote_doc_excludes_heading", label: "Quote exclusions heading", group: "Quote document", multiline: false },
+  { key: "quote_doc_excludes_default", label: "Standing exclusion, added to every quote (leave empty to omit)", group: "Quote document", multiline: true, allowEmpty: true },
   { key: "voucher_doc_title", label: "Voucher PDF title", group: "Voucher document", multiline: false },
   { key: "invoice_doc_deposit_title", label: "Deposit invoice title", group: "Invoice document", multiline: false },
   { key: "invoice_doc_final_title", label: "Final invoice title", group: "Invoice document", multiline: false },

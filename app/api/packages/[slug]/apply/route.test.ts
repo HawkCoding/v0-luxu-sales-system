@@ -81,6 +81,7 @@ function buildDetail(): PackageDetail {
         supplierName: "Blue Train",
         supplierDescription: null,
         supplierKind: "train_operator",
+        dateAnchor: null,
         label: "Blue Train",
         sortOrder: 0,
         routes: [
@@ -117,6 +118,7 @@ function buildDetail(): PackageDetail {
         supplierName: "Harbour Hotel",
         supplierDescription: null,
         supplierKind: "hotel_property",
+        dateAnchor: null,
         label: "Harbour Hotel",
         sortOrder: 1,
         routes: [
@@ -150,6 +152,7 @@ function buildDetail(): PackageDetail {
         supplierName: "Airport Transfers",
         supplierDescription: null,
         supplierKind: "transfers",
+        dateAnchor: null,
         label: "Airport Transfers",
         sortOrder: 2,
         routes: [
@@ -187,6 +190,7 @@ function buildDetail(): PackageDetail {
         supplierName: "Vehicle Rentals",
         supplierDescription: null,
         supplierKind: "vehicle_rental",
+        dateAnchor: null,
         label: "Vehicle Rentals",
         sortOrder: 3,
         routes: [

@@ -26,8 +26,8 @@ export function formatDisplayDate(value: string | Date | null | undefined): stri
   const parsed = parseDateInput(value)
   if (!parsed) return ""
 
-  const day = parsed.getDate()
-  const month = parsed.getMonth() + 1
+  const day = pad(parsed.getDate())
+  const month = pad(parsed.getMonth() + 1)
   const year = parsed.getFullYear()
 
   return `${day}/${month}/${year}`
@@ -53,4 +53,16 @@ export function formatDisplayDateLong(value: string | Date | null | undefined): 
   if (!parsed) return ""
 
   return `${parsed.getDate()} ${LONG_MONTH_NAMES[parsed.getMonth()]} ${parsed.getFullYear()}`
+}
+
+const SHORT_MONTH_NAMES = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+]
+
+export function formatDisplayDateShort(value: string | Date | null | undefined): string {
+  const parsed = parseDateInput(value)
+  if (!parsed) return ""
+
+  return `${parsed.getDate()} ${SHORT_MONTH_NAMES[parsed.getMonth()]} ${parsed.getFullYear()}`
 }

@@ -6,6 +6,7 @@ export interface TemplateEmailProps {
   /** Rendered template body HTML — inserted into the branded layout's content slot. */
   contentHtml: string
   footerTagline?: string
+  logoUrl?: string | null
 }
 
 /**
@@ -13,9 +14,9 @@ export interface TemplateEmailProps {
  * bracketed with slot marker comments so the preview dialog can swap in an
  * edited body without re-rendering the wrapper server-side.
  */
-export function TemplateEmail({ preview, contentHtml, footerTagline }: TemplateEmailProps) {
+export function TemplateEmail({ preview, contentHtml, footerTagline, logoUrl }: TemplateEmailProps) {
   return (
-    <BaseLayout preview={preview} footerTagline={footerTagline}>
+    <BaseLayout preview={preview} footerTagline={footerTagline} logoUrl={logoUrl}>
       <div
         dangerouslySetInnerHTML={{
           __html: `${CONTENT_SLOT_START}${contentHtml}${CONTENT_SLOT_END}`,

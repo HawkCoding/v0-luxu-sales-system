@@ -14,7 +14,7 @@ describe("renderTemplate", () => {
     expect(result.warnings).toEqual([])
   })
 
-  it("HTML-escapes scalar values", () => {
+  it("HTML-escapes scalar values in the body but not the subject", () => {
     const result = renderTemplate({
       subject: "Hello {{customerName}}",
       bodyHtml: "<p>{{customerName}}</p>",
@@ -25,6 +25,7 @@ describe("renderTemplate", () => {
       "<p>&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; &amp; &#39;co&#39;</p>",
     )
     expect(result.bodyHtml).not.toContain("<script>")
+    expect(result.subject).toBe(`Hello <script>alert("x")</script> & 'co'`)
   })
 
   it("inserts block tokens raw into the body only", () => {

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto"
 import { requireRole, requireUser } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { mapBookingTransportRequest } from "@/lib/suppliers"
+import { recomputeBookingTripDates } from "@/lib/packages/recompute-trip-dates"
 import { BOOKING_TRANSPORT_REQUEST_COLUMNS } from "@/lib/supabase/columns"
 import type { Json } from "@/lib/supabase/types"
 
@@ -141,6 +142,10 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   })
 
   if (replaceError) return safeSupabaseError("transport-requests:replace", replaceError, "Failed to replace transport requests")
+
+  // Rental returns / pickups can extend the trip, so re-derive the booking's trip dates.
+  const recompute = await recomputeBookingTripDates(supabase, id)
+  if (recompute.error) return jsonError(recompute.error, 500)
 
   const { data: savedRows, error: loadError } = await supabase
     .from("booking_transport_requests")

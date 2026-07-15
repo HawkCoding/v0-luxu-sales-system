@@ -624,6 +624,10 @@ export interface SupplierPackage {
   rateCards: SupplierRateCard[]
 }
 
+/** Where a hotel stay sits relative to its train leg. `custom` is a booking-level override only —
+ * a package leg stores `pre`/`post` (or null when the hotel isn't anchored to the train at all). */
+export type HotelDateAnchor = "pre" | "post" | "custom"
+
 export interface PackageLeg {
   id: string
   packageId: string
@@ -633,6 +637,8 @@ export interface PackageLeg {
   supplierKind: SupplierKind
   label: string | null
   sortOrder: number
+  /** Hotel legs only: pre-stay (night(s) before departure) or post-stay (from train arrival). */
+  dateAnchor: "pre" | "post" | null
   routes: SupplierRoute[]
   rateCards: SupplierRateCard[]
   suiteTypes: SupplierSuiteType[]
@@ -703,6 +709,10 @@ export interface Supplier {
   childMaxAge: number | null
   defaultTimeStart: string | null
   defaultTimeEnd: string | null
+  /** Client-facing bullets shown under this supplier's leg in the quote itinerary. */
+  inclusions: string[]
+  /** Client-facing exclusions pooled into the quote's "Your Package Excludes" section. */
+  exclusions: string[]
   createdAt: string
   createdAtDisplay?: string
   updatedAt: string

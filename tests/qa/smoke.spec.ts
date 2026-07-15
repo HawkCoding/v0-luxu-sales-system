@@ -286,12 +286,11 @@ test("S2 — settings nav badge appears and disappears with error state", async 
 })
 
 // ---------------------------------------------------------------------------
-// S3. Quote PDF — valid PDF magic bytes, "PROVISIONAL QUOTATION",
-//     "STATUS: Provisional", booking number, quote number, validity date.
+// S3. Quote PDF — valid PDF magic bytes, "QUOTATION", quote number, validity date.
 // ---------------------------------------------------------------------------
 test("S3 — quote PDF structural assertions", async ({ page }) => {
   const N = 3
-  const T = "Quote PDF — magic bytes, PROVISIONAL QUOTATION, booking number, validity"
+  const T = "Quote PDF — magic bytes, QUOTATION, quote number, validity"
   try {
     // Find a priced quote (must have total > 0 for line items to exist).
     const { data: quotes } = await db
@@ -333,10 +332,8 @@ test("S3 — quote PDF structural assertions", async ({ page }) => {
     const text = parsed.text ?? ""
 
     const checks: Array<[string, boolean]> = [
-      ["PROVISIONAL QUOTATION", text.includes("PROVISIONAL QUOTATION")],
-      ["STATUS: Provisional", text.includes("STATUS: Provisional")],
+      ["QUOTATION", text.includes("QUOTATION")],
       [`quote number (${quote!.quote_number})`, text.includes(quote!.quote_number ?? "")],
-      [`booking Ref: ${booking?.booking_number}`, text.includes(booking?.booking_number ?? "")],
       ["Valid Until / validity date", /Valid Until/i.test(text)],
       ["numeric line-item content", /\d+/.test(text)],
     ]

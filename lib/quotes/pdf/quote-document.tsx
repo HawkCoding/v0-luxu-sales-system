@@ -1,28 +1,37 @@
 import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer"
-
-export interface QuotePdfLineItem {
-  description: string
-  supplierDescription?: string | null
-  qty: number
-  unit?: string | null
-  unitPrice: number
-  total: number
-}
+import { formatDisplayDate, formatDisplayDateLong } from "@/lib/date-format"
+import { QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
+import type { VoucherServiceBlock } from "@/lib/generate-voucher"
+import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
+import {
+  buildQuoteItineraryLines,
+  collectQuoteExclusions,
+  derivePerPersonRate,
+  formatJourneyRange,
+  formatPaxLabel,
+  formatTotalLabel,
+} from "@/lib/quotes/quote-presentation"
 
 export interface QuotePdfData {
   quoteNumber: string
-  bookingNumber: string
   customerName: string
   quoteDate: string
   validUntil: string | null
-  lineItems: QuotePdfLineItem[]
-  subtotal: number
-  vat: number
+  journeyStart: string | null
+  journeyEnd: string | null
+  adults: number
+  children: number
+  /** VAT-inclusive grand total (quotes.total). */
   total: number
+  /** Package itinerary; empty array omits the section entirely. */
+  itineraryBlocks: VoucherServiceBlock[]
   currency?: string
   title?: string
-  statusLabel?: string
   footerText?: string
+  packageIncludesHeading?: string
+  packageExcludesHeading?: string
+  /** Standing exclusion appended after the suppliers' own; empty omits it. */
+  packageExcludesDefault?: string
 }
 
 function formatMoney(amount: number, currency = "ZAR"): string {
@@ -38,12 +47,7 @@ function formatMoney(amount: number, currency = "ZAR"): string {
 }
 
 function formatDate(value: string | null): string {
-  if (!value) return "To be confirmed"
-  return new Intl.DateTimeFormat("en-ZA", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(new Date(`${value}T00:00:00`))
+  return formatDisplayDate(value) || "To be confirmed"
 }
 
 const styles = StyleSheet.create({
@@ -96,9 +100,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#e8dfd2",
     padding: 12,
-    marginBottom: 20,
+    marginBottom: 12,
     flexDirection: "row",
     justifyContent: "space-between",
+    flexWrap: "wrap",
   },
   metaLabel: {
     fontSize: 9,
@@ -112,84 +117,65 @@ const styles = StyleSheet.create({
     fontFamily: "Helvetica-Bold",
     color: "#312b24",
   },
-  tableHeader: {
-    flexDirection: "row",
-    borderBottomWidth: 1,
-    borderBottomColor: "#d8cdbc",
-    paddingBottom: 6,
-    marginBottom: 4,
+  pricingBox: {
+    backgroundColor: "#f4efe6",
+    borderWidth: 1,
+    borderColor: "#d8cdbc",
+    padding: 14,
+    marginTop: 20,
   },
-  colDesc: { flex: 3 },
-  colQty: { width: 40, textAlign: "right" },
-  colUnit: { width: 80, textAlign: "right" },
-  colTotal: { width: 80, textAlign: "right" },
-  headerCell: {
-    fontSize: 8,
-    color: "#6f675d",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  row: {
-    flexDirection: "row",
-    borderBottomWidth: 1,
-    borderBottomColor: "#eee6dc",
-    paddingVertical: 7,
-  },
-  cellDesc: { flex: 3, paddingRight: 8 },
-  descMain: { fontSize: 10, color: "#312b24" },
-  descSub: { fontSize: 8, color: "#8a7f74", fontStyle: "italic", marginTop: 2 },
-  cellRight: { fontSize: 10, textAlign: "right", color: "#312b24" },
-  totalsBox: {
-    marginTop: 16,
-    alignItems: "flex-end",
-  },
-  totalLine: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    marginBottom: 3,
-  },
-  totalLabel: {
-    fontSize: 10,
-    color: "#6f675d",
-    width: 80,
-    textAlign: "right",
-    marginRight: 12,
-  },
-  totalValue: {
-    fontSize: 10,
-    color: "#312b24",
-    width: 80,
-    textAlign: "right",
+  perPersonLine: {
+    fontSize: 11,
+    color: "#554c42",
+    marginBottom: 6,
   },
   grandTotalLine: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    borderTopWidth: 1,
-    borderTopColor: "#d8cdbc",
-    paddingTop: 6,
-    marginTop: 4,
-  },
-  grandTotalLabel: {
-    fontSize: 12,
+    fontSize: 13,
     fontFamily: "Helvetica-Bold",
     color: "#172018",
-    width: 80,
-    textAlign: "right",
-    marginRight: 12,
   },
-  grandTotalValue: {
-    fontSize: 12,
+  sectionHeading: {
+    fontSize: 11,
     fontFamily: "Helvetica-Bold",
     color: "#172018",
-    width: 80,
-    textAlign: "right",
-  },
-  statusBadge: {
-    fontSize: 8,
-    color: "#8a7f74",
     textTransform: "uppercase",
     letterSpacing: 0.5,
-    marginTop: 3,
+    borderBottomWidth: 1,
+    borderBottomColor: "#d8cdbc",
+    paddingBottom: 5,
+    marginBottom: 6,
+  },
+  itinerarySection: {
+    marginTop: 20,
+  },
+  itineraryItem: {
+    marginBottom: 8,
+  },
+  itineraryDate: {
+    fontSize: 10,
+    fontFamily: "Helvetica-Bold",
+    color: "#172018",
+  },
+  itineraryText: {
+    fontSize: 10,
+    color: "#312b24",
+    marginTop: 1,
+    lineHeight: 1.4,
+  },
+  itineraryDetail: {
+    fontSize: 9,
+    color: "#554c42",
+    marginTop: 2,
+    paddingLeft: 10,
+  },
+  excludesSection: {
+    marginTop: 20,
+  },
+  excludesItem: {
+    fontSize: 9,
+    color: "#554c42",
+    marginBottom: 3,
+    lineHeight: 1.4,
   },
   footer: {
     marginTop: 36,
@@ -202,8 +188,12 @@ const styles = StyleSheet.create({
   },
 })
 
-const DEFAULT_FOOTER_TEXT =
-  "This quotation is valid until {{validUntil}} and is subject to availability. Prices are quoted in {{currency}}. Luxus Travel & Tours — Luxury Rail Journeys."
+const DEFAULT_FOOTER_TEXT = QUOTE_VALIDITY_ENABLED
+  ? "This quotation is valid until {{validUntil}} and is subject to availability. Prices are quoted in {{currency}}. Luxus Travel & Tours — Luxury Rail Journeys."
+  : "This quotation is subject to availability. Prices are quoted in {{currency}}. Luxus Travel & Tours — Luxury Rail Journeys."
+
+const DEFAULT_INCLUDES_HEADING = "Your Package Includes"
+const DEFAULT_EXCLUDES_HEADING = "Your Package Excludes"
 
 function resolveFooterText(template: string, validUntil: string | null, currency: string): string {
   return template
@@ -211,7 +201,32 @@ function resolveFooterText(template: string, validUntil: string | null, currency
     .replaceAll("{{currency}}", currency)
 }
 
-export function QuoteDocument({ quoteNumber, bookingNumber, customerName, quoteDate, validUntil, lineItems, subtotal, vat, total, currency = "ZAR", title = "PROVISIONAL QUOTATION", statusLabel = "Provisional", footerText = DEFAULT_FOOTER_TEXT }: QuotePdfData) {
+export function QuoteDocument({
+  quoteNumber,
+  customerName,
+  quoteDate,
+  validUntil,
+  journeyStart,
+  journeyEnd,
+  adults,
+  children,
+  total,
+  itineraryBlocks,
+  currency = "ZAR",
+  title = "QUOTATION",
+  footerText = DEFAULT_FOOTER_TEXT,
+  packageIncludesHeading = DEFAULT_INCLUDES_HEADING,
+  packageExcludesHeading = DEFAULT_EXCLUDES_HEADING,
+  packageExcludesDefault,
+}: QuotePdfData) {
+  const pax = { adults, children }
+  const paxLabel = formatPaxLabel(pax)
+  const journeyRange = formatJourneyRange(journeyStart, journeyEnd)
+  const perPersonRate = derivePerPersonRate(total, pax)
+  const sortedBlocks = sortItineraryBlocksChronologically(itineraryBlocks)
+  const itineraryLines = buildQuoteItineraryLines(sortedBlocks)
+  const exclusions = collectQuoteExclusions(sortedBlocks, packageExcludesDefault)
+
   return (
     <Document
       author="Luxus Travel & Tours"
@@ -227,11 +242,9 @@ export function QuoteDocument({ quoteNumber, bookingNumber, customerName, quoteD
         <View style={styles.titleRow}>
           <View>
             <Text style={styles.docTitle}>{title}</Text>
-            <Text style={styles.statusBadge}>STATUS: {statusLabel}</Text>
           </View>
           <View>
             <Text style={styles.quoteNumberBadge}>{quoteNumber}</Text>
-            <Text style={[styles.quoteNumberBadge, { color: "#8a7f74", fontSize: 9 }]}>Ref: {bookingNumber}</Text>
           </View>
         </View>
 
@@ -241,68 +254,69 @@ export function QuoteDocument({ quoteNumber, bookingNumber, customerName, quoteD
             <Text style={styles.metaValue}>{customerName || "Valued Guest"}</Text>
           </View>
           <View>
+            <Text style={styles.metaLabel}>Journey</Text>
+            <Text style={styles.metaValue}>{journeyRange ?? "To be confirmed"}</Text>
+          </View>
+          {paxLabel ? (
+            <View>
+              <Text style={styles.metaLabel}>Guests</Text>
+              <Text style={styles.metaValue}>{paxLabel}</Text>
+            </View>
+          ) : null}
+          <View>
             <Text style={styles.metaLabel}>Quote date</Text>
             <Text style={styles.metaValue}>{formatDate(quoteDate)}</Text>
           </View>
-          <View>
-            <Text style={styles.metaLabel}>Valid until</Text>
-            <Text style={styles.metaValue}>{formatDate(validUntil)}</Text>
-          </View>
+          {QUOTE_VALIDITY_ENABLED ? (
+            <View>
+              <Text style={styles.metaLabel}>Valid until</Text>
+              <Text style={styles.metaValue}>{formatDate(validUntil)}</Text>
+            </View>
+          ) : null}
         </View>
 
-        <View style={styles.tableHeader}>
-          <View style={styles.colDesc}>
-            <Text style={styles.headerCell}>Description</Text>
+        {itineraryLines.length > 0 ? (
+          <View style={styles.itinerarySection}>
+            <Text style={styles.sectionHeading}>{packageIncludesHeading}</Text>
+            {itineraryLines.map((line, index) => (
+              <View key={index} style={styles.itineraryItem} wrap={false}>
+                <Text style={styles.itineraryDate}>
+                  {line.dateISO
+                    ? formatDisplayDateLong(line.dateISO) || "Date to be confirmed"
+                    : "Date to be confirmed"}
+                </Text>
+                <Text style={styles.itineraryText}>{line.text}</Text>
+                {line.bullets.map((bullet, bulletIndex) => (
+                  <Text key={bulletIndex} style={styles.itineraryDetail}>
+                    {`- ${bullet}`}
+                  </Text>
+                ))}
+              </View>
+            ))}
           </View>
-          <View style={styles.colQty}>
-            <Text style={styles.headerCell}>Qty</Text>
-          </View>
-          <View style={styles.colUnit}>
-            <Text style={styles.headerCell}>Unit price</Text>
-          </View>
-          <View style={styles.colTotal}>
-            <Text style={styles.headerCell}>Total</Text>
-          </View>
-        </View>
+        ) : null}
 
-        {lineItems.map((item, index) => (
-          <View key={index} style={styles.row}>
-            <View style={styles.cellDesc}>
-              <Text style={styles.descMain}>{item.description}</Text>
-              {item.supplierDescription ? (
-                <Text style={styles.descSub}>{item.supplierDescription}</Text>
-              ) : null}
-            </View>
-            <View style={styles.colQty}>
-              <Text style={styles.cellRight}>{item.qty}</Text>
-              {item.unit ? <Text style={styles.descSub}>{item.unit}</Text> : null}
-            </View>
-            <View style={styles.colUnit}>
-              <Text style={styles.cellRight}>
-                {item.unitPrice === 0 ? "Incl." : formatMoney(item.unitPrice, currency)}
+        {exclusions.length > 0 ? (
+          <View style={styles.excludesSection}>
+            <Text style={styles.sectionHeading}>{packageExcludesHeading}</Text>
+            {exclusions.map((item, index) => (
+              <Text key={index} style={styles.excludesItem}>
+                {`- ${item}`}
               </Text>
-            </View>
-            <View style={styles.colTotal}>
-              <Text style={styles.cellRight}>
-                {item.total === 0 ? "—" : formatMoney(item.total, currency)}
-              </Text>
-            </View>
+            ))}
           </View>
-        ))}
+        ) : null}
 
-        <View style={styles.totalsBox}>
-          <View style={styles.totalLine}>
-            <Text style={styles.totalLabel}>Subtotal</Text>
-            <Text style={styles.totalValue}>{formatMoney(subtotal, currency)}</Text>
-          </View>
-          <View style={styles.totalLine}>
-            <Text style={styles.totalLabel}>VAT (15%)</Text>
-            <Text style={styles.totalValue}>{formatMoney(vat, currency)}</Text>
-          </View>
-          <View style={styles.grandTotalLine}>
-            <Text style={styles.grandTotalLabel}>Total</Text>
-            <Text style={styles.grandTotalValue}>{formatMoney(total, currency)}</Text>
-          </View>
+        {/* Total price renders last, after everything the quote covers. */}
+        <View style={styles.pricingBox}>
+          {perPersonRate !== null ? (
+            <Text style={styles.perPersonLine}>
+              {paxLabel} x {formatMoney(perPersonRate, currency)} per person
+            </Text>
+          ) : null}
+          <Text style={styles.grandTotalLine}>
+            {formatTotalLabel(pax)}: {formatMoney(total, currency)} (VAT inclusive)
+          </Text>
         </View>
 
         <Text style={styles.footer}>{resolveFooterText(footerText, validUntil, currency)}</Text>

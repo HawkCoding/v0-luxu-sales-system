@@ -12,6 +12,9 @@ const errorLogMocks = vi.hoisted(() => ({
 }))
 vi.mock("@/lib/error-log", () => ({ logError: errorLogMocks.logError }))
 
+// Backups are feature-flagged off in production; force-enable so the route logic stays covered.
+vi.mock("@/lib/feature-flags", () => ({ BACKUPS_ENABLED: true }))
+
 import { GET } from "./route"
 
 // ── Helpers ────────────────────────────────────────────────────────────────

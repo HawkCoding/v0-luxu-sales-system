@@ -85,6 +85,7 @@ function normalizeLegRows(
     supplier_id: row.supplier_id,
     label: row.label,
     sort_order: row.sort_order,
+    date_anchor: row.date_anchor,
     created_at: row.created_at,
     supplierName: row.suppliers?.name ?? "Unknown supplier",
     supplierDescription: row.suppliers?.description ?? null,
@@ -370,6 +371,8 @@ export function normalizePackageChildren(
         supplier_id: leg.supplierId,
         label: leg.label?.trim() || null,
         sort_order: leg.sortOrder ?? index,
+        // Only hotels hang off the train's dates; an anchor on any other kind is meaningless.
+        date_anchor: kind === "hotel_property" ? leg.dateAnchor ?? null : null,
         created_at: now,
       },
       routeRows,

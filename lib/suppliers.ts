@@ -126,6 +126,8 @@ export function mapSupplier(row: SupplierRow): Supplier {
     childMaxAge: row.child_max_age ?? null,
     defaultTimeStart: row.default_time_start ?? null,
     defaultTimeEnd: row.default_time_end ?? null,
+    inclusions: row.inclusions ?? [],
+    exclusions: row.exclusions ?? [],
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     createdAtDisplay: formatDisplayDateTime(row.created_at),

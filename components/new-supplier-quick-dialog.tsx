@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
+import { DatePicker } from "@/components/ui/date-picker"
 import { Label } from "@/components/ui/label"
 import { NumericInput } from "@/components/ui/numeric-input"
 import {
@@ -359,11 +360,10 @@ export function NewSupplierQuickDialog({
             {priceExpires && (
               <div className="space-y-1.5">
                 <Label>Valid until</Label>
-                <Input
-                  type="date"
+                <DatePicker
                   value={validTo}
-                  min={validFrom}
-                  onChange={(e) => setValidTo(e.target.value)}
+                  minDate={validFrom}
+                  onChange={(value) => setValidTo(value ?? "")}
                 />
               </div>
             )}

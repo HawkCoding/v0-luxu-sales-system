@@ -5,6 +5,8 @@
 // sample previews; renderTemplate flags any token in a template body that
 // is not supplied at send time.
 
+import { QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
+
 export interface TemplateTokenSpec {
   /** Token name as written in the template, without braces (e.g. "customerName"). */
   name: string
@@ -87,14 +89,32 @@ export const TEMPLATE_TOKENS: Record<SystemTemplateKey, TemplateTokenSpec[]> = {
     { name: "quoteDate", description: "Date the quote was issued", kind: "scalar", sample: "2026-07-12" },
     { name: "direction", description: "Travel route / journey name", kind: "scalar", sample: "Pretoria → Cape Town" },
     { name: "departureDate", description: "Departure date of the trip", kind: "scalar", sample: "2026-09-14" },
-    { name: "validityDate", description: "Date the quote expires", kind: "scalar", sample: "2026-07-26" },
+    {
+      name: "departureDateShort",
+      description: "Departure date, short month format (used in the subject line)",
+      kind: "scalar",
+      sample: "14 Sep 2026",
+    },
+    {
+      name: "supplierName",
+      description: "Primary supplier for the booking (route supplier, falling back to hotel supplier)",
+      kind: "scalar",
+      sample: "Bluetrain",
+    },
+    { name: "clientSurname", description: "Customer's surname", kind: "scalar", sample: "Smith" },
+    // Hidden while quote validity is disabled — still substituted at send time
+    // so a customised template containing the token keeps working.
+    ...(QUOTE_VALIDITY_ENABLED
+      ? [{ name: "validityDate", description: "Date the quote expires", kind: "scalar", sample: "2026-07-26" } satisfies TemplateTokenSpec]
+      : []),
     { name: "total", description: "Total quoted price (formatted)", kind: "scalar", sample: "R 58 900,00" },
     {
       name: "quoteSummaryTable",
-      description: "Quote meta, line-item table, and totals (system-generated)",
+      description:
+        "Quote meta (journey dates, guests), package itinerary and exclusions, then the VAT-inclusive total (system-generated)",
       kind: "block",
       sample:
-        '<div style="margin:18px 0;padding:14px 16px;background:#fbf8f3;border:1px solid #e8dfd2;"><p style="margin:0;"><strong>Quote number:</strong> BT-2026-0001-Q1</p><p style="margin:6px 0 0;"><strong>Sample line:</strong> Deluxe Suite × 2 — R 58 900,00</p></div>',
+        '<div style="margin:18px 0;padding:14px 16px;background:#fbf8f3;border:1px solid #e8dfd2;" data-label="Quote details"><p style="margin:0;"><strong>Quote number:</strong> BT-2026-0001-Q1</p><p style="margin:6px 0 0;"><strong>Journey:</strong> 18 – 22 July 2026</p><p style="margin:6px 0 0;"><strong>Guests:</strong> 2 Adults</p></div><div style="margin:18px 0;padding:14px 16px;background:#f4efe6;border:1px solid #d8cdbc;" data-label="Total price"><p style="margin:0;font-weight:700;">TOTAL for 2 Adults: R 86 300,00 (VAT inclusive)</p></div>',
     },
   ],
   follow_up: [

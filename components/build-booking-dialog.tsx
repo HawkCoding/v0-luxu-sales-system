@@ -13,7 +13,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -35,17 +34,22 @@ import { QuoteLineSupplierPicker, type QuoteExtraSelection } from "@/components/
 import { getDestinationLocationIds } from "@/lib/packages/location-filter"
 import { SuiteLegEditor } from "@/components/packages/suite-leg-editor"
 import { TransportLegEditor } from "@/components/packages/transport-leg-editor"
+import { TripDateSummary } from "@/components/packages/trip-date-summary"
 import type { PassengerTotals } from "@/lib/packages/passenger-totals"
+import { deriveTripDateRangeFromStates } from "@/lib/packages/trip-date-range"
 import {
+  applyAnchoredHotelDates,
   buildDefaultLegStates,
   hydrateFromSaved,
   PASSENGER_SPLIT_SUPPLIER_KINDS,
   toApplySelections,
+  toHotelAnchorContext,
   toPackageSelectionsPatch,
   toTransportRequestsPut,
   validateConfigureState,
   type ApplyCommissionOverride,
   type ApplyLegState,
+  type HotelAnchorContext,
   type SavedPackageState,
 } from "@/lib/packages/apply-dialog-state"
 
@@ -86,16 +90,7 @@ interface ServiceRow {
 interface BuildBookingResponse {
   packageId: string
   slug: string
-  tripStartDate: string
-  tripEndDate: string
   packageDetail: PackageDetail
-}
-
-function addNights(date: string, nights: number): string {
-  const parsed = new Date(`${date}T00:00:00Z`)
-  if (Number.isNaN(parsed.getTime())) return date
-  parsed.setUTCDate(parsed.getUTCDate() + nights)
-  return parsed.toISOString().slice(0, 10)
 }
 
 type Step = "services" | "configure" | "confirm"
@@ -131,8 +126,6 @@ export function BuildBookingDialog({
   const [existingTransportRequests, setExistingTransportRequests] = useState<BookingTransportRequest[]>([])
   const [legStates, setLegStates] = useState<ApplyLegState[]>([])
   const [totalsBySupplierId, setTotalsBySupplierId] = useState<Record<string, PassengerTotals>>({})
-  const [tripStartDate, setTripStartDate] = useState("")
-  const [tripEndDate, setTripEndDate] = useState("")
   const [commissionByLegId, setCommissionByLegId] = useState<Record<string, LegCommissionState>>({})
   const [rateTypeId, setRateTypeId] = useState("")
   const [previewLineItems, setPreviewLineItems] = useState<QuoteLineItem[]>([])
@@ -208,9 +201,6 @@ export function BuildBookingDialog({
                     supplierName: leg.supplierName,
                   })),
               )
-              const startDate = saved.tripStartDate ?? travelDate ?? ""
-              setTripStartDate(startDate)
-              setTripEndDate(saved.tripEndDate ?? "")
             }
           }
         }
@@ -240,8 +230,6 @@ export function BuildBookingDialog({
     setPackageDetail(null)
     setLegStates([])
     setTotalsBySupplierId({})
-    setTripStartDate("")
-    setTripEndDate("")
     setCommissionByLegId({})
     setRateTypeId("")
     setPreviewLineItems([])
@@ -280,15 +268,9 @@ export function BuildBookingDialog({
     })
   }
 
-  const tripDatesValid = Boolean(tripStartDate) && Boolean(tripEndDate) && tripEndDate >= tripStartDate
-
   async function buildServices() {
     if (services.length === 0) {
       setBuildError("Add at least one service")
-      return
-    }
-    if (!tripDatesValid) {
-      setBuildError("Trip start and end dates are required (end on or after start)")
       return
     }
 
@@ -304,8 +286,6 @@ export function BuildBookingDialog({
             supplierId: service.supplierId,
             supplierKind: service.supplierKind,
           })),
-          tripStartDate,
-          tripEndDate,
         }),
       })
       const payload = await res.json()
@@ -336,7 +316,8 @@ export function BuildBookingDialog({
       }
       setTotalsBySupplierId(totals)
 
-      const stateOptions = { tripStartDate: tripStartDate || null, totalsBySupplierId: totals }
+      // The job's enquiry travel date seeds default service dates; everything stays editable.
+      const stateOptions = { tripStartDate: savedState?.tripStartDate ?? travelDate ?? null, totalsBySupplierId: totals }
       const savedLegIds = new Set((savedState?.selections ?? []).map((row) => row.package_leg_id))
       const states =
         savedState && savedState.packageId === built.packageId
@@ -356,14 +337,29 @@ export function BuildBookingDialog({
     }
   }
 
+  // Anchored hotel dates are derived, so every edit re-runs them: changing the train's departure
+  // date or a hotel's night count immediately re-dates the stays that hang off it.
   function updateLegState(next: ApplyLegState) {
-    setLegStates((prev) => prev.map((state) => (state.legId === next.legId ? next : state)))
+    setLegStates((prev) => {
+      const merged = prev.map((state) => (state.legId === next.legId ? next : state))
+      return packageDetail ? applyAnchoredHotelDates(packageDetail, merged) : merged
+    })
+  }
+
+  function hotelAnchorContext(legId: string): HotelAnchorContext | null {
+    if (!packageDetail) return null
+    return toHotelAnchorContext(packageDetail, legStates, legId)
   }
 
   async function validateAndPreview() {
     if (!packageSlug || !packageDetail) return
 
     const problems = validateConfigureState(packageDetail, legStates, { totalsBySupplierId })
+    // Pricing needs at least one dated service (rate cards match on the derived trip start).
+    const derivedRange = deriveTripDateRangeFromStates(packageDetail, legStates)
+    if (problems.length === 0 && !derivedRange.start) {
+      problems.push("Add a date to at least one service — trip dates are worked out from them")
+    }
     setValidationErrors(problems)
     if (problems.length > 0) return
 
@@ -416,7 +412,7 @@ export function BuildBookingDialog({
         body: JSON.stringify({
           jobId,
           quoteId,
-          travelDate: tripStartDate,
+          travelDate: derivedRange.start,
           rateTypeId: rateTypeId || undefined,
           selections: toApplySelections(legStates, commissionOverrides),
           extras: extras.map((extra) => ({
@@ -478,31 +474,6 @@ export function BuildBookingDialog({
                 configure the fine detail and price the quote.
               </DialogDescription>
             </DialogHeader>
-
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor="build-trip-start">Trip start date</Label>
-                <Input
-                  id="build-trip-start"
-                  type="date"
-                  value={tripStartDate}
-                  onChange={(event) => {
-                    const startDate = event.target.value
-                    setTripStartDate(startDate)
-                    if (startDate && !tripEndDate) setTripEndDate(addNights(startDate, 1))
-                  }}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="build-trip-end">Trip end date</Label>
-                <Input
-                  id="build-trip-end"
-                  type="date"
-                  value={tripEndDate}
-                  onChange={(event) => setTripEndDate(event.target.value)}
-                />
-              </div>
-            </div>
 
             <div className="grid gap-3 md:grid-cols-[12rem_1fr_auto]">
               <Select value={pickerKind} onValueChange={(value) => setPickerKind(value as SupplierKind)}>
@@ -600,9 +571,11 @@ export function BuildBookingDialog({
               </DialogTitle>
               <DialogDescription>
                 Fill in the fine detail for each service. Saving here updates the booking and prices
-                the quote.
+                the quote. Trip dates are worked out from the service dates.
               </DialogDescription>
             </DialogHeader>
+
+            <TripDateSummary detail={packageDetail} states={legStates} />
 
             {rateTypes.length > 0 && (
               <div className="max-w-xs space-y-1.5">
@@ -641,6 +614,7 @@ export function BuildBookingDialog({
                         value={state}
                         onChange={updateLegState}
                         expectedTotals={totalsBySupplierId[leg.supplierId] ?? null}
+                        anchorContext={hotelAnchorContext(leg.id)}
                       />
                     )}
                     {state.selected ? (
@@ -704,7 +678,7 @@ export function BuildBookingDialog({
                         <span className="text-muted-foreground">
                           {" · "}
                           {extra.routeName} · {extra.suiteTypeName}
-                          {extra.quantity ? ` ×${extra.quantity}` : ""}
+                          {extra.quantity ? ` Ã—${extra.quantity}` : ""}
                         </span>
                       </div>
                       <button
@@ -775,8 +749,8 @@ export function BuildBookingDialog({
                   <tr className="border-b text-left text-xs font-medium text-muted-foreground">
                     <th className="px-3 py-2">Description</th>
                     <th className="px-3 py-2 text-right">Qty</th>
-                    <th className="px-3 py-2 text-right">Unit price</th>
-                    <th className="px-3 py-2 text-right">Total</th>
+                    <th className="px-3 py-2 text-right whitespace-nowrap min-w-[100px]">Unit price</th>
+                    <th className="px-3 py-2 text-right whitespace-nowrap min-w-[100px]">Total</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -810,8 +784,8 @@ export function BuildBookingDialog({
                           <div className="text-[11px] text-muted-foreground">{li.pricingSnapshot.unit}</div>
                         ) : null}
                       </td>
-                      <td className="px-3 py-2 text-right text-xs">R {li.unitPrice.toLocaleString()}</td>
-                      <td className="px-3 py-2 text-right text-xs font-medium">R {li.total.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right text-xs whitespace-nowrap">R {li.unitPrice.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right text-xs font-medium whitespace-nowrap">R {li.total.toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>

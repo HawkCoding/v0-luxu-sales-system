@@ -35,11 +35,35 @@ describe("editor round-trip", () => {
       quoteNumber: "BT-2026-0001-Q1",
       quoteDate: "2026-07-12",
       validUntil: "2026-07-26",
-      subtotal: 58900,
-      vat: 0,
+      journeyStart: "2026-07-18",
+      journeyEnd: "2026-07-22",
+      adults: 2,
+      children: 0,
       total: 58900,
-      lineItems: [
-        { description: "Deluxe Suite", supplierDescription: "Rovos Rail", qty: 2, unitPrice: 29450, total: 58900 },
+      itineraryBlocks: [
+        {
+          serviceType: "train",
+          title: "The Blue Train",
+          contactDetails: { name: "The Blue Train" },
+          serviceData: {
+            departureDate: "2026-07-20",
+            route: "Pretoria to Cape Town",
+            suiteType: "Deluxe Suite",
+            nights: 2,
+          },
+          displayOrder: 1,
+        },
+        {
+          serviceType: "hotel",
+          title: "Irene Country Lodge",
+          contactDetails: { name: "Irene Country Lodge" },
+          serviceData: {
+            departureDate: "2026-07-18",
+            roomType: "Guest room with lake view",
+            nights: 2,
+          },
+          displayOrder: 2,
+        },
       ],
     })
     const source = `<p>Dear Sofia,</p>${table}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>`

@@ -49,6 +49,29 @@ function humanizeToken(name: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1)
 }
 
+// Readable names for opaque tags that carry no text of their own.
+const TAG_FALLBACK_LABELS: Record<string, string> = {
+  HR: "Divider line",
+  TABLE: "Table",
+  IMG: "Image",
+}
+
+/**
+ * Human label for an opaque block placeholder. Generated blocks name
+ * themselves via data-label (see quote-summary-block/banking-details-block);
+ * otherwise fall back to a snippet of the block's text so the user can tell
+ * what they are moving or removing, and lastly to the tag name.
+ */
+function describeElement(el: Element): string {
+  const explicit = el.getAttribute("data-label")?.trim()
+  if (explicit) return explicit
+  const text = (el.textContent ?? "").replace(/\s+/g, " ").trim()
+  if (text) {
+    return text.length > 48 ? `“${text.slice(0, 48).trimEnd()}…”` : `“${text}”`
+  }
+  return TAG_FALLBACK_LABELS[el.tagName] ?? humanizeToken(el.tagName.toLowerCase())
+}
+
 /** True when an element and every descendant are representable rich tags with no style/class. */
 function isPlainRich(el: Element): boolean {
   if (!RICH_TAGS.has(el.tagName)) return false
@@ -125,7 +148,7 @@ export function toEditorHtml(source: string, blockTokens: string[]): ToEditorRes
     }
 
     // Anything else (table, styled div, hr, unknown tags) -> opaque placeholder.
-    out.push(makePlaceholder(doc, { label: humanizeToken(el.tagName.toLowerCase()), html: el.outerHTML }))
+    out.push(makePlaceholder(doc, { label: describeElement(el), html: el.outerHTML }))
   }
 
   const container = doc.createElement("div")

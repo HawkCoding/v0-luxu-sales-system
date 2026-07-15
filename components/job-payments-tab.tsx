@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { DatePicker } from "@/components/ui/date-picker"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -117,7 +118,7 @@ export function JobPaymentsTab({ payments, jobId, mutate, stage }: JobPaymentsTa
               <div className="space-y-3">
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">Payment Date</label>
-                  <Input type="date" value={form.paymentDate} onChange={(e) => setForm(f => ({ ...f, paymentDate: e.target.value }))} className="mt-1" />
+                  <DatePicker value={form.paymentDate} onChange={(value) => setForm(f => ({ ...f, paymentDate: value ?? "" }))} className="mt-1" aria-label="Payment date" />
                 </div>
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">Amount (ZAR)</label>

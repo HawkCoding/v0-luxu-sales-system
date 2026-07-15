@@ -98,7 +98,8 @@ describe("exportAuditToCsv", () => {
     expect(result.split("\r\n")[0]).toBe(
       '"Timestamp","Actor","Action","Description","Entity Type","Entity ID","Before (JSON)","After (JSON)","Metadata"',
     )
-    expect(result).toContain('"2026-03-07T10:30:00.000Z"')
+    // Time-of-day is local so it varies by TZ; only the day/month/year order is asserted.
+    expect(result).toContain('"07/03/2026 ')
     expect(result).toContain('"Jane Admin recorded updated on Booking"')
     expect(result).toContain('"{""note"":""old \\""value\\""""}"')
     expect(result).toContain('"{""note"":""new,value""}"')
