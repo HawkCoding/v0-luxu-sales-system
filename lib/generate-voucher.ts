@@ -228,6 +228,9 @@ function buildServiceBlockBodyRows(block: VoucherServiceBlock): string {
     if (d.pickup) rows.push(["Pickup", d.pickup])
     if (d.dropoff) rows.push(["Drop-off", d.dropoff])
     if (departureDate) rows.push(["Date", departureDate])
+    if (d.startTime) rows.push(["Pickup Time", d.startTime])
+    if (d.flightNumber) rows.push(["Flight", d.flightNumber])
+    if (arrivalDate) rows.push(["Return", d.endTime ? `${arrivalDate} ${d.endTime}` : arrivalDate])
   } else if (block.serviceType === "tour") {
     if (d.itinerary) rows.push(["Itinerary", d.itinerary])
     if (departureDate) rows.push(["Start Date", departureDate])

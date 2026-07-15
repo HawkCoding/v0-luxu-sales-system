@@ -39,6 +39,21 @@ export function TransportLegEditor({ leg, value, onChange }: TransportLegEditorP
     })
   }
 
+  /** Routes are quick-fill templates: picking one pre-fills empty pickup/drop-off fields but never
+   * overwrites what the salesperson already typed. */
+  function applyRouteTemplate(routeId: string) {
+    const route = leg.routes.find((candidate) => candidate.id === routeId)
+    onChange({
+      ...value,
+      routeId,
+      requests: value.requests.map((request) => ({
+        ...request,
+        pickupPoint: request.pickupPoint.trim() ? request.pickupPoint : route?.pickupPoint ?? "",
+        dropoffPoint: request.dropoffPoint.trim() ? request.dropoffPoint : route?.dropoffPoint ?? "",
+      })),
+    })
+  }
+
   function updateRentalDetails(id: string, patch: Partial<NonNullable<BookingTransportRequest["rentalDetails"]>>) {
     onChange({
       ...value,
@@ -92,18 +107,12 @@ export function TransportLegEditor({ leg, value, onChange }: TransportLegEditorP
         </div>
       </div>
 
-      {value.selected && leg.routes.length === 0 ? (
-        <p className="max-w-[280px] rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
-          No routes configured for {leg.supplierName} — add one under Suppliers before booking it.
-        </p>
-      ) : null}
-
-      {value.selected && leg.routes.length > 1 ? (
+      {value.selected && leg.routes.length > 0 ? (
         <div className="max-w-[280px] space-y-1.5">
-          <Label>{isRental ? "Rental route" : "Transfer route"}</Label>
-          <Select value={value.routeId ?? ""} onValueChange={(routeId) => onChange({ ...value, routeId })}>
+          <Label>{isRental ? "Rental route template" : "Transfer route template"}</Label>
+          <Select value={value.routeId ?? ""} onValueChange={applyRouteTemplate}>
             <SelectTrigger>
-              <SelectValue placeholder="Select route" />
+              <SelectValue placeholder="Quick-fill from a route (optional)" />
             </SelectTrigger>
             <SelectContent>
               {leg.routes.map((route) => (
@@ -113,6 +122,9 @@ export function TransportLegEditor({ leg, value, onChange }: TransportLegEditorP
               ))}
             </SelectContent>
           </Select>
+          <p className="text-xs text-muted-foreground">
+            Pre-fills empty pickup/drop-off fields — documents always show what you type below.
+          </p>
         </div>
       ) : null}
 
@@ -208,6 +220,18 @@ export function TransportLegEditor({ leg, value, onChange }: TransportLegEditorP
                 <Input
                   value={request.flightNumber ?? ""}
                   onChange={(event) => updateRequest(request.id, { flightNumber: event.target.value || null })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Price override</Label>
+                <NumericInput
+                  min="0"
+                  step="0.01"
+                  nullable
+                  value={request.priceOverride}
+                  onValueChange={(next) => updateRequest(request.id, { priceOverride: next })}
+                  placeholder="Rate card price"
+                  aria-label="Price override"
                 />
               </div>
               <div className="space-y-1.5 md:col-span-2">

@@ -634,6 +634,7 @@ export type Database = {
           passenger_count: number | null
           pickup_at: string | null
           pickup_point: string
+          price_override: number | null
           route_id: string | null
           service_type: string
           sort_order: number
@@ -653,6 +654,7 @@ export type Database = {
           passenger_count?: number | null
           pickup_at?: string | null
           pickup_point: string
+          price_override?: number | null
           route_id?: string | null
           service_type: string
           sort_order?: number
@@ -672,6 +674,7 @@ export type Database = {
           passenger_count?: number | null
           pickup_at?: string | null
           pickup_point?: string
+          price_override?: number | null
           route_id?: string | null
           service_type?: string
           sort_order?: number

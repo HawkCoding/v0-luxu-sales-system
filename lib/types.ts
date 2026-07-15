@@ -761,6 +761,8 @@ export interface BookingTransportRequest {
   passengerCount: number | null
   luggageCount: number | null
   flightNumber: string | null
+  /** When set, the quote line for this request uses this price instead of the rate card. */
+  priceOverride: number | null
   notes: string | null
   sortOrder: number
   createdAt: string

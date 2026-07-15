@@ -54,8 +54,24 @@ interface SupplierJoin {
 interface RouteJoin {
   name: string | null
   duration_days: number | null
-  pickup_point: string | null
-  dropoff_point: string | null
+}
+
+interface TransportRequestJoinRow {
+  id: string
+  package_leg_id: string | null
+  service_type: string
+  pickup_point: string
+  dropoff_point: string
+  pickup_at: string | null
+  flight_number: string | null
+  notes: string | null
+  sort_order: number
+  suppliers: SupplierJoin | SupplierJoin[] | null
+  suite_types: { name: string | null } | { name: string | null }[] | null
+  rental_details:
+    | { return_at: string | null }
+    | { return_at: string | null }[]
+    | null
 }
 
 interface SelectionJoinRow {
@@ -85,8 +101,69 @@ function toHoursMinutes(value: string | null | undefined): string | null {
   return trimmed.slice(0, 5)
 }
 
+/** YYYY-MM-DD part of a pickup timestamp. */
+function timestampDate(value: string | null | undefined): string | null {
+  if (!value) return null
+  const candidate = value.slice(0, 10)
+  return /^\d{4}-\d{2}-\d{2}$/.test(candidate) ? candidate : null
+}
+
+/** HH:MM part of a pickup timestamp, in the timezone it was entered (same convention as
+ * `formatDisplayDateTime` on the booking screens). */
+function timestampTime(value: string | null | undefined): string | null {
+  if (!value) return null
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return null
+  const pad = (part: number) => String(part).padStart(2, "0")
+  return `${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`
+}
+
 function cleanList(values: string[] | null | undefined): string[] {
   return (values ?? []).map((value) => value.trim()).filter(Boolean)
+}
+
+interface TransportBlockContext {
+  title: string
+  displayOrder: number
+  contactDetails: VoucherServiceBlockContact
+  supplier: SupplierJoin | null | undefined
+  /** Leg-level vehicle category, used when the request doesn't set its own. */
+  fallbackVehicle: string | null
+  supplierReference: string | null
+}
+
+/** One captured transfer/rental trip → one client-facing block: the typed pickup/drop-off and
+ * pickup time are authoritative; rentals also carry their return date/time. */
+function transportRequestBlock(
+  request: TransportRequestJoinRow,
+  blockContext: TransportBlockContext,
+): VoucherServiceBlock {
+  const requestSuite = firstRecord(request.suite_types)
+  const rental = firstRecord(request.rental_details)
+  const isRental = request.service_type === "rental"
+
+  return {
+    serviceType: "transfer",
+    title: blockContext.title,
+    supplierReference: blockContext.supplierReference,
+    contactDetails: blockContext.contactDetails,
+    serviceData: {
+      pickup: request.pickup_point.trim() || null,
+      dropoff: request.dropoff_point.trim() || null,
+      departureDate: timestampDate(request.pickup_at),
+      startTime:
+        timestampTime(request.pickup_at) ?? toHoursMinutes(blockContext.supplier?.default_time_start),
+      arrivalDate: isRental ? timestampDate(rental?.return_at) : null,
+      endTime: isRental ? timestampTime(rental?.return_at) : null,
+      vehicleType: requestSuite?.name ?? blockContext.fallbackVehicle,
+      suiteType: requestSuite?.name ?? blockContext.fallbackVehicle,
+      flightNumber: request.flight_number,
+      notes: request.notes,
+      inclusions: cleanList(blockContext.supplier?.inclusions),
+      exclusions: cleanList(blockContext.supplier?.exclusions),
+    },
+    displayOrder: blockContext.displayOrder,
+  }
 }
 
 /**
@@ -109,12 +186,28 @@ export async function buildVoucherServiceBlocks(
       `id, package_leg_id, selected, supplier_id, route_id, suite_type_id, service_date, nights, notes,
        package_legs(sort_order, label),
        suppliers(name, phone, email, website, location, kind, default_time_start, default_time_end, inclusions, exclusions),
-       routes(name, duration_days, pickup_point, dropoff_point),
+       routes(name, duration_days),
        suite_types(name)`,
     )
     .eq("booking_id", context.bookingId)
 
   if (error) throw error
+
+  // Transfers/rentals render from what the salesperson actually captured per trip — the typed
+  // pickup/drop-off, pickup time and flight — never from a route's static points.
+  const { data: transportRows, error: transportError } = await supabase
+    .from("booking_transport_requests")
+    .select(
+      `id, package_leg_id, service_type, pickup_point, dropoff_point, pickup_at, flight_number, notes, sort_order,
+       suppliers(name, phone, email, website, location, kind, default_time_start, default_time_end, inclusions, exclusions),
+       suite_types(name),
+       rental_details:booking_vehicle_rental_details(return_at)`,
+    )
+    .eq("booking_id", context.bookingId)
+    .order("sort_order", { ascending: true })
+
+  if (transportError) throw transportError
+  const transportRequests = (transportRows ?? []) as unknown as TransportRequestJoinRow[]
 
   const selections = ((rows ?? []) as unknown as SelectionJoinRow[]).filter((row) => row.selected)
 
@@ -124,7 +217,7 @@ export async function buildVoucherServiceBlocks(
       ? await getHotelDefaultTimes(supabase)
       : null)
 
-  const blocks: VoucherServiceBlock[] = selections.map((row, idx) => {
+  const blocks: VoucherServiceBlock[] = selections.flatMap((row, idx) => {
     const supplier = firstRecord(row.suppliers)
     const route = firstRecord(row.routes)
     const suite = firstRecord(row.suite_types)
@@ -139,6 +232,30 @@ export async function buildVoucherServiceBlocks(
       email: supplier?.email ?? null,
       website: supplier?.website ?? null,
       location: supplier?.location ?? null,
+    }
+
+    const title = leg?.label?.trim() || voucherServiceTypeLabel(serviceType)
+    const displayOrder = leg?.sort_order ?? idx
+
+    // A transfer leg renders one block per captured trip; the leg-level selection only supplies
+    // the fallback vehicle category and supplier contact.
+    if (serviceType === "transfer") {
+      const legRequests = transportRequests.filter(
+        (request) => request.package_leg_id === row.package_leg_id,
+      )
+      if (legRequests.length > 0) {
+        return legRequests.map((request, requestIndex) =>
+          transportRequestBlock(request, {
+            title,
+            // Fractional offsets keep a leg's trips in captured order within its slot.
+            displayOrder: displayOrder + requestIndex / 100,
+            contactDetails,
+            supplier,
+            fallbackVehicle: suite?.name ?? null,
+            supplierReference: context.supplierReferenceFallback ?? null,
+          }),
+        )
+      }
     }
 
     const serviceDate = row.service_date ?? null
@@ -165,28 +282,54 @@ export async function buildVoucherServiceBlocks(
       mealPlan: isHotel ? route?.name ?? null : null,
       suiteType: suite?.name ?? null,
       roomType: isHotel ? suite?.name ?? null : null,
+      vehicleType: serviceType === "transfer" ? suite?.name ?? null : null,
       departureDate: serviceDate,
       arrivalDate,
       startTime,
       endTime,
       nights,
       durationDays,
-      pickup: serviceType === "transfer" ? route?.pickup_point ?? null : null,
-      dropoff: serviceType === "transfer" ? route?.dropoff_point ?? null : null,
       notes: row.notes ?? null,
       inclusions: cleanList(supplier?.inclusions),
       exclusions: cleanList(supplier?.exclusions),
     }
 
-    return {
-      serviceType,
-      title: leg?.label?.trim() || voucherServiceTypeLabel(serviceType),
-      supplierReference: context.supplierReferenceFallback ?? null,
-      contactDetails,
-      serviceData,
-      displayOrder: leg?.sort_order ?? idx,
-    }
+    return [
+      {
+        serviceType,
+        title,
+        supplierReference: context.supplierReferenceFallback ?? null,
+        contactDetails,
+        serviceData,
+        displayOrder,
+      },
+    ]
   })
+
+  // Manually added transfers (not tied to a package leg) belong on the documents too.
+  const manualRequests = transportRequests.filter((request) => !request.package_leg_id)
+  if (manualRequests.length > 0) {
+    const orderBase = blocks.reduce((max, block) => Math.max(max, block.displayOrder), -1) + 1
+    manualRequests.forEach((request, index) => {
+      const supplier = firstRecord(request.suppliers)
+      blocks.push(
+        transportRequestBlock(request, {
+          title: voucherServiceTypeLabel("transfer"),
+          displayOrder: orderBase + index,
+          contactDetails: {
+            name: supplier?.name ?? null,
+            phone: supplier?.phone ?? null,
+            email: supplier?.email ?? null,
+            website: supplier?.website ?? null,
+            location: supplier?.location ?? null,
+          },
+          supplier,
+          fallbackVehicle: null,
+          supplierReference: context.supplierReferenceFallback ?? null,
+        }),
+      )
+    })
+  }
 
   if (context.additionalServicesDetails && context.additionalServicesDetails.trim()) {
     blocks.push({

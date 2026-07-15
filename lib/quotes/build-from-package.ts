@@ -58,6 +58,7 @@ interface TransportRequestRow {
   pickup_point: string
   dropoff_point: string
   pickup_at: string | null
+  price_override: number | null
   rental_details?: { return_at: string | null } | { return_at: string | null }[] | null
 }
 
@@ -107,7 +108,7 @@ export async function buildPackageQuoteLineItems({
 
   const { data: transportRequests } = await supabase
     .from("booking_transport_requests")
-    .select("service_type, route_id, suite_type_id, package_leg_id, pickup_point, dropoff_point, pickup_at, rental_details:booking_vehicle_rental_details(return_at)")
+    .select("service_type, route_id, suite_type_id, package_leg_id, pickup_point, dropoff_point, pickup_at, price_override, rental_details:booking_vehicle_rental_details(return_at)")
     .eq("booking_id", jobId)
     .order("sort_order", { ascending: true })
 
@@ -617,7 +618,8 @@ export async function buildPackageQuoteLineItems({
           addLineItem({
             description: transportDescription,
             qty: isVehicleRental ? getBillableRentalDays(transportRequest) : 1,
-            unitPrice: validRateCard.pricePerPerson,
+            // A per-request price override beats the rate card (odd trips, after-hours, etc.).
+            unitPrice: transportRequest?.price_override ?? validRateCard.pricePerPerson,
             supplierDescription,
             suiteTypeId,
             commission,

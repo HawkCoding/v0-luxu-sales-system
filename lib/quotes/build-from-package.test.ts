@@ -151,6 +151,53 @@ describe("buildPackageQuoteLineItems", () => {
     expect(lineItems[1].unitPrice).toBe(500)
   })
 
+  it("uses a request's price override instead of the rate card when set", async () => {
+    const transferLeg = leg({
+      id: "leg-transfer",
+      supplierKind: "transfers",
+      routes: [route("route-t", "supplier-leg-transfer", "Airport transfers")],
+      suiteTypes: [suiteType("vehicle-sedan", "supplier-leg-transfer", "Sedan")],
+      rateCards: [rateCard({ id: "rc-sedan", routeId: "route-t", suiteTypeId: "vehicle-sedan", pricePerPerson: 500 })],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({
+        transportRequests: [
+          {
+            service_type: "transfer",
+            route_id: null,
+            suite_type_id: "vehicle-sedan",
+            package_leg_id: "leg-transfer",
+            pickup_point: "Airport",
+            dropoff_point: "Private villa, Bantry Bay",
+            pickup_at: null,
+            price_override: 1850,
+            rental_details: null,
+          },
+          {
+            service_type: "transfer",
+            route_id: null,
+            suite_type_id: "vehicle-sedan",
+            package_leg_id: "leg-transfer",
+            pickup_point: "Hotel",
+            dropoff_point: "Station",
+            pickup_at: null,
+            price_override: null,
+            rental_details: null,
+          },
+        ],
+      }),
+      packageDetail: detail([transferLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [{ legId: "leg-transfer", selected: true, suiteTypeId: "vehicle-sedan" }],
+    })
+
+    expect(lineItems).toHaveLength(2)
+    expect(lineItems[0].unitPrice).toBe(1850)
+    expect(lineItems[1].unitPrice).toBe(500)
+  })
+
   it("marks fixed-price package legs as inclusions so they aren't read as unpriced", async () => {
     const trainLeg = leg({ id: "leg-train", supplierKind: "train_operator", label: "The Blue Train" })
     const packageDetail = { ...detail([trainLeg]), fixedPricePerPerson: 24800 }
