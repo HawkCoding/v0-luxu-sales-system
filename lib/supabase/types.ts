@@ -3019,7 +3019,9 @@ export type Database = {
           default_time_start: string | null
           description: string | null
           email: string | null
+          exclusions: string[]
           id: string
+          inclusions: string[]
           infant_max_age: number | null
           kind: Database["public"]["Enums"]["supplier_kind"]
           location: string | null
@@ -3043,7 +3045,9 @@ export type Database = {
           default_time_start?: string | null
           description?: string | null
           email?: string | null
+          exclusions?: string[]
           id?: string
+          inclusions?: string[]
           infant_max_age?: number | null
           kind: Database["public"]["Enums"]["supplier_kind"]
           location?: string | null
@@ -3067,7 +3071,9 @@ export type Database = {
           default_time_start?: string | null
           description?: string | null
           email?: string | null
+          exclusions?: string[]
           id?: string
+          inclusions?: string[]
           infant_max_age?: number | null
           kind?: Database["public"]["Enums"]["supplier_kind"]
           location?: string | null

@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test"
 import { randomUUID } from "node:crypto"
 import { createQaSupabase } from "../../qa/lib/db"
+import { BACKUPS_ENABLED } from "../../lib/feature-flags"
 import { READONLY, READONLY_STORAGE_STATE, report } from "./readonly.fixtures"
 
 // =============================================================================
@@ -354,8 +355,15 @@ test("R10 — cannot manage users/error log/backup", async ({ request }) => {
     const a = await assertBlocked(N, T, "GET /api/users", users)
     const resolve = await request.post(`/api/error-logs/${randomUUID()}/resolve`, jsonInit({}))
     const b = await assertBlocked(N, T, "POST /api/error-logs/[id]/resolve", resolve)
-    const backup = await request.post("/api/backups", jsonInit({}))
-    const c = await assertBlocked(N, T, "POST /api/backups", backup)
+    // Backups are feature-disabled: the route 404s for every role, so there is no
+    // role-blocking behaviour left to assert. Re-enable this check with the feature.
+    let c = true
+    if (BACKUPS_ENABLED) {
+      const backup = await request.post("/api/backups", jsonInit({}))
+      c = await assertBlocked(N, T, "POST /api/backups", backup)
+    } else {
+      report.addEvidence(N, T, "POST /api/backups → skipped (BACKUPS_ENABLED=false; route returns 404 for all roles)")
+    }
     report.record(N, T, a && b && c ? "PASS" : "FAIL", "User-management, error-log resolve, and backup all blocked at the API")
   } catch (err) {
     report.record(N, T, "FAIL", `Error: ${(err as Error).message}`)

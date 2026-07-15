@@ -36,6 +36,8 @@ const supplierRow: SupplierRow = {
   single_supplement_pct: 35,
   default_time_start: null,
   default_time_end: null,
+  inclusions: ["High Tea", "Wi-Fi"],
+  exclusions: ["Gratuities"],
   infant_max_age: null,
   child_max_age: null,
   created_at: "2026-01-01T10:00:00.000Z",

@@ -3,6 +3,7 @@ import { z } from "zod"
 import { jsonZodError } from "@/lib/api/responses"
 import { writeAuditLog } from "@/lib/audit-write"
 import { logError } from "@/lib/error-log"
+import { BACKUPS_ENABLED } from "@/lib/feature-flags"
 import { requireAdminSettingsAccess } from "@/lib/settings-access"
 import { createServiceClient } from "@/lib/supabase/server"
 import type { Json } from "@/lib/supabase/types"
@@ -21,6 +22,9 @@ const bodySchema = z
   })
 
 export async function POST(request: Request) {
+  if (!BACKUPS_ENABLED) {
+    return NextResponse.json({ error: "Backups are currently disabled" }, { status: 404 })
+  }
   // Restore is Admin-only — more destructive than a typical Manager action.
   const auth = await requireAdminSettingsAccess()
   if (!auth.ok) return auth.response

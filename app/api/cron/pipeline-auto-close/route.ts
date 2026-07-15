@@ -18,6 +18,7 @@ interface MaintenanceBooking {
   consultant: string | null
   departure_date: string | null
   duration_nights: number | null
+  trip_end_date: string | null
   customer: { first_name: string | null } | null
   route: { name: string | null } | null
 }
@@ -50,7 +51,7 @@ export async function GET(request: Request) {
   const { data: bookings, error: bookingsError } = await supabase
     .from("bookings")
     .select(
-      "id, booking_number, stage, source, raw_text, updated_at, customer_id, consultant, departure_date, duration_nights, customer:customers(first_name), route:routes(name)",
+      "id, booking_number, stage, source, raw_text, updated_at, customer_id, consultant, departure_date, duration_nights, trip_end_date, customer:customers(first_name), route:routes(name)",
     )
     .in("stage", ["voucher_sent", "trip_active"])
     .not("departure_date", "is", null)
@@ -81,7 +82,11 @@ export async function GET(request: Request) {
   for (const booking of maintenanceBookings) {
     if (!booking.departure_date) continue
 
-    const tripEndDate = addDays(dateFromDatabaseDate(booking.departure_date), booking.duration_nights ?? 0)
+    // Prefer the derived trip end (covers hotel stays/rentals past the train's arrival);
+    // fall back to departure + nights for bookings never re-saved since the field existed.
+    const tripEndDate = booking.trip_end_date
+      ? dateFromDatabaseDate(booking.trip_end_date)
+      : addDays(dateFromDatabaseDate(booking.departure_date), booking.duration_nights ?? 0)
     const thankYouDueDate = addDays(tripEndDate, 3)
     const thankYouCatchupDeadline = addDays(tripEndDate, 3 + THANK_YOU_CATCHUP_WINDOW_DAYS)
     const closeDueDate = addDays(tripEndDate, 7)

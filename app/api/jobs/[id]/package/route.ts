@@ -53,15 +53,10 @@ const setPackageSchema = z
     tripStartDate: z.string().regex(datePattern, "Expected YYYY-MM-DD").nullable().optional(),
     tripEndDate: z.string().regex(datePattern, "Expected YYYY-MM-DD").nullable().optional(),
   })
+  // Trip dates are optional: they are derived from per-service dates once the configure step
+  // saves selections (lib/packages/recompute-trip-dates.ts). Explicit dates are still accepted
+  // as seeds for the initial selection rows.
   .superRefine((value, ctx) => {
-    if (!value.packageId) return
-
-    if (!value.tripStartDate) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tripStartDate"], message: "Trip start date is required to apply a package" })
-    }
-    if (!value.tripEndDate) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tripEndDate"], message: "Trip end date is required to apply a package" })
-    }
     if (value.tripStartDate && value.tripEndDate && value.tripEndDate < value.tripStartDate) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tripEndDate"], message: "Trip end date must be on or after the trip start date" })
     }
@@ -99,18 +94,33 @@ export async function POST(req: Request, { params }: RouteParams) {
   if (!booking) return jsonError("Booking not found", 404)
 
   const newPackageId = parsed.data.packageId
-  const newTripStartDate = newPackageId ? (parsed.data.tripStartDate ?? null) : null
-  const newTripEndDate = newPackageId ? (parsed.data.tripEndDate ?? null) : null
   const packageChanged = booking.package_id !== newPackageId
+  const datesProvided = parsed.data.tripStartDate !== undefined || parsed.data.tripEndDate !== undefined
+  // Re-saving the same package without explicit dates must not wipe the derived trip dates.
+  const writeTripDates = packageChanged || datesProvided || !newPackageId
+  const newTripStartDate = writeTripDates
+    ? newPackageId
+      ? (parsed.data.tripStartDate ?? null)
+      : null
+    : booking.trip_start_date
+  const newTripEndDate = writeTripDates
+    ? newPackageId
+      ? (parsed.data.tripEndDate ?? null)
+      : null
+    : booking.trip_end_date
 
   const { error: updateError } = await supabase
     .from("bookings")
     .update({
       package_id: newPackageId,
-      trip_start_date: newTripStartDate,
-      trip_end_date: newTripEndDate,
-      // kept in sync for legacy read paths (voucher generation, pipeline logic) until they migrate off it
-      package_travel_date: newTripStartDate,
+      ...(writeTripDates
+        ? {
+            trip_start_date: newTripStartDate,
+            trip_end_date: newTripEndDate,
+            // kept in sync for legacy read paths (voucher generation, pipeline logic) until they migrate off it
+            package_travel_date: newTripStartDate,
+          }
+        : {}),
     })
     .eq("id", id)
 

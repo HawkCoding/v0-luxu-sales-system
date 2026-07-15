@@ -24,26 +24,20 @@ import { resolveHotelStayDates } from "@/lib/packages/hotel-dates"
 import {
   createDraftUnit,
   PASSENGER_SPLIT_SUPPLIER_KINDS,
+  type HotelAnchorContext,
   type SuiteLegState,
   type SuiteUnitState,
 } from "@/lib/packages/apply-dialog-state"
 
 const NONE_VALUE = "__none"
 
-/** The train leg this hotel's dates hang off, as resolved by the dialog. */
-export interface HotelAnchorContext {
-  trainLabel: string
-  departureDate: string | null
-  durationDays: number | null
-}
-
 interface SuiteLegEditorProps {
   leg: PackageLeg
   value: SuiteLegState
   onChange: (next: SuiteLegState) => void
-  /** Booking totals for this leg's supplier â€” shown as the target for per-unit passenger splits. */
+  /** Booking totals for this leg's supplier — shown as the target for per-unit passenger splits. */
   expectedTotals?: PassengerTotals | null
-  /** Hotel legs only â€” absent when the package has no train leg to anchor to. */
+  /** Hotel legs only — absent when the package has no train leg to anchor to. */
   anchorContext?: HotelAnchorContext | null
 }
 
@@ -107,7 +101,7 @@ export function SuiteLegEditor({
       })
     : null
   // Post-stay dates are counted off the train's arrival, which we can only work out from the
-  // route's length â€” without it we'd silently check the guest in on the departure day.
+  // route's length — without it we'd silently check the guest in on the departure day.
   const missingTrainDuration =
     value.dateAnchor === "post" && anchorContext != null && anchorContext.durationDays == null
 
@@ -202,7 +196,7 @@ export function SuiteLegEditor({
 
               {!anchorContext ? (
                 <p className="text-xs text-muted-foreground">
-                  This package has no train leg to anchor to â€” pick the check-in date manually.
+                  This package has no train leg to anchor to — pick the check-in date manually.
                 </p>
               ) : null}
             </div>

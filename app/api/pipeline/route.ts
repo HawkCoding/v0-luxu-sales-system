@@ -4,7 +4,7 @@ import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { depositPercentageToRate, getDefaultDepositPercentage } from "@/lib/pipeline/constants"
 
 const BOOKING_COLUMNS =
-  "id, booking_number, customer_id, stage, consultant, purpose, source, departure_date, duration_nights, created_at, updated_at, route:routes(name)"
+  "id, booking_number, customer_id, stage, consultant, purpose, source, departure_date, duration_nights, trip_end_date, created_at, updated_at, route:routes(name)"
 
 function addDaysToDateString(value: string, days: number): string {
   const [year = "1970", month = "1", day = "1"] = value.split("-")
@@ -50,10 +50,13 @@ export async function GET() {
     const bookingPayments = (payments ?? []).filter((p) => p.booking_id === booking.id)
     const bookingQuotes = (quotes ?? []).filter((q) => q.booking_id === booking.id)
     const thankYou = (thankYous ?? []).find((c) => c.booking_id === booking.id)
+    // Prefer the derived trip end (kept current by service edits); fall back to the old
+    // departure + nights math for bookings never re-saved since the field existed.
     const tripEndDate =
-      booking.departure_date && booking.duration_nights !== null
+      booking.trip_end_date ??
+      (booking.departure_date && booking.duration_nights !== null
         ? addDaysToDateString(booking.departure_date, booking.duration_nights)
-        : null
+        : null)
 
     const totalPaid = bookingPayments.reduce((s, p) => s + p.amount, 0)
     const quoteTotal = bookingQuotes.reduce((s, q) => Math.max(s, q.total), 0) || 1

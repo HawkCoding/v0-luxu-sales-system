@@ -37,9 +37,6 @@ const base: QuoteSummaryInput = {
   adults: 2,
   children: 0,
   total: 86300,
-  inclusions: [
-    { description: "Deluxe Suite", supplierDescription: "Rovos Rail", qty: 2, unit: "night" },
-  ],
   itineraryBlocks: [],
 }
 
@@ -65,12 +62,41 @@ describe("buildQuoteSummaryBlock", () => {
     expect(html).toContain("TOTAL for 2 Adults + 1 Child:")
   })
 
-  it("does not render item prices or subtotal/VAT rows", () => {
+  it("does not render item prices, subtotal/VAT rows, or the inclusions table", () => {
     const html = buildQuoteSummaryBlock(base)
     expect(html).not.toContain("Unit price")
     expect(html).not.toContain("Subtotal:")
     expect(html).not.toContain("VAT:")
-    expect(html).toContain("2 × night")
+    expect(html).not.toContain("Your quotation includes")
+  })
+
+  it("does not render the valid-until line while validity is hidden", () => {
+    const html = buildQuoteSummaryBlock(base)
+    expect(html).not.toContain("Valid until")
+  })
+
+  it("renders the total price block after the itinerary and exclusions", () => {
+    const html = buildQuoteSummaryBlock({
+      ...base,
+      itineraryBlocks,
+      packageExcludesDefault: "Services not mentioned.",
+    })
+    const totalIndex = html.indexOf("TOTAL for 2 Adults:")
+    expect(totalIndex).toBeGreaterThan(html.indexOf("Your Package Includes"))
+    expect(totalIndex).toBeGreaterThan(html.indexOf("Your Package Excludes"))
+  })
+
+  it("labels each generated section for the send-dialog editor", () => {
+    const html = buildQuoteSummaryBlock({
+      ...base,
+      itineraryBlocks,
+      packageExcludesDefault: "Services not mentioned.",
+    })
+    expect(html).toContain('data-label="Quote details"')
+    expect(html).toContain('data-label="Your Package Includes"')
+    expect(html).toContain('data-label="Your Package Excludes"')
+    expect(html).toContain('data-label="Total price"')
+    expect(html).toContain('data-label="Divider line"')
   })
 
   it("renders the itinerary section chronologically when blocks exist", () => {
@@ -96,21 +122,26 @@ describe("buildQuoteSummaryBlock", () => {
     expect(html).not.toContain("Your Package Includes")
   })
 
-  it("escapes HTML in descriptions and block content", () => {
+  it("escapes HTML in block content", () => {
     const html = buildQuoteSummaryBlock({
       ...base,
-      inclusions: [{ description: "<b>bold</b>", qty: 1 }],
       itineraryBlocks: [
         {
           ...itineraryBlocks[0],
-          title: "<script>alert(1)</script>",
+          contactDetails: { name: "<script>alert(1)</script>" },
+          serviceData: {
+            ...itineraryBlocks[0].serviceData,
+            inclusions: ["<img src=x onerror=alert(1)>"],
+          },
         },
       ],
+      packageExcludesDefault: "<i>excluded</i>",
     })
-    expect(html).toContain("&lt;b&gt;bold&lt;/b&gt;")
-    expect(html).not.toContain("<b>bold</b>")
     expect(html).toContain("&lt;script&gt;")
     expect(html).not.toContain("<script>")
+    expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;")
+    expect(html).not.toContain("<img src=x")
+    expect(html).toContain("&lt;i&gt;excluded&lt;/i&gt;")
   })
 
   it("formats missing dates as To be confirmed", () => {
@@ -120,7 +151,6 @@ describe("buildQuoteSummaryBlock", () => {
       journeyStart: null,
       journeyEnd: null,
     })
-    expect(html).toContain("Valid until:</strong> To be confirmed")
     expect(html).toContain("Journey:</strong> To be confirmed")
   })
 

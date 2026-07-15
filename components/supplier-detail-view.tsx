@@ -107,6 +107,14 @@ import {
 
 const DESCRIPTION_SOFT_LIMIT = 500
 
+/** Inclusion/exclusion bullets are edited as one-per-line text and stored as a string[]. */
+function splitBulletLines(value: string): string[] {
+  return value
+    .split("\n")
+    .map((line) => line.replace(/^[-•*]\s*/, "").trim())
+    .filter(Boolean)
+}
+
 type Presentation = "page" | "modal"
 
 interface SupplierDetailViewProps {
@@ -182,9 +190,12 @@ interface SupplierFormState {
   singleSupplementPct: number
   infantMaxAge: number | null
   childMaxAge: number | null
-  /** HH:MM; empty string = unset. Hotel check-in/check-out defaults. */
+  /** HH:MM; empty string = unset. Check-in/check-out (hotels) or departure/arrival (trains). */
   defaultTimeStart: string
   defaultTimeEnd: string
+  /** One client-facing bullet per line; split into a string[] on save. */
+  inclusions: string
+  exclusions: string
   rateAdjustments: SupplierRateAdjustment[]
   suiteTypes: EditableSuiteType[]
   packages: EditablePackage[]
@@ -360,6 +371,8 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
     // Postgres `time` columns arrive as HH:MM:SS — keep only HH:MM for the inputs.
     defaultTimeStart: (supplier.defaultTimeStart ?? "").slice(0, 5),
     defaultTimeEnd: (supplier.defaultTimeEnd ?? "").slice(0, 5),
+    inclusions: (supplier.inclusions ?? []).join("\n"),
+    exclusions: (supplier.exclusions ?? []).join("\n"),
     rateAdjustments: (supplier.rateAdjustments ?? []).map((adjustment) => ({
       rateTypeId: adjustment.rateTypeId,
       discountPct: adjustment.discountPct,
@@ -2132,7 +2145,7 @@ const RouteEditorRow = memo(function RouteEditorRow({
           ? "md:grid-cols-2 xl:grid-cols-5"
           : vocabulary.routeHasLocations
             ? vocabulary.routeHasDuration
-              ? "md:grid-cols-2 xl:grid-cols-[1.5fr_1fr_1fr_1fr_1fr_auto]"
+              ? "md:grid-cols-2 xl:grid-cols-[1.5fr_1fr_1fr_1fr_auto_auto]"
               : "md:grid-cols-2 xl:grid-cols-[1.5fr_1fr_1fr_1fr_auto]"
             : "md:grid-cols-[1.5fr_1fr_auto]"
       }`}
@@ -2282,12 +2295,13 @@ const RouteEditorRow = memo(function RouteEditorRow({
       ) : null}
       {vocabulary.routeHasDuration ? (
         <div className="min-w-0 space-y-1.5">
-          <Label>Duration (days)</Label>
+          <Label className="whitespace-nowrap">Duration (days)</Label>
           <NumericInput
             min="1"
             step="1"
             nullable
-            placeholder="e.g. 2"
+            placeholder="2"
+            className="w-16 text-center"
             value={route.durationDays}
             onValueChange={(value) => onUpdateRoute(packageIndex, routeIndex, "durationDays", value)}
           />
@@ -3429,6 +3443,7 @@ export function SupplierDetailView({
               }
             : null,
         directionMode: route.directionMode,
+        durationDays: route.durationDays,
         active: route.active,
         rateCards: activeRateCards
           .filter((rateCard) => rateCard.routeId === route.id)
@@ -3475,6 +3490,8 @@ export function SupplierDetailView({
           childMaxAge: form.childMaxAge,
           defaultTimeStart: form.defaultTimeStart || null,
           defaultTimeEnd: form.defaultTimeEnd || null,
+          inclusions: splitBulletLines(form.inclusions),
+          exclusions: splitBulletLines(form.exclusions),
           rateAdjustments: form.rateAdjustments,
           suiteTypes: cleanedSuiteTypes,
           routes: cleanedRoutes,
@@ -3992,6 +4009,46 @@ export function SupplierDetailView({
                   </div>
                 </div>
 
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Label htmlFor="supplier-inclusions">What's included</Label>
+                      <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-700">
+                        External
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      One per line. Listed under this supplier in the quote itinerary.
+                    </p>
+                    <BufferedTextarea
+                      id="supplier-inclusions"
+                      value={form.inclusions}
+                      onValueChange={(value) => updateField("inclusions", value)}
+                      rows={5}
+                      placeholder={"High Tea\n24-hour Butler service\nWi-Fi"}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Label htmlFor="supplier-exclusions">What's excluded</Label>
+                      <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-700">
+                        External
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      One per line. Pooled into the quote&apos;s exclusions section.
+                    </p>
+                    <BufferedTextarea
+                      id="supplier-exclusions"
+                      value={form.exclusions}
+                      onValueChange={(value) => updateField("exclusions", value)}
+                      rows={5}
+                      placeholder={"French Champagne, caviar, telephone calls, and gratuities"}
+                    />
+                  </div>
+                </div>
+
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <Label htmlFor="supplier-notes">Notes</Label>
@@ -4107,6 +4164,42 @@ export function SupplierDetailView({
                       {supplier.description || "No description added."}
                     </p>
                   </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-lg border border-emerald-100 bg-emerald-50/50 p-4">
+                      <div className="mb-2 flex items-center gap-2">
+                        <span className="text-xs font-medium text-emerald-800">What&apos;s included</span>
+                        <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-700">
+                          External
+                        </span>
+                      </div>
+                      {supplier.inclusions.length > 0 ? (
+                        <ul className="list-disc space-y-1 pl-4 text-sm text-muted-foreground">
+                          {supplier.inclusions.map((item, index) => (
+                            <li key={index}>{item}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Nothing listed.</p>
+                      )}
+                    </div>
+                    <div className="rounded-lg border border-emerald-100 bg-emerald-50/50 p-4">
+                      <div className="mb-2 flex items-center gap-2">
+                        <span className="text-xs font-medium text-emerald-800">What&apos;s excluded</span>
+                        <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-700">
+                          External
+                        </span>
+                      </div>
+                      {supplier.exclusions.length > 0 ? (
+                        <ul className="list-disc space-y-1 pl-4 text-sm text-muted-foreground">
+                          {supplier.exclusions.map((item, index) => (
+                            <li key={index}>{item}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Nothing listed.</p>
+                      )}
+                    </div>
+                  </div>
                   <div className="rounded-lg bg-secondary/40 p-4">
                     <div className="mb-2 flex items-center gap-2">
                       <span className="text-xs font-medium text-foreground">Notes</span>
@@ -4189,7 +4282,7 @@ export function SupplierDetailView({
                 </div>
               ) : null}
 
-              {form.kind === "hotel_property" ? (
+              {form.kind === "hotel_property" || form.kind === "train_operator" ? (
                 <div className="rounded-lg border p-4">
                   {isEditing ? (
                     <div className="grid gap-3 sm:grid-cols-[minmax(0,10rem)_minmax(0,10rem)_1fr] sm:items-end">
@@ -4216,15 +4309,19 @@ export function SupplierDetailView({
                         />
                       </div>
                       <p className="text-sm text-muted-foreground">
-                        Prefills the check-in and check-out times on new booking schedules for this hotel.
+                        Shown on the quote itinerary and prefilled on new booking schedules.
                       </p>
                     </div>
                   ) : (
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <p className="text-sm font-semibold text-foreground">Check-in / check-out</p>
+                        <p className="text-sm font-semibold text-foreground">
+                          {activeVocabulary.scheduleFields?.timeStartLabel ?? "Start"}
+                          {" / "}
+                          {activeVocabulary.scheduleFields?.timeEndLabel ?? "End"}
+                        </p>
                         <p className="text-sm text-muted-foreground">
-                          Default times prefilled on new booking schedules.
+                          Shown on the quote itinerary and prefilled on new booking schedules.
                         </p>
                       </div>
                       <Badge variant="outline">

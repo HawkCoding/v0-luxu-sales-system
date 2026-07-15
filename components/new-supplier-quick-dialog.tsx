@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 
 import { useState } from "react"
 import { toast } from "sonner"
@@ -179,7 +179,7 @@ export function NewSupplierQuickDialog({
 
       await mutate("/api/suppliers")
       toast.success(
-        `${name.trim()} added as a temporary supplier â€” a manager can activate it in Suppliers`,
+        `${name.trim()} added as a temporary supplier — a manager can activate it in Suppliers`,
       )
       onCreated({
         supplierId: payload.supplierId!,
@@ -253,7 +253,7 @@ export function NewSupplierQuickDialog({
                   {locations.map((location) => (
                     <SelectItem key={location.id} value={location.id}>
                       {location.parentLocationId
-                        ? `${cityLocations.find((c) => c.id === location.parentLocationId)?.name ?? "?"} Â· ${location.name}`
+                        ? `${cityLocations.find((c) => c.id === location.parentLocationId)?.name ?? "?"} · ${location.name}`
                         : location.name}
                     </SelectItem>
                   ))}
@@ -375,7 +375,7 @@ export function NewSupplierQuickDialog({
             Cancel
           </Button>
           <Button onClick={handleSave} disabled={saving}>
-            {saving ? "Savingâ€¦" : "Create & use"}
+            {saving ? "Saving…" : "Create & use"}
           </Button>
         </DialogFooter>
       </DialogContent>

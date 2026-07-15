@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 
 import Link from "next/link"
 import { useMemo, useState } from "react"
@@ -101,7 +101,7 @@ export function AuditLogView({ scope }: AuditLogViewProps) {
         <div>
           <h1 className="text-2xl font-semibold text-foreground tracking-tight">{title}</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            {description} Â· {total} entries
+            {description} · {total} entries
           </p>
         </div>
         <div className="flex items-center gap-2">

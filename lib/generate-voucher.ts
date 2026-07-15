@@ -23,6 +23,10 @@ export interface VoucherServiceBlockData {
   route?: string | null
   departureDate?: string | null
   arrivalDate?: string | null
+  /** HH:MM the service starts — train departure, hotel check-in, transfer pickup. */
+  startTime?: string | null
+  /** HH:MM the service ends — train arrival, hotel check-out. */
+  endTime?: string | null
   suiteType?: string | null
   numberOfSuites?: number | null
   roomType?: string | null
@@ -36,6 +40,10 @@ export interface VoucherServiceBlockData {
   flightNumber?: string | null
   durationDays?: number | null
   notes?: string | null
+  /** Client-facing bullets for this supplier, e.g. "High Tea", "24-hour Butler service". */
+  inclusions?: string[]
+  /** Client-facing exclusions for this supplier; pooled into the quote's excludes section. */
+  exclusions?: string[]
 }
 
 export interface VoucherServiceBlock {

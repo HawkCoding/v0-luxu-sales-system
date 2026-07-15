@@ -709,6 +709,10 @@ export interface Supplier {
   childMaxAge: number | null
   defaultTimeStart: string | null
   defaultTimeEnd: string | null
+  /** Client-facing bullets shown under this supplier's leg in the quote itinerary. */
+  inclusions: string[]
+  /** Client-facing exclusions pooled into the quote's "Your Package Excludes" section. */
+  exclusions: string[]
   createdAt: string
   createdAtDisplay?: string
   updatedAt: string

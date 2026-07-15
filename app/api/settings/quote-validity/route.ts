@@ -3,11 +3,11 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
 import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
+import { DEFAULT_QUOTE_VALIDITY_DAYS } from "@/lib/quotes/quote-validity"
 
-// app_settings key consumed by POST /api/quotes (app/api/quotes/route.ts) to set
-// each new quote's validity_until. Falls back to 14 days when unset.
+// app_settings key consumed by POST /api/quotes (app/api/quotes/route.ts) and
+// POST /api/jobs/[id]/start-quote to set each new quote's validity_until.
 const QUOTE_VALIDITY_DAYS_SETTING_KEY = "quote_validity_days"
-const DEFAULT_QUOTE_VALIDITY_DAYS = 14
 
 const allowedRoles = new Set(["admin", "manager"])
 

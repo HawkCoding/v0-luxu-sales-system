@@ -5,6 +5,8 @@ import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDate } from "@/lib/date-format"
 import { buildQuoteNumber } from "@/lib/quotes/quote-number"
 import { calculateQuoteTotals, roundMoney } from "@/lib/quotes/pricing-engine"
+import { isoDateDaysFromNow, resolveValidityDays } from "@/lib/quotes/quote-validity"
+import { syncBookingRoute } from "@/lib/quotes/resolve-primary-route"
 import type { Json } from "@/lib/supabase/types"
 import type { QuoteLineItem } from "@/lib/types"
 
@@ -76,10 +78,8 @@ export async function POST(req: Request) {
 
   if (existingQuotesError) return safeSupabaseError("quotes:load-existing", existingQuotesError)
 
-  const computedValidityUntil: string | null = body.validityUntil ?? (() => {
-    const days = validitySetting?.value ? parseInt(validitySetting.value, 10) : 14
-    return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10)
-  })()
+  const computedValidityUntil: string | null =
+    body.validityUntil ?? isoDateDaysFromNow(resolveValidityDays(validitySetting?.value))
 
   const { data: quote, error } = await supabase
     .from("quotes")
@@ -114,6 +114,9 @@ export async function POST(req: Request) {
       })),
     )
     if (lineError) return safeSupabaseError("quotes:insert-line-items", lineError)
+
+    const { error: routeSyncError } = await syncBookingRoute(supabase, bookingId, normalizedLineItems)
+    if (routeSyncError) return jsonError(routeSyncError, 500)
   }
 
   const auditResult = await writeAuditLog(supabase, {

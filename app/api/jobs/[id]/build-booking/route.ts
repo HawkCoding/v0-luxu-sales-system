@@ -9,26 +9,16 @@ import { seedSelectionsForLegs } from "../package/seed"
 
 export const runtime = "nodejs"
 
-const datePattern = /^\d{4}-\d{2}-\d{2}$/
-
 const serviceSchema = z.object({
   legId: z.string().uuid().optional(),
   supplierId: z.string().uuid(),
   supplierKind: z.string(),
 })
 
+// Trip dates are no longer taken upfront — they are derived from the per-service dates the
+// salesperson enters in the configure step (see lib/packages/recompute-trip-dates.ts).
 const buildBookingSchema = z.object({
   services: z.array(serviceSchema).min(1, "At least one service is required"),
-  tripStartDate: z.string().regex(datePattern, "Expected YYYY-MM-DD"),
-  tripEndDate: z.string().regex(datePattern, "Expected YYYY-MM-DD"),
-}).superRefine((value, ctx) => {
-  if (value.tripEndDate < value.tripStartDate) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["tripEndDate"],
-      message: "Trip end date must be on or after the trip start date",
-    })
-  }
 })
 
 interface RouteParams {
@@ -234,15 +224,11 @@ export async function POST(req: Request, { params }: RouteParams) {
     sortOrder += 1
   }
 
-  // 3. Assign the hidden package + trip dates to the booking (mirrors the predefined-package flow).
+  // 3. Assign the hidden package to the booking (mirrors the predefined-package flow). Trip
+  // dates are derived later, once the configure step saves the per-service dates.
   const { error: updateBookingError } = await supabase
     .from("bookings")
-    .update({
-      package_id: packageId,
-      trip_start_date: parsed.data.tripStartDate,
-      trip_end_date: parsed.data.tripEndDate,
-      package_travel_date: parsed.data.tripStartDate,
-    })
+    .update({ package_id: packageId })
     .eq("id", id)
 
   if (updateBookingError) return safeSupabaseError("build-booking:assign-booking", updateBookingError)
@@ -260,7 +246,7 @@ export async function POST(req: Request, { params }: RouteParams) {
         supplier_id: leg.supplier_id,
         kind: kindBySupplierId.get(leg.supplier_id) ?? null,
       })),
-      { tripStartDate: parsed.data.tripStartDate, tripEndDate: parsed.data.tripEndDate },
+      { tripStartDate: null, tripEndDate: null },
     )
     if (seedResult.error) return safeSupabaseError("build-booking:seed-selections", seedResult.error)
   }
@@ -280,8 +266,6 @@ export async function POST(req: Request, { params }: RouteParams) {
   return Response.json({
     packageId,
     slug,
-    tripStartDate: parsed.data.tripStartDate,
-    tripEndDate: parsed.data.tripEndDate,
     packageDetail: detail.detail,
   })
 }

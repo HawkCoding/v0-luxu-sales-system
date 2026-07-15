@@ -1,4 +1,5 @@
 import { Image, Text, View } from "@react-pdf/renderer"
+import { isRasterAssetUrl } from "@/lib/assets/raster-url"
 import type { VoucherTemplate } from "@/lib/types"
 import type { voucherStyles } from "../styles"
 
@@ -7,13 +8,6 @@ type Styles = ReturnType<typeof voucherStyles>
 interface HeaderBannerProps {
   template: VoucherTemplate
   styles: Styles
-}
-
-// react-pdf sizes SVGs from their intrinsic viewBox and ignores height/objectFit,
-// which can blow the header up to a full page — skip any lingering SVG asset URLs.
-function isRasterAssetUrl(url: string | null): url is string {
-  if (!url) return false
-  return !url.split("?")[0].toLowerCase().endsWith(".svg")
 }
 
 export function HeaderBanner({ template, styles }: HeaderBannerProps) {

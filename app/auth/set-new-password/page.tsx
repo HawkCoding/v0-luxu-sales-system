@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
@@ -59,7 +59,7 @@ export default function SetNewPasswordPage() {
         <Card className="w-full max-w-md">
           <CardHeader>
             <CardTitle>Password updated</CardTitle>
-            <CardDescription>Redirecting you to the appâ€¦</CardDescription>
+            <CardDescription>Redirecting you to the app…</CardDescription>
           </CardHeader>
         </Card>
       </div>
@@ -106,7 +106,7 @@ export default function SetNewPasswordPage() {
               <p className="text-sm text-destructive">{error}</p>
             )}
             <Button type="submit" className="w-full h-11" disabled={loading}>
-              {loading ? "Updatingâ€¦" : "Update password"}
+              {loading ? "Updating…" : "Update password"}
             </Button>
           </form>
         </CardContent>

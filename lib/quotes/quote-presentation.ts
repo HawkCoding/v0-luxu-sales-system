@@ -16,8 +16,10 @@ export interface QuoteJourneyDates {
 
 export interface QuoteItineraryLine {
   dateISO: string | null
-  title: string
-  details: string[]
+  /** One prose sentence, e.g. "Two nights at Irene Country Lodge … | Check in from 14h00". */
+  text: string
+  /** Supplier inclusions rendered as sub-bullets beneath the line. */
+  bullets: string[]
 }
 
 const LONG_MONTH_NAMES = [
@@ -104,33 +106,174 @@ export function formatJourneyRange(start: string | null, end: string | null): st
   return `${startDate.getDate()} – ${endLong}`
 }
 
-function pushDetail(details: string[], value: string | null | undefined): void {
-  const trimmed = value?.trim()
-  if (trimmed) details.push(trimmed)
+const NIGHT_WORDS = [
+  "", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
+]
+
+/** "Two nights" | "12 nights" | "One night" — spelled out where the example wording does. */
+function formatNights(count: number): string {
+  const noun = count === 1 ? "night" : "nights"
+  const word = count < NIGHT_WORDS.length ? NIGHT_WORDS[count] : String(count)
+  return `${word} ${noun}`
 }
 
-/** One itinerary display line per service block, shared by PDF and email. */
-export function summarizeServiceBlock(block: VoucherServiceBlock): QuoteItineraryLine {
+/** "14:00" → "14h00", the house style used throughout the client-facing itinerary. */
+export function formatTimeOfDay(value: string | null | undefined): string | null {
+  const trimmed = value?.trim()
+  if (!trimmed) return null
+  const [hours, minutes] = trimmed.split(":")
+  if (!hours || !minutes) return null
+  return `${hours}h${minutes.slice(0, 2)}`
+}
+
+function joinSentence(
+  parts: Array<string | null | undefined>,
+  suffixes: Array<string | null | undefined>,
+): string {
+  const main = parts.filter((part): part is string => Boolean(part?.trim())).join(" ")
+  const tail = suffixes.filter((part): part is string => Boolean(part?.trim()))
+  return tail.length > 0 ? `${main} | ${tail.join(" – ")}` : main
+}
+
+function describeBlock(block: VoucherServiceBlock): string {
   const d = block.serviceData
-  const details: string[] = []
+  const supplier = block.contactDetails.name?.trim() || null
+  const location = block.contactDetails.location?.trim() || null
+  const start = formatTimeOfDay(d.startTime)
 
-  pushDetail(details, block.contactDetails.name)
-  pushDetail(details, d.route)
-  pushDetail(details, d.suiteType)
-  pushDetail(details, d.roomType)
-  pushDetail(details, d.vehicleType)
-  pushDetail(details, d.cabin)
-  if (d.pickup && d.dropoff) details.push(`${d.pickup} to ${d.dropoff}`)
-  if (d.nights && d.nights > 0) details.push(`${d.nights} ${d.nights === 1 ? "night" : "nights"}`)
-  if (d.durationDays && d.durationDays > 0) {
-    details.push(`${d.durationDays} ${d.durationDays === 1 ? "day" : "days"}`)
+  switch (block.serviceType) {
+    case "hotel": {
+      const stay = d.nights && d.nights > 0 ? formatNights(d.nights) : "Stay"
+      const at = [supplier, location].filter(Boolean).join(", ")
+      return joinSentence(
+        [
+          `${stay} at ${at || "the hotel"}`,
+          d.roomType ? `in a ${d.roomType}` : null,
+          d.mealPlan ? `incl. ${d.mealPlan}` : null,
+        ],
+        [start ? `Check in from ${start}` : null],
+      )
+    }
+    case "train": {
+      // durationDays counts the departure day, so a 3-day journey is 2 nights on board.
+      const nights = d.durationDays && d.durationDays > 1 ? d.durationDays - 1 : null
+      const onBoard = nights ? `${formatNights(nights)} on` : "On board"
+      return joinSentence(
+        [
+          `${onBoard} ${supplier || "the train"}`,
+          d.suiteType ? `in a ${d.suiteType}` : null,
+          d.route ? `— ${d.route}` : null,
+        ],
+        [start ? `Departs at ${start}` : null],
+      )
+    }
+    case "transfer": {
+      const leg = d.pickup && d.dropoff ? `from ${d.pickup} to ${d.dropoff}` : d.route ? `— ${d.route}` : null
+      return joinSentence(
+        [supplier ? `${supplier} transfer` : "Transfer", leg, d.vehicleType ? `(${d.vehicleType})` : null],
+        [start ? `at ${start}` : null],
+      )
+    }
+    case "tour": {
+      const title = block.title?.trim() || supplier || "Excursion"
+      // Leg labels are often already written as "Excursion in Kimberley" — don't say it twice.
+      const namesLocation = location ? title.toLowerCase().includes(location.toLowerCase()) : true
+      return joinSentence(
+        [title, namesLocation ? null : `in ${location}`],
+        [start ? `at ${start}` : null],
+      )
+    }
+    case "airline": {
+      return joinSentence(
+        [
+          supplier ? `Flight with ${supplier}` : "Flight",
+          d.flightNumber,
+          d.route ? `— ${d.route}` : null,
+          d.cabin ? `in ${d.cabin}` : null,
+        ],
+        [start ? `Departs at ${start}` : null],
+      )
+    }
+    default:
+      return block.title?.trim() || supplier || voucherServiceTypeLabel(block.serviceType)
   }
-  pushDetail(details, d.mealPlan)
-  pushDetail(details, d.notes)
+}
 
-  return {
-    dateISO: d.departureDate ?? null,
-    title: block.title || voucherServiceTypeLabel(block.serviceType),
-    details,
+/** The closing line of a stay or journey: check-out for hotels, arrival for everything else. */
+function describeEndLine(block: VoucherServiceBlock): QuoteItineraryLine | null {
+  const d = block.serviceData
+  if (!d.arrivalDate) return null
+  const end = formatTimeOfDay(d.endTime)
+
+  if (block.serviceType === "hotel") {
+    return {
+      dateISO: d.arrivalDate,
+      text: end ? `Check out at ${end}` : "Check out",
+      bullets: [],
+    }
   }
+  if (block.serviceType === "train") {
+    const where = block.contactDetails.location?.trim()
+    return {
+      dateISO: d.arrivalDate,
+      text: end
+        ? `Arrival${where ? ` in ${where}` : ""} at ${end}`
+        : `Arrival${where ? ` in ${where}` : ""}`,
+      bullets: ["Train arrival times cannot be guaranteed"],
+    }
+  }
+  return null
+}
+
+/**
+ * The client-facing itinerary. One block can produce two lines — a hotel stay is a check-in line
+ * and a separate check-out line on a later date — so lines are re-sorted by date afterwards.
+ */
+export function buildQuoteItineraryLines(blocks: VoucherServiceBlock[]): QuoteItineraryLine[] {
+  const lines: QuoteItineraryLine[] = []
+
+  blocks.forEach((block) => {
+    const d = block.serviceData
+    const bullets = [...(d.inclusions ?? [])]
+    if (d.notes?.trim()) bullets.push(d.notes.trim())
+
+    lines.push({ dateISO: d.departureDate ?? null, text: describeBlock(block), bullets })
+
+    const endLine = describeEndLine(block)
+    if (endLine) lines.push(endLine)
+  })
+
+  // Undated lines keep their position at the end rather than sorting to the front.
+  return lines
+    .map((line, index) => ({ line, index }))
+    .sort((a, b) => {
+      const aDate = a.line.dateISO ?? "9999-12-31"
+      const bDate = b.line.dateISO ?? "9999-12-31"
+      if (aDate !== bDate) return aDate < bDate ? -1 : 1
+      return a.index - b.index
+    })
+    .map((entry) => entry.line)
+}
+
+/** Every supplier exclusion on the quote, de-duplicated, with the standing exclusion last. */
+export function collectQuoteExclusions(
+  blocks: VoucherServiceBlock[],
+  defaultExclusion?: string | null,
+): string[] {
+  const seen = new Set<string>()
+  const exclusions: string[] = []
+
+  for (const block of blocks) {
+    for (const raw of block.serviceData.exclusions ?? []) {
+      const value = raw.trim()
+      if (!value || seen.has(value.toLowerCase())) continue
+      seen.add(value.toLowerCase())
+      exclusions.push(value)
+    }
+  }
+
+  const fallback = defaultExclusion?.trim()
+  if (fallback && !seen.has(fallback.toLowerCase())) exclusions.push(fallback)
+
+  return exclusions
 }

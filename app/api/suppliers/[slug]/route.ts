@@ -638,6 +638,8 @@ export async function PATCH(
     child_max_age: parsed.childMaxAge ?? null,
     default_time_start: parsed.defaultTimeStart ?? null,
     default_time_end: parsed.defaultTimeEnd ?? null,
+    inclusions: parsed.inclusions,
+    exclusions: parsed.exclusions,
     active: nextActive,
     status: nextStatus,
   }

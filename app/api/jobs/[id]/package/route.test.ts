@@ -233,7 +233,7 @@ describe("POST /api/jobs/[id]/package", () => {
     expect(res.status).toBe(404)
   })
 
-  it("returns 400 when assigning a package without a trip date range", async () => {
+  it("accepts assigning a package without a trip date range (dates are derived later)", async () => {
     mockAuth({ bookingPackageId: null })
     const res = await POST(
       new Request("http://localhost", {
@@ -242,7 +242,7 @@ describe("POST /api/jobs/[id]/package", () => {
       }),
       makeParams(),
     )
-    expect(res.status).toBe(400)
+    expect(res.status).toBe(200)
   })
 
   it("returns 400 when trip end date is before trip start date", async () => {

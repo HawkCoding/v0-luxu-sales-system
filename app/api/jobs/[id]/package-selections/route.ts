@@ -4,6 +4,7 @@ import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { writeAuditLog } from "@/lib/audit-write"
 import { loadAllowedSuiteVariantIds, findInvalidVariantField } from "@/lib/packages/suite-config"
 import { computeLegPassengerTotals } from "@/lib/packages/passenger-totals"
+import { recomputeBookingTripDates } from "@/lib/packages/recompute-trip-dates"
 import type { Database } from "@/lib/supabase/types"
 
 export const runtime = "nodejs"
@@ -241,6 +242,10 @@ export async function PATCH(req: Request, { params }: RouteParams) {
       }
     }
   }
+
+  // Trip dates are derived from the services, so any selection change re-dates the trip.
+  const recompute = await recomputeBookingTripDates(supabase, id)
+  if (recompute.error) return jsonError(recompute.error, 500)
 
   await writeAuditLog(supabase, {
     actor: profile.actorName,

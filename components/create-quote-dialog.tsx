@@ -14,7 +14,9 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { DatePicker } from "@/components/ui/date-picker"
+import { QuoteValidityPicker } from "@/components/ui/quote-validity-picker"
+import { QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
+import { DEFAULT_QUOTE_VALIDITY_DAYS, isoDateDaysFromNow } from "@/lib/quotes/quote-validity"
 
 interface CreateQuoteDialogProps {
   jobId: string
@@ -22,9 +24,7 @@ interface CreateQuoteDialogProps {
 }
 
 function defaultValidityDate(): string {
-  const d = new Date()
-  d.setDate(d.getDate() + 14)
-  return d.toISOString().split("T")[0]
+  return isoDateDaysFromNow(DEFAULT_QUOTE_VALIDITY_DAYS)
 }
 
 export function CreateQuoteDialog({ jobId, onCreated }: CreateQuoteDialogProps) {
@@ -50,7 +50,8 @@ export function CreateQuoteDialog({ jobId, onCreated }: CreateQuoteDialogProps) 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         jobId,
-        validityUntil,
+        // Validity is hidden: the server stamps the silent org default.
+        ...(QUOTE_VALIDITY_ENABLED ? { validityUntil } : {}),
         status: "draft",
       }),
     })
@@ -85,14 +86,16 @@ export function CreateQuoteDialog({ jobId, onCreated }: CreateQuoteDialogProps) 
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="validity">Valid until</Label>
-            <DatePicker
-              id="validity"
-              value={validityUntil}
-              onChange={value => setValidityUntil(value ?? "")}
-            />
-          </div>
+          {QUOTE_VALIDITY_ENABLED && (
+            <div className="space-y-1.5">
+              <Label htmlFor="validity">Valid until</Label>
+              <QuoteValidityPicker
+                id="validity"
+                value={validityUntil}
+                onChange={value => setValidityUntil(value ?? "")}
+              />
+            </div>
+          )}
 
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>

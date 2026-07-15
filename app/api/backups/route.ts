@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server"
 import { safeSupabaseError } from "@/lib/api/responses"
 import { createBackup } from "@/lib/backup/create-backup"
+import { BACKUPS_ENABLED } from "@/lib/feature-flags"
 import { requireManagerSettingsAccess } from "@/lib/settings-access"
 import { logError } from "@/lib/error-log"
 
+const disabledResponse = () =>
+  NextResponse.json({ error: "Backups are currently disabled" }, { status: 404 })
+
 export async function GET() {
+  if (!BACKUPS_ENABLED) return disabledResponse()
   const auth = await requireManagerSettingsAccess()
   if (!auth.ok) return auth.response
 
@@ -19,6 +24,7 @@ export async function GET() {
 }
 
 export async function POST() {
+  if (!BACKUPS_ENABLED) return disabledResponse()
   const auth = await requireManagerSettingsAccess()
   if (!auth.ok) return auth.response
 

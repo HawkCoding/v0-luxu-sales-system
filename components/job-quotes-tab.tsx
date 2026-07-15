@@ -10,6 +10,7 @@ import type { Quote } from "@/lib/types"
 import { isMissingPricing } from "@/lib/quotes/pricing-engine"
 import { useRole } from "@/lib/role-context"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
+import { QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 import { BuildBookingDialog } from "@/components/build-booking-dialog"
 import { AddQuoteLineDialog } from "@/components/add-quote-line-dialog"
 import { CreateQuoteDialog } from "@/components/create-quote-dialog"
@@ -210,7 +211,9 @@ export function JobQuotesTab({
                   {hasIncomplete && <Badge variant="destructive" className="text-[10px]">Missing pricing</Badge>}
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Valid until {formatDisplayDate(q.validityUntil)}</span>
+                  {QUOTE_VALIDITY_ENABLED && (
+                    <span className="text-xs text-muted-foreground">Valid until {formatDisplayDate(q.validityUntil)}</span>
+                  )}
                   {can("edit:quotes") && (
                     <>
                       <QuotePreviewSendDialog

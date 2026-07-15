@@ -40,9 +40,6 @@ describe("editor round-trip", () => {
       adults: 2,
       children: 0,
       total: 58900,
-      inclusions: [
-        { description: "Deluxe Suite", supplierDescription: "Rovos Rail", qty: 2, unit: "night" },
-      ],
       itineraryBlocks: [
         {
           serviceType: "train",

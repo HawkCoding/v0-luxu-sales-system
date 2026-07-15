@@ -286,6 +286,13 @@ describe("buildPackageQuoteLineItems", () => {
     const childLine = lineItems.find((li) => li.description.includes("Child"))
     expect(childLine?.unitPrice).toBe(5000)
 
+    // Snapshot must carry the leg's route so booking.route_id can be synced to
+    // the quoted journey (resolvePrimaryRoute reads these fields).
+    const adultLine = lineItems.find((li) => li.description.includes("Adult"))
+    expect(adultLine?.pricingSnapshot?.routeId).toBe("route-cpt")
+    expect(adultLine?.pricingSnapshot?.routeName).toBe("CPT-PTA")
+    expect(adultLine?.pricingSnapshot?.supplierKind).toBe("train_operator")
+
     await expect(
       buildPackageQuoteLineItems({
         supabase: buildSupabase(),

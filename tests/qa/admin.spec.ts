@@ -2,6 +2,7 @@ import { test, expect, chromium } from "@playwright/test"
 import { mkdirSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { createQaSupabase, loadQaEnv } from "../../qa/lib/db"
+import { BACKUPS_ENABLED, QUOTE_VALIDITY_ENABLED } from "../../lib/feature-flags"
 import { ADMIN, ADMIN_STORAGE_STATE, LOCAL_SUPABASE_URL, SEED_CUSTOMER, report } from "./admin.fixtures"
 
 // =============================================================================
@@ -302,6 +303,10 @@ test("A4 — create backup via UI + download signed URL (200 JSON)", async ({ pa
   const T = "Configure backup/restore (create + download)"
   let backupId: string | null = null
   try {
+    if (!BACKUPS_ENABLED) {
+      report.record(N, T, "BLOCKED", "Backup & Restore is disabled (BACKUPS_ENABLED=false): UI hidden and API routes return 404.")
+      return
+    }
     await page.goto("/app/settings")
     const backupBtn = page.getByRole("button", { name: "Backup now" })
     await expect(backupBtn, "Settings → Backup & Restore card present").toBeVisible({ timeout: 30_000 })
@@ -359,6 +364,7 @@ test("A4 — create backup via UI + download signed URL (200 JSON)", async ({ pa
 //    Runs before criterion 5 so the destructive restore is genuinely last.
 // ---------------------------------------------------------------------------
 test("A6 — manage quote validity via Settings UI", async ({ page, request }) => {
+  test.skip(!QUOTE_VALIDITY_ENABLED, "Quote validity UI is hidden (QUOTE_VALIDITY_ENABLED=false)")
   const N = 6
   const T = "Manage global settings (quote_validity_days)"
   let originalDays: string | null = null
@@ -439,6 +445,10 @@ test("A5 — sandboxed backup/restore round-trip", async ({ request }) => {
   let backupId: string | null = null
   let renamed = false
   try {
+    if (!BACKUPS_ENABLED) {
+      report.record(N, T, "BLOCKED", "Backup & Restore is disabled (BACKUPS_ENABLED=false): UI hidden and API routes return 404; restore NOT run.")
+      return
+    }
     loadQaEnv()
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? ""
     if (url !== LOCAL_SUPABASE_URL) {

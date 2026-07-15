@@ -7,7 +7,18 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Input } from "@/components/ui/input"
 import { DatePicker } from "@/components/ui/date-picker"
 import { DateTimePicker } from "@/components/ui/date-time-picker"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
+import { QuoteValidityPicker } from "@/components/ui/quote-validity-picker"
+import { QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
+import { DEFAULT_QUOTE_VALIDITY_DAYS, isoDateDaysFromNow } from "@/lib/quotes/quote-validity"
 import { NumericInput } from "@/components/ui/numeric-input"
 import {
   Select,
@@ -134,6 +145,10 @@ export function JobEnquiryTab({
   const [isSavingSupplierSchedules, setIsSavingSupplierSchedules] = useState(false)
   const [isStartingQuote, setIsStartingQuote] = useState(false)
   const [startQuoteFailures, setStartQuoteFailures] = useState<GateFailure[]>([])
+  const [startQuoteDialogOpen, setStartQuoteDialogOpen] = useState(false)
+  const [startQuoteValidityUntil, setStartQuoteValidityUntil] = useState<string>(
+    isoDateDaysFromNow(DEFAULT_QUOTE_VALIDITY_DAYS),
+  )
 
   useEffect(() => {
     setTransportRequests(initialTransportRequests)
@@ -155,13 +170,21 @@ export function JobEnquiryTab({
     setIsStartingQuote(true)
     setStartQuoteFailures([])
     try {
-      const response = await fetch(`/api/jobs/${enquiry.jobId}/start-quote`, { method: "POST" })
+      const response = await fetch(`/api/jobs/${enquiry.jobId}/start-quote`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // Validity is hidden: the server stamps the silent org default.
+        body: JSON.stringify(
+          QUOTE_VALIDITY_ENABLED ? { validityUntil: startQuoteValidityUntil } : {},
+        ),
+      })
       const payload = (await response.json().catch(() => ({}))) as {
         failures?: GateFailure[]
         error?: string
       }
 
       if (response.status === 422 && Array.isArray(payload.failures)) {
+        setStartQuoteDialogOpen(false)
         setStartQuoteFailures(payload.failures)
         return
       }
@@ -170,6 +193,7 @@ export function JobEnquiryTab({
         throw new Error(payload.error ?? "Could not start quote")
       }
 
+      setStartQuoteDialogOpen(false)
       await onQuoteStarted?.()
       toast.success("Draft quote created")
     } catch (error) {
@@ -177,6 +201,13 @@ export function JobEnquiryTab({
     } finally {
       setIsStartingQuote(false)
     }
+  }
+
+  function handleStartQuoteDialogOpenChange(next: boolean) {
+    if (next) {
+      setStartQuoteValidityUntil(isoDateDaysFromNow(DEFAULT_QUOTE_VALIDITY_DAYS))
+    }
+    setStartQuoteDialogOpen(next)
   }
 
   const updateTransportRequest = <K extends keyof EditableTransportRequest>(
@@ -410,13 +441,54 @@ export function JobEnquiryTab({
               <p className="text-sm font-medium text-foreground">Ready to quote</p>
               <p className="text-sm text-muted-foreground">Create a draft quote once the enquiry details are complete.</p>
             </div>
-            <Button type="button" size="sm" onClick={startQuote} disabled={isStartingQuote}>
+            <Button
+              type="button"
+              size="sm"
+              disabled={isStartingQuote}
+              onClick={() =>
+                QUOTE_VALIDITY_ENABLED ? handleStartQuoteDialogOpenChange(true) : startQuote()
+              }
+            >
               <Plus className="mr-2 h-4 w-4" />
-              {isStartingQuote ? "Starting" : "Start Quote"}
+              {!QUOTE_VALIDITY_ENABLED && isStartingQuote ? "Starting…" : "Start Quote"}
             </Button>
           </CardContent>
         </Card>
       )}
+
+      {/* Only reachable when QUOTE_VALIDITY_ENABLED — the button above skips it otherwise. */}
+      <Dialog open={startQuoteDialogOpen} onOpenChange={handleStartQuoteDialogOpenChange}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Start Quote</DialogTitle>
+            <DialogDescription>
+              Choose how long this quote should stay valid, then start drafting it.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-1.5 py-2">
+            <Label htmlFor="start-quote-validity">Valid until</Label>
+            <QuoteValidityPicker
+              id="start-quote-validity"
+              value={startQuoteValidityUntil}
+              onChange={value => setStartQuoteValidityUntil(value ?? "")}
+            />
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setStartQuoteDialogOpen(false)}
+              disabled={isStartingQuote}
+            >
+              Cancel
+            </Button>
+            <Button onClick={startQuote} disabled={isStartingQuote}>
+              {isStartingQuote ? "Starting…" : "Start Quote"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {startQuoteFailures.length > 0 && (
         <Alert>

@@ -1,7 +1,13 @@
-﻿import { requireRole } from "@/lib/api/auth"
-import { jsonError, safeSupabaseError } from "@/lib/api/responses"
+﻿import { z } from "zod"
+import { requireRole } from "@/lib/api/auth"
+import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { buildQuoteNumber } from "@/lib/quotes/quote-number"
+import { isoDateDaysFromNow, resolveValidityDays } from "@/lib/quotes/quote-validity"
 import type { GateFailure } from "@/lib/pipeline/validate-transition"
+
+const startQuoteSchema = z.object({
+  validityUntil: z.string().nullable().optional(),
+})
 
 interface CustomerGateRow {
   first_name: string | null
@@ -36,9 +42,21 @@ function getCustomerCompleteFailure(customer: CustomerGateRow | null): GateFailu
   }
 }
 
-export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const auth = await requireRole(["admin", "manager", "consultant"])
   if (!auth.ok) return auth.response
+
+  let raw: unknown = {}
+  try {
+    const text = await req.text()
+    raw = text ? JSON.parse(text) : {}
+  } catch {
+    return jsonError("Invalid JSON body", 400)
+  }
+
+  const parsed = startQuoteSchema.safeParse(raw)
+  if (!parsed.success) return jsonZodError(parsed.error)
+  const body = parsed.data
 
   const { id } = await params
   const { supabase } = auth.value
@@ -54,6 +72,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const [
     { data: customer, error: customerError },
     { data: existingQuotes, error: existingQuotesError },
+    { data: validitySetting },
   ] = await Promise.all([
     supabase
       .from("customers")
@@ -61,6 +80,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       .eq("id", booking.customer_id)
       .maybeSingle(),
     supabase.from("quotes").select("quote_number").eq("booking_id", id),
+    supabase.from("app_settings").select("value").eq("key", "quote_validity_days").maybeSingle(),
   ])
 
   if (customerError) return safeSupabaseError("jobs:start-quote-load-customer", customerError)
@@ -82,13 +102,15 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
   if (failures.length > 0) return Response.json({ failures }, { status: 422 })
 
+  const computedValidityUntil = body.validityUntil ?? isoDateDaysFromNow(resolveValidityDays(validitySetting?.value))
+
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .insert({
       booking_id: id,
       itinerary_id: null,
       status: "draft",
-      validity_until: null,
+      validity_until: computedValidityUntil,
       subtotal: 0,
       vat: 0,
       total: 0,

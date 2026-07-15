@@ -430,21 +430,14 @@ function AppShell({ children }: { children: ReactNode }) {
 export default function AppClientLayout({
   children,
   initialUser,
-  demoMode,
 }: {
   children: ReactNode
   initialUser: User | null
-  demoMode?: boolean
 }) {
   return (
     <AuthProvider initialUser={initialUser}>
       <RoleProvider initialRole={initialUser?.role}>
         <div className="flex flex-col h-svh overflow-hidden">
-          {demoMode && (
-            <div className="flex items-center justify-center gap-2 bg-amber-400/90 text-amber-950 text-xs font-medium py-1 px-4 z-50 shrink-0">
-              <span>Demo mode — emails not sent</span>
-            </div>
-          )}
           <AppShell>{children}</AppShell>
         </div>
       </RoleProvider>

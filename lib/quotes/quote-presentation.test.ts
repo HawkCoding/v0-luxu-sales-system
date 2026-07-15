@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import {
+  buildQuoteItineraryLines,
+  collectQuoteExclusions,
   derivePerPersonRate,
   formatJourneyRange,
   formatPaxLabel,
+  formatTimeOfDay,
   formatTotalLabel,
   resolveJourneyDates,
-  summarizeServiceBlock,
 } from "./quote-presentation"
 
 describe("formatPaxLabel", () => {
@@ -104,49 +106,122 @@ describe("formatJourneyRange", () => {
   })
 })
 
-describe("summarizeServiceBlock", () => {
-  const baseBlock: VoucherServiceBlock = {
-    serviceType: "train",
-    title: "Blue Train",
-    contactDetails: { name: "Blue Train Co" },
-    serviceData: {},
-    displayOrder: 1,
-  }
+describe("formatTimeOfDay", () => {
+  it("renders house style", () => {
+    expect(formatTimeOfDay("14:00")).toBe("14h00")
+    expect(formatTimeOfDay("09:30:00")).toBe("09h30")
+  })
 
-  it("collects date, title, and populated details", () => {
-    const line = summarizeServiceBlock({
-      ...baseBlock,
-      serviceData: {
-        departureDate: "2026-07-20",
-        route: "Pretoria to Cape Town",
-        suiteType: "Deluxe Suite",
-        nights: 2,
-      },
+  it("returns null when unset", () => {
+    expect(formatTimeOfDay(null)).toBeNull()
+    expect(formatTimeOfDay("")).toBeNull()
+  })
+})
+
+const hotelBlock: VoucherServiceBlock = {
+  serviceType: "hotel",
+  title: "Irene Country Lodge",
+  contactDetails: { name: "Irene Country Lodge", location: "Pretoria" },
+  serviceData: {
+    departureDate: "2026-07-18",
+    arrivalDate: "2026-07-20",
+    startTime: "14:00",
+    endTime: "10:00",
+    roomType: "Guest room with a lake view",
+    mealPlan: "breakfast",
+    nights: 2,
+  },
+  displayOrder: 1,
+}
+
+const trainBlock: VoucherServiceBlock = {
+  serviceType: "train",
+  title: "The Blue Train",
+  contactDetails: { name: "The Blue Train", location: "Cape Town" },
+  serviceData: {
+    departureDate: "2026-07-20",
+    arrivalDate: "2026-07-22",
+    startTime: "12:00",
+    endTime: "18:00",
+    route: "Pretoria to Cape Town",
+    suiteType: "Deluxe Suite",
+    durationDays: 3,
+    inclusions: ["High Tea", "Wi-Fi"],
+    exclusions: ["French Champagne, caviar, and gratuities"],
+  },
+  displayOrder: 2,
+}
+
+describe("buildQuoteItineraryLines", () => {
+  it("writes a hotel stay as a check-in sentence plus a dated check-out line", () => {
+    const lines = buildQuoteItineraryLines([hotelBlock])
+
+    expect(lines).toHaveLength(2)
+    expect(lines[0]).toEqual({
+      dateISO: "2026-07-18",
+      text: "Two nights at Irene Country Lodge, Pretoria in a Guest room with a lake view incl. breakfast | Check in from 14h00",
+      bullets: [],
     })
-    expect(line.dateISO).toBe("2026-07-20")
-    expect(line.title).toBe("Blue Train")
-    expect(line.details).toEqual([
-      "Blue Train Co",
-      "Pretoria to Cape Town",
-      "Deluxe Suite",
-      "2 nights",
+    expect(lines[1]).toEqual({
+      dateISO: "2026-07-20",
+      text: "Check out at 10h00",
+      bullets: [],
+    })
+  })
+
+  it("derives nights on board from durationDays and lists supplier inclusions as bullets", () => {
+    const [boarding, arrival] = buildQuoteItineraryLines([trainBlock])
+
+    expect(boarding.text).toBe(
+      "Two nights on The Blue Train in a Deluxe Suite — Pretoria to Cape Town | Departs at 12h00",
+    )
+    expect(boarding.bullets).toEqual(["High Tea", "Wi-Fi"])
+    expect(arrival).toEqual({
+      dateISO: "2026-07-22",
+      text: "Arrival in Cape Town at 18h00",
+      bullets: ["Train arrival times cannot be guaranteed"],
+    })
+  })
+
+  it("interleaves lines from different blocks by date", () => {
+    const dates = buildQuoteItineraryLines([trainBlock, hotelBlock]).map((line) => line.dateISO)
+    expect(dates).toEqual(["2026-07-18", "2026-07-20", "2026-07-20", "2026-07-22"])
+  })
+
+  it("names pickup and dropoff on a transfer", () => {
+    const [line] = buildQuoteItineraryLines([
+      {
+        serviceType: "transfer",
+        title: "Transfer",
+        contactDetails: { name: "Luxus Chauffeur" },
+        serviceData: { departureDate: "2026-07-20", startTime: "10:00", pickup: "the hotel", dropoff: "the station" },
+        displayOrder: 1,
+      },
+    ])
+    expect(line.text).toBe("Luxus Chauffeur transfer from the hotel to the station | at 10h00")
+  })
+
+  it("omits the closing line when there is no end date", () => {
+    const lines = buildQuoteItineraryLines([
+      { ...hotelBlock, serviceData: { ...hotelBlock.serviceData, arrivalDate: null } },
+    ])
+    expect(lines).toHaveLength(1)
+  })
+})
+
+describe("collectQuoteExclusions", () => {
+  it("dedupes supplier exclusions and appends the standing one last", () => {
+    const exclusions = collectQuoteExclusions(
+      [trainBlock, { ...trainBlock, displayOrder: 3 }],
+      "Services not mentioned.",
+    )
+    expect(exclusions).toEqual([
+      "French Champagne, caviar, and gratuities",
+      "Services not mentioned.",
     ])
   })
 
-  it("falls back to the service-type label when title is empty", () => {
-    const line = summarizeServiceBlock({ ...baseBlock, title: "" })
-    expect(line.title).toBe("Train Service")
-  })
-
-  it("joins pickup and dropoff for transfers", () => {
-    const line = summarizeServiceBlock({
-      ...baseBlock,
-      serviceType: "transfer",
-      title: "Transfer",
-      contactDetails: {},
-      serviceData: { pickup: "Hotel", dropoff: "Station" },
-    })
-    expect(line.details).toContain("Hotel to Station")
-    expect(line.dateISO).toBeNull()
+  it("omits the standing exclusion when it is empty", () => {
+    expect(collectQuoteExclusions([hotelBlock], "")).toEqual([])
   })
 })

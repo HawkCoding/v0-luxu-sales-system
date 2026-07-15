@@ -229,6 +229,29 @@ export function getHotelAnchorContext(
   }
 }
 
+/** The train leg this hotel's dates hang off, as the leg editor needs it. */
+export interface HotelAnchorContext {
+  trainLabel: string
+  departureDate: string | null
+  durationDays: number | null
+}
+
+/** View-model form of {@link getHotelAnchorContext} — what the suite leg editor takes as a prop. */
+export function toHotelAnchorContext(
+  detail: PackageDetail,
+  states: ApplyLegState[],
+  hotelLegId: string,
+): HotelAnchorContext | null {
+  const context = getHotelAnchorContext(detail, states, hotelLegId)
+  if (!context) return null
+
+  return {
+    trainLabel: context.trainLeg.label ?? context.trainLeg.supplierName,
+    departureDate: context.departureDate,
+    durationDays: context.durationDays,
+  }
+}
+
 /** Recomputes the service date of every pre/post-anchored hotel leg from its train leg. Runs after
  * any state change so editing the train's departure date or a hotel's nights re-dates the stay. */
 export function applyAnchoredHotelDates(
@@ -437,6 +460,8 @@ export interface ApplyLegSelectionPayload {
   legId: string
   selected: boolean
   routeId?: string
+  /** The leg's own service date — pricing matches rate cards against it. */
+  serviceDate?: string | null
   suiteTypeId?: string
   units?: Array<{
     suiteTypeId: string
@@ -475,6 +500,7 @@ export function toApplySelections(
       legId: state.legId,
       selected: state.selected,
       routeId: state.routeId ?? undefined,
+      serviceDate: state.serviceDate ?? undefined,
       units: state.units
         .filter((unit): unit is SuiteUnitState & { suiteTypeId: string } => Boolean(unit.suiteTypeId))
         .map((unit) => ({
@@ -552,10 +578,13 @@ export function validateConfigureState(
       errors.push(`${legLabel}: nights must be at least 1`)
     }
 
-    // An anchored hotel with no date means the train leg it hangs off has no departure date yet
-    // (or the package has no train leg at all) — the salesperson has to set the date themselves.
-    if (state.supplierKind === "hotel_property" && !state.serviceDate) {
-      errors.push(`${legLabel}: check-in date is required`)
+    // Trip dates are derived from the services, so every selected suite leg needs its date.
+    // For an anchored hotel a missing date means the train leg it hangs off has no departure
+    // date yet (or the package has no train leg at all) — the salesperson sets it themselves.
+    if (!state.serviceDate) {
+      errors.push(
+        `${legLabel}: ${state.supplierKind === "hotel_property" ? "check-in" : "service"} date is required`,
+      )
     }
 
     if (PASSENGER_SPLIT_SUPPLIER_KINDS.has(state.supplierKind)) {

@@ -12,9 +12,9 @@ export interface EmailTemplate {
 // deactivated or deleted. Kept in sync with the seeded system templates.
 export const DEFAULT_TEMPLATES: Record<SystemTemplateKey, { subject: string; bodyHtml: string }> = {
   quote_email: {
-    subject: "Your Quote — {{jobNumber}}",
+    subject: "{{supplierName}}/{{clientSurname}}-{{direction}}-{{departureDateShort}}",
     bodyHtml:
-      "<p>Dear {{customerName}},</p><p>Thank you for your enquiry. We are pleased to share your Luxus Travel &amp; Tours quote for <strong>{{direction}}</strong>, departing <strong>{{departureDate}}</strong>.</p>{{quoteSummaryTable}}<p>This quote is valid until <strong>{{validityDate}}</strong>. The full quotation is also attached as a PDF.</p><p>To accept this quote, please reply to this email and we will prepare the next booking steps for you.</p><p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
+      "<p>Dear {{customerName}},</p><p>Thank you for your enquiry.</p><p>We are pleased to share your Luxus Travel &amp; Tours quote for <strong>{{direction}}</strong>, departing <strong>{{departureDate}}</strong>.</p>{{quoteSummaryTable}}<p>The full quotation is also attached as a PDF.</p><p>To accept this quote, please reply to this email and we will prepare the next booking steps for you.</p><p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
   },
   follow_up: {
     subject: "Following up on your enquiry — {{jobNumber}}",

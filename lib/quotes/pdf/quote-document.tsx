@@ -1,25 +1,19 @@
 import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer"
 import { formatDisplayDate, formatDisplayDateLong } from "@/lib/date-format"
+import { QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
 import {
+  buildQuoteItineraryLines,
+  collectQuoteExclusions,
   derivePerPersonRate,
   formatJourneyRange,
   formatPaxLabel,
   formatTotalLabel,
-  summarizeServiceBlock,
 } from "@/lib/quotes/quote-presentation"
-
-export interface QuotePdfInclusion {
-  description: string
-  supplierDescription?: string | null
-  qty: number
-  unit?: string | null
-}
 
 export interface QuotePdfData {
   quoteNumber: string
-  bookingNumber: string
   customerName: string
   quoteDate: string
   validUntil: string | null
@@ -29,14 +23,15 @@ export interface QuotePdfData {
   children: number
   /** VAT-inclusive grand total (quotes.total). */
   total: number
-  inclusions: QuotePdfInclusion[]
   /** Package itinerary; empty array omits the section entirely. */
   itineraryBlocks: VoucherServiceBlock[]
   currency?: string
   title?: string
-  statusLabel?: string
   footerText?: string
   packageIncludesHeading?: string
+  packageExcludesHeading?: string
+  /** Standing exclusion appended after the suppliers' own; empty omits it. */
+  packageExcludesDefault?: string
 }
 
 function formatMoney(amount: number, currency = "ZAR"): string {
@@ -127,7 +122,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#d8cdbc",
     padding: 14,
-    marginBottom: 20,
+    marginTop: 20,
   },
   perPersonLine: {
     fontSize: 11,
@@ -150,16 +145,6 @@ const styles = StyleSheet.create({
     paddingBottom: 5,
     marginBottom: 6,
   },
-  row: {
-    flexDirection: "row",
-    borderBottomWidth: 1,
-    borderBottomColor: "#eee6dc",
-    paddingVertical: 7,
-  },
-  cellDesc: { flex: 1, paddingRight: 8 },
-  descMain: { fontSize: 10, color: "#312b24" },
-  descSub: { fontSize: 8, color: "#8a7f74", fontStyle: "italic", marginTop: 2 },
-  cellQty: { width: 70, textAlign: "right", fontSize: 9, color: "#6f675d" },
   itinerarySection: {
     marginTop: 20,
   },
@@ -171,18 +156,26 @@ const styles = StyleSheet.create({
     fontFamily: "Helvetica-Bold",
     color: "#172018",
   },
+  itineraryText: {
+    fontSize: 10,
+    color: "#312b24",
+    marginTop: 1,
+    lineHeight: 1.4,
+  },
   itineraryDetail: {
     fontSize: 9,
     color: "#554c42",
     marginTop: 2,
     paddingLeft: 10,
   },
-  statusBadge: {
-    fontSize: 8,
-    color: "#8a7f74",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginTop: 3,
+  excludesSection: {
+    marginTop: 20,
+  },
+  excludesItem: {
+    fontSize: 9,
+    color: "#554c42",
+    marginBottom: 3,
+    lineHeight: 1.4,
   },
   footer: {
     marginTop: 36,
@@ -195,10 +188,12 @@ const styles = StyleSheet.create({
   },
 })
 
-const DEFAULT_FOOTER_TEXT =
-  "This quotation is valid until {{validUntil}} and is subject to availability. Prices are quoted in {{currency}}. Luxus Travel & Tours — Luxury Rail Journeys."
+const DEFAULT_FOOTER_TEXT = QUOTE_VALIDITY_ENABLED
+  ? "This quotation is valid until {{validUntil}} and is subject to availability. Prices are quoted in {{currency}}. Luxus Travel & Tours — Luxury Rail Journeys."
+  : "This quotation is subject to availability. Prices are quoted in {{currency}}. Luxus Travel & Tours — Luxury Rail Journeys."
 
 const DEFAULT_INCLUDES_HEADING = "Your Package Includes"
+const DEFAULT_EXCLUDES_HEADING = "Your Package Excludes"
 
 function resolveFooterText(template: string, validUntil: string | null, currency: string): string {
   return template
@@ -208,7 +203,6 @@ function resolveFooterText(template: string, validUntil: string | null, currency
 
 export function QuoteDocument({
   quoteNumber,
-  bookingNumber,
   customerName,
   quoteDate,
   validUntil,
@@ -217,21 +211,21 @@ export function QuoteDocument({
   adults,
   children,
   total,
-  inclusions,
   itineraryBlocks,
   currency = "ZAR",
-  title = "PROVISIONAL QUOTATION",
-  statusLabel = "Provisional",
+  title = "QUOTATION",
   footerText = DEFAULT_FOOTER_TEXT,
   packageIncludesHeading = DEFAULT_INCLUDES_HEADING,
+  packageExcludesHeading = DEFAULT_EXCLUDES_HEADING,
+  packageExcludesDefault,
 }: QuotePdfData) {
   const pax = { adults, children }
   const paxLabel = formatPaxLabel(pax)
   const journeyRange = formatJourneyRange(journeyStart, journeyEnd)
   const perPersonRate = derivePerPersonRate(total, pax)
-  const itineraryLines = sortItineraryBlocksChronologically(itineraryBlocks).map(
-    summarizeServiceBlock,
-  )
+  const sortedBlocks = sortItineraryBlocksChronologically(itineraryBlocks)
+  const itineraryLines = buildQuoteItineraryLines(sortedBlocks)
+  const exclusions = collectQuoteExclusions(sortedBlocks, packageExcludesDefault)
 
   return (
     <Document
@@ -248,11 +242,9 @@ export function QuoteDocument({
         <View style={styles.titleRow}>
           <View>
             <Text style={styles.docTitle}>{title}</Text>
-            <Text style={styles.statusBadge}>STATUS: {statusLabel}</Text>
           </View>
           <View>
             <Text style={styles.quoteNumberBadge}>{quoteNumber}</Text>
-            <Text style={[styles.quoteNumberBadge, { color: "#8a7f74", fontSize: 9 }]}>Ref: {bookingNumber}</Text>
           </View>
         </View>
 
@@ -275,12 +267,47 @@ export function QuoteDocument({
             <Text style={styles.metaLabel}>Quote date</Text>
             <Text style={styles.metaValue}>{formatDate(quoteDate)}</Text>
           </View>
-          <View>
-            <Text style={styles.metaLabel}>Valid until</Text>
-            <Text style={styles.metaValue}>{formatDate(validUntil)}</Text>
-          </View>
+          {QUOTE_VALIDITY_ENABLED ? (
+            <View>
+              <Text style={styles.metaLabel}>Valid until</Text>
+              <Text style={styles.metaValue}>{formatDate(validUntil)}</Text>
+            </View>
+          ) : null}
         </View>
 
+        {itineraryLines.length > 0 ? (
+          <View style={styles.itinerarySection}>
+            <Text style={styles.sectionHeading}>{packageIncludesHeading}</Text>
+            {itineraryLines.map((line, index) => (
+              <View key={index} style={styles.itineraryItem} wrap={false}>
+                <Text style={styles.itineraryDate}>
+                  {line.dateISO
+                    ? formatDisplayDateLong(line.dateISO) || "Date to be confirmed"
+                    : "Date to be confirmed"}
+                </Text>
+                <Text style={styles.itineraryText}>{line.text}</Text>
+                {line.bullets.map((bullet, bulletIndex) => (
+                  <Text key={bulletIndex} style={styles.itineraryDetail}>
+                    {`- ${bullet}`}
+                  </Text>
+                ))}
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {exclusions.length > 0 ? (
+          <View style={styles.excludesSection}>
+            <Text style={styles.sectionHeading}>{packageExcludesHeading}</Text>
+            {exclusions.map((item, index) => (
+              <Text key={index} style={styles.excludesItem}>
+                {`- ${item}`}
+              </Text>
+            ))}
+          </View>
+        ) : null}
+
+        {/* Total price renders last, after everything the quote covers. */}
         <View style={styles.pricingBox}>
           {perPersonRate !== null ? (
             <Text style={styles.perPersonLine}>
@@ -291,41 +318,6 @@ export function QuoteDocument({
             {formatTotalLabel(pax)}: {formatMoney(total, currency)} (VAT inclusive)
           </Text>
         </View>
-
-        <Text style={styles.sectionHeading}>Your quotation includes</Text>
-        {inclusions.map((item, index) => (
-          <View key={index} style={styles.row}>
-            <View style={styles.cellDesc}>
-              <Text style={styles.descMain}>{item.description}</Text>
-              {item.supplierDescription ? (
-                <Text style={styles.descSub}>{item.supplierDescription}</Text>
-              ) : null}
-            </View>
-            <Text style={styles.cellQty}>
-              {item.unit ? `${item.qty} × ${item.unit}` : `${item.qty}`}
-            </Text>
-          </View>
-        ))}
-
-        {itineraryLines.length > 0 ? (
-          <View style={styles.itinerarySection}>
-            <Text style={styles.sectionHeading}>{packageIncludesHeading}</Text>
-            {itineraryLines.map((line, index) => (
-              <View key={index} style={styles.itineraryItem}>
-                <Text style={styles.itineraryDate}>
-                  {line.dateISO ? formatDisplayDateLong(line.dateISO) || "Date to be confirmed" : "Date to be confirmed"}
-                  {" — "}
-                  {line.title}
-                </Text>
-                {line.details.map((detail, detailIndex) => (
-                  <Text key={detailIndex} style={styles.itineraryDetail}>
-                    {detail}
-                  </Text>
-                ))}
-              </View>
-            ))}
-          </View>
-        ) : null}
 
         <Text style={styles.footer}>{resolveFooterText(footerText, validUntil, currency)}</Text>
       </Page>

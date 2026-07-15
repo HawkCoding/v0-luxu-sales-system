@@ -42,6 +42,8 @@ const applyPackageSchema = z.object({
       legId: z.string().uuid(),
       selected: z.boolean().default(true),
       routeId: z.string().uuid().optional(),
+      /** The leg's own service date — rate cards match against it (travelDate is the fallback). */
+      serviceDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD").nullable().optional(),
       /** Transfer/vehicle-rental legs only: the vehicle category. */
       suiteTypeId: z.string().uuid().optional(),
       /** Hotel/train/tour/airline legs: one entry per independent suite/room booked. */
