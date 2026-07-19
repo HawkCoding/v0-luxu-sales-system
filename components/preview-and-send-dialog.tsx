@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useOptimisticSend } from "@/hooks/use-optimistic-send"
+import { EmailAttachmentPicker } from "@/components/email-attachment-picker"
 import { extractContentSlot, replaceContentSlot } from "@/lib/templates/content-slot"
 
 const HtmlBodyEditor = dynamic(
@@ -80,6 +81,7 @@ export function PreviewAndSendDialog({
   )
   const [content, setContent] = useState<string | null>(initialContent)
   const [sending, setSending] = useState(false)
+  const [libraryAttachmentIds, setLibraryAttachmentIds] = useState<string[]>([])
   const optimisticSend = useOptimisticSend()
 
   const canEditBody = initialContent !== null
@@ -97,6 +99,7 @@ export function PreviewAndSendDialog({
     const capturedSubject = subject
     const capturedHtml = finalHtml
     const capturedRecipient = recipient.trim()
+    const capturedLibraryIds = libraryAttachmentIds
     // Close dialog immediately for Gmail-style undo flow. The send fires
     // ~5s later via the optimistic-send hook; if the user clicks Undo on
     // the toast, the fetch never runs.
@@ -123,6 +126,7 @@ export function PreviewAndSendDialog({
             scheduledCorrespondenceId,
             sentAt: new Date().toISOString(),
             attachments,
+            libraryAttachmentIds: capturedLibraryIds.length > 0 ? capturedLibraryIds : undefined,
           }),
         })
         const payload = (await response.json().catch(() => null)) as { error?: string } | null
@@ -195,6 +199,14 @@ export function PreviewAndSendDialog({
             </div>
           )}
 
+          <EmailAttachmentPicker
+            bookingId={bookingId}
+            kind={kind}
+            selected={libraryAttachmentIds}
+            onSelectedChange={setLibraryAttachmentIds}
+            disabled={sending}
+          />
+
           {canEditBody ? (
             <Tabs defaultValue="preview">
               <TabsList>
@@ -230,7 +242,11 @@ export function PreviewAndSendDialog({
           </Button>
           <Button onClick={handleSend} disabled={sending || !subject.trim()}>
             <Send data-icon="inline-start" />
-            {sending ? "Sending..." : attachments?.length ? "Send with attachment" : "Send"}
+            {sending
+              ? "Sending..."
+              : (attachments?.length ?? 0) + libraryAttachmentIds.length > 0
+                ? "Send with attachment"
+                : "Send"}
           </Button>
         </DialogFooter>
       </DialogContent>

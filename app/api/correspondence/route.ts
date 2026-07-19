@@ -6,7 +6,9 @@ import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { getEmailFromAddress } from "@/lib/email/from"
 import { resolveSalespersonSender } from "@/lib/email/resolve-sender"
 import { sendEmail } from "@/lib/email/transport"
+import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { applyTransition } from "@/lib/pipeline/apply-transition"
+import { loadLibraryAttachments } from "@/lib/attachments/email-attachment-library"
 import { ensureQuotePdf, QUOTE_BUCKET } from "@/lib/quotes/ensure-quote-pdf"
 import { composeEmail } from "@/lib/templates/compose-email"
 import type { Json } from "@/lib/supabase/types"
@@ -70,6 +72,7 @@ const correspondenceSchema = z
       )
       .max(5)
       .optional(),
+    libraryAttachmentIds: z.array(z.string().uuid()).max(10).optional(),
   })
   .refine((value) => Boolean(value.bookingId ?? value.jobId), {
     message: "bookingId or jobId is required",
@@ -107,7 +110,7 @@ export async function POST(req: Request) {
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
     .select(
-      "id, booking_number, stage, source, raw_text, updated_at, customer_id, consultant, departure_date, duration_nights, invoice_balance, assigned_salesperson_id, customer:customers(email, first_name, last_name)",
+      "id, booking_number, stage, source, raw_text, updated_at, customer_id, consultant, departure_date, duration_nights, invoice_balance, assigned_salesperson_id, customer:customers(email, title, first_name, last_name)",
     )
     .eq("id", bookingId)
     .single()
@@ -164,6 +167,7 @@ export async function POST(req: Request) {
     // A quote email must always carry its PDF — re-render on every send so the
     // attachment reflects the current layout and quote data.
     let storagePath: string
+    let attachmentFilename: string
     try {
       const ensured = await ensureQuotePdf(supabase, parsed.data.quoteId, {
         actorName: profile.actorName,
@@ -171,6 +175,7 @@ export async function POST(req: Request) {
         force: true,
       })
       storagePath = ensured.storagePath
+      attachmentFilename = ensured.attachmentFilename
     } catch (err) {
       console.error("correspondence:quote-pdf-ensure", err)
       return jsonError("Quote PDF could not be generated — email not sent", 500)
@@ -186,12 +191,31 @@ export async function POST(req: Request) {
     }
 
     const arrayBuffer = await blob.arrayBuffer()
-    const filename = objectPath.split("/").pop() ?? "quote.pdf"
     baseAttachments.unshift({
-      filename,
+      filename: attachmentFilename,
       contentBase64: Buffer.from(arrayBuffer).toString("base64"),
       contentType: "application/pdf",
     })
+  }
+
+  // Library files the salesperson ticked in the send dialog (reservation
+  // forms, fact sheets, ...). A missing file blocks the send rather than
+  // quietly emailing without it.
+  let libraryFilenames: string[] = []
+  if (parsed.data.libraryAttachmentIds?.length) {
+    try {
+      const libraryAttachments = await loadLibraryAttachments(
+        supabase,
+        parsed.data.libraryAttachmentIds,
+      )
+      libraryFilenames = libraryAttachments.map((attachment) => attachment.filename)
+      baseAttachments.push(...libraryAttachments)
+    } catch (err) {
+      console.error("correspondence:library-attachments", err)
+      const message =
+        err instanceof Error ? err.message : "Attachments could not be loaded — email not sent"
+      return jsonError(message, 502)
+    }
   }
 
   const sendResult = await sendEmail({
@@ -309,7 +333,11 @@ export async function POST(req: Request) {
     })
   }
 
-  if ((parsed.data.attachments?.length ?? 0) > 0) {
+  const auditedFilenames = [
+    ...(parsed.data.attachments?.map((attachment) => attachment.filename) ?? []),
+    ...libraryFilenames,
+  ]
+  if (auditedFilenames.length > 0) {
     await writeAuditLog(supabase, {
       actor: profile.actorName,
       actorUserId: auth.value.user.id,
@@ -318,8 +346,8 @@ export async function POST(req: Request) {
       action: "attachment_uploaded",
       meta: {
         correspondence_id: cor.id,
-        attachment_count: parsed.data.attachments?.length ?? 0,
-        filenames: parsed.data.attachments?.map((attachment) => attachment.filename) ?? [],
+        attachment_count: auditedFilenames.length,
+        filenames: auditedFilenames,
       },
     })
   }
@@ -390,9 +418,7 @@ export async function POST(req: Request) {
   // Draft a scheduled follow-up 48h out — quote emails only, composed from the
   // editable follow_up template so the draft is a real, sendable email.
   if (parsed.data.kind === "quote") {
-    const customerName =
-      [customerRecord?.first_name, customerRecord?.last_name].filter(Boolean).join(" ").trim() ||
-      "Valued Guest"
+    const customerName = formatCustomerSalutation(customerRecord) || "Valued Guest"
     const followUp = await composeEmail(supabase, "follow_up", {
       tokens: {
         customerName,

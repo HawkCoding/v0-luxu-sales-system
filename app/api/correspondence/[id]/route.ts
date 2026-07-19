@@ -2,6 +2,7 @@ import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { writeAuditLog } from "@/lib/audit-write"
+import { formatCustomerSalutation } from "@/lib/person-name-format"
 
 export const runtime = "nodejs"
 
@@ -33,7 +34,7 @@ export async function GET(_req: Request, { params }: RouteParams) {
 
   const { data: booking } = await supabase
     .from("bookings")
-    .select("id, booking_number, customer:customers(first_name, last_name, email)")
+    .select("id, booking_number, customer:customers(title, first_name, last_name, email)")
     .eq("id", correspondence.booking_id)
     .maybeSingle()
 
@@ -50,7 +51,7 @@ export async function GET(_req: Request, { params }: RouteParams) {
     bodyHtml: correspondence.body_html,
     scheduledAt: correspondence.scheduled_at,
     to: recipients?.[0] ?? customer?.email ?? "",
-    customerName: [customer?.first_name, customer?.last_name].filter(Boolean).join(" ").trim(),
+    customerName: formatCustomerSalutation(customer),
   })
 }
 
