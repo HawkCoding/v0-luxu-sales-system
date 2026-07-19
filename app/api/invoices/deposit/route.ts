@@ -4,10 +4,14 @@ import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDate } from "@/lib/date-format"
 import { calculateDepositAmount, normalizeDepositPercentage } from "@/lib/pipeline/constants"
 import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
+import { buildUnifiedTotals } from "@/lib/invoices/build-unified-totals"
+import { calculateInvoiceBalance } from "@/lib/invoices/calculate-balance"
 import { ensureInvoicePdf } from "@/lib/invoices/ensure-invoice-pdf"
+import { resolveInvoiceStatusLabel, unifiedInvoiceNumber } from "@/lib/invoices/invoice-status"
 import { logError } from "@/lib/error-log"
 import { composeEmail } from "@/lib/templates/compose-email"
-import { getBankingSettings } from "@/lib/settings-access"
+import { formatCustomerSalutation } from "@/lib/person-name-format"
+import { getBankingSettings, getInvoiceStatusOptions } from "@/lib/settings-access"
 
 export const runtime = "nodejs"
 
@@ -58,7 +62,9 @@ export async function POST(req: Request) {
 
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
-    .select("id, booking_number, customer:customers(first_name, last_name, email)")
+    .select(
+      "id, booking_number, departure_date, deposit_paid, cancelled_at, customer:customers(title, first_name, last_name, email)",
+    )
     .eq("id", parsed.data.jobId)
     .single()
 
@@ -74,24 +80,25 @@ export async function POST(req: Request) {
 
   if (existingInvoiceError) return safeSupabaseError("deposit-invoice:existing", existingInvoiceError)
 
-  const { data: quote, error: quoteError } = await supabase
-    .from("quotes")
-    .select("id, total, status, created_at")
-    .eq("booking_id", parsed.data.jobId)
-    .eq("status", "accepted")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
-  if (quoteError) return safeSupabaseError("deposit-invoice:quote", quoteError)
-  if (!quote || quote.total <= 0) {
-    return jsonError("A priced quote is required before generating a deposit invoice", 422)
+  let balance
+  try {
+    balance = await calculateInvoiceBalance(supabase, parsed.data.jobId)
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("priced quote")) {
+      return jsonError("A priced quote is required before generating a deposit invoice", 422)
+    }
+    return safeSupabaseError("deposit-invoice:balance", error)
   }
+  const quote = balance.quote
 
   const now = new Date()
-  const dueDate = addDays(now, 7)
+  // The sales team's payment terms: deposit due within 72 hours of the
+  // confirmation invoice.
+  const dueDate = addDays(now, 3)
   const amount = calculateDepositAmount(quote.total, depositPercentage)
-  const invoiceNumber = `${booking.booking_number}-DEP1`
+  // One client-facing invoice per booking — the number stays fixed for the life
+  // of the booking and doubles as the payment reference.
+  const invoiceNumber = unifiedInvoiceNumber(booking.booking_number)
 
   const invoice = existingInvoice ?? await (async () => {
     const { data, error } = await supabase
@@ -122,7 +129,24 @@ export async function POST(req: Request) {
   if (!invoice) return jsonError("Deposit invoice could not be generated", 500)
 
   const customer = Array.isArray(booking.customer) ? booking.customer[0] : booking.customer
-  const customerName = [customer?.first_name, customer?.last_name].filter(Boolean).join(" ").trim()
+  const customerName = formatCustomerSalutation(customer)
+
+  const totals = buildUnifiedTotals({
+    balance,
+    departureDate: booking.departure_date,
+    depositPercentage: invoice.deposit_percentage ?? depositPercentage,
+    depositAmount: invoice.amount,
+  })
+  const statusOptions = await getInvoiceStatusOptions(supabase)
+  const statusLabel = resolveInvoiceStatusLabel(
+    statusOptions,
+    {
+      depositPaid: booking.deposit_paid ?? false,
+      outstanding: balance.balance,
+      cancelled: Boolean(booking.cancelled_at),
+    },
+    invoice.display_status,
+  )
 
   // Render + store the invoice PDF and return it as an email attachment.
   let pdf
@@ -131,7 +155,7 @@ export async function POST(req: Request) {
       invoice: {
         id: invoice.id,
         booking_id: invoice.booking_id,
-        kind: "deposit",
+        quote_id: invoice.quote_id,
         invoice_number: invoice.invoice_number,
         amount: invoice.amount,
         currency: invoice.currency,
@@ -141,13 +165,8 @@ export async function POST(req: Request) {
       },
       bookingNumber: booking.booking_number,
       customerName,
-      lines: [
-        { label: "Quote total", value: formatMoney(quote.total, invoice.currency) },
-        {
-          label: `Deposit (${invoice.deposit_percentage ?? depositPercentage}%)`,
-          value: formatMoney(invoice.amount, invoice.currency),
-        },
-      ],
+      statusLabel,
+      totals,
     })
   } catch (error) {
     console.error("deposit-invoice:pdf", error)
@@ -163,6 +182,8 @@ export async function POST(req: Request) {
       depositAmount: formatMoney(invoice.amount, invoice.currency),
       depositPercentage: String(invoice.deposit_percentage ?? depositPercentage),
       dueDate: formatDisplayDate(invoice.due_date),
+      finalDueDate: totals.finalDueDate ? formatDisplayDate(totals.finalDueDate) : "Now",
+      finalAmount: formatMoney(totals.finalAmount, invoice.currency),
     },
     blocks: { bankingDetails: buildBankingDetailsBlock(banking) },
   })

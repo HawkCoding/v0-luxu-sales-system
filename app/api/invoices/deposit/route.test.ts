@@ -43,7 +43,18 @@ vi.mock("@/lib/settings-access", () => ({
     company_address: "",
     company_reg_number: "",
     company_vat_number: "",
+    company_tel: "",
+    company_cell: "",
+    company_fax: "",
+    company_email: "",
+    company_website: "",
   })),
+  getInvoiceStatusOptions: vi.fn(async () => [
+    { role: "provisional", label: "Provisional" },
+    { role: "confirmed", label: "Confirmed" },
+    { role: "paid", label: "Paid in Full" },
+    { role: "cancelled", label: "Cancelled" },
+  ]),
 }))
 
 import { POST } from "./route"
@@ -101,7 +112,7 @@ describe("POST /api/invoices/deposit", () => {
     expect(res.status).toBe(200)
     // 25% of the accepted quote (1000), never the sent quote (9999)
     expect(body.invoice.amount).toBe(250)
-    expect(body.invoice.invoiceNumber).toBe("BT-2026-0001-DEP1")
+    expect(body.invoice.invoiceNumber).toBe("BT-2026-0001-INV")
     expect(store.rows("invoices")[0]).toEqual(
       expect.objectContaining({ kind: "deposit", quote_id: "quote-accepted", amount: 250 }),
     )

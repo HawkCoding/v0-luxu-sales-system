@@ -61,7 +61,7 @@ export async function syncBookingPaymentState(
       .maybeSingle(),
     supabase
       .from("bookings")
-      .select("deposit_paid, deposit_paid_at, invoice_balance, stage")
+      .select("deposit_paid, deposit_paid_at, invoice_balance, stage, deposit_confirmed_manually")
       .eq("id", bookingId)
       .single(),
   ])
@@ -76,7 +76,10 @@ export async function syncBookingPaymentState(
   const invoiceBalance = Math.max(0, Math.round((quoteTotal - totalPaid) * 100) / 100)
 
   const depositThreshold = depositInvoice ? Number(depositInvoice.amount) : null
-  const isDepositPaid = depositThreshold !== null && totalPaid >= depositThreshold
+  const derivedDepositPaid = depositThreshold !== null && totalPaid >= depositThreshold
+  // A manual "deposit received" confirmation is sticky: amounts can still
+  // set deposit_paid true, but they can never clear a confirmed deposit.
+  const isDepositPaid = derivedDepositPaid || currentBooking?.deposit_confirmed_manually === true
 
   const bookingUpdates: Record<string, unknown> = {
     invoice_balance: invoiceBalance,

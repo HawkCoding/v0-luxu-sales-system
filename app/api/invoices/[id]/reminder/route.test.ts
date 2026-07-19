@@ -47,7 +47,18 @@ vi.mock("@/lib/settings-access", () => ({
     company_address: "",
     company_reg_number: "",
     company_vat_number: "",
+    company_tel: "",
+    company_cell: "",
+    company_fax: "",
+    company_email: "",
+    company_website: "",
   })),
+  getInvoiceStatusOptions: vi.fn(async () => [
+    { role: "provisional", label: "Provisional" },
+    { role: "confirmed", label: "Confirmed" },
+    { role: "paid", label: "Paid in Full" },
+    { role: "cancelled", label: "Cancelled" },
+  ]),
 }))
 
 import { PATCH, POST } from "./route"

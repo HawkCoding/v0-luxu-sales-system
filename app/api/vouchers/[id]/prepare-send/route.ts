@@ -1,6 +1,7 @@
 import { requireRole } from "@/lib/api/auth"
 import { jsonError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDateLong } from "@/lib/date-format"
+import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { checkVoucherReadiness } from "@/lib/voucher/check-readiness"
 import { composeEmail } from "@/lib/templates/compose-email"
 
@@ -68,7 +69,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
     .select(
       `id, voucher_number, booking_id,
        booking:bookings(id, booking_number, stage, invoice_balance, departure_date, consultant,
-         customer:customers(first_name, last_name, email),
+         customer:customers(title, first_name, last_name, email),
          route:routes(name)),
        document:documents!pdf_document_id(storage_path)`,
     )
@@ -133,7 +134,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
     return jsonError("Itinerary PDF could not be retrieved from storage", 500)
   }
 
-  const customerName = [customer?.first_name, customer?.last_name].filter(Boolean).join(" ").trim()
+  const customerName = formatCustomerSalutation(customer)
   const composed = await composeEmail(supabase, "voucher_email", {
     tokens: {
       customerName: customerName || "Valued Guest",

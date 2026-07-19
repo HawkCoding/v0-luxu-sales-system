@@ -1,7 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
-import { renderInvoicePdf, type InvoicePdfLine } from "@/lib/invoices/render-invoice-pdf"
-import { getBankingSettings, getDocumentTextSettings } from "@/lib/settings-access"
+import { buildInvoiceView } from "@/lib/invoices/build-invoice-view"
+import type { InvoiceTotals } from "@/lib/invoices/pdf/invoice-document"
+import { renderInvoicePdf } from "@/lib/invoices/render-invoice-pdf"
+import { loadBrandLogo } from "@/lib/pdf/brand-logo"
+import {
+  getBankingSettings,
+  getDocumentBrandSettings,
+  getDocumentTextSettings,
+  resolveDocumentBrand,
+} from "@/lib/settings-access"
 import { logError } from "@/lib/error-log"
 
 export const INVOICE_BUCKET = "invoices"
@@ -14,7 +22,7 @@ export interface EnsureInvoicePdfInput {
   invoice: {
     id: string
     booking_id: string
-    kind: "deposit" | "final"
+    quote_id?: string | null
     invoice_number: string
     amount: number
     currency: string
@@ -24,8 +32,14 @@ export interface EnsureInvoicePdfInput {
   }
   bookingNumber: string
   customerName: string
-  /** Context lines (quote total, payments received, ...) shown above the amount due. */
-  lines: InvoicePdfLine[]
+  /**
+   * Client-facing status printed in the invoice header (Provisional /
+   * Confirmed / …). Resolved by the caller from the configured status options
+   * and the booking's payment state.
+   */
+  statusLabel: string
+  /** The money ladder, built by the caller from the current balance. */
+  totals: InvoiceTotals
 }
 
 export interface EnsuredInvoicePdf {
@@ -43,12 +57,21 @@ export interface EnsuredInvoicePdf {
  */
 export async function ensureInvoicePdf(
   supabase: SupabaseClient<Database>,
-  { invoice, bookingNumber, customerName, lines }: EnsureInvoicePdfInput,
+  { invoice, bookingNumber, customerName, statusLabel, totals }: EnsureInvoicePdfInput,
 ): Promise<EnsuredInvoicePdf> {
-  const [banking, documentText] = await Promise.all([
+  const [banking, documentText, documentBrand] = await Promise.all([
     getBankingSettings(supabase),
     getDocumentTextSettings(supabase),
+    getDocumentBrandSettings(supabase),
   ])
+  const { brand, position } = resolveDocumentBrand(documentBrand)
+  const brandLogo = await loadBrandLogo(brand.logoUrl)
+
+  const view = await buildInvoiceView(supabase, {
+    bookingId: invoice.booking_id,
+    quoteId: invoice.quote_id ?? null,
+    journeyHeading: documentText.itinerary_doc_journey_heading,
+  })
 
   let pdfBuffer: Buffer
   try {
@@ -56,17 +79,23 @@ export async function ensureInvoicePdf(
       invoiceNumber: invoice.invoice_number,
       bookingNumber,
       customerName,
-      kind: invoice.kind,
       issueDate: invoice.created_at.slice(0, 10),
       dueDate: invoice.due_date,
-      lines,
-      amountDue: invoice.amount,
+      consultant: view.consultant,
+      guestNames: view.guestNames,
+      billing: view.billing,
+      departure: view.departure,
+      items: view.items,
+      totals,
       currency: invoice.currency,
-      statusLabel: invoice.status === "draft" ? "Draft" : invoice.status,
+      statusLabel,
       banking,
-      depositTitle: documentText.invoice_doc_deposit_title,
-      finalTitle: documentText.invoice_doc_final_title,
       footerText: documentText.invoice_doc_footer_text,
+      paymentNote: documentText.invoice_doc_payment_note,
+      bankChargesNote: documentText.invoice_doc_bank_charges_note,
+      brand,
+      brandPosition: position.invoice,
+      brandLogo,
     })
   } catch (err) {
     void logError({

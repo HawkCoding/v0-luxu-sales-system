@@ -2,9 +2,14 @@ import { requireRole } from "@/lib/api/auth"
 import { jsonError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDate } from "@/lib/date-format"
 import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
+import { buildUnifiedTotals } from "@/lib/invoices/build-unified-totals"
+import { calculateInvoiceBalance } from "@/lib/invoices/calculate-balance"
 import { ensureInvoicePdf } from "@/lib/invoices/ensure-invoice-pdf"
+import { resolveInvoiceStatusLabel } from "@/lib/invoices/invoice-status"
+import type { InvoiceTotals } from "@/lib/invoices/pdf/invoice-document"
 import { composeEmail } from "@/lib/templates/compose-email"
-import { getBankingSettings } from "@/lib/settings-access"
+import { formatCustomerSalutation } from "@/lib/person-name-format"
+import { getBankingSettings, getInvoiceStatusOptions } from "@/lib/settings-access"
 
 export const runtime = "nodejs"
 
@@ -45,7 +50,9 @@ export async function POST(_req: Request, { params }: RouteParams) {
 
   const { data: invoice, error: invoiceError } = await supabase
     .from("invoices")
-    .select("id, booking_id, kind, status, invoice_number, amount, currency, due_date, created_at")
+    .select(
+      "id, booking_id, quote_id, kind, status, invoice_number, amount, currency, due_date, created_at, deposit_percentage, display_status",
+    )
     .eq("id", id)
     .single()
 
@@ -56,15 +63,55 @@ export async function POST(_req: Request, { params }: RouteParams) {
 
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
-    .select("id, booking_number, customer:customers(first_name, last_name, email)")
+    .select(
+      "id, booking_number, departure_date, deposit_paid, cancelled_at, customer:customers(title, first_name, last_name, email)",
+    )
     .eq("id", invoice.booking_id)
     .single()
 
   if (bookingError || !booking) return jsonError("Booking not found", 404)
   const customer = Array.isArray(booking.customer) ? booking.customer[0] : booking.customer
-  const customerName = [customer?.first_name, customer?.last_name].filter(Boolean).join(" ").trim()
+  const customerName = formatCustomerSalutation(customer)
 
-  const kind = invoice.kind === "deposit" ? ("deposit" as const) : ("final" as const)
+  const depositPercentage =
+    invoice.kind === "deposit" ? invoice.deposit_percentage : null
+  const depositAmount = invoice.kind === "deposit" ? invoice.amount : null
+
+  // Rebuild the money ladder from the current balance so a re-issued reminder
+  // reflects payments made since the invoice was first generated. If the balance
+  // can't be resolved, the PDF still renders from the invoice's own amount.
+  let totals: InvoiceTotals
+  let outstanding = invoice.amount
+  try {
+    const balance = await calculateInvoiceBalance(supabase, invoice.booking_id)
+    totals = buildUnifiedTotals({
+      balance,
+      departureDate: booking.departure_date,
+      depositPercentage,
+      depositAmount,
+    })
+    outstanding = balance.balance
+  } catch {
+    totals = {
+      subtotalInclVat: invoice.amount,
+      depositAmount: null,
+      finalAmount: invoice.amount,
+      finalDueDate: invoice.due_date,
+      amountReceived: 0,
+      amountReceivedAt: null,
+      outstanding: invoice.amount,
+    }
+  }
+
+  const statusLabel = resolveInvoiceStatusLabel(
+    await getInvoiceStatusOptions(supabase),
+    {
+      depositPaid: booking.deposit_paid ?? false,
+      outstanding,
+      cancelled: Boolean(booking.cancelled_at),
+    },
+    invoice.display_status,
+  )
 
   let pdf
   try {
@@ -72,7 +119,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
       invoice: {
         id: invoice.id,
         booking_id: invoice.booking_id,
-        kind,
+        quote_id: invoice.quote_id,
         invoice_number: invoice.invoice_number,
         amount: invoice.amount,
         currency: invoice.currency,
@@ -82,9 +129,8 @@ export async function POST(_req: Request, { params }: RouteParams) {
       },
       bookingNumber: booking.booking_number,
       customerName,
-      lines: [
-        { label: "Invoice amount", value: formatMoney(invoice.amount, invoice.currency) },
-      ],
+      statusLabel,
+      totals,
     })
   } catch (error) {
     console.error("payment-reminder:pdf", error)
@@ -98,7 +144,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
       customerName: customerName || "Valued Guest",
       jobNumber: booking.booking_number,
       invoiceNumber: invoice.invoice_number,
-      invoiceKind: kind,
+      invoiceKind: invoice.kind === "deposit" ? "deposit" : "final",
       amountDue: formatMoney(invoice.amount, invoice.currency),
       dueDate: formatDisplayDate(invoice.due_date),
       daysOverdue: overdue > 0 ? String(overdue) : "",

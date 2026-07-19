@@ -21,6 +21,16 @@ export const DEFAULT_TEMPLATES: Record<SystemTemplateKey, { subject: string; bod
     bodyHtml:
       "<p>Dear {{customerName}},</p><p>We are following up on the quotation sent on <strong>{{lastSentDate}}</strong>. Availability on peak dates can be limited — we would love to secure your suite.</p><p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
   },
+  reservation_received: {
+    subject: "Reservation received — {{jobNumber}}",
+    bodyHtml:
+      "<p>Dear {{customerName}},</p><p>Thank you for your reservation form well received.</p><p>Confirmation invoice with payment instructions to follow shortly.</p><p>In the meantime, I have secured your suite for you.</p><p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
+  },
+  payment_received: {
+    subject: "Payment received — {{jobNumber}}",
+    bodyHtml:
+      "<p>Dear {{customerName}},</p><p>Thank you very much for your payment well received.</p><p>Please find attached your amended confirmation invoice.</p><p><strong>PAYMENT SCHEDULE</strong></p><p>Amount received: <strong>{{receivedAmount}}</strong> – Received, thank you</p><p>Final amount due {{finalDueDate}}: <strong>{{outstandingAmount}}</strong></p><p>Hope you have a wonderful day.</p><p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
+  },
   deposit_request: {
     subject: "Deposit Invoice — {{jobNumber}}",
     bodyHtml:

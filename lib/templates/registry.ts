@@ -5,7 +5,7 @@
 // sample previews; renderTemplate flags any token in a template body that
 // is not supplied at send time.
 
-import { QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
+import { QUOTE_REFERENCE_ENABLED, QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 
 export interface TemplateTokenSpec {
   /** Token name as written in the template, without braces (e.g. "customerName"). */
@@ -23,7 +23,9 @@ export interface TemplateTokenSpec {
 export const SYSTEM_TEMPLATE_KEYS = [
   "quote_email",
   "follow_up",
+  "reservation_received",
   "deposit_request",
+  "payment_received",
   "final_invoice",
   "payment_reminder",
   "voucher_email",
@@ -39,9 +41,9 @@ export function isSystemTemplateKey(key: string): key is SystemTemplateKey {
 
 const customerName: TemplateTokenSpec = {
   name: "customerName",
-  description: "Full name of the customer",
+  description: "How the customer is addressed — title and surname",
   kind: "scalar",
-  sample: "Jane Smith",
+  sample: "Mr Smith",
 }
 const jobNumber: TemplateTokenSpec = {
   name: "jobNumber",
@@ -85,8 +87,14 @@ export const TEMPLATE_TOKENS: Record<SystemTemplateKey, TemplateTokenSpec[]> = {
   quote_email: [
     customerName,
     jobNumber,
-    { name: "quoteNumber", description: "Quote number (e.g. BT-2026-0001-Q1)", kind: "scalar", sample: "BT-2026-0001-Q1" },
-    { name: "quoteDate", description: "Date the quote was issued", kind: "scalar", sample: "2026-07-12" },
+    // Hidden while the quote reference is disabled — still substituted at send
+    // time so a customised template containing either token keeps working.
+    ...(QUOTE_REFERENCE_ENABLED
+      ? [
+          { name: "quoteNumber", description: "Quote number (e.g. LTT-2026-0001-Q1)", kind: "scalar", sample: "LTT-2026-0001-Q1" } satisfies TemplateTokenSpec,
+          { name: "quoteDate", description: "Date the quote was issued", kind: "scalar", sample: "2026-07-12" } satisfies TemplateTokenSpec,
+        ]
+      : []),
     { name: "direction", description: "Travel route / journey name", kind: "scalar", sample: "Pretoria → Cape Town" },
     { name: "departureDate", description: "Departure date of the trip", kind: "scalar", sample: "2026-09-14" },
     {
@@ -114,7 +122,7 @@ export const TEMPLATE_TOKENS: Record<SystemTemplateKey, TemplateTokenSpec[]> = {
         "Quote meta (journey dates, guests), package itinerary and exclusions, then the VAT-inclusive total (system-generated)",
       kind: "block",
       sample:
-        '<div style="margin:18px 0;padding:14px 16px;background:#fbf8f3;border:1px solid #e8dfd2;" data-label="Quote details"><p style="margin:0;"><strong>Quote number:</strong> BT-2026-0001-Q1</p><p style="margin:6px 0 0;"><strong>Journey:</strong> 18 – 22 July 2026</p><p style="margin:6px 0 0;"><strong>Guests:</strong> 2 Adults</p></div><div style="margin:18px 0;padding:14px 16px;background:#f4efe6;border:1px solid #d8cdbc;" data-label="Total price"><p style="margin:0;font-weight:700;">TOTAL for 2 Adults: R 86 300,00 (VAT inclusive)</p></div>',
+        '<div style="margin:18px 0;padding:14px 16px;background:#fbf8f3;border:1px solid #e8dfd2;" data-label="Quote details"><p style="margin:0;"><strong>Quote number:</strong> BT-2026-0001-Q1</p><p style="margin:6px 0 0;"><strong>Journey:</strong> 18 – 22 July 2026</p><p style="margin:6px 0 0;"><strong>Guests:</strong> 2 Adults</p></div><div style="margin:18px 0;padding:14px 16px;background:#f4efe6;border:1px solid #d8cdbc;" data-label="Total price"><p style="margin:0;font-weight:700;">TOTAL for 2 Adults: R 86 300,00 (INCL.VAT)</p></div>',
     },
   ],
   follow_up: [
@@ -127,6 +135,7 @@ export const TEMPLATE_TOKENS: Record<SystemTemplateKey, TemplateTokenSpec[]> = {
       sample: "2026-07-05",
     },
   ],
+  reservation_received: [customerName, jobNumber, consultantName],
   deposit_request: [
     customerName,
     jobNumber,
@@ -144,6 +153,42 @@ export const TEMPLATE_TOKENS: Record<SystemTemplateKey, TemplateTokenSpec[]> = {
       sample: "25",
     },
     dueDate,
+    {
+      name: "finalDueDate",
+      description: "Date the final payment is due (60 days before departure, or \"Now\")",
+      kind: "scalar",
+      sample: "14 July 2026",
+    },
+    {
+      name: "finalAmount",
+      description: "Final amount due after the deposit (formatted)",
+      kind: "scalar",
+      sample: "44 175.00",
+    },
+    bankingDetails,
+  ],
+  payment_received: [
+    customerName,
+    jobNumber,
+    invoiceNumber,
+    {
+      name: "receivedAmount",
+      description: "Total amount received to date (formatted)",
+      kind: "scalar",
+      sample: "14 725.00",
+    },
+    {
+      name: "finalDueDate",
+      description: "Date the final payment is due (60 days before departure, or \"Now\")",
+      kind: "scalar",
+      sample: "14 July 2026",
+    },
+    {
+      name: "outstandingAmount",
+      description: "Amount still outstanding (formatted)",
+      kind: "scalar",
+      sample: "44 175.00",
+    },
     bankingDetails,
   ],
   final_invoice: [customerName, jobNumber, invoiceNumber, amountDue, dueDate, bankingDetails],

@@ -82,6 +82,11 @@ describe("editor round-trip", () => {
       company_address: "1 Example Street, Cape Town",
       company_reg_number: "2020/123456/07",
       company_vat_number: "4123456789",
+      company_tel: "",
+      company_cell: "",
+      company_fax: "",
+      company_email: "",
+      company_website: "",
     })
     const source = `<p>Dear Sofia,</p>${block}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>`
     const result = roundTripThroughEditor(source, BLOCK_TOKENS)

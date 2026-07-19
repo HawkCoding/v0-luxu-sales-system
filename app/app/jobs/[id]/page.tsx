@@ -2,11 +2,12 @@
 
 import { useJobDetail, useAssignableUsers } from "@/lib/use-data"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   Dialog,
@@ -19,6 +20,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ContentTransition } from "@/components/ui/content-transition"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -31,10 +33,11 @@ import {
 import { useRole } from "@/lib/role-context"
 import { useAuth } from "@/lib/auth-context"
 import { AlertCircle, ArrowLeft, CheckCircle2, ChevronRight, ChevronLeft as ChevronLeftIcon, UserRound, XCircle, Target, UserPlus, UserMinus } from "lucide-react"
-import type { Outcome, OutcomeReason } from "@/lib/types"
+import type { Invoice, Outcome, OutcomeReason } from "@/lib/types"
 import Link from "next/link"
 import { JobEnquiryTab } from "@/components/job-enquiry-tab"
 import { JobQuotesTab } from "@/components/job-quotes-tab"
+import { JobReservationTab } from "@/components/job-reservation-tab"
 import { JobPaymentsTab } from "@/components/job-payments-tab"
 import { JobCorrespondenceTab } from "@/components/job-correspondence-tab"
 import { JobDocumentsTab } from "@/components/job-documents-tab"
@@ -45,6 +48,7 @@ import { BookingStageStepper } from "@/components/booking-stage-stepper"
 import { CancelBookingDialog } from "@/components/cancel-booking-dialog"
 import { StageTransitionModal } from "@/components/stage-transition-modal"
 import { GenerateDepositInvoiceDialog } from "@/components/generate-deposit-invoice-dialog"
+import { SendPaymentConfirmationButton } from "@/components/send-payment-confirmation-button"
 import { GenerateFinalInvoiceDialog } from "@/components/generate-final-invoice-dialog"
 import { SendPaymentReminderButton } from "@/components/send-payment-reminder-button"
 import { GenerateVoucherDialog } from "@/components/generate-voucher-dialog"
@@ -54,6 +58,7 @@ import { useVersionedSave } from "@/hooks/use-versioned-save"
 import { useBookingNotes } from "@/lib/use-data"
 import type { GateFailure, ManualConfirmations } from "@/lib/pipeline/validate-transition"
 import { getApiErrorMessage, parseStageTransitionFailurePayload } from "@/lib/pipeline/stage-transition-response"
+import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
 interface JobPatchResponse {
@@ -64,6 +69,7 @@ interface JobPatchResponse {
 type JobDetailTab =
   | "enquiry"
   | "quotes"
+  | "reservation"
   | "payments"
   | "correspondence"
   | "documents"
@@ -74,6 +80,7 @@ type JobDetailTab =
 const JOB_DETAIL_TABS = new Set<JobDetailTab>([
   "enquiry",
   "quotes",
+  "reservation",
   "payments",
   "correspondence",
   "documents",
@@ -170,6 +177,9 @@ export default function JobDetailPage() {
   const [transitionFailures, setTransitionFailures] = useState<GateFailure[]>([])
   const [transitionIsManager, setTransitionIsManager] = useState(false)
   const [transitionSubmitting, setTransitionSubmitting] = useState(false)
+  const [depositReceivedTick, setDepositReceivedTick] = useState(false)
+  const [depositTickFlash, setDepositTickFlash] = useState(false)
+  const depositTickRef = useRef<HTMLDivElement>(null)
   const [depositInvoiceOpen, setDepositInvoiceOpen] = useState(false)
   const [finalInvoiceOpen, setFinalInvoiceOpen] = useState(false)
   const [voucherOpen, setVoucherOpen] = useState(false)
@@ -227,6 +237,12 @@ export default function JobDetailPage() {
   }, [searchParams])
 
   useEffect(() => {
+    if (!depositTickFlash) return
+    const timer = setTimeout(() => setDepositTickFlash(false), 1200)
+    return () => clearTimeout(timer)
+  }, [depositTickFlash])
+
+  useEffect(() => {
     const next = (data?.job as { supplierReference?: string | null } | undefined)?.supplierReference ?? ""
     setSupplierRefDraft(next)
   }, [data?.job])
@@ -251,8 +267,11 @@ export default function JobDetailPage() {
   } = data
   const currentStage = getCanonicalPipelineStage(job.stage as PipelineStage)
   const currentStageIdx = PIPELINE_STAGES.findIndex(s => s.key === currentStage)
+  const forwardTargetStage = currentStageIdx >= 0 ? PIPELINE_STAGES[currentStageIdx + 1]?.key ?? null : null
+  const forwardNeedsDepositTick = forwardTargetStage === "deposit_paid"
   const consultantName = CONSULTANTS.find((consultant) => consultant.key === job.consultant)?.name ?? job.consultant ?? undefined
   const needsEmailReview = Boolean(enquiry?.emailImportNeedsReview)
+  const nextBlockedByTick = forwardNeedsDepositTick && !depositReceivedTick && !needsEmailReview
   const assignedSalespersonName = job.assignedSalespersonName ?? "Unassigned"
   const assignedSalespersonId = (job as { assignedSalespersonId?: string | null }).assignedSalespersonId ?? null
   const canReassign = role === "manager" || role === "admin"
@@ -269,6 +288,10 @@ export default function JobDetailPage() {
     (invoice: { kind: string; status: string }) =>
       invoice.kind === "final" && (invoice.status === "sent" || invoice.status === "paid"),
   )
+  const draftDepositInvoice =
+    (invoices.find(
+      (invoice: { kind: string; status: string }) => invoice.kind === "deposit" && invoice.status === "draft",
+    ) as Invoice | undefined) ?? null
 
   const canEditSupplierRef = can("edit:jobs")
   const currentSupplierRef = (job as { supplierReference?: string | null } | undefined)?.supplierReference ?? ""
@@ -431,7 +454,15 @@ export default function JobDetailPage() {
     if (needsEmailReview && direction === "forward") return
     const newIdx = direction === "forward" ? currentStageIdx + 1 : currentStageIdx - 1
     if (newIdx < 0 || newIdx >= PIPELINE_STAGES.length) return
-    await moveStageTo(PIPELINE_STAGES[newIdx].key)
+    const target = PIPELINE_STAGES[newIdx].key
+    // Deposit received is a manual tick beside Next — satisfy the gate
+    // inline so the confirmation modal never has to open for it.
+    const options =
+      direction === "forward" && target === "deposit_paid" && depositReceivedTick
+        ? { manualConfirmations: { depositReceived: true } }
+        : undefined
+    await moveStageTo(target, options)
+    if (direction === "forward" && target === "deposit_paid") setDepositReceivedTick(false)
   }
 
   const resolveEmailReview = async () => {
@@ -523,6 +554,22 @@ export default function JobDetailPage() {
       setOutcomeSubmitting(false)
     }
   }
+
+  const nextButton = (
+    <Button
+      size="sm"
+      disabled={
+        currentStageIdx >= PIPELINE_STAGES.length - 1 ||
+        needsEmailReview ||
+        isSavingJob ||
+        transitionSubmitting ||
+        (forwardNeedsDepositTick && !depositReceivedTick)
+      }
+      onClick={() => moveStage("forward")}
+    >
+      Next <ChevronRight className="w-4 h-4 ml-1" />
+    </Button>
+  )
 
   return (
     <ContentTransition show>
@@ -661,9 +708,24 @@ export default function JobDetailPage() {
               <Button variant="outline" size="sm" disabled={currentStageIdx <= 0 || transitionSubmitting} onClick={() => moveStage("back")}>
                 <ChevronLeftIcon className="w-4 h-4 mr-1" /> Back
               </Button>
-              <Button size="sm" disabled={currentStageIdx >= PIPELINE_STAGES.length - 1 || needsEmailReview || isSavingJob || transitionSubmitting} onClick={() => moveStage("forward")}>
-                Next <ChevronRight className="w-4 h-4 ml-1" />
-              </Button>
+              {nextBlockedByTick ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span
+                      className="inline-flex"
+                      onClick={() => {
+                        setDepositTickFlash(true)
+                        depositTickRef.current?.scrollIntoView({ block: "nearest" })
+                      }}
+                    >
+                      {nextButton}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>Tick the box for deposit received to continue</TooltipContent>
+                </Tooltip>
+              ) : (
+                nextButton
+              )}
               {can("cancel:booking") && job.stage !== "lost" && job.stage !== "closed" && (
                 <Button variant="destructive" size="sm" onClick={() => setCancelOpen(true)}>
                   <XCircle className="w-4 h-4 mr-1" /> Cancel Booking
@@ -672,6 +734,32 @@ export default function JobDetailPage() {
             </div>
             {needsEmailReview && (
               <p className="text-[11px] text-muted-foreground">Resolve email review to advance</p>
+            )}
+            {forwardNeedsDepositTick && !needsEmailReview && (
+              <div
+                ref={depositTickRef}
+                className={cn(
+                  "flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 transition-shadow",
+                  depositTickFlash && "ring-2 ring-amber-500 ring-offset-2 ring-offset-background",
+                )}
+              >
+                <Checkbox
+                  id="deposit-received-tick"
+                  checked={depositReceivedTick}
+                  onCheckedChange={(checked) => {
+                    setDepositReceivedTick(checked === true)
+                    if (checked === true) setDepositTickFlash(false)
+                  }}
+                  disabled={transitionSubmitting}
+                  className="border-amber-600/60 bg-background dark:bg-background"
+                />
+                <Label htmlFor="deposit-received-tick" className="cursor-pointer text-sm font-medium whitespace-nowrap">
+                  Deposit received
+                  <span className="ml-2 text-[11px] font-normal text-muted-foreground">
+                    Tick to confirm — no amount entry needed
+                  </span>
+                </Label>
+              </div>
             )}
           </div>
         )}
@@ -767,6 +855,17 @@ export default function JobDetailPage() {
         </Alert>
       )}
 
+      {can("send:correspondence") && draftDepositInvoice && (
+        <Alert className="border-yellow-300 bg-yellow-50 text-yellow-950">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Deposit invoice not sent yet</AlertTitle>
+          <AlertDescription>
+            {draftDepositInvoice.invoiceNumber} was generated but has not been emailed to the customer. Use
+            &quot;Preview &amp; Send Deposit Invoice&quot; to finish sending it.
+          </AlertDescription>
+        </Alert>
+      )}
+
       {can("send:correspondence") &&
         invoices.some((invoice: { status: string }) => invoice.status === "sent") && (
           <div className="flex justify-end gap-2">
@@ -808,6 +907,7 @@ export default function JobDetailPage() {
             customerName={`${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()}
             quotes={quotes}
             defaultDepositPercentage={settings?.defaultDepositPercentage ?? 25}
+            draftInvoice={draftDepositInvoice}
             onSent={async () => {
               await mutate()
               resetPendingTransition()
@@ -822,6 +922,7 @@ export default function JobDetailPage() {
         <TabsList className="bg-secondary/50">
           <TabsTrigger value="enquiry" className="text-xs">Enquiry</TabsTrigger>
           <TabsTrigger value="quotes" className="text-xs">Quotes ({quotes.length})</TabsTrigger>
+          <TabsTrigger value="reservation" className="text-xs">Reservation</TabsTrigger>
           <TabsTrigger value="payments" className="text-xs">Payments ({payments.length})</TabsTrigger>
           <TabsTrigger value="correspondence" className="text-xs">Emails Sent ({correspondence.length})</TabsTrigger>
           <TabsTrigger value="documents" className="text-xs">Documents ({documents.length})</TabsTrigger>
@@ -856,7 +957,23 @@ export default function JobDetailPage() {
             mutate={mutate}
           />
         </TabsContent>
+        <TabsContent value="reservation">
+          <JobReservationTab
+            bookingId={id}
+            reservationFormReceivedAt={job.reservationFormReceivedAt ?? null}
+            mutateJob={mutate}
+            additionalServicesDetails={enquiry?.additionalServicesDetails}
+            customer={customer ?? null}
+          />
+        </TabsContent>
         <TabsContent value="payments">
+          <div className="mb-3 flex justify-end">
+            <SendPaymentConfirmationButton
+              jobId={id}
+              hasPayments={payments.length > 0}
+              mutate={mutate}
+            />
+          </div>
           <JobPaymentsTab
             payments={payments}
             jobId={id}
@@ -948,6 +1065,9 @@ export default function JobDetailPage() {
         onSendFinalInvoice={() => {
           setFinalInvoiceOpen(true)
         }}
+        onSendDepositInvoice={() => {
+          setDepositInvoiceOpen(true)
+        }}
       />
 
       <GenerateDepositInvoiceDialog
@@ -959,6 +1079,7 @@ export default function JobDetailPage() {
         customerName={`${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()}
         quotes={quotes}
         defaultDepositPercentage={settings?.defaultDepositPercentage ?? 25}
+        draftInvoice={draftDepositInvoice}
         onSent={async () => {
           setDepositInvoiceOpen(false)
           await mutate()

@@ -1,28 +1,106 @@
-import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer"
+import { Document, Image, Page, StyleSheet, Text, View } from "@react-pdf/renderer"
+import {
+  FOOTER_BRAND_DIVISION_LINE,
+  FOOTER_BRAND_PRODUCT_LINE,
+} from "@/lib/assets/footer-brand"
 import { formatDisplayDate } from "@/lib/date-format"
-import type { BankingSettings } from "@/lib/settings-access"
+import { BrandBlock } from "@/lib/pdf/brand-block"
+import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
+import type { BankingSettings, BrandBlockPosition, DocumentBrand } from "@/lib/settings-access"
 
-export interface InvoicePdfLine {
-  label: string
-  value: string
+/** Per-line confirmation state. Codes are printed against the legend below the table. */
+export type InvoiceItemStatus = "OK" | "WL" | "RP" | "NO"
+
+export const INVOICE_STATUS_LEGEND =
+  "Status — OK: Confirmed  //  WL: Waitlisted  //  RP: Request Pending  //  NO: Not Booked"
+
+/** The invoice recipient. A full tax invoice must name and address them. */
+export interface InvoiceBillingParty {
+  companyName?: string | null
+  /** Street/suburb lines, already ordered for display. Empty renders no address rows. */
+  addressLines?: string[]
+  postalCode?: string | null
+  phone?: string | null
+  fax?: string | null
+  email?: string | null
+  vatNumber?: string | null
+}
+
+/** One direction of travel — a round trip renders one block per leg. */
+export interface InvoiceDepartureLeg {
+  route: string | null
+  departureDate?: string | null
+  departureTime?: string | null
+  arrivalDate?: string | null
+  arrivalTime?: string | null
+  suite?: string | null
+}
+
+export interface InvoiceDeparture {
+  heading: string
+  /** Train / product name, e.g. "The Blue Train". */
+  trainName?: string | null
+  /** Tour or package name, e.g. "Pretoria Journey". */
+  tourName?: string | null
+  /** e.g. "2 Nights / 3 Days". */
+  daysLabel?: string | null
+  /** Number of suites booked. */
+  qty?: string | null
+  adults?: string | null
+  children?: string | null
+  outbound: InvoiceDepartureLeg
+  /** Present for round trips; rendered as a second journey block. */
+  returnLeg?: InvoiceDepartureLeg | null
+}
+
+export interface InvoiceItem {
+  pax: number
+  description: string
+  status: InvoiceItemStatus
+  unitPrice: number
+  total: number
+}
+
+/**
+ * The money ladder down the right of the invoice. Amounts are shown
+ * VAT-inclusive only — the sales team's invoices never break out VAT.
+ */
+export interface InvoiceTotals {
+  /** VAT-inclusive subtotal — the reference's "Subtotal incl. VAT". */
+  subtotalInclVat: number
+  depositPercentage?: number | null
+  depositAmount?: number | null
+  finalAmount: number
+  finalDueDate?: string | null
+  amountReceived: number
+  amountReceivedAt?: string | null
+  outstanding: number
 }
 
 export interface InvoicePdfData {
   invoiceNumber: string
   bookingNumber: string
   customerName: string
-  kind: "deposit" | "final"
   issueDate: string
   dueDate: string | null
-  /** Context lines (quote total, payments received, ...) shown above the amount due. */
-  lines: InvoicePdfLine[]
-  amountDue: number
+  /** Initials or name of the consultant handling the booking. */
+  consultant?: string | null
+  /** Traveller names printed as Guest 1 / Guest 2. Falls back to customerName. */
+  guestNames?: string[]
+  billing?: InvoiceBillingParty
+  departure?: InvoiceDeparture | null
+  items: InvoiceItem[]
+  totals: InvoiceTotals
   currency?: string
   statusLabel?: string
   banking: BankingSettings
-  depositTitle?: string
-  finalTitle?: string
   footerText?: string
+  paymentNote?: string
+  bankChargesNote?: string
+  /** SARAIL brand block copy + logo. Omitted falls back to the fixed constants. */
+  brand?: DocumentBrand
+  brandPosition?: BrandBlockPosition
+  brandLogo?: BrandLogoImage | null
 }
 
 function formatMoney(amount: number, currency = "ZAR"): string {
@@ -37,187 +115,463 @@ function formatMoney(amount: number, currency = "ZAR"): string {
   }
 }
 
-function formatDate(value: string | null): string {
+function formatDate(value: string | null | undefined): string {
   return formatDisplayDate(value?.slice(0, 10)) || "To be confirmed"
+}
+
+/** Empty cells print as an em dash so a blank never reads as missing data. */
+const EMPTY = "–"
+
+function orDash(value: string | null | undefined): string {
+  return value?.trim() || EMPTY
+}
+
+function legDate(value: string | null | undefined): string {
+  if (!value) return EMPTY
+  return formatDisplayDate(value.slice(0, 10)) || EMPTY
 }
 
 const styles = StyleSheet.create({
   page: {
     fontFamily: "Helvetica",
-    fontSize: 10,
-    paddingTop: 48,
-    paddingBottom: 48,
-    paddingHorizontal: 48,
+    fontSize: 9,
+    paddingTop: 32,
+    paddingBottom: 36,
+    paddingHorizontal: 36,
     color: "#312b24",
     backgroundColor: "#ffffff",
   },
+
+  // Header: seal left, brand lines centre, invoice identity right.
   header: {
-    marginBottom: 24,
+    flexDirection: "row",
+    alignItems: "center",
     borderBottomWidth: 2,
     borderBottomColor: "#8b5a2b",
-    paddingBottom: 12,
+    paddingBottom: 10,
+    marginBottom: 12,
   },
-  brand: {
-    fontSize: 18,
-    fontFamily: "Helvetica-Bold",
-    color: "#172018",
-    marginBottom: 2,
+  headerSeal: {
+    width: 58,
+    height: 58,
+    objectFit: "contain",
+    marginRight: 12,
   },
-  brandSub: {
-    fontSize: 9,
-    color: "#8a7f74",
-    letterSpacing: 1,
-    textTransform: "uppercase",
-  },
-  titleRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-end",
-    marginTop: 20,
-    marginBottom: 16,
-  },
-  docTitle: {
-    fontSize: 22,
-    fontFamily: "Helvetica-Bold",
-    color: "#172018",
-  },
-  statusBadge: {
-    fontSize: 8,
-    color: "#8a7f74",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginTop: 3,
-  },
-  numberBadge: {
-    fontSize: 10,
-    color: "#6f675d",
-    textAlign: "right",
-  },
-  metaBox: {
-    backgroundColor: "#fbf8f3",
-    borderWidth: 1,
-    borderColor: "#e8dfd2",
-    padding: 12,
-    marginBottom: 20,
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  metaLabel: {
-    fontSize: 9,
-    color: "#8a7f74",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
-  metaValue: {
-    fontSize: 10,
-    fontFamily: "Helvetica-Bold",
-    color: "#312b24",
-  },
-  line: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    borderBottomWidth: 1,
-    borderBottomColor: "#eee6dc",
-    paddingVertical: 7,
-  },
-  lineLabel: { fontSize: 10, color: "#6f675d" },
-  lineValue: { fontSize: 10, color: "#312b24" },
-  amountBox: {
-    marginTop: 20,
-    backgroundColor: "#172018",
-    padding: 14,
-    flexDirection: "row",
-    justifyContent: "space-between",
+  headerBrand: {
+    flex: 1,
     alignItems: "center",
   },
-  amountLabel: {
-    fontSize: 11,
+  headerDivision: {
+    fontSize: 13,
     fontFamily: "Helvetica-Bold",
-    color: "#f6f2ea",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
+    color: "#172018",
   },
-  amountValue: {
-    fontSize: 16,
+  headerProduct: {
+    fontSize: 7.5,
+    color: "#8a7f74",
+    letterSpacing: 0.6,
+    marginTop: 3,
+  },
+  headerMeta: {
+    width: 168,
+  },
+  headerMetaRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    marginBottom: 2,
+  },
+  headerMetaLabel: {
+    fontSize: 8,
     fontFamily: "Helvetica-Bold",
-    color: "#ffffff",
-  },
-  dueNote: {
-    marginTop: 8,
-    fontSize: 9,
     color: "#6f675d",
     textAlign: "right",
+    marginRight: 8,
   },
-  bankingBox: {
-    marginTop: 28,
-    borderWidth: 1,
-    borderColor: "#e8dfd2",
-    backgroundColor: "#fbf8f3",
-    padding: 12,
+  headerMetaValue: {
+    fontSize: 8,
+    color: "#312b24",
+    width: 74,
+    textAlign: "right",
   },
-  bankingTitle: {
+
+  // Guest + billing identity.
+  guestRow: {
+    flexDirection: "row",
+    marginBottom: 8,
+  },
+  guestLabel: {
     fontSize: 10,
     fontFamily: "Helvetica-Bold",
     color: "#172018",
-    marginBottom: 6,
+    width: 58,
   },
-  bankingLine: {
-    flexDirection: "row",
-    marginBottom: 3,
-  },
-  bankingLabel: {
-    fontSize: 9,
-    color: "#8a7f74",
-    width: 110,
-  },
-  bankingValue: {
-    fontSize: 9,
+  guestValue: {
+    fontSize: 10,
     color: "#312b24",
     flex: 1,
   },
-  footer: {
-    marginTop: 36,
+  billingGrid: {
+    flexDirection: "row",
+    marginBottom: 14,
+  },
+  billingColumn: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  billingRow: {
+    flexDirection: "row",
+    marginBottom: 2,
+  },
+  billingLabel: {
+    fontSize: 8.5,
+    color: "#8a7f74",
+    width: 62,
+  },
+  billingValue: {
+    fontSize: 8.5,
+    color: "#312b24",
+    flex: 1,
+  },
+
+  // Departure information: paired label/value columns (left + right), mirroring
+  // the sales team's layout (Train | Days, Departure | Time, …).
+  sectionHeading: {
+    fontSize: 10.5,
+    fontFamily: "Helvetica-Bold",
+    color: "#172018",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    textAlign: "center",
+    marginBottom: 7,
+  },
+  departureRow: {
+    flexDirection: "row",
+    marginBottom: 2.5,
+  },
+  departureLabel: {
+    fontSize: 8.5,
+    fontFamily: "Helvetica-Bold",
+    color: "#6f675d",
+    width: 88,
+    textAlign: "right",
+    marginRight: 10,
+  },
+  departureValue: {
+    fontSize: 8.5,
+    color: "#312b24",
+    flex: 1,
+  },
+
+  // Line-item table.
+  table: {
+    marginTop: 14,
+  },
+  tableHead: {
+    flexDirection: "row",
+    borderBottomWidth: 1,
+    borderBottomColor: "#8b5a2b",
+    paddingBottom: 4,
+    marginBottom: 3,
+  },
+  tableRow: {
+    flexDirection: "row",
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee6dc",
+    paddingVertical: 5,
+  },
+  colPax: { width: 34, fontSize: 8.5, textAlign: "center" },
+  colDesc: { flex: 1, fontSize: 8.5 },
+  colStatus: { width: 46, fontSize: 8.5, textAlign: "center" },
+  colUnit: { width: 78, fontSize: 8.5, textAlign: "right" },
+  colTotal: { width: 84, fontSize: 8.5, textAlign: "right" },
+  headText: {
+    fontSize: 8.5,
+    fontFamily: "Helvetica-Bold",
+    color: "#172018",
+  },
+  legend: {
+    fontSize: 7,
+    color: "#8a7f74",
+    marginTop: 6,
+  },
+
+  // Totals ladder right-aligned; banking details full-width beneath it.
+  paymentSplit: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    marginTop: 16,
+  },
+  bankingBox: {
+    marginTop: 16,
     borderTopWidth: 1,
     borderTopColor: "#e8dfd2",
-    paddingTop: 12,
+    paddingTop: 10,
+  },
+  bankingTitle: {
+    fontSize: 9,
+    fontFamily: "Helvetica-Bold",
+    color: "#172018",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+    marginBottom: 5,
+  },
+  bankingLine: {
+    flexDirection: "row",
+    marginBottom: 2,
+  },
+  bankingLabel: {
     fontSize: 8,
     color: "#8a7f74",
+    width: 84,
+  },
+  bankingValue: {
+    fontSize: 8,
+    color: "#312b24",
+    flex: 1,
+  },
+  referenceLine: {
+    fontSize: 9,
+    fontFamily: "Helvetica-Bold",
+    color: "#172018",
     textAlign: "center",
+    marginTop: 8,
+    letterSpacing: 0.3,
+  },
+  totalsBox: {
+    width: 250,
+  },
+  totalsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 2.5,
+  },
+  totalsLabel: {
+    fontSize: 8.5,
+    color: "#6f675d",
+    flex: 1,
+    textAlign: "right",
+    marginRight: 10,
+  },
+  totalsValue: {
+    fontSize: 8.5,
+    color: "#312b24",
+    width: 84,
+    textAlign: "right",
+  },
+  totalsDivider: {
+    borderTopWidth: 1,
+    borderTopColor: "#d8cdbc",
+    marginVertical: 3,
+  },
+  outstandingRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    backgroundColor: "#172018",
+    paddingVertical: 6,
+    paddingHorizontal: 7,
+    marginTop: 3,
+  },
+  outstandingLabel: {
+    fontSize: 9,
+    fontFamily: "Helvetica-Bold",
+    color: "#f6f2ea",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+    flex: 1,
+    textAlign: "right",
+    marginRight: 10,
+  },
+  outstandingValue: {
+    fontSize: 11,
+    fontFamily: "Helvetica-Bold",
+    color: "#ffffff",
+    width: 84,
+    textAlign: "right",
+  },
+  bankChargesNote: {
+    fontSize: 7,
+    color: "#a3564b",
+    textAlign: "right",
+    marginTop: 5,
+    lineHeight: 1.4,
+  },
+
+  paymentNote: {
+    marginTop: 16,
+    fontSize: 9,
+    fontFamily: "Helvetica-Bold",
+    color: "#172018",
+    textAlign: "center",
+    lineHeight: 1.4,
+  },
+  footer: {
+    marginTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: "#e8dfd2",
+    paddingTop: 8,
+    fontSize: 7,
+    color: "#8a7f74",
+    textAlign: "center",
+    lineHeight: 1.5,
   },
 })
 
 const BANKING_ROWS: Array<{ key: keyof BankingSettings; label: string }> = [
   { key: "bank_name", label: "Bank" },
-  { key: "bank_account_name", label: "Account name" },
+  { key: "bank_account_name", label: "Account holder" },
   { key: "bank_account_number", label: "Account number" },
   { key: "bank_branch_code", label: "Branch code" },
-  { key: "bank_swift_code", label: "SWIFT/BIC" },
-  { key: "payment_reference_hint", label: "Payment reference" },
+  { key: "bank_swift_code", label: "SWIFT code" },
 ]
+
+interface DepartureCell {
+  label: string
+  value: string
+}
+
+interface DeparturePair {
+  left: DepartureCell | null
+  right: DepartureCell | null
+}
+
+/** Rows for one journey leg: left label/value column + right label/value column. */
+function legPairs(departure: InvoiceDeparture, leg: InvoiceDepartureLeg): DeparturePair[] {
+  const pairs: DeparturePair[] = [
+    {
+      left: { label: "Train", value: orDash(departure.trainName) },
+      right: { label: "Days", value: orDash(departure.daysLabel) },
+    },
+    departure.tourName
+      ? { left: { label: "Tour", value: departure.tourName }, right: null }
+      : { left: null, right: null },
+    { left: { label: "Route", value: orDash(leg.route) }, right: null },
+    {
+      left: { label: "Departure", value: legDate(leg.departureDate) },
+      right: { label: "Time", value: orDash(leg.departureTime) },
+    },
+    {
+      left: { label: "Arrival", value: legDate(leg.arrivalDate) },
+      right: { label: "Time", value: orDash(leg.arrivalTime) },
+    },
+    {
+      left: { label: "Suite Type", value: orDash(leg.suite) },
+      right: { label: "Qty", value: orDash(departure.qty) },
+    },
+    {
+      left: { label: "Adults", value: orDash(departure.adults) },
+      right: { label: "Children", value: orDash(departure.children) },
+    },
+  ]
+  return pairs.filter((pair) => pair.left !== null || pair.right !== null)
+}
+
+function DepartureLegBlock({
+  departure,
+  leg,
+  heading,
+}: {
+  departure: InvoiceDeparture
+  leg: InvoiceDepartureLeg
+  heading: string
+}) {
+  return (
+    <View style={{ marginBottom: 8 }}>
+      <Text style={styles.sectionHeading}>{heading}</Text>
+      {legPairs(departure, leg).map((pair, index) => (
+        <View key={index} style={styles.departureRow}>
+          <Text style={styles.departureLabel}>{pair.left ? `${pair.left.label}:` : ""}</Text>
+          <Text style={styles.departureValue}>{pair.left?.value ?? ""}</Text>
+          <Text style={styles.departureLabel}>{pair.right ? `${pair.right.label}:` : ""}</Text>
+          <Text style={styles.departureValue}>{pair.right?.value ?? ""}</Text>
+        </View>
+      ))}
+    </View>
+  )
+}
+
+function DepartureBlock({ departure }: { departure: InvoiceDeparture }) {
+  return (
+    <View>
+      <DepartureLegBlock departure={departure} leg={departure.outbound} heading={departure.heading} />
+      {departure.returnLeg ? (
+        <DepartureLegBlock
+          departure={departure}
+          leg={departure.returnLeg}
+          heading="Return Journey"
+        />
+      ) : null}
+    </View>
+  )
+}
 
 export function InvoiceDocument({
   invoiceNumber,
-  bookingNumber,
   customerName,
-  kind,
   issueDate,
   dueDate,
-  lines,
-  amountDue,
+  consultant,
+  guestNames,
+  billing,
+  departure,
+  items,
+  totals,
   currency = "ZAR",
-  statusLabel = "Draft",
+  statusLabel = "Provisional",
   banking,
-  depositTitle = "DEPOSIT INVOICE",
-  finalTitle = "FINAL INVOICE",
   footerText = "Luxus Travel & Tours — Luxury Rail Journeys",
+  paymentNote,
+  bankChargesNote,
+  brand,
+  brandPosition = "top",
+  brandLogo = null,
 }: InvoicePdfData) {
-  const title = kind === "deposit" ? depositTitle : finalTitle
+  const resolvedBrand: DocumentBrand = brand ?? {
+    heading: FOOTER_BRAND_DIVISION_LINE,
+    subheading: FOOTER_BRAND_PRODUCT_LINE,
+    logoUrl: null,
+  }
+  const showBrandTop = brandPosition === "top"
+  const showBrandBottom = brandPosition === "bottom"
+
   const bankingRows = BANKING_ROWS.filter(({ key }) => banking[key])
-  const companyFooterParts = [
+  const reference = banking.payment_reference_hint || invoiceNumber
+  const guests = (guestNames ?? []).map((name) => name.trim()).filter(Boolean)
+  const guest1 = guests[0] ?? customerName ?? "Valued Guest"
+  const guest2 = guests[1] ?? null
+  const extraGuests = guests.slice(2)
+
+  const addressLines = billing?.addressLines?.filter((line) => line.trim()) ?? []
+
+  // Supplier identity lines a full tax invoice must carry, plus the contact
+  // channels the sales team's own footer prints. Unset settings drop out.
+  const contactLine = [
+    banking.company_tel ? `Tel: ${banking.company_tel}` : "",
+    banking.company_cell ? `Cell: ${banking.company_cell}` : "",
+    banking.company_fax ? `Fax: ${banking.company_fax}` : "",
+  ]
+    .filter(Boolean)
+    .join("  •  ")
+
+  const webLine = [
+    banking.company_email ? `E-mail: ${banking.company_email}` : "",
+    banking.company_website ? `Web: ${banking.company_website}` : "",
+  ]
+    .filter(Boolean)
+    .join("  •  ")
+
+  const registrationLine = [
+    banking.company_reg_number ? `Company Registration ${banking.company_reg_number}` : "",
+    banking.company_vat_number ? `VAT number ${banking.company_vat_number}` : "",
+  ]
+    .filter(Boolean)
+    .join("  •  ")
+
+  const footerLines = [
+    footerText,
     banking.company_address,
-    banking.company_reg_number ? `Reg no: ${banking.company_reg_number}` : "",
-    banking.company_vat_number ? `VAT no: ${banking.company_vat_number}` : "",
+    contactLine,
+    webLine,
+    registrationLine,
   ].filter(Boolean)
 
   return (
@@ -228,66 +582,192 @@ export function InvoiceDocument({
     >
       <Page size="A4" style={styles.page}>
         <View style={styles.header}>
-          <Text style={styles.brand}>Luxus Travel & Tours</Text>
-          <Text style={styles.brandSub}>Luxury Rail Journeys</Text>
-        </View>
-
-        <View style={styles.titleRow}>
-          <View>
-            <Text style={styles.docTitle}>{title}</Text>
-            <Text style={styles.statusBadge}>STATUS: {statusLabel}</Text>
-          </View>
-          <View>
-            <Text style={styles.numberBadge}>{invoiceNumber}</Text>
-            <Text style={[styles.numberBadge, { color: "#8a7f74", fontSize: 9 }]}>
-              Ref: {bookingNumber}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.metaBox}>
-          <View>
-            <Text style={styles.metaLabel}>Billed to</Text>
-            <Text style={styles.metaValue}>{customerName || "Valued Guest"}</Text>
-          </View>
-          <View>
-            <Text style={styles.metaLabel}>Invoice date</Text>
-            <Text style={styles.metaValue}>{formatDate(issueDate)}</Text>
-          </View>
-          <View>
-            <Text style={styles.metaLabel}>Due date</Text>
-            <Text style={styles.metaValue}>{formatDate(dueDate)}</Text>
-          </View>
-        </View>
-
-        {lines.map((line, index) => (
-          <View key={index} style={styles.line}>
-            <Text style={styles.lineLabel}>{line.label}</Text>
-            <Text style={styles.lineValue}>{line.value}</Text>
-          </View>
-        ))}
-
-        <View style={styles.amountBox}>
-          <Text style={styles.amountLabel}>Amount due</Text>
-          <Text style={styles.amountValue}>{formatMoney(amountDue, currency)}</Text>
-        </View>
-        <Text style={styles.dueNote}>Payable by {formatDate(dueDate)}</Text>
-
-        {bankingRows.length > 0 ? (
-          <View style={styles.bankingBox}>
-            <Text style={styles.bankingTitle}>Banking details</Text>
-            {bankingRows.map(({ key, label }) => (
-              <View key={key} style={styles.bankingLine}>
-                <Text style={styles.bankingLabel}>{label}</Text>
-                <Text style={styles.bankingValue}>{banking[key]}</Text>
+          {showBrandTop ? (
+            <>
+              {brandLogo ? <Image src={brandLogo} style={styles.headerSeal} /> : null}
+              <View style={styles.headerBrand}>
+                <Text style={styles.headerDivision}>{resolvedBrand.heading}</Text>
+                <Text style={styles.headerProduct}>{resolvedBrand.subheading}</Text>
               </View>
-            ))}
+            </>
+          ) : (
+            // Empty flex:1 spacer keeps the meta box right-aligned when the brand
+            // block has been moved to the bottom (or hidden).
+            <View style={styles.headerBrand} />
+          )}
+          <View style={styles.headerMeta}>
+            <View style={styles.headerMetaRow}>
+              <Text style={styles.headerMetaLabel}>Invoice No.</Text>
+              <Text style={styles.headerMetaValue}>{invoiceNumber}</Text>
+            </View>
+            <View style={styles.headerMetaRow}>
+              <Text style={styles.headerMetaLabel}>Status</Text>
+              <Text style={styles.headerMetaValue}>{statusLabel}</Text>
+            </View>
+            <View style={styles.headerMetaRow}>
+              <Text style={styles.headerMetaLabel}>Invoice date</Text>
+              <Text style={styles.headerMetaValue}>{formatDate(issueDate)}</Text>
+            </View>
+            <View style={styles.headerMetaRow}>
+              <Text style={styles.headerMetaLabel}>Consultant</Text>
+              <Text style={styles.headerMetaValue}>{orDash(consultant)}</Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.guestRow}>
+          <Text style={styles.guestLabel}>Guest 1</Text>
+          <Text style={styles.guestValue}>{guest1}</Text>
+          <Text style={styles.guestLabel}>Guest 2</Text>
+          <Text style={styles.guestValue}>{guest2 ?? EMPTY}</Text>
+        </View>
+        {extraGuests.length > 0 ? (
+          <View style={styles.guestRow}>
+            <Text style={styles.guestLabel}>Guests</Text>
+            <Text style={styles.guestValue}>{extraGuests.join(", ")}</Text>
           </View>
         ) : null}
 
-        <Text style={styles.footer}>
-          {[footerText, ...companyFooterParts].join("  •  ")}
-        </Text>
+        <View style={styles.billingGrid}>
+          <View style={styles.billingColumn}>
+            <View style={styles.billingRow}>
+              <Text style={styles.billingLabel}>Company</Text>
+              <Text style={styles.billingValue}>{orDash(billing?.companyName)}</Text>
+            </View>
+            <View style={styles.billingRow}>
+              <Text style={styles.billingLabel}>Address</Text>
+              <View style={styles.billingValue}>
+                {addressLines.length > 0 ? (
+                  addressLines.map((line, index) => (
+                    <Text key={index} style={styles.billingValue}>
+                      {line}
+                    </Text>
+                  ))
+                ) : (
+                  <Text style={styles.billingValue}>{EMPTY}</Text>
+                )}
+              </View>
+            </View>
+            <View style={styles.billingRow}>
+              <Text style={styles.billingLabel}>Phone</Text>
+              <Text style={styles.billingValue}>{orDash(billing?.phone)}</Text>
+            </View>
+            <View style={styles.billingRow}>
+              <Text style={styles.billingLabel}>Fax</Text>
+              <Text style={styles.billingValue}>{orDash(billing?.fax)}</Text>
+            </View>
+            <View style={styles.billingRow}>
+              <Text style={styles.billingLabel}>E-mail</Text>
+              <Text style={styles.billingValue}>{orDash(billing?.email)}</Text>
+            </View>
+          </View>
+          <View style={styles.billingColumn}>
+            <View style={styles.billingRow}>
+              <Text style={styles.billingLabel}>VAT</Text>
+              <Text style={styles.billingValue}>{orDash(billing?.vatNumber)}</Text>
+            </View>
+            <View style={styles.billingRow}>
+              <Text style={styles.billingLabel}>Code</Text>
+              <Text style={styles.billingValue}>{orDash(billing?.postalCode)}</Text>
+            </View>
+          </View>
+        </View>
+
+        {departure ? <DepartureBlock departure={departure} /> : null}
+
+        <View style={styles.table}>
+          <View style={styles.tableHead}>
+            <Text style={[styles.colPax, styles.headText]}>Pax</Text>
+            <Text style={[styles.colDesc, styles.headText]}>Travel Package Description</Text>
+            <Text style={[styles.colStatus, styles.headText]}>Status</Text>
+            <Text style={[styles.colUnit, styles.headText]}>PP Rate</Text>
+            <Text style={[styles.colTotal, styles.headText]}>TOTAL</Text>
+          </View>
+          {items.map((item, index) => (
+            <View key={index} style={styles.tableRow} wrap={false}>
+              <Text style={styles.colPax}>{item.pax}</Text>
+              <Text style={styles.colDesc}>{item.description}</Text>
+              <Text style={styles.colStatus}>{item.status}</Text>
+              <Text style={styles.colUnit}>{formatMoney(item.unitPrice, currency)}</Text>
+              <Text style={styles.colTotal}>{formatMoney(item.total, currency)}</Text>
+            </View>
+          ))}
+          <Text style={styles.legend}>{INVOICE_STATUS_LEGEND}</Text>
+        </View>
+
+        <View style={styles.paymentSplit}>
+          <View style={styles.totalsBox}>
+            {/* VAT-inclusive amounts only — the sales team's invoices never break out VAT. */}
+            <View style={styles.totalsRow}>
+              <Text style={[styles.totalsLabel, { fontFamily: "Helvetica-Bold" }]}>
+                Subtotal incl. VAT
+              </Text>
+              <Text style={[styles.totalsValue, { fontFamily: "Helvetica-Bold" }]}>
+                {formatMoney(totals.subtotalInclVat, currency)}
+              </Text>
+            </View>
+            <View style={styles.totalsDivider} />
+            {totals.depositAmount !== null && totals.depositAmount !== undefined ? (
+              <View style={styles.totalsRow}>
+                <Text style={styles.totalsLabel}>
+                  {totals.depositPercentage ? `${totals.depositPercentage}% Deposit due now` : "Deposit due now"}
+                </Text>
+                <Text style={styles.totalsValue}>{formatMoney(totals.depositAmount, currency)}</Text>
+              </View>
+            ) : null}
+            <View style={styles.totalsRow}>
+              <Text style={styles.totalsLabel}>
+                {totals.finalDueDate
+                  ? `Final amount due ${formatDate(totals.finalDueDate)}`
+                  : "Final amount due Now"}
+              </Text>
+              <Text style={styles.totalsValue}>{formatMoney(totals.finalAmount, currency)}</Text>
+            </View>
+            <View style={styles.totalsRow}>
+              <Text style={styles.totalsLabel}>
+                {totals.amountReceivedAt
+                  ? `Amount received, thank you ${formatDate(totals.amountReceivedAt)}`
+                  : "Amount received"}
+              </Text>
+              <Text style={styles.totalsValue}>{formatMoney(totals.amountReceived, currency)}</Text>
+            </View>
+            <View style={styles.outstandingRow}>
+              <Text style={styles.outstandingLabel}>Outstanding amount</Text>
+              <Text style={styles.outstandingValue}>
+                {formatMoney(totals.outstanding, currency)}
+              </Text>
+            </View>
+            {bankChargesNote ? (
+              <Text style={styles.bankChargesNote}>{bankChargesNote}</Text>
+            ) : null}
+          </View>
+        </View>
+
+        <View style={styles.bankingBox}>
+          <Text style={styles.bankingTitle}>Bank details for electronic payments</Text>
+          {bankingRows.map(({ key, label }) => (
+            <View key={key} style={styles.bankingLine}>
+              <Text style={styles.bankingLabel}>{label}</Text>
+              <Text style={styles.bankingValue}>{banking[key]}</Text>
+            </View>
+          ))}
+          <Text style={styles.referenceLine}>
+            PLEASE USE REFERENCE  {reference}  WHEN MAKING PAYMENT
+          </Text>
+        </View>
+
+        {paymentNote ? <Text style={styles.paymentNote}>{paymentNote}</Text> : null}
+
+        <View style={styles.footer}>
+          {footerLines.map((line, index) => (
+            <Text key={index}>{line}</Text>
+          ))}
+          <Text>Payable by {formatDate(dueDate)}</Text>
+        </View>
+
+        {showBrandBottom ? (
+          <BrandBlock brand={resolvedBrand} logoImage={brandLogo} placement="bottom" />
+        ) : null}
       </Page>
     </Document>
   )
