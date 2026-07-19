@@ -100,9 +100,16 @@ export interface Customer {
   lastName: string
   email: string
   phone: string | null
+  fax?: string | null
   country: string | null
   province?: string | null
   title?: string | null
+  companyName?: string | null
+  addressLine1?: string | null
+  addressLine2?: string | null
+  city?: string | null
+  postalCode?: string | null
+  vatNumber?: string | null
   notes?: string | null
   dateOfBirth?: string | null
   vipStatus?: boolean
@@ -187,6 +194,7 @@ export interface Booking {
   updatedAtDisplay?: string
   quoteSentAt: string | null
   acceptedAt: string | null
+  reservationFormReceivedAt?: string | null
   depositRequestedAt: string | null
   depositPaidAt: string | null
   finalPaidAt: string | null
@@ -484,6 +492,10 @@ export interface SupplierRoute {
   name: string
   originLocationId: string | null
   destinationLocationId: string | null
+  /** Endpoint display names, resolved from the location ids. Used to render the booked travel
+   * direction (origin → destination, or the reverse) on documents. */
+  originLocationName?: string | null
+  destinationLocationName?: string | null
   pickupPoint?: string | null
   dropoffPoint?: string | null
   vehicleRentalDetails?: VehicleRentalRouteDetails | null
@@ -586,6 +598,8 @@ export interface PricingSnapshot {
   supplierKind: SupplierKind | null
   routeId: string | null
   routeName: string | null
+  /** Two-way (round_trip) routes only: true when the booking travels destination → origin. */
+  routeReversed?: boolean
   suiteTypeId: string | null
   suiteTypeName: string | null
   rateCardId: string | null

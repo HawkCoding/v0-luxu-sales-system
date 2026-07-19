@@ -7,6 +7,8 @@ import type {
 } from "@/lib/types"
 import type { PassengerTotals } from "@/lib/packages/passenger-totals"
 import { findAnchorTrainLeg, resolveHotelStayDates } from "@/lib/packages/hotel-dates"
+import { dateOnly } from "@/lib/packages/trip-date-range"
+import { findRateCardCandidates, hasAnyRateCardFor } from "@/lib/rate-cards/resolve"
 
 /**
  * Pure state model for the Apply Package dialog's configure step.
@@ -43,12 +45,16 @@ export interface SuiteLegState {
   supplierKind: SupplierKind
   selected: boolean
   routeId: string | null
+  /** Two-way (round_trip) routes only: when true the booking travels destination → origin. */
+  reversed: boolean
   serviceDate: string | null
   /** Hotel legs only. */
   nights: number | null
   /** Hotel legs only: `pre`/`post` derive serviceDate from the train leg, `custom` leaves it manual. */
   dateAnchor: HotelDateAnchor | null
   notes: string | null
+  /** Per-leg rate type; null falls back to the system default at pricing time. */
+  rateTypeId: string | null
   units: SuiteUnitState[]
 }
 
@@ -58,6 +64,8 @@ export interface TransportLegState {
   supplierKind: SupplierKind
   selected: boolean
   routeId: string | null
+  /** Per-leg rate type; null falls back to the system default at pricing time. */
+  rateTypeId: string | null
   requests: BookingTransportRequest[]
 }
 
@@ -82,10 +90,12 @@ export interface SavedSelectionRow {
   selected: boolean
   supplier_id: string | null
   route_id: string | null
+  route_reversed: boolean | null
   suite_type_id: string | null
   service_date: string | null
   nights: number | null
   date_anchor: string | null
+  rate_type_id: string | null
   notes: string | null
   units: SavedSelectionUnitRow[]
 }
@@ -113,9 +123,10 @@ export function createDraftUnit(totals?: PassengerTotals): SuiteUnitState {
   }
 }
 
-export function createDraftTransportRequest(leg: PackageLeg): BookingTransportRequest {
+export function createDraftTransportRequest(leg: PackageLeg, routeId?: string | null): BookingTransportRequest {
   const now = new Date().toISOString()
   const isRental = leg.supplierKind === "vehicle_rental"
+  const route = leg.routes.find((candidate) => candidate.id === (routeId ?? defaultRouteId(leg))) ?? null
   return {
     id: crypto.randomUUID(),
     bookingId: "",
@@ -124,8 +135,8 @@ export function createDraftTransportRequest(leg: PackageLeg): BookingTransportRe
     routeId: null,
     suiteTypeId: null,
     packageLegId: leg.id,
-    pickupPoint: "",
-    dropoffPoint: "",
+    pickupPoint: route?.pickupPoint ?? "",
+    dropoffPoint: route?.dropoffPoint ?? "",
     pickupAt: null,
     rentalDetails: isRental
       ? { transportRequestId: "", returnAt: null, returnCutoffTime: null, createdAt: now, updatedAt: now }
@@ -149,10 +160,18 @@ function defaultRouteId(leg: PackageLeg): string | null {
   return leg.routes.length === 1 ? leg.routes[0].id : null
 }
 
+/** Only two-way (round_trip) routes can be flipped; one-way (and unresolved) routes cannot. */
+export function isRouteReversible(leg: PackageLeg | undefined, routeId: string | null): boolean {
+  if (!leg || !routeId) return false
+  return leg.routes.find((route) => route.id === routeId)?.directionMode === "round_trip"
+}
+
 export interface BuildDefaultLegStatesOptions {
   tripStartDate: string | null
   /** Booking-level totals per supplier — seeds the first unit's passenger split on split legs. */
   totalsBySupplierId?: Record<string, PassengerTotals>
+  /** Seeds every leg's rate type (customer default falling back to system default). */
+  defaultRateTypeId?: string | null
 }
 
 export function buildDefaultLegStates(
@@ -174,6 +193,7 @@ function buildRawDefaultLegStates(
         supplierKind: leg.supplierKind,
         selected: leg.supplierKind === "train_operator",
         routeId: defaultRouteId(leg),
+        rateTypeId: options.defaultRateTypeId ?? null,
         requests: [createDraftTransportRequest(leg)],
       } satisfies TransportLegState
     }
@@ -190,11 +210,13 @@ function buildRawDefaultLegStates(
       supplierKind: leg.supplierKind,
       selected: leg.supplierKind === "train_operator",
       routeId: defaultRouteId(leg),
+      reversed: false,
       serviceDate: options.tripStartDate,
       nights: isHotel ? 1 : null,
       // An un-anchored hotel keeps today's behaviour: a manually picked service date.
       dateAnchor: isHotel ? leg.dateAnchor ?? "custom" : null,
       notes: null,
+      rateTypeId: options.defaultRateTypeId ?? null,
       units: [createDraftUnit(totals)],
     } satisfies SuiteLegState
   })
@@ -280,6 +302,7 @@ export function hydrateFromSaved(
   options: BuildDefaultLegStatesOptions,
 ): ApplyLegState[] {
   const selectionByLegId = new Map(saved.selections.map((row) => [row.package_leg_id, row]))
+  const legById = new Map(detail.legs.map((leg) => [leg.id, leg]))
   const defaults = buildRawDefaultLegStates(detail, options)
 
   const hydrated = defaults.map((fallback) => {
@@ -294,6 +317,7 @@ export function hydrateFromSaved(
         ...fallback,
         selected: row?.selected ?? fallback.selected,
         routeId: row?.route_id ?? fallback.routeId,
+        rateTypeId: row?.rate_type_id ?? fallback.rateTypeId,
         requests: legRequests.length > 0 ? legRequests : fallback.requests,
       } satisfies TransportLegState
     }
@@ -315,16 +339,21 @@ export function hydrateFromSaved(
       }))
 
     const isHotel = fallback.supplierKind === "hotel_property"
+    const routeId = row.route_id ?? fallback.routeId
 
     return {
       ...fallback,
       selected: row.selected,
-      routeId: row.route_id ?? fallback.routeId,
+      routeId,
+      reversed: isRouteReversible(legById.get(fallback.legId), routeId)
+        ? row.route_reversed ?? false
+        : false,
       serviceDate: row.service_date ?? fallback.serviceDate,
       nights: isHotel ? row.nights ?? fallback.nights : null,
       // No saved anchor (pre-existing booking, or seeded by intake) falls back to the package's.
       dateAnchor: isHotel ? normalizeSavedAnchor(row.date_anchor) ?? fallback.dateAnchor : null,
       notes: row.notes,
+      rateTypeId: row.rate_type_id ?? fallback.rateTypeId,
       units: units.length > 0 ? units : fallback.units,
     } satisfies SuiteLegState
   })
@@ -338,9 +367,11 @@ export interface PackageSelectionsPatchBody {
     packageLegId: string
     selected: boolean
     routeId: string | null
+    routeReversed?: boolean
     serviceDate?: string | null
     nights?: number | null
     dateAnchor?: HotelDateAnchor | null
+    rateTypeId?: string | null
     notes?: string | null
     units?: Array<{
       id?: string
@@ -364,15 +395,18 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
           packageLegId: state.legId,
           selected: state.selected,
           routeId: state.routeId,
+          rateTypeId: state.rateTypeId,
         }
       }
       return {
         packageLegId: state.legId,
         selected: state.selected,
         routeId: state.routeId,
+        routeReversed: state.reversed,
         serviceDate: state.serviceDate,
         nights: state.supplierKind === "hotel_property" ? Math.max(1, state.nights ?? 1) : null,
         dateAnchor: state.supplierKind === "hotel_property" ? state.dateAnchor : null,
+        rateTypeId: state.rateTypeId,
         notes: state.notes,
         units: state.units.map((unit, index) => ({
           id: unit.id.startsWith("draft-") ? undefined : unit.id,
@@ -463,6 +497,7 @@ export interface ApplyLegSelectionPayload {
   legId: string
   selected: boolean
   routeId?: string
+  routeReversed?: boolean
   /** The leg's own service date — pricing matches rate cards against it. */
   serviceDate?: string | null
   suiteTypeId?: string
@@ -476,6 +511,8 @@ export interface ApplyLegSelectionPayload {
     infantCount: number
   }>
   nights?: number
+  /** Per-leg rate type override; omitted falls back to the system default. */
+  rateTypeId?: string
   commissionOverride?: ApplyCommissionOverride | null
 }
 
@@ -495,6 +532,7 @@ export function toApplySelections(
         selected: state.selected,
         routeId: state.routeId ?? undefined,
         suiteTypeId: fallbackSuiteTypeId ?? undefined,
+        rateTypeId: state.rateTypeId ?? undefined,
         commissionOverride,
       }
     }
@@ -503,6 +541,7 @@ export function toApplySelections(
       legId: state.legId,
       selected: state.selected,
       routeId: state.routeId ?? undefined,
+      routeReversed: state.reversed,
       serviceDate: state.serviceDate ?? undefined,
       units: state.units
         .filter((unit): unit is SuiteUnitState & { suiteTypeId: string } => Boolean(unit.suiteTypeId))
@@ -517,6 +556,7 @@ export function toApplySelections(
         })),
       nights:
         state.supplierKind === "hotel_property" ? Math.max(1, state.nights ?? 1) : undefined,
+      rateTypeId: state.rateTypeId ?? undefined,
       commissionOverride,
     }
   })
@@ -524,6 +564,23 @@ export function toApplySelections(
 
 export interface ValidateConfigureStateOptions {
   totalsBySupplierId?: Record<string, PassengerTotals>
+}
+
+/** Distinguishes "this route+type was never priced" from "priced, but not on this date" —
+ * mirrors the two-case error thrown at build time in lib/quotes/build-from-package.ts. */
+function describeMissingRateCard(
+  leg: PackageLeg,
+  routeId: string,
+  suiteTypeId: string,
+  pricingDate: string,
+): string | null {
+  if (findRateCardCandidates(leg.rateCards, routeId, suiteTypeId, pricingDate).length > 0) return null
+  const suiteTypeName = leg.suiteTypes.find((s) => s.id === suiteTypeId)?.name ?? "this type"
+  const routeName = leg.routes.find((r) => r.id === routeId)?.name ?? "this route"
+  const where = `"${suiteTypeName}" on "${routeName}"`
+  return hasAnyRateCardFor(leg.rateCards, routeId, suiteTypeId)
+    ? `no rate card covers ${pricingDate} for ${where} — extend the validity period or add a new one`
+    : `no rate card for ${where} — add one under Suppliers → ${leg.supplierName}`
 }
 
 /** Mirrors the server-side rules so the user sees actionable errors before the Next sequence.
@@ -566,6 +623,18 @@ export function validateConfigureState(
         if (leg.suiteTypes.length > 0 && !request.suiteTypeId) {
           errors.push(`${label}: select a vehicle category`)
         }
+        // Route + type resolved: check pricing exists before the salesperson hits Next and gets
+        // a build-time error that's harder to connect back to this row.
+        const pricingDate = dateOnly(request.pickupAt)
+        if (request.routeId && request.suiteTypeId && pricingDate) {
+          const pricingError = describeMissingRateCard(
+            leg,
+            request.routeId,
+            request.suiteTypeId,
+            pricingDate,
+          )
+          if (pricingError) errors.push(`${label}: ${pricingError}`)
+        }
       })
       continue
     }
@@ -578,6 +647,9 @@ export function validateConfigureState(
         errors.push(
           `${legLabel}: ${leg.supplierKind === "hotel_property" ? "room" : "suite"} ${index + 1} needs a type`,
         )
+      } else if (state.routeId && state.serviceDate) {
+        const pricingError = describeMissingRateCard(leg, state.routeId, unit.suiteTypeId, state.serviceDate)
+        if (pricingError) errors.push(`${legLabel}: ${pricingError}`)
       }
     })
 

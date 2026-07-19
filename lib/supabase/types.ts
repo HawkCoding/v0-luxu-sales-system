@@ -441,7 +441,9 @@ export type Database = {
           nights: number | null
           notes: string | null
           package_leg_id: string
+          rate_type_id: string | null
           route_id: string | null
+          route_reversed: boolean
           selected: boolean
           service_date: string | null
           suite_type_id: string | null
@@ -456,7 +458,9 @@ export type Database = {
           nights?: number | null
           notes?: string | null
           package_leg_id: string
+          rate_type_id?: string | null
           route_id?: string | null
+          route_reversed?: boolean
           selected?: boolean
           service_date?: string | null
           suite_type_id?: string | null
@@ -471,7 +475,9 @@ export type Database = {
           nights?: number | null
           notes?: string | null
           package_leg_id?: string
+          rate_type_id?: string | null
           route_id?: string | null
+          route_reversed?: boolean
           selected?: boolean
           service_date?: string | null
           suite_type_id?: string | null
@@ -494,6 +500,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "booking_package_selections_rate_type_id_fkey"
+            columns: ["rate_type_id"]
+            isOneToOne: false
+            referencedRelation: "rate_types"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "booking_package_selections_route_id_fkey"
             columns: ["route_id"]
             isOneToOne: false
@@ -512,6 +525,56 @@ export type Database = {
             columns: ["supplier_id"]
             isOneToOne: false
             referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      booking_reservation_details: {
+        Row: {
+          agency_address: string | null
+          agency_name: string | null
+          booking_id: string
+          created_at: string
+          dietary: string | null
+          id: string
+          meal_seating: string | null
+          medical: string | null
+          occasion: string | null
+          smoking_preference: string | null
+          updated_at: string
+        }
+        Insert: {
+          agency_address?: string | null
+          agency_name?: string | null
+          booking_id: string
+          created_at?: string
+          dietary?: string | null
+          id?: string
+          meal_seating?: string | null
+          medical?: string | null
+          occasion?: string | null
+          smoking_preference?: string | null
+          updated_at?: string
+        }
+        Update: {
+          agency_address?: string | null
+          agency_name?: string | null
+          booking_id?: string
+          created_at?: string
+          dietary?: string | null
+          id?: string
+          meal_seating?: string | null
+          medical?: string | null
+          occasion?: string | null
+          smoking_preference?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "booking_reservation_details_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
             referencedColumns: ["id"]
           },
         ]
@@ -766,6 +829,7 @@ export type Database = {
           created_at: string
           customer_id: string
           departure_date: string | null
+          deposit_confirmed_manually: boolean
           deposit_paid: boolean
           deposit_paid_at: string | null
           deposit_requested_at: string | null
@@ -809,7 +873,9 @@ export type Database = {
           refund_reference: string | null
           refund_status: string | null
           refunded_at: string | null
+          reservation_form_received_at: string | null
           route_id: string | null
+          route_reversed: boolean
           source: Database["public"]["Enums"]["source_kind"]
           stage: Database["public"]["Enums"]["pipeline_stage"]
           supplier_reference: string | null
@@ -832,6 +898,7 @@ export type Database = {
           created_at?: string
           customer_id: string
           departure_date?: string | null
+          deposit_confirmed_manually?: boolean
           deposit_paid?: boolean
           deposit_paid_at?: string | null
           deposit_requested_at?: string | null
@@ -875,7 +942,9 @@ export type Database = {
           refund_reference?: string | null
           refund_status?: string | null
           refunded_at?: string | null
+          reservation_form_received_at?: string | null
           route_id?: string | null
+          route_reversed?: boolean
           source?: Database["public"]["Enums"]["source_kind"]
           stage?: Database["public"]["Enums"]["pipeline_stage"]
           supplier_reference?: string | null
@@ -898,6 +967,7 @@ export type Database = {
           created_at?: string
           customer_id?: string
           departure_date?: string | null
+          deposit_confirmed_manually?: boolean
           deposit_paid?: boolean
           deposit_paid_at?: string | null
           deposit_requested_at?: string | null
@@ -941,7 +1011,9 @@ export type Database = {
           refund_reference?: string | null
           refund_status?: string | null
           refunded_at?: string | null
+          reservation_form_received_at?: string | null
           route_id?: string | null
+          route_reversed?: boolean
           source?: Database["public"]["Enums"]["source_kind"]
           stage?: Database["public"]["Enums"]["pipeline_stage"]
           supplier_reference?: string | null
@@ -1168,12 +1240,17 @@ export type Database = {
       }
       customers: {
         Row: {
+          address_line1: string | null
+          address_line2: string | null
+          city: string | null
           communication_preferences: string | null
+          company_name: string | null
           country: string | null
           created_at: string
           date_of_birth: string | null
           default_rate_type_id: string | null
           email: string
+          fax: string | null
           first_name: string
           first_travel_date: string | null
           id: string
@@ -1182,19 +1259,26 @@ export type Database = {
           last_travel_date: string | null
           notes: string | null
           phone: string | null
+          postal_code: string | null
           preferences: string | null
           province: string | null
           title: string | null
           updated_at: string
+          vat_number: string | null
           vip_status: boolean
         }
         Insert: {
+          address_line1?: string | null
+          address_line2?: string | null
+          city?: string | null
           communication_preferences?: string | null
+          company_name?: string | null
           country?: string | null
           created_at?: string
           date_of_birth?: string | null
           default_rate_type_id?: string | null
           email: string
+          fax?: string | null
           first_name: string
           first_travel_date?: string | null
           id?: string
@@ -1203,19 +1287,26 @@ export type Database = {
           last_travel_date?: string | null
           notes?: string | null
           phone?: string | null
+          postal_code?: string | null
           preferences?: string | null
           province?: string | null
           title?: string | null
           updated_at?: string
+          vat_number?: string | null
           vip_status?: boolean
         }
         Update: {
+          address_line1?: string | null
+          address_line2?: string | null
+          city?: string | null
           communication_preferences?: string | null
+          company_name?: string | null
           country?: string | null
           created_at?: string
           date_of_birth?: string | null
           default_rate_type_id?: string | null
           email?: string
+          fax?: string | null
           first_name?: string
           first_travel_date?: string | null
           id?: string
@@ -1224,10 +1315,12 @@ export type Database = {
           last_travel_date?: string | null
           notes?: string | null
           phone?: string | null
+          postal_code?: string | null
           preferences?: string | null
           province?: string | null
           title?: string | null
           updated_at?: string
+          vat_number?: string | null
           vip_status?: boolean
         }
         Relationships: [
@@ -1295,6 +1388,56 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["user_id"]
+          },
+        ]
+      }
+      email_attachment_library: {
+        Row: {
+          content_type: string
+          created_at: string
+          email_kinds: string[]
+          file_name: string
+          file_size: number
+          id: string
+          name: string
+          storage_path: string
+          supplier_id: string | null
+          supplier_kind: string | null
+          updated_at: string
+        }
+        Insert: {
+          content_type: string
+          created_at?: string
+          email_kinds?: string[]
+          file_name: string
+          file_size?: number
+          id?: string
+          name: string
+          storage_path: string
+          supplier_id?: string | null
+          supplier_kind?: string | null
+          updated_at?: string
+        }
+        Update: {
+          content_type?: string
+          created_at?: string
+          email_kinds?: string[]
+          file_name?: string
+          file_size?: number
+          id?: string
+          name?: string
+          storage_path?: string
+          supplier_id?: string | null
+          supplier_kind?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_attachment_library_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -1643,6 +1786,7 @@ export type Database = {
           created_by: string | null
           currency: string
           deposit_percentage: number | null
+          display_status: string | null
           due_date: string | null
           id: string
           invoice_number: string
@@ -1660,6 +1804,7 @@ export type Database = {
           created_by?: string | null
           currency?: string
           deposit_percentage?: number | null
+          display_status?: string | null
           due_date?: string | null
           id?: string
           invoice_number: string
@@ -1677,6 +1822,7 @@ export type Database = {
           created_by?: string | null
           currency?: string
           deposit_percentage?: number | null
+          display_status?: string | null
           due_date?: string | null
           id?: string
           invoice_number?: string
@@ -3156,6 +3302,7 @@ export type Database = {
           is_child: boolean
           last_name: string
           prefix: string | null
+          residence: string | null
           sort_order: number
         }
         Insert: {
@@ -3168,6 +3315,7 @@ export type Database = {
           is_child?: boolean
           last_name: string
           prefix?: string | null
+          residence?: string | null
           sort_order?: number
         }
         Update: {
@@ -3180,6 +3328,7 @@ export type Database = {
           is_child?: boolean
           last_name?: string
           prefix?: string | null
+          residence?: string | null
           sort_order?: number
         }
         Relationships: [

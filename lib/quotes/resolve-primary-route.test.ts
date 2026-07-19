@@ -41,7 +41,22 @@ describe("resolvePrimaryRoute", () => {
       { pricingSnapshot: snapshot({ supplierKind: "train_operator", routeId: "route-train", routeName: "Pretoria ↔ Cape Town" }) },
     ])
 
-    expect(result).toEqual({ routeId: "route-train", routeName: "Pretoria ↔ Cape Town" })
+    expect(result).toEqual({ routeId: "route-train", routeName: "Pretoria ↔ Cape Town", routeReversed: false })
+  })
+
+  it("carries the winning snapshot's routeReversed flag", () => {
+    const result = resolvePrimaryRoute([
+      {
+        pricingSnapshot: snapshot({
+          supplierKind: "train_operator",
+          routeId: "route-train",
+          routeName: "Pretoria → Cape Town",
+          routeReversed: true,
+        }),
+      },
+    ])
+
+    expect(result).toEqual({ routeId: "route-train", routeName: "Pretoria → Cape Town", routeReversed: true })
   })
 
   it("falls back to the first snapshot with a route when no train leg exists", () => {
@@ -56,7 +71,7 @@ describe("resolvePrimaryRoute", () => {
       },
     ])
 
-    expect(result).toEqual({ routeId: "route-transfer", routeName: "Airport ↔ Hotel" })
+    expect(result).toEqual({ routeId: "route-transfer", routeName: "Airport ↔ Hotel", routeReversed: false })
   })
 
   it("ignores snapshots without a routeId", () => {
@@ -64,13 +79,14 @@ describe("resolvePrimaryRoute", () => {
       { pricingSnapshot: snapshot({ supplierKind: "hotel_property", routeId: null, routeName: null }) },
     ])
 
-    expect(result).toEqual({ routeId: null, routeName: null })
+    expect(result).toEqual({ routeId: null, routeName: null, routeReversed: false })
   })
 
   it("returns nulls for manual line items without snapshots", () => {
     expect(resolvePrimaryRoute([{ pricingSnapshot: null }, {}])).toEqual({
       routeId: null,
       routeName: null,
+      routeReversed: false,
     })
   })
 
@@ -92,7 +108,7 @@ describe("resolvePrimaryRoute", () => {
       },
     ])
 
-    expect(result).toEqual({ routeId: "route-transfer", routeName: "Airport ↔ Hotel" })
+    expect(result).toEqual({ routeId: "route-transfer", routeName: "Airport ↔ Hotel", routeReversed: false })
   })
 
   it("returns nulls when the only routed leg is a hotel", () => {
@@ -106,6 +122,6 @@ describe("resolvePrimaryRoute", () => {
           }),
         },
       ]),
-    ).toEqual({ routeId: null, routeName: null })
+    ).toEqual({ routeId: null, routeName: null, routeReversed: false })
   })
 })

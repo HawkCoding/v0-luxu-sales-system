@@ -12,6 +12,11 @@ const EMPTY_BANKING = {
   company_address: "",
   company_reg_number: "",
   company_vat_number: "",
+  company_tel: "",
+  company_cell: "",
+  company_fax: "",
+  company_email: "",
+  company_website: "",
 }
 
 vi.mock("@/lib/settings-access", () => ({
@@ -173,6 +178,7 @@ describe("applyTransition", () => {
           deposit_paid_at: now.toISOString(),
           final_paid_at: now.toISOString(),
           deposit_paid: true,
+          deposit_confirmed_manually: true,
           invoice_balance: 0,
           stage: "final_paid",
         }),
@@ -298,7 +304,7 @@ describe("applyTransition", () => {
       actorName: "Douwlien",
       actorUserId: "user-1",
       manualConfirmations: {
-        createInvoiceCorrespondence: true,
+        createDepositInvoice: true,
       },
       quotes: [{ id: "quote-3", status: "accepted", total: 1234.56, created_at: "2026-05-01T08:00:00.000Z" }],
       documents: [{ id: "document-3", kind: "invoice_pdf", status: "generated" }],
@@ -330,6 +336,43 @@ describe("applyTransition", () => {
           depositAmount: "308.64",
         }),
       }),
+    )
+  })
+
+  it("does not schedule a deposit email when the invoice was sent outside the system", async () => {
+    const now = new Date("2026-05-01T10:00:00.000Z")
+    const { client, operations } = createFakeSupabase({
+      id: "booking-3",
+      stage: "deposit_requested",
+      invoice_balance: null,
+    })
+
+    const result = await applyTransition(client, {
+      booking: {
+        id: "booking-3",
+        booking_number: "BT-2026-0003",
+        stage: "accepted",
+        source: "web_form",
+        raw_text: null,
+        updated_at: "2026-05-01T09:00:00.000Z",
+        customer_id: "customer-3",
+        consultant: "DR",
+      },
+      targetStage: "deposit_requested",
+      actorName: "Douwlien",
+      actorUserId: "user-1",
+      manualConfirmations: {
+        createInvoiceCorrespondence: true,
+      },
+      quotes: [{ id: "quote-3", status: "accepted", total: 1234.56, created_at: "2026-05-01T08:00:00.000Z" }],
+      documents: [{ id: "document-3", kind: "invoice_pdf", status: "generated" }],
+      correspondences: [],
+      now,
+    })
+
+    expect(result.scheduledDepositCorrespondence).toBe(false)
+    expect(operations).not.toContainEqual(
+      expect.objectContaining({ table: "correspondences", action: "insert" }),
     )
   })
 

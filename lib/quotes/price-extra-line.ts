@@ -9,6 +9,7 @@ import type {
   SupplierKind,
 } from "@/lib/types"
 import { fetchDefaultAgeBuckets, resolveAgeBuckets } from "@/lib/pricing/age-buckets"
+import { isRateCardValidOn } from "@/lib/rate-cards/resolve"
 import {
   buildCommissionBreakdown,
   calculateCommissionAmount,
@@ -128,11 +129,18 @@ export async function priceExtraLineItems(
     .eq("suite_type_id", suiteTypeId)
     .order("valid_from", { ascending: true })
 
-  const validCards = (rateCards ?? []).filter(
-    (card) => card.valid_from <= travelDate && (card.valid_to === null || card.valid_to >= travelDate),
+  const validCards = (rateCards ?? []).filter((card) =>
+    isRateCardValidOn({ validFrom: card.valid_from, validTo: card.valid_to }, travelDate),
   )
   if (validCards.length === 0) {
-    throw new Error(`No pricing available for "${supplier.name}" on ${travelDate}. Add a rate card first.`)
+    // The query above is already scoped to this route + type, so a non-empty `rateCards` means
+    // cards exist and the date is what missed — otherwise the pair was never priced at all.
+    const where = `"${suiteType.name}" on "${route.name}" (${supplier.name})`
+    throw new Error(
+      (rateCards ?? []).length > 0
+        ? `No rate card covers ${travelDate} for ${where}. Extend the validity period or add a new one.`
+        : `No rate card for ${where}. Add one under Suppliers → ${supplier.name} → rate cards.`,
+    )
   }
   const chosen = rateTypeId ?? null
   const byRateType = (id: string | null) => (id ? validCards.find((card) => card.rate_type_id === id) : undefined)

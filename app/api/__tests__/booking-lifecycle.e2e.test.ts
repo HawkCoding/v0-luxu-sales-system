@@ -60,6 +60,11 @@ vi.mock("@/lib/settings-access", async (importOriginal) => {
       company_address: "",
       company_reg_number: "",
       company_vat_number: "",
+      company_tel: "",
+      company_cell: "",
+      company_fax: "",
+      company_email: "",
+      company_website: "",
     })),
   }
 })

@@ -124,10 +124,12 @@ function suiteState(overrides: Partial<SuiteLegState> & { legId: string }): Suit
     supplierKind: "train_operator",
     selected: true,
     routeId: null,
+    reversed: false,
     serviceDate: null,
     nights: null,
     dateAnchor: null,
     notes: null,
+    rateTypeId: null,
     units: [],
     ...overrides,
   }
@@ -145,6 +147,7 @@ describe("deriveTripDateRangeFromStates", () => {
         supplierKind: "vehicle_rental",
         selected: true,
         routeId: null,
+        rateTypeId: null,
         requests: [
           {
             pickupAt: "2026-07-20T09:00:00+00:00",

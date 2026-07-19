@@ -15,7 +15,16 @@ const patchCustomerSchema = z.object({
   notes: z.string().max(5000),
   email: z.string().trim().toLowerCase().email().max(255),
   phone: z.string().max(50).nullable(),
+  fax: z.string().trim().max(50).nullable().optional(),
   province: z.string().trim().max(100).nullable().optional(),
+  // Billing identity for tax invoices. All optional so an existing customer can
+  // be saved without them, and cleared by sending an empty string.
+  company_name: z.string().trim().max(200).nullable().optional(),
+  address_line1: z.string().trim().max(200).nullable().optional(),
+  address_line2: z.string().trim().max(200).nullable().optional(),
+  city: z.string().trim().max(120).nullable().optional(),
+  postal_code: z.string().trim().max(20).nullable().optional(),
+  vat_number: z.string().trim().max(50).nullable().optional(),
   date_of_birth: z.string().date().nullable().optional(),
   vip_status: z.boolean().optional(),
   preferences: z.string().trim().max(2000).nullable().optional(),
@@ -23,6 +32,12 @@ const patchCustomerSchema = z.object({
   default_rate_type_id: z.string().uuid().nullable().optional(),
   expectedUpdatedAt: z.string().datetime({ offset: true }).optional(),
 })
+
+/** Trim, then fold empty strings to null so blank inputs clear the column. */
+function blankToNull(value: string | null | undefined): string | null {
+  const trimmed = value?.trim()
+  return trimmed ? trimmed : null
+}
 
 export async function GET(
   _req: Request,
@@ -148,9 +163,16 @@ export async function GET(
       lastName: customer.last_name,
       email: customer.email,
       phone: customer.phone,
+      fax: customer.fax,
       country: customer.country,
       province: customer.province,
       title: customer.title,
+      companyName: customer.company_name,
+      addressLine1: customer.address_line1,
+      addressLine2: customer.address_line2,
+      city: customer.city,
+      postalCode: customer.postal_code,
+      vatNumber: customer.vat_number,
       notes: customer.notes,
       dateOfBirth: customer.date_of_birth,
       vipStatus: customer.vip_status,
@@ -285,6 +307,25 @@ export async function PATCH(
       communication_preferences: normalizedCommunicationPreferences
         ? normalizedCommunicationPreferences
         : null,
+      // Only write a billing field when the client sent it, so a partial patch
+      // never wipes an address the edit form did not include.
+      ...(parsed.fax !== undefined ? { fax: blankToNull(parsed.fax) } : {}),
+      ...(parsed.company_name !== undefined
+        ? { company_name: blankToNull(parsed.company_name) }
+        : {}),
+      ...(parsed.address_line1 !== undefined
+        ? { address_line1: blankToNull(parsed.address_line1) }
+        : {}),
+      ...(parsed.address_line2 !== undefined
+        ? { address_line2: blankToNull(parsed.address_line2) }
+        : {}),
+      ...(parsed.city !== undefined ? { city: blankToNull(parsed.city) } : {}),
+      ...(parsed.postal_code !== undefined
+        ? { postal_code: blankToNull(parsed.postal_code) }
+        : {}),
+      ...(parsed.vat_number !== undefined
+        ? { vat_number: blankToNull(parsed.vat_number) }
+        : {}),
       ...(parsed.default_rate_type_id !== undefined
         ? { default_rate_type_id: parsed.default_rate_type_id }
         : {}),
@@ -298,7 +339,7 @@ export async function PATCH(
 
   const { data: updated, error: updateError } = await updateQuery
     .select(
-      "id, notes, email, phone, province, date_of_birth, vip_status, preferences, communication_preferences, default_rate_type_id, first_travel_date, last_travel_date, updated_at",
+      "id, notes, email, phone, fax, province, company_name, address_line1, address_line2, city, postal_code, vat_number, date_of_birth, vip_status, preferences, communication_preferences, default_rate_type_id, first_travel_date, last_travel_date, updated_at",
     )
     .single()
 
@@ -331,7 +372,14 @@ export async function PATCH(
     notes: updated.notes,
     email: updated.email,
     phone: updated.phone,
+    fax: updated.fax,
     province: updated.province,
+    companyName: updated.company_name,
+    addressLine1: updated.address_line1,
+    addressLine2: updated.address_line2,
+    city: updated.city,
+    postalCode: updated.postal_code,
+    vatNumber: updated.vat_number,
     dateOfBirth: updated.date_of_birth,
     vipStatus: updated.vip_status,
     preferences: updated.preferences,

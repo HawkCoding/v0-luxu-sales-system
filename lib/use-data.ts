@@ -176,6 +176,45 @@ export function useBookingSupplierSchedules(bookingId: string | null | undefined
   )
 }
 
+export interface JobTraveller {
+  id: string
+  prefix: string
+  firstName: string
+  lastName: string
+  idPassport: string
+  dateOfBirth: string
+  residence: string
+  isChild: boolean
+  sortOrder: number
+}
+
+export function useJobTravellers(bookingId: string | null | undefined) {
+  return useSWR<{ travellers: JobTraveller[] }>(
+    bookingId ? `/api/jobs/${bookingId}/travellers` : null,
+    fetcher,
+    swrOptions,
+  )
+}
+
+export interface JobReservationDetails {
+  dietary: string
+  medical: string
+  occasion: string
+  smokingPreference: "smoking" | "non_smoking" | null
+  mealSeating: "first" | "second" | null
+  agencyName: string
+  agencyAddress: string
+  updatedAt: string | null
+}
+
+export function useJobReservationDetails(bookingId: string | null | undefined) {
+  return useSWR<JobReservationDetails>(
+    bookingId ? `/api/jobs/${bookingId}/reservation-details` : null,
+    fetcher,
+    swrOptions,
+  )
+}
+
 export function useTemplates() {
   return useSWR("/api/templates", fetcher, swrOptions)
 }
@@ -263,12 +302,36 @@ export interface DocumentTextSettings {
   invoice_doc_deposit_title: string
   invoice_doc_final_title: string
   invoice_doc_footer_text: string
+  invoice_doc_payment_note: string
+  invoice_doc_bank_charges_note: string
   itinerary_doc_journey_heading: string
   itinerary_doc_intro_text: string
 }
 
 export function useDocumentTextSettings() {
   return useSWR<DocumentTextSettings>("/api/settings/document-text", fetcher, swrOptions)
+}
+
+export interface DocumentBrandSettings {
+  brand_block_heading: string
+  brand_block_subheading: string
+  brand_block_logo_url: string
+  brand_block_position_quote: string
+  brand_block_position_invoice: string
+  brand_block_position_email: string
+}
+
+export function useDocumentBrandSettings() {
+  return useSWR<DocumentBrandSettings>("/api/settings/document-brand", fetcher, swrOptions)
+}
+
+export interface EmailAppearanceSettings {
+  email_font_family: string
+  email_font_size: string
+}
+
+export function useEmailAppearanceSettings() {
+  return useSWR<EmailAppearanceSettings>("/api/settings/email-appearance", fetcher, swrOptions)
 }
 
 export interface SystemInfo {

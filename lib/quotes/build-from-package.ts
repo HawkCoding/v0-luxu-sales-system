@@ -1,4 +1,5 @@
 import { isOptionalPackageLegKind, SUPPLIER_VOCABULARY } from "@/lib/types"
+import { resolveDirectedRouteName } from "@/lib/routes/route-name"
 import type {
   CommissionBreakdown,
   CommissionKind,
@@ -15,6 +16,7 @@ import {
   calculateCommissionAmount,
   resolveCommission,
 } from "@/lib/pricing/commission"
+import { findRateCardCandidates, hasAnyRateCardFor, selectRateCard } from "@/lib/rate-cards/resolve"
 
 /** One independent suite/room booked on a hotel or train/tour/airline leg — its own suite type,
  * bedroom/bathroom configuration, and (train/tour/airline only) its own passenger split. */
@@ -39,6 +41,8 @@ export interface PackageLegSelection {
   /** This leg's own service date (YYYY-MM-DD) — rate cards are matched against it, falling back
    * to the quote-level travelDate when unset. */
   serviceDate?: string | null
+  /** Two-way (round_trip) routes only: when true the booking travels destination → origin. */
+  routeReversed?: boolean
   /** Train/hotel legs: one entry per independent suite/room booked on this leg. */
   units?: PackageUnitSelection[]
   /** Hotel legs only: number of nights stayed (default 1). Independent of journey duration, and
@@ -255,6 +259,7 @@ export async function buildPackageQuoteLineItems({
   let activeLeg: PackageDetail["legs"][number] | null = null
   let activeRouteId: string | null = null
   let activeRouteName: string | null = null
+  let activeRouteReversed = false
   // The date the current line's rate card was matched against (the leg's own service date, or
   // the quote-level travelDate when the leg has none).
   let activePricingDate: string = travelDate
@@ -369,6 +374,7 @@ export async function buildPackageQuoteLineItems({
         supplierKind: activeLeg?.supplierKind ?? null,
         routeId: activeRouteId,
         routeName: activeRouteName,
+        routeReversed: activeRouteReversed,
         suiteTypeId: suiteTypeId ?? null,
         suiteTypeName: null,
         rateCardId: activeRateCard?.id ?? null,
@@ -415,26 +421,19 @@ export async function buildPackageQuoteLineItems({
     pricingDate: string,
     perLegRateTypeId?: string | null,
   ) {
-    const candidates = leg.rateCards.filter(
-      (rc) =>
-        rc.routeId === routeId &&
-        rc.suiteTypeId === suiteTypeId &&
-        rc.validFrom <= pricingDate &&
-        (rc.validTo === null || rc.validTo >= pricingDate),
-    )
-    if (candidates.length === 0) return undefined
-
-    // Resolve deterministically: a per-leg override beats the quote-level
-    // choice, which beats the system default, which beats any remaining card.
-    const chosen = perLegRateTypeId ?? quoteRateTypeId
-    const byRateType = (rateTypeId: string | null | undefined) =>
-      rateTypeId ? candidates.find((rc) => rc.rateTypeId === rateTypeId) : undefined
-
-    return byRateType(chosen) ?? byRateType(fallbackRateTypeId) ?? candidates[0]
+    const candidates = findRateCardCandidates(leg.rateCards, routeId, suiteTypeId, pricingDate)
+    return selectRateCard(candidates, perLegRateTypeId, quoteRateTypeId, fallbackRateTypeId)
   }
 
-  function getRouteName(leg: PackageDetail["legs"][number], routeId: string) {
-    return leg.routes.find((route) => route.id === routeId)?.name ?? null
+  function getRouteName(leg: PackageDetail["legs"][number], routeId: string, reversed = false) {
+    const route = leg.routes.find((route) => route.id === routeId)
+    if (!route) return null
+    // Only two-way point-to-point routes have a meaningful travel direction to render; everything
+    // else (one-way routes, hotel meal plans) keeps its stored name regardless of `reversed`.
+    if (route.directionMode !== "round_trip" || !route.originLocationName || !route.destinationLocationName) {
+      return route.name
+    }
+    return resolveDirectedRouteName(route.originLocationName, route.destinationLocationName, reversed)
   }
 
   function getSuiteTypeName(leg: PackageDetail["legs"][number], suiteTypeId: string) {
@@ -538,10 +537,12 @@ export async function buildPackageQuoteLineItems({
       }
 
       const legLabel = leg.label ?? leg.supplierName
-      const routeName = getRouteName(leg, routeId)
+      const routeReversed = selection.routeReversed ?? false
+      const routeName = getRouteName(leg, routeId, routeReversed)
       activeLeg = leg
       activeRouteId = routeId
       activeRouteName = routeName
+      activeRouteReversed = routeReversed
       // Each leg prices off its own service date so e.g. a pre-stay hotel in a different
       // rate-card season than the train still gets the right card.
       const legPricingDate = selection.serviceDate ?? travelDate
@@ -556,10 +557,18 @@ export async function buildPackageQuoteLineItems({
           throw new Error(`Selected type is not available for leg: ${legLabel}`)
         }
         const validRateCard = getValidRateCard(leg, routeId, suiteTypeId, pricingDate, selection.rateTypeId)
-        if (!validRateCard) {
-          throw new Error(`No pricing available for "${legLabel}" on ${pricingDate}. Update the package rate cards first.`)
-        }
         const suiteTypeName = getSuiteTypeName(leg, suiteTypeId)
+        if (!validRateCard) {
+          // Name the route + type: the missing dimension is almost never the date, and an error
+          // that only names the supplier sends people hunting through validity periods.
+          const typeLabel = suiteTypeName ?? SUPPLIER_VOCABULARY[leg.supplierKind].suiteType
+          const where = `"${typeLabel}" on "${routeName ?? "this route"}" (${legLabel})`
+          throw new Error(
+            hasAnyRateCardFor(leg.rateCards, routeId, suiteTypeId)
+              ? `No rate card covers ${pricingDate} for ${where}. Extend the validity period or add a new one.`
+              : `No rate card for ${where}. Add one under Suppliers → ${leg.supplierName} → rate cards.`,
+          )
+        }
         const description = [legLabel, suiteTypeName, routeName].filter(Boolean).join(" - ")
         return { validRateCard, description }
       }

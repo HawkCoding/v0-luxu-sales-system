@@ -1,9 +1,9 @@
 "use client"
 
-import { useCallback } from "react"
+import { useCallback, useMemo } from "react"
 import { useSearchParams, useRouter, usePathname } from "next/navigation"
 import useSWR from "swr"
-import { useData } from "@/lib/use-data"
+import { useActiveSuppliers, useData } from "@/lib/use-data"
 import { useRole } from "@/lib/role-context"
 import { formatDisplayDate } from "@/lib/date-format"
 import { DatePicker } from "@/components/ui/date-picker"
@@ -61,6 +61,14 @@ export default function ReportingPage() {
   const { data, isLoading } = useData(["bookings", "customers", "payments", "quotes"])
   const { can } = useRole()
   const canExport = can("export:reporting")
+
+  // Product means the train operator actually booked, so the filter lists train
+  // operators rather than a hardcoded pair — a new operator needs no code change.
+  const { data: suppliers } = useActiveSuppliers()
+  const trainOperators = useMemo(
+    () => (suppliers ?? []).filter((s) => s.kind === "train_operator"),
+    [suppliers],
+  )
 
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -468,8 +476,11 @@ export default function ReportingPage() {
               className="h-8 rounded-md border border-input bg-background px-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
             >
               <option value="">All</option>
-              <option value="BT">Blue Train</option>
-              <option value="RR">Rovos Rail</option>
+              {trainOperators.map((supplier) => (
+                <option key={supplier.id} value={supplier.id}>
+                  {supplier.name}
+                </option>
+              ))}
             </select>
           </div>
           <div className="flex flex-col gap-1">
@@ -573,10 +584,8 @@ export default function ReportingPage() {
             isEmpty={!revenueData?.data?.length}
           >
             {revenueData?.data?.map((row) => (
-              <div key={row.product} className="flex items-start justify-between py-1.5">
-                <span className="text-sm text-muted-foreground">
-                  {row.product === "BT" ? "Blue Train" : row.product === "RR" ? "Rovos Rail" : row.product}
-                </span>
+              <div key={row.productId ?? "unassigned"} className="flex items-start justify-between py-1.5">
+                <span className="text-sm text-muted-foreground">{row.product}</span>
                 <div className="text-right">
                   <p className="text-sm font-medium text-foreground">{formatRand(row.revenue)}</p>
                   <p className="text-xs text-muted-foreground">{row.bookingCount} bookings</p>

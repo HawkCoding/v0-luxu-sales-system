@@ -35,6 +35,7 @@
     "qa:smoke": "playwright test --config tests/qa/smoke.config.ts",
     "qa:all": "playwright test --config tests/qa/playwright.config.ts && playwright test --config tests/qa/manager.config.ts && playwright test --config tests/qa/admin.config.ts",
     "app:version:bump": "node scripts/bump-app-version.mjs",
+    "assets:brand:push": "node scripts/upload-footer-brand.mjs",
     "db:start": "npx supabase start",
     "db:stop": "npx supabase stop",
     "db:reset": "npx supabase db reset",

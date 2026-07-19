@@ -13,12 +13,21 @@ export interface BookingInputRow {
   booking_number: string
   consultant: string | null
   assigned_salesperson_id: string | null
+  route_id: string | null
   /**
    * Resolved owner display name (from assigned_salesperson_id → profiles).
    * Populated by the report routes before the pure report functions run so
    * ownership reflects reassignments rather than the legacy `consultant` code.
    */
   owner_name?: string | null
+  /**
+   * Train operator actually booked, resolved via route → supplier by the report
+   * routes before the pure report functions run. The booking number carries no
+   * product information, so this is the only trustworthy source: it follows the
+   * package the salesperson actually priced.
+   */
+  product_supplier_id?: string | null
+  product_supplier_name?: string | null
   departure_date: string | null
   stage: string
   outcome: string
@@ -33,11 +42,7 @@ export interface PaymentInputRow {
   received_at: string
 }
 
-export function getProductFromBookingNumber(bookingNumber: string): string {
-  if (bookingNumber.startsWith("BT")) return "BT"
-  if (bookingNumber.startsWith("RR")) return "RR"
-  return "Other"
-}
+export const UNASSIGNED_PRODUCT_LABEL = "Unassigned"
 
 export function applyBookingFilter(
   bookings: BookingInputRow[],
@@ -48,7 +53,8 @@ export function applyBookingFilter(
     if (filter.to && b.created_at > filter.to + "T23:59:59Z") return false
     // The consultant filter value is the owner's user id (assigned_salesperson_id).
     if (filter.consultant && b.assigned_salesperson_id !== filter.consultant) return false
-    if (filter.product && getProductFromBookingNumber(b.booking_number) !== filter.product) return false
+    // The product filter value is the train operator's supplier id.
+    if (filter.product && b.product_supplier_id !== filter.product) return false
     if (filter.stage && getCanonicalPipelineStage(b.stage as Parameters<typeof getCanonicalPipelineStage>[0]) !== filter.stage) return false
     return true
   })

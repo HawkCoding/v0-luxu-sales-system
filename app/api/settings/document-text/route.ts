@@ -27,6 +27,9 @@ const patchSchema = z
     invoice_doc_deposit_title: z.string().trim().min(1).max(80).optional(),
     invoice_doc_final_title: z.string().trim().min(1).max(80).optional(),
     invoice_doc_footer_text: z.string().trim().min(1).max(500).optional(),
+    // Empty string allowed — clearing removes the note from the invoice.
+    invoice_doc_payment_note: z.string().trim().max(500).optional(),
+    invoice_doc_bank_charges_note: z.string().trim().max(500).optional(),
     itinerary_doc_journey_heading: z.string().trim().min(1).max(80).optional(),
     // Empty string allowed — clearing removes the intro paragraph.
     itinerary_doc_intro_text: z.string().trim().max(500).optional(),

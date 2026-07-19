@@ -2,10 +2,16 @@ import { describe, it, expect } from "vitest"
 import { conversionRate } from "./conversion-rate"
 import type { BookingInputRow } from "./types"
 
+const BLUE_TRAIN = "00000000-0000-0000-0000-0000000000bt"
+const ROVOS = "00000000-0000-0000-0000-0000000000rr"
+
 const bookings: BookingInputRow[] = [
   {
     id: "b1",
-    booking_number: "BT-2026-0001",
+    booking_number: "LTT-2026-0001",
+    route_id: "r-bt",
+    product_supplier_id: BLUE_TRAIN,
+    product_supplier_name: "Blue Train",
     consultant: "LB",
     assigned_salesperson_id: "u-lb",
     owner_name: "Leonie",
@@ -18,7 +24,10 @@ const bookings: BookingInputRow[] = [
   },
   {
     id: "b2",
-    booking_number: "RR-2026-0001",
+    booking_number: "LTT-2026-0002",
+    route_id: "r-rr",
+    product_supplier_id: ROVOS,
+    product_supplier_name: "Rovos Rail",
     consultant: "LB",
     assigned_salesperson_id: "u-lb",
     owner_name: "Leonie",
@@ -31,7 +40,10 @@ const bookings: BookingInputRow[] = [
   },
   {
     id: "b3",
-    booking_number: "BT-2026-0002",
+    booking_number: "LTT-2026-0003",
+    route_id: "r-bt",
+    product_supplier_id: BLUE_TRAIN,
+    product_supplier_name: "Blue Train",
     consultant: "CDJ",
     assigned_salesperson_id: "u-cdj",
     owner_name: "Carmen",
@@ -44,7 +56,10 @@ const bookings: BookingInputRow[] = [
   },
   {
     id: "b4",
-    booking_number: "BT-2026-0003",
+    booking_number: "LTT-2026-0004",
+    route_id: "r-bt",
+    product_supplier_id: BLUE_TRAIN,
+    product_supplier_name: "Blue Train",
     consultant: "CDJ",
     assigned_salesperson_id: "u-cdj",
     owner_name: "Carmen",
@@ -74,7 +89,7 @@ describe("conversionRate", () => {
   })
 
   it("filters by product", () => {
-    const result = conversionRate(bookings, { product: "RR" })
+    const result = conversionRate(bookings, { product: ROVOS })
     expect(result.total).toBe(1)
     expect(result.won).toBe(0)
   })

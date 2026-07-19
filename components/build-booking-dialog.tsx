@@ -32,6 +32,7 @@ import { CommissionControl, type CommissionControlValue } from "@/components/sup
 import { CommissionBadge } from "@/components/quotes/commission-badge"
 import { QuoteLineSupplierPicker, type QuoteExtraSelection } from "@/components/quote-line-supplier-picker"
 import { getDestinationLocationIds } from "@/lib/packages/location-filter"
+import { RateTypeSelect } from "@/components/rate-type-select"
 import { SuiteLegEditor } from "@/components/packages/suite-leg-editor"
 import { TransportLegEditor } from "@/components/packages/transport-leg-editor"
 import { TripDateSummary } from "@/components/packages/trip-date-summary"
@@ -95,6 +96,9 @@ interface BuildBookingResponse {
 
 type Step = "services" | "configure" | "confirm"
 
+/** Extras carry their own rate type, like legs do. */
+type ExtraWithRateType = QuoteExtraSelection & { rateTypeId: string | null }
+
 interface LegCommissionState {
   value: CommissionControlValue
   show: boolean
@@ -112,7 +116,10 @@ export function BuildBookingDialog({
 }: BuildBookingDialogProps) {
   const { data: suppliers = [] } = useActiveSuppliers()
   const { data: rateTypesData } = useRateTypes()
-  const rateTypes = (rateTypesData?.rateTypes ?? []).filter((rt) => !rt.archivedAt)
+  const rateTypes = useMemo(
+    () => (rateTypesData?.rateTypes ?? []).filter((rt) => !rt.archivedAt),
+    [rateTypesData],
+  )
   const systemDefaultRateTypeId = rateTypes.find((rt) => rt.isDefault)?.id ?? ""
   const [open, setOpen] = useState(false)
   const [step, setStep] = useState<Step>("services")
@@ -127,9 +134,8 @@ export function BuildBookingDialog({
   const [legStates, setLegStates] = useState<ApplyLegState[]>([])
   const [totalsBySupplierId, setTotalsBySupplierId] = useState<Record<string, PassengerTotals>>({})
   const [commissionByLegId, setCommissionByLegId] = useState<Record<string, LegCommissionState>>({})
-  const [rateTypeId, setRateTypeId] = useState("")
   const [previewLineItems, setPreviewLineItems] = useState<QuoteLineItem[]>([])
-  const [extras, setExtras] = useState<QuoteExtraSelection[]>([])
+  const [extras, setExtras] = useState<ExtraWithRateType[]>([])
   const [validating, setValidating] = useState(false)
   const [buildError, setBuildError] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<string[]>([])
@@ -148,19 +154,36 @@ export function BuildBookingDialog({
   })
 
   const filteredSuppliers = suppliers.filter((supplier) => supplier.kind === pickerKind)
+  const defaultRateTypeId = customerDefaultRateTypeId || systemDefaultRateTypeId || null
 
   useEffect(() => {
     setEditing(open && step !== "services")
   }, [open, setEditing, step])
 
-  // Backfill the rate type once it resolves, if the picker is still empty
-  // (rate types may load after the configure step opens).
+  // Reconcile per-leg/per-extra rate types once the rate-type list resolves (it may load after
+  // the configure step opens): fill empty ones and replace archived ones with the default.
   useEffect(() => {
-    if (step === "configure" && !rateTypeId) {
-      const fallback = customerDefaultRateTypeId || systemDefaultRateTypeId
-      if (fallback) setRateTypeId(fallback)
-    }
-  }, [step, rateTypeId, customerDefaultRateTypeId, systemDefaultRateTypeId])
+    if (step !== "configure" || !defaultRateTypeId) return
+    const activeIds = new Set(rateTypes.map((rt) => rt.id))
+    setLegStates((prev) =>
+      prev.some((state) => !state.rateTypeId || !activeIds.has(state.rateTypeId))
+        ? prev.map((state) =>
+            state.rateTypeId && activeIds.has(state.rateTypeId)
+              ? state
+              : { ...state, rateTypeId: defaultRateTypeId },
+          )
+        : prev,
+    )
+    setExtras((prev) =>
+      prev.some((extra) => !extra.rateTypeId || !activeIds.has(extra.rateTypeId))
+        ? prev.map((extra) =>
+            extra.rateTypeId && activeIds.has(extra.rateTypeId)
+              ? extra
+              : { ...extra, rateTypeId: defaultRateTypeId },
+          )
+        : prev,
+    )
+  }, [step, defaultRateTypeId, rateTypes])
 
   // Load the booking's saved services when the dialog opens, so re-opening pre-fills everything
   // the last build persisted.
@@ -231,7 +254,6 @@ export function BuildBookingDialog({
     setLegStates([])
     setTotalsBySupplierId({})
     setCommissionByLegId({})
-    setRateTypeId("")
     setPreviewLineItems([])
     setExtras([])
     setBuildError(null)
@@ -317,7 +339,11 @@ export function BuildBookingDialog({
       setTotalsBySupplierId(totals)
 
       // The job's enquiry travel date seeds default service dates; everything stays editable.
-      const stateOptions = { tripStartDate: savedState?.tripStartDate ?? travelDate ?? null, totalsBySupplierId: totals }
+      const stateOptions = {
+        tripStartDate: savedState?.tripStartDate ?? travelDate ?? null,
+        totalsBySupplierId: totals,
+        defaultRateTypeId,
+      }
       const savedLegIds = new Set((savedState?.selections ?? []).map((row) => row.package_leg_id))
       const states =
         savedState && savedState.packageId === built.packageId
@@ -328,7 +354,6 @@ export function BuildBookingDialog({
       // just picked here has no "optional" concept; only respect an existing saved deselection.
       setLegStates(states.map((state) => (savedLegIds.has(state.legId) ? state : { ...state, selected: true })))
       setCommissionByLegId({})
-      setRateTypeId(customerDefaultRateTypeId || systemDefaultRateTypeId || "")
       setStep("configure")
     } catch {
       setBuildError("Failed to build booking services. Please try again.")
@@ -413,14 +438,13 @@ export function BuildBookingDialog({
           jobId,
           quoteId,
           travelDate: derivedRange.start,
-          rateTypeId: rateTypeId || undefined,
           selections: toApplySelections(legStates, commissionOverrides),
           extras: extras.map((extra) => ({
             supplierId: extra.supplierId,
             routeId: extra.routeId,
             suiteTypeId: extra.suiteTypeId,
             quantity: extra.quantity,
-            rateTypeId: rateTypeId || undefined,
+            rateTypeId: extra.rateTypeId ?? undefined,
           })),
         }),
       })
@@ -577,28 +601,6 @@ export function BuildBookingDialog({
 
             <TripDateSummary detail={packageDetail} states={legStates} />
 
-            {rateTypes.length > 0 && (
-              <div className="max-w-xs space-y-1.5">
-                <Label htmlFor="build-rate-type">Rate type</Label>
-                <Select value={rateTypeId} onValueChange={setRateTypeId}>
-                  <SelectTrigger id="build-rate-type" className="h-9">
-                    <SelectValue placeholder="System default" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {rateTypes.map((rt) => (
-                      <SelectItem key={rt.id} value={rt.id}>
-                        {rt.name}
-                        {rt.isDefault ? " (default)" : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Applies to every service; a service without this rate falls back to the default.
-                </p>
-              </div>
-            )}
-
             <div className="space-y-4">
               {sortedLegs.map((leg) => {
                 const state = legStates.find((candidate) => candidate.legId === leg.id)
@@ -607,7 +609,7 @@ export function BuildBookingDialog({
                 return (
                   <div key={leg.id} className="space-y-2">
                     {state.kind === "transport" ? (
-                      <TransportLegEditor leg={leg} value={state} onChange={updateLegState} />
+                      <TransportLegEditor leg={leg} value={state} onChange={updateLegState} rateTypes={rateTypes} />
                     ) : (
                       <SuiteLegEditor
                         leg={leg}
@@ -615,6 +617,7 @@ export function BuildBookingDialog({
                         onChange={updateLegState}
                         expectedTotals={totalsBySupplierId[leg.supplierId] ?? null}
                         anchorContext={hotelAnchorContext(leg.id)}
+                        rateTypes={rateTypes}
                       />
                     )}
                     {state.selected ? (
@@ -678,24 +681,37 @@ export function BuildBookingDialog({
                         <span className="text-muted-foreground">
                           {" · "}
                           {extra.routeName} · {extra.suiteTypeName}
-                          {extra.quantity ? ` Ã—${extra.quantity}` : ""}
+                          {extra.quantity ? ` ×${extra.quantity}` : ""}
                         </span>
                       </div>
-                      <button
-                        type="button"
-                        aria-label="Remove extra"
-                        className="text-muted-foreground hover:text-destructive"
-                        onClick={() => setExtras((prev) => prev.filter((_, i) => i !== index))}
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <RateTypeSelect
+                          rateTypes={rateTypes}
+                          value={extra.rateTypeId}
+                          onChange={(rateTypeId) =>
+                            setExtras((prev) =>
+                              prev.map((item, i) => (i === index ? { ...item, rateTypeId } : item)),
+                            )
+                          }
+                          label={null}
+                          triggerClassName="h-7 w-36 text-xs"
+                        />
+                        <button
+                          type="button"
+                          aria-label="Remove extra"
+                          className="text-muted-foreground hover:text-destructive"
+                          onClick={() => setExtras((prev) => prev.filter((_, i) => i !== index))}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
               ) : null}
               <QuoteLineSupplierPicker
                 destinationLocationIds={destinationLocationIds}
-                onAdd={(selection) => setExtras((prev) => [...prev, selection])}
+                onAdd={(selection) => setExtras((prev) => [...prev, { ...selection, rateTypeId: defaultRateTypeId }])}
                 addLabel="Add extra"
               />
             </div>
@@ -766,11 +782,16 @@ export function BuildBookingDialog({
                         {li.pricingSnapshot?.rateTypeName && (
                           <span className="text-[11px] text-muted-foreground">
                             {li.pricingSnapshot.rateTypeName}
-                            {rateTypeId &&
-                            li.pricingSnapshot.rateTypeId &&
-                            li.pricingSnapshot.rateTypeId !== rateTypeId
-                              ? " (fallback)"
-                              : ""}
+                            {(() => {
+                              const chosen = legStates.find(
+                                (state) => state.legId === li.pricingSnapshot?.legId,
+                              )?.rateTypeId
+                              return chosen &&
+                                li.pricingSnapshot.rateTypeId &&
+                                li.pricingSnapshot.rateTypeId !== chosen
+                                ? " (fallback)"
+                                : ""
+                            })()}
                           </span>
                         )}
                         <CommissionBadge

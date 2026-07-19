@@ -22,6 +22,14 @@ function pad(value: number): string {
   return value.toString().padStart(2, "0")
 }
 
+/** Zero-padded day of month ("07", "18") — the house style for all client-facing dates. */
+export function formatDayOfMonth(value: string | Date | null | undefined): string {
+  const parsed = parseDateInput(value)
+  if (!parsed) return ""
+
+  return pad(parsed.getDate())
+}
+
 export function formatDisplayDate(value: string | Date | null | undefined): string {
   const parsed = parseDateInput(value)
   if (!parsed) return ""
@@ -43,7 +51,7 @@ export function formatDisplayDateTime(value: string | Date | null | undefined): 
   return `${datePortion} ${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`
 }
 
-const LONG_MONTH_NAMES = [
+export const LONG_MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ]
@@ -52,7 +60,7 @@ export function formatDisplayDateLong(value: string | Date | null | undefined): 
   const parsed = parseDateInput(value)
   if (!parsed) return ""
 
-  return `${parsed.getDate()} ${LONG_MONTH_NAMES[parsed.getMonth()]} ${parsed.getFullYear()}`
+  return `${pad(parsed.getDate())} ${LONG_MONTH_NAMES[parsed.getMonth()]} ${parsed.getFullYear()}`
 }
 
 const SHORT_MONTH_NAMES = [
@@ -64,5 +72,5 @@ export function formatDisplayDateShort(value: string | Date | null | undefined):
   const parsed = parseDateInput(value)
   if (!parsed) return ""
 
-  return `${parsed.getDate()} ${SHORT_MONTH_NAMES[parsed.getMonth()]} ${parsed.getFullYear()}`
+  return `${pad(parsed.getDate())} ${SHORT_MONTH_NAMES[parsed.getMonth()]} ${parsed.getFullYear()}`
 }

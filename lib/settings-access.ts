@@ -1,5 +1,16 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { NextResponse } from "next/server"
+import {
+  EMAIL_APPEARANCE_SETTING_KEYS,
+  toEmailFontFamily,
+  toEmailFontSize,
+  type EmailAppearanceSettings,
+} from "@/lib/email/appearance"
+import {
+  FOOTER_BRAND_DIVISION_LINE,
+  FOOTER_BRAND_PRODUCT_LINE,
+  getFooterBrandLogoUrl,
+} from "@/lib/assets/footer-brand"
 import { createServiceClient, createSessionClient } from "@/lib/supabase/server"
 import type { Database } from "@/lib/supabase/types"
 
@@ -183,6 +194,8 @@ export const DOCUMENT_TEXT_SETTING_KEYS = [
   "invoice_doc_deposit_title",
   "invoice_doc_final_title",
   "invoice_doc_footer_text",
+  "invoice_doc_payment_note",
+  "invoice_doc_bank_charges_note",
   "itinerary_doc_journey_heading",
   "itinerary_doc_intro_text",
 ] as const
@@ -202,6 +215,10 @@ const DOCUMENT_TEXT_DEFAULTS: DocumentTextSettings = {
   invoice_doc_deposit_title: "DEPOSIT INVOICE",
   invoice_doc_final_title: "FINAL INVOICE",
   invoice_doc_footer_text: "Luxus Travel & Tours — Luxury Rail Journeys",
+  invoice_doc_payment_note:
+    "Please e-mail proof of payment. Reservations can only be confirmed once payment has been received.",
+  invoice_doc_bank_charges_note:
+    "Please note that the amounts transferred should be exclusive of all bank charges.",
   itinerary_doc_journey_heading: "Your Journey",
   // Optional paragraph; empty means the itinerary renders without an intro.
   itinerary_doc_intro_text: "",
@@ -222,6 +239,200 @@ export async function getDocumentTextSettings(
   ) as DocumentTextSettings
 }
 
+// Client-facing status labels shown in the invoice header. The four system
+// roles drive automatic derivation from the booking's payment state; extra
+// entries (role: null) are manual-only labels.
+export type InvoiceStatusRole = "provisional" | "confirmed" | "paid" | "cancelled"
+
+export interface InvoiceStatusOption {
+  role: InvoiceStatusRole | null
+  label: string
+}
+
+export const DEFAULT_INVOICE_STATUS_OPTIONS: InvoiceStatusOption[] = [
+  { role: "provisional", label: "Provisional" },
+  { role: "confirmed", label: "Confirmed" },
+  { role: "paid", label: "Paid in Full" },
+  { role: "cancelled", label: "Cancelled" },
+]
+
+const INVOICE_STATUS_ROLES: readonly string[] = ["provisional", "confirmed", "paid", "cancelled"]
+
+export function parseInvoiceStatusOptions(value: string | null | undefined): InvoiceStatusOption[] {
+  if (!value) return [...DEFAULT_INVOICE_STATUS_OPTIONS]
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (!Array.isArray(parsed)) return [...DEFAULT_INVOICE_STATUS_OPTIONS]
+    const options = parsed
+      .filter((entry): entry is { role?: unknown; label?: unknown } =>
+        typeof entry === "object" && entry !== null,
+      )
+      .map((entry) => ({
+        role:
+          typeof entry.role === "string" && INVOICE_STATUS_ROLES.includes(entry.role)
+            ? (entry.role as InvoiceStatusRole)
+            : null,
+        label: typeof entry.label === "string" ? entry.label.trim() : "",
+      }))
+      .filter((entry) => entry.label.length > 0)
+    return options.length > 0 ? options : [...DEFAULT_INVOICE_STATUS_OPTIONS]
+  } catch {
+    return [...DEFAULT_INVOICE_STATUS_OPTIONS]
+  }
+}
+
+export async function getInvoiceStatusOptions(
+  supabase: SupabaseClient<Database>,
+): Promise<InvoiceStatusOption[]> {
+  const { data } = await supabase
+    .from("app_settings")
+    .select("value")
+    .eq("key", "invoice_status_options")
+    .maybeSingle()
+  return parseInvoiceStatusOptions(data?.value)
+}
+
+// The SARAIL brand block (seal + heading + subheading) rendered on the quote,
+// invoice, voucher and itinerary PDFs and in the email footer. Admins choose
+// where it sits per document type; the strings and logo are editable too, so
+// these keys are the single source of truth for brand chrome across documents.
+export const BRAND_BLOCK_POSITIONS = ["top", "bottom", "hidden"] as const
+export type BrandBlockPosition = (typeof BRAND_BLOCK_POSITIONS)[number]
+
+// Position is only offered for the quote and invoice, the two documents that
+// render the standalone SARAIL block. The voucher and itinerary carry a banner
+// masthead instead, which has no coherent top/bottom/hidden slot; they still
+// take the shared heading/subheading/logo so brand copy stays in one place.
+export const DOCUMENT_BRAND_SETTING_KEYS = [
+  "brand_block_heading",
+  "brand_block_subheading",
+  "brand_block_logo_url",
+  "brand_block_position_quote",
+  "brand_block_position_invoice",
+  "brand_block_position_email",
+] as const
+
+export type DocumentBrandSettings = Record<
+  (typeof DOCUMENT_BRAND_SETTING_KEYS)[number],
+  string
+>
+
+const DOCUMENT_BRAND_DEFAULTS: DocumentBrandSettings = {
+  brand_block_heading: FOOTER_BRAND_DIVISION_LINE,
+  brand_block_subheading: FOOTER_BRAND_PRODUCT_LINE,
+  // Empty means "no uploaded logo" — the renderers then fall back to the
+  // committed asset. A non-empty default would make that state unreachable,
+  // because getDocumentBrandSettings treats a blank row as unset (see below).
+  brand_block_logo_url: "",
+  // Preserve the placement each document had before the block became
+  // configurable: the quote carried it in the footer, the invoice at the top.
+  brand_block_position_quote: "bottom",
+  brand_block_position_invoice: "top",
+  // Emails have always shown the block in the footer; keep that default so
+  // enabling this setting changes nothing until an admin picks another slot.
+  brand_block_position_email: "bottom",
+}
+
+function isBrandBlockPosition(value: string): value is BrandBlockPosition {
+  return (BRAND_BLOCK_POSITIONS as readonly string[]).includes(value)
+}
+
+/**
+ * Positions are validated as an enum at the API boundary, but app_settings.value
+ * is plain text and rows predate this code, so a stored value can still be
+ * anything. Re-check on read and fall back to the default rather than rendering
+ * an unknown placement as nothing.
+ */
+export function toBrandBlockPosition(
+  value: string,
+  fallback: BrandBlockPosition,
+): BrandBlockPosition {
+  return isBrandBlockPosition(value) ? value : fallback
+}
+
+/** The brand block resolved for one document, ready to hand to a renderer. */
+export interface DocumentBrand {
+  heading: string
+  subheading: string
+  logoUrl: string | null
+}
+
+export async function getDocumentBrandSettings(
+  supabase: SupabaseClient<Database>,
+): Promise<DocumentBrandSettings> {
+  const { data } = await supabase
+    .from("app_settings")
+    .select("key, value")
+    .in("key", DOCUMENT_BRAND_SETTING_KEYS)
+
+  const map = Object.fromEntries((data ?? []).map((r) => [r.key, r.value]))
+
+  return Object.fromEntries(
+    DOCUMENT_BRAND_SETTING_KEYS.map((key) => [
+      key,
+      map[key]?.trim() || DOCUMENT_BRAND_DEFAULTS[key],
+    ]),
+  ) as DocumentBrandSettings
+}
+
+/**
+ * Splits the flat settings row into the brand text/logo and the per-document
+ * placements, so renderers take a resolved object instead of reaching for
+ * setting keys themselves.
+ */
+/**
+ * The brand block resolved for the email footer. Emails cannot embed a local
+ * file or a relative path, so the logo must be an absolute URL: the uploaded
+ * one when present, otherwise the committed asset mirrored into the public
+ * bucket. Never throws — a branding lookup must not block a send.
+ */
+export interface EmailBrand {
+  brand: DocumentBrand
+  position: BrandBlockPosition
+}
+
+export async function getDocumentBrandForEmail(): Promise<EmailBrand> {
+  try {
+    const supabase = createServiceClient()
+    const settings = await getDocumentBrandSettings(supabase)
+    const uploaded = settings.brand_block_logo_url
+    return {
+      brand: {
+        heading: settings.brand_block_heading,
+        subheading: settings.brand_block_subheading,
+        logoUrl: /^https?:\/\//i.test(uploaded) ? uploaded : getFooterBrandLogoUrl(),
+      },
+      position: toBrandBlockPosition(settings.brand_block_position_email, "bottom"),
+    }
+  } catch {
+    return {
+      brand: {
+        heading: FOOTER_BRAND_DIVISION_LINE,
+        subheading: FOOTER_BRAND_PRODUCT_LINE,
+        logoUrl: getFooterBrandLogoUrl(),
+      },
+      position: "bottom",
+    }
+  }
+}
+
+export function resolveDocumentBrand(settings: DocumentBrandSettings): {
+  brand: DocumentBrand
+  position: Record<"quote" | "invoice", BrandBlockPosition>
+} {
+  return {
+    brand: {
+      heading: settings.brand_block_heading,
+      subheading: settings.brand_block_subheading,
+      logoUrl: settings.brand_block_logo_url || null,
+    },
+    position: {
+      quote: toBrandBlockPosition(settings.brand_block_position_quote, "bottom"),
+      invoice: toBrandBlockPosition(settings.brand_block_position_invoice, "top"),
+    },
+  }
+}
+
 // Banking + company registration details rendered on invoice PDFs and into
 // the {{bankingDetails}} email-template block. Empty values are omitted.
 export const BANKING_SETTING_KEYS = [
@@ -234,6 +445,11 @@ export const BANKING_SETTING_KEYS = [
   "company_address",
   "company_reg_number",
   "company_vat_number",
+  "company_tel",
+  "company_cell",
+  "company_fax",
+  "company_email",
+  "company_website",
 ] as const
 
 export type BankingSettings = Record<(typeof BANKING_SETTING_KEYS)[number], string>
@@ -255,14 +471,44 @@ export async function getBankingSettings(
 
 const DEFAULT_EMAIL_FOOTER_TAGLINE = "Luxury train journeys, handled with care."
 
-export async function getEmailFooterTagline(): Promise<string> {
+export interface EmailBrandingSettings extends EmailAppearanceSettings {
+  footerTagline: string
+}
+
+export async function getEmailAppearanceSettings(
+  supabase: SupabaseClient<Database>,
+): Promise<EmailAppearanceSettings> {
+  const { data } = await supabase
+    .from("app_settings")
+    .select("key, value")
+    .in("key", EMAIL_APPEARANCE_SETTING_KEYS)
+
+  const map = Object.fromEntries((data ?? []).map((r) => [r.key, r.value]))
+
+  return {
+    email_font_family: toEmailFontFamily(map["email_font_family"]),
+    email_font_size: toEmailFontSize(map["email_font_size"]),
+  }
+}
+
+/**
+ * Footer + font for the branded email wrapper. Uses the service client because
+ * composing runs from workers and cron with no user session.
+ */
+export async function getEmailBrandingSettings(): Promise<EmailBrandingSettings> {
   const supabase = createServiceClient()
   const { data } = await supabase
     .from("app_settings")
-    .select("value")
-    .eq("key", "email_footer_tagline")
-    .maybeSingle()
-  return data?.value?.trim() || DEFAULT_EMAIL_FOOTER_TAGLINE
+    .select("key, value")
+    .in("key", ["email_footer_tagline", ...EMAIL_APPEARANCE_SETTING_KEYS])
+
+  const map = Object.fromEntries((data ?? []).map((r) => [r.key, r.value]))
+
+  return {
+    footerTagline: map["email_footer_tagline"]?.trim() || DEFAULT_EMAIL_FOOTER_TAGLINE,
+    email_font_family: toEmailFontFamily(map["email_font_family"]),
+    email_font_size: toEmailFontSize(map["email_font_size"]),
+  }
 }
 
 export async function getAttachmentAllowedMimeTypes(

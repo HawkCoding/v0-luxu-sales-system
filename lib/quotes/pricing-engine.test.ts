@@ -351,7 +351,7 @@ describe("pricing engine", () => {
           { legId: ROVOS_LEG_ID, selected: false },
         ],
       }),
-    ).toThrow(/No pricing available/)
+    ).toThrow(/No rate card covers 2027-01-01/)
   })
 })
 

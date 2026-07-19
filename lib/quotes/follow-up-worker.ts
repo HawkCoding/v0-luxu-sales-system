@@ -3,6 +3,7 @@ import type { Database } from "@/lib/supabase/types"
 import { getQuoteFollowUpSettings } from "@/lib/settings-access"
 import { formatDisplayDate } from "@/lib/date-format"
 import { logError } from "@/lib/error-log"
+import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { sendEmail } from "@/lib/email/transport"
 import { composeFromTemplate } from "@/lib/templates/compose-email"
 import { getTemplate } from "@/lib/templates/get-template"
@@ -92,7 +93,7 @@ export async function runQuoteFollowUpWorker(
     const { data: booking } = await supabase
       .from("bookings")
       .select(
-        "id, booking_number, stage, outcome, assigned_salesperson_id, customers!inner(first_name, last_name, email)",
+        "id, booking_number, stage, outcome, assigned_salesperson_id, customers!inner(title, first_name, last_name, email)",
       )
       .eq("id", quote.booking_id)
       .single()
@@ -133,8 +134,7 @@ export async function runQuoteFollowUpWorker(
       ? booking.customers[0]
       : booking.customers
     const customerEmail = customer?.email
-    const customerName =
-      [customer?.first_name, customer?.last_name].filter(Boolean).join(" ").trim() || "Valued Guest"
+    const customerName = formatCustomerSalutation(customer) || "Valued Guest"
 
     if (!customerEmail) {
       skipped++

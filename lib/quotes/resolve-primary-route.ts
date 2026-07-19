@@ -8,6 +8,7 @@ interface SnapshotCarrier {
 export interface PrimaryRoute {
   routeId: string | null
   routeName: string | null
+  routeReversed: boolean
 }
 
 /**
@@ -31,6 +32,7 @@ export function resolvePrimaryRoute(lineItems: SnapshotCarrier[]): PrimaryRoute 
   return {
     routeId: winner?.routeId ?? null,
     routeName: winner?.routeName ?? null,
+    routeReversed: winner?.routeReversed ?? false,
   }
 }
 
@@ -45,9 +47,12 @@ export async function syncBookingRoute(
   bookingId: string,
   lineItems: SnapshotCarrier[],
 ): Promise<{ error: string | null }> {
-  const { routeId } = resolvePrimaryRoute(lineItems)
+  const { routeId, routeReversed } = resolvePrimaryRoute(lineItems)
   if (!routeId) return { error: null }
 
-  const { error } = await supabase.from("bookings").update({ route_id: routeId }).eq("id", bookingId)
+  const { error } = await supabase
+    .from("bookings")
+    .update({ route_id: routeId, route_reversed: routeReversed })
+    .eq("id", bookingId)
   return { error: error ? "Failed to sync booking route" : null }
 }

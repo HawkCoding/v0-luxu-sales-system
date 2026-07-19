@@ -22,6 +22,11 @@ const FIELDS: Array<{ key: string; label: string }> = [
   { key: "company_address", label: "Company address" },
   { key: "company_reg_number", label: "Company registration number" },
   { key: "company_vat_number", label: "VAT number" },
+  { key: "company_tel", label: "Telephone" },
+  { key: "company_cell", label: "Cell" },
+  { key: "company_fax", label: "Fax" },
+  { key: "company_email", label: "Contact e-mail" },
+  { key: "company_website", label: "Website" },
 ]
 
 export function BankingSettingsEditor({ canEdit }: BankingSettingsEditorProps) {

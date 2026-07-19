@@ -1,7 +1,13 @@
 import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
 import { jsonError } from "@/lib/api/responses"
-import { getBankingSettings, getDocumentTextSettings } from "@/lib/settings-access"
+import { loadBrandLogo } from "@/lib/pdf/brand-logo"
+import {
+  getBankingSettings,
+  getDocumentBrandSettings,
+  getDocumentTextSettings,
+  resolveDocumentBrand,
+} from "@/lib/settings-access"
 import { renderVoucherPdf } from "@/lib/voucher/render-pdf"
 import { renderItineraryPdf } from "@/lib/itinerary/render-pdf"
 import { renderQuotePdf } from "@/lib/quotes/render-quote-pdf"
@@ -47,6 +53,9 @@ export async function GET(
 
   let buffer: Buffer
   try {
+    const { brand, position } = resolveDocumentBrand(await getDocumentBrandSettings(supabase))
+    const brandLogo = await loadBrandLogo(brand.logoUrl)
+
     if (type === "voucher") {
       const [template, documentText] = await Promise.all([
         fetchVoucherTemplate(supabase),
@@ -56,6 +65,7 @@ export async function GET(
         data: { ...sampleVoucherData(), serviceBlocks: sampleVoucherServiceBlocks() },
         template,
         docTitle: documentText.voucher_doc_title,
+        brand,
       })
     } else if (type === "itinerary") {
       const [template, documentText] = await Promise.all([
@@ -67,6 +77,7 @@ export async function GET(
         template,
         journeyHeading: documentText.itinerary_doc_journey_heading,
         introText: documentText.itinerary_doc_intro_text,
+        brand,
       })
     } else if (type === "quote") {
       const documentText = await getDocumentTextSettings(supabase)
@@ -77,6 +88,9 @@ export async function GET(
         packageIncludesHeading: documentText.quote_doc_includes_heading,
         packageExcludesHeading: documentText.quote_doc_excludes_heading,
         packageExcludesDefault: documentText.quote_doc_excludes_default,
+        brand,
+        brandPosition: position.quote,
+        brandLogo,
       })
     } else {
       const [banking, documentText] = await Promise.all([
@@ -86,9 +100,12 @@ export async function GET(
       buffer = await renderInvoicePdf({
         ...sampleInvoicePdfData(),
         banking,
-        depositTitle: documentText.invoice_doc_deposit_title,
-        finalTitle: documentText.invoice_doc_final_title,
         footerText: documentText.invoice_doc_footer_text,
+        paymentNote: documentText.invoice_doc_payment_note,
+        bankChargesNote: documentText.invoice_doc_bank_charges_note,
+        brand,
+        brandPosition: position.invoice,
+        brandLogo,
       })
     }
   } catch (error) {

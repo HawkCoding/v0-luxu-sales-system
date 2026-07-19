@@ -34,6 +34,7 @@ const updateSelectionSchema = z.object({
   selected: z.boolean().optional(),
   supplierId: z.string().uuid().nullable().optional(),
   routeId: z.string().uuid().nullable().optional(),
+  routeReversed: z.boolean().optional(),
   serviceDate: z
     .string()
     .regex(datePattern, "Expected YYYY-MM-DD")
@@ -41,6 +42,7 @@ const updateSelectionSchema = z.object({
     .optional(),
   nights: z.number().int().positive().nullable().optional(),
   dateAnchor: z.enum(["pre", "post", "custom"]).nullable().optional(),
+  rateTypeId: z.string().uuid().nullable().optional(),
   notes: z.string().nullable().optional(),
   units: z.array(selectionUnitSchema).optional(),
 })
@@ -59,7 +61,7 @@ type BookingPackageSelectionUnitInsert =
   Database["public"]["Tables"]["booking_package_selection_units"]["Insert"]
 
 const SELECTIONS_WITH_UNITS_SELECT =
-  "id, booking_id, package_leg_id, selected, supplier_id, route_id, suite_type_id, service_date, nights, date_anchor, notes, " +
+  "id, booking_id, package_leg_id, selected, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, date_anchor, rate_type_id, notes, " +
   "units:booking_package_selection_units(id, suite_type_id, bedroom_type_id, bedroom_layout_id, bathroom_type_id, adult_count, child_count, infant_count, sort_order)"
 
 export async function PATCH(req: Request, { params }: RouteParams) {
@@ -176,9 +178,11 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     if (selection.selected !== undefined) updatePayload.selected = selection.selected
     if (selection.supplierId !== undefined) updatePayload.supplier_id = selection.supplierId
     if (selection.routeId !== undefined) updatePayload.route_id = selection.routeId
+    if (selection.routeReversed !== undefined) updatePayload.route_reversed = selection.routeReversed
     if (selection.serviceDate !== undefined) updatePayload.service_date = selection.serviceDate
     if (selection.nights !== undefined) updatePayload.nights = selection.nights
     if (selection.dateAnchor !== undefined) updatePayload.date_anchor = selection.dateAnchor
+    if (selection.rateTypeId !== undefined) updatePayload.rate_type_id = selection.rateTypeId
     if (selection.notes !== undefined) updatePayload.notes = selection.notes
 
     if (Object.keys(updatePayload).length === 0) continue

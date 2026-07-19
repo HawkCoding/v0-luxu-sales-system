@@ -204,7 +204,7 @@ describe("POST /api/customers/import idempotency", () => {
     })
     expect(state.precheckCustomerIds.sort()).toEqual(["cust-existing", "cust-new"])
     expect(state.bookingInsertRows).toHaveLength(1)
-    expect(state.bookingInsertRows[0]?.booking_number).toBe("BT-2026-0001")
+    expect(state.bookingInsertRows[0]?.booking_number).toBe("LTT-2026-0001")
     expect(state.bookingInsertRows[0]?.hotel_supplier_id).toBe(SUPPLIER_ID)
 
     const insertedBookingMeta = (state.bookingInsertRows[0].extracted_json as {

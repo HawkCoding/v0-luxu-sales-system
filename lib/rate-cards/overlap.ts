@@ -1,3 +1,5 @@
+import { isOngoingRateCard } from "./resolve"
+
 export interface RateCardDateRange {
   validFrom: string
   validTo: string | null
@@ -13,8 +15,10 @@ export function areRateCardDateRangesOverlapping(
   first: RateCardDateRange,
   second: RateCardDateRange,
 ): boolean {
-  const firstStartsBeforeSecondEnds = !second.validTo || first.validFrom <= second.validTo
-  const secondStartsBeforeFirstEnds = !first.validTo || second.validFrom <= first.validTo
+  const firstStartsBeforeSecondEnds =
+    isOngoingRateCard(second.validTo) || first.validFrom <= (second.validTo ?? "")
+  const secondStartsBeforeFirstEnds =
+    isOngoingRateCard(first.validTo) || second.validFrom <= (first.validTo ?? "")
   return firstStartsBeforeSecondEnds && secondStartsBeforeFirstEnds
 }
 

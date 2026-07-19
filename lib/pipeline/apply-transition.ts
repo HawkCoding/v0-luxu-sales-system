@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { writeAuditLog } from "@/lib/audit-write"
 import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
+import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { getBankingSettings } from "@/lib/settings-access"
 import type { Database } from "@/lib/supabase/types"
 import { composeEmail } from "@/lib/templates/compose-email"
@@ -84,6 +85,7 @@ function buildBookingUpdates(input: ApplyTransitionInput, nowIso: string): Booki
   if (crossedStages.includes("deposit_paid")) {
     updates.deposit_paid_at = nowIso
     updates.deposit_paid = true
+    updates.deposit_confirmed_manually = true
   }
   if (crossedStages.includes("final_paid")) {
     updates.final_paid_at = nowIso
@@ -178,11 +180,14 @@ export async function applyTransition(
       if (balanceError) throw new Error(balanceError.message)
     }
 
+    // Only the "create the invoice for me" confirmation schedules a deposit
+    // email draft. The createInvoiceCorrespondence confirmation means the
+    // invoice was already sent outside the system, so drafting another email
+    // would be misleading.
     const shouldScheduleDepositCorrespondence =
       (hasInvoiceDocument || createdInvoiceDocument) &&
       !hasCorrespondence(input.correspondences ?? [], "invoice", ["invoice", "deposit request"]) &&
-      (input.manualConfirmations?.createDepositInvoice === true ||
-        input.manualConfirmations?.createInvoiceCorrespondence === true)
+      input.manualConfirmations?.createDepositInvoice === true
 
     if (shouldScheduleDepositCorrespondence) {
       const defaultDepositPercentage = await getDefaultDepositPercentage(supabase)
@@ -194,10 +199,10 @@ export async function applyTransition(
       if (input.booking.customer_id) {
         const { data: customer } = await supabase
           .from("customers")
-          .select("first_name, last_name")
+          .select("title, first_name, last_name")
           .eq("id", input.booking.customer_id)
           .maybeSingle()
-        const name = [customer?.first_name, customer?.last_name].filter(Boolean).join(" ").trim()
+        const name = formatCustomerSalutation(customer)
         if (name) customerName = name
       }
 

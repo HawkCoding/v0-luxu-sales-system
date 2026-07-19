@@ -3,6 +3,7 @@
 
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { voucherServiceTypeLabel } from "@/lib/generate-voucher"
+import { LONG_MONTH_NAMES, formatDayOfMonth, formatDisplayDateLong } from "@/lib/date-format"
 
 export interface QuotePax {
   adults: number
@@ -22,13 +23,14 @@ export interface QuoteItineraryLine {
   bullets: string[]
 }
 
-const LONG_MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-]
-
 const DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})/
 
+/**
+ * Deliberately stricter than `parseDateInput` in @/lib/date-format: only a
+ * leading YYYY-MM-DD is accepted (a trailing time portion is ignored, anything
+ * else is null), and it is read as local time so a date never shifts a day.
+ * Parse here, then hand the Date to the shared formatters.
+ */
 function parseIsoDate(value: string | null | undefined): Date | null {
   if (!value) return null
   const match = DATE_ONLY_PATTERN.exec(value)
@@ -66,44 +68,52 @@ export function formatTotalLabel(pax: QuotePax): string {
   return label ? `TOTAL for ${label}` : "TOTAL"
 }
 
-/** Journey window from booking fields, with duration_nights as end fallback. */
-export function resolveJourneyDates(booking: {
-  trip_start_date: string | null
-  trip_end_date: string | null
-  departure_date: string | null
-  duration_nights: number | null
-}): QuoteJourneyDates {
-  const start = booking.trip_start_date ?? booking.departure_date
-  let end = booking.trip_end_date
-  if (!end && start && booking.duration_nights && booking.duration_nights > 0) {
-    const startDate = parseIsoDate(start)
-    if (startDate) {
-      startDate.setDate(startDate.getDate() + booking.duration_nights)
-      end = toIsoDateString(startDate)
+/**
+ * Suffix asserting a client-facing amount already includes VAT. Single source
+ * so the quote PDF, the quote email block, the invoice PDF and the template
+ * editor's token preview can never drift apart.
+ */
+export const VAT_INCLUSIVE_SUFFIX = "(INCL.VAT)"
+
+/**
+ * Journey window derived from the legs actually priced into the quote, not the
+ * booking's enquiry-time scalar dates (departure_date/trip_*), which drift out
+ * of sync once package legs change. start = earliest leg date, end = latest
+ * (covers hotel check-out). Returns null when no block carries a date.
+ */
+export function deriveJourneyFromBlocks(blocks: VoucherServiceBlock[]): QuoteJourneyDates | null {
+  const dates: string[] = []
+  for (const block of blocks) {
+    const d = block.serviceData
+    for (const raw of [d.departureDate, d.arrivalDate]) {
+      const parsed = parseIsoDate(raw)
+      if (parsed) dates.push(toIsoDateString(parsed))
     }
   }
-  return { start: start ?? null, end: end ?? null }
+  if (dates.length === 0) return null
+  dates.sort()
+  return { start: dates[0], end: dates[dates.length - 1] }
 }
 
 /**
- * "18 – 22 July 2026" (same month), "28 July – 2 August 2026" (cross-month),
- * "18 December 2026 – 3 January 2027" (cross-year), "18 July 2026" (start
- * only), null when no start date.
+ * "18 – 22 July 2026" (same month), "28 July – 02 August 2026" (cross-month),
+ * "18 December 2026 – 03 January 2027" (cross-year), "18 July 2026" (start
+ * only), null when no start date. Days are zero-padded throughout.
  */
 export function formatJourneyRange(start: string | null, end: string | null): string | null {
   const startDate = parseIsoDate(start)
   if (!startDate) return null
 
   const endDate = parseIsoDate(end)
-  const startLong = `${startDate.getDate()} ${LONG_MONTH_NAMES[startDate.getMonth()]} ${startDate.getFullYear()}`
+  const startLong = formatDisplayDateLong(startDate)
   if (!endDate || endDate.getTime() === startDate.getTime()) return startLong
 
-  const endLong = `${endDate.getDate()} ${LONG_MONTH_NAMES[endDate.getMonth()]} ${endDate.getFullYear()}`
+  const endLong = formatDisplayDateLong(endDate)
   if (startDate.getFullYear() !== endDate.getFullYear()) return `${startLong} – ${endLong}`
   if (startDate.getMonth() !== endDate.getMonth()) {
-    return `${startDate.getDate()} ${LONG_MONTH_NAMES[startDate.getMonth()]} – ${endLong}`
+    return `${formatDayOfMonth(startDate)} ${LONG_MONTH_NAMES[startDate.getMonth()]} – ${endLong}`
   }
-  return `${startDate.getDate()} – ${endLong}`
+  return `${formatDayOfMonth(startDate)} – ${endLong}`
 }
 
 const NIGHT_WORDS = [

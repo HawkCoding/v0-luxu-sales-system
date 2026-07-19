@@ -31,7 +31,7 @@ export default function RootLayout({
       <body className="font-sans antialiased">
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
           {children}
-          <Toaster position="top-right" />
+          <Toaster position="top-right" duration={2500} />
           <Analytics />
         </ThemeProvider>
       </body>

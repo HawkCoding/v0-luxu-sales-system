@@ -356,4 +356,64 @@ describe("buildPackageQuoteLineItems", () => {
       }),
     ).rejects.toThrow(/must sum to the booking's traveller totals/)
   })
+
+  it("renders the flipped travel direction for a reversed two-way route, without changing price", async () => {
+    const twoWayLeg = leg({
+      id: "leg-train",
+      supplierKind: "train_operator",
+      routes: [
+        {
+          ...route("route-cpt", "supplier-leg-train", "Cape Town ↔ Pretoria"),
+          directionMode: "round_trip",
+          originLocationName: "Cape Town",
+          destinationLocationName: "Pretoria",
+        } as PackageLeg["routes"][number],
+      ],
+      suiteTypes: [suiteType("suite-dlx", "supplier-leg-train", "Deluxe")],
+      rateCards: [
+        rateCard({ id: "rc-train", routeId: "route-cpt", suiteTypeId: "suite-dlx", pricePerPerson: 10000 }),
+      ],
+    })
+
+    const selections = [
+      {
+        legId: "leg-train",
+        selected: true,
+        units: [{ suiteTypeId: "suite-dlx", adultCount: 1, childCount: 0, infantCount: 0 }],
+      },
+    ]
+
+    const singleAdultBooking = {
+      id: JOB_ID,
+      no_of_adults: 1,
+      no_of_children: 0,
+      no_of_suites: 1,
+      child_ages: [],
+      departure_date: "2026-09-01",
+    }
+
+    const { lineItems: forward } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({ booking: singleAdultBooking }),
+      packageDetail: detail([twoWayLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections,
+    })
+    const { lineItems: reversed } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({ booking: singleAdultBooking }),
+      packageDetail: detail([twoWayLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [{ ...selections[0], routeReversed: true }],
+    })
+
+    const forwardAdult = forward.find((li) => li.description.includes("Adult"))
+    const reversedAdult = reversed.find((li) => li.description.includes("Adult"))
+
+    expect(forwardAdult?.pricingSnapshot?.routeName).toBe("Cape Town → Pretoria")
+    expect(forwardAdult?.pricingSnapshot?.routeReversed).toBe(false)
+    expect(reversedAdult?.pricingSnapshot?.routeName).toBe("Pretoria → Cape Town")
+    expect(reversedAdult?.pricingSnapshot?.routeReversed).toBe(true)
+    expect(reversedAdult?.total).toBe(forwardAdult?.total)
+  })
 })

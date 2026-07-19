@@ -3,12 +3,12 @@ import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import {
   buildQuoteItineraryLines,
   collectQuoteExclusions,
+  deriveJourneyFromBlocks,
   derivePerPersonRate,
   formatJourneyRange,
   formatPaxLabel,
   formatTimeOfDay,
   formatTotalLabel,
-  resolveJourneyDates,
 } from "./quote-presentation"
 
 describe("formatPaxLabel", () => {
@@ -46,38 +46,35 @@ describe("formatTotalLabel", () => {
   })
 })
 
-describe("resolveJourneyDates", () => {
-  it("prefers trip dates over departure date", () => {
-    expect(
-      resolveJourneyDates({
-        trip_start_date: "2026-07-18",
-        trip_end_date: "2026-07-22",
-        departure_date: "2026-07-20",
-        duration_nights: null,
-      }),
-    ).toEqual({ start: "2026-07-18", end: "2026-07-22" })
+describe("deriveJourneyFromBlocks", () => {
+  it("spans earliest departure to latest arrival across blocks", () => {
+    expect(deriveJourneyFromBlocks([trainBlock, hotelBlock])).toEqual({
+      start: "2026-07-18",
+      end: "2026-07-22",
+    })
   })
 
-  it("falls back to departure date plus duration nights", () => {
+  it("uses a departure date when a block carries no arrival date", () => {
     expect(
-      resolveJourneyDates({
-        trip_start_date: null,
-        trip_end_date: null,
-        departure_date: "2026-07-20",
-        duration_nights: 2,
-      }),
-    ).toEqual({ start: "2026-07-20", end: "2026-07-22" })
+      deriveJourneyFromBlocks([
+        {
+          ...hotelBlock,
+          serviceData: { ...hotelBlock.serviceData, arrivalDate: null },
+        },
+      ]),
+    ).toEqual({ start: "2026-07-18", end: "2026-07-18" })
   })
 
-  it("returns nulls when nothing is set", () => {
+  it("returns null when no block carries a date", () => {
     expect(
-      resolveJourneyDates({
-        trip_start_date: null,
-        trip_end_date: null,
-        departure_date: null,
-        duration_nights: 3,
-      }),
-    ).toEqual({ start: null, end: null })
+      deriveJourneyFromBlocks([
+        {
+          ...hotelBlock,
+          serviceData: { ...hotelBlock.serviceData, departureDate: null, arrivalDate: null },
+        },
+      ]),
+    ).toBeNull()
+    expect(deriveJourneyFromBlocks([])).toBeNull()
   })
 })
 
@@ -87,18 +84,24 @@ describe("formatJourneyRange", () => {
   })
 
   it("spells out cross-month ranges", () => {
-    expect(formatJourneyRange("2026-07-28", "2026-08-02")).toBe("28 July – 2 August 2026")
+    expect(formatJourneyRange("2026-07-28", "2026-08-02")).toBe("28 July – 02 August 2026")
   })
 
   it("spells out cross-year ranges in full", () => {
     expect(formatJourneyRange("2026-12-28", "2027-01-03")).toBe(
-      "28 December 2026 – 3 January 2027",
+      "28 December 2026 – 03 January 2027",
     )
+  })
+
+  it("zero-pads single-digit days on both sides of a range", () => {
+    expect(formatJourneyRange("2026-07-01", "2026-07-05")).toBe("01 – 05 July 2026")
+    expect(formatJourneyRange("2026-07-08", "2026-08-03")).toBe("08 July – 03 August 2026")
   })
 
   it("shows start only when end is missing or equal", () => {
     expect(formatJourneyRange("2026-07-18", null)).toBe("18 July 2026")
     expect(formatJourneyRange("2026-07-18", "2026-07-18")).toBe("18 July 2026")
+    expect(formatJourneyRange("2026-07-04", null)).toBe("04 July 2026")
   })
 
   it("returns null without a start date", () => {

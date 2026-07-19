@@ -71,6 +71,7 @@ const patchJobSchema = z.object({
     .optional(),
   ownerUser: z.string().optional(),
   consultant: z.string().optional(),
+  reservationFormReceived: z.boolean().optional(),
   assignedSalespersonId: z.string().uuid().nullable().optional(),
   customerId: z.string().optional(),
   supplierReference: z.string().trim().max(120).nullable().optional(),
@@ -189,6 +190,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     cancelledAt: booking.cancelled_at ?? null,
     cancelledAtDisplay: formatDisplayDateTime(booking.cancelled_at),
     depositPaid: booking.deposit_paid ?? false,
+    reservationFormReceivedAt: booking.reservation_form_received_at ?? null,
     invoiceBalance: booking.invoice_balance !== null ? Number(booking.invoice_balance) : null,
     outcome: (booking.outcome as string) ?? "Open",
     outcomeReasonId: booking.outcome_reason_id ?? null,
@@ -210,6 +212,12 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       phone: customer.phone,
       country: customer.country,
       title: customer.title,
+      companyName: customer.company_name,
+      addressLine1: customer.address_line1,
+      addressLine2: customer.address_line2,
+      city: customer.city,
+      province: customer.province,
+      postalCode: customer.postal_code,
       defaultRateTypeId: customer.default_rate_type_id,
       isRepeatClient: customer.is_repeat_client,
       createdAt: customer.created_at,
@@ -502,6 +510,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
 
+  if (body.reservationFormReceived !== undefined) {
+    updates.reservation_form_received_at = body.reservationFormReceived
+      ? new Date().toISOString()
+      : null
+  }
+
   if (body.resolveEmailImportReview === true) {
     const { data: actorProfile } = await supabase
       .from("profiles")
@@ -590,9 +604,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         body.resolveEmailImportReview === true
           ? new Date().toISOString()
           : booking.email_import_review_resolved_at,
-      deposit_paid: booking.deposit_paid,
-      invoice_balance: booking.invoice_balance !== null ? Number(booking.invoice_balance) : null,
-      departure_date: booking.departure_date,
     }
     const failures = validateTransition({
       booking: validationBooking,

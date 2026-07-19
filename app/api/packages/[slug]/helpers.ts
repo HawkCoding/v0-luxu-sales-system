@@ -185,6 +185,31 @@ export async function loadPackageDetail(supabase: SupabaseClient<Database>, slug
   const { data: rateCards, error: rateCardsError } = rateCardsResult
   const { data: vehicleRentalRouteDetails, error: vehicleRentalDetailsError } =
     vehicleRentalDetailsResult
+
+  // Endpoint names for rendering the booked travel direction (origin → destination) on documents.
+  const locationIds = Array.from(
+    new Set(
+      (routes ?? []).flatMap((route) =>
+        [route.origin_location_id, route.destination_location_id].filter(
+          (id): id is string => Boolean(id),
+        ),
+      ),
+    ),
+  )
+  const { data: locationRows, error: locationsError } =
+    locationIds.length > 0
+      ? await supabase.from("locations").select("id, name").in("id", locationIds)
+      : { data: [], error: null }
+  const locationNameById = new Map((locationRows ?? []).map((row) => [row.id, row.name]))
+
+  if (locationsError) {
+    return {
+      error: NextResponse.json(
+        { error: "Failed to load package reference data" },
+        { status: 500 },
+      ),
+    }
+  }
   if (rateCardsError) {
     return {
       error: NextResponse.json(
@@ -211,6 +236,7 @@ export async function loadPackageDetail(supabase: SupabaseClient<Database>, slug
     rateCards ?? [],
     suiteTypes ?? [],
     vehicleRentalRouteDetails ?? [],
+    locationNameById,
   )
 
   await attachSuiteVariantVocab(supabase, detail)

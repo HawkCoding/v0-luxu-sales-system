@@ -10,6 +10,7 @@ import { addDays, trainArrivalDate } from "@/lib/packages/hotel-dates"
 import { getHotelDefaultTimes, type HotelDefaultTimes } from "@/lib/suppliers/hotel-default-times"
 import type { Database } from "@/lib/supabase/types"
 import type { SupplierKind } from "@/lib/types"
+import { resolveDirectedRouteName } from "@/lib/routes/route-name"
 import { firstRecord } from "@/lib/utils"
 
 export function mapSupplierKindToServiceType(kind: SupplierKind | string | null): VoucherServiceType {
@@ -36,6 +37,11 @@ interface BuildContext {
   additionalServicesDetails?: string | null
   /** Fallback check-in/check-out times when a hotel has no default times of its own. */
   hotelDefaultTimes?: HotelDefaultTimes
+  /** When set, restricts package-leg selections (and their leg-scoped transport requests) to
+   * these leg ids — scopes a specific quote version's itinerary to what was actually priced into
+   * it, instead of whatever is currently selected live on the job. Manually-added transport
+   * requests (no package leg) are never priced this way and stay unfiltered. */
+  legIds?: Set<string>
 }
 
 interface SupplierJoin {
@@ -54,6 +60,9 @@ interface SupplierJoin {
 interface RouteJoin {
   name: string | null
   duration_days: number | null
+  direction_mode: string | null
+  origin: { name: string | null } | { name: string | null }[] | null
+  destination: { name: string | null } | { name: string | null }[] | null
 }
 
 interface TransportRequestJoinRow {
@@ -80,6 +89,7 @@ interface SelectionJoinRow {
   selected: boolean
   supplier_id: string | null
   route_id: string | null
+  route_reversed: boolean | null
   suite_type_id: string | null
   service_date: string | null
   nights: number | null
@@ -120,6 +130,16 @@ function timestampTime(value: string | null | undefined): string | null {
 
 function cleanList(values: string[] | null | undefined): string[] {
   return (values ?? []).map((value) => value.trim()).filter(Boolean)
+}
+
+/** The route name as it should read on client documents: the canonical name, unless it's a
+ * two-way route with resolvable endpoint names, in which case it renders the booked direction. */
+function resolveVoucherRouteName(route: RouteJoin | null | undefined, reversed: boolean): string | null {
+  if (!route) return null
+  const origin = firstRecord(route.origin)?.name
+  const destination = firstRecord(route.destination)?.name
+  if (route.direction_mode !== "round_trip" || !origin || !destination) return route.name
+  return resolveDirectedRouteName(origin, destination, reversed)
 }
 
 interface TransportBlockContext {
@@ -183,10 +203,10 @@ export async function buildVoucherServiceBlocks(
   const { data: rows, error } = await supabase
     .from("booking_package_selections")
     .select(
-      `id, package_leg_id, selected, supplier_id, route_id, suite_type_id, service_date, nights, notes,
+      `id, package_leg_id, selected, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, notes,
        package_legs(sort_order, label),
        suppliers(name, phone, email, website, location, kind, default_time_start, default_time_end, inclusions, exclusions),
-       routes(name, duration_days),
+       routes(name, duration_days, direction_mode, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name)),
        suite_types(name)`,
     )
     .eq("booking_id", context.bookingId)
@@ -209,7 +229,9 @@ export async function buildVoucherServiceBlocks(
   if (transportError) throw transportError
   const transportRequests = (transportRows ?? []) as unknown as TransportRequestJoinRow[]
 
-  const selections = ((rows ?? []) as unknown as SelectionJoinRow[]).filter((row) => row.selected)
+  const selections = ((rows ?? []) as unknown as SelectionJoinRow[]).filter(
+    (row) => row.selected && (!context.legIds || context.legIds.has(row.package_leg_id)),
+  )
 
   const hotelDefaults =
     context.hotelDefaultTimes ??
@@ -277,8 +299,9 @@ export async function buildVoucherServiceBlocks(
       toHoursMinutes(supplier?.default_time_end) ?? (isHotel ? hotelDefaults?.checkOut ?? null : null)
 
     // A hotel leg's "route" is its meal plan (see lib/packages/apply-dialog-state.ts).
+    const directedRouteName = resolveVoucherRouteName(route, row.route_reversed ?? false)
     const serviceData: VoucherServiceBlockData = {
-      route: isHotel ? null : route?.name ?? null,
+      route: isHotel ? null : directedRouteName,
       mealPlan: isHotel ? route?.name ?? null : null,
       suiteType: suite?.name ?? null,
       roomType: isHotel ? suite?.name ?? null : null,

@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import { Plus, Trash2 } from "lucide-react"
+import { ArrowLeftRight, Plus, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { HotelDateAnchor, PackageLeg } from "@/lib/types"
+import type { HotelDateAnchor, PackageLeg, RateType } from "@/lib/types"
 import { getSupplierVocabulary, isOptionalPackageLegKind } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { formatDisplayDate } from "@/lib/date-format"
@@ -23,11 +23,15 @@ import type { PassengerTotals } from "@/lib/packages/passenger-totals"
 import { resolveHotelStayDates } from "@/lib/packages/hotel-dates"
 import {
   createDraftUnit,
+  isRouteReversible,
   PASSENGER_SPLIT_SUPPLIER_KINDS,
   type HotelAnchorContext,
   type SuiteLegState,
   type SuiteUnitState,
 } from "@/lib/packages/apply-dialog-state"
+import { resolveDirectedRouteName } from "@/lib/routes/route-name"
+import { hasAnyRateCardFor } from "@/lib/rate-cards/resolve"
+import { RateTypeSelect } from "@/components/rate-type-select"
 
 const NONE_VALUE = "__none"
 
@@ -39,6 +43,8 @@ interface SuiteLegEditorProps {
   expectedTotals?: PassengerTotals | null
   /** Hotel legs only — absent when the package has no train leg to anchor to. */
   anchorContext?: HotelAnchorContext | null
+  /** Active (non-archived) rate types — shows the per-leg rate type selector when non-empty. */
+  rateTypes?: RateType[]
 }
 
 const ANCHOR_OPTIONS: { value: HotelDateAnchor; label: string; hint: string }[] = [
@@ -53,12 +59,24 @@ export function SuiteLegEditor({
   onChange,
   expectedTotals,
   anchorContext,
+  rateTypes = [],
 }: SuiteLegEditorProps) {
   const isHotel = leg.supplierKind === "hotel_property"
   const vocab = getSupplierVocabulary(leg.supplierKind)
   const optional = isOptionalPackageLegKind(leg.supplierKind)
   const showPassengerSplit = PASSENGER_SPLIT_SUPPLIER_KINDS.has(leg.supplierKind)
   const activeSuiteTypes = leg.suiteTypes.filter((suiteType) => suiteType.active)
+
+  const selectedRoute = leg.routes.find((route) => route.id === value.routeId)
+  const canFlipDirection = vocab.routeHasDirection && isRouteReversible(leg, value.routeId)
+  const directedRouteLabel =
+    canFlipDirection && selectedRoute?.originLocationName && selectedRoute?.destinationLocationName
+      ? resolveDirectedRouteName(
+          selectedRoute.originLocationName,
+          selectedRoute.destinationLocationName,
+          value.reversed,
+        )
+      : null
 
   function updateUnit(id: string, patch: Partial<SuiteUnitState>) {
     onChange({
@@ -203,15 +221,32 @@ export function SuiteLegEditor({
           ) : null}
 
           <div className="grid gap-3 md:grid-cols-2">
-            {leg.routes.length > 1 || isHotel ? (
-              <div className="space-y-1.5">
-                <Label>{isHotel ? "Meal plan" : "Route"}</Label>
+            <div className="space-y-1.5">
+              <Label>{isHotel ? "Meal plan" : "Route"}</Label>
+              <div className="flex items-center gap-2">
                 <Select
                   value={value.routeId ?? ""}
-                  onValueChange={(routeId) => onChange({ ...value, routeId })}
+                  disabled={leg.routes.length === 0}
+                  onValueChange={(routeId) =>
+                    onChange({
+                      ...value,
+                      routeId,
+                      reversed: isRouteReversible(leg, routeId) ? value.reversed : false,
+                    })
+                  }
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder={isHotel ? "Select meal plan" : "Select route"} />
+                    <SelectValue
+                      placeholder={
+                        leg.routes.length === 0
+                          ? isHotel
+                            ? "No meal plans configured"
+                            : "No routes configured"
+                          : isHotel
+                            ? "Select meal plan"
+                            : "Select route"
+                      }
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     {leg.routes.map((route) => (
@@ -221,8 +256,25 @@ export function SuiteLegEditor({
                     ))}
                   </SelectContent>
                 </Select>
+                {canFlipDirection ? (
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant={value.reversed ? "default" : "outline"}
+                    className="h-9 w-9 shrink-0"
+                    aria-pressed={value.reversed}
+                    aria-label="Flip travel direction"
+                    title="Flip travel direction"
+                    onClick={() => onChange({ ...value, reversed: !value.reversed })}
+                  >
+                    <ArrowLeftRight className="h-4 w-4" />
+                  </Button>
+                ) : null}
               </div>
-            ) : null}
+              {directedRouteLabel ? (
+                <p className="text-xs text-muted-foreground">{directedRouteLabel}</p>
+              ) : null}
+            </div>
 
             {isHotel ? (
               <div className="space-y-1.5">
@@ -238,6 +290,13 @@ export function SuiteLegEditor({
                 />
               </div>
             ) : null}
+
+            <RateTypeSelect
+              rateTypes={rateTypes}
+              value={value.rateTypeId}
+              onChange={(rateTypeId) => onChange({ ...value, rateTypeId })}
+              id={`rate-type-${leg.id}`}
+            />
           </div>
 
           <div className="flex items-center justify-between">
@@ -291,6 +350,13 @@ export function SuiteLegEditor({
                       ))}
                     </SelectContent>
                   </Select>
+                  {unit.suiteTypeId &&
+                  value.routeId &&
+                  !hasAnyRateCardFor(leg.rateCards, value.routeId, unit.suiteTypeId) ? (
+                    <p className="text-xs text-amber-600 dark:text-amber-500">
+                      No rate card for this type on the selected route
+                    </p>
+                  ) : null}
                 </div>
 
                 {bedroomTypeIds.length > 0 ? (
