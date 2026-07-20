@@ -241,4 +241,55 @@ describe("buildVoucherServiceBlocks", () => {
     expect(blocks[0].serviceData.departureDate).toBe("2026-09-01")
     expect(blocks[0].serviceData.arrivalDate).toBe("2026-09-03")
   })
+
+  it("scopes selections (and their leg-scoped transport requests) to legIds when given, so a leg left selected on the job but not priced into this quote is excluded", async () => {
+    const blueTrain = {
+      id: "sel-blue-train",
+      package_leg_id: "leg-blue-train",
+      selected: true,
+      supplier_id: "supplier-blue-train",
+      route_id: "route-blue-train",
+      suite_type_id: "suite-royal",
+      service_date: "2026-08-01",
+      nights: null,
+      notes: null,
+      package_legs: { sort_order: 0, label: "The Blue Train" },
+      suppliers: supplier({ kind: "train_operator", name: "Blue Train" }),
+      routes: { name: "Pretoria ↔ Cape Town", duration_days: 1 },
+      suite_types: { name: "Royal Suite" },
+    }
+    // Selected on the job (e.g. left over from an earlier draft) but never priced into this
+    // quote — must be dropped, along with the transfer request captured against its leg.
+    const rovosRailTransfer = transferSelection({
+      id: "sel-rovos-transfer",
+      package_leg_id: "leg-rovos-transfer",
+      package_legs: { sort_order: 1, label: "Rovos Rail transfer" },
+    })
+    const rovosTransferRequest = {
+      id: "req-rovos-transfer",
+      package_leg_id: "leg-rovos-transfer",
+      service_type: "transfer",
+      pickup_point: "Rovos Rail Station",
+      dropoff_point: "The Silo Hotel",
+      pickup_at: "2026-09-01T16:00:00",
+      flight_number: null,
+      notes: null,
+      sort_order: 0,
+      suppliers: supplier(),
+      suite_types: null,
+      rental_details: null,
+    }
+
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [blueTrain, rovosRailTransfer],
+        transportRequests: [rovosTransferRequest],
+      }),
+      { bookingId: BOOKING_ID, legIds: new Set(["leg-blue-train"]) },
+    )
+
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].contactDetails.name).toBe("Blue Train")
+    expect(blocks[0].serviceData.departureDate).toBe("2026-08-01")
+  })
 })

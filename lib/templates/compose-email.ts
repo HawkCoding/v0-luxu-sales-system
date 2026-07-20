@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { TemplateEmail } from "@/emails/template-email"
 import { getEmailLogoUrl } from "@/lib/email/branding"
-import { getEmailFooterTagline } from "@/lib/settings-access"
+import { getDocumentBrandForEmail, getEmailBrandingSettings } from "@/lib/settings-access"
 import { getTemplate, type EmailTemplate } from "@/lib/templates/get-template"
 import { renderTemplate } from "@/lib/templates/render"
 
@@ -36,13 +36,20 @@ export async function composeFromTemplate(
     blocks,
   })
 
-  const [footerTagline, logoUrl] = await Promise.all([getEmailFooterTagline(), getEmailLogoUrl()])
+  const [branding, logoUrl, emailBrand] = await Promise.all([
+    getEmailBrandingSettings(),
+    getEmailLogoUrl(),
+    getDocumentBrandForEmail(),
+  ])
   const bodyHtml = await render(
     createElement(TemplateEmail, {
       preview: rendered.subject,
       contentHtml: rendered.bodyHtml,
-      footerTagline,
       logoUrl,
+      brand: emailBrand.brand,
+      brandPosition: emailBrand.position,
+      fontFamily: branding.email_font_family,
+      fontSize: branding.email_font_size,
     }),
   )
 

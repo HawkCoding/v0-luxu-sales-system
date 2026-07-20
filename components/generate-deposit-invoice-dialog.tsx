@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { FileText } from "lucide-react"
+import { FileText, Send } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -27,6 +27,12 @@ interface GenerateDepositInvoiceDialogProps {
   customerName: string
   quotes: Quote[]
   defaultDepositPercentage: number
+  /**
+   * An existing draft (generated but unsent) deposit invoice. When present the
+   * dialog switches to resume mode: no percentage form — the API reuses the
+   * draft — and the action re-opens the preview/send step for it.
+   */
+  draftInvoice?: Invoice | null
   onSent: () => Promise<void> | void
 }
 
@@ -75,6 +81,7 @@ export function GenerateDepositInvoiceDialog({
   customerName,
   quotes,
   defaultDepositPercentage,
+  draftInvoice = null,
   onSent,
 }: GenerateDepositInvoiceDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false)
@@ -90,6 +97,7 @@ export function GenerateDepositInvoiceDialog({
     ? Math.min(100, Math.max(0, numericPercentage))
     : defaultDepositPercentage
   const amountPreview = quote ? quote.total * (validPercentage / 100) : 0
+  const resumingDraft = draftInvoice !== null
 
   async function generateInvoice() {
     if (!quote) {
@@ -104,7 +112,10 @@ export function GenerateDepositInvoiceDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           jobId,
-          depositPercentage: validPercentage,
+          // The API reuses an existing draft, so pass its percentage when resuming.
+          depositPercentage: resumingDraft
+            ? draftInvoice?.depositPercentage ?? defaultDepositPercentage
+            : validPercentage,
         }),
       })
       const payload = (await response.json()) as GenerateDepositInvoiceResponse
@@ -146,45 +157,66 @@ export function GenerateDepositInvoiceDialog({
         {trigger ? (
           <DialogTrigger asChild>
             <Button size="sm">
-              <FileText data-icon="inline-start" />
-              Generate Deposit Invoice
+              {resumingDraft ? <Send data-icon="inline-start" /> : <FileText data-icon="inline-start" />}
+              {resumingDraft ? "Preview & Send Deposit Invoice" : "Generate Deposit Invoice"}
             </Button>
           </DialogTrigger>
         ) : null}
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Generate deposit invoice</DialogTitle>
+            <DialogTitle>{resumingDraft ? "Send deposit invoice" : "Generate deposit invoice"}</DialogTitle>
             <DialogDescription>
-              Create a draft deposit invoice for {bookingNumber}, then preview and send it.
+              {resumingDraft
+                ? `${draftInvoice?.invoiceNumber} was generated but has not been sent. Preview and send it to the customer.`
+                : `Create a draft deposit invoice for ${bookingNumber}, then preview and send it.`}
             </DialogDescription>
           </DialogHeader>
 
           <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="deposit-percentage">Deposit percentage</Label>
-              <Input
-                id="deposit-percentage"
-                type="number"
-                min="0"
-                max="100"
-                step="0.01"
-                value={percentage}
-                onChange={(event) => setPercentage(event.target.value)}
-              />
-            </div>
+            {!resumingDraft ? (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="deposit-percentage">Deposit percentage</Label>
+                <Input
+                  id="deposit-percentage"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  value={percentage}
+                  onChange={(event) => setPercentage(event.target.value)}
+                />
+              </div>
+            ) : null}
             <div className="rounded-md border p-3 text-sm">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-muted-foreground">Customer</span>
                 <span className="font-medium">{customerName || "Traveller"}</span>
               </div>
-              <div className="mt-2 flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">Quote total</span>
-                <span className="font-medium">{quote ? formatMoney(quote.total) : "-"}</span>
-              </div>
-              <div className="mt-2 flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">Deposit amount</span>
-                <span className="font-semibold">{quote ? formatMoney(amountPreview) : "-"}</span>
-              </div>
+              {resumingDraft ? (
+                <>
+                  <div className="mt-2 flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">Invoice</span>
+                    <span className="font-medium">{draftInvoice?.invoiceNumber}</span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">Deposit ({draftInvoice?.depositPercentage ?? "-"}%)</span>
+                    <span className="font-semibold">
+                      {draftInvoice ? formatMoney(draftInvoice.amount) : "-"}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="mt-2 flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">Quote total</span>
+                    <span className="font-medium">{quote ? formatMoney(quote.total) : "-"}</span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-3">
+                    <span className="text-muted-foreground">Deposit amount</span>
+                    <span className="font-semibold">{quote ? formatMoney(amountPreview) : "-"}</span>
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -193,7 +225,13 @@ export function GenerateDepositInvoiceDialog({
               Cancel
             </Button>
             <Button onClick={generateInvoice} disabled={generating || !quote}>
-              {generating ? "Generating..." : "Generate"}
+              {generating
+                ? resumingDraft
+                  ? "Preparing..."
+                  : "Generating..."
+                : resumingDraft
+                  ? "Preview & Send"
+                  : "Generate"}
             </Button>
           </DialogFooter>
         </DialogContent>

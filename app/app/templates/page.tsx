@@ -27,7 +27,10 @@ import {
 import type { Template } from "@/lib/types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
 import { VoucherTemplateEditor } from "@/components/voucher-template-editor"
+import { BrandBlockSettingsEditor } from "@/components/brand-block-settings-editor"
 import { DocumentTextSettingsEditor } from "@/components/document-text-settings-editor"
+import { EmailAppearanceSettingsEditor } from "@/components/email-appearance-settings-editor"
+import { EmailAttachmentLibraryEditor } from "@/components/email-attachment-library-editor"
 import { PdfPreviewButtons } from "@/components/pdf-preview-buttons"
 
 const HtmlBodyEditor = dynamic(
@@ -83,7 +86,7 @@ const VOUCHER_PLACEHOLDERS = [
 export default function TemplatesPage() {
   const { data: templates, isLoading, mutate } = useTemplates()
   const { data: voucherTemplate, isLoading: voucherLoading } = useVoucherTemplate()
-  const { can } = useRole()
+  const { can, role } = useRole()
   const [editing, setEditing] = useState<Template | null>(null)
   const [editSubject, setEditSubject] = useState("")
   const [editBody, setEditBody] = useState("")
@@ -226,9 +229,22 @@ export default function TemplatesPage() {
           <TabsTrigger value="email">Email Templates</TabsTrigger>
           <TabsTrigger value="voucher">Voucher Template</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
+          <TabsTrigger value="attachments">Attachments</TabsTrigger>
         </TabsList>
 
         <TabsContent value="email" className="space-y-3">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg">Email Appearance</CardTitle>
+              <p className="text-sm text-muted-foreground mt-1.5">
+                Font used for every outgoing email. Applies to all templates below.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <EmailAppearanceSettingsEditor canEdit={can("edit:templates")} />
+            </CardContent>
+          </Card>
+
           {(templates as Template[]).map(t => (
             <Card key={t.id}>
               <CardHeader className="pb-2">
@@ -296,7 +312,20 @@ export default function TemplatesPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="documents">
+        <TabsContent value="documents" className="space-y-6">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg">Brand Block</CardTitle>
+              <p className="text-sm text-muted-foreground mt-1.5">
+                The SARAIL seal and heading shown on quotes, invoices, vouchers and
+                emails. Choose top or bottom placement per document.
+              </p>
+            </CardHeader>
+            <CardContent className="pb-6">
+              <BrandBlockSettingsEditor canEdit={role === "admin"} />
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader className="pb-3">
               <div className="flex flex-wrap items-start justify-between gap-2">
@@ -311,6 +340,22 @@ export default function TemplatesPage() {
             </CardHeader>
             <CardContent className="pb-6">
               <DocumentTextSettingsEditor canEdit={can("edit:templates")} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="attachments">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg">Email Attachments</CardTitle>
+              <p className="text-sm text-muted-foreground mt-1.5">
+                Reusable files (reservation form, suite layouts, fact sheets) offered as tick-box
+                attachments when sending emails. Scope a file to a supplier category or a single
+                supplier to limit where it appears.
+              </p>
+            </CardHeader>
+            <CardContent className="pb-6">
+              <EmailAttachmentLibraryEditor canEdit={role === "admin" || role === "manager"} />
             </CardContent>
           </Card>
         </TabsContent>

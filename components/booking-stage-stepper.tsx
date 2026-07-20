@@ -24,9 +24,12 @@ export function BookingStageStepper({ currentStage, className }: BookingStageSte
       className={cn("flex items-center gap-0 overflow-x-auto pb-1", className)}
     >
       {FORWARD_STAGES.map((stage, index) => {
-        const isCompleted = !isLost && index < currentIndex
+        // A stage label names a milestone that is already achieved once the job
+        // reaches it, so the current stage counts as done. Only two states:
+        // done (green tick) and not done (empty).
+        const isDone = !isLost && index <= currentIndex
         const isCurrent = !isLost && index === currentIndex
-        const isUpcoming = isLost || index > currentIndex
+        const isUpcoming = !isDone
         const isLast = index === FORWARD_STAGES.length - 1
 
         return (
@@ -38,27 +41,21 @@ export function BookingStageStepper({ currentStage, className }: BookingStageSte
               <div
                 className={cn(
                   "flex h-7 w-7 items-center justify-center rounded-full border-2 transition-colors",
-                  isCompleted && "border-success bg-success text-white",
-                  isCurrent && "border-accent bg-card text-accent ring-2 ring-accent/30",
+                  isDone && "border-success bg-success text-white",
                   isUpcoming && "border-muted-foreground/30 bg-card text-muted-foreground/50",
                 )}
                 title={stage.label}
               >
-                {isCompleted ? (
+                {isDone ? (
                   <Check className="h-3.5 w-3.5" aria-hidden="true" />
                 ) : (
-                  <Circle
-                    className={cn("h-2 w-2 fill-current", isUpcoming && "opacity-60")}
-                    aria-hidden="true"
-                  />
+                  <Circle className="h-2 w-2 fill-current opacity-60" aria-hidden="true" />
                 )}
               </div>
               <span
                 className={cn(
                   "whitespace-nowrap text-[10px] font-medium",
-                  isCompleted && "text-foreground",
-                  isCurrent && "text-accent",
-                  isUpcoming && "text-muted-foreground",
+                  isDone ? "text-foreground" : "text-muted-foreground",
                 )}
                 style={{ fontFamily: "var(--font-inter)" }}
               >
@@ -69,7 +66,7 @@ export function BookingStageStepper({ currentStage, className }: BookingStageSte
               <div
                 className={cn(
                   "mx-2 h-px w-8 transition-colors",
-                  isCompleted ? "bg-success" : "bg-muted-foreground/20",
+                  isDone ? "bg-success" : "bg-muted-foreground/20",
                 )}
                 aria-hidden="true"
               />

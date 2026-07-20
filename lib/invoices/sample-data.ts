@@ -1,26 +1,72 @@
 import type { InvoicePdfData } from "@/lib/invoices/pdf/invoice-document"
 
 // Sample invoice fixture for /api/pdf-preview. Banking details and the
-// document-text titles/footer come from real settings, so they are excluded.
+// document-text notes/footer come from real settings, so they are excluded.
+// Figures mirror a real Blue Train confirmation invoice so the layout can be
+// judged against the document it is meant to reproduce.
 export function sampleInvoicePdfData(): Omit<
   InvoicePdfData,
-  "banking" | "depositTitle" | "finalTitle" | "footerText"
+  "banking" | "footerText" | "paymentNote" | "bankChargesNote"
 > {
-  const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const dueDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const unitPrice = 16903.75
+  const total = 33807.5
+  const deposit = Math.round(total * 0.25 * 100) / 100
   return {
-    invoiceNumber: "BT-2026-0001-D1",
-    bookingNumber: "BT-2026-0001",
-    customerName: "Mr & Mrs Sample Guest",
-    kind: "deposit",
+    invoiceNumber: "LTT-2026-0001-INV",
+    bookingNumber: "LTT-2026-0001",
+    customerName: "Ms Virginia Lunn",
+    guestNames: ["Ms Virginia Lunn", "Ms Jacqueline Allemaan"],
     issueDate: new Date().toISOString().slice(0, 10),
     dueDate,
-    lines: [
-      { label: "Quote total", value: "R 98 500.00" },
-      { label: "Deposit (25%)", value: "R 24 625.00" },
-      { label: "Payments received", value: "R 0.00" },
+    consultant: "LB",
+    billing: {
+      companyName: null,
+      addressLines: [],
+      postalCode: null,
+      phone: "+44 7884 495357",
+      fax: null,
+      email: "sample.guest@example.com",
+      vatNumber: null,
+    },
+    departure: {
+      heading: "Luxury Train Departure Information",
+      trainName: "The Blue Train",
+      tourName: "Cape Town Journey",
+      daysLabel: "2 Nights / 3 Days",
+      qty: "1",
+      adults: "2",
+      children: "0",
+      outbound: {
+        route: "Pretoria to Cape Town",
+        departureDate: "2026-07-20",
+        departureTime: "13h00",
+        arrivalDate: "2026-07-22",
+        arrivalTime: "18h00",
+        suite: "Twin Deluxe with Shower",
+      },
+      returnLeg: null,
+    },
+    items: [
+      {
+        pax: 2,
+        description: "Cape Town Journey — Deluxe Suite",
+        status: "OK",
+        unitPrice,
+        total,
+      },
     ],
-    amountDue: 24625,
+    totals: {
+      subtotalInclVat: total,
+      depositPercentage: 25,
+      depositAmount: deposit,
+      finalAmount: Math.round((total - deposit) * 100) / 100,
+      finalDueDate: dueDate,
+      amountReceived: 0,
+      amountReceivedAt: null,
+      outstanding: total,
+    },
     currency: "ZAR",
-    statusLabel: "Sent",
+    statusLabel: "Provisional",
   }
 }

@@ -40,7 +40,14 @@ interface CustomerPatchPayload {
   notes: string
   email: string
   phone: string | null
+  fax: string | null
   province: string | null
+  company_name: string | null
+  address_line1: string | null
+  address_line2: string | null
+  city: string | null
+  postal_code: string | null
+  vat_number: string | null
   date_of_birth: string | null
   vip_status: boolean
   preferences: string | null
@@ -84,8 +91,15 @@ export function CustomerDetailView({
   const [newBookingOpen, setNewBookingOpen] = useState(false)
   const [emailDraft, setEmailDraft] = useState("")
   const [phoneDraft, setPhoneDraft] = useState("")
+  const [faxDraft, setFaxDraft] = useState("")
   const [notesDraft, setNotesDraft] = useState("")
   const [provinceDraft, setProvinceDraft] = useState("")
+  const [companyNameDraft, setCompanyNameDraft] = useState("")
+  const [addressLine1Draft, setAddressLine1Draft] = useState("")
+  const [addressLine2Draft, setAddressLine2Draft] = useState("")
+  const [cityDraft, setCityDraft] = useState("")
+  const [postalCodeDraft, setPostalCodeDraft] = useState("")
+  const [vatNumberDraft, setVatNumberDraft] = useState("")
   const [dateOfBirthDraft, setDateOfBirthDraft] = useState("")
   const [vipStatusDraft, setVipStatusDraft] = useState(false)
   const [preferencesDraft, setPreferencesDraft] = useState("")
@@ -132,8 +146,15 @@ export function CustomerDetailView({
       if (!isEditing) {
         setEmailDraft(data.customer.email)
         setPhoneDraft(data.customer.phone ?? "")
+        setFaxDraft(data.customer.fax ?? "")
         setNotesDraft(data.customer.notes ?? "")
         setProvinceDraft(data.customer.province ?? "")
+        setCompanyNameDraft(data.customer.companyName ?? "")
+        setAddressLine1Draft(data.customer.addressLine1 ?? "")
+        setAddressLine2Draft(data.customer.addressLine2 ?? "")
+        setCityDraft(data.customer.city ?? "")
+        setPostalCodeDraft(data.customer.postalCode ?? "")
+        setVatNumberDraft(data.customer.vatNumber ?? "")
         setDateOfBirthDraft(data.customer.dateOfBirth ?? "")
         setVipStatusDraft(data.customer.vipStatus ?? false)
         setPreferencesDraft(data.customer.preferences ?? "")
@@ -206,8 +227,15 @@ export function CustomerDetailView({
   const hasChanges =
     emailDraft !== customer.email ||
     phoneDraft !== (customer.phone ?? "") ||
+    faxDraft !== (customer.fax ?? "") ||
     notesDraft !== (customer.notes ?? "") ||
     provinceDraft !== (customer.province ?? "") ||
+    companyNameDraft !== (customer.companyName ?? "") ||
+    addressLine1Draft !== (customer.addressLine1 ?? "") ||
+    addressLine2Draft !== (customer.addressLine2 ?? "") ||
+    cityDraft !== (customer.city ?? "") ||
+    postalCodeDraft !== (customer.postalCode ?? "") ||
+    vatNumberDraft !== (customer.vatNumber ?? "") ||
     dateOfBirthDraft !== (customer.dateOfBirth ?? "") ||
     vipStatusDraft !== (customer.vipStatus ?? false) ||
     preferencesDraft !== (customer.preferences ?? "") ||
@@ -219,7 +247,14 @@ export function CustomerDetailView({
       notes: notesDraft,
       email: emailDraft,
       phone: phoneDraft || null,
+      fax: faxDraft || null,
       province: provinceDraft || null,
+      company_name: companyNameDraft || null,
+      address_line1: addressLine1Draft || null,
+      address_line2: addressLine2Draft || null,
+      city: cityDraft || null,
+      postal_code: postalCodeDraft || null,
+      vat_number: vatNumberDraft || null,
       date_of_birth: dateOfBirthDraft || null,
       vip_status: vipStatusDraft,
       preferences: preferencesDraft || null,
@@ -424,8 +459,15 @@ export function CustomerDetailView({
                     onClick={() => {
                       setEmailDraft(customer.email)
                       setPhoneDraft(customer.phone ?? "")
+                      setFaxDraft(customer.fax ?? "")
                       setNotesDraft(customer.notes ?? "")
                       setProvinceDraft(customer.province ?? "")
+                      setCompanyNameDraft(customer.companyName ?? "")
+                      setAddressLine1Draft(customer.addressLine1 ?? "")
+                      setAddressLine2Draft(customer.addressLine2 ?? "")
+                      setCityDraft(customer.city ?? "")
+                      setPostalCodeDraft(customer.postalCode ?? "")
+                      setVatNumberDraft(customer.vatNumber ?? "")
                       setDateOfBirthDraft(customer.dateOfBirth ?? "")
                       setVipStatusDraft(customer.vipStatus ?? false)
                       setPreferencesDraft(customer.preferences ?? "")
@@ -562,6 +604,91 @@ export function CustomerDetailView({
                 readOnly={!canEditCustomers || !isEditing}
                 disabled={isSaving}
               />
+            </div>
+          </div>
+
+          <div className="space-y-4 rounded-md border p-4">
+            <div>
+              <h3 className="text-sm font-semibold">Billing details</h3>
+              <p className="text-xs text-muted-foreground">
+                Printed on tax invoices. Required by law for supplies over R5 000.
+              </p>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Company</Label>
+                <Input
+                  value={companyNameDraft}
+                  onChange={(event) => setCompanyNameDraft(event.target.value)}
+                  readOnly={!canEditCustomers || !isEditing}
+                  disabled={isSaving}
+                  placeholder={isEditing ? "Company name" : "Not provided"}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>VAT number</Label>
+                <Input
+                  value={vatNumberDraft}
+                  onChange={(event) => setVatNumberDraft(event.target.value)}
+                  readOnly={!canEditCustomers || !isEditing}
+                  disabled={isSaving}
+                  placeholder={isEditing ? "Recipient VAT number" : "Not provided"}
+                />
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Address line 1</Label>
+                <Input
+                  value={addressLine1Draft}
+                  onChange={(event) => setAddressLine1Draft(event.target.value)}
+                  readOnly={!canEditCustomers || !isEditing}
+                  disabled={isSaving}
+                  placeholder={isEditing ? "Street address" : "Not provided"}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Address line 2</Label>
+                <Input
+                  value={addressLine2Draft}
+                  onChange={(event) => setAddressLine2Draft(event.target.value)}
+                  readOnly={!canEditCustomers || !isEditing}
+                  disabled={isSaving}
+                  placeholder={isEditing ? "Suburb / apartment" : "Not provided"}
+                />
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="space-y-2">
+                <Label>City</Label>
+                <Input
+                  value={cityDraft}
+                  onChange={(event) => setCityDraft(event.target.value)}
+                  readOnly={!canEditCustomers || !isEditing}
+                  disabled={isSaving}
+                  placeholder={isEditing ? "City" : "Not provided"}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Postal code</Label>
+                <Input
+                  value={postalCodeDraft}
+                  onChange={(event) => setPostalCodeDraft(event.target.value)}
+                  readOnly={!canEditCustomers || !isEditing}
+                  disabled={isSaving}
+                  placeholder={isEditing ? "Code" : "Not provided"}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Fax</Label>
+                <Input
+                  value={faxDraft}
+                  onChange={(event) => setFaxDraft(event.target.value)}
+                  readOnly={!canEditCustomers || !isEditing}
+                  disabled={isSaving}
+                  placeholder={isEditing ? "Fax number" : "Not provided"}
+                />
+              </div>
             </div>
           </div>
 

@@ -27,9 +27,9 @@ const FIELDS: FieldConfig[] = [
   { key: "quote_doc_excludes_heading", label: "Quote exclusions heading", group: "Quote document", multiline: false },
   { key: "quote_doc_excludes_default", label: "Standing exclusion, added to every quote (leave empty to omit)", group: "Quote document", multiline: true, allowEmpty: true },
   { key: "voucher_doc_title", label: "Voucher PDF title", group: "Voucher document", multiline: false },
-  { key: "invoice_doc_deposit_title", label: "Deposit invoice title", group: "Invoice document", multiline: false },
-  { key: "invoice_doc_final_title", label: "Final invoice title", group: "Invoice document", multiline: false },
   { key: "invoice_doc_footer_text", label: "Invoice PDF footer", group: "Invoice document", multiline: true },
+  { key: "invoice_doc_payment_note", label: "Invoice payment note (leave empty to omit)", group: "Invoice document", multiline: true, allowEmpty: true },
+  { key: "invoice_doc_bank_charges_note", label: "Invoice bank-charges note (leave empty to omit)", group: "Invoice document", multiline: true, allowEmpty: true },
   { key: "itinerary_doc_journey_heading", label: "Itinerary journey heading", group: "Itinerary document", multiline: false },
   { key: "itinerary_doc_intro_text", label: "Itinerary intro paragraph (leave empty to omit)", group: "Itinerary document", multiline: true, allowEmpty: true },
 ]

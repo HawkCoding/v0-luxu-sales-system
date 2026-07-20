@@ -2,13 +2,19 @@ import { describe, it, expect } from "vitest"
 import { revenuePerProduct } from "./revenue-per-product"
 import type { BookingInputRow, PaymentInputRow } from "./types"
 
+const BLUE_TRAIN = "00000000-0000-0000-0000-0000000000bt"
+const ROVOS = "00000000-0000-0000-0000-0000000000rr"
+
 const bookings: BookingInputRow[] = [
   {
     id: "b1",
-    booking_number: "BT-2026-0001",
+    booking_number: "LTT-2026-0001",
     consultant: "LB",
     assigned_salesperson_id: "u-lb",
     owner_name: "Leonie",
+    route_id: "r-bt",
+    product_supplier_id: BLUE_TRAIN,
+    product_supplier_name: "Blue Train",
     departure_date: "2026-08-01",
     stage: "closed",
     outcome: "Won",
@@ -18,10 +24,13 @@ const bookings: BookingInputRow[] = [
   },
   {
     id: "b2",
-    booking_number: "BT-2026-0002",
+    booking_number: "LTT-2026-0002",
     consultant: "LB",
     assigned_salesperson_id: "u-lb",
     owner_name: "Leonie",
+    route_id: "r-bt",
+    product_supplier_id: BLUE_TRAIN,
+    product_supplier_name: "Blue Train",
     departure_date: "2026-09-01",
     stage: "closed",
     outcome: "Won",
@@ -31,10 +40,13 @@ const bookings: BookingInputRow[] = [
   },
   {
     id: "b3",
-    booking_number: "RR-2026-0001",
+    booking_number: "LTT-2026-0003",
     consultant: "CDJ",
     assigned_salesperson_id: "u-cdj",
     owner_name: "Carmen",
+    route_id: "r-rr",
+    product_supplier_id: ROVOS,
+    product_supplier_name: "Rovos Rail",
     departure_date: "2026-10-01",
     stage: "closed",
     outcome: "Won",
@@ -51,21 +63,23 @@ const payments: PaymentInputRow[] = [
 ]
 
 describe("revenuePerProduct", () => {
-  it("groups revenue by product prefix", () => {
+  it("groups revenue by the booked train operator", () => {
     const result = revenuePerProduct(bookings, payments, {})
-    const bt = result.find((r) => r.product === "BT")
-    const rr = result.find((r) => r.product === "RR")
+    const bt = result.find((r) => r.productId === BLUE_TRAIN)
+    const rr = result.find((r) => r.productId === ROVOS)
 
+    expect(bt?.product).toBe("Blue Train")
     expect(bt?.revenue).toBe(18000)
     expect(bt?.bookingCount).toBe(2)
+    expect(rr?.product).toBe("Rovos Rail")
     expect(rr?.revenue).toBe(15000)
     expect(rr?.bookingCount).toBe(1)
   })
 
   it("filters by product", () => {
-    const result = revenuePerProduct(bookings, payments, { product: "BT" })
+    const result = revenuePerProduct(bookings, payments, { product: BLUE_TRAIN })
     expect(result).toHaveLength(1)
-    expect(result[0].product).toBe("BT")
+    expect(result[0].product).toBe("Blue Train")
     expect(result[0].revenue).toBe(18000)
   })
 
@@ -77,5 +91,29 @@ describe("revenuePerProduct", () => {
   it("returns empty for no matching bookings", () => {
     const result = revenuePerProduct(bookings, payments, { consultant: "NOBODY" })
     expect(result).toHaveLength(0)
+  })
+
+  it("buckets bookings with no train leg priced yet as Unassigned", () => {
+    const unpriced: BookingInputRow = {
+      ...bookings[0],
+      id: "b4",
+      booking_number: "LTT-2026-0004",
+      route_id: null,
+      product_supplier_id: null,
+      product_supplier_name: null,
+    }
+    const result = revenuePerProduct([unpriced], [], {})
+
+    expect(result).toHaveLength(1)
+    expect(result[0].productId).toBeNull()
+    expect(result[0].product).toBe("Unassigned")
+    expect(result[0].bookingCount).toBe(1)
+  })
+
+  it("groups a booking by its supplier even when the booking number says nothing", () => {
+    // The regression that motivated this: booking numbers carry no product, so
+    // two bookings sharing a number series still split by the train booked.
+    const result = revenuePerProduct(bookings, payments, {})
+    expect(result.map((r) => r.product).sort()).toEqual(["Blue Train", "Rovos Rail"])
   })
 })

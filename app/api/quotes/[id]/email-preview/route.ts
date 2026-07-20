@@ -2,9 +2,10 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
 import { formatDisplayDate, formatDisplayDateShort } from "@/lib/date-format"
+import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { buildQuoteSummaryBlock, formatMoney } from "@/lib/quotes/quote-summary-block"
-import { resolveJourneyDates } from "@/lib/quotes/quote-presentation"
+import { deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
 import { resolvePrimaryRoute } from "@/lib/quotes/resolve-primary-route"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
@@ -45,7 +46,7 @@ export async function POST(req: Request, { params }: RouteParams) {
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, booking_id, quote_number, validity_until, subtotal, vat, total, created_at, booking:bookings(booking_number, departure_date, no_of_adults, no_of_children, trip_start_date, trip_end_date, duration_nights, route:routes(name, supplier:suppliers(name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(name), customer:customers(first_name, last_name))",
+      "id, booking_id, quote_number, validity_until, subtotal, vat, total, created_at, booking:bookings(booking_number, no_of_adults, no_of_children, route:routes(name, supplier:suppliers(name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(name), customer:customers(title, first_name, last_name))",
     )
     .eq("id", id)
     .single()
@@ -81,12 +82,20 @@ export async function POST(req: Request, { params }: RouteParams) {
   const hotelSupplier = Array.isArray(booking?.hotel_supplier)
     ? booking?.hotel_supplier[0]
     : booking?.hotel_supplier
-  const customerName =
-    [customer?.first_name, customer?.last_name].filter(Boolean).join(" ").trim() || "traveller"
+  const customerName = formatCustomerSalutation(customer) || "traveller"
   const supplierName = routeSupplier?.name ?? hotelSupplier?.name ?? "Supplier"
   const clientSurname = customer?.last_name?.trim() || "Client"
   const quoteNumber = quote.quote_number ?? `${booking?.booking_number ?? "QUOTE"}-Q1`
   const quoteDate = quote.created_at?.slice(0, 10) ?? todayDateString()
+
+  // Scope the itinerary to legs actually priced into this quote version, not whatever is
+  // currently selected live on the job — an empty set means a manual/no-package quote, so fall
+  // back to unfiltered (today's behavior) rather than rendering an empty itinerary.
+  const quoteLegIds = new Set(
+    lineItems
+      .map((li) => (li.pricing_snapshot as PricingSnapshot | null)?.legId)
+      .filter((legId): legId is string => Boolean(legId)),
+  )
 
   // Itinerary degrades to an omitted section rather than failing the preview.
   let itineraryBlocks: VoucherServiceBlock[] = []
@@ -94,6 +103,7 @@ export async function POST(req: Request, { params }: RouteParams) {
     const { blocks } = await buildVoucherServiceBlocks(supabase, {
       bookingId: quote.booking_id,
       additionalServicesDetails: null,
+      legIds: quoteLegIds.size > 0 ? quoteLegIds : undefined,
     })
     itineraryBlocks = blocks
   } catch {
@@ -102,12 +112,9 @@ export async function POST(req: Request, { params }: RouteParams) {
 
   const documentText = await getDocumentTextSettings(supabase)
 
-  const journey = resolveJourneyDates({
-    trip_start_date: booking?.trip_start_date ?? null,
-    trip_end_date: booking?.trip_end_date ?? null,
-    departure_date: booking?.departure_date ?? null,
-    duration_nights: booking?.duration_nights ?? null,
-  })
+  // Journey + header departure date come from the priced legs, not the booking's
+  // enquiry-time scalar dates which drift out of sync once the package changes.
+  const journey = deriveJourneyFromBlocks(itineraryBlocks) ?? { start: null, end: null }
 
   const quoteSummaryTable = buildQuoteSummaryBlock({
     quoteNumber,
@@ -131,8 +138,8 @@ export async function POST(req: Request, { params }: RouteParams) {
       quoteNumber,
       quoteDate: formatDisplayDate(quoteDate),
       validityDate: formatDisplayDate(quote.validity_until) || "To be confirmed",
-      departureDate: formatDisplayDate(booking?.departure_date) || "To be confirmed",
-      departureDateShort: formatDisplayDateShort(booking?.departure_date) || "TBC",
+      departureDate: formatDisplayDate(journey.start) || "To be confirmed",
+      departureDateShort: formatDisplayDateShort(journey.start) || "TBC",
       direction: quotedRouteName ?? route?.name ?? "your journey",
       supplierName,
       clientSurname,

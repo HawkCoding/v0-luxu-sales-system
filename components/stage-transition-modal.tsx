@@ -34,8 +34,8 @@ const GATE_TAB_MAP: Record<string, string> = {
   email_import_review: "?tab=enquiry",
   cancel_reason: "",
   refund_capture: "",
-  deposit_received_confirmation: "",
-  final_payment_confirmation: "",
+  // deposit_received_confirmation / final_payment_confirmation are manual
+  // ticks, not amount-entry gates — no "Fix → Payments tab" link.
 }
 
 interface StageTransitionModalProps {
@@ -58,6 +58,13 @@ interface StageTransitionModalProps {
    * data is not loaded), only the standard "Fix" link is shown.
    */
   onSendFinalInvoice?: () => void
+  /**
+   * Optional callback that opens the booking's deposit-invoice preview/send
+   * flow. When provided, an `invoice_correspondence` failure (deposit invoice
+   * generated but never sent) renders an inline "Send deposit invoice"
+   * button so the user can finish the send instead of getting stuck.
+   */
+  onSendDepositInvoice?: () => void
 }
 
 export function gateIdToTabPath(gateId: string): string {
@@ -67,7 +74,7 @@ export function gateIdToTabPath(gateId: string): string {
 export function confirmationKeyForFailure(failure: GateFailure): keyof ManualConfirmations | null {
   if (failure.autoFixable === "create_invoice_25pct") return "createDepositInvoice"
   if (failure.autoFixable === "create_final_invoice") return "createFinalInvoice"
-  if (failure.autoFixable === "create_invoice_correspondence") return "createInvoiceCorrespondence"
+  if (failure.gateId === "invoice_correspondence") return "createInvoiceCorrespondence"
   if (failure.gateId === "deposit_received_confirmation") return "depositReceived"
   if (failure.gateId === "final_payment_confirmation") return "finalPaymentReceived"
   return null
@@ -85,6 +92,7 @@ export function StageTransitionModal({
   onProceed,
   onOverride,
   onSendFinalInvoice,
+  onSendDepositInvoice,
 }: StageTransitionModalProps) {
   const [confirmations, setConfirmations] = useState<ManualConfirmations>({})
   const [overrideReason, setOverrideReason] = useState("")
@@ -93,6 +101,7 @@ export function StageTransitionModal({
     [failures],
   )
   const hasBlockingFailures = failures.some((failure) => failure.severity === "block")
+  const allConfirmationsOnly = failures.length > 0 && !hasBlockingFailures
   const allConfirmationsChecked = confirmationFailures.every((failure) => {
     const key = confirmationKeyForFailure(failure)
     return key ? confirmations[key] === true : true
@@ -123,22 +132,29 @@ export function StageTransitionModal({
       >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <AlertTriangle data-icon="inline-start" />
-            Stage move needs attention
+            {allConfirmationsOnly ? <CheckCircle2 data-icon="inline-start" /> : <AlertTriangle data-icon="inline-start" />}
+            {allConfirmationsOnly ? "Confirm this stage move" : "Stage move needs attention"}
           </DialogTitle>
           <DialogDescription>
-            {jobNumber} cannot move to {targetStage ? getPipelineStageLabel(targetStage) : "the selected stage"} until
-            these checks are cleared.
+            {allConfirmationsOnly
+              ? `Confirm the checks below to move ${jobNumber} to ${targetStage ? getPipelineStageLabel(targetStage) : "the selected stage"}.`
+              : `${jobNumber} cannot move to ${targetStage ? getPipelineStageLabel(targetStage) : "the selected stage"} until these checks are cleared.`}
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col gap-3">
           {failures.map((failure) => {
             const confirmationKey = confirmationKeyForFailure(failure)
+            // No Fix link for gates with no target tab (manual-confirmation
+            // ticks and cancel/refund gates handled elsewhere).
+            const showFix = gateIdToTabPath(failure.gateId) !== ""
             const showSendFinalInvoice =
               failure.gateId === "final_invoice_correspondence" &&
               failure.severity === "block" &&
               typeof onSendFinalInvoice === "function"
+            const showSendDepositInvoice =
+              failure.gateId === "invoice_correspondence" &&
+              typeof onSendDepositInvoice === "function"
             return (
               <Alert key={failure.gateId} variant={failure.severity === "block" ? "destructive" : "default"}>
                 <AlertTriangle />
@@ -166,9 +182,23 @@ export function StageTransitionModal({
                             Send final invoice
                           </Button>
                         ) : null}
-                        <Button asChild size="sm" variant="outline">
-                          <Link href={`/app/bookings/${jobId}${gateIdToTabPath(failure.gateId)}`}>Fix</Link>
-                        </Button>
+                        {showSendDepositInvoice ? (
+                          <Button
+                            size="sm"
+                            variant="default"
+                            onClick={() => onSendDepositInvoice?.()}
+                            disabled={submitting}
+                            data-testid="send-deposit-invoice"
+                          >
+                            <FileText data-icon="inline-start" />
+                            Send deposit invoice
+                          </Button>
+                        ) : null}
+                        {showFix ? (
+                          <Button asChild size="sm" variant="outline">
+                            <Link href={`/app/bookings/${jobId}${gateIdToTabPath(failure.gateId)}`}>Fix</Link>
+                          </Button>
+                        ) : null}
                       </div>
                     </div>
                     {confirmationKey && failure.autoFixable && (
@@ -202,7 +232,7 @@ export function StageTransitionModal({
                           onCheckedChange={(checked) => handleConfirmationChange(failure, checked === true)}
                         />
                         <Label htmlFor={`${failure.gateId}-confirm`} className="text-sm">
-                          Confirm this action
+                          {failure.message}
                         </Label>
                       </div>
                     )}

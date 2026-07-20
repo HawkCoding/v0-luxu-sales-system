@@ -138,7 +138,7 @@ describe("validateTransition", () => {
     ])
   })
 
-  it("marks missing invoice correspondence as an auto-fixable confirmation", () => {
+  it("requires an actual send when the deposit invoice is only generated", () => {
     const failures = validateTransition({
       ...baseInput,
       booking: { ...baseInput.booking, stage: "accepted" },
@@ -152,12 +152,53 @@ describe("validateTransition", () => {
       expect.objectContaining({
         gateId: "invoice_correspondence",
         severity: "confirm",
-        autoFixable: "create_invoice_correspondence",
       }),
+    ])
+    expect(failures[0]?.autoFixable).toBeUndefined()
+  })
+
+  it("flags a draft deposit invoice that was never emailed", () => {
+    const failures = validateTransition({
+      ...baseInput,
+      booking: { ...baseInput.booking, stage: "accepted" },
+      targetStage: "deposit_requested",
+      quotes: [{ status: "accepted", total: 1000 }],
+      invoices: [{ kind: "deposit", status: "draft" }],
+      correspondences: [{ kind: "invoice", subject: "Deposit invoice", status: "scheduled" }],
+    })
+
+    expect(failures).toEqual([
+      expect.objectContaining({ gateId: "invoice_correspondence", severity: "confirm" }),
     ])
   })
 
-  it("allows confirmed invoice correspondence creation", () => {
+  it("passes when the deposit invoice was sent", () => {
+    const failures = validateTransition({
+      ...baseInput,
+      booking: { ...baseInput.booking, stage: "accepted" },
+      targetStage: "deposit_requested",
+      quotes: [{ status: "accepted", total: 1000 }],
+      invoices: [{ kind: "deposit", status: "sent" }],
+      correspondences: [],
+    })
+
+    expect(failures).toEqual([])
+  })
+
+  it("passes when an invoice correspondence was sent", () => {
+    const failures = validateTransition({
+      ...baseInput,
+      booking: { ...baseInput.booking, stage: "accepted" },
+      targetStage: "deposit_requested",
+      quotes: [{ status: "accepted", total: 1000 }],
+      documents: [{ kind: "invoice_pdf", status: "generated" }],
+      correspondences: [{ kind: "invoice", subject: "Deposit invoice", status: "sent" }],
+    })
+
+    expect(failures).toEqual([])
+  })
+
+  it("allows confirming the invoice was sent outside the system", () => {
     const failures = validateTransition({
       ...baseInput,
       booking: { ...baseInput.booking, stage: "accepted" },

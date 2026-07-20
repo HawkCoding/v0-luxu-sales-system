@@ -6,7 +6,8 @@ import { formatDisplayDateLong } from "@/lib/date-format"
 import { buildItineraryData } from "@/lib/itinerary/build-itinerary"
 import { checkItineraryReadiness } from "@/lib/itinerary/check-readiness"
 import { renderItineraryPdf } from "@/lib/itinerary/render-pdf"
-import { getDocumentTextSettings } from "@/lib/settings-access"
+import { formatCustomerSalutation } from "@/lib/person-name-format"
+import { getDocumentBrandSettings, getDocumentTextSettings, resolveDocumentBrand } from "@/lib/settings-access"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { CONSULTANTS, VOUCHER_TEMPLATE_DEFAULTS, type ConsultantAbbreviation, type VoucherTemplate } from "@/lib/types"
 import { firstRecord } from "@/lib/utils"
@@ -58,10 +59,7 @@ function buildGuestNames(
   noOfAdults: number,
   noOfChildren: number,
 ): string {
-  const name = [customer?.title, customer?.first_name, customer?.last_name]
-    .filter(Boolean)
-    .join(" ")
-    .trim()
+  const name = formatCustomerSalutation(customer)
   if (!name) return "Guests"
   const parts = [name]
   if (noOfAdults > 0) parts.push(`${noOfAdults} adult${noOfAdults === 1 ? "" : "s"}`)
@@ -94,6 +92,7 @@ export async function POST(req: Request) {
     { data: bookingRaw, error: bookingError },
     { data: templateRaw },
     documentText,
+    documentBrandSettings,
   ] = await Promise.all([
     supabase
       .from("bookings")
@@ -108,7 +107,9 @@ export async function POST(req: Request) {
       .limit(1)
       .maybeSingle(),
     getDocumentTextSettings(supabase),
+    getDocumentBrandSettings(supabase),
   ])
+  const { brand } = resolveDocumentBrand(documentBrandSettings)
 
   if (bookingError || !bookingRaw) return jsonError("Booking not found", 404)
 
@@ -162,6 +163,7 @@ export async function POST(req: Request) {
       template,
       journeyHeading: documentText.itinerary_doc_journey_heading,
       introText: documentText.itinerary_doc_intro_text,
+      brand,
     })
   } catch (error) {
     console.error("itinerary:render-pdf", error)
@@ -253,7 +255,7 @@ export async function POST(req: Request) {
     },
   })
 
-  const customerName = [customer.first_name, customer.last_name].filter(Boolean).join(" ").trim()
+  const customerName = formatCustomerSalutation(customer)
   const composed = await composeEmail(supabase, "itinerary_email", {
     tokens: {
       customerName: customerName || "Valued Guest",

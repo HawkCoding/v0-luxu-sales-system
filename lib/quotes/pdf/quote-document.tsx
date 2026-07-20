@@ -1,8 +1,10 @@
 import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer"
 import { formatDisplayDate, formatDisplayDateLong } from "@/lib/date-format"
-import { QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
+import { QUOTE_REFERENCE_ENABLED, QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
+import { BrandBlock } from "@/lib/pdf/brand-block"
+import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
 import {
   buildQuoteItineraryLines,
   collectQuoteExclusions,
@@ -10,7 +12,9 @@ import {
   formatJourneyRange,
   formatPaxLabel,
   formatTotalLabel,
+  VAT_INCLUSIVE_SUFFIX,
 } from "@/lib/quotes/quote-presentation"
+import type { BrandBlockPosition, DocumentBrand } from "@/lib/settings-access"
 
 export interface QuotePdfData {
   quoteNumber: string
@@ -32,6 +36,10 @@ export interface QuotePdfData {
   packageExcludesHeading?: string
   /** Standing exclusion appended after the suppliers' own; empty omits it. */
   packageExcludesDefault?: string
+  /** SARAIL brand block copy + logo. Omitted falls back to the plain wordmark. */
+  brand?: DocumentBrand
+  brandPosition?: BrandBlockPosition
+  brandLogo?: BrandLogoImage | null
 }
 
 function formatMoney(amount: number, currency = "ZAR"): string {
@@ -54,14 +62,14 @@ const styles = StyleSheet.create({
   page: {
     fontFamily: "Helvetica",
     fontSize: 10,
-    paddingTop: 48,
-    paddingBottom: 48,
-    paddingHorizontal: 48,
+    paddingTop: 40,
+    paddingBottom: 40,
+    paddingHorizontal: 40,
     color: "#312b24",
     backgroundColor: "#ffffff",
   },
   header: {
-    marginBottom: 24,
+    marginBottom: 16,
     borderBottomWidth: 2,
     borderBottomColor: "#8b5a2b",
     paddingBottom: 12,
@@ -82,8 +90,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-end",
-    marginTop: 20,
-    marginBottom: 16,
+    marginTop: 14,
+    marginBottom: 12,
   },
   docTitle: {
     fontSize: 22,
@@ -99,7 +107,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#fbf8f3",
     borderWidth: 1,
     borderColor: "#e8dfd2",
-    padding: 12,
+    padding: 9,
     marginBottom: 12,
     flexDirection: "row",
     justifyContent: "space-between",
@@ -121,8 +129,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#f4efe6",
     borderWidth: 1,
     borderColor: "#d8cdbc",
-    padding: 14,
-    marginTop: 20,
+    padding: 11,
+    marginTop: 14,
   },
   perPersonLine: {
     fontSize: 11,
@@ -146,10 +154,10 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   itinerarySection: {
-    marginTop: 20,
+    marginTop: 14,
   },
   itineraryItem: {
-    marginBottom: 8,
+    marginBottom: 6,
   },
   itineraryDate: {
     fontSize: 10,
@@ -169,7 +177,7 @@ const styles = StyleSheet.create({
     paddingLeft: 10,
   },
   excludesSection: {
-    marginTop: 20,
+    marginTop: 14,
   },
   excludesItem: {
     fontSize: 9,
@@ -178,7 +186,7 @@ const styles = StyleSheet.create({
     lineHeight: 1.4,
   },
   footer: {
-    marginTop: 36,
+    marginTop: 24,
     borderTopWidth: 1,
     borderTopColor: "#e8dfd2",
     paddingTop: 12,
@@ -218,7 +226,14 @@ export function QuoteDocument({
   packageIncludesHeading = DEFAULT_INCLUDES_HEADING,
   packageExcludesHeading = DEFAULT_EXCLUDES_HEADING,
   packageExcludesDefault,
+  brand,
+  brandPosition = "bottom",
+  brandLogo = null,
 }: QuotePdfData) {
+  // The brand block is only shown when its copy is supplied; without it the
+  // document keeps the plain wordmark masthead and no footer mark.
+  const showBrandTop = brand !== undefined && brandPosition === "top"
+  const showBrandBottom = brand !== undefined && brandPosition === "bottom"
   const pax = { adults, children }
   const paxLabel = formatPaxLabel(pax)
   const journeyRange = formatJourneyRange(journeyStart, journeyEnd)
@@ -230,22 +245,34 @@ export function QuoteDocument({
   return (
     <Document
       author="Luxus Travel & Tours"
-      subject={`Quote ${quoteNumber}`}
-      title={`Quote ${quoteNumber} — ${customerName}`}
+      // Document metadata shows in the PDF viewer's title bar, so it follows the
+      // same rule as the visible document.
+      subject={QUOTE_REFERENCE_ENABLED ? `Quote ${quoteNumber}` : "Quotation"}
+      title={
+        QUOTE_REFERENCE_ENABLED
+          ? `Quote ${quoteNumber} — ${customerName}`
+          : `Quotation — ${customerName}`
+      }
     >
       <Page size="A4" style={styles.page}>
-        <View style={styles.header}>
-          <Text style={styles.brand}>Luxus Travel & Tours</Text>
-          <Text style={styles.brandSub}>Luxury Rail Journeys</Text>
-        </View>
+        {showBrandTop && brand ? (
+          <BrandBlock brand={brand} logoImage={brandLogo} placement="top" />
+        ) : (
+          <View style={styles.header}>
+            <Text style={styles.brand}>Luxus Travel & Tours</Text>
+            <Text style={styles.brandSub}>Luxury Rail Journeys</Text>
+          </View>
+        )}
 
         <View style={styles.titleRow}>
           <View>
             <Text style={styles.docTitle}>{title}</Text>
           </View>
-          <View>
-            <Text style={styles.quoteNumberBadge}>{quoteNumber}</Text>
-          </View>
+          {QUOTE_REFERENCE_ENABLED ? (
+            <View>
+              <Text style={styles.quoteNumberBadge}>{quoteNumber}</Text>
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.metaBox}>
@@ -263,10 +290,12 @@ export function QuoteDocument({
               <Text style={styles.metaValue}>{paxLabel}</Text>
             </View>
           ) : null}
-          <View>
-            <Text style={styles.metaLabel}>Quote date</Text>
-            <Text style={styles.metaValue}>{formatDate(quoteDate)}</Text>
-          </View>
+          {QUOTE_REFERENCE_ENABLED ? (
+            <View>
+              <Text style={styles.metaLabel}>Quote date</Text>
+              <Text style={styles.metaValue}>{formatDate(quoteDate)}</Text>
+            </View>
+          ) : null}
           {QUOTE_VALIDITY_ENABLED ? (
             <View>
               <Text style={styles.metaLabel}>Valid until</Text>
@@ -315,11 +344,14 @@ export function QuoteDocument({
             </Text>
           ) : null}
           <Text style={styles.grandTotalLine}>
-            {formatTotalLabel(pax)}: {formatMoney(total, currency)} (VAT inclusive)
+            {formatTotalLabel(pax)}: {formatMoney(total, currency)} {VAT_INCLUSIVE_SUFFIX}
           </Text>
         </View>
 
         <Text style={styles.footer}>{resolveFooterText(footerText, validUntil, currency)}</Text>
+        {showBrandBottom && brand ? (
+          <BrandBlock brand={brand} logoImage={brandLogo} placement="bottom" />
+        ) : null}
       </Page>
     </Document>
   )

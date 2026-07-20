@@ -369,6 +369,57 @@ describe("PATCH /api/jobs/[id]/package-selections", () => {
     expect(unitInserts).toHaveLength(2)
   })
 
+  const RATE_TYPE = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+
+  it("writes rate_type_id when a selection carries rateTypeId", async () => {
+    const { updateCalls } = mockAuth({ validLegIds: [LEG_A] })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          selections: [{ packageLegId: LEG_A, rateTypeId: RATE_TYPE }],
+        }),
+      }),
+      makeParams(),
+    )
+    expect(res.status).toBe(200)
+    expect(updateCalls).toContainEqual({ legId: LEG_A, payload: { rate_type_id: RATE_TYPE } })
+  })
+
+  it("clears rate_type_id when rateTypeId is null and leaves it untouched when omitted", async () => {
+    const { updateCalls } = mockAuth({ validLegIds: [LEG_A, LEG_B] })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          selections: [
+            { packageLegId: LEG_A, rateTypeId: null },
+            { packageLegId: LEG_B, selected: true },
+          ],
+        }),
+      }),
+      makeParams(),
+    )
+    expect(res.status).toBe(200)
+    expect(updateCalls).toContainEqual({ legId: LEG_A, payload: { rate_type_id: null } })
+    const legBCall = updateCalls.find((call) => call.legId === LEG_B)
+    expect(legBCall?.payload).not.toHaveProperty("rate_type_id")
+  })
+
+  it("returns 400 for a non-uuid rateTypeId", async () => {
+    mockAuth({ validLegIds: [LEG_A] })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          selections: [{ packageLegId: LEG_A, rateTypeId: "standard" }],
+        }),
+      }),
+      makeParams(),
+    )
+    expect(res.status).toBe(400)
+  })
+
   it("does not require a passenger split for hotel legs", async () => {
     const { unitInserts } = mockAuth({ validLegIds: [LEG_A], legKinds: { [LEG_A]: "hotel_property" } })
     const res = await PATCH(

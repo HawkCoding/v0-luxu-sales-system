@@ -14,3 +14,16 @@ export const BACKUPS_ENABLED = false
  * Nothing automates or gates on the date while this is false.
  */
 export const QUOTE_VALIDITY_ENABLED = false
+
+/**
+ * Quote number and quote date are built but hidden from everything the
+ * customer sees — no quote number badge or quote date row on the quote PDF,
+ * no quote meta lines in the quote email, no quoteNumber/quoteDate token chips
+ * on the Templates page, and the emailed PDF is named after the booking number
+ * rather than the quote number. Salespeople never reference either, so they are
+ * noise on customer documents.
+ *
+ * Quotes are still numbered and versioned (LTT-2026-0001-Q1) and staff screens
+ * still show the number, so re-enabling is a one-line flip.
+ */
+export const QUOTE_REFERENCE_ENABLED = false

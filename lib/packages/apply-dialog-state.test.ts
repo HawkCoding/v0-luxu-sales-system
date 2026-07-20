@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { BookingTransportRequest, PackageDetail, PackageLeg, SupplierKind } from "@/lib/types"
 import {
   buildDefaultLegStates,
+  createDraftTransportRequest,
   hydrateFromSaved,
   toApplySelections,
   toPackageSelectionsPatch,
@@ -50,11 +51,38 @@ const trainLeg = leg({
   supplierKind: "train_operator",
   sortOrder: 1,
   routes: [
-    { id: "route-1", supplierId: "supplier-leg-train", name: "CPT-PTA", active: true, createdAt: "", updatedAt: "" },
+    {
+      id: "route-1",
+      supplierId: "supplier-leg-train",
+      name: "Cape Town ↔ Pretoria",
+      originLocationId: "loc-cpt",
+      destinationLocationId: "loc-pta",
+      originLocationName: "Cape Town",
+      destinationLocationName: "Pretoria",
+      directionMode: "round_trip",
+      active: true,
+      createdAt: "",
+      updatedAt: "",
+    },
   ] as PackageLeg["routes"],
   suiteTypes: [
     { id: "suite-1", supplierId: "supplier-leg-train", name: "Deluxe", active: true, createdAt: "", updatedAt: "" },
   ] as PackageLeg["suiteTypes"],
+  rateCards: [
+    {
+      id: "rate-train-1",
+      routeId: "route-1",
+      suiteTypeId: "suite-1",
+      rateTypeId: "rate-type-default",
+      pricePerPerson: 1000,
+      childPrice: null,
+      infantPrice: null,
+      currency: "ZAR",
+      validFrom: "2026-01-01",
+      validTo: null,
+      createdAt: "",
+    },
+  ] as PackageLeg["rateCards"],
 })
 
 const hotelLeg = leg({
@@ -68,6 +96,21 @@ const hotelLeg = leg({
   suiteTypes: [
     { id: "room-1", supplierId: "supplier-leg-hotel", name: "Standard", active: true, createdAt: "", updatedAt: "" },
   ] as PackageLeg["suiteTypes"],
+  rateCards: [
+    {
+      id: "rate-hotel-1",
+      routeId: "route-bb",
+      suiteTypeId: "room-1",
+      rateTypeId: "rate-type-default",
+      pricePerPerson: 500,
+      childPrice: null,
+      infantPrice: null,
+      currency: "ZAR",
+      validFrom: "2026-01-01",
+      validTo: null,
+      createdAt: "",
+    },
+  ] as PackageLeg["rateCards"],
 })
 
 const transferLeg = leg({
@@ -75,7 +118,16 @@ const transferLeg = leg({
   supplierKind: "transfers",
   sortOrder: 3,
   routes: [
-    { id: "route-transfer-1", supplierId: "supplier-leg-transfer", name: "Airport - Hotel", active: true, createdAt: "", updatedAt: "" },
+    {
+      id: "route-transfer-1",
+      supplierId: "supplier-leg-transfer",
+      name: "Airport - Hotel",
+      active: true,
+      pickupPoint: "Cape Town Airport",
+      dropoffPoint: "V&A Waterfront",
+      createdAt: "",
+      updatedAt: "",
+    },
   ] as PackageLeg["routes"],
   suiteTypes: [
     { id: "vehicle-1", supplierId: "supplier-leg-transfer", name: "Sedan", active: true, createdAt: "", updatedAt: "" },
@@ -109,6 +161,7 @@ describe("buildDefaultLegStates", () => {
     const states = buildDefaultLegStates(pkg, { tripStartDate: "2026-09-01" })
     const train = suiteState(states, "leg-train")
     expect(train.routeId).toBe("route-1")
+    expect(train.reversed).toBe(false)
     expect(train.units).toHaveLength(1)
     expect(train.serviceDate).toBe("2026-09-01")
 
@@ -119,6 +172,30 @@ describe("buildDefaultLegStates", () => {
     const transfer = transportState(states, "leg-transfer")
     expect(transfer.requests).toHaveLength(1)
     expect(transfer.requests[0].serviceType).toBe("transfer")
+  })
+
+  it("pre-fills pickup/drop-off from a leg's single route", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: "2026-09-01" })
+    const transfer = transportState(states, "leg-transfer")
+    expect(transfer.routeId).toBe("route-transfer-1")
+    expect(transfer.requests[0].pickupPoint).toBe("Cape Town Airport")
+    expect(transfer.requests[0].dropoffPoint).toBe("V&A Waterfront")
+  })
+
+  it("createDraftTransportRequest pre-fills from an explicitly passed route on multi-route legs", () => {
+    const multiRouteLeg = leg({
+      id: "leg-multi",
+      supplierKind: "transfers",
+      sortOrder: 5,
+      routes: [
+        { id: "route-a", supplierId: "supplier-leg-multi", name: "A", active: true, pickupPoint: "Point A", dropoffPoint: "Point B", createdAt: "", updatedAt: "" },
+        { id: "route-b", supplierId: "supplier-leg-multi", name: "B", active: true, pickupPoint: "Point C", dropoffPoint: "Point D", createdAt: "", updatedAt: "" },
+      ] as PackageLeg["routes"],
+    })
+
+    const request = createDraftTransportRequest(multiRouteLeg, "route-b")
+    expect(request.pickupPoint).toBe("Point C")
+    expect(request.dropoffPoint).toBe("Point D")
   })
 
   it("defaults selected to true only for the mandatory train leg", () => {
@@ -150,9 +227,11 @@ describe("hydrateFromSaved", () => {
         selected: true,
         supplier_id: "supplier-leg-train",
         route_id: "route-1",
+        route_reversed: true,
         suite_type_id: null,
         service_date: "2026-09-02",
         nights: null,
+        rate_type_id: null,
         notes: "window seat",
         units: [
           {
@@ -186,9 +265,11 @@ describe("hydrateFromSaved", () => {
         selected: false,
         supplier_id: "supplier-leg-transfer",
         route_id: null,
+        route_reversed: null,
         suite_type_id: null,
         service_date: null,
         nights: null,
+        rate_type_id: null,
         notes: null,
         units: [],
       },
@@ -229,6 +310,56 @@ describe("hydrateFromSaved", () => {
     expect(transfer.requests).toEqual([savedRequest])
   })
 
+  it("reads route_reversed for a round_trip route", () => {
+    const states = hydrateFromSaved(pkg, saved, [savedRequest], { tripStartDate: "2026-09-01" })
+    expect(suiteState(states, "leg-train").reversed).toBe(true)
+  })
+
+  it("coerces reversed to false when the saved route is not round_trip", () => {
+    const oneWayLeg = leg({
+      id: "leg-one-way",
+      supplierKind: "train_operator",
+      sortOrder: 1,
+      routes: [
+        {
+          id: "route-one-way",
+          supplierId: "supplier-leg-one-way",
+          name: "Cape Town → Pretoria",
+          directionMode: "one_way",
+          active: true,
+          createdAt: "",
+          updatedAt: "",
+        },
+      ] as PackageLeg["routes"],
+    })
+    const oneWayPkg = detail([oneWayLeg])
+    const oneWaySaved: SavedPackageState = {
+      packageId: "pkg-1",
+      tripStartDate: "2026-09-01",
+      tripEndDate: null,
+      selections: [
+        {
+          id: "sel-one-way",
+          package_leg_id: "leg-one-way",
+          date_anchor: null,
+          selected: true,
+          supplier_id: "supplier-leg-one-way",
+          route_id: "route-one-way",
+          route_reversed: true,
+          suite_type_id: null,
+          service_date: "2026-09-02",
+          nights: null,
+          rate_type_id: null,
+          notes: null,
+          units: [],
+        },
+      ],
+    }
+
+    const states = hydrateFromSaved(oneWayPkg, oneWaySaved, [], { tripStartDate: "2026-09-01" })
+    expect(suiteState(states, "leg-one-way").reversed).toBe(false)
+  })
+
   it("falls back to defaults for legs without a saved selection", () => {
     const states = hydrateFromSaved(pkg, saved, [savedRequest], { tripStartDate: "2026-09-01" })
     const hotel = suiteState(states, "leg-hotel")
@@ -254,6 +385,16 @@ describe("toPackageSelectionsPatch", () => {
 
     const transferPatch = patch.selections.find((s) => s.packageLegId === "leg-transfer")
     expect(transferPatch?.units).toBeUndefined()
+  })
+
+  it("emits routeReversed for suite legs", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: "2026-09-01" })
+    const train = suiteState(states, "leg-train")
+    train.reversed = true
+
+    const patch = toPackageSelectionsPatch(states)
+    const trainPatch = patch.selections.find((s) => s.packageLegId === "leg-train")
+    expect(trainPatch?.routeReversed).toBe(true)
   })
 
   it("keeps persisted unit ids", () => {
@@ -322,6 +463,7 @@ describe("toApplySelections", () => {
     const states = buildDefaultLegStates(pkg, { tripStartDate: null, totalsBySupplierId: totals })
     const train = suiteState(states, "leg-train")
     train.units[0].suiteTypeId = "suite-1"
+    train.reversed = true
     const hotel = suiteState(states, "leg-hotel")
     hotel.routeId = "route-fb"
     hotel.nights = 2
@@ -344,6 +486,7 @@ describe("toApplySelections", () => {
       },
     ])
     expect(trainSel?.commissionOverride).toEqual({ type: "percent", value: 10 })
+    expect(trainSel?.routeReversed).toBe(true)
     expect(trainSel?.nights).toBeUndefined()
 
     const hotelSel = selections.find((s) => s.legId === "leg-hotel")
@@ -352,6 +495,83 @@ describe("toApplySelections", () => {
     const transferSel = selections.find((s) => s.legId === "leg-transfer")
     expect(transferSel?.suiteTypeId).toBe("vehicle-1")
     expect(transferSel?.units).toBeUndefined()
+  })
+})
+
+describe("per-leg rate types", () => {
+  it("buildDefaultLegStates seeds every leg from defaultRateTypeId, null when omitted", () => {
+    const seeded = buildDefaultLegStates(pkg, { tripStartDate: null, defaultRateTypeId: "rate-std" })
+    expect(seeded.every((state) => state.rateTypeId === "rate-std")).toBe(true)
+
+    const unseeded = buildDefaultLegStates(pkg, { tripStartDate: null })
+    expect(unseeded.every((state) => state.rateTypeId === null)).toBe(true)
+  })
+
+  it("hydrateFromSaved restores a saved rate_type_id and falls back to the default when null", () => {
+    const saved: SavedPackageState = {
+      packageId: "pkg-1",
+      tripStartDate: "2026-09-01",
+      tripEndDate: null,
+      selections: [
+        {
+          id: "sel-train",
+          package_leg_id: "leg-train",
+          date_anchor: null,
+          selected: true,
+          supplier_id: "supplier-leg-train",
+          route_id: "route-1",
+          route_reversed: null,
+          suite_type_id: null,
+          service_date: "2026-09-02",
+          nights: null,
+          rate_type_id: "rate-resident",
+          notes: null,
+          units: [],
+        },
+        {
+          id: "sel-transfer",
+          package_leg_id: "leg-transfer",
+          date_anchor: null,
+          selected: true,
+          supplier_id: "supplier-leg-transfer",
+          route_id: null,
+          route_reversed: null,
+          suite_type_id: null,
+          service_date: null,
+          nights: null,
+          rate_type_id: null,
+          notes: null,
+          units: [],
+        },
+      ],
+    }
+
+    const states = hydrateFromSaved(pkg, saved, [], { tripStartDate: "2026-09-01", defaultRateTypeId: "rate-std" })
+    expect(suiteState(states, "leg-train").rateTypeId).toBe("rate-resident")
+    expect(transportState(states, "leg-transfer").rateTypeId).toBe("rate-std")
+    // Leg with no saved row keeps the seeded default.
+    expect(suiteState(states, "leg-hotel").rateTypeId).toBe("rate-std")
+  })
+
+  it("toPackageSelectionsPatch emits rateTypeId for suite and transport legs", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: null, defaultRateTypeId: "rate-std" })
+    const train = suiteState(states, "leg-train")
+    train.rateTypeId = "rate-resident"
+
+    const patch = toPackageSelectionsPatch(states)
+    expect(patch.selections.find((s) => s.packageLegId === "leg-train")?.rateTypeId).toBe("rate-resident")
+    expect(patch.selections.find((s) => s.packageLegId === "leg-transfer")?.rateTypeId).toBe("rate-std")
+  })
+
+  it("toApplySelections emits rateTypeId per leg and omits it when null", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: null, defaultRateTypeId: "rate-std" })
+    const hotel = suiteState(states, "leg-hotel")
+    hotel.rateTypeId = null
+
+    const selections = toApplySelections(states)
+    expect(selections.find((s) => s.legId === "leg-train")?.rateTypeId).toBe("rate-std")
+    expect(selections.find((s) => s.legId === "leg-transfer")?.rateTypeId).toBe("rate-std")
+    expect(selections.find((s) => s.legId === "leg-hotel")?.rateTypeId).toBeUndefined()
   })
 })
 
@@ -378,7 +598,10 @@ describe("validateConfigureState", () => {
   it("flags missing route, unit type, transport fields, and passenger sum mismatches", () => {
     const states = buildDefaultLegStates(pkg, { tripStartDate: null })
     suiteState(states, "leg-hotel").selected = true
-    transportState(states, "leg-transfer").selected = true
+    const transfer = transportState(states, "leg-transfer")
+    transfer.selected = true
+    // Route quick-fill seeds pickup/drop-off; blank them to test the missing-field validation itself.
+    transfer.requests[0] = { ...transfer.requests[0], pickupPoint: "", dropoffPoint: "" }
     const errors = validateConfigureState(pkg, states, { totalsBySupplierId: totals })
     expect(errors.some((e) => e.includes("meal plan"))).toBe(true) // hotel has 2 routes, none chosen
     expect(errors.some((e) => e.includes("needs a type"))).toBe(true)

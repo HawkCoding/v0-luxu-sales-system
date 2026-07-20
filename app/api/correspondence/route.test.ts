@@ -20,6 +20,9 @@ const senderMocks = vi.hoisted(() => ({
 const templateMocks = vi.hoisted(() => ({
   composeEmail: vi.fn(),
 }))
+const libraryMocks = vi.hoisted(() => ({
+  loadLibraryAttachments: vi.fn(),
+}))
 
 vi.mock("@/lib/api/auth", () => ({
   requireRole: authMocks.requireRole,
@@ -49,6 +52,10 @@ vi.mock("@/lib/email/resolve-sender", () => ({
 
 vi.mock("@/lib/templates/compose-email", () => ({
   composeEmail: templateMocks.composeEmail,
+}))
+
+vi.mock("@/lib/attachments/email-attachment-library", () => ({
+  loadLibraryAttachments: libraryMocks.loadLibraryAttachments,
 }))
 
 import { POST } from "./route"
@@ -242,7 +249,10 @@ describe("POST /api/correspondence", () => {
     quotePdfMocks.ensureQuotePdf.mockResolvedValue({
       documentId: "doc-1",
       bookingId: BOOKING_ID,
-      storagePath: "quotes/BT-2026-0001-Q1/quote-BT-2026-0001-Q1.pdf",
+      // Storage stays keyed on the quote number so quote versions cannot
+      // overwrite each other; the customer-visible attachment name does not.
+      storagePath: "quotes/LTT-2026-0001-Q1/quote-LTT-2026-0001-Q1.pdf",
+      attachmentFilename: "quote-LTT-2026-0001.pdf",
       status: "generated",
       createdAt: "2026-05-01T00:00:00.000Z",
       regenerated: false,
@@ -260,6 +270,8 @@ describe("POST /api/correspondence", () => {
       providerMessageId: "pmid",
       error: null,
     })
+    libraryMocks.loadLibraryAttachments.mockReset()
+    libraryMocks.loadLibraryAttachments.mockResolvedValue([])
     transitionMocks.applyTransition.mockResolvedValue({
       updated: {},
       crossedStages: [],
@@ -305,6 +317,49 @@ describe("POST /api/correspondence", () => {
     expect(emailMocks.sendEmail).toHaveBeenCalledWith(
       expect.objectContaining({ from: "noreply@example.com", subject: "Hello" }),
     )
+  })
+
+  it("attaches selected library files to the outgoing email", async () => {
+    buildAuth()
+    libraryMocks.loadLibraryAttachments.mockResolvedValue([
+      { filename: "reservation-form.pdf", contentBase64: "QQ==", contentType: "application/pdf" },
+    ])
+
+    const libraryId = "00000000-0000-4000-8000-00000000cccc"
+    const res = await POST(
+      postJson({ bookingId: BOOKING_ID, subject: "Hello", libraryAttachmentIds: [libraryId] }),
+    )
+
+    expect(res.status).toBe(200)
+    expect(libraryMocks.loadLibraryAttachments).toHaveBeenCalledWith(expect.anything(), [libraryId])
+    expect(emailMocks.sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachments: [
+          expect.objectContaining({
+            filename: "reservation-form.pdf",
+            contentType: "application/pdf",
+          }),
+        ],
+      }),
+    )
+  })
+
+  it("blocks the send when a library attachment cannot be loaded", async () => {
+    buildAuth()
+    libraryMocks.loadLibraryAttachments.mockRejectedValue(
+      new Error('Attachment "fact-sheet.pdf" could not be loaded — email not sent'),
+    )
+
+    const res = await POST(
+      postJson({
+        bookingId: BOOKING_ID,
+        subject: "Hello",
+        libraryAttachmentIds: ["00000000-0000-4000-8000-00000000cccc"],
+      }),
+    )
+
+    expect(res.status).toBe(502)
+    expect(emailMocks.sendEmail).not.toHaveBeenCalled()
   })
 
   it("returns 502 on email send failure without advancing stage or updating quote", async () => {
@@ -520,11 +575,13 @@ describe("POST /api/correspondence", () => {
       QUOTE_ID,
       expect.objectContaining({ actorName: "Jane Doe", actorUserId: "u1" }),
     )
-    expect(mocks.storageDownload).toHaveBeenCalledWith("BT-2026-0001-Q1/quote-BT-2026-0001-Q1.pdf")
+    expect(mocks.storageDownload).toHaveBeenCalledWith("LTT-2026-0001-Q1/quote-LTT-2026-0001-Q1.pdf")
+    // The attachment is named from ensureQuotePdf, not derived from the storage
+    // path, so the quote number cannot leak through the filename.
     expect(emailMocks.sendEmail).toHaveBeenCalledWith(
       expect.objectContaining({
         attachments: expect.arrayContaining([
-          expect.objectContaining({ filename: "quote-BT-2026-0001-Q1.pdf", contentType: "application/pdf" }),
+          expect.objectContaining({ filename: "quote-LTT-2026-0001.pdf", contentType: "application/pdf" }),
         ]),
       }),
     )

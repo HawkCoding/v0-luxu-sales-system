@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const settingsMocks = vi.hoisted(() => ({
   getQuoteFollowUpSettings: vi.fn(),
-  getEmailFooterTagline: vi.fn(),
+  getEmailBrandingSettings: vi.fn(),
 }))
 
 const emailMocks = vi.hoisted(() => ({
@@ -19,7 +19,15 @@ const templateMocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/settings-access", () => ({
   getQuoteFollowUpSettings: settingsMocks.getQuoteFollowUpSettings,
-  getEmailFooterTagline: settingsMocks.getEmailFooterTagline,
+  getEmailBrandingSettings: settingsMocks.getEmailBrandingSettings,
+  getDocumentBrandForEmail: vi.fn(async () => ({
+    brand: {
+      heading: "SA RAIL",
+      subheading: "THE BLUE TRAIN | ROVOS RAIL | KRUGER SHALATI",
+      logoUrl: null,
+    },
+    position: "bottom",
+  })),
 }))
 
 vi.mock("@/lib/email/transport", () => ({
@@ -143,7 +151,11 @@ describe("runQuoteFollowUpWorker", () => {
       enabled: true,
       cadence: [3, 7],
     })
-    settingsMocks.getEmailFooterTagline.mockResolvedValue("Test tagline")
+    settingsMocks.getEmailBrandingSettings.mockResolvedValue({
+      footerTagline: "Test tagline",
+      email_font_family: "Arial, sans-serif",
+      email_font_size: "16px",
+    })
     templateMocks.getTemplate.mockResolvedValue({
       key: "follow_up",
       subject: "Following up on your enquiry — {{jobNumber}}",
@@ -233,10 +245,11 @@ describe("runQuoteFollowUpWorker", () => {
         html: expect.stringContaining("Dear Jane Smith, quote RR-2026-0001"),
       }),
     )
-    // Full branded wrapper with the editable-content slot markers
+    // Full branded wrapper with the editable-content slot markers and the
+    // footer brand block (the tagline was replaced by the brand heading).
     const html = emailMocks.sendEmail.mock.calls[0][0].html as string
     expect(html).toContain("<!--LUXUS_CONTENT_START-->")
-    expect(html).toContain("Test tagline")
+    expect(html).toContain("SA RAIL")
   })
 
   it("skips booking with cancelled outcome", async () => {

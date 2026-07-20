@@ -1,16 +1,31 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { renderQuotePdf } from "@/lib/quotes/render-quote-pdf"
-import { resolveJourneyDates } from "@/lib/quotes/quote-presentation"
+import { deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
-import { getDocumentTextSettings } from "@/lib/settings-access"
+import { loadBrandLogo } from "@/lib/pdf/brand-logo"
+import { getDocumentBrandSettings, getDocumentTextSettings, resolveDocumentBrand } from "@/lib/settings-access"
+import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { logError } from "@/lib/error-log"
+import { QUOTE_REFERENCE_ENABLED } from "@/lib/feature-flags"
+import type { PricingSnapshot } from "@/lib/types"
 
 export const QUOTE_BUCKET = "quotes"
 
 function sanitizePath(value: string): string {
   return value.replace(/[^a-zA-Z0-9_\-]/g, "_")
+}
+
+/**
+ * Customer-visible name for the emailed PDF. While the quote reference is
+ * hidden, the attachment is named after the booking so the quote number does
+ * not leak through the filename; it falls back to the quote number when the
+ * booking number is unavailable.
+ */
+export function buildAttachmentFilename(quoteNumber: string, bookingNumber: string | null | undefined): string {
+  const reference = QUOTE_REFERENCE_ENABLED ? quoteNumber : bookingNumber || quoteNumber
+  return `quote-${sanitizePath(reference)}.pdf`
 }
 
 export interface EnsureQuotePdfOptions {
@@ -23,8 +38,15 @@ export interface EnsureQuotePdfOptions {
 export interface EnsuredQuotePdf {
   documentId: string
   bookingId: string
-  /** documents.storage_path, prefixed with the bucket (e.g. "quotes/BT-1_Q1/quote-BT-1_Q1.pdf"). */
+  /** documents.storage_path, prefixed with the bucket (e.g. "quotes/LTT-1_Q1/quote-LTT-1_Q1.pdf"). */
   storagePath: string
+  /**
+   * Name to attach the PDF under when emailing it. Deliberately decoupled from
+   * the storage path: storage stays keyed on the quote number so quote versions
+   * cannot overwrite each other, while the customer-visible filename follows
+   * QUOTE_REFERENCE_ENABLED and falls back to the booking number.
+   */
+  attachmentFilename: string
   status: string
   createdAt: string
   regenerated: boolean
@@ -44,7 +66,7 @@ export async function ensureQuotePdf(
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, booking_id, quote_number, status, validity_until, subtotal, vat, total, created_at, pdf_document_id, booking:bookings(id, booking_number, no_of_adults, no_of_children, trip_start_date, trip_end_date, departure_date, duration_nights, customer:customers(first_name, last_name))",
+      "id, booking_id, quote_number, status, validity_until, subtotal, vat, total, created_at, pdf_document_id, booking:bookings(id, booking_number, no_of_adults, no_of_children, customer:customers(title, first_name, last_name))",
     )
     .eq("id", quoteId)
     .single()
@@ -52,6 +74,12 @@ export async function ensureQuotePdf(
   if (quoteError || !quote) {
     throw new Error("Quote not found")
   }
+
+  const quoteBooking = Array.isArray(quote.booking) ? quote.booking[0] : quote.booking
+  const attachmentFilename = buildAttachmentFilename(
+    quote.quote_number ?? quoteId,
+    quoteBooking?.booking_number,
+  )
 
   if (!force && quote.pdf_document_id) {
     const { data: existingDoc } = await supabase
@@ -65,6 +93,7 @@ export async function ensureQuotePdf(
         documentId: existingDoc.id,
         bookingId: existingDoc.booking_id,
         storagePath: existingDoc.storage_path,
+        attachmentFilename,
         status: existingDoc.status,
         createdAt: existingDoc.created_at,
         regenerated: false,
@@ -82,11 +111,22 @@ export async function ensureQuotePdf(
     throw new Error("Quote line items could not be loaded")
   }
 
-  const booking = Array.isArray(quote.booking) ? quote.booking[0] : quote.booking
+  const booking = quoteBooking
   const customer = Array.isArray(booking?.customer) ? booking.customer[0] : booking?.customer
-  const customerName = [customer?.first_name, customer?.last_name].filter(Boolean).join(" ").trim()
+  const customerName = formatCustomerSalutation(customer)
 
   const documentText = await getDocumentTextSettings(supabase)
+  const { brand, position } = resolveDocumentBrand(await getDocumentBrandSettings(supabase))
+  const brandLogo = await loadBrandLogo(brand.logoUrl)
+
+  // Scope the itinerary to legs actually priced into this quote version, not whatever is
+  // currently selected live on the job — an empty set means a manual/no-package quote, so fall
+  // back to unfiltered (today's behavior) rather than rendering an empty itinerary.
+  const quoteLegIds = new Set(
+    (lineItems ?? [])
+      .map((li) => (li.pricing_snapshot as PricingSnapshot | null)?.legId)
+      .filter((legId): legId is string => Boolean(legId)),
+  )
 
   // Itinerary degrades to an empty section rather than blocking the PDF —
   // correspondence relies on a quote email never going out without its PDF.
@@ -95,6 +135,7 @@ export async function ensureQuotePdf(
     const { blocks } = await buildVoucherServiceBlocks(supabase, {
       bookingId: quote.booking_id,
       additionalServicesDetails: null,
+      legIds: quoteLegIds.size > 0 ? quoteLegIds : undefined,
     })
     itineraryBlocks = blocks
   } catch (err) {
@@ -106,12 +147,9 @@ export async function ensureQuotePdf(
     })
   }
 
-  const journey = resolveJourneyDates({
-    trip_start_date: booking?.trip_start_date ?? null,
-    trip_end_date: booking?.trip_end_date ?? null,
-    departure_date: booking?.departure_date ?? null,
-    duration_nights: booking?.duration_nights ?? null,
-  })
+  // Journey window comes from the priced legs, not the booking's enquiry-time
+  // scalar dates which drift out of sync once the package changes.
+  const journey = deriveJourneyFromBlocks(itineraryBlocks) ?? { start: null, end: null }
 
   let pdfBuffer: Buffer
   try {
@@ -131,6 +169,9 @@ export async function ensureQuotePdf(
       children: booking?.no_of_children ?? 0,
       total: quote.total,
       itineraryBlocks,
+      brand,
+      brandPosition: position.quote,
+      brandLogo,
     })
   } catch (err) {
     void logError({
@@ -210,6 +251,7 @@ export async function ensureQuotePdf(
   })
 
   return {
+    attachmentFilename,
     documentId: documentWrite.data.id,
     bookingId: documentWrite.data.booking_id,
     storagePath: documentPath,

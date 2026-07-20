@@ -9,6 +9,13 @@
 export const CONTENT_SLOT_START = "<!--LUXUS_CONTENT_START-->"
 export const CONTENT_SLOT_END = "<!--LUXUS_CONTENT_END-->"
 
+/**
+ * Class on the element wrapping the slot. The email <head> font rule targets it,
+ * which is what keeps the configured font applied after the client splices
+ * edited content back in — the wrapper, and so the rule, is never replaced.
+ */
+export const CONTENT_CLASS_NAME = "luxus-content"
+
 /** Extract the editable content between the slot markers, or null if absent. */
 export function extractContentSlot(fullHtml: string): string | null {
   const start = fullHtml.indexOf(CONTENT_SLOT_START)

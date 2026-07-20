@@ -152,6 +152,7 @@ export function mapLocation(row: LocationRow): Location {
 export function mapSupplierRoute(
   row: RouteRow,
   vehicleRentalDetails?: VehicleRentalRouteDetailsRow | null,
+  locationNameById?: Map<string, string>,
 ): SupplierRoute {
   return {
     id: row.id,
@@ -159,6 +160,12 @@ export function mapSupplierRoute(
     name: row.name,
     originLocationId: row.origin_location_id ?? null,
     destinationLocationId: row.destination_location_id ?? null,
+    originLocationName: row.origin_location_id
+      ? locationNameById?.get(row.origin_location_id) ?? null
+      : null,
+    destinationLocationName: row.destination_location_id
+      ? locationNameById?.get(row.destination_location_id) ?? null
+      : null,
     pickupPoint: row.pickup_point ?? null,
     dropoffPoint: row.dropoff_point ?? null,
     vehicleRentalDetails: mapVehicleRentalRouteDetails(vehicleRentalDetails),
@@ -423,12 +430,16 @@ export function mapSupplierDetail(
     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name))
     .map(mapRateType)
 
+  const locationNameById = new Map(locations.map((location) => [location.id, location.name]))
+
   const mapped = mapSupplier(supplier)
   return {
     ...mapped,
     emails: emails.map(mapSupplierEmail),
     suiteTypes: sortedSuiteTypes.map((row) => mapSupplierSuiteType(row, memberships)),
-    routes: routes.map((route) => mapSupplierRoute(route, detailsByRouteId.get(route.id))),
+    routes: routes.map((route) =>
+      mapSupplierRoute(route, detailsByRouteId.get(route.id), locationNameById),
+    ),
     rateCards: rateCards.map(mapSupplierRateCard),
     locations: locations.map(mapLocation),
     bedroomTypes: [...bedroomTypeRows]

@@ -29,7 +29,7 @@ const itineraryBlocks: VoucherServiceBlock[] = [
 ]
 
 const base: QuoteSummaryInput = {
-  quoteNumber: "BT-2026-0001-Q1",
+  quoteNumber: "LTT-2026-0001-Q1",
   quoteDate: "2026-07-12",
   validUntil: "2026-07-26",
   journeyStart: "2026-07-18",
@@ -43,9 +43,23 @@ const base: QuoteSummaryInput = {
 describe("buildQuoteSummaryBlock", () => {
   it("renders quote meta with journey dates and guests", () => {
     const html = buildQuoteSummaryBlock(base)
-    expect(html).toContain("BT-2026-0001-Q1")
     expect(html).toContain("Journey:</strong> 18 – 22 July 2026")
     expect(html).toContain("Guests:</strong> 2 Adults")
+  })
+
+  it("omits the quote number and quote date while the reference is hidden", () => {
+    // Salespeople never reference either, so they are noise to the customer.
+    // QUOTE_REFERENCE_ENABLED is false; flipping it restores both lines.
+    const html = buildQuoteSummaryBlock(base)
+    expect(html).not.toContain("Quote number:")
+    expect(html).not.toContain("Quote date:")
+    expect(html).not.toContain("LTT-2026-0001-Q1")
+  })
+
+  it("still renders the details box when the quote reference is hidden", () => {
+    const html = buildQuoteSummaryBlock(base)
+    expect(html).toContain('data-label="Quote details"')
+    expect(html).toContain("Journey:</strong>")
   })
 
   it("renders per-person rate and bold VAT-inclusive total for adults-only bookings", () => {
@@ -53,7 +67,7 @@ describe("buildQuoteSummaryBlock", () => {
     expect(html).toContain("2 Adults x")
     expect(html).toContain("per person")
     expect(html).toContain("TOTAL for 2 Adults:")
-    expect(html).toContain("(VAT inclusive)")
+    expect(html).toContain("(INCL.VAT)")
   })
 
   it("omits the per-person rate when children are present", () => {

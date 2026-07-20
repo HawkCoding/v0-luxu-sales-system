@@ -84,6 +84,7 @@ export function normalizeLegDateAnchor(value: string | null | undefined): "pre" 
 export function mapPackageRoute(
   row: RouteRow,
   vehicleRentalDetails?: VehicleRentalRouteDetailsRow | null,
+  locationNameById?: Map<string, string>,
 ): SupplierRoute {
   return {
     id: row.id,
@@ -91,6 +92,12 @@ export function mapPackageRoute(
     name: row.name,
     originLocationId: row.origin_location_id ?? null,
     destinationLocationId: row.destination_location_id ?? null,
+    originLocationName: row.origin_location_id
+      ? locationNameById?.get(row.origin_location_id) ?? null
+      : null,
+    destinationLocationName: row.destination_location_id
+      ? locationNameById?.get(row.destination_location_id) ?? null
+      : null,
     pickupPoint: row.pickup_point ?? null,
     dropoffPoint: row.dropoff_point ?? null,
     vehicleRentalDetails: mapVehicleRentalRouteDetails(vehicleRentalDetails),
@@ -147,6 +154,7 @@ export function mapPackageLeg(
   rateCards: RateCardRow[],
   suiteTypes: SuiteTypeRow[],
   vehicleRentalRouteDetails: VehicleRentalRouteDetailsRow[] = [],
+  locationNameById?: Map<string, string>,
 ): PackageLeg {
   const detailsByRouteId = new Map(
     vehicleRentalRouteDetails.map((details) => [details.route_id, details]),
@@ -173,7 +181,9 @@ export function mapPackageLeg(
     label: row.label,
     sortOrder: row.sort_order,
     dateAnchor: normalizeLegDateAnchor(row.date_anchor),
-    routes: eligibleRoutes.map((route) => mapPackageRoute(route, detailsByRouteId.get(route.id))),
+    routes: eligibleRoutes.map((route) =>
+      mapPackageRoute(route, detailsByRouteId.get(route.id), locationNameById),
+    ),
     rateCards: rateCards
       .filter((rateCard) => legRouteIds.has(rateCard.route_id))
       .map(mapPackageRateCard),
@@ -189,6 +199,7 @@ export function mapPackageDetail(
   rateCards: RateCardRow[],
   suiteTypes: SuiteTypeRow[],
   vehicleRentalRouteDetails: VehicleRentalRouteDetailsRow[] = [],
+  locationNameById?: Map<string, string>,
 ): PackageDetail {
   return {
     id: row.id,
@@ -215,6 +226,7 @@ export function mapPackageDetail(
           rateCards,
           suiteTypes.filter((suiteType) => suiteType.supplier_id === leg.supplier_id),
           vehicleRentalRouteDetails,
+          locationNameById,
         ),
       ),
   }

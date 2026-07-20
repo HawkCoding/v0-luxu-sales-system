@@ -7,7 +7,7 @@ import { seedSelectionsForLegs } from "./seed"
 export const runtime = "nodejs"
 
 const SELECTIONS_WITH_UNITS_SELECT =
-  "id, booking_id, package_leg_id, selected, supplier_id, route_id, suite_type_id, service_date, nights, date_anchor, notes, " +
+  "id, booking_id, package_leg_id, selected, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, date_anchor, rate_type_id, notes, " +
   "units:booking_package_selection_units(id, suite_type_id, bedroom_type_id, bedroom_layout_id, bathroom_type_id, adult_count, child_count, infant_count, sort_order)"
 
 interface RouteParams {

@@ -7,8 +7,10 @@ import type { VoucherData } from "@/lib/generate-voucher"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 import { checkVoucherReadiness } from "@/lib/voucher/check-readiness"
 import { composeEmail } from "@/lib/templates/compose-email"
+import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { renderVoucherPdf } from "@/lib/voucher/render-pdf"
-import { getDocumentTextSettings } from "@/lib/settings-access"
+import { getDocumentBrandSettings, getDocumentTextSettings, resolveDocumentBrand } from "@/lib/settings-access"
+import { buildSpecialRequestsText } from "@/lib/reservation-details/format-special-requests"
 import { CONSULTANTS, VOUCHER_TEMPLATE_DEFAULTS, type ConsultantAbbreviation, type VoucherTemplate } from "@/lib/types"
 import type { Database, Json } from "@/lib/supabase/types"
 
@@ -71,7 +73,7 @@ function buildGuestNames(customer: CustomerRecord | null, travellers: { prefix: 
 
   if (travellerNames.length > 0) return travellerNames.join(", ")
 
-  return [customer?.title, customer?.first_name, customer?.last_name].filter(Boolean).join(" ").trim()
+  return formatCustomerSalutation(customer)
 }
 
 function normalizeTemplate(template: VoucherTemplateRow | null): VoucherTemplate {
@@ -98,8 +100,10 @@ export async function POST(req: Request) {
     { data: bookingRaw, error: bookingError },
     { data: suites, error: suitesError },
     { data: travellers, error: travellersError },
+    { data: reservationDetails },
     { data: templateRaw },
     documentText,
+    documentBrandSettings,
   ] = await Promise.all([
     supabase
       .from("bookings")
@@ -119,12 +123,19 @@ export async function POST(req: Request) {
       .eq("booking_id", parsed.data.jobId)
       .order("sort_order"),
     supabase
+      .from("booking_reservation_details")
+      .select("dietary, medical, occasion, smoking_preference, meal_seating")
+      .eq("booking_id", parsed.data.jobId)
+      .maybeSingle(),
+    supabase
       .from("voucher_template")
       .select("id, logo_url, banner_url, header_text, product_line, accent_colour, section_bg, font_family, section_order, hidden_sections, footer_company, footer_phone, footer_email, guidance_text")
       .limit(1)
       .maybeSingle(),
     getDocumentTextSettings(supabase),
+    getDocumentBrandSettings(supabase),
   ])
+  const { brand } = resolveDocumentBrand(documentBrandSettings)
 
   if (bookingError || !bookingRaw) return jsonError("Booking not found", 404)
   if (suitesError) return safeSupabaseError("voucher:suites", suitesError)
@@ -179,7 +190,13 @@ export async function POST(req: Request) {
     arrival: "",
     suiteType,
     numberOfGuests: booking.no_of_adults + booking.no_of_children,
-    specialRequests: booking.additional_services_details ?? "",
+    specialRequests: buildSpecialRequestsText(booking.additional_services_details, {
+      dietary: reservationDetails?.dietary,
+      medical: reservationDetails?.medical,
+      occasion: reservationDetails?.occasion,
+      smokingPreference: reservationDetails?.smoking_preference as "smoking" | "non_smoking" | null,
+      mealSeating: reservationDetails?.meal_seating as "first" | "second" | null,
+    }),
     customerEmail: customer.email,
     customerPhone: customer.phone ?? "",
     enquiry: {
@@ -212,6 +229,7 @@ export async function POST(req: Request) {
       data: voucherData,
       template,
       docTitle: documentText.voucher_doc_title,
+      brand,
     })
   } catch (error) {
     console.error("voucher:render-pdf", error)
@@ -346,7 +364,7 @@ export async function POST(req: Request) {
     },
   })
 
-  const customerName = [customer.first_name, customer.last_name].filter(Boolean).join(" ").trim()
+  const customerName = formatCustomerSalutation(customer)
   const composed = await composeEmail(supabase, "voucher_email", {
     tokens: {
       customerName: customerName || "Valued Guest",

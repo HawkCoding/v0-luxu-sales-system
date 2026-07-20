@@ -9,8 +9,8 @@ import { revenuePerProduct } from "@/lib/reports/revenue-per-product"
 import { outstandingPayments } from "@/lib/reports/outstanding-payments"
 import { enquiriesBySource } from "@/lib/reports/enquiries-by-source"
 import { toCsv } from "@/lib/reports/to-csv"
-import { withOwnerNames } from "@/lib/reports/owner-names"
-import type { BookingInputRow, PaymentInputRow, ReportFilter } from "@/lib/reports/types"
+import { loadReportInputRows } from "@/lib/reports/booking-query"
+import type { ReportFilter } from "@/lib/reports/types"
 
 const REPORT_NAMES = [
   "sales-per-salesperson",
@@ -26,7 +26,9 @@ const querySchema = z.object({
   from: z.string().optional(),
   to: z.string().optional(),
   consultant: z.string().optional(),
-  product: z.enum(["BT", "RR"]).optional(),
+  // Train operator supplier id — product is resolved from the booked route's
+  // supplier, not from the booking number.
+  product: z.string().uuid().optional(),
   stage: z.string().optional(),
 })
 
@@ -128,35 +130,13 @@ export async function GET(
 
   const filter: ReportFilter = parsed.data
 
-  let bookingQuery = supabase
-    .from("bookings")
-    .select(
-      "id, booking_number, consultant, assigned_salesperson_id, departure_date, stage, outcome, source, invoice_balance, created_at",
-    )
-
-  if (filter.from) bookingQuery = bookingQuery.gte("created_at", filter.from)
-  if (filter.to) bookingQuery = bookingQuery.lte("created_at", filter.to + "T23:59:59Z")
-  // The consultant filter value is the owner's user id (assigned_salesperson_id).
-  if (filter.consultant) bookingQuery = bookingQuery.eq("assigned_salesperson_id", filter.consultant)
-  if (filter.stage) bookingQuery = bookingQuery.eq("stage", filter.stage as never)
-  if (filter.product) bookingQuery = bookingQuery.ilike("booking_number", `${filter.product}-%`)
-
-  const { data: bookings, error: bookingsError } = await bookingQuery
-  if (bookingsError) {
-    return NextResponse.json({ error: bookingsError.message }, { status: 500 })
+  const { rows, error: rowsError } = await loadReportInputRows(supabase, filter)
+  if (rowsError) {
+    return NextResponse.json({ error: rowsError }, { status: 500 })
   }
 
-  const { data: payments, error: paymentsError } = await supabase
-    .from("payments")
-    .select("booking_id, amount, received_at")
-    .gt("amount", 0)
-
-  if (paymentsError) {
-    return NextResponse.json({ error: paymentsError.message }, { status: 500 })
-  }
-
-  const bookingRows = await withOwnerNames(supabase, (bookings ?? []) as BookingInputRow[])
-  const paymentRows = (payments ?? []) as PaymentInputRow[]
+  const bookingRows = rows.bookings
+  const paymentRows = rows.payments
   const reportName = report as ReportName
 
   let reportData: unknown[]

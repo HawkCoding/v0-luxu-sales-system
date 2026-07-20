@@ -4,10 +4,18 @@ import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDate } from "@/lib/date-format"
 import { calculateInvoiceBalance } from "@/lib/invoices/calculate-balance"
 import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
+import { buildUnifiedTotals } from "@/lib/invoices/build-unified-totals"
 import { ensureInvoicePdf } from "@/lib/invoices/ensure-invoice-pdf"
+import {
+  computeFinalDueDate,
+  isFinalDueNow,
+  resolveInvoiceStatusLabel,
+  unifiedInvoiceNumber,
+} from "@/lib/invoices/invoice-status"
 import { logError } from "@/lib/error-log"
 import { composeEmail } from "@/lib/templates/compose-email"
-import { getBankingSettings } from "@/lib/settings-access"
+import { formatCustomerSalutation } from "@/lib/person-name-format"
+import { getBankingSettings, getInvoiceStatusOptions } from "@/lib/settings-access"
 
 export const runtime = "nodejs"
 
@@ -57,7 +65,9 @@ export async function POST(req: Request) {
 
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
-    .select("id, booking_number, customer:customers(first_name, last_name, email)")
+    .select(
+      "id, booking_number, departure_date, deposit_paid, cancelled_at, customer:customers(title, first_name, last_name, email)",
+    )
     .eq("id", parsed.data.jobId)
     .single()
 
@@ -73,6 +83,16 @@ export async function POST(req: Request) {
 
   if (existingInvoiceError) return safeSupabaseError("final-invoice:existing", existingInvoiceError)
 
+  // The deposit issue of the booking's invoice, for a consistent money ladder.
+  const { data: depositInvoice } = await supabase
+    .from("invoices")
+    .select("deposit_percentage, amount")
+    .eq("booking_id", parsed.data.jobId)
+    .eq("kind", "deposit")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
   let balance
   try {
     balance = await calculateInvoiceBalance(supabase, parsed.data.jobId)
@@ -84,9 +104,13 @@ export async function POST(req: Request) {
   }
 
   const now = new Date()
-  const dueDate = addDays(now, 7)
+  // Final payment is due 60 days before departure; inside that window (or with
+  // no departure date) the sales team's terms give 48 hours from invoicing.
+  const sixtyDaysBefore = computeFinalDueDate(booking.departure_date)
+  const dueDate =
+    sixtyDaysBefore && !isFinalDueNow(sixtyDaysBefore) ? sixtyDaysBefore : addDays(now, 2)
   const amount = parsed.data.amount ?? balance.balance
-  const invoiceNumber = `${booking.booking_number}-FIN1`
+  const invoiceNumber = unifiedInvoiceNumber(booking.booking_number)
 
   const invoice = await (async () => {
     if (existingInvoice) {
@@ -136,7 +160,24 @@ export async function POST(req: Request) {
   if (!invoice) return jsonError("Final invoice could not be generated", 500)
 
   const customer = Array.isArray(booking.customer) ? booking.customer[0] : booking.customer
-  const customerName = [customer?.first_name, customer?.last_name].filter(Boolean).join(" ").trim()
+  const customerName = formatCustomerSalutation(customer)
+
+  const totals = buildUnifiedTotals({
+    balance,
+    departureDate: booking.departure_date,
+    depositPercentage: depositInvoice?.deposit_percentage ?? null,
+    depositAmount: depositInvoice?.amount ?? null,
+  })
+  const statusOptions = await getInvoiceStatusOptions(supabase)
+  const statusLabel = resolveInvoiceStatusLabel(
+    statusOptions,
+    {
+      depositPaid: booking.deposit_paid ?? false,
+      outstanding: balance.balance,
+      cancelled: Boolean(booking.cancelled_at),
+    },
+    invoice.display_status,
+  )
 
   // Render + store the invoice PDF and return it as an email attachment.
   let pdf
@@ -145,7 +186,7 @@ export async function POST(req: Request) {
       invoice: {
         id: invoice.id,
         booking_id: invoice.booking_id,
-        kind: "final",
+        quote_id: invoice.quote_id,
         invoice_number: invoice.invoice_number,
         amount: invoice.amount,
         currency: invoice.currency,
@@ -155,11 +196,8 @@ export async function POST(req: Request) {
       },
       bookingNumber: booking.booking_number,
       customerName,
-      lines: [
-        { label: "Quote total", value: formatMoney(balance.quoteTotal, invoice.currency) },
-        { label: "Payments received", value: formatMoney(balance.totalPaid, invoice.currency) },
-        { label: "Balance", value: formatMoney(balance.balance, invoice.currency) },
-      ],
+      statusLabel,
+      totals,
     })
   } catch (error) {
     console.error("final-invoice:pdf", error)

@@ -67,6 +67,28 @@ export function normalizeFirstName(value: string): string {
     .join(" ")
 }
 
+export interface CustomerNameFields {
+  title?: string | null
+  first_name?: string | null
+  last_name?: string | null
+}
+
+/**
+ * How a customer is addressed in client-facing documents and emails: title + surname
+ * ("Mr Smith"). Falls back to the full name when no title is on record, so a greeting
+ * never reads as a bare surname. Returns "" when nothing is on record — callers supply
+ * their own placeholder.
+ */
+export function formatCustomerSalutation(customer: CustomerNameFields | null | undefined): string {
+  const title = customer?.title?.trim() ?? ""
+  const firstName = customer?.first_name?.trim() ?? ""
+  const lastName = customer?.last_name?.trim() ?? ""
+
+  if (title && lastName) return `${title} ${lastName}`
+
+  return [firstName, lastName].filter(Boolean).join(" ")
+}
+
 export function normalizeLastName(value: string): string {
   const compact = normalizeWhitespace(value).normalize("NFC")
   if (!compact) return ""

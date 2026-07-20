@@ -6,6 +6,7 @@ import { toast } from "sonner"
 import { InboundEmailSettings } from "@/components/inbound-email-settings"
 import { BackupSettings } from "@/components/backup-settings"
 import { BankingSettingsEditor } from "@/components/banking-settings-editor"
+import { InvoiceStatusSettingsEditor } from "@/components/invoice-status-settings-editor"
 import { BACKUPS_ENABLED, QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -1333,7 +1334,7 @@ function DefaultAgeBandsCard({ canEdit }: { canEdit: boolean }) {
         )}
         {!isValid && (
           <p className="text-xs text-destructive">
-            Infant max must be â‰¤ child max, and both must be between 0 and 17.
+            Infant max must be ≤ child max, and both must be between 0 and 17.
           </p>
         )}
       </CardContent>
@@ -1820,6 +1821,19 @@ export default function SettingsPage() {
         </CardHeader>
         <CardContent>
           <BankingSettingsEditor canEdit={canEditDepositSettings} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-medium">Invoice Statuses</CardTitle>
+          <CardDescription className="text-xs">
+            Labels shown in the invoice header. System statuses apply automatically as the booking
+            progresses; extra statuses can be set manually per invoice.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <InvoiceStatusSettingsEditor canEdit={canEditDepositSettings} />
         </CardContent>
       </Card>
 

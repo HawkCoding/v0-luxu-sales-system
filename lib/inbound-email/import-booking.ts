@@ -329,10 +329,7 @@ export async function createEmailBookingFromParsedDraft(
     },
   } satisfies Json
 
-  const { bookingNumber: allocatedBookingNumber } = await allocateJobNumberForBooking(supabase, {
-    routeId,
-    packageId,
-  })
+  const { bookingNumber: allocatedBookingNumber } = await allocateJobNumberForBooking(supabase)
 
   const bookingInsert: BookingInsert = {
     booking_number: allocatedBookingNumber,

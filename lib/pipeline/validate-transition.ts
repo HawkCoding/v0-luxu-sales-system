@@ -5,7 +5,6 @@ export type GateSeverity = "block" | "confirm"
 export type GateAutoFix =
   | "create_invoice_25pct"
   | "create_final_invoice"
-  | "create_invoice_correspondence"
   | "create_voucher_pdf"
 
 export interface GateFailure {
@@ -132,6 +131,18 @@ function hasCorrespondence(
     (correspondence) =>
       correspondence.kind === kind ||
       subjectIncludes(correspondence, subjectTerms),
+  )
+}
+
+function hasSentCorrespondence(
+  correspondences: TransitionCorrespondence[],
+  kind: string,
+  subjectTerms: string[],
+): boolean {
+  return correspondences.some(
+    (correspondence) =>
+      correspondence.status === "sent" &&
+      (correspondence.kind === kind || subjectIncludes(correspondence, subjectTerms)),
   )
 }
 
@@ -264,6 +275,9 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
     const hasDepositInvoice = invoices.some(
       (invoice) => invoice.kind === "deposit" && invoice.status !== "void",
     )
+    const hasSentDepositInvoice = invoices.some(
+      (invoice) => invoice.kind === "deposit" && (invoice.status === "sent" || invoice.status === "paid"),
+    )
     const hasInvoiceDocument = hasDocument(documents, "invoice_pdf")
     if (!hasDepositInvoice && !hasInvoiceDocument && !manualConfirmations.createDepositInvoice) {
       failures.push({
@@ -275,15 +289,15 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
       })
     } else if (
       (hasDepositInvoice || hasInvoiceDocument) &&
-      !hasCorrespondence(correspondences, "invoice", ["invoice", "deposit request"]) &&
+      !hasSentDepositInvoice &&
+      !hasSentCorrespondence(correspondences, "invoice", ["invoice", "deposit request"]) &&
       !manualConfirmations.createInvoiceCorrespondence
     ) {
       failures.push({
         gateId: "invoice_correspondence",
-        message: "Invoice correspondence must exist before the deposit invoice stage.",
-        fixHint: "Confirm that the system should schedule the invoice/deposit request email.",
+        message: "The deposit invoice has been generated but not sent to the customer.",
+        fixHint: "Preview and send the deposit invoice, or confirm it was already sent outside the system.",
         severity: "confirm",
-        autoFixable: "create_invoice_correspondence",
       })
     }
   }
@@ -291,8 +305,8 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
   if (crossedStages.includes("deposit_paid") && !manualConfirmations.depositReceived) {
     failures.push({
       gateId: "deposit_received_confirmation",
-      message: "Confirm the deposit has been received before marking Deposit Paid.",
-      fixHint: "Tick the deposit received confirmation in the transition modal.",
+      message: "Confirm the deposit has been received.",
+      fixHint: "Tick to confirm — no amount entry needed.",
       severity: "confirm",
     })
   }
@@ -322,8 +336,8 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
   if (crossedStages.includes("final_paid") && !manualConfirmations.finalPaymentReceived) {
     failures.push({
       gateId: "final_payment_confirmation",
-      message: "Confirm the booking is paid in full before moving to Paid in Full.",
-      fixHint: "Tick the final payment confirmation in the transition modal.",
+      message: "Confirm the booking is paid in full.",
+      fixHint: "Tick to confirm — no amount entry needed.",
       severity: "confirm",
     })
   }

@@ -508,7 +508,7 @@ export async function POST(req: Request) {
         continue
       }
 
-      const bookingNumber = await allocateJobNumber(supabase, "BT")
+      const bookingNumber = await allocateJobNumber(supabase)
       bookingRows.push({
         booking_number: bookingNumber,
         customer_id: row.customerId,

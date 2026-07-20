@@ -3,7 +3,9 @@ import { formatDisplayDate } from "@/lib/date-format"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { applyTransition } from "@/lib/pipeline/apply-transition"
 import { createServiceClient } from "@/lib/supabase/server"
+import { resolveDirectedRouteName } from "@/lib/routes/route-name"
 import type { PipelineStage, Source } from "@/lib/types"
+import { firstRecord } from "@/lib/utils"
 
 const THANK_YOU_CATCHUP_WINDOW_DAYS = 14
 
@@ -19,8 +21,23 @@ interface MaintenanceBooking {
   departure_date: string | null
   duration_nights: number | null
   trip_end_date: string | null
+  route_reversed: boolean | null
   customer: { first_name: string | null } | null
-  route: { name: string | null } | null
+  route: {
+    name: string | null
+    direction_mode: string | null
+    origin: { name: string | null } | { name: string | null }[] | null
+    destination: { name: string | null } | { name: string | null }[] | null
+  } | null
+}
+
+function resolveBookingRouteName(booking: MaintenanceBooking): string | null {
+  const route = booking.route
+  if (!route) return null
+  const origin = firstRecord(route.origin)?.name
+  const destination = firstRecord(route.destination)?.name
+  if (route.direction_mode !== "round_trip" || !origin || !destination) return route.name
+  return resolveDirectedRouteName(origin, destination, booking.route_reversed ?? false)
 }
 
 function utcDateOnly(date: Date): Date {
@@ -51,7 +68,7 @@ export async function GET(request: Request) {
   const { data: bookings, error: bookingsError } = await supabase
     .from("bookings")
     .select(
-      "id, booking_number, stage, source, raw_text, updated_at, customer_id, consultant, departure_date, duration_nights, trip_end_date, customer:customers(first_name), route:routes(name)",
+      "id, booking_number, stage, source, raw_text, updated_at, customer_id, consultant, departure_date, duration_nights, trip_end_date, route_reversed, customer:customers(first_name), route:routes(name, direction_mode, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name))",
     )
     .in("stage", ["voucher_sent", "trip_active"])
     .not("departure_date", "is", null)
@@ -102,7 +119,7 @@ export async function GET(request: Request) {
         tokens: {
           customerName: booking.customer?.first_name ?? "Valued Guest",
           jobNumber: booking.booking_number,
-          routeName: booking.route?.name ?? "your journey",
+          routeName: resolveBookingRouteName(booking) ?? "your journey",
           tripEndDate: formatDisplayDate(tripEndDate),
           consultantName: booking.consultant ?? "The Luxus team",
         },

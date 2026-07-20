@@ -11,6 +11,7 @@ import {
   Send,
 } from "lucide-react"
 import { toast } from "sonner"
+import { QUOTE_REFERENCE_ENABLED } from "@/lib/feature-flags"
 import { Button } from "@/components/ui/button"
 import { useOptimisticSend } from "@/hooks/use-optimistic-send"
 import {
@@ -23,6 +24,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import dynamic from "next/dynamic"
+import { EmailAttachmentPicker } from "@/components/email-attachment-picker"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -76,6 +78,7 @@ export function QuotePreviewSendDialog({
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [libraryAttachmentIds, setLibraryAttachmentIds] = useState<string[]>([])
   const optimisticSend = useOptimisticSend()
 
   function setOpen(next: boolean) {
@@ -109,7 +112,12 @@ export function QuotePreviewSendDialog({
 
       setHtml(payload.html)
       setContent(payload.bodyContentHtml ?? null)
-      setSubject(payload.subject ?? `Quote ${payload.quoteNumber ?? bookingNumber}`)
+      // Customer-facing fallback when the template resolves no subject, so it
+      // follows the same reference rule as the quote email and PDF.
+      const subjectReference = QUOTE_REFERENCE_ENABLED
+        ? payload.quoteNumber ?? bookingNumber
+        : bookingNumber
+      setSubject(payload.subject ?? `Quote ${subjectReference}`)
       setWarnings(payload.warnings ?? [])
     } catch (previewError) {
       const message = previewError instanceof Error ? previewError.message : "Failed to render quote preview"
@@ -142,6 +150,7 @@ export function QuotePreviewSendDialog({
 
     const capturedSubject = subject
     const capturedHtml = finalHtml
+    const capturedLibraryIds = libraryAttachmentIds
     // Close dialog immediately for Gmail-style undo flow.
     setOpen(false)
     setSending(false)
@@ -162,6 +171,7 @@ export function QuotePreviewSendDialog({
             subject: capturedSubject,
             bodyHtml: capturedHtml,
             moveStage: "quote_sent",
+            libraryAttachmentIds: capturedLibraryIds.length > 0 ? capturedLibraryIds : undefined,
           }),
         })
         const payload = (await response.json()) as { error?: string }
@@ -232,6 +242,13 @@ export function QuotePreviewSendDialog({
                   onChange={(event) => setSubject(event.target.value)}
                 />
               </div>
+              <EmailAttachmentPicker
+                bookingId={quote.jobId}
+                kind="quote"
+                selected={libraryAttachmentIds}
+                onSelectedChange={setLibraryAttachmentIds}
+                disabled={sending}
+              />
               {content !== null && (
                 <div className="space-y-1.5">
                   <Label htmlFor={`quote-body-${quote.id}`}>Email body (this send only)</Label>

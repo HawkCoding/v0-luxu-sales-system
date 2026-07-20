@@ -306,13 +306,13 @@ export function JobQuotesTab({
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm" style={{ fontFamily: "var(--font-inter)" }}>
+                <table className="w-full table-fixed text-sm" style={{ fontFamily: "var(--font-inter)" }}>
                   <thead>
                     <tr className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wider border-b border-border">
-                      <th className="pb-2">Description</th>
-                      <th className="pb-2 text-right">Qty</th>
-                      <th className="pb-2 text-right">Unit Price</th>
-                      <th className="pb-2 text-right">Total</th>
+                      <th className="pb-2 w-[40%]">Description</th>
+                      <th className="pb-2 pl-4 text-right w-16">Qty</th>
+                      <th className="pb-2 pl-6 text-right w-28">Unit Price</th>
+                      <th className="pb-2 pl-6 text-right w-28">Total</th>
                       {canEditLines && <th className="pb-2 w-8" aria-label="Actions" />}
                     </tr>
                   </thead>
@@ -321,26 +321,26 @@ export function JobQuotesTab({
                       const isExtra = li.pricingSnapshot?.isExtra === true
                       return (
                       <tr key={i} className="border-b border-border/50 last:border-0">
-                        <td className="py-2 text-xs text-foreground">
+                        <td className="py-2 text-xs text-foreground break-words">
                           {li.description}
                           {isExtra ? (
                             <Badge variant="outline" className="ml-1.5 text-[9px] align-middle">Extra</Badge>
                           ) : null}
                         </td>
-                        <td className="py-2 text-xs text-right text-muted-foreground">
+                        <td className="py-2 pl-4 text-xs text-right text-muted-foreground">
                           <div>{li.qty}</div>
                           {li.pricingSnapshot?.unit ? (
                             <div className="text-[10px] text-muted-foreground">{li.pricingSnapshot.unit}</div>
                           ) : null}
                         </td>
-                        <td className={`py-2 text-xs text-right ${isMissingPricing(li) ? "text-destructive font-medium" : "text-muted-foreground"}`}>
+                        <td className={`py-2 pl-6 text-xs text-right ${isMissingPricing(li) ? "text-destructive font-medium" : "text-muted-foreground"}`}>
                           {li.unitPrice === 0
                             ? isMissingPricing(li)
                               ? "TBD"
                               : "Included"
                             : `R ${li.unitPrice.toLocaleString()}`}
                         </td>
-                        <td className="py-2 text-xs text-right text-foreground font-medium">R {li.total.toLocaleString()}</td>
+                        <td className="py-2 pl-6 text-xs text-right text-foreground font-medium">R {li.total.toLocaleString()}</td>
                         {canEditLines && (
                           <td className="py-2 text-right">
                             <button

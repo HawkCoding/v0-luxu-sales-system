@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto"
 import { z } from "zod"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { detectCountryInText, loadCountryAliasMap, normalizeCountry } from "@/lib/countries"
-import { addJobNumberingMetadata, allocateJobNumberForBooking, type JobNumberAllocation } from "@/lib/job-numbering"
+import { allocateJobNumberForBooking, type JobNumberAllocation } from "@/lib/job-numbering"
 import { isAuthorizedWebhookRequest } from "@/lib/api/webhook-secret"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
 import { buildPackageQuoteLineItems, calculateQuoteTotals } from "@/lib/quotes/build-from-package"
@@ -582,15 +582,7 @@ export async function POST(req: Request) {
   const hotelSupplierId = await findHotelSupplierId(supabase, body.hotelOption)
   let jobNumberAllocation: JobNumberAllocation
   try {
-    jobNumberAllocation = await allocateJobNumberForBooking(supabase, {
-      supplierId: normalizeNullableText(body.supplierId),
-      parsedSupplier: normalizeNullableText(body.supplier),
-      routeId,
-      routeName: normalizeNullableText(body.direction),
-      packageId,
-      packageName: normalizeNullableText(body.packageOption),
-      rawText: normalizeNullableText(body.rawText),
-    })
+    jobNumberAllocation = await allocateJobNumberForBooking(supabase)
   } catch (error) {
     console.error("enquiries:allocateJobNumber", error)
     return NextResponse.json({ error: "Failed to allocate job number" }, { status: 500 })
@@ -603,7 +595,7 @@ export async function POST(req: Request) {
     existingExtractedJson.formFields && typeof existingExtractedJson.formFields === "object" && !Array.isArray(existingExtractedJson.formFields)
       ? existingExtractedJson.formFields as Record<string, unknown>
       : {}
-  const extractedJson = addJobNumberingMetadata({
+  const extractedJson = {
     ...existingExtractedJson,
     formFields: {
       ...existingFormFields,
@@ -619,7 +611,7 @@ export async function POST(req: Request) {
       hotelSupplierId,
       supplierId: normalizeNullableText(body.supplierId),
     },
-  }, jobNumberAllocation.resolution)
+  }
 
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
@@ -791,21 +783,6 @@ export async function POST(req: Request) {
     },
   })
 
-  if (jobNumberAllocation.resolution.needsReview) {
-    await supabase.from("audit_logs").insert({
-      actor: user?.email ?? (body.rawText ? "consultant" : "system"),
-      actor_user_id: user?.id ?? null,
-      entity_type: "Booking",
-      entity_id: booking.id,
-      action: "job_number_product_needs_review",
-      meta_json: {
-        booking_number: booking.booking_number,
-        reason: jobNumberAllocation.resolution.reason,
-        sources: jobNumberAllocation.resolution.sources,
-      },
-    })
-  }
-
   return NextResponse.json({
     bookingNumber: booking.booking_number,
     bookingId: booking.id,
@@ -816,7 +793,6 @@ export async function POST(req: Request) {
     quoteWarning: draftQuote.warning,
     customerId,
     customerIsRepeatClient,
-    needsReview: jobNumberAllocation.resolution.needsReview,
   })
 }
 

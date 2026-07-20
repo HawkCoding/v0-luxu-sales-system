@@ -15,11 +15,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { BookingTransportRequest, PackageLeg } from "@/lib/types"
+import type { BookingTransportRequest, PackageLeg, RateType } from "@/lib/types"
 import {
   createDraftTransportRequest,
   type TransportLegState,
 } from "@/lib/packages/apply-dialog-state"
+import { RateTypeSelect } from "@/components/rate-type-select"
 
 const NONE_VALUE = "__none"
 
@@ -27,9 +28,11 @@ interface TransportLegEditorProps {
   leg: PackageLeg
   value: TransportLegState
   onChange: (next: TransportLegState) => void
+  /** Active (non-archived) rate types — shows the per-leg rate type selector when non-empty. */
+  rateTypes?: RateType[]
 }
 
-export function TransportLegEditor({ leg, value, onChange }: TransportLegEditorProps) {
+export function TransportLegEditor({ leg, value, onChange, rateTypes = [] }: TransportLegEditorProps) {
   const isRental = leg.supplierKind === "vehicle_rental"
 
   function updateRequest(id: string, patch: Partial<BookingTransportRequest>) {
@@ -98,7 +101,9 @@ export function TransportLegEditor({ leg, value, onChange }: TransportLegEditorP
               type="button"
               size="sm"
               variant="outline"
-              onClick={() => onChange({ ...value, requests: [...value.requests, createDraftTransportRequest(leg)] })}
+              onClick={() =>
+                onChange({ ...value, requests: [...value.requests, createDraftTransportRequest(leg, value.routeId)] })
+              }
             >
               <Plus className="mr-1 h-3 w-3" />
               Add {isRental ? "vehicle" : "transfer"}
@@ -126,6 +131,16 @@ export function TransportLegEditor({ leg, value, onChange }: TransportLegEditorP
             Pre-fills empty pickup/drop-off fields — documents always show what you type below.
           </p>
         </div>
+      ) : null}
+
+      {value.selected ? (
+        <RateTypeSelect
+          rateTypes={rateTypes}
+          value={value.rateTypeId}
+          onChange={(rateTypeId) => onChange({ ...value, rateTypeId })}
+          id={`rate-type-${leg.id}`}
+          className="max-w-[280px]"
+        />
       ) : null}
 
       {value.selected

@@ -145,6 +145,7 @@ function buildAuth({ stage, invoiceBalance, existingDocumentId, existingVoucherI
 
       if (table === "booking_suites") return createSelectResult([{ suite_type_name: "Luxury" }])
       if (table === "travellers") return createSelectResult([])
+      if (table === "booking_reservation_details") return createSelectResult(null)
       if (table === "voucher_template") return createSelectResult(null)
 
       if (table === "app_settings") {

@@ -1,4 +1,5 @@
 import { isOptionalPackageLegKind, type PackageDetail, type QuoteLineItem, type SupplierKind } from "@/lib/types"
+import { findRateCardCandidates, hasAnyRateCardFor, selectRateCard } from "@/lib/rate-cards/resolve"
 
 export interface PackageLegSelection {
   legId: string
@@ -136,13 +137,7 @@ export function getValidRateCard(
   suiteTypeId: string,
   travelDate: string,
 ) {
-  return leg.rateCards.find(
-    (rateCard) =>
-      rateCard.routeId === routeId &&
-      rateCard.suiteTypeId === suiteTypeId &&
-      rateCard.validFrom <= travelDate &&
-      (rateCard.validTo === null || rateCard.validTo >= travelDate),
-  )
+  return selectRateCard(findRateCardCandidates(leg.rateCards, routeId, suiteTypeId, travelDate))
 }
 
 function getLegSelection(
@@ -305,14 +300,18 @@ export function buildPackagePricing({
     }
 
     const validRateCard = getValidRateCard(leg, routeId, suiteTypeId, travelDate)
-    if (!validRateCard) {
-      const legLabel = leg.label ?? leg.supplierName
-      throw new Error(`No pricing available for "${legLabel}" on ${travelDate}. Update the package rate cards first.`)
-    }
-
     const legLabel = leg.label ?? leg.supplierName
     const routeName = getRouteName(leg, routeId)
     const suiteTypeName = getSuiteTypeName(leg, suiteTypeId)
+    if (!validRateCard) {
+      const where = `"${suiteTypeName ?? suiteTypeId}" on "${routeName ?? "this route"}" (${legLabel})`
+      throw new Error(
+        hasAnyRateCardFor(leg.rateCards, routeId, suiteTypeId)
+          ? `No rate card covers ${travelDate} for ${where}. Extend the validity period or add a new one.`
+          : `No rate card for ${where}. Add one under Suppliers → ${leg.supplierName} → rate cards.`,
+      )
+    }
+
     const descriptionParts = [legLabel, suiteTypeName, routeName].filter(Boolean)
     const description = descriptionParts.join(" - ")
     const snapshotBase = {

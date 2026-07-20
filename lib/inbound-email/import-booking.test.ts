@@ -11,23 +11,12 @@ vi.mock("@/lib/supabase/server", () => ({
 }))
 
 vi.mock("@/lib/job-numbering", () => ({
-  addJobNumberingMetadata: (extractedJson: Record<string, unknown>, resolution: Record<string, unknown>) => ({
-    ...extractedJson,
-    numbering: resolution,
-  }),
   allocateJobNumberForBooking: vi.fn(async () => {
     importBookingMocks.bookingSequence += 1
     return {
-      bookingNumber: `BT-2026-${String(importBookingMocks.bookingSequence).padStart(4, "0")}`,
-      resolution: {
-        prefix: "BT",
-        needsReview: false,
-        reason: "matched_blue_train",
-        sources: {},
-      },
+      bookingNumber: `LTT-2026-${String(importBookingMocks.bookingSequence).padStart(4, "0")}`,
     }
   }),
-  getTrainProductReviewWarning: () => "Train product needs review",
 }))
 
 import { createEmailBookingFromParsedDraft } from "./import-booking"

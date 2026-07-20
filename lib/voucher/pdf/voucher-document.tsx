@@ -1,6 +1,7 @@
 import { Document, Page, Text, View } from "@react-pdf/renderer"
 import type { VoucherData } from "@/lib/generate-voucher"
 import { sortedVoucherServiceBlocks } from "@/lib/generate-voucher"
+import type { DocumentBrand } from "@/lib/settings-access"
 import type { VoucherSectionKey, VoucherTemplate } from "@/lib/types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
 import { registerVoucherFonts, resolveVoucherFontPairing } from "./fonts"
@@ -15,6 +16,8 @@ export interface VoucherDocumentProps {
   data: VoucherData
   template?: VoucherTemplate | null
   docTitle?: string
+  /** Shared brand copy for the masthead; omitted keeps the template's own text. */
+  brand?: DocumentBrand
 }
 
 function normalizeTemplate(template?: VoucherTemplate | null): VoucherTemplate {
@@ -38,7 +41,7 @@ function sectionFor(key: VoucherSectionKey, data: VoucherData, template: Voucher
   return null
 }
 
-export function VoucherDocument({ data, template, docTitle = "TRAVEL VOUCHERS" }: VoucherDocumentProps) {
+export function VoucherDocument({ data, template, docTitle = "TRAVEL VOUCHERS", brand }: VoucherDocumentProps) {
   registerVoucherFonts()
 
   const t = normalizeTemplate(template)
@@ -60,7 +63,7 @@ export function VoucherDocument({ data, template, docTitle = "TRAVEL VOUCHERS" }
         <View fixed style={styles.frameOuter} />
         <View fixed style={styles.frameInner} />
 
-        <HeaderBanner template={t} styles={styles} />
+        <HeaderBanner template={t} styles={styles} brand={brand} />
 
         <View style={styles.voucherNumberRow}>
           <Text style={styles.title}>{docTitle}</Text>

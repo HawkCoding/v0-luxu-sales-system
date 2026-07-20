@@ -7,7 +7,7 @@
 // editor can show a readable name on its locked placeholder card.
 
 import { formatDisplayDate, formatDisplayDateLong } from "@/lib/date-format"
-import { QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
+import { QUOTE_REFERENCE_ENABLED, QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
 import {
@@ -17,6 +17,7 @@ import {
   formatJourneyRange,
   formatPaxLabel,
   formatTotalLabel,
+  VAT_INCLUSIVE_SUFFIX,
 } from "@/lib/quotes/quote-presentation"
 
 export interface QuoteSummaryInput {
@@ -85,8 +86,12 @@ export function buildQuoteSummaryBlock(input: QuoteSummaryInput): string {
   const perPersonRate = derivePerPersonRate(input.total, pax)
 
   const metaLines = [
-    `<p style="${summaryLine}"><strong>Quote number:</strong> ${escapeHtml(input.quoteNumber)}</p>`,
-    `<p style="${summaryLine}"><strong>Quote date:</strong> ${formatQuoteDate(input.quoteDate)}</p>`,
+    ...(QUOTE_REFERENCE_ENABLED
+      ? [
+          `<p style="${summaryLine}"><strong>Quote number:</strong> ${escapeHtml(input.quoteNumber)}</p>`,
+          `<p style="${summaryLine}"><strong>Quote date:</strong> ${formatQuoteDate(input.quoteDate)}</p>`,
+        ]
+      : []),
     ...(QUOTE_VALIDITY_ENABLED
       ? [`<p style="${summaryLine}"><strong>Valid until:</strong> ${formatQuoteDate(input.validUntil)}</p>`]
       : []),
@@ -101,7 +106,7 @@ export function buildQuoteSummaryBlock(input: QuoteSummaryInput): string {
     (perPersonRate !== null
       ? `<p style="${perPersonLine}">${escapeHtml(paxLabel)} x ${formatMoney(perPersonRate)} per person</p>`
       : "") +
-    `<p style="${totalLine}">${escapeHtml(formatTotalLabel(pax))}: ${formatMoney(input.total)} (VAT inclusive)</p>` +
+    `<p style="${totalLine}">${escapeHtml(formatTotalLabel(pax))}: ${formatMoney(input.total)} ${escapeHtml(VAT_INCLUSIVE_SUFFIX)}</p>` +
     `</div>`
 
   const sortedBlocks = sortItineraryBlocksChronologically(input.itineraryBlocks)

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest"
 
-import { formatDisplayDate, formatDisplayDateLong, formatDisplayDateTime } from "./date-format"
+import {
+  formatDayOfMonth,
+  formatDisplayDate,
+  formatDisplayDateLong,
+  formatDisplayDateShort,
+  formatDisplayDateTime,
+} from "./date-format"
 
 describe("formatDisplayDate", () => {
   it("formats an ISO date as zero-padded day/month/year", () => {
@@ -37,11 +43,39 @@ describe("formatDisplayDateTime", () => {
 })
 
 describe("formatDisplayDateLong", () => {
-  it("formats as day, spelled-out month, year", () => {
-    expect(formatDisplayDateLong("2026-07-04")).toBe("4 July 2026")
+  it("formats as zero-padded day, spelled-out month, year", () => {
+    expect(formatDisplayDateLong("2026-07-04")).toBe("04 July 2026")
+  })
+
+  it("leaves a two-digit day alone", () => {
+    expect(formatDisplayDateLong("2026-07-18")).toBe("18 July 2026")
   })
 
   it("returns an empty string for null input", () => {
     expect(formatDisplayDateLong(null)).toBe("")
+  })
+})
+
+describe("formatDisplayDateShort", () => {
+  it("formats as zero-padded day, abbreviated month, year", () => {
+    expect(formatDisplayDateShort("2026-07-04")).toBe("04 Jul 2026")
+  })
+
+  it("leaves a two-digit day alone", () => {
+    expect(formatDisplayDateShort("2026-07-18")).toBe("18 Jul 2026")
+  })
+
+  it("returns an empty string for null input", () => {
+    expect(formatDisplayDateShort(null)).toBe("")
+  })
+})
+
+describe("formatDayOfMonth", () => {
+  it("zero-pads a single-digit day", () => {
+    expect(formatDayOfMonth("2026-07-04")).toBe("04")
+  })
+
+  it("returns an empty string for null input", () => {
+    expect(formatDayOfMonth(null)).toBe("")
   })
 })

@@ -383,8 +383,6 @@ export function VoucherTemplateEditor({ initial, canEdit }: Props) {
         body: JSON.stringify({
           logo_url: draft.logo_url,
           banner_url: draft.banner_url,
-          header_text: draft.header_text,
-          product_line: draft.product_line,
           accent_colour: draft.accent_colour,
           section_bg: draft.section_bg,
           font_family: draft.font_family,
@@ -449,32 +447,13 @@ export function VoucherTemplateEditor({ initial, canEdit }: Props) {
 
       <Separator />
 
-      {/* ── Header Text ── */}
-      <section>
-        <h3 className="text-sm font-semibold mb-3">Header Text</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="product_line">Product line</Label>
-            <Input
-              id="product_line"
-              value={draft.product_line}
-              onChange={(e) => set("product_line", e.target.value)}
-              disabled={!canEdit}
-              placeholder="THE BLUE TRAIN • ROVOS RAIL"
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="header_text">Sub-heading</Label>
-            <Input
-              id="header_text"
-              value={draft.header_text}
-              onChange={(e) => set("header_text", e.target.value)}
-              disabled={!canEdit}
-              placeholder="A division of Luxus Travel & Tours"
-            />
-          </div>
-        </div>
-      </section>
+      {/* The masthead heading + sub-heading are now edited once on
+          Templates → Documents (the brand block), which feeds every document. */}
+      <p className="text-xs text-muted-foreground">
+        The masthead heading and sub-heading are set on the{" "}
+        <span className="font-medium">Documents</span> tab (brand block) so they
+        stay consistent across quotes, invoices and vouchers.
+      </p>
 
       <Separator />
 

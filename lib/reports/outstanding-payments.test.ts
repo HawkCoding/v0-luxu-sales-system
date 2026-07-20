@@ -6,6 +6,7 @@ const bookings: BookingInputRow[] = [
   {
     id: "b1",
     booking_number: "BT-2026-0001",
+    route_id: null,
     consultant: "LB",
     assigned_salesperson_id: "u-lb",
     owner_name: "Leonie",
@@ -19,6 +20,7 @@ const bookings: BookingInputRow[] = [
   {
     id: "b2",
     booking_number: "RR-2026-0001",
+    route_id: null,
     consultant: "CDJ",
     assigned_salesperson_id: "u-cdj",
     owner_name: "Carmen",
@@ -32,6 +34,7 @@ const bookings: BookingInputRow[] = [
   {
     id: "b3",
     booking_number: "BT-2026-0002",
+    route_id: null,
     consultant: null,
     assigned_salesperson_id: null,
     owner_name: null,
@@ -45,6 +48,7 @@ const bookings: BookingInputRow[] = [
   {
     id: "b4",
     booking_number: "BT-2026-0003",
+    route_id: null,
     consultant: "LB",
     assigned_salesperson_id: "u-lb",
     owner_name: "Leonie",

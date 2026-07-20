@@ -15,6 +15,7 @@ import {
   Trash2,
 } from "lucide-react"
 import { SortableList } from "@/components/ui/sortable-list"
+import { isOngoingRateCard } from "@/lib/rate-cards/resolve"
 import { SuiteVocabularyCard, type EditableVocabularyValue } from "@/components/supplier/suite-vocabulary-card"
 import { ApplicableRatesCard } from "@/components/supplier/applicable-rates-card"
 import { VariantChipPicker } from "@/components/supplier/variant-chip-picker"
@@ -1656,7 +1657,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                 <div className="space-y-2">
                   <Label>Valid to</Label>
                   <div className="relative">
-                    {!period.validTo?.trim() ? (
+                    {isOngoingRateCard(period.validTo) ? (
                       <Badge
                         variant="outline"
                         className="absolute top-0 right-1 z-10 -translate-y-1/2 bg-background px-1.5 py-0 text-[10px] font-medium uppercase tracking-wide"

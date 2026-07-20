@@ -13,6 +13,11 @@ import {
  * trip range stays correct no matter which dialog (or API client) edited the services.
  *
  * `package_travel_date` is kept in sync with the derived start for legacy read paths.
+ *
+ * `departure_date` — the enquiry-time scalar that vouchers/itineraries and pricing read
+ * directly — is also re-synced to the derived start, but only when a start exists: a package
+ * whose legs aren't dated yet keeps its enquiry-time departure rather than being nulled (which
+ * would trip the departure_date_missing voucher-readiness gate).
  */
 export async function recomputeBookingTripDates(
   supabase: SupabaseClient<Database>,
@@ -90,13 +95,18 @@ export async function recomputeBookingTripDates(
 
   const range = deriveTripDateRange(spans)
 
+  const updates: Database["public"]["Tables"]["bookings"]["Update"] = {
+    trip_start_date: range.start,
+    trip_end_date: range.end,
+    package_travel_date: range.start,
+  }
+  // Keep the doc/pricing departure in sync with the legs; never null a known
+  // enquiry-time date just because the legs aren't dated yet.
+  if (range.start) updates.departure_date = range.start
+
   const { error: updateError } = await supabase
     .from("bookings")
-    .update({
-      trip_start_date: range.start,
-      trip_end_date: range.end,
-      package_travel_date: range.start,
-    })
+    .update(updates)
     .eq("id", bookingId)
 
   if (updateError) return { error: updateError.message }

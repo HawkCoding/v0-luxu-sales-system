@@ -591,6 +591,68 @@ describe("POST /api/packages/[slug]/apply", () => {
     expect(hotelLine.unitPrice).toBe(500)
   })
 
+  it("uses a per-selection rateTypeId without any quote-level rate type", async () => {
+    const response = await postApply({
+      jobId: JOB_ID,
+      quoteId: QUOTE_ID,
+      travelDate: "2026-06-01",
+      selections: [
+        {
+          legId: TRAIN_LEG_ID,
+          selected: true,
+          routeId: TRAIN_ROUTE_ID,
+          rateTypeId: RATE_TYPE_RESIDENT_ID,
+          units: [{ suiteTypeId: TRAIN_SUITE_ID, adultCount: 2, childCount: 1, infantCount: 0 }],
+        },
+        { legId: HOTEL_LEG_ID, selected: false },
+        { legId: TRANSFER_LEG_ID, selected: false },
+      ],
+    })
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    const adultLine = payload.lineItems.find((item: { description: string }) =>
+      item.description.endsWith("Adult"),
+    )
+    expect(adultLine.unitPrice).toBe(800)
+  })
+
+  it("applies per-leg rate types independently: overridden leg re-prices, others keep the default", async () => {
+    const response = await postApply({
+      jobId: JOB_ID,
+      quoteId: QUOTE_ID,
+      travelDate: "2026-06-01",
+      selections: [
+        {
+          legId: TRAIN_LEG_ID,
+          selected: true,
+          routeId: TRAIN_ROUTE_ID,
+          rateTypeId: RATE_TYPE_RESIDENT_ID,
+          units: [{ suiteTypeId: TRAIN_SUITE_ID, adultCount: 2, childCount: 1, infantCount: 0 }],
+        },
+        {
+          legId: HOTEL_LEG_ID,
+          selected: true,
+          routeId: HOTEL_MEAL_PLAN_ID,
+          rateTypeId: RATE_TYPE_DEFAULT_ID,
+          units: [{ suiteTypeId: HOTEL_ROOM_ID }],
+        },
+        { legId: TRANSFER_LEG_ID, selected: false },
+      ],
+    })
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    const adultLine = payload.lineItems.find((item: { description: string }) =>
+      item.description.endsWith("Adult"),
+    )
+    const hotelLine = payload.lineItems.find((item: { description: string }) =>
+      item.description.startsWith("Harbour Hotel"),
+    )
+    expect(adultLine.unitPrice).toBe(800)
+    expect(hotelLine.unitPrice).toBe(500)
+  })
+
   it("prices deterministically using the default rate type when none is chosen", async () => {
     const response = await postApply({
       jobId: JOB_ID,

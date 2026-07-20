@@ -27,3 +27,19 @@ export function buildRouteName(
   const separator = directionMode === "round_trip" ? "↔" : "→"
   return `${origin} ${separator} ${destination}`
 }
+
+/**
+ * Resolves the route name as it should read on a booking's documents (quote, voucher, itinerary,
+ * invoice, emails). Unlike the canonical two-way name (`A ↔ B`) shown in the supplier admin, a
+ * document always renders the actual booked travel direction with a one-way arrow: non-reversed is
+ * `origin → destination`, reversed swaps the endpoints to `destination → origin`.
+ */
+export function resolveDirectedRouteName(
+  originName: string,
+  destinationName: string,
+  reversed: boolean,
+): string {
+  return reversed
+    ? buildRouteName(destinationName, originName, "one_way")
+    : buildRouteName(originName, destinationName, "one_way")
+}

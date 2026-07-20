@@ -10,7 +10,11 @@ function makeSupabase({
   payments = [] as { amount: number }[],
   depositInvoice = null as { id: string; amount: number; status: string } | null,
   finalInvoice = null as { id: string; status: string } | null,
-  currentBooking = { deposit_paid: false, deposit_paid_at: null as string | null },
+  currentBooking = {
+    deposit_paid: false,
+    deposit_paid_at: null as string | null,
+    deposit_confirmed_manually: false,
+  },
   bookingUpdateError = null as Error | null,
   invoiceUpdateError = null as Error | null,
 } = {}) {
@@ -215,7 +219,7 @@ describe("syncBookingPaymentState", () => {
     const { supabase, bookingUpdate } = makeSupabase({
       payments: [{ amount: 2500 }],
       depositInvoice: { id: DEPOSIT_INVOICE_ID, amount: 2500, status: "sent" },
-      currentBooking: { deposit_paid: false, deposit_paid_at: null },
+      currentBooking: { deposit_paid: false, deposit_paid_at: null, deposit_confirmed_manually: false },
     })
     await syncBookingPaymentState(supabase as never, BOOKING_ID)
     const updateCall = (bookingUpdate.mock.calls as unknown[][])[0][0] as Record<string, unknown>
@@ -226,11 +230,27 @@ describe("syncBookingPaymentState", () => {
     const { supabase, bookingUpdate } = makeSupabase({
       payments: [{ amount: 2500 }],
       depositInvoice: { id: DEPOSIT_INVOICE_ID, amount: 2500, status: "paid" },
-      currentBooking: { deposit_paid: true, deposit_paid_at: "2026-01-01T00:00:00Z" },
+      currentBooking: { deposit_paid: true, deposit_paid_at: "2026-01-01T00:00:00Z", deposit_confirmed_manually: false },
     })
     await syncBookingPaymentState(supabase as never, BOOKING_ID)
     const updateCall = (bookingUpdate.mock.calls as unknown[][])[0][0] as Record<string, unknown>
     expect(updateCall.deposit_paid_at).toBeUndefined()
+  })
+
+  it("keeps deposit_paid true when manually confirmed even if payments fall short", async () => {
+    const { supabase, bookingUpdate } = makeSupabase({
+      payments: [{ amount: 1000 }],
+      depositInvoice: { id: DEPOSIT_INVOICE_ID, amount: 2500, status: "sent" },
+      currentBooking: { deposit_paid: true, deposit_paid_at: "2026-01-01T00:00:00Z", deposit_confirmed_manually: true },
+    })
+    const result = await syncBookingPaymentState(supabase as never, BOOKING_ID)
+    // Amount is below threshold, but the manual tick is sticky.
+    expect(result?.depositPaid).toBe(true)
+    // Balance is still derived purely from amounts — the shortfall shows.
+    expect(result?.invoiceBalance).toBe(9000)
+    expect(bookingUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ deposit_paid: true }),
+    )
   })
 
   it("does not set deposit_paid when no deposit invoice exists", async () => {

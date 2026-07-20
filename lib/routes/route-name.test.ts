@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { buildRouteName } from "@/lib/routes/route-name"
+import { buildRouteName, resolveDirectedRouteName } from "@/lib/routes/route-name"
 
 describe("buildRouteName", () => {
   it("uses a single arrow for one-way routes", () => {
@@ -21,5 +21,20 @@ describe("buildRouteName", () => {
     expect(buildRouteName("Cape Town", "Dar es Salaam", "round_trip")).toBe(
       "Cape Town ↔ Dar es Salaam",
     )
+  })
+})
+
+describe("resolveDirectedRouteName", () => {
+  it("renders origin → destination when not reversed", () => {
+    expect(resolveDirectedRouteName("Pretoria", "Cape Town", false)).toBe("Pretoria → Cape Town")
+  })
+
+  it("swaps the endpoints when reversed", () => {
+    expect(resolveDirectedRouteName("Pretoria", "Cape Town", true)).toBe("Cape Town → Pretoria")
+  })
+
+  it("always renders a one-way arrow, never the two-way glyph", () => {
+    expect(resolveDirectedRouteName("Pretoria", "Cape Town", false)).not.toContain("↔")
+    expect(resolveDirectedRouteName("Pretoria", "Cape Town", true)).not.toContain("↔")
   })
 })
