@@ -334,6 +334,20 @@ export function useEmailAppearanceSettings() {
   return useSWR<EmailAppearanceSettings>("/api/settings/email-appearance", fetcher, swrOptions)
 }
 
+export interface EmailSignatureSettings {
+  signature_enabled: string
+  signature_banner_url: string
+  signature_company_line: string
+  signature_registration_line: string
+  signature_trading_hours: string
+  signature_divisions_line: string
+  signature_confidentiality: string
+}
+
+export function useEmailSignatureSettings() {
+  return useSWR<EmailSignatureSettings>("/api/settings/email-signature", fetcher, swrOptions)
+}
+
 export interface SystemInfo {
   dataMode: string
   emailProvider: string

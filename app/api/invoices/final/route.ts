@@ -66,7 +66,7 @@ export async function POST(req: Request) {
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
     .select(
-      "id, booking_number, departure_date, deposit_paid, cancelled_at, customer:customers(title, first_name, last_name, email)",
+      "id, booking_number, departure_date, deposit_paid, cancelled_at, assigned_salesperson_id, customer:customers(title, first_name, last_name, email)",
     )
     .eq("id", parsed.data.jobId)
     .single()
@@ -214,6 +214,7 @@ export async function POST(req: Request) {
       dueDate: formatDisplayDate(invoice.due_date),
     },
     blocks: { bankingDetails: buildBankingDetailsBlock(banking) },
+    senderProfileId: booking.assigned_salesperson_id ?? user.id,
   })
 
   if (!composed) return jsonError("Final invoice email template could not be resolved", 500)

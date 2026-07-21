@@ -26,7 +26,14 @@ export interface ApplyTransitionInput {
     | "updated_at"
     | "customer_id"
     | "consultant"
-  >
+  > & {
+    /**
+     * Optional so existing callers building this Pick literal don't all need
+     * updating. Used only to pick a signature sender for the deposit-request
+     * draft this transition composes — falls back to actorUserId when absent.
+     */
+    assigned_salesperson_id?: string | null
+  }
   departureDate?: string | null
   durationNights?: number | null
   targetStage: PipelineStage
@@ -219,6 +226,7 @@ export async function applyTransition(
           dueDate: dueDate.toISOString().slice(0, 10),
         },
         blocks: { bankingDetails: buildBankingDetailsBlock(banking) },
+        senderProfileId: input.booking.assigned_salesperson_id ?? input.actorUserId,
       })
 
       const { error: correspondenceError } = await supabase.from("correspondences").insert({

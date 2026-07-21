@@ -46,7 +46,7 @@ export async function POST(req: Request, { params }: RouteParams) {
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, booking_id, quote_number, validity_until, subtotal, vat, total, created_at, booking:bookings(booking_number, no_of_adults, no_of_children, route:routes(name, supplier:suppliers(name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(name), customer:customers(title, first_name, last_name))",
+      "id, booking_id, quote_number, validity_until, subtotal, vat, total, created_at, booking:bookings(booking_number, no_of_adults, no_of_children, assigned_salesperson_id, route:routes(name, supplier:suppliers(name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(name), customer:customers(title, first_name, last_name))",
     )
     .eq("id", id)
     .single()
@@ -146,6 +146,7 @@ export async function POST(req: Request, { params }: RouteParams) {
       total: formatMoney(quote.total),
     },
     blocks: { quoteSummaryTable },
+    senderProfileId: booking?.assigned_salesperson_id ?? user.id,
   })
 
   if (!composed) {

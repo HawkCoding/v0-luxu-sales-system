@@ -23,7 +23,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
 
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
-    .select("id, booking_number, consultant, customer:customers(title, first_name, last_name, email)")
+    .select("id, booking_number, consultant, assigned_salesperson_id, customer:customers(title, first_name, last_name, email)")
     .eq("id", id)
     .single()
 
@@ -38,6 +38,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
       jobNumber: booking.booking_number,
       consultantName: booking.consultant ?? "Luxus Travel & Tours",
     },
+    senderProfileId: booking.assigned_salesperson_id ?? auth.value.user.id,
   })
 
   if (!composed) return jsonError("Reservation-received template could not be resolved", 500)

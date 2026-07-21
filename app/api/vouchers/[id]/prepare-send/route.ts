@@ -4,6 +4,7 @@ import { formatDisplayDateLong } from "@/lib/date-format"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { checkVoucherReadiness } from "@/lib/voucher/check-readiness"
 import { composeEmail } from "@/lib/templates/compose-email"
+import { resolveDirectedRouteName } from "@/lib/routes/route-name"
 
 export const runtime = "nodejs"
 
@@ -17,6 +18,13 @@ type CustomerJoin = {
   email: string | null
 }
 
+type RouteJoin = {
+  name: string | null
+  direction_mode: string | null
+  origin: { name: string | null } | { name: string | null }[] | null
+  destination: { name: string | null } | { name: string | null }[] | null
+}
+
 type VoucherRow = {
   id: string
   voucher_number: string
@@ -28,8 +36,10 @@ type VoucherRow = {
     invoice_balance: number | null
     departure_date: string | null
     consultant: string | null
+    route_reversed: boolean | null
+    assigned_salesperson_id: string | null
     customer: CustomerJoin | CustomerJoin[] | null
-    route: { name: string | null } | { name: string | null }[] | null
+    route: RouteJoin | RouteJoin[] | null
   } | null
   document: { storage_path: string | null } | { storage_path: string | null }[] | null
 }
@@ -37,6 +47,18 @@ type VoucherRow = {
 function firstRecord<T>(value: T | T[] | null | undefined): T | null {
   if (Array.isArray(value)) return value[0] ?? null
   return value ?? null
+}
+
+/**
+ * Documents (unlike the supplier admin) always show the actual booked travel direction with
+ * a one-way arrow, never the two-way `↔` glyph — see lib/routes/route-name.ts.
+ */
+function resolveBookingRouteName(route: RouteJoin | null, routeReversed: boolean | null): string | null {
+  if (!route) return null
+  const origin = firstRecord(route.origin)?.name
+  const destination = firstRecord(route.destination)?.name
+  if (route.direction_mode !== "round_trip" || !origin || !destination) return route.name
+  return resolveDirectedRouteName(origin, destination, routeReversed ?? false)
 }
 
 function parseStoragePath(combined: string | null): { bucket: string; path: string } | null {
@@ -62,15 +84,15 @@ export async function POST(_req: Request, { params }: RouteParams) {
     return jsonError("Invalid voucher id", 400)
   }
 
-  const { supabase } = auth.value
+  const { supabase, user } = auth.value
 
   const { data: voucherRaw, error: voucherError } = await supabase
     .from("vouchers")
     .select(
       `id, voucher_number, booking_id,
-       booking:bookings(id, booking_number, stage, invoice_balance, departure_date, consultant,
+       booking:bookings(id, booking_number, stage, invoice_balance, departure_date, consultant, route_reversed, assigned_salesperson_id,
          customer:customers(title, first_name, last_name, email),
-         route:routes(name)),
+         route:routes(name, direction_mode, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name))),
        document:documents!pdf_document_id(storage_path)`,
     )
     .eq("id", id)
@@ -139,11 +161,12 @@ export async function POST(_req: Request, { params }: RouteParams) {
     tokens: {
       customerName: customerName || "Valued Guest",
       jobNumber: booking.booking_number,
-      direction: route?.name ?? "your journey",
+      direction: resolveBookingRouteName(route, booking.route_reversed) ?? "your journey",
       voucherNumber: voucher.voucher_number,
       departureDate: formatDisplayDateLong(booking.departure_date),
       consultantName: booking.consultant ?? "",
     },
+    senderProfileId: booking.assigned_salesperson_id ?? user.id,
   })
 
   if (!composed) return jsonError("Voucher email template could not be resolved", 500)

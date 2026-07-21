@@ -3,10 +3,8 @@ import {
   Container,
   Head,
   Html,
-  Img,
   Preview,
   Section,
-  Text,
 } from "@react-email/components"
 import type { ReactNode } from "react"
 import {
@@ -17,28 +15,30 @@ import {
 import type { BrandBlockPosition, DocumentBrand } from "@/lib/settings-access"
 import { CONTENT_CLASS_NAME } from "@/lib/templates/content-slot"
 import { FooterBrandBlock } from "@/emails/footer-brand-block"
+import { EmailSignature } from "@/emails/email-signature"
+import type { ResolvedEmailSignature } from "@/lib/email/signature"
 
 interface BaseLayoutProps {
   preview: string
   children: ReactNode
-  /** Absolute URL of the brand logo; null renders a text wordmark instead. */
-  logoUrl?: string | null
   /** SARAIL brand copy + logo; omitted falls back to the constants. */
   brand?: DocumentBrand
-  /** Brand block slot: below the header, in the footer, or hidden. Default footer. */
+  /** Brand block slot: the masthead, the footer, or hidden. Default masthead. */
   brandPosition?: BrandBlockPosition
   fontFamily?: EmailFontFamily
   fontSize?: EmailFontSize
+  /** Sender signature, rendered below the content, above the bottom brand block. Omitted renders nothing. */
+  signature?: ResolvedEmailSignature | null
 }
 
 export function BaseLayout({
   preview,
   children,
-  logoUrl,
   brand,
-  brandPosition = "bottom",
+  brandPosition = "top",
   fontFamily = EMAIL_APPEARANCE_DEFAULTS.email_font_family,
   fontSize = EMAIL_APPEARANCE_DEFAULTS.email_font_size,
+  signature,
 }: BaseLayoutProps) {
   // Outlook's Word engine resets fonts on block elements, so a font-family on
   // <Body> alone never reaches the template content's <p> tags. The head rule
@@ -71,19 +71,13 @@ export function BaseLayout({
       <Preview>{preview}</Preview>
       <Body style={{ ...body, fontFamily, fontSize }}>
         <Container style={container}>
-          <Section style={header}>
-            {logoUrl ? (
-              <Img alt="Luxus Travel & Tours" height="48" src={logoUrl} style={logo} />
-            ) : (
-              <Text style={wordmark}>Luxus Travel &amp; Tours</Text>
-            )}
-          </Section>
           {brandPosition === "top" && (
             <Section style={topBrand}>
               <FooterBrandBlock brand={brand} />
             </Section>
           )}
           <Section style={content}>{children}</Section>
+          {signature ? <EmailSignature signature={signature} /> : null}
           {brandPosition === "bottom" && (
             <Section style={footer}>
               <FooterBrandBlock brand={brand} />
@@ -108,25 +102,6 @@ const container = {
   backgroundColor: "#ffffff",
 }
 
-const header = {
-  padding: "16px 24px 10px",
-  borderBottom: "1px solid #e8dfd2",
-}
-
-const logo = {
-  display: "block",
-  objectFit: "contain" as const,
-}
-
-const wordmark = {
-  margin: "0",
-  color: "#2f2a24",
-  fontSize: "20px",
-  lineHeight: "28px",
-  fontWeight: "bold" as const,
-  letterSpacing: "0.4px",
-}
-
 const content = {
   padding: "20px 24px",
 }
@@ -138,8 +113,8 @@ const footer = {
   textAlign: "center" as const,
 }
 
-// Top placement sits between the logo header and the message body; a bottom
-// border divides it from the content the way the footer's top border does.
+// Top placement is the email's masthead; a bottom border divides it from the
+// content the way the footer's top border does.
 const topBrand = {
   padding: "18px 24px",
   borderBottom: "1px solid #e8dfd2",

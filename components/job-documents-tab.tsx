@@ -38,6 +38,18 @@ export function JobDocumentsTab({
   const canGenerateVoucher = job && enquiry && customer && VOUCHER_STAGES.has(job.stage ?? "")
   const canGenerateItinerary = job && customer && CONFIRMED_STAGES.has(job.stage ?? "")
   const existingItinerary = itineraries[0] ?? null
+  const hasItinerary = documents.some((d) => d.kind === "itinerary_pdf")
+
+  // Pre-fill a sensible trip title from the booking's route + customer surname —
+  // still just a starting point, the salesperson can always edit it before generating.
+  const defaultItineraryTitle = (() => {
+    const route = enquiry?.direction?.trim()
+    const lastName = customer?.lastName?.trim()
+    if (route && lastName) return `${route} — ${lastName} Family`
+    if (lastName) return `${lastName} Family`
+    return ""
+  })()
+  const initialItineraryTitle = existingItinerary?.name ?? defaultItineraryTitle
 
   if (loading) {
     return (
@@ -98,7 +110,7 @@ export function JobDocumentsTab({
               <GenerateItineraryDialog
                 jobId={job.id}
                 bookingNumber={job.jobNumber}
-                initialTripTitle={existingItinerary?.name ?? ""}
+                initialTripTitle={initialItineraryTitle}
                 initialTripNotes={existingItinerary?.notes ?? ""}
                 onGenerated={onChange}
                 onSent={onChange}
@@ -120,6 +132,10 @@ export function JobDocumentsTab({
                 jobId={job.id}
                 bookingNumber={job.jobNumber}
                 onGenerated={onChange}
+                hasItinerary={hasItinerary}
+                initialItineraryTitle={initialItineraryTitle}
+                initialItineraryNotes={existingItinerary?.notes ?? ""}
+                onItineraryGenerated={onChange}
                 onSent={async () => {
                   await onChange?.()
                 }}

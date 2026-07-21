@@ -2,38 +2,49 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { encryptCredential } from "@/lib/inbound-email/crypto"
+import {
+  getEmailSignaturesByProfileIds,
+  signatureFieldsSchema,
+  upsertEmailSignature,
+  type SignatureRow,
+} from "@/lib/email/signature-admin"
 import { requireManagerSettingsAccess } from "@/lib/settings-access"
 import type { Database } from "@/lib/supabase/types"
 
 type SalespersonCredentialInsert = Database["public"]["Tables"]["salesperson_credentials"]["Insert"]
 
-const createSchema = z.object({
-  profile_id: z.string().uuid(),
-  email_address: z.string().trim().email(),
-  smtp_host: z.string().trim().min(1).default("mail.sa-rail.co.za"),
-  smtp_port: z.coerce.number().int().min(1).max(65535).default(465),
-  smtp_encryption: z.enum(["ssl", "starttls", "none"]).default("ssl"),
-  imap_host: z.string().trim().min(1).default("mail.sa-rail.co.za"),
-  imap_port: z.coerce.number().int().min(1).max(65535).default(993),
-  imap_encryption: z.enum(["ssl", "starttls", "none"]).default("ssl"),
-  imap_sent_folder: z.string().trim().min(1).default("Sent"),
-  password: z.string().min(1).optional(),
-})
+const createSchema = z
+  .object({
+    profile_id: z.string().uuid(),
+    email_address: z.string().trim().email(),
+    smtp_host: z.string().trim().min(1).default("mail.sa-rail.co.za"),
+    smtp_port: z.coerce.number().int().min(1).max(65535).default(465),
+    smtp_encryption: z.enum(["ssl", "starttls", "none"]).default("ssl"),
+    imap_host: z.string().trim().min(1).default("mail.sa-rail.co.za"),
+    imap_port: z.coerce.number().int().min(1).max(65535).default(993),
+    imap_encryption: z.enum(["ssl", "starttls", "none"]).default("ssl"),
+    imap_sent_folder: z.string().trim().min(1).default("Sent"),
+    password: z.string().min(1).optional(),
+  })
+  .merge(signatureFieldsSchema)
 
-function mapRow(row: {
-  id: string
-  profile_id: string
-  email_address: string
-  smtp_host: string
-  smtp_port: number
-  smtp_encryption: string
-  imap_host: string
-  imap_port: number
-  imap_encryption: string
-  imap_sent_folder: string
-  created_at: string
-  updated_at: string
-}) {
+function mapRow(
+  row: {
+    id: string
+    profile_id: string
+    email_address: string
+    smtp_host: string
+    smtp_port: number
+    smtp_encryption: string
+    imap_host: string
+    imap_port: number
+    imap_encryption: string
+    imap_sent_folder: string
+    created_at: string
+    updated_at: string
+  },
+  signature: SignatureRow | null,
+) {
   return {
     id: row.id,
     profile_id: row.profile_id,
@@ -47,6 +58,7 @@ function mapRow(row: {
     imap_sent_folder: row.imap_sent_folder,
     created_at: row.created_at,
     updated_at: row.updated_at,
+    signature,
   }
 }
 
@@ -64,7 +76,15 @@ export async function GET() {
 
   if (error) return safeSupabaseError("salesperson-credentials:list", error, "Failed to load credentials")
 
-  return NextResponse.json({ credentials: (data ?? []).map(mapRow) })
+  const rows = data ?? []
+  const signatures = await getEmailSignaturesByProfileIds(
+    auth.value.supabase,
+    rows.map((row) => row.profile_id),
+  )
+
+  return NextResponse.json({
+    credentials: rows.map((row) => mapRow(row, signatures.get(row.profile_id) ?? null)),
+  })
 }
 
 export async function POST(request: Request) {
@@ -99,5 +119,18 @@ export async function POST(request: Request) {
 
   if (error || !data) return safeSupabaseError("salesperson-credentials:create", error, "Failed to create credential")
 
-  return NextResponse.json({ credential: mapRow(data) }, { status: 201 })
+  const { error: signatureError } = await upsertEmailSignature(auth.value.supabase, parsed.profile_id, parsed)
+  if (signatureError) return safeSupabaseError("salesperson-credentials:signature", signatureError)
+
+  const signature: SignatureRow = {
+    full_name: parsed.full_name || null,
+    job_title: parsed.job_title || null,
+    tel: parsed.tel || null,
+    cell: parsed.cell || null,
+    fax: parsed.fax || null,
+    email: parsed.email || null,
+    website: parsed.website || null,
+  }
+
+  return NextResponse.json({ credential: mapRow(data, signature) }, { status: 201 })
 }

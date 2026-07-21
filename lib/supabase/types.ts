@@ -1441,6 +1441,53 @@ export type Database = {
           },
         ]
       }
+      email_signatures: {
+        Row: {
+          cell: string | null
+          created_at: string
+          email: string | null
+          fax: string | null
+          full_name: string | null
+          job_title: string | null
+          profile_id: string
+          tel: string | null
+          updated_at: string
+          website: string | null
+        }
+        Insert: {
+          cell?: string | null
+          created_at?: string
+          email?: string | null
+          fax?: string | null
+          full_name?: string | null
+          job_title?: string | null
+          profile_id: string
+          tel?: string | null
+          updated_at?: string
+          website?: string | null
+        }
+        Update: {
+          cell?: string | null
+          created_at?: string
+          email?: string | null
+          fax?: string | null
+          full_name?: string | null
+          job_title?: string | null
+          profile_id?: string
+          tel?: string | null
+          updated_at?: string
+          website?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_signatures_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["user_id"]
+          },
+        ]
+      }
       error_logs: {
         Row: {
           created_at: string

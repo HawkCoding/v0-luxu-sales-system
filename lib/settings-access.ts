@@ -328,9 +328,9 @@ const DOCUMENT_BRAND_DEFAULTS: DocumentBrandSettings = {
   // configurable: the quote carried it in the footer, the invoice at the top.
   brand_block_position_quote: "bottom",
   brand_block_position_invoice: "top",
-  // Emails have always shown the block in the footer; keep that default so
-  // enabling this setting changes nothing until an admin picks another slot.
-  brand_block_position_email: "bottom",
+  // Emails no longer render a separate logo/wordmark header, so the brand
+  // block is the masthead by default.
+  brand_block_position_email: "top",
 }
 
 function isBrandBlockPosition(value: string): value is BrandBlockPosition {
@@ -508,6 +508,61 @@ export async function getEmailBrandingSettings(): Promise<EmailBrandingSettings>
     footerTagline: map["email_footer_tagline"]?.trim() || DEFAULT_EMAIL_FOOTER_TAGLINE,
     email_font_family: toEmailFontFamily(map["email_font_family"]),
     email_font_size: toEmailFontSize(map["email_font_size"]),
+  }
+}
+
+// Company-wide chrome appended under every salesperson's per-person signature
+// lines (name/title/phones/email/web, which live in the email_signatures
+// table). Distinct from BANKING_SETTING_KEYS' company_* fields, which are
+// Luxus Travel's own invoice/banking details — this is the SARAIL division
+// copy shown in the outgoing-mail signature block.
+export const EMAIL_SIGNATURE_SETTING_KEYS = [
+  "signature_enabled",
+  "signature_banner_url",
+  "signature_company_line",
+  "signature_registration_line",
+  "signature_trading_hours",
+  "signature_divisions_line",
+  "signature_confidentiality",
+] as const
+
+export type EmailSignatureSettings = Record<(typeof EMAIL_SIGNATURE_SETTING_KEYS)[number], string>
+
+const EMAIL_SIGNATURE_DEFAULTS: EmailSignatureSettings = {
+  signature_enabled: "true",
+  signature_banner_url: "",
+  signature_company_line:
+    "SA-Rail is a division of Luxus Travel & Tours. We are authorized reservation agents for The Blue Train, Rovos Rail & Kruger Shalati since 2014.",
+  signature_registration_line: "Registered in South Africa CK2007/049324/23",
+  signature_trading_hours: "Trading Hours: Mon – Fri 08h30 to 16h00 Closed on Weekends and Public Holidays",
+  signature_divisions_line: "DIVISIONS OF LUXUS TRAVEL & TOURS",
+  signature_confidentiality:
+    "CONFIDENTIALITY CAUTION: This message is intended for the use of the addressed party only. If the reader is not the intended recipient, please notify us immediately and destroy this message.",
+}
+
+/**
+ * Company-wide signature chrome, resolved with the service client because
+ * composing runs from workers and cron with no user session. Never throws —
+ * a settings lookup must not block a send.
+ */
+export async function getEmailSignatureSettings(): Promise<EmailSignatureSettings> {
+  try {
+    const supabase = createServiceClient()
+    const { data } = await supabase
+      .from("app_settings")
+      .select("key, value")
+      .in("key", EMAIL_SIGNATURE_SETTING_KEYS)
+
+    const map = Object.fromEntries((data ?? []).map((r) => [r.key, r.value]))
+
+    return Object.fromEntries(
+      EMAIL_SIGNATURE_SETTING_KEYS.map((key) => [
+        key,
+        map[key]?.trim() || EMAIL_SIGNATURE_DEFAULTS[key],
+      ]),
+    ) as EmailSignatureSettings
+  } catch {
+    return { ...EMAIL_SIGNATURE_DEFAULTS }
   }
 }
 

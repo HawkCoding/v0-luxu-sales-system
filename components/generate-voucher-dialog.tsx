@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { FileOutput } from "lucide-react"
+import { FileOutput, TriangleAlert } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -13,7 +13,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { PreviewAndSendDialog } from "@/components/preview-and-send-dialog"
+import { GenerateItineraryDialog } from "@/components/generate-itinerary-dialog"
 import type { DocRecord } from "@/lib/types"
 import { SendVoucherButton } from "@/components/send-voucher-button"
 
@@ -26,6 +28,11 @@ interface GenerateVoucherDialogProps {
   disabled?: boolean
   onSent: () => Promise<void> | void
   onGenerated?: () => Promise<void> | void
+  /** Whether an itinerary PDF already exists for this booking — the voucher email attaches both. */
+  hasItinerary?: boolean
+  initialItineraryTitle?: string
+  initialItineraryNotes?: string
+  onItineraryGenerated?: () => Promise<void> | void
 }
 
 interface GenerateVoucherResponse {
@@ -64,11 +71,18 @@ export function GenerateVoucherDialog({
   disabled,
   onSent,
   onGenerated,
+  hasItinerary = false,
+  initialItineraryTitle = "",
+  initialItineraryNotes = "",
+  onItineraryGenerated,
 }: GenerateVoucherDialogProps) {
   const [internalOpen, setInternalOpen] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [generated, setGenerated] = useState<GenerateVoucherResponse | null>(null)
   const [previewSendOpen, setPreviewSendOpen] = useState(false)
+  const [itineraryOpen, setItineraryOpen] = useState(false)
+  const [itineraryGeneratedLocally, setItineraryGeneratedLocally] = useState(false)
+  const itineraryReady = hasItinerary || itineraryGeneratedLocally
   const dialogOpen = open ?? internalOpen
   const setDialogOpen = onOpenChange ?? setInternalOpen
 
@@ -120,6 +134,26 @@ export function GenerateVoucherDialog({
             </DialogDescription>
           </DialogHeader>
 
+          {!itineraryReady && (
+            <Alert>
+              <TriangleAlert />
+              <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
+                <span>Itinerary not generated yet — the voucher email attaches both PDFs.</span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setDialogOpen(false)
+                    setItineraryOpen(true)
+                  }}
+                >
+                  Generate Itinerary
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
+
           <div className="min-h-[420px] overflow-hidden rounded-md border bg-muted">
             {generated ? (
               <iframe
@@ -158,10 +192,33 @@ export function GenerateVoucherDialog({
                 setDialogOpen(false)
                 await handleSent()
               }}
+              onMissingItinerary={() => {
+                setDialogOpen(false)
+                setItineraryOpen(true)
+              }}
             />
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <GenerateItineraryDialog
+        trigger={false}
+        open={itineraryOpen}
+        onOpenChange={setItineraryOpen}
+        jobId={jobId}
+        bookingNumber={bookingNumber}
+        initialTripTitle={initialItineraryTitle}
+        initialTripNotes={initialItineraryNotes}
+        onGenerated={async () => {
+          setItineraryGeneratedLocally(true)
+          await onItineraryGenerated?.()
+        }}
+        onSent={onItineraryGenerated}
+        onContinueTo={{
+          label: "Continue to Voucher",
+          onClick: () => setDialogOpen(true),
+        }}
+      />
 
       {generated ? (
         <PreviewAndSendDialog

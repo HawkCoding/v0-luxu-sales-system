@@ -63,7 +63,7 @@ export async function POST(req: Request) {
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
     .select(
-      "id, booking_number, departure_date, deposit_paid, cancelled_at, customer:customers(title, first_name, last_name, email)",
+      "id, booking_number, departure_date, deposit_paid, cancelled_at, assigned_salesperson_id, customer:customers(title, first_name, last_name, email)",
     )
     .eq("id", parsed.data.jobId)
     .single()
@@ -186,6 +186,7 @@ export async function POST(req: Request) {
       finalAmount: formatMoney(totals.finalAmount, invoice.currency),
     },
     blocks: { bankingDetails: buildBankingDetailsBlock(banking) },
+    senderProfileId: booking.assigned_salesperson_id ?? user.id,
   })
 
   if (!composed) return jsonError("Deposit invoice email template could not be resolved", 500)

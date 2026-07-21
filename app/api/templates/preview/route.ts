@@ -28,7 +28,10 @@ export async function POST(req: Request) {
   if (!parsed.success) return jsonZodError(parsed.error)
 
   const { key, subject, bodyHtml } = parsed.data
-  const composed = await composeFromTemplate({ subject, bodyHtml }, getSampleTokens(key))
+  const composed = await composeFromTemplate(
+    { subject, bodyHtml },
+    { ...getSampleTokens(key), senderProfileId: auth.value.user.id },
+  )
 
   return Response.json({
     subject: composed.subject,
