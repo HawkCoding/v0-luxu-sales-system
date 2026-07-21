@@ -11,6 +11,7 @@ interface SendVoucherButtonProps {
   bookingNumber: string
   disabled?: boolean
   onSent?: () => Promise<void> | void
+  onMissingItinerary?: () => void
 }
 
 interface PreparedVoucherSend {
@@ -31,7 +32,13 @@ interface PreparedVoucherSend {
   details?: { missingItinerary?: boolean }
 }
 
-export function SendVoucherButton({ voucherId, bookingNumber, disabled, onSent }: SendVoucherButtonProps) {
+export function SendVoucherButton({
+  voucherId,
+  bookingNumber,
+  disabled,
+  onSent,
+  onMissingItinerary,
+}: SendVoucherButtonProps) {
   const [loading, setLoading] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [prepared, setPrepared] = useState<PreparedVoucherSend | null>(null)
@@ -47,7 +54,12 @@ export function SendVoucherButton({ voucherId, bookingNumber, disabled, onSent }
       const payload = (await response.json().catch(() => ({}))) as PreparedVoucherSend
       if (!response.ok) {
         if (payload.details?.missingItinerary) {
-          throw new Error("Generate the itinerary first — the voucher email includes both PDFs")
+          toast.error("Generate the itinerary first — the voucher email includes both PDFs", {
+            action: onMissingItinerary
+              ? { label: "Generate Itinerary", onClick: onMissingItinerary }
+              : undefined,
+          })
+          return
         }
         throw new Error(payload.error ?? "Voucher email could not be prepared")
       }

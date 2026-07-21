@@ -27,6 +27,7 @@ interface BuildOptions {
   customerEmail?: string | null
   voucherStoragePath?: string | null
   itineraryStoragePath?: string | null
+  routeReversed?: boolean | null
 }
 
 function buildSupabase(options: BuildOptions = {}) {
@@ -36,6 +37,7 @@ function buildSupabase(options: BuildOptions = {}) {
     customerEmail = "guest@example.test",
     voucherStoragePath = "vouchers/BT-2026-0001/voucher.pdf",
     itineraryStoragePath = "vouchers/BT-2026-0001/itinerary.pdf",
+    routeReversed = false,
   } = options
 
   const voucherRow = {
@@ -49,8 +51,14 @@ function buildSupabase(options: BuildOptions = {}) {
       invoice_balance: invoiceBalance,
       departure_date: "2026-09-14",
       consultant: "CDJ",
+      route_reversed: routeReversed,
       customer: { first_name: "Jane", last_name: "Smith", email: customerEmail },
-      route: { name: "Pretoria → Cape Town" },
+      route: {
+        name: "Pretoria ↔ Cape Town",
+        direction_mode: "round_trip",
+        origin: { name: "Pretoria" },
+        destination: { name: "Cape Town" },
+      },
     },
     document: voucherStoragePath ? { storage_path: voucherStoragePath } : null,
   }
@@ -135,7 +143,25 @@ describe("POST /api/vouchers/[id]/prepare-send", () => {
       expect.anything(),
       "voucher_email",
       expect.objectContaining({
-        tokens: expect.objectContaining({ voucherNumber: "180226-01", jobNumber: "BT-2026-0001" }),
+        tokens: expect.objectContaining({
+          voucherNumber: "180226-01",
+          jobNumber: "BT-2026-0001",
+          direction: "Pretoria → Cape Town",
+        }),
+      }),
+    )
+  })
+
+  it("reverses the directed route name when the booking travels the other way", async () => {
+    buildSupabase({ routeReversed: true })
+
+    await POST(new Request("http://localhost"), routeParams())
+
+    expect(composeMocks.composeEmail).toHaveBeenCalledWith(
+      expect.anything(),
+      "voucher_email",
+      expect.objectContaining({
+        tokens: expect.objectContaining({ direction: "Cape Town → Pretoria" }),
       }),
     )
   })

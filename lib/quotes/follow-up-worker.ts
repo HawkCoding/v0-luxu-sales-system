@@ -194,6 +194,7 @@ export async function runQuoteFollowUpWorker(
           jobNumber: booking.booking_number,
           lastSentDate: formatDisplayDate(lastSentDateStr),
         },
+        senderProfileId: booking.assigned_salesperson_id,
       })
 
       // Send the email

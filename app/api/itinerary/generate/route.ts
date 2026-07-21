@@ -264,6 +264,7 @@ export async function POST(req: Request) {
       departureDate: departure,
       consultantName: consultant.name,
     },
+    senderProfileId: booking.assigned_salesperson_id ?? user.id,
   })
   if (!composed) return jsonError("Itinerary email template could not be resolved", 500)
 

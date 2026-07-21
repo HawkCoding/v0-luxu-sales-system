@@ -380,6 +380,7 @@ export async function POST(req: Request) {
           updated_at: booking.updated_at,
           customer_id: booking.customer_id,
           consultant: booking.consultant,
+          assigned_salesperson_id: booking.assigned_salesperson_id,
         },
         departureDate: booking.departure_date,
         durationNights: booking.duration_nights,
@@ -425,6 +426,7 @@ export async function POST(req: Request) {
         jobNumber: booking.booking_number,
         lastSentDate: formatDisplayDate((parsed.data.sentAt ?? now).slice(0, 10)),
       },
+      senderProfileId: booking.assigned_salesperson_id ?? auth.value.user.id,
     })
 
     if (followUp) {

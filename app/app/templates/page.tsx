@@ -30,6 +30,7 @@ import { VoucherTemplateEditor } from "@/components/voucher-template-editor"
 import { BrandBlockSettingsEditor } from "@/components/brand-block-settings-editor"
 import { DocumentTextSettingsEditor } from "@/components/document-text-settings-editor"
 import { EmailAppearanceSettingsEditor } from "@/components/email-appearance-settings-editor"
+import { EmailSignatureSettingsEditor } from "@/components/email-signature-settings-editor"
 import { EmailAttachmentLibraryEditor } from "@/components/email-attachment-library-editor"
 import { PdfPreviewButtons } from "@/components/pdf-preview-buttons"
 
@@ -242,6 +243,19 @@ export default function TemplatesPage() {
             </CardHeader>
             <CardContent>
               <EmailAppearanceSettingsEditor canEdit={can("edit:templates")} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg">Email Signature</CardTitle>
+              <p className="text-sm text-muted-foreground mt-1.5">
+                Company chrome appended below every salesperson&apos;s signature. Per-person name,
+                title and contact details are set on each mailbox under Settings › Communication.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <EmailSignatureSettingsEditor canEdit={role === "admin"} />
             </CardContent>
           </Card>
 

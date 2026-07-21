@@ -94,7 +94,7 @@ describe("GET /api/settings/document-brand", () => {
     expect(body.brand_block_logo_url).toBe("")
     expect(body.brand_block_position_quote).toBe("bottom")
     expect(body.brand_block_position_invoice).toBe("top")
-    expect(body.brand_block_position_email).toBe("bottom")
+    expect(body.brand_block_position_email).toBe("top")
   })
 })
 

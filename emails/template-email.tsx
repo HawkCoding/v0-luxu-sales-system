@@ -1,5 +1,6 @@
 import { BaseLayout } from "@/emails/base-layout"
 import type { EmailFontFamily, EmailFontSize } from "@/lib/email/appearance"
+import type { ResolvedEmailSignature } from "@/lib/email/signature"
 import type { BrandBlockPosition, DocumentBrand } from "@/lib/settings-access"
 import { CONTENT_CLASS_NAME, CONTENT_SLOT_END, CONTENT_SLOT_START } from "@/lib/templates/content-slot"
 
@@ -7,13 +8,14 @@ export interface TemplateEmailProps {
   preview: string
   /** Rendered template body HTML — inserted into the branded layout's content slot. */
   contentHtml: string
-  logoUrl?: string | null
   /** SARAIL brand copy + logo. */
   brand?: DocumentBrand
   /** Where the brand block sits: below the header, in the footer, or hidden. */
   brandPosition?: BrandBlockPosition
   fontFamily?: EmailFontFamily
   fontSize?: EmailFontSize
+  /** Sender signature, rendered below the content, above the bottom brand block. */
+  signature?: ResolvedEmailSignature | null
 }
 
 /**
@@ -24,20 +26,20 @@ export interface TemplateEmailProps {
 export function TemplateEmail({
   preview,
   contentHtml,
-  logoUrl,
   brand,
   brandPosition,
   fontFamily,
   fontSize,
+  signature,
 }: TemplateEmailProps) {
   return (
     <BaseLayout
       preview={preview}
-      logoUrl={logoUrl}
       brand={brand}
       brandPosition={brandPosition}
       fontFamily={fontFamily}
       fontSize={fontSize}
+      signature={signature}
     >
       <div
         className={CONTENT_CLASS_NAME}

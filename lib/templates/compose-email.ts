@@ -3,7 +3,7 @@ import { createElement } from "react"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { TemplateEmail } from "@/emails/template-email"
-import { getEmailLogoUrl } from "@/lib/email/branding"
+import { resolveEmailSignature } from "@/lib/email/signature"
 import { getDocumentBrandForEmail, getEmailBrandingSettings } from "@/lib/settings-access"
 import { getTemplate, type EmailTemplate } from "@/lib/templates/get-template"
 import { renderTemplate } from "@/lib/templates/render"
@@ -24,10 +24,19 @@ export interface ComposeTokens {
   blocks?: Record<string, string>
 }
 
+export interface ComposeOptions extends ComposeTokens {
+  /**
+   * Profile id of the sender whose signature (name/title/contact, set in
+   * Settings) is appended below the content. Omitted renders no signature —
+   * SMTP/IMAP transport a message as-is, nothing appends one automatically.
+   */
+  senderProfileId?: string | null
+}
+
 /** Compose from an already-fetched template (e.g. once per worker run). */
 export async function composeFromTemplate(
   template: Pick<EmailTemplate, "subject" | "bodyHtml">,
-  { tokens, blocks }: ComposeTokens,
+  { tokens, blocks, senderProfileId }: ComposeOptions,
 ): Promise<ComposedEmail> {
   const rendered = renderTemplate({
     subject: template.subject,
@@ -36,20 +45,20 @@ export async function composeFromTemplate(
     blocks,
   })
 
-  const [branding, logoUrl, emailBrand] = await Promise.all([
+  const [branding, emailBrand, signature] = await Promise.all([
     getEmailBrandingSettings(),
-    getEmailLogoUrl(),
     getDocumentBrandForEmail(),
+    resolveEmailSignature(senderProfileId),
   ])
   const bodyHtml = await render(
     createElement(TemplateEmail, {
       preview: rendered.subject,
       contentHtml: rendered.bodyHtml,
-      logoUrl,
       brand: emailBrand.brand,
       brandPosition: emailBrand.position,
       fontFamily: branding.email_font_family,
       fontSize: branding.email_font_size,
+      signature,
     }),
   )
 
@@ -68,9 +77,9 @@ export async function composeFromTemplate(
 export async function composeEmail(
   supabase: SupabaseClient<Database>,
   key: string,
-  tokens: ComposeTokens,
+  options: ComposeOptions,
 ): Promise<ComposedEmail | null> {
   const template = await getTemplate(supabase, key)
   if (!template) return null
-  return composeFromTemplate(template, tokens)
+  return composeFromTemplate(template, options)
 }

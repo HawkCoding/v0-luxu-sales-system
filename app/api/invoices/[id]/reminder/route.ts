@@ -64,7 +64,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
     .select(
-      "id, booking_number, departure_date, deposit_paid, cancelled_at, customer:customers(title, first_name, last_name, email)",
+      "id, booking_number, departure_date, deposit_paid, cancelled_at, assigned_salesperson_id, customer:customers(title, first_name, last_name, email)",
     )
     .eq("id", invoice.booking_id)
     .single()
@@ -150,6 +150,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
       daysOverdue: overdue > 0 ? String(overdue) : "",
     },
     blocks: { bankingDetails: buildBankingDetailsBlock(banking) },
+    senderProfileId: booking.assigned_salesperson_id ?? auth.value.user.id,
   })
 
   if (!composed) return jsonError("Payment reminder template could not be resolved", 500)

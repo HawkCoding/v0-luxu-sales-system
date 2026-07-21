@@ -22,6 +22,7 @@ interface MaintenanceBooking {
   duration_nights: number | null
   trip_end_date: string | null
   route_reversed: boolean | null
+  assigned_salesperson_id: string | null
   customer: { first_name: string | null } | null
   route: {
     name: string | null
@@ -68,7 +69,7 @@ export async function GET(request: Request) {
   const { data: bookings, error: bookingsError } = await supabase
     .from("bookings")
     .select(
-      "id, booking_number, stage, source, raw_text, updated_at, customer_id, consultant, departure_date, duration_nights, trip_end_date, route_reversed, customer:customers(first_name), route:routes(name, direction_mode, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name))",
+      "id, booking_number, stage, source, raw_text, updated_at, customer_id, consultant, departure_date, duration_nights, trip_end_date, route_reversed, assigned_salesperson_id, customer:customers(first_name), route:routes(name, direction_mode, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name))",
     )
     .in("stage", ["voucher_sent", "trip_active"])
     .not("departure_date", "is", null)
@@ -123,6 +124,7 @@ export async function GET(request: Request) {
           tripEndDate: formatDisplayDate(tripEndDate),
           consultantName: booking.consultant ?? "The Luxus team",
         },
+        senderProfileId: booking.assigned_salesperson_id,
       })
       if (!composed) {
         return NextResponse.json({ error: "Thank-you template could not be resolved" }, { status: 500 })
@@ -166,6 +168,7 @@ export async function GET(request: Request) {
           updated_at: booking.updated_at,
           customer_id: booking.customer_id,
           consultant: booking.consultant,
+          assigned_salesperson_id: booking.assigned_salesperson_id,
         },
         targetStage: "closed",
         actorName: "system_cron",

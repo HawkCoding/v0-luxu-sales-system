@@ -41,6 +41,7 @@ type BookingVoucherRecord = {
   stage: string | null
   invoice_balance: number | null
   consultant: string | null
+  assigned_salesperson_id: string | null
   departure_date: string | null
   no_of_suites: number
   no_of_adults: number
@@ -108,7 +109,7 @@ export async function POST(req: Request) {
     supabase
       .from("bookings")
       .select(
-        "id, booking_number, stage, invoice_balance, consultant, departure_date, no_of_suites, no_of_adults, no_of_children, additional_services_details, customer:customers(first_name, last_name, email, phone, title), route:routes(name, supplier:suppliers(name, description))",
+        "id, booking_number, stage, invoice_balance, consultant, assigned_salesperson_id, departure_date, no_of_suites, no_of_adults, no_of_children, additional_services_details, customer:customers(first_name, last_name, email, phone, title), route:routes(name, supplier:suppliers(name, description))",
       )
       .eq("id", parsed.data.jobId)
       .single(),
@@ -374,6 +375,7 @@ export async function POST(req: Request) {
       departureDate: voucherData.departure,
       consultantName: consultant.name,
     },
+    senderProfileId: booking.assigned_salesperson_id ?? user.id,
   })
   if (!composed) return jsonError("Voucher email template could not be resolved", 500)
 

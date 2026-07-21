@@ -27,6 +27,13 @@ interface GenerateItineraryDialogProps {
   initialTripNotes?: string
   onGenerated?: () => Promise<void> | void
   onSent?: () => Promise<void> | void
+  /** Controlled open state — omit to let the dialog manage its own trigger/open state. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  /** Set false to hide the built-in trigger button when embedding this dialog elsewhere (e.g. inside the voucher dialog). */
+  trigger?: boolean
+  /** Shown once a PDF has been generated — lets an embedding flow (e.g. the voucher dialog) swap back to itself. */
+  onContinueTo?: { label: string; onClick: () => void }
 }
 
 interface GenerateItineraryResponse {
@@ -56,13 +63,19 @@ export function GenerateItineraryDialog({
   initialTripNotes = "",
   onGenerated,
   onSent,
+  open,
+  onOpenChange,
+  trigger = true,
+  onContinueTo,
 }: GenerateItineraryDialogProps) {
-  const [open, setOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
   const [tripTitle, setTripTitle] = useState(initialTripTitle)
   const [tripNotes, setTripNotes] = useState(initialTripNotes)
   const [generating, setGenerating] = useState(false)
   const [generated, setGenerated] = useState<GenerateItineraryResponse | null>(null)
   const [previewSendOpen, setPreviewSendOpen] = useState(false)
+  const dialogOpen = open ?? internalOpen
+  const setOpen = onOpenChange ?? setInternalOpen
 
   function handleOpenChange(next: boolean) {
     if (!next) {
@@ -110,13 +123,15 @@ export function GenerateItineraryDialog({
 
   return (
     <>
-      <Dialog open={open} onOpenChange={(next) => !generating && handleOpenChange(next)}>
-        <DialogTrigger asChild>
-          <Button size="sm" variant="outline" disabled={disabled}>
-            <Map data-icon="inline-start" />
-            Generate Itinerary
-          </Button>
-        </DialogTrigger>
+      <Dialog open={dialogOpen} onOpenChange={(next) => !generating && handleOpenChange(next)}>
+        {trigger ? (
+          <DialogTrigger asChild>
+            <Button size="sm" variant="outline" disabled={disabled}>
+              <Map data-icon="inline-start" />
+              Generate Itinerary
+            </Button>
+          </DialogTrigger>
+        ) : null}
         <DialogContent className="sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>Generate client itinerary</DialogTitle>
@@ -186,6 +201,18 @@ export function GenerateItineraryDialog({
             >
               Preview &amp; Send
             </Button>
+            {onContinueTo && generated && (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  handleOpenChange(false)
+                  onContinueTo.onClick()
+                }}
+                disabled={generating}
+              >
+                {onContinueTo.label}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

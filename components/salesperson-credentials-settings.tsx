@@ -34,6 +34,16 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 
+interface SignatureRow {
+  full_name: string | null
+  job_title: string | null
+  tel: string | null
+  cell: string | null
+  fax: string | null
+  email: string | null
+  website: string | null
+}
+
 interface Credential {
   id: string
   profile_id: string
@@ -47,6 +57,7 @@ interface Credential {
   imap_sent_folder: string
   created_at: string
   updated_at: string
+  signature: SignatureRow | null
 }
 
 interface AppUser {
@@ -66,6 +77,13 @@ interface CredentialForm {
   imap_encryption: string
   imap_sent_folder: string
   password: string
+  full_name: string
+  job_title: string
+  tel: string
+  cell: string
+  fax: string
+  signature_email: string
+  website: string
 }
 
 const EMPTY_FORM: CredentialForm = {
@@ -79,6 +97,13 @@ const EMPTY_FORM: CredentialForm = {
   imap_encryption: "ssl",
   imap_sent_folder: "Sent",
   password: "",
+  full_name: "",
+  job_title: "",
+  tel: "",
+  cell: "",
+  fax: "",
+  signature_email: "",
+  website: "",
 }
 
 interface TestResult {
@@ -150,6 +175,13 @@ export function SalespersonCredentialsSettings() {
       imap_encryption: cred.imap_encryption,
       imap_sent_folder: cred.imap_sent_folder,
       password: "",
+      full_name: cred.signature?.full_name ?? "",
+      job_title: cred.signature?.job_title ?? "",
+      tel: cred.signature?.tel ?? "",
+      cell: cred.signature?.cell ?? "",
+      fax: cred.signature?.fax ?? "",
+      signature_email: cred.signature?.email ?? "",
+      website: cred.signature?.website ?? "",
     })
     setFormError("")
     setEditTarget(cred)
@@ -174,6 +206,13 @@ export function SalespersonCredentialsSettings() {
         imap_port: Number(form.imap_port),
         imap_encryption: form.imap_encryption,
         imap_sent_folder: form.imap_sent_folder,
+        full_name: form.full_name,
+        job_title: form.job_title,
+        tel: form.tel,
+        cell: form.cell,
+        fax: form.fax,
+        email: form.signature_email,
+        website: form.website,
       }
       if (form.password) body.password = form.password
 
@@ -457,6 +496,87 @@ export function SalespersonCredentialsSettings() {
                   value={form.imap_sent_folder}
                   onChange={(e) => setForm((p) => ({ ...p, imap_sent_folder: e.target.value }))}
                   placeholder="Sent"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2 border-t pt-4">
+              <p className="text-sm font-medium">Signature</p>
+              <p className="text-xs text-muted-foreground">
+                Appended to every email this salesperson sends. Company chrome underneath it is
+                shared and set in Templates › Email Signature.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-2">
+                <Label htmlFor="sc-sig-name">Name on signature</Label>
+                <Input
+                  id="sc-sig-name"
+                  value={form.full_name}
+                  onChange={(e) => setForm((p) => ({ ...p, full_name: e.target.value }))}
+                  placeholder={users.find((u) => u.userId === form.profile_id)?.name || "Full name"}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="sc-sig-title">Job title</Label>
+                <Input
+                  id="sc-sig-title"
+                  value={form.job_title}
+                  onChange={(e) => setForm((p) => ({ ...p, job_title: e.target.value }))}
+                  placeholder="Tour Operating Consultant"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              <div className="space-y-2">
+                <Label htmlFor="sc-sig-tel">Tel</Label>
+                <Input
+                  id="sc-sig-tel"
+                  value={form.tel}
+                  onChange={(e) => setForm((p) => ({ ...p, tel: e.target.value }))}
+                  placeholder="+27 (0)21 100 3596"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="sc-sig-cell">Cell</Label>
+                <Input
+                  id="sc-sig-cell"
+                  value={form.cell}
+                  onChange={(e) => setForm((p) => ({ ...p, cell: e.target.value }))}
+                  placeholder="+27 (0)81 580 6471"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="sc-sig-fax">Fax</Label>
+                <Input
+                  id="sc-sig-fax"
+                  value={form.fax}
+                  onChange={(e) => setForm((p) => ({ ...p, fax: e.target.value }))}
+                  placeholder="+27 (0)86 598 0812"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-2">
+                <Label htmlFor="sc-sig-email">Signature email</Label>
+                <Input
+                  id="sc-sig-email"
+                  type="email"
+                  value={form.signature_email}
+                  onChange={(e) => setForm((p) => ({ ...p, signature_email: e.target.value }))}
+                  placeholder={form.email_address || "reservations@sa-rail.co.za"}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="sc-sig-web">Website</Label>
+                <Input
+                  id="sc-sig-web"
+                  value={form.website}
+                  onChange={(e) => setForm((p) => ({ ...p, website: e.target.value }))}
+                  placeholder="www.sa-rail.co.za"
                 />
               </div>
             </div>

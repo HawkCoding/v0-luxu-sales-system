@@ -12,13 +12,17 @@ const settingsMocks = vi.hoisted(() => ({
   getDocumentBrandForEmail: vi.fn(),
 }))
 
-const brandingMocks = vi.hoisted(() => ({
-  getEmailLogoUrl: vi.fn(),
-}))
-
 vi.mock("@/lib/settings-access", () => ({
   getEmailBrandingSettings: settingsMocks.getEmailBrandingSettings,
   getDocumentBrandForEmail: settingsMocks.getDocumentBrandForEmail,
+}))
+
+const signatureMocks = vi.hoisted(() => ({
+  resolveEmailSignature: vi.fn(),
+}))
+
+vi.mock("@/lib/email/signature", () => ({
+  resolveEmailSignature: signatureMocks.resolveEmailSignature,
 }))
 
 const DEFAULT_BRANDING = {
@@ -26,10 +30,6 @@ const DEFAULT_BRANDING = {
   email_font_family: "Arial, sans-serif",
   email_font_size: "16px",
 } as const
-
-vi.mock("@/lib/email/branding", () => ({
-  getEmailLogoUrl: brandingMocks.getEmailLogoUrl,
-}))
 
 import { composeEmail, composeFromTemplate } from "./compose-email"
 
@@ -45,28 +45,7 @@ describe("composeFromTemplate", () => {
       },
       position: "bottom",
     })
-    brandingMocks.getEmailLogoUrl.mockResolvedValue("https://cdn.example.com/logo.png")
-  })
-
-  it("renders the branded logo in the email header", async () => {
-    const composed = await composeFromTemplate(
-      { subject: "Hi", bodyHtml: "<p>Body</p>" },
-      { tokens: {} },
-    )
-
-    expect(composed.bodyHtml).toContain("https://cdn.example.com/logo.png")
-  })
-
-  it("falls back to a text wordmark when no logo URL is available", async () => {
-    brandingMocks.getEmailLogoUrl.mockResolvedValue(null)
-
-    const composed = await composeFromTemplate(
-      { subject: "Hi", bodyHtml: "<p>Body</p>" },
-      { tokens: {} },
-    )
-
-    expect(composed.bodyHtml).not.toContain("<img")
-    expect(composed.bodyHtml).toContain("Luxus Travel")
+    signatureMocks.resolveEmailSignature.mockResolvedValue(null)
   })
 
   it("renders a full branded email with slot markers around the content", async () => {
@@ -138,6 +117,24 @@ describe("composeFromTemplate", () => {
     expect(composed.bodyHtml).not.toContain("SA RAIL")
   })
 
+  it("no longer renders a separate logo/wordmark header above the brand block", async () => {
+    settingsMocks.getDocumentBrandForEmail.mockResolvedValue({
+      brand: {
+        heading: "SA RAIL",
+        subheading: "THE BLUE TRAIN | ROVOS RAIL | KRUGER SHALATI",
+        logoUrl: null,
+      },
+      position: "hidden",
+    })
+
+    const composed = await composeFromTemplate(
+      { subject: "Hi", bodyHtml: "<p>Body</p>" },
+      { tokens: {} },
+    )
+
+    expect(composed.bodyHtml).not.toContain("Luxus Travel")
+  })
+
   it("applies the configured font to the content, not just the body", async () => {
     settingsMocks.getEmailBrandingSettings.mockResolvedValue({
       ...DEFAULT_BRANDING,
@@ -190,6 +187,51 @@ describe("composeFromTemplate", () => {
     expect(composed.bodyHtml).toContain("font-size: 16px")
   })
 
+  it("renders the sender's signature outside the content slot when senderProfileId is given", async () => {
+    signatureMocks.resolveEmailSignature.mockResolvedValue({
+      fullName: "Leonie Burke",
+      jobTitle: "Tour Operating Consultant",
+      tel: "+27 (0)21 100 3596",
+      cell: null,
+      fax: null,
+      email: "reservations2@sa-rail.co.za",
+      website: "www.sa-rail.co.za",
+      company: {
+        signature_enabled: "true",
+        signature_banner_url: "",
+        signature_company_line: "SA-Rail is a division of Luxus Travel & Tours.",
+        signature_registration_line: "Registered in South Africa CK2007/049324/23",
+        signature_trading_hours: "Trading Hours: Mon – Fri 08h30 to 16h00",
+        signature_divisions_line: "DIVISIONS OF LUXUS TRAVEL & TOURS",
+        signature_confidentiality: "CONFIDENTIALITY CAUTION: ...",
+      },
+    })
+
+    const composed = await composeFromTemplate(
+      { subject: "Hi", bodyHtml: "<p>Body</p>" },
+      { tokens: {}, senderProfileId: "profile-1" },
+    )
+
+    expect(signatureMocks.resolveEmailSignature).toHaveBeenCalledWith("profile-1")
+    expect(composed.bodyHtml).toContain("Leonie Burke")
+    expect(composed.bodyHtml).toContain("Tour Operating Consultant")
+    // The signature must sit after the slot markers, not inside them — the
+    // send preview only lets the salesperson edit the slotted content.
+    const contentEnd = composed.bodyHtml.indexOf(CONTENT_SLOT_END)
+    const signatureIndex = composed.bodyHtml.indexOf("Leonie Burke")
+    expect(signatureIndex).toBeGreaterThan(contentEnd)
+  })
+
+  it("renders no signature block when senderProfileId is omitted", async () => {
+    const composed = await composeFromTemplate(
+      { subject: "Hi", bodyHtml: "<p>Body</p>" },
+      { tokens: {} },
+    )
+
+    expect(signatureMocks.resolveEmailSignature).toHaveBeenCalledWith(undefined)
+    expect(composed.bodyHtml).not.toContain("Kind regards")
+  })
+
   it("propagates warnings for unreplaced tokens", async () => {
     const composed = await composeFromTemplate(
       { subject: "Hi", bodyHtml: "<p>{{missing}}</p>" },
@@ -213,7 +255,7 @@ describe("composeEmail", () => {
       },
       position: "bottom",
     })
-    brandingMocks.getEmailLogoUrl.mockResolvedValue("https://cdn.example.com/logo.png")
+    signatureMocks.resolveEmailSignature.mockResolvedValue(null)
   })
 
   function makeSupabase(row: { key: string; subject: string; body_html: string } | null) {

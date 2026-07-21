@@ -2,6 +2,11 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { encryptCredential } from "@/lib/inbound-email/crypto"
+import {
+  getEmailSignaturesByProfileIds,
+  signatureFieldsSchema,
+  upsertEmailSignature,
+} from "@/lib/email/signature-admin"
 import { requireManagerSettingsAccess } from "@/lib/settings-access"
 import { createSessionClient } from "@/lib/supabase/server"
 import { extractRoleFromJwt } from "@/lib/role-utils"
@@ -9,17 +14,19 @@ import type { Database } from "@/lib/supabase/types"
 
 type SalespersonCredentialUpdate = Database["public"]["Tables"]["salesperson_credentials"]["Update"]
 
-const updateSchema = z.object({
-  email_address: z.string().trim().email().optional(),
-  smtp_host: z.string().trim().min(1).optional(),
-  smtp_port: z.coerce.number().int().min(1).max(65535).optional(),
-  smtp_encryption: z.enum(["ssl", "starttls", "none"]).optional(),
-  imap_host: z.string().trim().min(1).optional(),
-  imap_port: z.coerce.number().int().min(1).max(65535).optional(),
-  imap_encryption: z.enum(["ssl", "starttls", "none"]).optional(),
-  imap_sent_folder: z.string().trim().min(1).optional(),
-  password: z.string().min(1).optional(),
-})
+const updateSchema = z
+  .object({
+    email_address: z.string().trim().email().optional(),
+    smtp_host: z.string().trim().min(1).optional(),
+    smtp_port: z.coerce.number().int().min(1).max(65535).optional(),
+    smtp_encryption: z.enum(["ssl", "starttls", "none"]).optional(),
+    imap_host: z.string().trim().min(1).optional(),
+    imap_port: z.coerce.number().int().min(1).max(65535).optional(),
+    imap_encryption: z.enum(["ssl", "starttls", "none"]).optional(),
+    imap_sent_folder: z.string().trim().min(1).optional(),
+    password: z.string().min(1).optional(),
+  })
+  .merge(signatureFieldsSchema)
 
 const SAFE_COLUMNS =
   "id, profile_id, email_address, smtp_host, smtp_port, smtp_encryption, imap_host, imap_port, imap_encryption, imap_sent_folder, created_at, updated_at"
@@ -52,7 +59,9 @@ export async function GET(
   const { data, error } = await query.single()
   if (error || !data) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
-  return NextResponse.json({ credential: data })
+  const signatures = await getEmailSignaturesByProfileIds(supabase, [data.profile_id])
+
+  return NextResponse.json({ credential: { ...data, signature: signatures.get(data.profile_id) ?? null } })
 }
 
 export async function PATCH(
@@ -87,7 +96,12 @@ export async function PATCH(
 
   if (error || !data) return safeSupabaseError("salesperson-credentials:update", error, "Failed to update credential")
 
-  return NextResponse.json({ credential: data })
+  const { error: signatureError } = await upsertEmailSignature(auth.value.supabase, data.profile_id, parsed)
+  if (signatureError) return safeSupabaseError("salesperson-credentials:signature", signatureError)
+
+  const signatures = await getEmailSignaturesByProfileIds(auth.value.supabase, [data.profile_id])
+
+  return NextResponse.json({ credential: { ...data, signature: signatures.get(data.profile_id) ?? null } })
 }
 
 export async function DELETE(
