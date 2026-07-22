@@ -6,6 +6,7 @@ import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { getBankingSettings } from "@/lib/settings-access"
 import type { Database } from "@/lib/supabase/types"
 import { composeEmail } from "@/lib/templates/compose-email"
+import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import type { PipelineStage } from "@/lib/types"
 import { calculateDepositAmount, getDefaultDepositPercentage } from "./constants"
 import { getCrossedForwardStages, type LostContext, type ManualConfirmations } from "./validate-transition"
@@ -217,8 +218,10 @@ export async function applyTransition(
       const dueDate = new Date(nowIso)
       dueDate.setDate(dueDate.getDate() + 7)
       const banking = await getBankingSettings(supabase)
+      const shared = await resolveSharedEmailTokens(supabase, input.booking.id)
       const composed = await composeEmail(supabase, "deposit_request", {
         tokens: {
+          ...shared.tokens,
           customerName,
           jobNumber: input.booking.booking_number,
           invoiceNumber: `${input.booking.booking_number}-DEP1`,
@@ -226,7 +229,7 @@ export async function applyTransition(
           depositPercentage: String(defaultDepositPercentage),
           dueDate: formatDisplayDateLong(dueDate),
         },
-        blocks: { bankingDetails: buildBankingDetailsBlock(banking) },
+        blocks: { ...shared.blocks, bankingDetails: buildBankingDetailsBlock(banking) },
         senderProfileId: input.booking.assigned_salesperson_id ?? input.actorUserId,
       })
 

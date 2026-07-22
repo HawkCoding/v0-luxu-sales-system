@@ -36,6 +36,10 @@ vi.mock("@/lib/templates/compose-email", () => ({
   composeEmail: composeMocks.composeEmail,
 }))
 
+vi.mock("@/lib/templates/resolve-shared-tokens", () => ({
+  resolveSharedEmailTokens: vi.fn(async () => ({ tokens: {}, blocks: {} })),
+}))
+
 import { applyTransition } from "../apply-transition"
 
 interface Operation {
