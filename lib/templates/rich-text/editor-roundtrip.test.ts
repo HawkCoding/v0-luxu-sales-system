@@ -10,7 +10,7 @@ import { DEFAULT_TEMPLATES } from "@/lib/templates/get-template"
 import { buildQuoteSummaryBlock } from "@/lib/quotes/quote-summary-block"
 import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
 
-const BLOCK_TOKENS = ["quoteSummaryTable", "bankingDetails"]
+const BLOCK_TOKENS = ["quoteSummaryTable", "bankingDetails", "guestInfo"]
 
 function roundTripThroughEditor(source: string, blockTokens: string[]): string {
   const editor = new Editor({

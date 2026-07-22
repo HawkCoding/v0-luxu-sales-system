@@ -40,7 +40,6 @@ function buildAuth(previousLineItems: PrevLine[]) {
                 data: {
                   id: QUOTE_ID,
                   subtotal: 0,
-                  vat: 0,
                   total: 0,
                   updated_at: "2026-07-14T00:00:00.000Z",
                   override_reason: null,

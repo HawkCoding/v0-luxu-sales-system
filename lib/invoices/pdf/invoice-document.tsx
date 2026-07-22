@@ -21,7 +21,6 @@ export interface InvoiceBillingParty {
   addressLines?: string[]
   postalCode?: string | null
   phone?: string | null
-  fax?: string | null
   email?: string | null
   vatNumber?: string | null
 }
@@ -131,6 +130,18 @@ function legDate(value: string | null | undefined): string {
   return formatDisplayDate(value.slice(0, 10)) || EMPTY
 }
 
+/**
+ * "25% Deposit due now" reads as a fresh demand once the deposit has actually
+ * been paid — swap to a receipted label instead. A cent of rounding slack
+ * covers float drift between the stored deposit amount and payments received.
+ */
+function depositRowLabel(totals: InvoiceTotals): string {
+  const pctPrefix = totals.depositPercentage ? `${totals.depositPercentage}% Deposit` : "Deposit"
+  const depositAmount = totals.depositAmount ?? 0
+  const isPaid = depositAmount > 0 && totals.amountReceived >= depositAmount - 0.01
+  return isPaid ? `${pctPrefix} — received` : `${pctPrefix} due now`
+}
+
 const styles = StyleSheet.create({
   page: {
     fontFamily: "Helvetica",
@@ -203,7 +214,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontFamily: "Helvetica-Bold",
     color: "#172018",
-    width: 58,
+    width: 62,
   },
   guestValue: {
     fontSize: 10,
@@ -280,7 +291,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   colPax: { width: 34, fontSize: 8.5, textAlign: "center" },
-  colDesc: { flex: 1, fontSize: 8.5 },
+  colDesc: { flex: 1, fontSize: 8.5, paddingRight: 8 },
   colStatus: { width: 46, fontSize: 8.5, textAlign: "center" },
   colUnit: { width: 78, fontSize: 8.5, textAlign: "right" },
   colTotal: { width: 84, fontSize: 8.5, textAlign: "right" },
@@ -299,7 +310,7 @@ const styles = StyleSheet.create({
   paymentSplit: {
     flexDirection: "row",
     justifyContent: "flex-end",
-    marginTop: 16,
+    marginTop: 18,
   },
   bankingBox: {
     marginTop: 16,
@@ -333,7 +344,7 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontFamily: "Helvetica-Bold",
     color: "#172018",
-    textAlign: "center",
+    textAlign: "left",
     marginTop: 8,
     letterSpacing: 0.3,
   },
@@ -547,7 +558,6 @@ export function InvoiceDocument({
   const contactLine = [
     banking.company_tel ? `Tel: ${banking.company_tel}` : "",
     banking.company_cell ? `Cell: ${banking.company_cell}` : "",
-    banking.company_fax ? `Fax: ${banking.company_fax}` : "",
   ]
     .filter(Boolean)
     .join("  •  ")
@@ -653,10 +663,6 @@ export function InvoiceDocument({
               <Text style={styles.billingValue}>{orDash(billing?.phone)}</Text>
             </View>
             <View style={styles.billingRow}>
-              <Text style={styles.billingLabel}>Fax</Text>
-              <Text style={styles.billingValue}>{orDash(billing?.fax)}</Text>
-            </View>
-            <View style={styles.billingRow}>
               <Text style={styles.billingLabel}>E-mail</Text>
               <Text style={styles.billingValue}>{orDash(billing?.email)}</Text>
             </View>
@@ -709,9 +715,7 @@ export function InvoiceDocument({
             <View style={styles.totalsDivider} />
             {totals.depositAmount !== null && totals.depositAmount !== undefined ? (
               <View style={styles.totalsRow}>
-                <Text style={styles.totalsLabel}>
-                  {totals.depositPercentage ? `${totals.depositPercentage}% Deposit due now` : "Deposit due now"}
-                </Text>
+                <Text style={styles.totalsLabel}>{depositRowLabel(totals)}</Text>
                 <Text style={styles.totalsValue}>{formatMoney(totals.depositAmount, currency)}</Text>
               </View>
             ) : null}
@@ -719,7 +723,7 @@ export function InvoiceDocument({
               <Text style={styles.totalsLabel}>
                 {totals.finalDueDate
                   ? `Final amount due ${formatDate(totals.finalDueDate)}`
-                  : "Final amount due Now"}
+                  : "Final amount due now"}
               </Text>
               <Text style={styles.totalsValue}>{formatMoney(totals.finalAmount, currency)}</Text>
             </View>

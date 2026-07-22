@@ -112,6 +112,7 @@ export interface Customer {
   vatNumber?: string | null
   notes?: string | null
   dateOfBirth?: string | null
+  idPassport?: string | null
   vipStatus?: boolean
   preferences?: string | null
   communicationPreferences?: string | null
@@ -940,7 +941,6 @@ export interface Quote {
   updatedAtDisplay?: string
   lineItems: QuoteLineItem[]
   subtotal: number
-  vat: number
   total: number
   lastSentAt?: string
   lastSentAtDisplay?: string
@@ -1026,11 +1026,13 @@ export interface BookingNote {
 export interface Template {
   id: string
   key: string
+  name: string
   subject: string
   bodyHtml: string
   version: number
   active: boolean
   isSystem: boolean
+  sortOrder: number
 }
 
 export interface Correspondence {

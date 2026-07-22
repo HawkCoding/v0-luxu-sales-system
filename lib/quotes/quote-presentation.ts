@@ -73,7 +73,7 @@ export function formatTotalLabel(pax: QuotePax): string {
  * so the quote PDF, the quote email block, the invoice PDF and the template
  * editor's token preview can never drift apart.
  */
-export const VAT_INCLUSIVE_SUFFIX = "(INCL.VAT)"
+export const VAT_INCLUSIVE_SUFFIX = "(incl.VAT)"
 
 /**
  * Journey window derived from the legs actually priced into the quote, not the
@@ -170,8 +170,9 @@ function describeBlock(block: VoucherServiceBlock): string {
       const onBoard = nights ? `${formatNights(nights)} on` : "On board"
       return joinSentence(
         [
-          `${onBoard} ${supplier || "the train"}`,
+          `${onBoard} the ${supplier || "train"}`,
           d.suiteType ? `in a ${d.suiteType}` : null,
+          "on an all-inclusive basis",
           d.route ? `— ${d.route}` : null,
         ],
         [start ? `Departs at ${start}` : null],
@@ -227,8 +228,8 @@ function describeEndLine(block: VoucherServiceBlock): QuoteItineraryLine | null 
     return {
       dateISO: d.arrivalDate,
       text: end
-        ? `Arrival${where ? ` in ${where}` : ""} at ${end}`
-        : `Arrival${where ? ` in ${where}` : ""}`,
+        ? `Arrival${where ? ` at ${where} station` : ""} at ${end}`
+        : `Arrival${where ? ` at ${where} station` : ""}`,
       bullets: ["Train arrival times cannot be guaranteed"],
     }
   }

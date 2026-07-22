@@ -37,6 +37,25 @@ export function resolvePrimaryRoute(lineItems: SnapshotCarrier[]): PrimaryRoute 
 }
 
 /**
+ * Derives the journey's primary supplier id from quote line-item pricing
+ * snapshots, using the same precedence as resolvePrimaryRoute: the train leg
+ * names the journey, otherwise the first non-hotel leg wins. Callers must look
+ * the name up in `suppliers` — the snapshot's own `supplierName` is frozen at
+ * pricing time and drifts once a supplier is renamed.
+ */
+export function resolvePrimarySupplierId(lineItems: SnapshotCarrier[]): string | null {
+  const snapshots = lineItems
+    .map((li) => li.pricingSnapshot)
+    .filter(
+      (snapshot): snapshot is PricingSnapshot =>
+        Boolean(snapshot?.supplierId) && snapshot?.supplierKind !== "hotel_property",
+    )
+
+  const trainSnapshot = snapshots.find((snapshot) => snapshot.supplierKind === "train_operator")
+  return (trainSnapshot ?? snapshots[0])?.supplierId ?? null
+}
+
+/**
  * Keeps bookings.route_id in step with the quoted journey. Enquiry intake sets
  * route_id from a fuzzy text match on the caller's free-text direction, which
  * is often wrong — every quote-line write (create or edit) corrects it here so

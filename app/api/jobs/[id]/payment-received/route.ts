@@ -1,12 +1,13 @@
 import { requireRole } from "@/lib/api/auth"
 import { jsonError, safeSupabaseError } from "@/lib/api/responses"
-import { formatDisplayDate } from "@/lib/date-format"
+import { formatDisplayDateLong } from "@/lib/date-format"
 import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
 import { buildUnifiedTotals } from "@/lib/invoices/build-unified-totals"
 import { calculateInvoiceBalance } from "@/lib/invoices/calculate-balance"
 import { ensureInvoicePdf } from "@/lib/invoices/ensure-invoice-pdf"
 import { resolveInvoiceStatusLabel } from "@/lib/invoices/invoice-status"
 import { composeEmail } from "@/lib/templates/compose-email"
+import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { getBankingSettings, getInvoiceStatusOptions } from "@/lib/settings-access"
 
@@ -136,16 +137,18 @@ export async function POST(_req: Request, { params }: RouteParams) {
   }
 
   const banking = await getBankingSettings(supabase)
+  const shared = await resolveSharedEmailTokens(supabase, booking.id)
   const composed = await composeEmail(supabase, "payment_received", {
     tokens: {
+      ...shared.tokens,
       customerName: customerName || "Valued Guest",
       jobNumber: booking.booking_number,
       invoiceNumber: invoice.invoice_number,
       receivedAmount: formatMoney(balance.totalPaid, invoice.currency),
-      finalDueDate: totals.finalDueDate ? formatDisplayDate(totals.finalDueDate) : "Now",
+      finalDueDate: totals.finalDueDate ? formatDisplayDateLong(totals.finalDueDate) : "Now",
       outstandingAmount: formatMoney(balance.balance, invoice.currency),
     },
-    blocks: { bankingDetails: buildBankingDetailsBlock(banking) },
+    blocks: { ...shared.blocks, bankingDetails: buildBankingDetailsBlock(banking) },
     senderProfileId: booking.assigned_salesperson_id ?? auth.value.user.id,
   })
 

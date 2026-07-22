@@ -7,8 +7,10 @@ import type {
   InvoiceItem,
   InvoiceItemStatus,
 } from "@/lib/invoices/pdf/invoice-document"
+import { describeInvoiceLine } from "@/lib/invoices/describe-invoice-line"
 import { logError } from "@/lib/error-log"
 import type { Database } from "@/lib/supabase/types"
+import type { PricingSnapshot } from "@/lib/types"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 
 /**
@@ -35,7 +37,6 @@ type CustomerRow = Pick<
   | "country"
   | "postal_code"
   | "phone"
-  | "fax"
   | "email"
   | "vat_number"
 >
@@ -55,7 +56,6 @@ export function buildBillingParty(customer: CustomerRow | null | undefined): Inv
     addressLines,
     postalCode: customer?.postal_code ?? null,
     phone: customer?.phone ?? null,
-    fax: customer?.fax ?? null,
     email: customer?.email ?? null,
     vatNumber: customer?.vat_number ?? null,
   }
@@ -106,12 +106,16 @@ export function buildDeparture(
   const [outbound, returnLeg] = trainBlocks
   if (!outbound) return null
 
+  // The units actually configured on the outbound leg are the authoritative suite count;
+  // no_of_suites is an enquiry-time scalar that drifts once the package is configured in detail.
+  const resolvedSuites = outbound.serviceData.numberOfSuites ?? context.suites
+
   return {
     heading,
     trainName: context.trainName,
     tourName: context.tourName,
     daysLabel: buildDaysLabel(context.durationNights),
-    qty: context.suites > 0 ? String(context.suites) : null,
+    qty: resolvedSuites > 0 ? String(resolvedSuites) : null,
     adults: String(context.adults),
     children: String(context.children),
     outbound: toLeg(outbound),
@@ -134,7 +138,7 @@ export function buildInvoiceItems(
   lineItems: Array<
     Pick<
       Database["public"]["Tables"]["quote_line_items"]["Row"],
-      "description" | "qty" | "unit_price" | "total"
+      "description" | "qty" | "unit_price" | "total" | "pricing_snapshot"
     >
   >,
   depositPaid: boolean,
@@ -142,7 +146,10 @@ export function buildInvoiceItems(
   const status = deriveItemStatus(depositPaid)
   return lineItems.map((item) => ({
     pax: Number(item.qty ?? 0),
-    description: item.description,
+    description: describeInvoiceLine(
+      item.description,
+      (item.pricing_snapshot as PricingSnapshot | null) ?? null,
+    ),
     status,
     unitPrice: Number(item.unit_price ?? 0),
     total: Number(item.total ?? 0),
@@ -176,7 +183,7 @@ export async function buildInvoiceView(
     supabase
       .from("bookings")
       .select(
-        "id, consultant, deposit_paid, no_of_adults, no_of_children, no_of_suites, duration_nights, customer:customers(company_name, address_line1, address_line2, city, province, country, postal_code, phone, fax, email, vat_number), package:packages(name), route:routes(name, supplier:suppliers(name))",
+        "id, consultant, deposit_paid, no_of_adults, no_of_children, no_of_suites, duration_nights, customer:customers(company_name, address_line1, address_line2, city, province, country, postal_code, phone, email, vat_number), package:packages!bookings_package_id_fkey(name), route:routes(name, supplier:suppliers(name))",
       )
       .eq("id", bookingId)
       .maybeSingle(),
@@ -196,7 +203,7 @@ export async function buildInvoiceView(
   if (quoteId) {
     const { data: lineItems, error } = await supabase
       .from("quote_line_items")
-      .select("description, qty, unit_price, total, sort_order")
+      .select("description, qty, unit_price, total, pricing_snapshot, sort_order")
       .eq("quote_id", quoteId)
       .order("sort_order", { ascending: true })
 

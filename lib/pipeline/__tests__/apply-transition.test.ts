@@ -334,6 +334,8 @@ describe("applyTransition", () => {
         tokens: expect.objectContaining({
           jobNumber: "BT-2026-0003",
           depositAmount: "308.64",
+          // Client-facing dates are always "08 May 2026", never raw ISO.
+          dueDate: "08 May 2026",
         }),
       }),
     )

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { writeAuditLog } from "@/lib/audit-write"
+import { formatDisplayDateLong } from "@/lib/date-format"
 import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { getBankingSettings } from "@/lib/settings-access"
@@ -223,7 +224,7 @@ export async function applyTransition(
           invoiceNumber: `${input.booking.booking_number}-DEP1`,
           depositAmount: depositAmount === null ? "TBC" : depositAmount.toFixed(2),
           depositPercentage: String(defaultDepositPercentage),
-          dueDate: dueDate.toISOString().slice(0, 10),
+          dueDate: formatDisplayDateLong(dueDate),
         },
         blocks: { bankingDetails: buildBankingDetailsBlock(banking) },
         senderProfileId: input.booking.assigned_salesperson_id ?? input.actorUserId,

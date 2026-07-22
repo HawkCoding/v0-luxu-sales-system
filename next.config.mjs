@@ -21,7 +21,7 @@ const nextConfig = {
   // every serverless route that renders a voucher-family PDF bundles them.
   outputFileTracingIncludes: {
     "/api/voucher/generate": ["./assets/fonts/**"],
-    "/api/itinerary/generate": ["./assets/fonts/**"],
+    "/api/vouchers/[id]/prepare-send": ["./assets/fonts/**"],
   },
 }
 

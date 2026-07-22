@@ -83,7 +83,7 @@ insert into public.bookings (
 insert into public.quotes (
   id, booking_id, itinerary_id,
   quote_number, status, validity_until,
-  subtotal, vat, total,
+  subtotal, total,
   last_sent_at, created_at, updated_at
 ) values (
   '00000000-0000-0000-0000-00000000dd01',
@@ -92,7 +92,7 @@ insert into public.quotes (
   'DEMO-2026-0001-Q1',
   'accepted',
   current_date + interval '9 days',
-  124000.00, 18600.00, 142600.00,
+  124000.00, 124000.00,
   now() - interval '5 days',
   now() - interval '5 days',
   now() - interval '1 day'

@@ -1254,6 +1254,7 @@ export type Database = {
           first_name: string
           first_travel_date: string | null
           id: string
+          id_passport: string | null
           is_repeat_client: boolean
           last_name: string
           last_travel_date: string | null
@@ -1282,6 +1283,7 @@ export type Database = {
           first_name: string
           first_travel_date?: string | null
           id?: string
+          id_passport?: string | null
           is_repeat_client?: boolean
           last_name: string
           last_travel_date?: string | null
@@ -1310,6 +1312,7 @@ export type Database = {
           first_name?: string
           first_travel_date?: string | null
           id?: string
+          id_passport?: string | null
           is_repeat_client?: boolean
           last_name?: string
           last_travel_date?: string | null
@@ -2468,7 +2471,6 @@ export type Database = {
           total: number
           updated_at: string
           validity_until: string | null
-          vat: number
         }
         Insert: {
           amount_received?: number | null
@@ -2491,7 +2493,6 @@ export type Database = {
           total?: number
           updated_at?: string
           validity_until?: string | null
-          vat?: number
         }
         Update: {
           amount_received?: number | null
@@ -2514,7 +2515,6 @@ export type Database = {
           total?: number
           updated_at?: string
           validity_until?: string | null
-          vat?: number
         }
         Relationships: [
           {
@@ -3310,6 +3310,8 @@ export type Database = {
           id: string
           is_system: boolean
           key: string
+          name: string | null
+          sort_order: number
           subject: string
           updated_at: string
           version: number
@@ -3321,6 +3323,8 @@ export type Database = {
           id?: string
           is_system?: boolean
           key: string
+          name?: string | null
+          sort_order?: number
           subject: string
           updated_at?: string
           version?: number
@@ -3332,6 +3336,8 @@ export type Database = {
           id?: string
           is_system?: boolean
           key?: string
+          name?: string | null
+          sort_order?: number
           subject?: string
           updated_at?: string
           version?: number
@@ -3347,6 +3353,7 @@ export type Database = {
           id: string
           id_passport: string | null
           is_child: boolean
+          is_primary: boolean
           last_name: string
           prefix: string | null
           residence: string | null
@@ -3360,6 +3367,7 @@ export type Database = {
           id?: string
           id_passport?: string | null
           is_child?: boolean
+          is_primary?: boolean
           last_name: string
           prefix?: string | null
           residence?: string | null
@@ -3373,6 +3381,7 @@ export type Database = {
           id?: string
           id_passport?: string | null
           is_child?: boolean
+          is_primary?: boolean
           last_name?: string
           prefix?: string | null
           residence?: string | null
@@ -3612,7 +3621,6 @@ export type Database = {
           p_quote_id: string
           p_subtotal: number
           p_total: number
-          p_vat: number
         }
         Returns: undefined
       }

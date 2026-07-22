@@ -7,6 +7,9 @@ import type { VoucherData } from "@/lib/generate-voucher"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 import { checkVoucherReadiness } from "@/lib/voucher/check-readiness"
 import { composeEmail } from "@/lib/templates/compose-email"
+import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
+import { buildSuiteTokens } from "@/lib/templates/suite-description"
+import { loadSuiteSelections } from "@/lib/templates/suite-selections"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { renderVoucherPdf } from "@/lib/voucher/render-pdf"
 import { getDocumentBrandSettings, getDocumentTextSettings, resolveDocumentBrand } from "@/lib/settings-access"
@@ -366,15 +369,19 @@ export async function POST(req: Request) {
   })
 
   const customerName = formatCustomerSalutation(customer)
+  const shared = await resolveSharedEmailTokens(supabase, booking.id)
   const composed = await composeEmail(supabase, "voucher_email", {
     tokens: {
+      ...shared.tokens,
       customerName: customerName || "Valued Guest",
       jobNumber: booking.booking_number,
       direction: route,
       voucherNumber: booking.booking_number,
       departureDate: voucherData.departure,
       consultantName: consultant.name,
+      ...buildSuiteTokens(await loadSuiteSelections(supabase, booking.id)),
     },
+    blocks: shared.blocks,
     senderProfileId: booking.assigned_salesperson_id ?? user.id,
   })
   if (!composed) return jsonError("Voucher email template could not be resolved", 500)

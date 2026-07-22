@@ -240,6 +240,77 @@ describe("buildVoucherServiceBlocks", () => {
     expect(blocks[0].serviceData.route).toBe("Pretoria ↔ Cape Town")
     expect(blocks[0].serviceData.departureDate).toBe("2026-09-01")
     expect(blocks[0].serviceData.arrivalDate).toBe("2026-09-03")
+    // Legacy row: no unit children, falls back to the leg-level suite_types join.
+    expect(blocks[0].serviceData.suiteType).toBe("Royal Suite")
+    expect(blocks[0].serviceData.numberOfSuites).toBe(1)
+  })
+
+  it("resolves suite type and suite count from per-unit rows when present, over the legacy leg-level join", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "sel-train-units",
+            package_leg_id: "leg-train",
+            selected: true,
+            supplier_id: "supplier-train",
+            route_id: "route-train",
+            suite_type_id: "suite-stale",
+            service_date: "2026-09-01",
+            nights: null,
+            notes: null,
+            package_legs: { sort_order: 0, label: "The Blue Train" },
+            suppliers: supplier({ kind: "train_operator", name: "Blue Train" }),
+            routes: { name: "Pretoria ↔ Cape Town", duration_days: 3 },
+            // Leg-level join is stale (pre-cutover value) — units must win.
+            suite_types: { name: "Stale Suite" },
+            units: [
+              { suite_type_id: "suite-deluxe", sort_order: 1, suite_types: { name: "Deluxe Suite" } },
+              { suite_type_id: "suite-deluxe-2", sort_order: 0, suite_types: { name: "Deluxe Suite" } },
+            ],
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks).toHaveLength(1)
+    // Two units, same suite name, de-duplicated for display; count reflects both rooms.
+    expect(blocks[0].serviceData.suiteType).toBe("Deluxe Suite")
+    expect(blocks[0].serviceData.numberOfSuites).toBe(2)
+  })
+
+  it("joins distinct suite names across mixed per-unit rows", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "sel-hotel-units",
+            package_leg_id: "leg-hotel",
+            selected: true,
+            supplier_id: "supplier-hotel",
+            route_id: "route-hotel",
+            suite_type_id: null,
+            service_date: "2026-09-01",
+            nights: 2,
+            notes: null,
+            package_legs: { sort_order: 0, label: "Irene Country Lodge" },
+            suppliers: supplier({ kind: "hotel_property", name: "Irene Country Lodge" }),
+            routes: { name: "Full Board", duration_days: null },
+            suite_types: null,
+            units: [
+              { suite_type_id: "room-standard", sort_order: 0, suite_types: { name: "Standard Room" } },
+              { suite_type_id: "room-deluxe", sort_order: 1, suite_types: { name: "Deluxe Room" } },
+            ],
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].serviceData.roomType).toBe("Standard Room, Deluxe Room")
+    expect(blocks[0].serviceData.numberOfSuites).toBe(2)
   })
 
   it("scopes selections (and their leg-scoped transport requests) to legIds when given, so a leg left selected on the job but not priced into this quote is excluded", async () => {

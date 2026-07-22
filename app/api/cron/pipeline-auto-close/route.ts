@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server"
-import { formatDisplayDate } from "@/lib/date-format"
+import { formatDisplayDateLong } from "@/lib/date-format"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { applyTransition } from "@/lib/pipeline/apply-transition"
+import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import { createServiceClient } from "@/lib/supabase/server"
 import { resolveDirectedRouteName } from "@/lib/routes/route-name"
 import type { PipelineStage, Source } from "@/lib/types"
@@ -116,14 +117,17 @@ export async function GET(request: Request) {
     ) {
       // Draft from the editable thank_you template — sent later with one
       // click from the dashboard's scheduled-email queue.
+      const shared = await resolveSharedEmailTokens(supabase, booking.id)
       const composed = await composeEmail(supabase, "thank_you", {
         tokens: {
+          ...shared.tokens,
           customerName: booking.customer?.first_name ?? "Valued Guest",
           jobNumber: booking.booking_number,
           routeName: resolveBookingRouteName(booking) ?? "your journey",
-          tripEndDate: formatDisplayDate(tripEndDate),
+          tripEndDate: formatDisplayDateLong(tripEndDate),
           consultantName: booking.consultant ?? "The Luxus team",
         },
+        blocks: shared.blocks,
         senderProfileId: booking.assigned_salesperson_id,
       })
       if (!composed) {

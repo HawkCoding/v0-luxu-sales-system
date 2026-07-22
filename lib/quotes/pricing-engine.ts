@@ -63,10 +63,8 @@ export function applyMarkup(value: number, markupPct: number): number {
 
 export function calculateQuoteTotals(lineItems: QuoteLineItem[]) {
   const subtotal = roundMoney(lineItems.reduce((sum, item) => sum + item.total, 0))
-  const vat = roundMoney(subtotal * 0.15)
-  const total = roundMoney(subtotal + vat)
 
-  return { subtotal, vat, total }
+  return { subtotal, total: subtotal }
 }
 
 export function inferSingleAdultCount(booking: PricingBookingInput): number {

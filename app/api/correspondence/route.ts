@@ -2,7 +2,7 @@ import { z } from "zod"
 import { writeAuditLog } from "@/lib/audit-write"
 import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
-import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
+import { formatDisplayDateLong, formatDisplayDateTime } from "@/lib/date-format"
 import { getEmailFromAddress } from "@/lib/email/from"
 import { resolveSalespersonSender } from "@/lib/email/resolve-sender"
 import { sendEmail } from "@/lib/email/transport"
@@ -11,6 +11,7 @@ import { applyTransition } from "@/lib/pipeline/apply-transition"
 import { loadLibraryAttachments } from "@/lib/attachments/email-attachment-library"
 import { ensureQuotePdf, QUOTE_BUCKET } from "@/lib/quotes/ensure-quote-pdf"
 import { composeEmail } from "@/lib/templates/compose-email"
+import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import type { Json } from "@/lib/supabase/types"
 import type { PipelineStage } from "@/lib/types"
 import { checkVoucherReadiness } from "@/lib/voucher/check-readiness"
@@ -420,12 +421,15 @@ export async function POST(req: Request) {
   // editable follow_up template so the draft is a real, sendable email.
   if (parsed.data.kind === "quote") {
     const customerName = formatCustomerSalutation(customerRecord) || "Valued Guest"
+    const shared = await resolveSharedEmailTokens(supabase, booking.id)
     const followUp = await composeEmail(supabase, "follow_up", {
       tokens: {
+        ...shared.tokens,
         customerName,
         jobNumber: booking.booking_number,
-        lastSentDate: formatDisplayDate((parsed.data.sentAt ?? now).slice(0, 10)),
+        lastSentDate: formatDisplayDateLong((parsed.data.sentAt ?? now).slice(0, 10)),
       },
+      blocks: shared.blocks,
       senderProfileId: booking.assigned_salesperson_id ?? auth.value.user.id,
     })
 

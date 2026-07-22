@@ -33,7 +33,7 @@ import {
 import { useRole } from "@/lib/role-context"
 import { useAuth } from "@/lib/auth-context"
 import { AlertCircle, ArrowLeft, CheckCircle2, ChevronRight, ChevronLeft as ChevronLeftIcon, UserRound, XCircle, Target, UserPlus, UserMinus } from "lucide-react"
-import type { Invoice, Outcome, OutcomeReason } from "@/lib/types"
+import type { DocRecord, Invoice, Outcome, OutcomeReason } from "@/lib/types"
 import Link from "next/link"
 import { JobEnquiryTab } from "@/components/job-enquiry-tab"
 import { JobQuotesTab } from "@/components/job-quotes-tab"
@@ -990,7 +990,6 @@ export default function JobDetailPage() {
             job={job}
             enquiry={enquiry}
             customer={customer}
-            itineraries={itineraries}
             onChange={mutate}
             loading={isLoading}
             error={error as Error | null}

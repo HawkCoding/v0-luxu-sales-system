@@ -67,7 +67,7 @@ describe("buildQuoteSummaryBlock", () => {
     expect(html).toContain("2 Adults x")
     expect(html).toContain("per person")
     expect(html).toContain("TOTAL for 2 Adults:")
-    expect(html).toContain("(INCL.VAT)")
+    expect(html).toContain("(incl.VAT)")
   })
 
   it("omits the per-person rate when children are present", () => {

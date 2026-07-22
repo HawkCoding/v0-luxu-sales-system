@@ -168,6 +168,7 @@ function buildAuth(options: AuthOptions = {}) {
                 },
                 error: null,
               })),
+              maybeSingle: vi.fn(async () => ({ data: null, error: null })),
             })),
           })),
         }

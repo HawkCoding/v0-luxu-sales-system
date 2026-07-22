@@ -370,10 +370,6 @@ export function JobQuotesTab({
                   <span className="text-muted-foreground">Subtotal</span>
                   <span className="text-foreground font-medium w-24">R {q.subtotal.toLocaleString()}</span>
                 </div>
-                <div className="flex justify-end gap-8 text-xs">
-                  <span className="text-muted-foreground">VAT (15%)</span>
-                  <span className="text-foreground w-24">R {q.vat.toLocaleString()}</span>
-                </div>
                 <div className="flex justify-end gap-8 text-sm font-semibold">
                   <span className="text-foreground">Total</span>
                   <span className="text-foreground w-24">R {q.total.toLocaleString()}</span>

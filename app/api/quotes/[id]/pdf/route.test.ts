@@ -47,8 +47,7 @@ function buildAuth() {
                   status: "ready",
                   validity_until: "2026-06-01",
                   subtotal: 1000,
-                  vat: 150,
-                  total: 1150,
+                  total: 1000,
                   created_at: "2026-05-01T00:00:00.000Z",
                   booking: {
                     id: BOOKING_ID,

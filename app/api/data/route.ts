@@ -346,7 +346,6 @@ export async function GET(req: Request) {
       validityUntil: q.validity_until,
       validityUntilDisplay: formatDisplayDate(q.validity_until),
       subtotal: q.subtotal,
-      vat: q.vat,
       total: q.total,
       lastSentAt: q.last_sent_at,
       lastSentAtDisplay: formatDisplayDateTime(q.last_sent_at),

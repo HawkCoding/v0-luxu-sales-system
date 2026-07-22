@@ -308,7 +308,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     validityUntil: q.validity_until ?? "",
     validityUntilDisplay: formatDisplayDate(q.validity_until),
     subtotal: q.subtotal,
-    vat: q.vat,
     total: q.total,
     updatedAt: q.updated_at,
     updatedAtDisplay: formatDisplayDateTime(q.updated_at),

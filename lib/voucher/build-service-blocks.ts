@@ -83,6 +83,12 @@ interface TransportRequestJoinRow {
     | null
 }
 
+interface SelectionUnitJoinRow {
+  suite_type_id: string | null
+  sort_order: number
+  suite_types: { name: string | null } | { name: string | null }[] | null
+}
+
 interface SelectionJoinRow {
   id: string
   package_leg_id: string
@@ -98,6 +104,9 @@ interface SelectionJoinRow {
   suppliers: SupplierJoin | SupplierJoin[] | null
   routes: RouteJoin | RouteJoin[] | null
   suite_types: { name: string | null } | { name: string | null }[] | null
+  /** Per-suite/room unit rows (train & hotel legs only). Suite type moved here — the
+   * leg-level suite_type_id/suite_types join is now a legacy fallback for pre-cutover rows. */
+  units: SelectionUnitJoinRow[] | null
 }
 
 export interface BuildVoucherServiceBlocksResult {
@@ -130,6 +139,21 @@ function timestampTime(value: string | null | undefined): string | null {
 
 function cleanList(values: string[] | null | undefined): string[] {
   return (values ?? []).map((value) => value.trim()).filter(Boolean)
+}
+
+/** Suite/room names selected for a leg, in unit order, de-duplicated by name. Falls back to the
+ * legacy leg-level suite_types join for selections captured before the per-unit cutover
+ * (migration 20260701050000_booking_package_selection_units) — those rows have no unit children. */
+function resolveLegSuiteNames(row: SelectionJoinRow): { names: string[]; unitCount: number } {
+  const unitRows = [...(row.units ?? [])].sort((a, b) => a.sort_order - b.sort_order)
+  const unitNames = unitRows
+    .map((unit) => firstRecord(unit.suite_types)?.name?.trim())
+    .filter((name): name is string => Boolean(name))
+  if (unitRows.length > 0) {
+    return { names: Array.from(new Set(unitNames)), unitCount: unitRows.length }
+  }
+  const legacyName = firstRecord(row.suite_types)?.name?.trim()
+  return { names: legacyName ? [legacyName] : [], unitCount: legacyName ? 1 : 0 }
 }
 
 /** The route name as it should read on client documents: the canonical name, unless it's a
@@ -207,7 +231,8 @@ export async function buildVoucherServiceBlocks(
        package_legs(sort_order, label),
        suppliers(name, phone, email, website, location, kind, default_time_start, default_time_end, inclusions, exclusions),
        routes(name, duration_days, direction_mode, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name)),
-       suite_types(name)`,
+       suite_types(name),
+       units:booking_package_selection_units(suite_type_id, sort_order, suite_types(name))`,
     )
     .eq("booking_id", context.bookingId)
 
@@ -300,11 +325,14 @@ export async function buildVoucherServiceBlocks(
 
     // A hotel leg's "route" is its meal plan (see lib/packages/apply-dialog-state.ts).
     const directedRouteName = resolveVoucherRouteName(route, row.route_reversed ?? false)
+    const { names: suiteNames, unitCount } = resolveLegSuiteNames(row)
+    const suiteName = suiteNames.length > 0 ? suiteNames.join(", ") : null
     const serviceData: VoucherServiceBlockData = {
       route: isHotel ? null : directedRouteName,
       mealPlan: isHotel ? route?.name ?? null : null,
-      suiteType: suite?.name ?? null,
-      roomType: isHotel ? suite?.name ?? null : null,
+      suiteType: suiteName,
+      numberOfSuites: unitCount > 0 ? unitCount : null,
+      roomType: isHotel ? suiteName : null,
       vehicleType: serviceType === "transfer" ? suite?.name ?? null : null,
       departureDate: serviceDate,
       arrivalDate,

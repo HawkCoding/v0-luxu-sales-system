@@ -54,7 +54,6 @@ export async function POST(_req: Request, { params }: RouteParams) {
       status: "draft",
       validity_until: quote.validity_until,
       subtotal: quote.subtotal,
-      vat: quote.vat,
       total: quote.total,
       no_package_match: quote.no_package_match,
       quote_number: quoteNumber,

@@ -1,7 +1,7 @@
 import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
-import { formatDisplayDate } from "@/lib/date-format"
+import { formatDisplayDate, formatDisplayDateLong } from "@/lib/date-format"
 import { calculateDepositAmount, normalizeDepositPercentage } from "@/lib/pipeline/constants"
 import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
 import { buildUnifiedTotals } from "@/lib/invoices/build-unified-totals"
@@ -10,6 +10,8 @@ import { ensureInvoicePdf } from "@/lib/invoices/ensure-invoice-pdf"
 import { resolveInvoiceStatusLabel, unifiedInvoiceNumber } from "@/lib/invoices/invoice-status"
 import { logError } from "@/lib/error-log"
 import { composeEmail } from "@/lib/templates/compose-email"
+import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
+import { buildGuestInfoBlock } from "@/lib/templates/guest-info-block"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { getBankingSettings, getInvoiceStatusOptions } from "@/lib/settings-access"
 
@@ -63,12 +65,18 @@ export async function POST(req: Request) {
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
     .select(
-      "id, booking_number, departure_date, deposit_paid, cancelled_at, assigned_salesperson_id, customer:customers(title, first_name, last_name, email)",
+      "id, booking_number, departure_date, deposit_paid, cancelled_at, assigned_salesperson_id, no_of_adults, no_of_children, customer:customers(title, first_name, last_name, email)",
     )
     .eq("id", parsed.data.jobId)
     .single()
 
   if (bookingError || !booking) return jsonError("Booking not found", 404)
+
+  const { data: travellers } = await supabase
+    .from("travellers")
+    .select("prefix, first_name, last_name")
+    .eq("booking_id", parsed.data.jobId)
+    .order("sort_order")
 
   const { data: existingInvoice, error: existingInvoiceError } = await supabase
     .from("invoices")
@@ -174,18 +182,33 @@ export async function POST(req: Request) {
   }
 
   const banking = await getBankingSettings(supabase)
+  const guestNames = (travellers ?? [])
+    .map((traveller) => [traveller.prefix, traveller.first_name, traveller.last_name].filter(Boolean).join(" ").trim())
+    .filter(Boolean)
+  const shared = await resolveSharedEmailTokens(supabase, booking.id)
   const composed = await composeEmail(supabase, "deposit_request", {
     tokens: {
+      ...shared.tokens,
       customerName: customerName || "Valued Guest",
       jobNumber: booking.booking_number,
       invoiceNumber: invoice.invoice_number,
       depositAmount: formatMoney(invoice.amount, invoice.currency),
       depositPercentage: String(invoice.deposit_percentage ?? depositPercentage),
-      dueDate: formatDisplayDate(invoice.due_date),
-      finalDueDate: totals.finalDueDate ? formatDisplayDate(totals.finalDueDate) : "Now",
+      dueDate: formatDisplayDateLong(invoice.due_date),
+      finalDueDate: totals.finalDueDate ? formatDisplayDateLong(totals.finalDueDate) : "Now",
       finalAmount: formatMoney(totals.finalAmount, invoice.currency),
     },
-    blocks: { bankingDetails: buildBankingDetailsBlock(banking) },
+    blocks: {
+      ...shared.blocks,
+      bankingDetails: buildBankingDetailsBlock(banking),
+      guestInfo: buildGuestInfoBlock({
+        customerName: customerName || "Valued Guest",
+        customerEmail: customer?.email ?? null,
+        guestNames,
+        adults: booking.no_of_adults ?? 0,
+        children: booking.no_of_children ?? 0,
+      }),
+    },
     senderProfileId: booking.assigned_salesperson_id ?? user.id,
   })
 

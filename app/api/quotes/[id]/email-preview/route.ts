@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
-import { formatDisplayDate, formatDisplayDateShort } from "@/lib/date-format"
+import { formatDisplayDateLong } from "@/lib/date-format"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { composeEmail } from "@/lib/templates/compose-email"
+import { buildSuiteTokens, suiteSelectionsFromSnapshots } from "@/lib/templates/suite-description"
 import { buildQuoteSummaryBlock, formatMoney } from "@/lib/quotes/quote-summary-block"
 import { deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
-import { resolvePrimaryRoute } from "@/lib/quotes/resolve-primary-route"
+import { resolvePrimaryRoute, resolvePrimarySupplierId } from "@/lib/quotes/resolve-primary-route"
+import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import type { PricingSnapshot } from "@/lib/types"
@@ -46,7 +48,7 @@ export async function POST(req: Request, { params }: RouteParams) {
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, booking_id, quote_number, validity_until, subtotal, vat, total, created_at, booking:bookings(booking_number, no_of_adults, no_of_children, assigned_salesperson_id, route:routes(name, supplier:suppliers(name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(name), customer:customers(title, first_name, last_name))",
+      "id, booking_id, quote_number, validity_until, subtotal, total, created_at, booking:bookings(booking_number, no_of_adults, no_of_children, assigned_salesperson_id, route:routes(name, supplier:suppliers(name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(name), customer:customers(title, first_name, last_name))",
     )
     .eq("id", id)
     .single()
@@ -71,9 +73,25 @@ export async function POST(req: Request, { params }: RouteParams) {
 
   // The quoted journey's route (from line-item snapshots) beats the booking's
   // route_id, which may still point at the enquiry-time route.
-  const { routeName: quotedRouteName } = resolvePrimaryRoute(
-    lineItems.map((li) => ({ pricingSnapshot: li.pricing_snapshot as PricingSnapshot | null })),
-  )
+  const snapshotCarriers = lineItems.map((li) => ({
+    pricingSnapshot: li.pricing_snapshot as PricingSnapshot | null,
+  }))
+  const { routeName: quotedRouteName } = resolvePrimaryRoute(snapshotCarriers)
+
+  // The supplier is named to the customer exactly as it is spelled in Suppliers,
+  // so the name is read live off the record rather than from the booking's
+  // enquiry-time route (a fuzzy text match that often points at another
+  // supplier) or the snapshot's frozen copy of the name.
+  const quotedSupplierId = resolvePrimarySupplierId(snapshotCarriers)
+  let quotedSupplierName: string | null = null
+  if (quotedSupplierId) {
+    const { data: quotedSupplier } = await supabase
+      .from("suppliers")
+      .select("name")
+      .eq("id", quotedSupplierId)
+      .maybeSingle()
+    quotedSupplierName = quotedSupplier?.name ?? null
+  }
 
   const booking = Array.isArray(quote.booking) ? quote.booking[0] : quote.booking
   const customer = Array.isArray(booking?.customer) ? booking?.customer[0] : booking?.customer
@@ -83,7 +101,8 @@ export async function POST(req: Request, { params }: RouteParams) {
     ? booking?.hotel_supplier[0]
     : booking?.hotel_supplier
   const customerName = formatCustomerSalutation(customer) || "traveller"
-  const supplierName = routeSupplier?.name ?? hotelSupplier?.name ?? "Supplier"
+  const supplierName =
+    quotedSupplierName ?? routeSupplier?.name ?? hotelSupplier?.name ?? "Supplier"
   const clientSurname = customer?.last_name?.trim() || "Client"
   const quoteNumber = quote.quote_number ?? `${booking?.booking_number ?? "QUOTE"}-Q1`
   const quoteDate = quote.created_at?.slice(0, 10) ?? todayDateString()
@@ -131,21 +150,28 @@ export async function POST(req: Request, { params }: RouteParams) {
     packageExcludesDefault: documentText.quote_doc_excludes_default,
   })
 
+  const shared = await resolveSharedEmailTokens(supabase, quote.booking_id)
   const composed = await composeEmail(supabase, "quote_email", {
     tokens: {
+      ...shared.tokens,
       customerName,
       jobNumber: booking?.booking_number ?? "",
       quoteNumber,
-      quoteDate: formatDisplayDate(quoteDate),
-      validityDate: formatDisplayDate(quote.validity_until) || "To be confirmed",
-      departureDate: formatDisplayDate(journey.start) || "To be confirmed",
-      departureDateShort: formatDisplayDateShort(journey.start) || "TBC",
+      quoteDate: formatDisplayDateLong(quoteDate),
+      validityDate: formatDisplayDateLong(quote.validity_until) || "To be confirmed",
+      departureDate: formatDisplayDateLong(journey.start) || "To be confirmed",
+      departureDateShort: formatDisplayDateLong(journey.start) || "TBC",
       direction: quotedRouteName ?? route?.name ?? "your journey",
       supplierName,
       clientSurname,
       total: formatMoney(quote.total),
+      ...buildSuiteTokens(
+        suiteSelectionsFromSnapshots(
+          lineItems.map((li) => li.pricing_snapshot as PricingSnapshot | null),
+        ),
+      ),
     },
-    blocks: { quoteSummaryTable },
+    blocks: { ...shared.blocks, quoteSummaryTable },
     senderProfileId: booking?.assigned_salesperson_id ?? user.id,
   })
 

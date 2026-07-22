@@ -34,7 +34,7 @@ export const DEFAULT_TEMPLATES: Record<SystemTemplateKey, { subject: string; bod
   deposit_request: {
     subject: "Deposit Invoice — {{jobNumber}}",
     bodyHtml:
-      "<p>Dear {{customerName}},</p><p>Thank you for confirming your reservation. A deposit of <strong>R {{depositAmount}}</strong> ({{depositPercentage}}%) is required to secure your booking, due by <strong>{{dueDate}}</strong>. Invoice <strong>{{invoiceNumber}}</strong> is attached.</p>{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
+      "<p>Dear {{customerName}},</p><p>Thank you for confirming your reservation. A deposit of <strong>R {{depositAmount}}</strong> ({{depositPercentage}}%) is required to secure your booking, due by <strong>{{dueDate}}</strong>. Invoice <strong>{{invoiceNumber}}</strong> is attached.</p>{{guestInfo}}{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
   },
   final_invoice: {
     subject: "Final Invoice — {{jobNumber}}",
@@ -50,11 +50,6 @@ export const DEFAULT_TEMPLATES: Record<SystemTemplateKey, { subject: string; bod
     subject: "Your Travel Voucher — {{jobNumber}}",
     bodyHtml:
       "<p>Dear {{customerName}},</p><p>Your travel voucher for the <strong>{{direction}}</strong> journey is attached, together with your itinerary. Please present the voucher to your service provider on arrival. Safe travels!</p><p>Warm regards,<br/>Luxus Travel &amp; Tours</p>",
-  },
-  itinerary_email: {
-    subject: "Your Itinerary — {{jobNumber}}",
-    bodyHtml:
-      "<p>Dear {{customerName}},</p><p>Please find attached your itinerary for <strong>{{tripTitle}}</strong>, departing <strong>{{departureDate}}</strong>.</p><p>Warm regards,<br/>Luxus Travel &amp; Tours</p>",
   },
   thank_you: {
     subject: "Thank you for travelling with us — {{jobNumber}}",

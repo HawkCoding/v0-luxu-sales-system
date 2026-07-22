@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { getQuoteFollowUpSettings } from "@/lib/settings-access"
-import { formatDisplayDate } from "@/lib/date-format"
+import { formatDisplayDateLong } from "@/lib/date-format"
 import { logError } from "@/lib/error-log"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { sendEmail } from "@/lib/email/transport"
@@ -192,7 +192,7 @@ export async function runQuoteFollowUpWorker(
         tokens: {
           customerName,
           jobNumber: booking.booking_number,
-          lastSentDate: formatDisplayDate(lastSentDateStr),
+          lastSentDate: formatDisplayDateLong(lastSentDateStr),
         },
         senderProfileId: booking.assigned_salesperson_id,
       })

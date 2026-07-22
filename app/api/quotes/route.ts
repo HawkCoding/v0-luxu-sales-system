@@ -26,7 +26,6 @@ const createQuoteSchema = z
     status: z.enum(["draft", "pricing_incomplete", "ready", "sent", "accepted"]).optional(),
     validityUntil: z.string().nullable().optional(),
     subtotal: z.number().nonnegative().optional(),
-    vat: z.number().nonnegative().optional(),
     total: z.number().nonnegative().optional(),
     lineItems: z.array(lineItemSchema).optional(),
     overrideReason: z.string().trim().min(1).max(500).optional(),
@@ -88,13 +87,12 @@ export async function POST(req: Request) {
       status: body.status ?? "draft",
       validity_until: computedValidityUntil,
       subtotal: lineItems.length > 0 ? calculatedTotals.subtotal : (body.subtotal ?? 0),
-      vat: lineItems.length > 0 ? calculatedTotals.vat : (body.vat ?? 0),
       total: lineItems.length > 0 ? calculatedTotals.total : (body.total ?? 0),
       override_reason: body.overrideReason ?? null,
       quote_number: buildQuoteNumber(booking.booking_number, existingQuotes ?? []),
     })
     .select(
-      "id, booking_id, itinerary_id, status, quote_number, parent_quote_id, validity_until, subtotal, vat, total",
+      "id, booking_id, itinerary_id, status, quote_number, parent_quote_id, validity_until, subtotal, total",
     )
     .single()
 
@@ -146,7 +144,6 @@ export async function POST(req: Request) {
     validityUntil: quote.validity_until,
     validityUntilDisplay: formatDisplayDate(quote.validity_until),
     subtotal: quote.subtotal,
-    vat: quote.vat,
     total: quote.total,
     lineItems: normalizedLineItems,
   })

@@ -185,6 +185,7 @@ export interface JobTraveller {
   dateOfBirth: string
   residence: string
   isChild: boolean
+  isPrimary: boolean
   sortOrder: number
 }
 
