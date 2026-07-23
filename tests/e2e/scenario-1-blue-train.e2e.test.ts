@@ -98,6 +98,7 @@ async function moveStage(mock: SupabaseMock, targetStage: PipelineStage, manualC
   const quotes = mock.store.rows("quotes").map((q) => ({ id: q.id as string, status: q.status as string, total: q.total as number, created_at: q.created_at as string }))
   const documents = mock.store.rows("documents").map((d) => ({ id: d.id as string, kind: d.kind as string, status: d.status as string }))
   const correspondences = mock.store.rows("correspondences").map((c) => ({ id: c.id as string, kind: c.kind as string, subject: c.subject as string, status: c.status as string }))
+  const payments = mock.store.rows("payments").map((p) => ({ amount: p.amount as number }))
 
   const failures = validateTransition({
     booking: {
@@ -112,6 +113,7 @@ async function moveStage(mock: SupabaseMock, targetStage: PipelineStage, manualC
     quotes,
     documents,
     correspondences,
+    payments,
     manualConfirmations,
   })
   expect(failures).toEqual([])

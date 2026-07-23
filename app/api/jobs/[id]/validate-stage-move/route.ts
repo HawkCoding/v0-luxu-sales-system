@@ -27,7 +27,6 @@ const validateMoveSchema = z.object({
     .object({
       createDepositInvoice: z.boolean().optional(),
       createInvoiceCorrespondence: z.boolean().optional(),
-      depositReceived: z.boolean().optional(),
       finalPaymentReceived: z.boolean().optional(),
     })
     .optional(),
@@ -61,7 +60,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
     .select(
-      "id, stage, source, customer_id, email_import_needs_review, email_import_review_resolved_at",
+      "id, stage, source, customer_id, email_import_needs_review, email_import_review_resolved_at, reservation_form_received_at, customer_invoice_number",
     )
     .eq("id", id)
     .single()
@@ -75,6 +74,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     { data: documents },
     { data: invoices },
     { data: correspondences },
+    { data: payments },
   ] = await Promise.all([
     supabase.from("profiles").select("clearance_level").eq("user_id", user.id).maybeSingle(),
     supabase
@@ -90,6 +90,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     supabase.from("documents").select("kind, status").eq("booking_id", id),
     supabase.from("invoices").select("kind, status").eq("booking_id", id),
     supabase.from("correspondences").select("kind, subject, status").eq("booking_id", id),
+    supabase.from("payments").select("amount").eq("booking_id", id),
   ])
 
   const role = extractRoleFromJwt(user) ?? profile?.clearance_level ?? null
@@ -99,8 +100,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       id: booking.id,
       stage: booking.stage as PipelineStage,
       source: booking.source,
+      customer_invoice_number: booking.customer_invoice_number,
       email_import_needs_review: booking.email_import_needs_review,
       email_import_review_resolved_at: booking.email_import_review_resolved_at,
+      reservation_form_received_at: booking.reservation_form_received_at,
     },
     customer,
     targetStage: body.targetStage as PipelineStage,
@@ -108,6 +111,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     documents: documents ?? [],
     invoices: invoices ?? [],
     correspondences: correspondences ?? [],
+    payments: payments ?? [],
     manualConfirmations: body.manualConfirmations,
     lostContext: body.lostContext,
   })

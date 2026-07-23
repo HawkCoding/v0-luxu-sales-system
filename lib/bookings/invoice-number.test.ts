@@ -6,7 +6,7 @@ vi.mock("@/lib/audit-write", () => ({
   settingAuditMeta: vi.fn(() => ({})),
 }))
 
-import { updateSupplierReference } from "./supplier-reference"
+import { updateInvoiceNumber } from "./invoice-number"
 
 const BOOKING_ID = "00000000-0000-4000-8000-00000000aaaa"
 
@@ -19,7 +19,7 @@ function makeSupabase(existing: string | null, updateResult: { error: unknown } 
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
               maybeSingle: vi.fn(async () => ({
-                data: { id: BOOKING_ID, supplier_reference: existing },
+                data: { id: BOOKING_ID, customer_invoice_number: existing },
                 error: null,
               })),
             })),
@@ -32,17 +32,17 @@ function makeSupabase(existing: string | null, updateResult: { error: unknown } 
   }
 }
 
-describe("updateSupplierReference", () => {
+describe("updateInvoiceNumber", () => {
   beforeEach(() => {
     auditMocks.writeAuditLog.mockClear()
   })
 
   it("writes audit with before/after when value changes", async () => {
-    const supabase = makeSupabase("OLD-REF")
+    const supabase = makeSupabase("OLD-INV")
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await updateSupplierReference(supabase as any, {
+    const result = await updateInvoiceNumber(supabase as any, {
       bookingId: BOOKING_ID,
-      value: "NEW-REF",
+      value: "NEW-INV",
       actor: "Jane Doe",
       actorUserId: "u1",
     })
@@ -50,11 +50,11 @@ describe("updateSupplierReference", () => {
     expect(auditMocks.writeAuditLog).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        action: "supplier_reference_captured",
+        action: "invoice_number_captured",
         entityId: BOOKING_ID,
         entityType: "Booking",
-        before: { supplier_reference: "OLD-REF" },
-        after: { supplier_reference: "NEW-REF" },
+        before: { customer_invoice_number: "OLD-INV" },
+        after: { customer_invoice_number: "NEW-INV" },
       }),
     )
   })
@@ -62,7 +62,7 @@ describe("updateSupplierReference", () => {
   it("skips audit when value unchanged", async () => {
     const supabase = makeSupabase("SAME")
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await updateSupplierReference(supabase as any, {
+    const result = await updateInvoiceNumber(supabase as any, {
       bookingId: BOOKING_ID,
       value: "SAME",
       actor: "Jane",
@@ -75,7 +75,7 @@ describe("updateSupplierReference", () => {
   it("normalises empty string to null and records the clear", async () => {
     const supabase = makeSupabase("OLD")
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await updateSupplierReference(supabase as any, {
+    const result = await updateInvoiceNumber(supabase as any, {
       bookingId: BOOKING_ID,
       value: "   ",
       actor: "Jane",
@@ -85,8 +85,8 @@ describe("updateSupplierReference", () => {
     expect(auditMocks.writeAuditLog).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        before: { supplier_reference: "OLD" },
-        after: { supplier_reference: null },
+        before: { customer_invoice_number: "OLD" },
+        after: { customer_invoice_number: null },
       }),
     )
   })
@@ -102,7 +102,7 @@ describe("updateSupplierReference", () => {
       })),
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await updateSupplierReference(supabase as any, {
+    const result = await updateInvoiceNumber(supabase as any, {
       bookingId: BOOKING_ID,
       value: "X",
       actor: "Jane",

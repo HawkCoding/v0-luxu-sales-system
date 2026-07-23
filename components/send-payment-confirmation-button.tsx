@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Loader2, MailCheck } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -11,6 +11,11 @@ interface SendPaymentConfirmationButtonProps {
   /** No payments yet → the prepare endpoint would 422; hide the button. */
   hasPayments: boolean
   mutate: () => void
+  /** Controlled open state, e.g. when invoked from the stage-transition modal's fix button. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  /** Set false to hide the built-in trigger button and rely on `open`/`onOpenChange`. */
+  trigger?: boolean
 }
 
 interface PreparedEmail {
@@ -35,12 +40,15 @@ export function SendPaymentConfirmationButton({
   jobId,
   hasPayments,
   mutate,
+  open,
+  onOpenChange,
+  trigger = true,
 }: SendPaymentConfirmationButtonProps) {
   const [preparing, setPreparing] = useState(false)
   const [prepared, setPrepared] = useState<PreparedEmail | null>(null)
-  const [previewOpen, setPreviewOpen] = useState(false)
-
-  if (!hasPayments) return null
+  const [internalPreviewOpen, setInternalPreviewOpen] = useState(false)
+  const previewOpen = open ?? internalPreviewOpen
+  const setPreviewOpen = onOpenChange ?? setInternalPreviewOpen
 
   const handlePrepare = async () => {
     setPreparing(true)
@@ -56,21 +64,35 @@ export function SendPaymentConfirmationButton({
           ? error.message
           : "Could not prepare the payment confirmation",
       )
+      setPreviewOpen(false)
     } finally {
       setPreparing(false)
     }
   }
 
+  // Controlled mode (trigger=false): prepare the email as soon as the caller
+  // opens the dialog, since there's no internal button to click.
+  useEffect(() => {
+    if (!trigger && open && !prepared && !preparing) {
+      void handlePrepare()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trigger, open])
+
+  if (!hasPayments) return null
+
   return (
     <>
-      <Button type="button" variant="outline" size="sm" onClick={handlePrepare} disabled={preparing}>
-        {preparing ? (
-          <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-        ) : (
-          <MailCheck className="mr-1 h-3.5 w-3.5" />
-        )}
-        Send payment confirmation
-      </Button>
+      {trigger ? (
+        <Button type="button" variant="outline" size="sm" onClick={handlePrepare} disabled={preparing}>
+          {preparing ? (
+            <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <MailCheck className="mr-1 h-3.5 w-3.5" />
+          )}
+          Send payment confirmation
+        </Button>
+      ) : null}
       {prepared ? (
         <PreviewAndSendDialog
           open={previewOpen}

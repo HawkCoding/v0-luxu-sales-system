@@ -88,6 +88,9 @@ interface SelectionUnitJoinRow {
   suite_type_id: string | null
   sort_order: number
   suite_types: { name: string | null } | { name: string | null }[] | null
+  bedroom_types: { name: string | null } | { name: string | null }[] | null
+  bedroom_layouts: { name: string | null } | { name: string | null }[] | null
+  bathroom_types: { name: string | null } | { name: string | null }[] | null
 }
 
 interface SelectionJoinRow {
@@ -143,16 +146,48 @@ function cleanList(values: string[] | null | undefined): string[] {
   return (values ?? []).map((value) => value.trim()).filter(Boolean)
 }
 
-/** Suite/room names selected for a leg, in unit order, de-duplicated by name. Falls back to the
- * legacy leg-level suite_types join for selections captured before the per-unit cutover
- * (migration 20260701050000_booking_package_selection_units) — those rows have no unit children. */
-function resolveLegSuiteNames(row: SelectionJoinRow): { names: string[]; unitCount: number } {
+/** "Twin bedded Deluxe Suite with a shower" — a unit's suite type, prefixed with its bed
+ * configuration and suffixed with its bathroom, when the unit has those selected. Either can be
+ * absent (legacy rows, or a supplier that doesn't track that variant), in which case that part is
+ * simply omitted rather than leaving an awkward gap. */
+function composeUnitSuiteLabel(
+  suiteTypeName: string | null | undefined,
+  bedConfigName: string | null | undefined,
+  bathroomTypeName: string | null | undefined,
+): string | null {
+  const suite = suiteTypeName?.trim()
+  if (!suite) return null
+  const bedPrefix = bedConfigName?.trim() ? `${bedConfigName.trim()} bedded ` : ""
+  const bathroomSuffix = bathroomTypeName?.trim() ? ` with a ${bathroomTypeName.trim().toLowerCase()}` : ""
+  return `${bedPrefix}${suite}${bathroomSuffix}`
+}
+
+/** Suite/room labels selected for a leg, in unit order, de-duplicated. Falls back to the legacy
+ * leg-level suite_types join for selections captured before the per-unit cutover (migration
+ * 20260701050000_booking_package_selection_units) — those rows have no unit children and no
+ * bedroom/bathroom configuration to compose in.
+ *
+ * `includeConfig` composes each unit's bed/bathroom configuration into its label (train legs, so
+ * the itinerary line reads "Twin bedded Deluxe Suite with a shower"); hotel legs pass false since
+ * their room name alone already fills that role in the sentence. */
+function resolveLegSuiteNames(
+  row: SelectionJoinRow,
+  includeConfig: boolean,
+): { names: string[]; unitCount: number } {
   const unitRows = [...(row.units ?? [])].sort((a, b) => a.sort_order - b.sort_order)
-  const unitNames = unitRows
-    .map((unit) => firstRecord(unit.suite_types)?.name?.trim())
-    .filter((name): name is string => Boolean(name))
+  const unitLabels = unitRows
+    .map((unit) =>
+      includeConfig
+        ? composeUnitSuiteLabel(
+            firstRecord(unit.suite_types)?.name,
+            firstRecord(unit.bedroom_layouts)?.name ?? firstRecord(unit.bedroom_types)?.name,
+            firstRecord(unit.bathroom_types)?.name,
+          )
+        : firstRecord(unit.suite_types)?.name?.trim() || null,
+    )
+    .filter((label): label is string => Boolean(label))
   if (unitRows.length > 0) {
-    return { names: Array.from(new Set(unitNames)), unitCount: unitRows.length }
+    return { names: Array.from(new Set(unitLabels)), unitCount: unitRows.length }
   }
   const legacyName = firstRecord(row.suite_types)?.name?.trim()
   return { names: legacyName ? [legacyName] : [], unitCount: legacyName ? 1 : 0 }
@@ -234,7 +269,7 @@ export async function buildVoucherServiceBlocks(
        suppliers(name, phone, email, website, location, kind, default_time_start, default_time_end, inclusions, exclusions),
        routes(name, duration_days, direction_mode, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name)),
        suite_types(name),
-       units:booking_package_selection_units(suite_type_id, sort_order, suite_types(name))`,
+       units:booking_package_selection_units(suite_type_id, sort_order, suite_types(name), bedroom_types(name), bedroom_layouts(name), bathroom_types(name))`,
     )
     .eq("booking_id", context.bookingId)
 
@@ -327,7 +362,7 @@ export async function buildVoucherServiceBlocks(
 
     // A hotel leg's "route" is its meal plan (see lib/packages/apply-dialog-state.ts).
     const directedRouteName = resolveVoucherRouteName(route, row.route_reversed ?? false)
-    const { names: suiteNames, unitCount } = resolveLegSuiteNames(row)
+    const { names: suiteNames, unitCount } = resolveLegSuiteNames(row, serviceType === "train")
     const suiteName = suiteNames.length > 0 ? suiteNames.join(", ") : null
     const serviceData: VoucherServiceBlockData = {
       route: isHotel ? null : directedRouteName,

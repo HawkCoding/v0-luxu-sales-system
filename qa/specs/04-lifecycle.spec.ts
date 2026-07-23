@@ -975,29 +975,12 @@ test("04-lifecycle: walk enquiry → voucher_sent capturing every gap", async ({
     }
 
     // -----------------------------------------------------------------
-    // → final_paid: create final invoice + balance payment
+    // → final_paid: balance payment + payment-received confirmation
+    // (one-invoice model: the booking's existing invoice is amended in
+    // place rather than a separate "final" invoice being generated.)
     // -----------------------------------------------------------------
     {
       const supabase = createQaSupabase()
-      const { error } = await supabase.from("invoices").insert({
-        booking_id: bookingId,
-        kind: "final",
-        status: "sent",
-        amount: 77625,
-        currency: "ZAR",
-        invoice_number: `${bookingNumber}-F1`,
-        sent_at: new Date().toISOString(),
-      })
-      if (error) {
-        report.step("Final invoice insert failed", { status: "fail", evidence: { error: error.message } })
-      } else {
-        workarounds.push({
-          stage: "final_paid",
-          reason: "Final-invoice generation dialog flow not exercised end-to-end; inserted invoice row directly.",
-        })
-        report.step("Fallback: created final invoice via DB insert", { status: "warn" })
-      }
-
       const { error: paymentError } = await supabase.from("payments").insert({
         booking_id: bookingId,
         amount: 77625,
@@ -1009,6 +992,25 @@ test("04-lifecycle: walk enquiry → voucher_sent capturing every gap", async ({
         report.step("Final payment insert failed", { status: "fail", evidence: { error: paymentError.message } })
       } else {
         report.step("Fallback: inserted balance payment via DB", { status: "warn" })
+      }
+
+      const { error: correspondenceError } = await supabase.from("correspondences").insert({
+        booking_id: bookingId,
+        kind: "payment_received",
+        subject: `Payment received — ${bookingNumber}`,
+        status: "sent",
+      })
+      if (correspondenceError) {
+        report.step("Payment-received correspondence insert failed", {
+          status: "fail",
+          evidence: { error: correspondenceError.message },
+        })
+      } else {
+        workarounds.push({
+          stage: "final_paid",
+          reason: "Payment-confirmation send flow not exercised end-to-end; inserted correspondence row directly.",
+        })
+        report.step("Fallback: created payment-received correspondence via DB insert", { status: "warn" })
       }
 
       await supabase

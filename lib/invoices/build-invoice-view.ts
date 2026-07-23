@@ -5,7 +5,6 @@ import type {
   InvoiceDeparture,
   InvoiceDepartureLeg,
   InvoiceItem,
-  InvoiceItemStatus,
 } from "@/lib/invoices/pdf/invoice-document"
 import { describeInvoiceLine } from "@/lib/invoices/describe-invoice-line"
 import { logError } from "@/lib/error-log"
@@ -123,17 +122,6 @@ export function buildDeparture(
   }
 }
 
-/**
- * Per-line confirmation state. The suppliers workflow does not yet record a
- * per-line answer, so every line inherits the booking's own confirmation: paid
- * deposit means the supplier seats are held ("OK"), otherwise the request is
- * still pending ("RP"). Once the suppliers tab tracks replies per line, this
- * should read that column instead.
- */
-export function deriveItemStatus(depositPaid: boolean): InvoiceItemStatus {
-  return depositPaid ? "OK" : "RP"
-}
-
 export function buildInvoiceItems(
   lineItems: Array<
     Pick<
@@ -141,16 +129,13 @@ export function buildInvoiceItems(
       "description" | "qty" | "unit_price" | "total" | "pricing_snapshot"
     >
   >,
-  depositPaid: boolean,
 ): InvoiceItem[] {
-  const status = deriveItemStatus(depositPaid)
   return lineItems.map((item) => ({
     pax: Number(item.qty ?? 0),
     description: describeInvoiceLine(
       item.description,
       (item.pricing_snapshot as PricingSnapshot | null) ?? null,
     ),
-    status,
     unitPrice: Number(item.unit_price ?? 0),
     total: Number(item.total ?? 0),
   }))
@@ -183,7 +168,7 @@ export async function buildInvoiceView(
     supabase
       .from("bookings")
       .select(
-        "id, consultant, deposit_paid, no_of_adults, no_of_children, no_of_suites, duration_nights, customer:customers(company_name, address_line1, address_line2, city, province, country, postal_code, phone, email, vat_number), package:packages!bookings_package_id_fkey(name), route:routes(name, supplier:suppliers(name))",
+        "id, consultant, no_of_adults, no_of_children, no_of_suites, duration_nights, customer:customers(company_name, address_line1, address_line2, city, province, country, postal_code, phone, email, vat_number), package:packages!bookings_package_id_fkey(name), route:routes(name, supplier:suppliers(name))",
       )
       .eq("id", bookingId)
       .maybeSingle(),
@@ -215,7 +200,7 @@ export async function buildInvoiceView(
         details: { bookingId, quoteId, error: error.message },
       })
     } else {
-      items = buildInvoiceItems(lineItems ?? [], booking?.deposit_paid ?? false)
+      items = buildInvoiceItems(lineItems ?? [])
     }
   }
 

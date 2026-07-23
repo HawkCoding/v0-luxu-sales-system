@@ -5,7 +5,7 @@ import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
 import { buildUnifiedTotals } from "@/lib/invoices/build-unified-totals"
 import { calculateInvoiceBalance } from "@/lib/invoices/calculate-balance"
 import { ensureInvoicePdf } from "@/lib/invoices/ensure-invoice-pdf"
-import { resolveInvoiceStatusLabel } from "@/lib/invoices/invoice-status"
+import { clientInvoiceNumber, resolveInvoiceStatusLabel } from "@/lib/invoices/invoice-status"
 import type { InvoiceTotals } from "@/lib/invoices/pdf/invoice-document"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
@@ -65,7 +65,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
     .select(
-      "id, booking_number, departure_date, deposit_paid, cancelled_at, assigned_salesperson_id, customer:customers(title, first_name, last_name, email)",
+      "id, booking_number, customer_invoice_number, departure_date, deposit_paid, cancelled_at, assigned_salesperson_id, customer:customers(title, first_name, last_name, email)",
     )
     .eq("id", invoice.booking_id)
     .single()
@@ -114,6 +114,8 @@ export async function POST(_req: Request, { params }: RouteParams) {
     invoice.display_status,
   )
 
+  const displayInvoiceNumber = clientInvoiceNumber(booking)
+
   let pdf
   try {
     pdf = await ensureInvoicePdf(supabase, {
@@ -129,6 +131,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
         status: invoice.status,
       },
       bookingNumber: booking.booking_number,
+      displayInvoiceNumber,
       customerName,
       statusLabel,
       totals,
@@ -146,7 +149,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
       ...shared.tokens,
       customerName: customerName || "Valued Guest",
       jobNumber: booking.booking_number,
-      invoiceNumber: invoice.invoice_number,
+      invoiceNumber: displayInvoiceNumber,
       invoiceKind: invoice.kind === "deposit" ? "deposit" : "final",
       amountDue: formatMoney(invoice.amount, invoice.currency),
       dueDate: formatDisplayDateLong(invoice.due_date),
@@ -162,7 +165,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
     invoice: {
       id: invoice.id,
       jobId: invoice.booking_id,
-      invoiceNumber: invoice.invoice_number,
+      invoiceNumber: displayInvoiceNumber,
       daysOverdue: overdue,
     },
     email: {

@@ -338,8 +338,8 @@ export function SuiteLegEditor({
                     value={unit.suiteTypeId ?? NONE_VALUE}
                     onValueChange={(next) => updateUnit(unit.id, { suiteTypeId: next === NONE_VALUE ? null : next })}
                   >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select type" />
+                    <SelectTrigger className="w-full">
+                      <SelectValue className="truncate" placeholder="Select type" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value={NONE_VALUE}>Not set</SelectItem>
@@ -366,8 +366,8 @@ export function SuiteLegEditor({
                       value={unit.bedroomTypeId ?? NONE_VALUE}
                       onValueChange={(next) => updateUnit(unit.id, { bedroomTypeId: next === NONE_VALUE ? null : next })}
                     >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select bed configuration" />
+                      <SelectTrigger className="w-full">
+                        <SelectValue className="truncate" placeholder="Select bed configuration" />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value={NONE_VALUE}>Not set</SelectItem>
@@ -388,8 +388,8 @@ export function SuiteLegEditor({
                       value={unit.bedroomLayoutId ?? NONE_VALUE}
                       onValueChange={(next) => updateUnit(unit.id, { bedroomLayoutId: next === NONE_VALUE ? null : next })}
                     >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select layout" />
+                      <SelectTrigger className="w-full">
+                        <SelectValue className="truncate" placeholder="Select layout" />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value={NONE_VALUE}>Not set</SelectItem>
@@ -410,8 +410,8 @@ export function SuiteLegEditor({
                       value={unit.bathroomTypeId ?? NONE_VALUE}
                       onValueChange={(next) => updateUnit(unit.id, { bathroomTypeId: next === NONE_VALUE ? null : next })}
                     >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select bathroom type" />
+                      <SelectTrigger className="w-full">
+                        <SelectValue className="truncate" placeholder="Select bathroom type" />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value={NONE_VALUE}>Not set</SelectItem>

@@ -1,20 +1,21 @@
 "use client"
 
 import { useState } from "react"
-import { Loader2, Send } from "lucide-react"
+import { Loader2 } from "lucide-react"
 import { toast } from "sonner"
-import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { PreviewAndSendDialog } from "@/components/preview-and-send-dialog"
 import { formatDisplayDate } from "@/lib/date-format"
+import type { PipelineStage } from "@/lib/types"
 
 interface ReservationFormCardProps {
   jobId: string
   reservationFormReceivedAt: string | null
   mutate: () => void
   onMarkedReceived?: () => void
+  stage: PipelineStage
 }
 
 interface PreparedEmail {
@@ -27,37 +28,47 @@ interface PreparedEmail {
 }
 
 /**
- * Quote-accepted step: tick when the client's signed reservation form comes
- * back, then send the acknowledgement ("reservation received") email.
+ * Quote-accepted gate: ticking "received" composes the acknowledgement email
+ * and opens the send dialog immediately. The DB flag (and the pipeline gate
+ * it satisfies) is only set once the email is actually sent — cancelling the
+ * dialog leaves the box unticked.
  */
 export function ReservationFormCard({
   jobId,
   reservationFormReceivedAt,
   mutate,
   onMarkedReceived,
+  stage,
 }: ReservationFormCardProps) {
-  const [saving, setSaving] = useState(false)
   const [preparing, setPreparing] = useState(false)
+  const [unchecking, setUnchecking] = useState(false)
   const [prepared, setPrepared] = useState<PreparedEmail | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
 
   const received = Boolean(reservationFormReceivedAt)
+  // Only auto-advance from quote_sent: apply-transition sets the target stage
+  // unconditionally (no forward-only check), so sending this from a later
+  // stage would regress it back to "accepted".
+  const moveStage = stage === "quote_sent" ? "accepted" : undefined
 
-  const handleToggle = async (checked: boolean) => {
-    setSaving(true)
+  const persistReceived = async (checked: boolean) => {
+    const res = await fetch(`/api/jobs/${jobId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reservationFormReceived: checked }),
+    })
+    if (!res.ok) throw new Error()
+  }
+
+  const handleUncheck = async () => {
+    setUnchecking(true)
     try {
-      const res = await fetch(`/api/jobs/${jobId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reservationFormReceived: checked }),
-      })
-      if (!res.ok) throw new Error()
+      await persistReceived(false)
       mutate()
-      if (checked) onMarkedReceived?.()
     } catch {
       toast.error("Could not update the reservation form status")
     } finally {
-      setSaving(false)
+      setUnchecking(false)
     }
   }
 
@@ -80,15 +91,27 @@ export function ReservationFormCard({
     }
   }
 
+  const handleConfirmedReceived = async () => {
+    try {
+      await persistReceived(true)
+      mutate()
+      onMarkedReceived?.()
+    } catch {
+      toast.error("Could not update the reservation form status")
+    }
+  }
+
   return (
     <Card className="mb-4">
-      <CardContent className="flex flex-wrap items-center justify-between gap-3 py-3">
+      <CardContent className="flex flex-wrap items-center gap-3 py-3">
         <div className="flex items-center gap-2">
           <Checkbox
             id="reservation-form-received"
             checked={received}
-            disabled={saving}
-            onCheckedChange={(checked) => handleToggle(checked === true)}
+            disabled={preparing || unchecking}
+            onCheckedChange={(checked) =>
+              checked === true ? handlePrepare() : handleUncheck()
+            }
           />
           <Label htmlFor="reservation-form-received" className="text-sm">
             Reservation form received
@@ -98,21 +121,8 @@ export function ReservationFormCard({
               </span>
             ) : null}
           </Label>
+          {preparing ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /> : null}
         </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={handlePrepare}
-          disabled={preparing}
-        >
-          {preparing ? (
-            <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Send className="mr-1 h-3.5 w-3.5" />
-          )}
-          Send acknowledgement
-        </Button>
       </CardContent>
       {prepared ? (
         <PreviewAndSendDialog
@@ -125,8 +135,9 @@ export function ReservationFormCard({
           bodyHtml={prepared.email.bodyHtml}
           bodyContentHtml={prepared.email.bodyContentHtml}
           kind="reservation_received"
+          moveStage={moveStage}
           to={prepared.email.to}
-          onSent={mutate}
+          onSent={handleConfirmedReceived}
         />
       ) : null}
     </Card>

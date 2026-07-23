@@ -65,7 +65,25 @@ export function isFinalDueNow(
   return finalDueDate <= today
 }
 
-/** The one client-facing invoice number for a booking, e.g. LTT-2026-0001-INV. */
+/**
+ * The internal invoice number for a booking, e.g. LTT-2026-0001-INV. Stored on
+ * `invoices.invoice_number` and used only for backend tracking (storage paths,
+ * filenames). It is NOT shown to the customer — see `clientInvoiceNumber`.
+ */
 export function unifiedInvoiceNumber(bookingNumber: string): string {
   return `${bookingNumber}-INV`
+}
+
+/**
+ * The invoice number the customer sees on PDFs, emails, and as the bank payment
+ * reference. This is the salesperson-entered `bookings.customer_invoice_number`;
+ * when it has not been entered yet, we fall back to the internal auto number so
+ * documents never render blank. A hard stage gate ensures it is filled before the
+ * deposit invoice is actually sent.
+ */
+export function clientInvoiceNumber(booking: {
+  customer_invoice_number: string | null
+  booking_number: string
+}): string {
+  return booking.customer_invoice_number?.trim() || unifiedInvoiceNumber(booking.booking_number)
 }

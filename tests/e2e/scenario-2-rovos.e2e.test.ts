@@ -130,6 +130,8 @@ function seedFromParsedRovos(): SupabaseMock {
     stage: "enquiry",
     email_import_needs_review: false,
     email_import_review_resolved_at: "2026-05-01T00:00:00.000Z",
+    reservation_form_received_at: "2026-05-01T00:00:00.000Z",
+    customer_invoice_number: "RR-2026-0001-INV",
     departure_date: parsed.trip.departureDate,
     deposit_paid: false,
     invoice_balance: null,
@@ -147,6 +149,9 @@ function seedFromParsedRovos(): SupabaseMock {
     correspondences: [],
     audit_logs: [],
     app_settings: [],
+    travellers: [
+      { id: "traveller-1", booking_id: BOOKING_ID, prefix: "Mr", first_name: "John", last_name: "Smith", id_passport: "P1234567", sort_order: 0 },
+    ],
   })
 }
 
@@ -162,6 +167,9 @@ async function moveStage(mock: SupabaseMock, targetStage: PipelineStage, manualC
   const correspondences = mock.store.rows("correspondences")
     .filter((c) => c.booking_id === BOOKING_ID)
     .map((c) => ({ id: c.id as string, kind: c.kind as string, subject: c.subject as string, status: c.status as string }))
+  const payments = mock.store.rows("payments")
+    .filter((p) => p.booking_id === BOOKING_ID)
+    .map((p) => ({ amount: p.amount as number }))
 
   const failures = validateTransition({
     booking: {
@@ -170,12 +178,15 @@ async function moveStage(mock: SupabaseMock, targetStage: PipelineStage, manualC
       source: booking.source as string,
       email_import_needs_review: booking.email_import_needs_review as boolean,
       email_import_review_resolved_at: booking.email_import_review_resolved_at as string | null,
+      reservation_form_received_at: booking.reservation_form_received_at as string | null,
+      customer_invoice_number: booking.customer_invoice_number as string | null,
     },
     customer,
     targetStage,
     quotes,
     documents,
     correspondences,
+    payments,
     manualConfirmations,
   })
   expect(failures).toEqual([])
@@ -261,7 +272,7 @@ describe("E2E Scenario 2: Rovos Rail enquiry → voucher", () => {
     }))
     expect(store.rows("bookings")[0]).toMatchObject({ deposit_paid: true, invoice_balance: 60000 })
 
-    await moveStage(mock, "deposit_paid", { createInvoiceCorrespondence: true, depositReceived: true })
+    await moveStage(mock, "deposit_paid", { createInvoiceCorrespondence: true })
     expect(store.rows("bookings")[0].stage).toBe("deposit_paid")
 
     // 6. Final invoice + final payment → balance to zero.
@@ -272,7 +283,15 @@ describe("E2E Scenario 2: Rovos Rail enquiry → voucher", () => {
       method: "eft",
       reference: "FIN-RR-001",
     }))
-    await moveStage(mock, "final_paid", { createFinalInvoice: true, finalPaymentReceived: true })
+    // Payment-received confirmation clears the final_invoice_correspondence gate.
+    await mock.supabase.from("correspondences").insert({
+      booking_id: BOOKING_ID,
+      kind: "payment_received",
+      subject: "Payment received — RR-2026-0001",
+      status: "sent",
+    })
+
+    await moveStage(mock, "final_paid", { finalPaymentReceived: true })
     expect(store.rows("bookings")[0]).toMatchObject({ stage: "final_paid", invoice_balance: 0 })
 
     // 7. Voucher readiness gate passes.

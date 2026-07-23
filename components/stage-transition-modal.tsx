@@ -21,21 +21,22 @@ import { Textarea } from "@/components/ui/textarea"
 import type { GateFailure, ManualConfirmations } from "@/lib/pipeline/validate-transition"
 import { getPipelineStageLabel, type PipelineStage } from "@/lib/types"
 
-const GATE_TAB_MAP: Record<string, string> = {
-  customer_complete: "?tab=enquiry",
-  quote_sent_required: "?tab=quotes",
-  quote_sent_or_accepted: "?tab=quotes",
-  invoice_document: "?tab=documents",
-  invoice_correspondence: "?tab=correspondence",
-  final_invoice: "?tab=documents",
-  final_invoice_correspondence: "?tab=correspondence",
-  voucher_document: "?tab=documents",
-  voucher_correspondence: "?tab=correspondence",
-  email_import_review: "?tab=enquiry",
-  cancel_reason: "",
-  refund_capture: "",
-  // deposit_received_confirmation / final_payment_confirmation are manual
-  // ticks, not amount-entry gates — no "Fix → Payments tab" link.
+// final_payment_confirmation is a manual tick, and cancel_reason /
+// refund_capture have no owning tab — all three are deliberately absent
+// here, which is what makes `showFix` false for them.
+const GATE_TAB_CONFIG: Record<string, { path: string; label: string }> = {
+  customer_complete: { path: "?tab=enquiry", label: "Enquiry" },
+  quote_sent_required: { path: "?tab=quotes", label: "Quotes" },
+  quote_sent_or_accepted: { path: "?tab=quotes", label: "Quotes" },
+  reservation_form_received: { path: "?tab=reservation", label: "Reservation" },
+  invoice_document: { path: "?tab=documents", label: "Documents" },
+  invoice_correspondence: { path: "?tab=correspondence", label: "Emails Sent" },
+  deposit_received_confirmation: { path: "?tab=payments", label: "Payments" },
+  final_invoice: { path: "?tab=documents", label: "Documents" },
+  final_invoice_correspondence: { path: "?tab=correspondence", label: "Emails Sent" },
+  voucher_document: { path: "?tab=documents", label: "Documents" },
+  voucher_correspondence: { path: "?tab=correspondence", label: "Emails Sent" },
+  email_import_review: { path: "?tab=enquiry", label: "Enquiry" },
 }
 
 interface StageTransitionModalProps {
@@ -50,14 +51,14 @@ interface StageTransitionModalProps {
   onProceed: (manualConfirmations: ManualConfirmations) => Promise<void>
   onOverride: (overrideReason: string) => Promise<void>
   /**
-   * Optional callback that opens the booking's final-invoice generation
+   * Optional callback that opens the booking's payment-confirmation send
    * flow. When provided, a blocking `final_invoice_correspondence` failure
-   * renders an inline "Send final invoice" button that invokes this
+   * renders an inline "Send payment confirmation" button that invokes this
    * callback (mirroring the dialog opened from the booking page). When
    * omitted (e.g. on the pipeline page where the relevant booking-level
-   * data is not loaded), only the standard "Fix" link is shown.
+   * data is not loaded), only the standard "Go to … tab" link is shown.
    */
-  onSendFinalInvoice?: () => void
+  onSendPaymentConfirmation?: () => void
   /**
    * Optional callback that opens the booking's deposit-invoice preview/send
    * flow. When provided, an `invoice_correspondence` failure (deposit invoice
@@ -68,14 +69,16 @@ interface StageTransitionModalProps {
 }
 
 export function gateIdToTabPath(gateId: string): string {
-  return GATE_TAB_MAP[gateId] ?? ""
+  return GATE_TAB_CONFIG[gateId]?.path ?? ""
+}
+
+export function gateIdToTabLabel(gateId: string): string {
+  return GATE_TAB_CONFIG[gateId]?.label ?? ""
 }
 
 export function confirmationKeyForFailure(failure: GateFailure): keyof ManualConfirmations | null {
   if (failure.autoFixable === "create_invoice_25pct") return "createDepositInvoice"
-  if (failure.autoFixable === "create_final_invoice") return "createFinalInvoice"
   if (failure.gateId === "invoice_correspondence") return "createInvoiceCorrespondence"
-  if (failure.gateId === "deposit_received_confirmation") return "depositReceived"
   if (failure.gateId === "final_payment_confirmation") return "finalPaymentReceived"
   return null
 }
@@ -91,7 +94,7 @@ export function StageTransitionModal({
   onCancel,
   onProceed,
   onOverride,
-  onSendFinalInvoice,
+  onSendPaymentConfirmation,
   onSendDepositInvoice,
 }: StageTransitionModalProps) {
   const [confirmations, setConfirmations] = useState<ManualConfirmations>({})
@@ -148,10 +151,10 @@ export function StageTransitionModal({
             // No Fix link for gates with no target tab (manual-confirmation
             // ticks and cancel/refund gates handled elsewhere).
             const showFix = gateIdToTabPath(failure.gateId) !== ""
-            const showSendFinalInvoice =
+            const showSendPaymentConfirmation =
               failure.gateId === "final_invoice_correspondence" &&
               failure.severity === "block" &&
-              typeof onSendFinalInvoice === "function"
+              typeof onSendPaymentConfirmation === "function"
             const showSendDepositInvoice =
               failure.gateId === "invoice_correspondence" &&
               typeof onSendDepositInvoice === "function"
@@ -171,15 +174,15 @@ export function StageTransitionModal({
                         <p className="mt-1 text-sm">{failure.fixHint}</p>
                       </div>
                       <div className="flex shrink-0 flex-wrap items-center gap-2">
-                        {showSendFinalInvoice ? (
+                        {showSendPaymentConfirmation ? (
                           <Button
                             size="sm"
                             variant="default"
-                            onClick={() => onSendFinalInvoice?.()}
+                            onClick={() => onSendPaymentConfirmation?.()}
                             disabled={submitting}
                           >
                             <FileText data-icon="inline-start" />
-                            Send final invoice
+                            Send payment confirmation
                           </Button>
                         ) : null}
                         {showSendDepositInvoice ? (
@@ -196,7 +199,12 @@ export function StageTransitionModal({
                         ) : null}
                         {showFix ? (
                           <Button asChild size="sm" variant="outline">
-                            <Link href={`/app/bookings/${jobId}${gateIdToTabPath(failure.gateId)}`}>Fix</Link>
+                            <Link
+                              href={`/app/bookings/${jobId}${gateIdToTabPath(failure.gateId)}`}
+                              onClick={onCancel}
+                            >
+                              Go to {gateIdToTabLabel(failure.gateId)} tab
+                            </Link>
                           </Button>
                         ) : null}
                       </div>

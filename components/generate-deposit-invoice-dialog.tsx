@@ -192,7 +192,7 @@ export function GenerateDepositInvoiceDialog({
                 ? resumingFull
                   ? "Preview & Send Invoice"
                   : "Preview & Send Deposit Invoice"
-                : "Generate Invoice"}
+                : "Generate Deposit Invoice"}
             </Button>
           </DialogTrigger>
         ) : null}
@@ -215,7 +215,7 @@ export function GenerateDepositInvoiceDialog({
                   <Label htmlFor="pay-in-full">Pay in full</Label>
                   <span className="text-xs text-muted-foreground">
                     {insideSixtyDays
-                      ? "Departure is within 60 days — full payment is due, no deposit split."
+                      ? "Departure is within 60 days — full payment is due, no deposit required."
                       : "One invoice for the full amount instead of a deposit + final split."}
                   </span>
                 </div>

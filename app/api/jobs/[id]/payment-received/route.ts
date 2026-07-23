@@ -5,7 +5,7 @@ import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
 import { buildUnifiedTotals } from "@/lib/invoices/build-unified-totals"
 import { calculateInvoiceBalance } from "@/lib/invoices/calculate-balance"
 import { ensureInvoicePdf } from "@/lib/invoices/ensure-invoice-pdf"
-import { resolveInvoiceStatusLabel } from "@/lib/invoices/invoice-status"
+import { clientInvoiceNumber, resolveInvoiceStatusLabel } from "@/lib/invoices/invoice-status"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
@@ -45,7 +45,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
     .select(
-      "id, booking_number, departure_date, deposit_paid, cancelled_at, assigned_salesperson_id, customer:customers(title, first_name, last_name, email)",
+      "id, booking_number, customer_invoice_number, departure_date, deposit_paid, cancelled_at, assigned_salesperson_id, customer:customers(title, first_name, last_name, email)",
     )
     .eq("id", id)
     .single()
@@ -111,6 +111,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
 
   const customer = Array.isArray(booking.customer) ? booking.customer[0] : booking.customer
   const customerName = formatCustomerSalutation(customer)
+  const displayInvoiceNumber = clientInvoiceNumber(booking)
 
   let pdf
   try {
@@ -127,6 +128,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
         status: invoice.status,
       },
       bookingNumber: booking.booking_number,
+      displayInvoiceNumber,
       customerName,
       statusLabel,
       totals,
@@ -143,7 +145,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
       ...shared.tokens,
       customerName: customerName || "Valued Guest",
       jobNumber: booking.booking_number,
-      invoiceNumber: invoice.invoice_number,
+      invoiceNumber: displayInvoiceNumber,
       receivedAmount: formatMoney(balance.totalPaid, invoice.currency),
       finalDueDate: totals.finalDueDate ? formatDisplayDateLong(totals.finalDueDate) : "Now",
       outstandingAmount: formatMoney(balance.balance, invoice.currency),

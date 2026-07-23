@@ -136,6 +136,13 @@ export function formatTimeOfDay(value: string | null | undefined): string | null
   return `${hours}h${minutes.slice(0, 2)}`
 }
 
+/** "Pretoria → Cape Town" → "Pretoria to Cape Town" — the flowing prose style used in the
+ * itinerary line. The base-14 Helvetica font the PDF renders with has no glyph for the arrow, so
+ * it must never reach this sentence as-is. */
+function toProseRoute(route: string): string {
+  return route.replace(/\s*[→↔]\s*/g, " to ")
+}
+
 function joinSentence(
   parts: Array<string | null | undefined>,
   suffixes: Array<string | null | undefined>,
@@ -173,15 +180,16 @@ function describeBlock(block: VoucherServiceBlock): string {
           `${onBoard} the ${supplier || "train"}`,
           d.suiteType ? `in a ${d.suiteType}` : null,
           "on an all-inclusive basis",
-          d.route ? `— ${d.route}` : null,
+          d.route ? `— ${toProseRoute(d.route)}` : null,
         ],
         [start ? `Departs at ${start}` : null],
       )
     }
     case "transfer": {
+      // Transfer/car-rental supplier identity is never shown to the client — always generic.
       const leg = d.pickup && d.dropoff ? `from ${d.pickup} to ${d.dropoff}` : d.route ? `— ${d.route}` : null
       return joinSentence(
-        [supplier ? `${supplier} transfer` : "Transfer", leg, d.vehicleType ? `(${d.vehicleType})` : null],
+        ["Transfer", leg, d.vehicleType ? `(${d.vehicleType})` : null],
         [start ? `at ${start}` : null],
       )
     }

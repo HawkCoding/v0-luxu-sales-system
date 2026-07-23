@@ -166,11 +166,53 @@ export function tryGenerateAndSendDepositInvoice(page: Page): Promise<SendFlowRe
   })
 }
 
-export function tryGenerateAndSendFinalInvoice(page: Page): Promise<SendFlowResult> {
-  return tryGenerateAndSendInvoice(page, {
-    triggerLabel: /Generate Final Invoice/i,
-    generateEndpoint: "/api/invoices/final",
-  })
+// Payment-received confirmation — replaces the old "Generate Final Invoice"
+// flow under the one-invoice model: no separate generate step, the trigger
+// directly prepares the amended-invoice email, then opens PreviewAndSendDialog.
+export async function trySendPaymentConfirmation(page: Page): Promise<SendFlowResult> {
+  const trigger = page.getByRole("button", { name: /Send payment confirmation/i }).first()
+  const triggerVisible = await trigger.isVisible({ timeout: 5_000 }).catch(() => false)
+  if (!triggerVisible) {
+    return {
+      outcome: "skipped",
+      reason: "Trigger button (Send payment confirmation) not visible — no payments recorded or capability missing",
+    }
+  }
+
+  const preparePromise = waitForApiResponse(page, "/payment-received", "POST", SEND_TIMEOUT)
+  await trigger.click().catch(() => undefined)
+  const prepareResponse = await preparePromise
+
+  if (!prepareResponse || !prepareResponse.ok()) {
+    await page.keyboard.press("Escape").catch(() => undefined)
+    return {
+      outcome: "warn",
+      reason: "payment-received prepare endpoint did not return a successful response",
+      status: prepareResponse?.status() ?? null,
+    }
+  }
+
+  const sendBtn = page.getByRole("button", { name: /^Send($|\s)/ }).last()
+  await sendBtn.waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined)
+
+  const correspondencePromise = waitForApiResponse(page, "/api/correspondence", "POST", SEND_TIMEOUT)
+  await sendBtn.click().catch(() => undefined)
+  const sendResponse = await correspondencePromise
+
+  if (!sendResponse || !sendResponse.ok()) {
+    await page.keyboard.press("Escape").catch(() => undefined)
+    return {
+      outcome: "warn",
+      reason: "Payment-received correspondence POST did not return success",
+      status: sendResponse?.status() ?? null,
+    }
+  }
+
+  return {
+    outcome: "pass",
+    reason: "Payment-received confirmation sent",
+    status: sendResponse.status(),
+  }
 }
 
 // ---------------------------------------------------------------------------

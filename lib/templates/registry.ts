@@ -59,9 +59,9 @@ const consultantName: TemplateTokenSpec = {
 }
 const invoiceNumber: TemplateTokenSpec = {
   name: "invoiceNumber",
-  description: "Invoice number (e.g. BT-2026-0001-DEP1)",
+  description: "Customer-facing invoice number entered by the salesperson (falls back to the internal number)",
   kind: "scalar",
-  sample: "BT-2026-0001-DEP1",
+  sample: "INV-2026-0001",
 }
 const amountDue: TemplateTokenSpec = {
   name: "amountDue",

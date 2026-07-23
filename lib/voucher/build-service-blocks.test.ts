@@ -280,6 +280,82 @@ describe("buildVoucherServiceBlocks", () => {
     expect(blocks[0].serviceData.numberOfSuites).toBe(2)
   })
 
+  it("composes each train unit's bed/bathroom configuration into its suite label", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "sel-train-config",
+            package_leg_id: "leg-train",
+            selected: true,
+            supplier_id: "supplier-train",
+            route_id: "route-train",
+            suite_type_id: "suite-deluxe",
+            service_date: "2026-09-01",
+            nights: null,
+            notes: null,
+            package_legs: { sort_order: 0, label: "The Blue Train" },
+            suppliers: supplier({ kind: "train_operator", name: "Blue Train" }),
+            routes: { name: "Pretoria ↔ Cape Town", duration_days: 3 },
+            suite_types: null,
+            units: [
+              {
+                suite_type_id: "suite-deluxe",
+                sort_order: 0,
+                suite_types: { name: "Deluxe Suite" },
+                bedroom_types: { name: "Twin" },
+                bedroom_layouts: null,
+                bathroom_types: { name: "Shower" },
+              },
+            ],
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].serviceData.suiteType).toBe("Twin bedded Deluxe Suite with a shower")
+  })
+
+  it("leaves a hotel unit's room name plain — no bed/bathroom suffix", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "sel-hotel-config",
+            package_leg_id: "leg-hotel",
+            selected: true,
+            supplier_id: "supplier-hotel",
+            route_id: "route-hotel",
+            suite_type_id: null,
+            service_date: "2026-09-01",
+            nights: 2,
+            notes: null,
+            package_legs: { sort_order: 0, label: "Irene Country Lodge" },
+            suppliers: supplier({ kind: "hotel_property", name: "Irene Country Lodge" }),
+            routes: { name: "Full Board", duration_days: null },
+            suite_types: null,
+            units: [
+              {
+                suite_type_id: "room-standard",
+                sort_order: 0,
+                suite_types: { name: "Standard Room" },
+                bedroom_types: { name: "Twin" },
+                bedroom_layouts: null,
+                bathroom_types: { name: "En-suite shower" },
+              },
+            ],
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].serviceData.roomType).toBe("Standard Room")
+  })
+
   it("joins distinct suite names across mixed per-unit rows", async () => {
     const { blocks } = await buildVoucherServiceBlocks(
       buildSupabase({

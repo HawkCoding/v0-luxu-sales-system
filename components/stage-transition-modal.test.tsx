@@ -16,8 +16,11 @@ describe("gateIdToTabPath", () => {
     expect(gateIdToTabPath("quote_sent_or_accepted")).toBe("?tab=quotes")
   })
 
-  it("returns an empty path for manual-confirmation gates (no Fix link)", () => {
-    expect(gateIdToTabPath("deposit_received_confirmation")).toBe("")
+  it("routes the deposit-received gate to the payments tab", () => {
+    expect(gateIdToTabPath("deposit_received_confirmation")).toBe("?tab=payments")
+  })
+
+  it("returns an empty path for the final-payment manual-confirmation gate (no Fix link)", () => {
     expect(gateIdToTabPath("final_payment_confirmation")).toBe("")
   })
 
@@ -48,21 +51,28 @@ function renderModal(failures: GateFailure[]) {
 
 const depositGate: GateFailure = {
   gateId: "deposit_received_confirmation",
-  message: "Confirm the deposit has been received.",
+  message: "A payment must be recorded before the deposit can be marked received.",
+  fixHint: "Record a payment on the Payments tab, then send the payment confirmation email.",
+  severity: "block",
+}
+
+const finalPaymentGate: GateFailure = {
+  gateId: "final_payment_confirmation",
+  message: "Confirm the final payment has been received.",
   fixHint: "Tick to confirm — no amount entry needed.",
   severity: "confirm",
 }
 
 describe("StageTransitionModal", () => {
   it("shows a confirmation title when every failure is confirm-only", () => {
-    renderModal([depositGate])
+    renderModal([finalPaymentGate])
     expect(screen.getByText("Confirm this stage move")).toBeInTheDocument()
     expect(screen.queryByText("Stage move needs attention")).not.toBeInTheDocument()
   })
 
   it("shows the attention title when a blocking failure is present", () => {
     renderModal([
-      depositGate,
+      finalPaymentGate,
       {
         gateId: "quote_sent_required",
         message: "A quote must be sent first.",
@@ -73,13 +83,14 @@ describe("StageTransitionModal", () => {
     expect(screen.getByText("Stage move needs attention")).toBeInTheDocument()
   })
 
-  it("renders no Fix link for the deposit-received confirmation gate", () => {
+  it("renders a Fix link to the Payments tab for the deposit-received gate", () => {
     renderModal([depositGate])
-    expect(screen.queryByRole("link", { name: "Fix" })).not.toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Go to Payments tab" })).toBeInTheDocument()
   })
 
-  it("disables Confirm and move until the confirmation is ticked", () => {
+  it("hides Confirm and move when the deposit-received gate is blocking", () => {
     renderModal([depositGate])
-    expect(screen.getByRole("button", { name: /Confirm and move/i })).toBeDisabled()
+    expect(screen.queryByRole("button", { name: /Confirm and move/i })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Cancel move/i })).toBeInTheDocument()
   })
 })
