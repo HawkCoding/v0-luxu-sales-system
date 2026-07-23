@@ -33,11 +33,12 @@ import {
 import { useRole } from "@/lib/role-context"
 import { useAuth } from "@/lib/auth-context"
 import { AlertCircle, ArrowLeft, CheckCircle2, ChevronRight, ChevronLeft as ChevronLeftIcon, UserRound, XCircle, Target, UserPlus, UserMinus } from "lucide-react"
-import type { Invoice, Outcome, OutcomeReason } from "@/lib/types"
+import type { DocRecord, Invoice, Outcome, OutcomeReason } from "@/lib/types"
 import Link from "next/link"
 import { JobEnquiryTab } from "@/components/job-enquiry-tab"
 import { JobQuotesTab } from "@/components/job-quotes-tab"
 import { JobReservationTab } from "@/components/job-reservation-tab"
+import { JobReferencesTab } from "@/components/job-references-tab"
 import { JobPaymentsTab } from "@/components/job-payments-tab"
 import { JobCorrespondenceTab } from "@/components/job-correspondence-tab"
 import { JobDocumentsTab } from "@/components/job-documents-tab"
@@ -70,6 +71,7 @@ type JobDetailTab =
   | "enquiry"
   | "quotes"
   | "reservation"
+  | "references"
   | "payments"
   | "correspondence"
   | "documents"
@@ -81,6 +83,7 @@ const JOB_DETAIL_TABS = new Set<JobDetailTab>([
   "enquiry",
   "quotes",
   "reservation",
+  "references",
   "payments",
   "correspondence",
   "documents",
@@ -188,6 +191,7 @@ export default function JobDetailPage() {
   const [customerResults, setCustomerResults] = useState<Array<{ id: string; firstName: string; lastName: string; email: string }>>([])
   const [changingCustomer, setChangingCustomer] = useState(false)
   const [resolvingImportReview, setResolvingImportReview] = useState(false)
+  const [dismissingPackageMatch, setDismissingPackageMatch] = useState(false)
   const [ownerSubmitting, setOwnerSubmitting] = useState(false)
   const [lastJobPayload, setLastJobPayload] = useState<Record<string, unknown> | null>(null)
   const [activeTab, setActiveTab] = useState<JobDetailTab>(() => parseJobDetailTab(searchParams.get("tab")))
@@ -280,18 +284,27 @@ export default function JobDetailPage() {
   const canTake = can("edit:jobs") && !assignedSalespersonId
   const canRelease = can("edit:jobs") && isOwnedByMe
   const hasNoPackageMatchQuote = quotes.some((quote: { noPackageMatch?: boolean }) => quote.noPackageMatch)
+  // A kind='full' invoice covers the whole booking in one payment, so it
+  // satisfies both the deposit and final invoice requirements.
   const hasSentDepositInvoice = invoices.some(
     (invoice: { kind: string; status: string }) =>
-      invoice.kind === "deposit" && (invoice.status === "sent" || invoice.status === "paid"),
+      (invoice.kind === "deposit" || invoice.kind === "full") &&
+      (invoice.status === "sent" || invoice.status === "paid"),
   )
   const hasSentFinalInvoice = invoices.some(
     (invoice: { kind: string; status: string }) =>
-      invoice.kind === "final" && (invoice.status === "sent" || invoice.status === "paid"),
+      (invoice.kind === "final" || invoice.kind === "full") &&
+      (invoice.status === "sent" || invoice.status === "paid"),
   )
   const draftDepositInvoice =
     (invoices.find(
-      (invoice: { kind: string; status: string }) => invoice.kind === "deposit" && invoice.status === "draft",
+      (invoice: { kind: string; status: string }) =>
+        (invoice.kind === "deposit" || invoice.kind === "full") && invoice.status === "draft",
     ) as Invoice | undefined) ?? null
+  // A full-payment invoice replaces the separate final invoice entirely.
+  const hasFullInvoice = invoices.some(
+    (invoice: { kind: string; status: string }) => invoice.kind === "full" && invoice.status !== "void",
+  )
 
   const canEditSupplierRef = can("edit:jobs")
   const currentSupplierRef = (job as { supplierReference?: string | null } | undefined)?.supplierReference ?? ""
@@ -479,6 +492,22 @@ export default function JobDetailPage() {
       toast.error(error instanceof Error ? error.message : "Could not resolve import review")
     } finally {
       setResolvingImportReview(false)
+    }
+  }
+
+  const dismissPackageMatchNote = async () => {
+    setDismissingPackageMatch(true)
+    try {
+      const response = await fetch(`/api/jobs/${id}/dismiss-package-match`, { method: "POST" })
+      const payload = (await response.json().catch(() => ({}))) as { error?: string }
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Could not dismiss note")
+      }
+      await mutate()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not dismiss note")
+    } finally {
+      setDismissingPackageMatch(false)
     }
   }
 
@@ -848,9 +877,21 @@ export default function JobDetailPage() {
       {hasNoPackageMatchQuote && (
         <Alert className="border-yellow-300 bg-yellow-50 text-yellow-950">
           <AlertCircle className="h-4 w-4" />
-          <AlertTitle>No package matched</AlertTitle>
+          <AlertTitle className="flex items-center justify-between gap-2">
+            <span>No package matched</span>
+            <label className="flex items-center gap-1.5 text-xs font-normal text-yellow-900">
+              <Checkbox
+                checked={false}
+                disabled={dismissingPackageMatch}
+                onCheckedChange={(checked) => {
+                  if (checked) void dismissPackageMatchNote()
+                }}
+              />
+              Dismiss
+            </label>
+          </AlertTitle>
           <AlertDescription>
-            No package was matched from the email - pricing not pre-filled. Add line items manually before sending.
+            No package was matched when this inquiry was created - pricing not pre-filled. Add line items manually before sending.
           </AlertDescription>
         </Alert>
       )}
@@ -887,7 +928,7 @@ export default function JobDetailPage() {
 
       {can("send:correspondence") && (!hasSentDepositInvoice || !hasSentFinalInvoice) && (
         <div className="flex justify-end gap-2">
-          {!hasSentFinalInvoice ? (
+          {!hasSentFinalInvoice && !hasFullInvoice ? (
             <GenerateFinalInvoiceDialog
               jobId={id}
               bookingNumber={job.jobNumber}
@@ -907,6 +948,7 @@ export default function JobDetailPage() {
             customerName={`${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()}
             quotes={quotes}
             defaultDepositPercentage={settings?.defaultDepositPercentage ?? 25}
+            departureDate={enquiry?.departureDate ?? null}
             draftInvoice={draftDepositInvoice}
             onSent={async () => {
               await mutate()
@@ -923,6 +965,7 @@ export default function JobDetailPage() {
           <TabsTrigger value="enquiry" className="text-xs">Enquiry</TabsTrigger>
           <TabsTrigger value="quotes" className="text-xs">Quotes ({quotes.length})</TabsTrigger>
           <TabsTrigger value="reservation" className="text-xs">Reservation</TabsTrigger>
+          <TabsTrigger value="references" className="text-xs">Voucher References</TabsTrigger>
           <TabsTrigger value="payments" className="text-xs">Payments ({payments.length})</TabsTrigger>
           <TabsTrigger value="correspondence" className="text-xs">Emails Sent ({correspondence.length})</TabsTrigger>
           <TabsTrigger value="documents" className="text-xs">Documents ({documents.length})</TabsTrigger>
@@ -966,6 +1009,9 @@ export default function JobDetailPage() {
             customer={customer ?? null}
           />
         </TabsContent>
+        <TabsContent value="references">
+          <JobReferencesTab bookingId={id} />
+        </TabsContent>
         <TabsContent value="payments">
           <div className="mb-3 flex justify-end">
             <SendPaymentConfirmationButton
@@ -990,7 +1036,6 @@ export default function JobDetailPage() {
             job={job}
             enquiry={enquiry}
             customer={customer}
-            itineraries={itineraries}
             onChange={mutate}
             loading={isLoading}
             error={error as Error | null}
@@ -1079,6 +1124,7 @@ export default function JobDetailPage() {
         customerName={`${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()}
         quotes={quotes}
         defaultDepositPercentage={settings?.defaultDepositPercentage ?? 25}
+        departureDate={enquiry?.departureDate ?? null}
         draftInvoice={draftDepositInvoice}
         onSent={async () => {
           setDepositInvoiceOpen(false)

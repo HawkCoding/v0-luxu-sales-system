@@ -11,7 +11,7 @@ export interface InfoRowProps {
 
 export function InfoRow({ label, value, styles }: InfoRowProps) {
   return (
-    <View style={styles.infoRow}>
+    <View style={styles.infoRow} wrap={false}>
       <Text style={styles.infoLabel}>{label}</Text>
       <Text style={styles.infoValue}>{String(value || "")}</Text>
     </View>

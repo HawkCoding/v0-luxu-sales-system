@@ -4,16 +4,19 @@ import { syncBookingPaymentState } from "./sync-booking-payment-state"
 const BOOKING_ID = "00000000-0000-4000-8000-000000000001"
 const DEPOSIT_INVOICE_ID = "00000000-0000-4000-8000-000000000002"
 const FINAL_INVOICE_ID = "00000000-0000-4000-8000-000000000003"
+const FULL_INVOICE_ID = "00000000-0000-4000-8000-000000000004"
 
 function makeSupabase({
   quote = { total: 10000 },
   payments = [] as { amount: number }[],
   depositInvoice = null as { id: string; amount: number; status: string } | null,
   finalInvoice = null as { id: string; status: string } | null,
+  fullInvoice = null as { id: string; amount: number; status: string } | null,
   currentBooking = {
     deposit_paid: false,
     deposit_paid_at: null as string | null,
     deposit_confirmed_manually: false,
+    stage: "deposit_requested" as string,
   },
   bookingUpdateError = null as Error | null,
   invoiceUpdateError = null as Error | null,
@@ -56,12 +59,13 @@ function makeSupabase({
         if (table === "invoices") {
           return {
             select: vi.fn(() => {
-              // Track which "kind" eq is called with to route to deposit vs final result
+              // Track which "kind" eq is called with to route to deposit/final/full result
               let capturedKind: string | undefined
               const makeEq = (depth: number): ReturnType<typeof vi.fn> =>
                 vi.fn((_col: string, val?: string) => {
                   if (depth === 1 && val === "deposit") capturedKind = "deposit"
                   if (depth === 1 && val === "final") capturedKind = "final"
+                  if (depth === 1 && val === "full") capturedKind = "full"
                   return {
                     eq: makeEq(depth + 1),
                     in: vi.fn(() => ({
@@ -71,6 +75,11 @@ function makeSupabase({
                             if (capturedKind === "deposit") {
                               return depositInvoice
                                 ? { data: depositInvoice, error: null }
+                                : { data: null, error: null }
+                            }
+                            if (capturedKind === "full") {
+                              return fullInvoice
+                                ? { data: fullInvoice, error: null }
                                 : { data: null, error: null }
                             }
                             return finalInvoice
@@ -219,7 +228,7 @@ describe("syncBookingPaymentState", () => {
     const { supabase, bookingUpdate } = makeSupabase({
       payments: [{ amount: 2500 }],
       depositInvoice: { id: DEPOSIT_INVOICE_ID, amount: 2500, status: "sent" },
-      currentBooking: { deposit_paid: false, deposit_paid_at: null, deposit_confirmed_manually: false },
+      currentBooking: { deposit_paid: false, deposit_paid_at: null, deposit_confirmed_manually: false, stage: "deposit_requested" },
     })
     await syncBookingPaymentState(supabase as never, BOOKING_ID)
     const updateCall = (bookingUpdate.mock.calls as unknown[][])[0][0] as Record<string, unknown>
@@ -230,7 +239,7 @@ describe("syncBookingPaymentState", () => {
     const { supabase, bookingUpdate } = makeSupabase({
       payments: [{ amount: 2500 }],
       depositInvoice: { id: DEPOSIT_INVOICE_ID, amount: 2500, status: "paid" },
-      currentBooking: { deposit_paid: true, deposit_paid_at: "2026-01-01T00:00:00Z", deposit_confirmed_manually: false },
+      currentBooking: { deposit_paid: true, deposit_paid_at: "2026-01-01T00:00:00Z", deposit_confirmed_manually: false, stage: "deposit_requested" },
     })
     await syncBookingPaymentState(supabase as never, BOOKING_ID)
     const updateCall = (bookingUpdate.mock.calls as unknown[][])[0][0] as Record<string, unknown>
@@ -241,7 +250,7 @@ describe("syncBookingPaymentState", () => {
     const { supabase, bookingUpdate } = makeSupabase({
       payments: [{ amount: 1000 }],
       depositInvoice: { id: DEPOSIT_INVOICE_ID, amount: 2500, status: "sent" },
-      currentBooking: { deposit_paid: true, deposit_paid_at: "2026-01-01T00:00:00Z", deposit_confirmed_manually: true },
+      currentBooking: { deposit_paid: true, deposit_paid_at: "2026-01-01T00:00:00Z", deposit_confirmed_manually: true, stage: "deposit_requested" },
     })
     const result = await syncBookingPaymentState(supabase as never, BOOKING_ID)
     // Amount is below threshold, but the manual tick is sticky.
@@ -260,5 +269,65 @@ describe("syncBookingPaymentState", () => {
     })
     const result = await syncBookingPaymentState(supabase as never, BOOKING_ID)
     expect(result?.depositPaid).toBe(false)
+  })
+
+  it("derives deposit_paid threshold from a full-payment invoice when no deposit invoice exists", async () => {
+    const { supabase } = makeSupabase({
+      payments: [{ amount: 10000 }],
+      fullInvoice: { id: FULL_INVOICE_ID, amount: 10000, status: "sent" },
+    })
+    const result = await syncBookingPaymentState(supabase as never, BOOKING_ID)
+    expect(result?.depositPaid).toBe(true)
+    expect(result?.invoiceBalance).toBe(0)
+  })
+
+  it("marks full-payment invoice paid when invoice_balance reaches zero", async () => {
+    const { supabase, invoiceUpdate, auditInsert } = makeSupabase({
+      payments: [{ amount: 10000 }],
+      fullInvoice: { id: FULL_INVOICE_ID, amount: 10000, status: "sent" },
+    })
+    await syncBookingPaymentState(supabase as never, BOOKING_ID)
+    expect(invoiceUpdate).toHaveBeenCalledWith(expect.objectContaining({ status: "paid" }))
+    expect(auditInsert).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "invoice_marked_paid", entity_id: BOOKING_ID }),
+    )
+  })
+
+  it("auto-advances the booking to final_paid when the balance hits zero before that stage", async () => {
+    const { supabase, bookingUpdate, auditInsert } = makeSupabase({
+      payments: [{ amount: 10000 }],
+      fullInvoice: { id: FULL_INVOICE_ID, amount: 10000, status: "sent" },
+      currentBooking: { deposit_paid: false, deposit_paid_at: null, deposit_confirmed_manually: false, stage: "deposit_requested" },
+    })
+    await syncBookingPaymentState(supabase as never, BOOKING_ID)
+    expect(bookingUpdate).toHaveBeenCalledWith(expect.objectContaining({ stage: "final_paid" }))
+    expect(auditInsert).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "booking_paid_in_full", entity_id: BOOKING_ID }),
+    )
+  })
+
+  it("does not re-advance the stage when the booking is already at or past final_paid", async () => {
+    const { supabase, bookingUpdate, auditInsert } = makeSupabase({
+      payments: [{ amount: 10000 }],
+      fullInvoice: { id: FULL_INVOICE_ID, amount: 10000, status: "paid" },
+      currentBooking: { deposit_paid: true, deposit_paid_at: "2026-01-01T00:00:00Z", deposit_confirmed_manually: false, stage: "final_paid" },
+    })
+    await syncBookingPaymentState(supabase as never, BOOKING_ID)
+    const updateCall = (bookingUpdate.mock.calls as unknown[][])[0][0] as Record<string, unknown>
+    expect(updateCall.stage).toBeUndefined()
+    expect(auditInsert).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: "booking_paid_in_full" }),
+    )
+  })
+
+  it("does not advance the stage while balance remains outstanding", async () => {
+    const { supabase, bookingUpdate } = makeSupabase({
+      payments: [{ amount: 5000 }],
+      fullInvoice: { id: FULL_INVOICE_ID, amount: 10000, status: "sent" },
+      currentBooking: { deposit_paid: false, deposit_paid_at: null, deposit_confirmed_manually: false, stage: "deposit_requested" },
+    })
+    await syncBookingPaymentState(supabase as never, BOOKING_ID)
+    const updateCall = (bookingUpdate.mock.calls as unknown[][])[0][0] as Record<string, unknown>
+    expect(updateCall.stage).toBeUndefined()
   })
 })

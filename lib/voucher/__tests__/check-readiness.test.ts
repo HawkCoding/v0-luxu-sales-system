@@ -6,6 +6,7 @@ const readyInput: VoucherReadinessInput = {
   invoiceBalance: 0,
   departureDate: "2026-06-01",
   customerEmail: "ada@example.test",
+  missingLegReferenceLabels: [],
 }
 
 describe("checkVoucherReadiness", () => {
@@ -73,12 +74,21 @@ describe("checkVoucherReadiness", () => {
     expect(result.failures).toContainEqual(expect.objectContaining({ code: "customer_email_missing" }))
   })
 
-  it("accumulates all four failures simultaneously", () => {
+  it("returns leg_references_missing when a leg has no supplier reference", () => {
+    const result = checkVoucherReadiness({ ...readyInput, missingLegReferenceLabels: ["Hotel: Cape Town"] })
+    expect(result.ready).toBe(false)
+    expect(result.failures).toContainEqual(
+      expect.objectContaining({ code: "leg_references_missing", message: expect.stringContaining("Hotel: Cape Town") }),
+    )
+  })
+
+  it("accumulates all five failures simultaneously", () => {
     const result = checkVoucherReadiness({
       stage: "deposit_paid",
       invoiceBalance: 500,
       departureDate: null,
       customerEmail: null,
+      missingLegReferenceLabels: ["Hotel: Cape Town"],
     })
     expect(result.ready).toBe(false)
     expect(result.failures.map((f) => f.code)).toEqual([
@@ -86,6 +96,7 @@ describe("checkVoucherReadiness", () => {
       "balance_not_zero",
       "departure_date_missing",
       "customer_email_missing",
+      "leg_references_missing",
     ])
   })
 

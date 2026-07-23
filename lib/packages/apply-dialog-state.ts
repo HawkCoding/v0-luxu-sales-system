@@ -146,6 +146,7 @@ export function createDraftTransportRequest(leg: PackageLeg, routeId?: string | 
     flightNumber: null,
     priceOverride: null,
     notes: null,
+    supplierReference: null,
     sortOrder: 0,
     createdAt: now,
     updatedAt: now,

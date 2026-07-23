@@ -1,18 +1,26 @@
 import { z } from "zod"
 import { requireRole, requireUser } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
+import { humanizeTemplateKey } from "@/lib/templates/humanize-key"
 
-const TEMPLATE_COLUMNS = "id, key, subject, body_html, version, active, is_system"
+const TEMPLATE_COLUMNS = "id, key, name, subject, body_html, version, active, is_system, sort_order"
 
 const templatePatchSchema = z
   .object({
     id: z.string().uuid(),
+    name: z.string().trim().min(1).max(120).optional(),
     subject: z.string().max(500).optional(),
     bodyHtml: z.string().max(200_000).optional(),
     active: z.boolean().optional(),
+    sortOrder: z.number().int().nonnegative().optional(),
   })
   .refine(
-    (v) => v.subject !== undefined || v.bodyHtml !== undefined || v.active !== undefined,
+    (v) =>
+      v.name !== undefined ||
+      v.subject !== undefined ||
+      v.bodyHtml !== undefined ||
+      v.active !== undefined ||
+      v.sortOrder !== undefined,
     { message: "Body must include at least one updatable field" },
   )
 
@@ -23,7 +31,7 @@ export async function GET() {
   const { data: templates, error } = await auth.value.supabase
     .from("templates")
     .select(TEMPLATE_COLUMNS)
-    .order("key", { ascending: true })
+    .order("sort_order", { ascending: true })
 
   if (error) return safeSupabaseError("templates:list", error)
 
@@ -31,11 +39,13 @@ export async function GET() {
     (templates ?? []).map((t) => ({
       id: t.id,
       key: t.key,
+      name: t.name ?? humanizeTemplateKey(t.key),
       subject: t.subject,
       bodyHtml: t.body_html,
       version: t.version,
       active: t.active,
       isSystem: t.is_system,
+      sortOrder: t.sort_order,
     })),
   )
 }
@@ -92,15 +102,25 @@ export async function POST(req: Request) {
     suffix += 1
   }
 
+  const { data: maxRow } = await supabase
+    .from("templates")
+    .select("sort_order")
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  const nextSortOrder = (maxRow?.sort_order ?? -1) + 1
+
   const { data: created, error } = await supabase
     .from("templates")
     .insert({
       key,
+      name: parsed.data.name,
       subject: parsed.data.subject,
       body_html: parsed.data.bodyHtml,
       version: 1,
       active: true,
       is_system: false,
+      sort_order: nextSortOrder,
     })
     .select(TEMPLATE_COLUMNS)
     .single()
@@ -120,11 +140,13 @@ export async function POST(req: Request) {
     {
       id: created.id,
       key: created.key,
+      name: created.name ?? humanizeTemplateKey(created.key),
       subject: created.subject,
       bodyHtml: created.body_html,
       version: created.version,
       active: created.active,
       isSystem: created.is_system,
+      sortOrder: created.sort_order,
     },
     { status: 201 },
   )
@@ -155,10 +177,14 @@ export async function PATCH(req: Request) {
   if (existingError || !existing) return jsonError("Template not found", 404)
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  if (parsed.data.name !== undefined) updates.name = parsed.data.name
   if (parsed.data.subject !== undefined) updates.subject = parsed.data.subject
   if (parsed.data.bodyHtml !== undefined) updates.body_html = parsed.data.bodyHtml
   if (parsed.data.active !== undefined) updates.active = parsed.data.active
-  updates.version = existing.version + 1
+  if (parsed.data.sortOrder !== undefined) updates.sort_order = parsed.data.sortOrder
+  if (parsed.data.subject !== undefined || parsed.data.bodyHtml !== undefined) {
+    updates.version = existing.version + 1
+  }
 
   const { data: updated, error } = await supabase
     .from("templates")
@@ -181,10 +207,12 @@ export async function PATCH(req: Request) {
   return Response.json({
     id: updated.id,
     key: updated.key,
+    name: updated.name ?? humanizeTemplateKey(updated.key),
     subject: updated.subject,
     bodyHtml: updated.body_html,
     version: updated.version,
     active: updated.active,
     isSystem: updated.is_system,
+    sortOrder: updated.sort_order,
   })
 }

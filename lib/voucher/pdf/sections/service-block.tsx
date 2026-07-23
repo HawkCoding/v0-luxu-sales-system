@@ -74,18 +74,29 @@ interface ServiceBlockProps {
   styles: Styles
 }
 
+// A block that cannot physically fit on one page must stay wrappable, otherwise
+// react-pdf clips the overflow instead of continuing it. Rough character budget
+// for a full A4 content column at these type sizes.
+const SINGLE_PAGE_CHAR_BUDGET = 1800
+
+function fitsOnOnePage(rows: Array<[string, string | number]>, extra: string): boolean {
+  const chars = rows.reduce((sum, [label, value]) => sum + label.length + String(value).length, extra.length)
+  return chars <= SINGLE_PAGE_CHAR_BUDGET
+}
+
 export function ServiceBlock({ block, styles }: ServiceBlockProps) {
   const title = block.title || voucherServiceTypeLabel(block.serviceType)
+  const rows = rowsForBlock(block)
+  const name = block.contactDetails.name ?? ""
+
   return (
-    <View style={styles.section}>
+    <View style={styles.section} wrap={!fitsOnOnePage(rows, `${title}${name}`)}>
       <Text style={styles.sectionTitle} minPresenceAhead={60}>
         {title}
       </Text>
       <View style={styles.providerBox}>
-        {block.contactDetails.name ? (
-          <Text style={styles.providerName}>{block.contactDetails.name}</Text>
-        ) : null}
-        {rowsForBlock(block).map(([label, value], idx) => (
+        {name ? <Text style={styles.providerName}>{name}</Text> : null}
+        {rows.map(([label, value], idx) => (
           <InfoRow key={`${block.serviceType}-${idx}`} label={label} value={value} styles={styles} />
         ))}
       </View>

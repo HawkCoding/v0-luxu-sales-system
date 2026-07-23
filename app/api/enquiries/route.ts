@@ -273,7 +273,6 @@ async function createDraftQuoteForBooking({
       status,
       validity_until: getDefaultQuoteValidityDate(),
       subtotal: totals.subtotal,
-      vat: totals.vat,
       total: totals.total,
       no_package_match: noPackageMatch,
       quote_number: buildQuoteNumber(bookingNumber, []),

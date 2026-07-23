@@ -195,7 +195,7 @@ describe("pricing engine", () => {
         total: 69000,
       }),
     )
-    expect(calculateQuoteTotals(lineItems)).toEqual({ subtotal: 69000, vat: 10350, total: 79350 })
+    expect(calculateQuoteTotals(lineItems)).toEqual({ subtotal: 69000, total: 69000 })
   })
 
   it("keeps mixed train, hotel, transfer, and rental legs deterministic", () => {

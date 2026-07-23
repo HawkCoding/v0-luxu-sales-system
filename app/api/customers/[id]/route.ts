@@ -26,6 +26,7 @@ const patchCustomerSchema = z.object({
   postal_code: z.string().trim().max(20).nullable().optional(),
   vat_number: z.string().trim().max(50).nullable().optional(),
   date_of_birth: z.string().date().nullable().optional(),
+  id_passport: z.string().trim().max(50).nullable().optional(),
   vip_status: z.boolean().optional(),
   preferences: z.string().trim().max(2000).nullable().optional(),
   communication_preferences: z.string().trim().max(1000).nullable().optional(),
@@ -64,7 +65,7 @@ export async function GET(
       supabase
         .from("bookings")
         .select(
-          "id, booking_number, stage, consultant, departure_date, created_at, route:routes(name, supplier:suppliers(id, name)), package:packages(name), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(id, name), extracted_json",
+          "id, booking_number, stage, consultant, departure_date, created_at, route:routes(name, supplier:suppliers(id, name)), package:packages!bookings_package_id_fkey(name), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(id, name), extracted_json",
         )
         .eq("customer_id", id)
         .order("created_at", { ascending: false }),
@@ -175,6 +176,7 @@ export async function GET(
       vatNumber: customer.vat_number,
       notes: customer.notes,
       dateOfBirth: customer.date_of_birth,
+      idPassport: customer.id_passport,
       vipStatus: customer.vip_status,
       preferences: customer.preferences,
       communicationPreferences: customer.communication_preferences,
@@ -302,6 +304,7 @@ export async function PATCH(
       phone: normalizedPhone ? normalizedPhone : null,
       province: normalizedProvince ? normalizedProvince : null,
       date_of_birth: parsed.date_of_birth ?? null,
+      ...(parsed.id_passport !== undefined ? { id_passport: blankToNull(parsed.id_passport) } : {}),
       vip_status: parsed.vip_status ?? false,
       preferences: normalizedPreferences ? normalizedPreferences : null,
       communication_preferences: normalizedCommunicationPreferences
@@ -339,7 +342,7 @@ export async function PATCH(
 
   const { data: updated, error: updateError } = await updateQuery
     .select(
-      "id, notes, email, phone, fax, province, company_name, address_line1, address_line2, city, postal_code, vat_number, date_of_birth, vip_status, preferences, communication_preferences, default_rate_type_id, first_travel_date, last_travel_date, updated_at",
+      "id, notes, email, phone, fax, province, company_name, address_line1, address_line2, city, postal_code, vat_number, date_of_birth, id_passport, vip_status, preferences, communication_preferences, default_rate_type_id, first_travel_date, last_travel_date, updated_at",
     )
     .single()
 
@@ -381,6 +384,7 @@ export async function PATCH(
     postalCode: updated.postal_code,
     vatNumber: updated.vat_number,
     dateOfBirth: updated.date_of_birth,
+    idPassport: updated.id_passport,
     vipStatus: updated.vip_status,
     preferences: updated.preferences,
     communicationPreferences: updated.communication_preferences,

@@ -1,17 +1,16 @@
 "use client"
 
+import { useState } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import type { DocRecord, Enquiry, Job, Customer, Itinerary } from "@/lib/types"
-import { AlertCircle, FileText } from "lucide-react"
+import type { DocRecord, Enquiry, Job, Customer } from "@/lib/types"
+import { AlertCircle, FileOutput, FileText } from "lucide-react"
 import { GenerateVoucherDialog } from "@/components/generate-voucher-dialog"
-import { GenerateItineraryDialog } from "@/components/generate-itinerary-dialog"
 import { formatDisplayDateTime } from "@/lib/date-format"
 
-const CONFIRMED_STAGES = new Set(["deposit_paid", "final_paid", "voucher_sent", "closed"])
 const VOUCHER_STAGES = new Set(["final_paid", "voucher_sent", "closed"])
 
 interface JobDocumentsTabProps {
@@ -19,7 +18,6 @@ interface JobDocumentsTabProps {
   job?: Job
   enquiry?: Enquiry
   customer?: Customer
-  itineraries?: Itinerary[]
   onChange?: () => Promise<void> | void
   loading?: boolean
   error?: Error | null
@@ -30,26 +28,13 @@ export function JobDocumentsTab({
   job,
   enquiry,
   customer,
-  itineraries = [],
   onChange,
   loading = false,
   error = null,
 }: JobDocumentsTabProps) {
-  const canGenerateVoucher = job && enquiry && customer && VOUCHER_STAGES.has(job.stage ?? "")
-  const canGenerateItinerary = job && customer && CONFIRMED_STAGES.has(job.stage ?? "")
-  const existingItinerary = itineraries[0] ?? null
-  const hasItinerary = documents.some((d) => d.kind === "itinerary_pdf")
+  const [voucherOpen, setVoucherOpen] = useState(false)
 
-  // Pre-fill a sensible trip title from the booking's route + customer surname —
-  // still just a starting point, the salesperson can always edit it before generating.
-  const defaultItineraryTitle = (() => {
-    const route = enquiry?.direction?.trim()
-    const lastName = customer?.lastName?.trim()
-    if (route && lastName) return `${route} — ${lastName} Family`
-    if (lastName) return `${lastName} Family`
-    return ""
-  })()
-  const initialItineraryTitle = existingItinerary?.name ?? defaultItineraryTitle
+  const canGenerateVoucher = job && enquiry && customer && VOUCHER_STAGES.has(job.stage ?? "")
 
   if (loading) {
     return (
@@ -97,29 +82,6 @@ export function JobDocumentsTab({
 
   return (
     <div className="space-y-3">
-      {canGenerateItinerary && (
-        <Card className="border-primary/20 bg-primary/5">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-foreground">Generate Client Itinerary</p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Create a personalised trip overview PDF to send to the client
-                </p>
-              </div>
-              <GenerateItineraryDialog
-                jobId={job.id}
-                bookingNumber={job.jobNumber}
-                initialTripTitle={initialItineraryTitle}
-                initialTripNotes={existingItinerary?.notes ?? ""}
-                onGenerated={onChange}
-                onSent={onChange}
-              />
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       {canGenerateVoucher && (
         <Card className="border-primary/20 bg-primary/5">
           <CardContent className="p-4">
@@ -128,24 +90,30 @@ export function JobDocumentsTab({
                 <p className="text-sm font-medium text-foreground">Generate Travel Voucher</p>
                 <p className="text-xs text-muted-foreground mt-0.5">Create, preview, and send the PDF voucher</p>
               </div>
-              <GenerateVoucherDialog
-                jobId={job.id}
-                bookingNumber={job.jobNumber}
-                onGenerated={onChange}
-                hasItinerary={hasItinerary}
-                initialItineraryTitle={initialItineraryTitle}
-                initialItineraryNotes={existingItinerary?.notes ?? ""}
-                onItineraryGenerated={onChange}
-                onSent={async () => {
-                  await onChange?.()
-                }}
-              />
+              <Button size="sm" onClick={() => setVoucherOpen(true)}>
+                <FileOutput data-icon="inline-start" />
+                Generate Voucher
+              </Button>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {documents.length === 0 && !canGenerateVoucher && !canGenerateItinerary && (
+      {canGenerateVoucher && (
+        <GenerateVoucherDialog
+          trigger={false}
+          open={voucherOpen}
+          onOpenChange={setVoucherOpen}
+          jobId={job.id}
+          bookingNumber={job.jobNumber}
+          onGenerated={onChange}
+          onSent={async () => {
+            await onChange?.()
+          }}
+        />
+      )}
+
+      {documents.length === 0 && !canGenerateVoucher && (
         <div className="text-center py-8 text-sm text-muted-foreground">No documents generated</div>
       )}
 

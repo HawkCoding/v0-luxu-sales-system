@@ -709,8 +709,6 @@ export async function buildPackageQuoteLineItems({
 
 export function calculateQuoteTotals(lineItems: QuoteLineItem[]) {
   const subtotal = Math.round(lineItems.reduce((sum, item) => sum + item.total, 0) * 100) / 100
-  const vat = Math.round(subtotal * 0.15 * 100) / 100
-  const total = Math.round((subtotal + vat) * 100) / 100
 
-  return { subtotal, vat, total }
+  return { subtotal, total: subtotal }
 }

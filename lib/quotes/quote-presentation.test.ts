@@ -139,8 +139,8 @@ const hotelBlock: VoucherServiceBlock = {
 
 const trainBlock: VoucherServiceBlock = {
   serviceType: "train",
-  title: "The Blue Train",
-  contactDetails: { name: "The Blue Train", location: "Cape Town" },
+  title: "Blue Train",
+  contactDetails: { name: "Blue Train", location: "Cape Town" },
   serviceData: {
     departureDate: "2026-07-20",
     arrivalDate: "2026-07-22",
@@ -176,12 +176,12 @@ describe("buildQuoteItineraryLines", () => {
     const [boarding, arrival] = buildQuoteItineraryLines([trainBlock])
 
     expect(boarding.text).toBe(
-      "Two nights on The Blue Train in a Deluxe Suite — Pretoria to Cape Town | Departs at 12h00",
+      "Two nights on the Blue Train in a Deluxe Suite on an all-inclusive basis — Pretoria to Cape Town | Departs at 12h00",
     )
     expect(boarding.bullets).toEqual(["High Tea", "Wi-Fi"])
     expect(arrival).toEqual({
       dateISO: "2026-07-22",
-      text: "Arrival in Cape Town at 18h00",
+      text: "Arrival at Cape Town station at 18h00",
       bullets: ["Train arrival times cannot be guaranteed"],
     })
   })

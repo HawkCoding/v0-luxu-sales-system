@@ -8,12 +8,20 @@ const composeMocks = vi.hoisted(() => ({
   composeEmail: vi.fn(),
 }))
 
+const itineraryMocks = vi.hoisted(() => ({
+  ensureItineraryPdf: vi.fn(),
+}))
+
 vi.mock("@/lib/api/auth", () => ({
   requireRole: authMocks.requireRole,
 }))
 
 vi.mock("@/lib/templates/compose-email", () => ({
   composeEmail: composeMocks.composeEmail,
+}))
+
+vi.mock("@/lib/itinerary/ensure-itinerary-pdf", () => ({
+  ensureItineraryPdf: itineraryMocks.ensureItineraryPdf,
 }))
 
 import { POST } from "./route"
@@ -91,6 +99,40 @@ function buildSupabase(options: BuildOptions = {}) {
           })),
         }
       }
+      if (table === "quotes") {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+        }
+      }
+      // Supplier fallback lookup for {{supplierName}} — no route supplier in these fixtures.
+      if (table === "bookings") {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+        }
+      }
+      // Suite tokens for the voucher email — no package selections in these fixtures.
+      if (table === "booking_package_selections") {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          then: (resolve: (value: { data: unknown[]; error: null }) => unknown) =>
+            resolve({ data: [], error: null }),
+        }
+      }
+      // No leg reference rows in these fixtures — readiness check sees nothing missing.
+      if (table === "booking_transport_requests") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              order: vi.fn(async () => ({ data: [], error: null })),
+            })),
+          })),
+        }
+      }
+
       throw new Error(`Unexpected table ${table}`)
     }),
     storage: {
@@ -123,6 +165,14 @@ describe("POST /api/vouchers/[id]/prepare-send", () => {
       bodyHtml: "<html><p>voucher</p></html>",
       bodyContentHtml: "<p>voucher</p>",
       warnings: [],
+    })
+    itineraryMocks.ensureItineraryPdf.mockReset()
+    itineraryMocks.ensureItineraryPdf.mockResolvedValue({
+      documentId: "doc-itin-generated",
+      bookingId: BOOKING_ID,
+      itineraryId: "itin-generated",
+      storagePath: "vouchers/BT-2026-0001/itinerary.pdf",
+      regenerated: true,
     })
   })
 
@@ -166,14 +216,28 @@ describe("POST /api/vouchers/[id]/prepare-send", () => {
     )
   })
 
-  it("returns a structured missingItinerary error when no itinerary PDF exists", async () => {
-    buildSupabase({ itineraryStoragePath: null })
+  it("silently generates the itinerary PDF and proceeds when none exists yet", async () => {
+    const { download } = buildSupabase({ itineraryStoragePath: null })
 
     const res = await POST(new Request("http://localhost"), routeParams())
     const body = await res.json()
 
-    expect(res.status).toBe(422)
-    expect(body.details).toMatchObject({ missingItinerary: true })
+    expect(res.status).toBe(200)
+    expect(itineraryMocks.ensureItineraryPdf).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ bookingId: BOOKING_ID }),
+    )
+    expect(body.attachments).toHaveLength(2)
+    expect(download).toHaveBeenCalledTimes(2)
+  })
+
+  it("blocks the send when the itinerary PDF cannot be generated", async () => {
+    buildSupabase({ itineraryStoragePath: null })
+    itineraryMocks.ensureItineraryPdf.mockRejectedValue(new Error("render failed"))
+
+    const res = await POST(new Request("http://localhost"), routeParams())
+
+    expect(res.status).toBe(500)
   })
 
   it("blocks when voucher readiness fails (unpaid balance)", async () => {

@@ -74,7 +74,6 @@ interface QuotePatchPayload {
 interface QuotePatchResponse {
   id: string
   subtotal: number
-  vat: number
   total: number
   lineItems: QuoteLineItem[]
   updatedAt: string

@@ -20,6 +20,7 @@ const travellerInputSchema = z.object({
   dateOfBirth: z.string().trim().max(50).nullable().optional(),
   residence: z.string().trim().max(100).nullable().optional(),
   isChild: z.boolean().default(false),
+  isPrimary: z.boolean().default(false),
 })
 
 const putTravellersSchema = z.object({
@@ -36,6 +37,7 @@ type TravellerRow = {
   date_of_birth: string | null
   residence: string | null
   is_child: boolean
+  is_primary: boolean
   sort_order: number
 }
 
@@ -49,6 +51,7 @@ function mapTraveller(row: TravellerRow) {
     dateOfBirth: row.date_of_birth ?? "",
     residence: row.residence ?? "",
     isChild: row.is_child,
+    isPrimary: row.is_primary,
     sortOrder: row.sort_order,
   }
 }
@@ -108,6 +111,7 @@ export async function PUT(req: Request, { params }: RouteParams) {
     date_of_birth: traveller.dateOfBirth?.trim() || null,
     residence: traveller.residence?.trim() || null,
     is_child: traveller.isChild,
+    is_primary: traveller.isPrimary,
     sort_order: index,
   }))
 

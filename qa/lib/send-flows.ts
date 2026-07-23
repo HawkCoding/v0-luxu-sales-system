@@ -207,10 +207,24 @@ export async function tryGenerateAndSendVoucher(page: Page): Promise<SendFlowRes
     }
   }
 
-  // After Generate completes, click Preview & Send to open the email step.
-  const previewSendBtn = page.getByRole("button", { name: /Preview & Send/i }).last()
+  // After Generate completes, click Preview & Send Voucher. That prepares the
+  // email server-side (voucher PDF + itinerary PDF) before the preview opens,
+  // and 422s when the booking has no itinerary yet.
+  const previewSendBtn = page.getByRole("button", { name: /Preview & Send Voucher/i }).last()
   await previewSendBtn.waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined)
+
+  const preparePromise = waitForApiResponse(page, "/prepare-send", "POST", 60_000)
   await previewSendBtn.click().catch(() => undefined)
+  const prepareResponse = await preparePromise
+
+  if (!prepareResponse || !prepareResponse.ok()) {
+    return {
+      outcome: "warn",
+      reason:
+        "Voucher prepare-send POST did not return success — the booking likely has no itinerary PDF, which the voucher email requires",
+      status: prepareResponse?.status() ?? null,
+    }
+  }
 
   const sendBtn = page.getByRole("button", { name: /Send with attachment|^Send$/ }).last()
   await sendBtn.waitFor({ state: "visible", timeout: 5_000 }).catch(() => undefined)

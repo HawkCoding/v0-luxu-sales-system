@@ -44,6 +44,7 @@ interface TravellerDraft {
   dateOfBirth: string
   residence: string
   isChild: boolean
+  isPrimary: boolean
 }
 
 let draftKeySeq = 0
@@ -63,6 +64,7 @@ function toDraft(t: JobTraveller): TravellerDraft {
     dateOfBirth: t.dateOfBirth,
     residence: t.residence,
     isChild: t.isChild,
+    isPrimary: t.isPrimary,
   }
 }
 
@@ -76,6 +78,21 @@ function emptyDraft(isChild: boolean): TravellerDraft {
     dateOfBirth: "",
     residence: "",
     isChild,
+    isPrimary: false,
+  }
+}
+
+function travellerFromCustomer(customer: Customer): TravellerDraft {
+  return {
+    key: newDraftKey(),
+    prefix: customer.title ?? "",
+    firstName: customer.firstName,
+    lastName: customer.lastName,
+    idPassport: customer.idPassport ?? "",
+    dateOfBirth: customer.dateOfBirth ?? "",
+    residence: customer.country ?? "",
+    isChild: false,
+    isPrimary: true,
   }
 }
 
@@ -136,6 +153,9 @@ export function JobReservationTab({
 
   const goToGuestDetails = () => {
     setShowReceivedPrompt(false)
+    if (travellers.length === 0 && customer) {
+      setTravellers([travellerFromCustomer(customer)])
+    }
     guestsCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
   }
 
@@ -190,6 +210,69 @@ export function JobReservationTab({
     setTravellers((rows) => rows.map((row) => (row.key === key ? { ...seed } : row)))
   }
 
+  const setPrimaryTraveller = (key: string) => {
+    setTravellers((rows) => rows.map((row) => ({ ...row, isPrimary: row.key === key })))
+  }
+
+  const addOrSyncCustomerAsGuest = () => {
+    if (!customer) return
+    setTravellers((rows) => {
+      const existingPrimary = rows.find((row) => row.isPrimary)
+      const seeded = travellerFromCustomer(customer)
+      if (existingPrimary) {
+        return rows.map((row) =>
+          row.key === existingPrimary.key
+            ? { ...seeded, key: row.key, id: row.id, residence: row.residence || seeded.residence }
+            : row,
+        )
+      }
+      return [seeded, ...rows]
+    })
+  }
+
+  const [syncingCustomer, setSyncingCustomer] = useState(false)
+
+  const syncGuestToCustomer = async (traveller: TravellerDraft) => {
+    if (!customer) return
+    setSyncingCustomer(true)
+    try {
+      const response = await fetch(`/api/customers/${customer.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          notes: customer.notes ?? "",
+          email: customer.email,
+          phone: customer.phone ?? null,
+          fax: customer.fax ?? null,
+          province: customer.province ?? null,
+          company_name: customer.companyName ?? null,
+          address_line1: customer.addressLine1 ?? null,
+          address_line2: customer.addressLine2 ?? null,
+          city: customer.city ?? null,
+          postal_code: customer.postalCode ?? null,
+          vat_number: customer.vatNumber ?? null,
+          date_of_birth: traveller.dateOfBirth || null,
+          id_passport: traveller.idPassport || null,
+          vip_status: customer.vipStatus ?? false,
+          preferences: customer.preferences ?? null,
+          communication_preferences: customer.communicationPreferences ?? null,
+          default_rate_type_id: customer.defaultRateTypeId ?? null,
+          expectedUpdatedAt: customer.updatedAt,
+        }),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null)
+        throw new Error(typeof payload?.error === "string" ? payload.error : "Could not update customer")
+      }
+      await mutateJob()
+      toast.success("Customer record updated")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not update customer")
+    } finally {
+      setSyncingCustomer(false)
+    }
+  }
+
   const saveTravellers = async () => {
     const invalid = travellers.some((t) => !t.firstName.trim() || !t.lastName.trim())
     if (invalid) {
@@ -211,6 +294,7 @@ export function JobReservationTab({
             dateOfBirth: t.dateOfBirth || null,
             residence: t.residence || null,
             isChild: t.isChild,
+            isPrimary: t.isPrimary,
           })),
         }),
       })
@@ -323,6 +407,15 @@ export function JobReservationTab({
             >
               <Plus className="w-3.5 h-3.5 mr-1" /> Add child
             </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={addOrSyncCustomerAsGuest}
+              disabled={!customer}
+            >
+              <Plus className="w-3.5 h-3.5 mr-1" /> Add customer as guest
+            </Button>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -365,6 +458,16 @@ export function JobReservationTab({
                       />
                       <Label htmlFor={`child-${traveller.key}`} className="text-xs">Child</Label>
                     </div>
+                    <div className="flex items-center gap-1.5">
+                      <Checkbox
+                        id={`primary-${traveller.key}`}
+                        checked={traveller.isPrimary}
+                        onCheckedChange={(checked) =>
+                          checked === true ? setPrimaryTraveller(traveller.key) : updateTraveller(traveller.key, { isPrimary: false })
+                        }
+                      />
+                      <Label htmlFor={`primary-${traveller.key}`} className="text-xs">Primary guest</Label>
+                    </div>
                     <Input
                       placeholder="Residence"
                       value={traveller.residence}
@@ -404,6 +507,24 @@ export function JobReservationTab({
                         onClick={() => revertTraveller(traveller.key)}
                       >
                         <RotateCcw className="w-3 h-3 mr-1" /> Revert to enquiry
+                      </Button>
+                    </div>
+                  ) : null}
+                  {traveller.isPrimary &&
+                  customer &&
+                  (traveller.dateOfBirth !== (customer.dateOfBirth ?? "") ||
+                    traveller.idPassport !== (customer.idPassport ?? "")) ? (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span>Customer record has different ID/date of birth</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2"
+                        disabled={syncingCustomer}
+                        onClick={() => syncGuestToCustomer(traveller)}
+                      >
+                        Update customer record
                       </Button>
                     </div>
                   ) : null}

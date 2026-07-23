@@ -112,7 +112,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       status: "draft",
       validity_until: computedValidityUntil,
       subtotal: 0,
-      vat: 0,
       total: 0,
       quote_number: buildQuoteNumber(booking.booking_number, existingQuotes ?? []),
     })

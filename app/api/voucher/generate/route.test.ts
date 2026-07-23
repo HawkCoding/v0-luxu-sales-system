@@ -143,6 +143,9 @@ function buildAuth({ stage, invoiceBalance, existingDocumentId, existingVoucherI
         })
       }
 
+      if (table === "quotes") {
+        return { select: vi.fn(() => ({ eq: vi.fn(async () => ({ data: [], error: null })) })) }
+      }
       if (table === "booking_suites") return createSelectResult([{ suite_type_name: "Luxury" }])
       if (table === "travellers") return createSelectResult([])
       if (table === "booking_reservation_details") return createSelectResult(null)
@@ -220,6 +223,26 @@ function buildAuth({ stage, invoiceBalance, existingDocumentId, existingVoucherI
             insertedBlocks.push(...rows)
             return { error: null }
           }),
+        }
+      }
+
+      // Suite tokens for the voucher email — no package selections in these fixtures.
+      if (table === "booking_package_selections") {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          then: (resolve: (value: { data: unknown[]; error: null }) => unknown) =>
+            resolve({ data: [], error: null }),
+        }
+      }
+      // No leg reference rows in these fixtures — readiness check sees nothing missing.
+      if (table === "booking_transport_requests") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              order: vi.fn(async () => ({ data: [], error: null })),
+            })),
+          })),
         }
       }
 

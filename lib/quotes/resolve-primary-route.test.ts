@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { resolvePrimaryRoute } from "@/lib/quotes/resolve-primary-route"
+import { resolvePrimaryRoute, resolvePrimarySupplierId } from "@/lib/quotes/resolve-primary-route"
 import type { PricingSnapshot } from "@/lib/types"
 
 function snapshot(overrides: Partial<PricingSnapshot>): PricingSnapshot {
@@ -123,5 +123,38 @@ describe("resolvePrimaryRoute", () => {
         },
       ]),
     ).toEqual({ routeId: null, routeName: null, routeReversed: false })
+  })
+})
+
+describe("resolvePrimarySupplierId", () => {
+  it("prefers the train leg's supplier over other legs", () => {
+    const result = resolvePrimarySupplierId([
+      { pricingSnapshot: snapshot({ supplierKind: "transfers", supplierId: "sup-transfer" }) },
+      { pricingSnapshot: snapshot({ supplierKind: "train_operator", supplierId: "sup-train" }) },
+    ])
+
+    expect(result).toBe("sup-train")
+  })
+
+  it("falls back to the first non-hotel leg when no train leg exists", () => {
+    const result = resolvePrimarySupplierId([
+      { pricingSnapshot: null },
+      { pricingSnapshot: snapshot({ supplierKind: "hotel_property", supplierId: "sup-hotel" }) },
+      { pricingSnapshot: snapshot({ supplierKind: "transfers", supplierId: "sup-transfer" }) },
+    ])
+
+    expect(result).toBe("sup-transfer")
+  })
+
+  it("returns null for a hotel-only quote", () => {
+    expect(
+      resolvePrimarySupplierId([
+        { pricingSnapshot: snapshot({ supplierKind: "hotel_property", supplierId: "sup-hotel" }) },
+      ]),
+    ).toBeNull()
+  })
+
+  it("returns null for manual line items without snapshots", () => {
+    expect(resolvePrimarySupplierId([{ pricingSnapshot: null }, {}])).toBeNull()
   })
 })

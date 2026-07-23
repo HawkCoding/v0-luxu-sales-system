@@ -168,6 +168,7 @@ function buildAuth(options: AuthOptions = {}) {
                 },
                 error: null,
               })),
+              maybeSingle: vi.fn(async () => ({ data: null, error: null })),
             })),
           })),
         }
@@ -196,6 +197,24 @@ function buildAuth(options: AuthOptions = {}) {
       }
       if (table === "audit_logs") {
         return { insert: auditInsert }
+      }
+      if (table === "booking_package_selections") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              eq: vi.fn(async () => ({ data: [], error: null })),
+            })),
+          })),
+        }
+      }
+      if (table === "booking_transport_requests") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              order: vi.fn(async () => ({ data: [], error: null })),
+            })),
+          })),
+        }
       }
       throw new Error(`Unexpected table ${table}`)
     }),

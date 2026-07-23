@@ -310,6 +310,45 @@ describe("validateTransition", () => {
     expect(failures.map((failure) => failure.gateId)).toEqual(["cancel_reason", "refund_capture"])
   })
 
+  it("treats a full-payment invoice as satisfying the deposit invoice gate", () => {
+    const failures = validateTransition({
+      ...baseInput,
+      booking: { ...baseInput.booking, stage: "accepted" },
+      targetStage: "deposit_requested",
+      quotes: [{ status: "accepted", total: 1000 }],
+      invoices: [{ kind: "full", status: "sent" }],
+      correspondences: [{ kind: "invoice", subject: "Confirmation Invoice BT-2026-0001-INV", status: "sent" }],
+    })
+
+    expect(failures).toEqual([])
+  })
+
+  it("treats a full-payment invoice as satisfying the final invoice gate", () => {
+    const failures = validateTransition({
+      ...baseInput,
+      booking: { ...baseInput.booking, stage: "deposit_paid" },
+      targetStage: "final_paid",
+      quotes: [{ status: "accepted", total: 1000 }],
+      invoices: [{ kind: "full", status: "sent" }],
+      correspondences: [{ kind: "invoice", subject: "Confirmation Invoice BT-2026-0001-INV", status: "sent" }],
+      manualConfirmations: { finalPaymentReceived: true },
+    })
+
+    expect(failures).toEqual([])
+  })
+
+  it("still requires the final invoice gate when no full or final invoice was sent", () => {
+    const failures = validateTransition({
+      ...baseInput,
+      booking: { ...baseInput.booking, stage: "deposit_paid" },
+      targetStage: "final_paid",
+      quotes: [{ status: "accepted", total: 1000 }],
+      invoices: [],
+    })
+
+    expect(failures).toContainEqual(expect.objectContaining({ gateId: "final_invoice" }))
+  })
+
   it("keeps customer completeness as a continuous forward invariant", () => {
     const failures = validateTransition({
       ...baseInput,

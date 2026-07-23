@@ -15,7 +15,8 @@ import { BuildBookingDialog } from "@/components/build-booking-dialog"
 import { AddQuoteLineDialog } from "@/components/add-quote-line-dialog"
 import { CreateQuoteDialog } from "@/components/create-quote-dialog"
 import { QuotePreviewSendDialog } from "@/components/quote-preview-send-dialog"
-import { FileDown, Link2, Loader2, RotateCcw, Send, Trash2, X } from "lucide-react"
+import { ReviseQuoteDialog } from "@/components/revise-quote-dialog"
+import { FileDown, Link2, Loader2, Send, Trash2, X } from "lucide-react"
 
 const EDITABLE_QUOTE_STATUSES = ["draft", "pricing_incomplete", "ready"]
 
@@ -53,7 +54,6 @@ export function JobQuotesTab({
 }: JobQuotesTabProps) {
   const { can } = useRole()
   const [previewSendOpen, setPreviewSendOpen] = useState(false)
-  const [revisingQuoteId, setRevisingQuoteId] = useState<string | null>(null)
   const [cancellingQuoteId, setCancellingQuoteId] = useState<string | null>(null)
   const [generatingLinkForId, setGeneratingLinkForId] = useState<string | null>(null)
   const [generatingPdfForId, setGeneratingPdfForId] = useState<string | null>(null)
@@ -86,27 +86,6 @@ export function JobQuotesTab({
   // Quotes arrive oldest-first from the API; the send button targets the newest sendable one.
   const latestSendableQuote =
     [...quotes].reverse().find((q) => EDITABLE_QUOTE_STATUSES.includes(q.status)) ?? null
-
-  async function reviseQuote(quoteId: string) {
-    setRevisingQuoteId(quoteId)
-
-    try {
-      const response = await fetch(`/api/quotes/${quoteId}/revise`, { method: "POST" })
-      const payload = (await response.json().catch(() => ({}))) as { error?: string }
-
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Failed to revise quote")
-      }
-
-      mutate()
-      toast.success("Quote revision created.")
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to revise quote"
-      toast.error(message)
-    } finally {
-      setRevisingQuoteId(null)
-    }
-  }
 
   async function cancelQuote(quoteId: string) {
     setCancellingQuoteId(quoteId)
@@ -224,19 +203,11 @@ export function JobQuotesTab({
                         onSent={mutate}
                       />
                       {(q.status === "sent" || q.status === "accepted" || q.status === "expired") && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={revisingQuoteId === q.id}
-                          onClick={() => void reviseQuote(q.id)}
-                        >
-                          {revisingQuoteId === q.id ? (
-                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-                          )}
-                          Revise
-                        </Button>
+                        <ReviseQuoteDialog
+                          quoteId={q.id}
+                          quoteNumber={q.quoteNumber || "quote"}
+                          onRevised={mutate}
+                        />
                       )}
                       {q.status === "sent" && (
                         <Button
@@ -369,10 +340,6 @@ export function JobQuotesTab({
                 <div className="flex justify-end gap-8 text-xs">
                   <span className="text-muted-foreground">Subtotal</span>
                   <span className="text-foreground font-medium w-24">R {q.subtotal.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-end gap-8 text-xs">
-                  <span className="text-muted-foreground">VAT (15%)</span>
-                  <span className="text-foreground w-24">R {q.vat.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-end gap-8 text-sm font-semibold">
                   <span className="text-foreground">Total</span>

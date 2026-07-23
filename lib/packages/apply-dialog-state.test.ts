@@ -293,6 +293,7 @@ describe("hydrateFromSaved", () => {
     flightNumber: "SA123",
     priceOverride: null,
     notes: null,
+    supplierReference: null,
     sortOrder: 0,
     createdAt: "",
     updatedAt: "",

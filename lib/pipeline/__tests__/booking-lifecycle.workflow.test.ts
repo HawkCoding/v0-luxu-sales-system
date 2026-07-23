@@ -321,6 +321,7 @@ describe("booking lifecycle workflow regression", () => {
         invoiceBalance: syncResult?.invoiceBalance ?? null,
         departureDate: "2026-06-01",
         customerEmail: "ada@example.test",
+      missingLegReferenceLabels: [],
       }),
     ).toEqual({ ready: true, failures: [] })
   })
@@ -431,6 +432,7 @@ describe("booking lifecycle workflow regression", () => {
         invoiceBalance: 500,
         departureDate: "2026-06-01",
         customerEmail: "ada@example.test",
+      missingLegReferenceLabels: [],
       }).failures,
     ).toContainEqual(expect.objectContaining({ code: "balance_not_zero" }))
   })

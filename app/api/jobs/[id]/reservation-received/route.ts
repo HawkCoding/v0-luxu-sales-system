@@ -1,6 +1,7 @@
 import { requireRole } from "@/lib/api/auth"
 import { jsonError } from "@/lib/api/responses"
 import { composeEmail } from "@/lib/templates/compose-email"
+import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 
 export const runtime = "nodejs"
@@ -32,12 +33,15 @@ export async function POST(_req: Request, { params }: RouteParams) {
   const customer = Array.isArray(booking.customer) ? booking.customer[0] : booking.customer
   const customerName = formatCustomerSalutation(customer)
 
+  const shared = await resolveSharedEmailTokens(supabase, booking.id)
   const composed = await composeEmail(supabase, "reservation_received", {
     tokens: {
+      ...shared.tokens,
       customerName: customerName || "Valued Guest",
       jobNumber: booking.booking_number,
       consultantName: booking.consultant ?? "Luxus Travel & Tours",
     },
+    blocks: shared.blocks,
     senderProfileId: booking.assigned_salesperson_id ?? auth.value.user.id,
   })
 

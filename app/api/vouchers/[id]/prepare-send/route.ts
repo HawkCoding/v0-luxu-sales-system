@@ -3,8 +3,13 @@ import { jsonError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDateLong } from "@/lib/date-format"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { checkVoucherReadiness } from "@/lib/voucher/check-readiness"
+import { loadLegReferenceRows, missingLegReferenceLabels } from "@/lib/voucher/leg-references"
 import { composeEmail } from "@/lib/templates/compose-email"
+import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
+import { buildSuiteTokens } from "@/lib/templates/suite-description"
+import { loadSuiteSelections } from "@/lib/templates/suite-selections"
 import { resolveDirectedRouteName } from "@/lib/routes/route-name"
+import { ensureItineraryPdf } from "@/lib/itinerary/ensure-itinerary-pdf"
 
 export const runtime = "nodejs"
 
@@ -109,11 +114,19 @@ export async function POST(_req: Request, { params }: RouteParams) {
   const route = firstRecord(booking.route)
   const voucherDocument = firstRecord(voucher.document)
 
+  let legReferenceRows: Awaited<ReturnType<typeof loadLegReferenceRows>> = []
+  try {
+    legReferenceRows = await loadLegReferenceRows(supabase, booking.id)
+  } catch (error) {
+    return safeSupabaseError("voucher-prepare-send:load-leg-references", error)
+  }
+
   const readiness = checkVoucherReadiness({
     stage: booking.stage,
     invoiceBalance: booking.invoice_balance,
     departureDate: booking.departure_date,
     customerEmail: customer?.email ?? null,
+    missingLegReferenceLabels: missingLegReferenceLabels(legReferenceRows),
   })
   if (!readiness.ready) {
     return jsonError("Voucher is not ready to send", 400, { failures: readiness.failures })
@@ -125,7 +138,8 @@ export async function POST(_req: Request, { params }: RouteParams) {
   }
 
   // Latest itinerary PDF for the booking — required so the customer receives
-  // voucher + itinerary in one email.
+  // voucher + itinerary in one email. Built silently here if it doesn't exist
+  // yet; there's no customer-facing itinerary step anymore.
   const { data: itineraryDoc, error: itineraryError } = await supabase
     .from("documents")
     .select("id, storage_path, created_at")
@@ -137,11 +151,18 @@ export async function POST(_req: Request, { params }: RouteParams) {
 
   if (itineraryError) return safeSupabaseError("voucher-prepare-send:itinerary", itineraryError)
 
-  const itineraryRef = parseStoragePath(itineraryDoc?.storage_path ?? null)
+  let itineraryRef = parseStoragePath(itineraryDoc?.storage_path ?? null)
   if (!itineraryRef) {
-    return jsonError("Generate the itinerary before sending the voucher", 422, {
-      missingItinerary: true,
-    })
+    try {
+      const ensured = await ensureItineraryPdf(supabase, { bookingId: booking.id })
+      itineraryRef = parseStoragePath(ensured.storagePath)
+    } catch (error) {
+      console.error("voucher-prepare-send:ensure-itinerary", error)
+      return jsonError("Itinerary PDF could not be generated — voucher not sent", 500)
+    }
+  }
+  if (!itineraryRef) {
+    return jsonError("Itinerary PDF could not be generated — voucher not sent", 500)
   }
 
   const [voucherDownload, itineraryDownload] = await Promise.all([
@@ -157,15 +178,20 @@ export async function POST(_req: Request, { params }: RouteParams) {
   }
 
   const customerName = formatCustomerSalutation(customer)
+  const suiteTokens = buildSuiteTokens(await loadSuiteSelections(supabase, booking.id))
+  const shared = await resolveSharedEmailTokens(supabase, booking.id)
   const composed = await composeEmail(supabase, "voucher_email", {
     tokens: {
+      ...shared.tokens,
       customerName: customerName || "Valued Guest",
       jobNumber: booking.booking_number,
       direction: resolveBookingRouteName(route, booking.route_reversed) ?? "your journey",
       voucherNumber: voucher.voucher_number,
       departureDate: formatDisplayDateLong(booking.departure_date),
       consultantName: booking.consultant ?? "",
+      ...suiteTokens,
     },
+    blocks: shared.blocks,
     senderProfileId: booking.assigned_salesperson_id ?? user.id,
   })
 

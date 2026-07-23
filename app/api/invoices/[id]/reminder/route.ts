@@ -1,6 +1,6 @@
 import { requireRole } from "@/lib/api/auth"
 import { jsonError, safeSupabaseError } from "@/lib/api/responses"
-import { formatDisplayDate } from "@/lib/date-format"
+import { formatDisplayDateLong } from "@/lib/date-format"
 import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
 import { buildUnifiedTotals } from "@/lib/invoices/build-unified-totals"
 import { calculateInvoiceBalance } from "@/lib/invoices/calculate-balance"
@@ -8,6 +8,7 @@ import { ensureInvoicePdf } from "@/lib/invoices/ensure-invoice-pdf"
 import { resolveInvoiceStatusLabel } from "@/lib/invoices/invoice-status"
 import type { InvoiceTotals } from "@/lib/invoices/pdf/invoice-document"
 import { composeEmail } from "@/lib/templates/compose-email"
+import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { getBankingSettings, getInvoiceStatusOptions } from "@/lib/settings-access"
 
@@ -139,17 +140,19 @@ export async function POST(_req: Request, { params }: RouteParams) {
 
   const overdue = daysOverdue(invoice.due_date)
   const banking = await getBankingSettings(supabase)
+  const shared = await resolveSharedEmailTokens(supabase, booking.id)
   const composed = await composeEmail(supabase, "payment_reminder", {
     tokens: {
+      ...shared.tokens,
       customerName: customerName || "Valued Guest",
       jobNumber: booking.booking_number,
       invoiceNumber: invoice.invoice_number,
       invoiceKind: invoice.kind === "deposit" ? "deposit" : "final",
       amountDue: formatMoney(invoice.amount, invoice.currency),
-      dueDate: formatDisplayDate(invoice.due_date),
-      daysOverdue: overdue > 0 ? String(overdue) : "",
+      dueDate: formatDisplayDateLong(invoice.due_date),
+      daysOverdue: overdue > 0 ? String(overdue) : "—",
     },
-    blocks: { bankingDetails: buildBankingDetailsBlock(banking) },
+    blocks: { ...shared.blocks, bankingDetails: buildBankingDetailsBlock(banking) },
     senderProfileId: booking.assigned_salesperson_id ?? auth.value.user.id,
   })
 

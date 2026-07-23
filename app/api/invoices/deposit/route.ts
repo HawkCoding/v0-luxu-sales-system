@@ -1,7 +1,7 @@
 import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
-import { formatDisplayDate } from "@/lib/date-format"
+import { formatDisplayDate, formatDisplayDateLong } from "@/lib/date-format"
 import { calculateDepositAmount, normalizeDepositPercentage } from "@/lib/pipeline/constants"
 import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
 import { buildUnifiedTotals } from "@/lib/invoices/build-unified-totals"
@@ -10,6 +10,8 @@ import { ensureInvoicePdf } from "@/lib/invoices/ensure-invoice-pdf"
 import { resolveInvoiceStatusLabel, unifiedInvoiceNumber } from "@/lib/invoices/invoice-status"
 import { logError } from "@/lib/error-log"
 import { composeEmail } from "@/lib/templates/compose-email"
+import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
+import { buildGuestInfoBlock } from "@/lib/templates/guest-info-block"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { getBankingSettings, getInvoiceStatusOptions } from "@/lib/settings-access"
 
@@ -18,6 +20,9 @@ export const runtime = "nodejs"
 const depositInvoiceSchema = z.object({
   jobId: z.string().uuid(),
   depositPercentage: z.number().min(1).max(100),
+  mode: z.enum(["deposit", "full"]).default("deposit"),
+  /** Full-payment mode only: overrides the default +48h due date. */
+  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 })
 
 const updateDepositInvoiceSchema = z.object({
@@ -58,23 +63,31 @@ export async function POST(req: Request) {
   if (!parsed.success) return jsonZodError(parsed.error)
 
   const { supabase, user } = auth.value
+  const isFullPayment = parsed.data.mode === "full"
   const depositPercentage = normalizeDepositPercentage(parsed.data.depositPercentage)
+  const invoiceKind = isFullPayment ? "full" : "deposit"
 
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
     .select(
-      "id, booking_number, departure_date, deposit_paid, cancelled_at, assigned_salesperson_id, customer:customers(title, first_name, last_name, email)",
+      "id, booking_number, departure_date, deposit_paid, cancelled_at, assigned_salesperson_id, no_of_adults, no_of_children, customer:customers(title, first_name, last_name, email)",
     )
     .eq("id", parsed.data.jobId)
     .single()
 
   if (bookingError || !booking) return jsonError("Booking not found", 404)
 
+  const { data: travellers } = await supabase
+    .from("travellers")
+    .select("prefix, first_name, last_name, id_passport")
+    .eq("booking_id", parsed.data.jobId)
+    .order("sort_order")
+
   const { data: existingInvoice, error: existingInvoiceError } = await supabase
     .from("invoices")
     .select("*")
     .eq("booking_id", parsed.data.jobId)
-    .eq("kind", "deposit")
+    .eq("kind", invoiceKind)
     .in("status", ["draft", "sent"])
     .maybeSingle()
 
@@ -93,9 +106,10 @@ export async function POST(req: Request) {
 
   const now = new Date()
   // The sales team's payment terms: deposit due within 72 hours of the
-  // confirmation invoice.
-  const dueDate = addDays(now, 3)
-  const amount = calculateDepositAmount(quote.total, depositPercentage)
+  // confirmation invoice. Full-payment invoices (booking made inside 60 days
+  // of departure) default to 48 hours, but the salesperson can override.
+  const dueDate = isFullPayment ? parsed.data.dueDate ?? addDays(now, 2) : addDays(now, 3)
+  const amount = isFullPayment ? quote.total : calculateDepositAmount(quote.total, depositPercentage)
   // One client-facing invoice per booking — the number stays fixed for the life
   // of the booking and doubles as the payment reference.
   const invoiceNumber = unifiedInvoiceNumber(booking.booking_number)
@@ -106,10 +120,10 @@ export async function POST(req: Request) {
       .insert({
         booking_id: parsed.data.jobId,
         quote_id: quote.id,
-        kind: "deposit",
+        kind: invoiceKind,
         status: "draft",
         invoice_number: invoiceNumber,
-        deposit_percentage: depositPercentage,
+        deposit_percentage: isFullPayment ? null : depositPercentage,
         amount,
         currency: "ZAR",
         due_date: dueDate,
@@ -134,8 +148,10 @@ export async function POST(req: Request) {
   const totals = buildUnifiedTotals({
     balance,
     departureDate: booking.departure_date,
-    depositPercentage: invoice.deposit_percentage ?? depositPercentage,
-    depositAmount: invoice.amount,
+    depositPercentage: isFullPayment ? null : invoice.deposit_percentage ?? depositPercentage,
+    depositAmount: isFullPayment ? null : invoice.amount,
+    mode: isFullPayment ? "full" : "deposit",
+    fullDueDate: isFullPayment ? invoice.due_date : undefined,
   })
   const statusOptions = await getInvoiceStatusOptions(supabase)
   const statusLabel = resolveInvoiceStatusLabel(
@@ -174,22 +190,63 @@ export async function POST(req: Request) {
   }
 
   const banking = await getBankingSettings(supabase)
-  const composed = await composeEmail(supabase, "deposit_request", {
-    tokens: {
-      customerName: customerName || "Valued Guest",
-      jobNumber: booking.booking_number,
-      invoiceNumber: invoice.invoice_number,
-      depositAmount: formatMoney(invoice.amount, invoice.currency),
-      depositPercentage: String(invoice.deposit_percentage ?? depositPercentage),
-      dueDate: formatDisplayDate(invoice.due_date),
-      finalDueDate: totals.finalDueDate ? formatDisplayDate(totals.finalDueDate) : "Now",
-      finalAmount: formatMoney(totals.finalAmount, invoice.currency),
-    },
-    blocks: { bankingDetails: buildBankingDetailsBlock(banking) },
-    senderProfileId: booking.assigned_salesperson_id ?? user.id,
-  })
+  const guests = (travellers ?? [])
+    .map((traveller) => ({
+      name: [traveller.prefix, traveller.first_name, traveller.last_name].filter(Boolean).join(" ").trim(),
+      idNumber: traveller.id_passport,
+    }))
+    .filter((guest) => guest.name)
+  const shared = await resolveSharedEmailTokens(supabase, booking.id)
+  const composed = isFullPayment
+    ? await composeEmail(supabase, "full_payment_request", {
+        tokens: {
+          ...shared.tokens,
+          customerName: customerName || "Valued Guest",
+          jobNumber: booking.booking_number,
+          invoiceNumber: invoice.invoice_number,
+          amountDue: formatMoney(invoice.amount, invoice.currency),
+          dueDate: formatDisplayDateLong(invoice.due_date),
+        },
+        blocks: {
+          ...shared.blocks,
+          bankingDetails: buildBankingDetailsBlock(banking),
+          guestInfo: buildGuestInfoBlock({
+            customerName: customerName || "Valued Guest",
+            customerEmail: customer?.email ?? null,
+            guests,
+            adults: booking.no_of_adults ?? 0,
+            children: booking.no_of_children ?? 0,
+          }),
+        },
+        senderProfileId: booking.assigned_salesperson_id ?? user.id,
+      })
+    : await composeEmail(supabase, "deposit_request", {
+        tokens: {
+          ...shared.tokens,
+          customerName: customerName || "Valued Guest",
+          jobNumber: booking.booking_number,
+          invoiceNumber: invoice.invoice_number,
+          depositAmount: formatMoney(invoice.amount, invoice.currency),
+          depositPercentage: String(invoice.deposit_percentage ?? depositPercentage),
+          dueDate: formatDisplayDateLong(invoice.due_date),
+          finalDueDate: totals.finalDueDate ? formatDisplayDateLong(totals.finalDueDate) : "Now",
+          finalAmount: formatMoney(totals.finalAmount, invoice.currency),
+        },
+        blocks: {
+          ...shared.blocks,
+          bankingDetails: buildBankingDetailsBlock(banking),
+          guestInfo: buildGuestInfoBlock({
+            customerName: customerName || "Valued Guest",
+            customerEmail: customer?.email ?? null,
+            guests,
+            adults: booking.no_of_adults ?? 0,
+            children: booking.no_of_children ?? 0,
+          }),
+        },
+        senderProfileId: booking.assigned_salesperson_id ?? user.id,
+      })
 
-  if (!composed) return jsonError("Deposit invoice email template could not be resolved", 500)
+  if (!composed) return jsonError("Invoice email template could not be resolved", 500)
 
   return Response.json({
     invoice: {
@@ -245,7 +302,7 @@ export async function PATCH(req: Request) {
       updated_at: now,
     })
     .eq("id", parsed.data.invoiceId)
-    .eq("kind", "deposit")
+    .in("kind", ["deposit", "full"])
     .select("id, status, sent_at")
     .single()
 

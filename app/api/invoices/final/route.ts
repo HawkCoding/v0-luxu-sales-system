@@ -1,7 +1,7 @@
 import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
-import { formatDisplayDate } from "@/lib/date-format"
+import { formatDisplayDate, formatDisplayDateLong } from "@/lib/date-format"
 import { calculateInvoiceBalance } from "@/lib/invoices/calculate-balance"
 import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
 import { buildUnifiedTotals } from "@/lib/invoices/build-unified-totals"
@@ -14,6 +14,7 @@ import {
 } from "@/lib/invoices/invoice-status"
 import { logError } from "@/lib/error-log"
 import { composeEmail } from "@/lib/templates/compose-email"
+import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { getBankingSettings, getInvoiceStatusOptions } from "@/lib/settings-access"
 
@@ -205,15 +206,17 @@ export async function POST(req: Request) {
   }
 
   const banking = await getBankingSettings(supabase)
+  const shared = await resolveSharedEmailTokens(supabase, booking.id)
   const composed = await composeEmail(supabase, "final_invoice", {
     tokens: {
+      ...shared.tokens,
       customerName: customerName || "Valued Guest",
       jobNumber: booking.booking_number,
       invoiceNumber: invoice.invoice_number,
       amountDue: formatMoney(invoice.amount, invoice.currency),
-      dueDate: formatDisplayDate(invoice.due_date),
+      dueDate: formatDisplayDateLong(invoice.due_date),
     },
-    blocks: { bankingDetails: buildBankingDetailsBlock(banking) },
+    blocks: { ...shared.blocks, bankingDetails: buildBankingDetailsBlock(banking) },
     senderProfileId: booking.assigned_salesperson_id ?? user.id,
   })
 

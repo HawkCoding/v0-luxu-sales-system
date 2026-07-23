@@ -276,6 +276,7 @@ describe("booking lifecycle (route-level E2E)", () => {
         invoiceBalance: store.rows("bookings")[0].invoice_balance as number,
         departureDate: DEPARTURE_DATE,
         customerEmail: customer.email as string,
+      missingLegReferenceLabels: [],
       }),
     ).toEqual({ ready: true, failures: [] })
 
@@ -308,7 +309,8 @@ describe("booking lifecycle (route-level E2E)", () => {
       invoiceBalance: 500,
       departureDate: DEPARTURE_DATE,
       customerEmail: customer.email as string,
-    })
+    missingLegReferenceLabels: [],
+      })
 
     expect(result.ready).toBe(false)
     expect(result.failures).toContainEqual(expect.objectContaining({ code: "balance_not_zero" }))

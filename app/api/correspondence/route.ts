@@ -2,7 +2,7 @@ import { z } from "zod"
 import { writeAuditLog } from "@/lib/audit-write"
 import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
-import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
+import { formatDisplayDateLong, formatDisplayDateTime } from "@/lib/date-format"
 import { getEmailFromAddress } from "@/lib/email/from"
 import { resolveSalespersonSender } from "@/lib/email/resolve-sender"
 import { sendEmail } from "@/lib/email/transport"
@@ -11,9 +11,11 @@ import { applyTransition } from "@/lib/pipeline/apply-transition"
 import { loadLibraryAttachments } from "@/lib/attachments/email-attachment-library"
 import { ensureQuotePdf, QUOTE_BUCKET } from "@/lib/quotes/ensure-quote-pdf"
 import { composeEmail } from "@/lib/templates/compose-email"
+import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import type { Json } from "@/lib/supabase/types"
 import type { PipelineStage } from "@/lib/types"
 import { checkVoucherReadiness } from "@/lib/voucher/check-readiness"
+import { loadLegReferenceRows, missingLegReferenceLabels } from "@/lib/voucher/leg-references"
 
 export const runtime = "nodejs"
 
@@ -121,11 +123,19 @@ export async function POST(req: Request) {
 
   const customerRecord = Array.isArray(booking.customer) ? booking.customer[0] : booking.customer
   if (isVoucherSend(parsed.data.kind, parsed.data.moveStage)) {
+    let legReferenceRows: Awaited<ReturnType<typeof loadLegReferenceRows>> = []
+    try {
+      legReferenceRows = await loadLegReferenceRows(supabase, booking.id)
+    } catch (error) {
+      return safeSupabaseError("correspondence:load-leg-references", error)
+    }
+
     const readiness = checkVoucherReadiness({
       stage: booking.stage,
       invoiceBalance: booking.invoice_balance !== null ? Number(booking.invoice_balance) : null,
       departureDate: booking.departure_date,
       customerEmail: customerRecord?.email ?? null,
+      missingLegReferenceLabels: missingLegReferenceLabels(legReferenceRows),
     })
 
     if (!readiness.ready) {
@@ -420,12 +430,15 @@ export async function POST(req: Request) {
   // editable follow_up template so the draft is a real, sendable email.
   if (parsed.data.kind === "quote") {
     const customerName = formatCustomerSalutation(customerRecord) || "Valued Guest"
+    const shared = await resolveSharedEmailTokens(supabase, booking.id)
     const followUp = await composeEmail(supabase, "follow_up", {
       tokens: {
+        ...shared.tokens,
         customerName,
         jobNumber: booking.booking_number,
-        lastSentDate: formatDisplayDate((parsed.data.sentAt ?? now).slice(0, 10)),
+        lastSentDate: formatDisplayDateLong((parsed.data.sentAt ?? now).slice(0, 10)),
       },
+      blocks: shared.blocks,
       senderProfileId: booking.assigned_salesperson_id ?? auth.value.user.id,
     })
 

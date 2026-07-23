@@ -53,7 +53,6 @@ function buildAuth(validityDays = "14") {
                     parent_quote_id: null,
                     validity_until: null,
                     subtotal: 0,
-                    vat: 0,
                     total: 0,
                   },
                   error: null,

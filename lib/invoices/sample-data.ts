@@ -25,7 +25,6 @@ export function sampleInvoicePdfData(): Omit<
       addressLines: [],
       postalCode: null,
       phone: "+44 7884 495357",
-      fax: null,
       email: "sample.guest@example.com",
       vatNumber: null,
     },

@@ -91,6 +91,32 @@ describe("renderInvoicePdf smoke", () => {
     expect(buffer.subarray(0, 5).toString("utf8")).toBe("%PDF-")
   })
 
+  it("renders the deposit-paid ladder without re-demanding the deposit", async () => {
+    const buffer = await renderInvoicePdf({
+      invoiceNumber: "LTT-2026-0001-INV",
+      bookingNumber: "LTT-2026-0001",
+      customerName: "Jane Smith",
+      issueDate: "2026-07-12",
+      dueDate: "2026-07-19",
+      statusLabel: "Confirmed",
+      departure: null,
+      items,
+      totals: {
+        subtotalInclVat: 58900,
+        depositPercentage: 25,
+        depositAmount: 14725,
+        finalAmount: 44175,
+        finalDueDate: "2026-11-20",
+        amountReceived: 14725,
+        amountReceivedAt: "2026-07-13",
+        outstanding: 44175,
+      },
+      banking,
+    })
+
+    expect(buffer.subarray(0, 5).toString("utf8")).toBe("%PDF-")
+  })
+
   it("renders a paid-up invoice without banking details configured", async () => {
     const buffer = await renderInvoicePdf({
       invoiceNumber: "LTT-2026-0001-INV",

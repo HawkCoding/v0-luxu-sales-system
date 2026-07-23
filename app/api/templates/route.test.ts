@@ -151,4 +151,22 @@ describe("PATCH /api/templates", () => {
       expect.objectContaining({ version: 2, subject: "Subject" }),
     )
   })
+
+  it("does not bump the version for a rename-only or reorder-only update", async () => {
+    const built = buildAuth()
+    authMocks.requireRole.mockResolvedValue(built.context)
+    const req = new Request("http://localhost/api/templates", {
+      method: "PATCH",
+      body: JSON.stringify({ id: TEMPLATE_ID, name: "Quote Sent", sortOrder: 3 }),
+      headers: { "Content-Type": "application/json" },
+    })
+    const res = await PATCH(req)
+    expect(res.status).toBe(200)
+    expect(built.update).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Quote Sent", sort_order: 3 }),
+    )
+    expect(built.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ version: expect.anything() }),
+    )
+  })
 })

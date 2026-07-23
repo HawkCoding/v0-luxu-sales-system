@@ -1,10 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { writeAuditLog } from "@/lib/audit-write"
+import { formatDisplayDateLong } from "@/lib/date-format"
 import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { getBankingSettings } from "@/lib/settings-access"
 import type { Database } from "@/lib/supabase/types"
 import { composeEmail } from "@/lib/templates/compose-email"
+import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import type { PipelineStage } from "@/lib/types"
 import { calculateDepositAmount, getDefaultDepositPercentage } from "./constants"
 import { getCrossedForwardStages, type LostContext, type ManualConfirmations } from "./validate-transition"
@@ -216,16 +218,18 @@ export async function applyTransition(
       const dueDate = new Date(nowIso)
       dueDate.setDate(dueDate.getDate() + 7)
       const banking = await getBankingSettings(supabase)
+      const shared = await resolveSharedEmailTokens(supabase, input.booking.id)
       const composed = await composeEmail(supabase, "deposit_request", {
         tokens: {
+          ...shared.tokens,
           customerName,
           jobNumber: input.booking.booking_number,
           invoiceNumber: `${input.booking.booking_number}-DEP1`,
           depositAmount: depositAmount === null ? "TBC" : depositAmount.toFixed(2),
           depositPercentage: String(defaultDepositPercentage),
-          dueDate: dueDate.toISOString().slice(0, 10),
+          dueDate: formatDisplayDateLong(dueDate),
         },
-        blocks: { bankingDetails: buildBankingDetailsBlock(banking) },
+        blocks: { ...shared.blocks, bankingDetails: buildBankingDetailsBlock(banking) },
         senderProfileId: input.booking.assigned_salesperson_id ?? input.actorUserId,
       })
 

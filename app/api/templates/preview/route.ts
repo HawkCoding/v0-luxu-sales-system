@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { requireUser } from "@/lib/api/auth"
 import { jsonError, jsonZodError } from "@/lib/api/responses"
+import { createSessionClient } from "@/lib/supabase/server"
 import { composeFromTemplate } from "@/lib/templates/compose-email"
 import { getSampleTokens } from "@/lib/templates/registry"
 
@@ -28,9 +29,27 @@ export async function POST(req: Request) {
   if (!parsed.success) return jsonZodError(parsed.error)
 
   const { key, subject, bodyHtml } = parsed.data
+  const sample = getSampleTokens(key)
+
+  // Sample values are static, so the supplier token would otherwise show a
+  // spelling that exists nowhere in Suppliers. Preview with a real record so
+  // managers see the exact name, spacing and capitalisation customers get.
+  if (sample.tokens.supplierName) {
+    const supabase = await createSessionClient()
+    const { data: supplier } = await supabase
+      .from("suppliers")
+      .select("name")
+      .eq("kind", "train_operator")
+      .eq("active", true)
+      .order("name")
+      .limit(1)
+      .maybeSingle()
+    if (supplier?.name) sample.tokens.supplierName = supplier.name
+  }
+
   const composed = await composeFromTemplate(
     { subject, bodyHtml },
-    { ...getSampleTokens(key), senderProfileId: auth.value.user.id },
+    { ...sample, senderProfileId: auth.value.user.id },
   )
 
   return Response.json({

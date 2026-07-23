@@ -3,6 +3,7 @@ export type ReadinessFailureCode =
   | "balance_not_zero"
   | "departure_date_missing"
   | "customer_email_missing"
+  | "leg_references_missing"
 
 export interface ReadinessFailure {
   code: ReadinessFailureCode
@@ -20,6 +21,7 @@ export interface VoucherReadinessInput {
   invoiceBalance: number | null
   departureDate: string | null
   customerEmail: string | null
+  missingLegReferenceLabels: string[]
 }
 
 const PAID_IN_FULL_STAGES = new Set(["final_paid", "voucher_sent", "closed"])
@@ -56,6 +58,14 @@ export function checkVoucherReadiness(input: VoucherReadinessInput): VoucherRead
       code: "customer_email_missing",
       message: "Customer email is required before generating a voucher.",
       fixHint: "Add an email address to the customer record.",
+    })
+  }
+
+  if (input.missingLegReferenceLabels.length > 0) {
+    failures.push({
+      code: "leg_references_missing",
+      message: `Supplier reference numbers are missing for: ${input.missingLegReferenceLabels.join(", ")}.`,
+      fixHint: "Add a reference number for every leg on the Voucher References tab.",
     })
   }
 

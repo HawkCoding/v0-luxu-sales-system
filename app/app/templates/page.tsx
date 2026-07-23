@@ -5,6 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { BufferedInput } from "@/components/ui/buffered-input"
+import { SortableList } from "@/components/ui/sortable-list"
 import { Skeleton } from "@/components/ui/skeleton"
 import dynamic from "next/dynamic"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
@@ -103,6 +105,11 @@ export default function TemplatesPage() {
   const [previewHtml, setPreviewHtml] = useState<string | null>(null)
   const [previewWarnings, setPreviewWarnings] = useState<string[]>([])
   const [previewLoading, setPreviewLoading] = useState(false)
+  const [orderedTemplates, setOrderedTemplates] = useState<Template[]>([])
+
+  useEffect(() => {
+    if (templates) setOrderedTemplates(templates as Template[])
+  }, [templates])
 
   // Server-render a branded preview (sample token values) whenever a template
   // is opened for preview; fall back to the raw body if the request fails.
@@ -204,6 +211,60 @@ export default function TemplatesPage() {
     }
   }
 
+  const handleRenameLocal = (id: string, name: string) => {
+    setOrderedTemplates((prev) => prev.map((t) => (t.id === id ? { ...t, name } : t)))
+  }
+
+  const commitRename = async (id: string) => {
+    const current = orderedTemplates.find((t) => t.id === id)
+    const original = (templates as Template[]).find((t) => t.id === id)
+    if (!current || !original || current.name === original.name) return
+    const name = current.name.trim()
+    if (!name) {
+      handleRenameLocal(id, original.name)
+      return
+    }
+    try {
+      await fetch("/api/templates", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, name }),
+      })
+      mutate()
+    } catch {
+      toast.error("Failed to rename template")
+      mutate()
+    }
+  }
+
+  const handleReorder = async (orderedIds: string[]) => {
+    const byId = new Map(orderedTemplates.map((t) => [t.id, t]))
+    const next = orderedIds.flatMap((id, index) => {
+      const t = byId.get(id)
+      return t ? [{ ...t, sortOrder: index }] : []
+    })
+    setOrderedTemplates(next)
+    const changed = next.filter((t, index) => {
+      const original = (templates as Template[]).find((o) => o.id === t.id)
+      return original && original.sortOrder !== index
+    })
+    try {
+      await Promise.all(
+        changed.map((t) =>
+          fetch("/api/templates", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: t.id, sortOrder: t.sortOrder }),
+          }),
+        ),
+      )
+      mutate()
+    } catch {
+      toast.error("Failed to save new template order")
+      mutate()
+    }
+  }
+
   return (
     <div className="p-6 space-y-4 max-w-5xl">
       <div className="flex items-start justify-between">
@@ -259,43 +320,58 @@ export default function TemplatesPage() {
             </CardContent>
           </Card>
 
-          {(templates as Template[]).map(t => (
-            <Card key={t.id}>
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <CardTitle className="text-sm font-medium">{t.key.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}</CardTitle>
-                    <Badge variant="secondary" className="text-[10px]">v{t.version}</Badge>
-                    <Badge variant={t.active ? "default" : "outline"} className="text-[10px]">{t.active ? "Active" : "Inactive"}</Badge>
-                    {t.isSystem && <Badge variant="outline" className="text-[10px]">System</Badge>}
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Button variant="ghost" size="sm" onClick={() => setPreview(t)}>
-                      <Eye className="w-3.5 h-3.5" />
-                    </Button>
-                    {can("edit:templates") && (
-                      <Button variant="ghost" size="sm" onClick={() => startEdit(t)}>
-                        <Edit3 className="w-3.5 h-3.5" />
+          <SortableList
+            items={orderedTemplates}
+            onReorder={handleReorder}
+            disabled={!can("edit:templates")}
+            renderItem={({ item: t, dragHandle }) => (
+              <Card>
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      {can("edit:templates") && dragHandle}
+                      {can("edit:templates") ? (
+                        <BufferedInput
+                          value={t.name}
+                          onValueChange={(value) => handleRenameLocal(t.id, value)}
+                          onBlur={() => commitRename(t.id)}
+                          className="h-7 max-w-xs text-sm font-medium"
+                        />
+                      ) : (
+                        <CardTitle className="text-sm font-medium">{t.name}</CardTitle>
+                      )}
+                      <Badge variant="secondary" className="text-[10px]">v{t.version}</Badge>
+                      <Badge variant={t.active ? "default" : "outline"} className="text-[10px]">{t.active ? "Active" : "Inactive"}</Badge>
+                      {t.isSystem && <Badge variant="outline" className="text-[10px]">System</Badge>}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="sm" onClick={() => setPreview(t)}>
+                        <Eye className="w-3.5 h-3.5" />
                       </Button>
-                    )}
-                    {can("edit:templates") && !t.isSystem && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setPendingDelete(t)}
-                        aria-label={`Delete ${t.key} template`}
-                      >
-                        <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                      </Button>
-                    )}
+                      {can("edit:templates") && (
+                        <Button variant="ghost" size="sm" onClick={() => startEdit(t)}>
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </Button>
+                      )}
+                      {can("edit:templates") && !t.isSystem && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setPendingDelete(t)}
+                          aria-label={`Delete ${t.key} template`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                        </Button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <p className="text-xs text-muted-foreground"><span className="font-medium">Subject:</span> {t.subject}</p>
-              </CardContent>
-            </Card>
-          ))}
+                </CardHeader>
+                <CardContent>
+                  <p className="text-xs text-muted-foreground"><span className="font-medium">Subject:</span> {t.subject}</p>
+                </CardContent>
+              </Card>
+            )}
+          />
         </TabsContent>
 
         <TabsContent value="voucher">
@@ -473,7 +549,7 @@ export default function TemplatesPage() {
             <AlertDialogTitle>Delete this template?</AlertDialogTitle>
             <AlertDialogDescription>
               {pendingDelete
-                ? `“${pendingDelete.key.replace(/_/g, " ")}” will be permanently removed. This cannot be undone.`
+                ? `“${pendingDelete.name}” will be permanently removed. This cannot be undone.`
                 : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>

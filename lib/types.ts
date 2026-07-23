@@ -112,6 +112,7 @@ export interface Customer {
   vatNumber?: string | null
   notes?: string | null
   dateOfBirth?: string | null
+  idPassport?: string | null
   vipStatus?: boolean
   preferences?: string | null
   communicationPreferences?: string | null
@@ -778,6 +779,7 @@ export interface BookingTransportRequest {
   /** When set, the quote line for this request uses this price instead of the rate card. */
   priceOverride: number | null
   notes: string | null
+  supplierReference: string | null
   sortOrder: number
   createdAt: string
   createdAtDisplay?: string
@@ -940,7 +942,6 @@ export interface Quote {
   updatedAtDisplay?: string
   lineItems: QuoteLineItem[]
   subtotal: number
-  vat: number
   total: number
   lastSentAt?: string
   lastSentAtDisplay?: string
@@ -968,7 +969,7 @@ export interface Payment {
   proofStoragePath?: string | null
 }
 
-export type InvoiceKind = "deposit" | "final"
+export type InvoiceKind = "deposit" | "final" | "full"
 export type InvoiceStatus = "draft" | "sent" | "paid" | "void"
 
 export interface Invoice {
@@ -1026,11 +1027,13 @@ export interface BookingNote {
 export interface Template {
   id: string
   key: string
+  name: string
   subject: string
   bodyHtml: string
   version: number
   active: boolean
   isSystem: boolean
+  sortOrder: number
 }
 
 export interface Correspondence {

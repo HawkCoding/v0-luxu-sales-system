@@ -86,6 +86,7 @@ function createEmptyTransportRequest(sortOrder: number): EditableTransportReques
     flightNumber: null,
     priceOverride: null,
     notes: null,
+    supplierReference: null,
     sortOrder,
     createdAt: now,
     updatedAt: now,

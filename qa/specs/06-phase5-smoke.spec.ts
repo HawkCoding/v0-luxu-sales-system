@@ -104,8 +104,7 @@ async function seedDraftQuote(bookingId: string): Promise<{ quoteId: string; quo
     quote_number: quoteNumber,
     status: "draft",
     subtotal: 100000,
-    vat: 15000,
-    total: 115000,
+    total: 100000,
     validity_until: "2099-12-31",
   })
   if (error) throw new Error(`Failed to seed draft quote: ${error.message}`)

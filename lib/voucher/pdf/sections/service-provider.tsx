@@ -20,7 +20,7 @@ function formatServiceDate(value: string | null | undefined): string {
 
 export function ServiceProvider({ data, styles }: ServiceProviderProps) {
   return (
-    <View style={styles.section}>
+    <View style={styles.section} wrap={false}>
       <Text style={styles.sectionTitle} minPresenceAhead={60}>
         Service Provider
       </Text>

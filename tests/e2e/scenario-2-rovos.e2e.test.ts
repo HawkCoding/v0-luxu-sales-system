@@ -283,6 +283,7 @@ describe("E2E Scenario 2: Rovos Rail enquiry → voucher", () => {
         invoiceBalance: store.rows("bookings")[0].invoice_balance as number,
         departureDate: DEPARTURE_DATE,
         customerEmail: customer.email as string,
+      missingLegReferenceLabels: [],
       }),
     ).toEqual({ ready: true, failures: [] })
 

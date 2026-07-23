@@ -8,10 +8,15 @@ import { PreviewAndSendDialog } from "@/components/preview-and-send-dialog"
 
 interface SendVoucherButtonProps {
   voucherId: string | null
+  /**
+   * Called on click instead of using `voucherId` directly. Lets the caller generate
+   * any missing PDF first and return the voucher id to prepare. Return null to abort
+   * the send.
+   */
+  resolveVoucherId?: () => Promise<string | null>
   bookingNumber: string
   disabled?: boolean
   onSent?: () => Promise<void> | void
-  onMissingItinerary?: () => void
 }
 
 interface PreparedVoucherSend {
@@ -29,38 +34,31 @@ interface PreparedVoucherSend {
     contentType?: string
   }>
   error?: string
-  details?: { missingItinerary?: boolean }
 }
 
 export function SendVoucherButton({
   voucherId,
+  resolveVoucherId,
   bookingNumber,
   disabled,
   onSent,
-  onMissingItinerary,
 }: SendVoucherButtonProps) {
   const [loading, setLoading] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [prepared, setPrepared] = useState<PreparedVoucherSend | null>(null)
 
   async function prepare() {
-    if (!voucherId) {
-      toast.error("Generate the voucher PDF before sending")
-      return
-    }
     setLoading(true)
     try {
-      const response = await fetch(`/api/vouchers/${voucherId}/prepare-send`, { method: "POST" })
+      const id = resolveVoucherId ? await resolveVoucherId() : voucherId
+      if (!id) {
+        // resolveVoucherId surfaces its own error toast; only the plain path needs one.
+        if (!resolveVoucherId) toast.error("Generate the voucher PDF before sending")
+        return
+      }
+      const response = await fetch(`/api/vouchers/${id}/prepare-send`, { method: "POST" })
       const payload = (await response.json().catch(() => ({}))) as PreparedVoucherSend
       if (!response.ok) {
-        if (payload.details?.missingItinerary) {
-          toast.error("Generate the itinerary first — the voucher email includes both PDFs", {
-            action: onMissingItinerary
-              ? { label: "Generate Itinerary", onClick: onMissingItinerary }
-              : undefined,
-          })
-          return
-        }
         throw new Error(payload.error ?? "Voucher email could not be prepared")
       }
       setPrepared(payload)
@@ -74,13 +72,18 @@ export function SendVoucherButton({
 
   return (
     <>
-      <Button size="sm" variant="default" disabled={disabled || loading || !voucherId} onClick={prepare}>
+      <Button
+        size="sm"
+        variant="default"
+        disabled={disabled || loading || (!voucherId && !resolveVoucherId)}
+        onClick={prepare}
+      >
         {loading ? (
           <Loader2 data-icon="inline-start" className="animate-spin" />
         ) : (
           <Send data-icon="inline-start" />
         )}
-        {loading ? "Preparing…" : "Send Voucher"}
+        {loading ? "Preparing…" : "Preview & Send Voucher"}
       </Button>
 
       {prepared ? (

@@ -64,6 +64,18 @@ class FakeSelectQuery {
   not(): Promise<{ data: TestBooking[]; error: null }> {
     return Promise.resolve({ data: testBookings, error: null })
   }
+
+  order(): FakeSelectQuery {
+    return this
+  }
+
+  limit(): FakeSelectQuery {
+    return this
+  }
+
+  maybeSingle(): Promise<{ data: null; error: null }> {
+    return Promise.resolve({ data: null, error: null })
+  }
 }
 
 const fakeSupabase = {

@@ -510,8 +510,7 @@ test("04-lifecycle: walk enquiry → voucher_sent capturing every gap", async ({
           quote_number: `${bookingNumber}-Q1`,
           status: "draft",
           subtotal: 90000,
-          vat: 13500,
-          total: 103500,
+          total: 90000,
           validity_until: "2026-09-01",
         })
         .select("id, quote_number")
