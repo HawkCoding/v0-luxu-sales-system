@@ -779,6 +779,7 @@ export interface BookingTransportRequest {
   /** When set, the quote line for this request uses this price instead of the rate card. */
   priceOverride: number | null
   notes: string | null
+  supplierReference: string | null
   sortOrder: number
   createdAt: string
   createdAtDisplay?: string
@@ -968,7 +969,7 @@ export interface Payment {
   proofStoragePath?: string | null
 }
 
-export type InvoiceKind = "deposit" | "final"
+export type InvoiceKind = "deposit" | "final" | "full"
 export type InvoiceStatus = "draft" | "sent" | "paid" | "void"
 
 export interface Invoice {

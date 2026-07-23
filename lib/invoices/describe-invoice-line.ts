@@ -15,7 +15,9 @@ export function describeInvoiceLine(
   const supplier = snapshot?.supplierName?.trim() || snapshot?.legLabel?.trim() || null
   if (!supplier) return storedDescription
 
-  const detail = snapshot?.routeName?.trim() || null
+  // Invoice PDF renders with the core Helvetica font (WinAnsi-only, no arrow glyph),
+  // so routeName's "→"/"↔" must be swapped for a word here or it renders as garbage.
+  const detail = snapshot?.routeName?.trim().replace(/\s*[→↔]\s*/g, " to ") || null
   const base = detail ? `${supplier} — ${detail}` : supplier
 
   if (snapshot?.passengerKind === "child") return `${base} (Child)`

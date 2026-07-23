@@ -1,0 +1,185 @@
+import type { SupabaseClient } from "@supabase/supabase-js"
+import { writeAuditLog } from "@/lib/audit-write"
+import { FORWARD_STAGES } from "@/lib/pipeline/validate-transition"
+import type { Database } from "@/lib/supabase/types"
+import { getCanonicalPipelineStage, PIPELINE_STAGE_LABELS, type PipelineStage } from "@/lib/types"
+
+type BookingUpdate = Database["public"]["Tables"]["bookings"]["Update"]
+
+/** Invoice statuses that a revision supersedes. A `paid` invoice is never voided. */
+const VOIDABLE_INVOICE_STATUSES = ["draft", "sent"]
+
+/** Timestamp column cleared when the stage it records is rewound past. */
+const STAGE_TIMESTAMP_COLUMN: Partial<Record<PipelineStage, keyof BookingUpdate>> = {
+  quote_sent: "quote_sent_at",
+  accepted: "accepted_at",
+  deposit_requested: "deposit_requested_at",
+  deposit_paid: "deposit_paid_at",
+  final_paid: "final_paid_at",
+  voucher_sent: "voucher_sent_at",
+  closed: "closed_at",
+}
+
+export interface RevisionResetInput {
+  stage: PipelineStage
+  /** True once the deposit has been received or manually confirmed. */
+  depositPaid: boolean
+  /** Sum of payment rows on the booking. Any money received floors the reset. */
+  totalPaid: number
+  outcome?: string | null
+}
+
+export interface RevisionResetPlan {
+  /** Stage the booking is rewound to. Equal to the current stage when nothing changes. */
+  targetStage: PipelineStage
+  /** True when money was already received, so the reset stops at Deposit Invoice Sent. */
+  keepsDeposit: boolean
+  /** Booking timestamp columns this reset clears. */
+  clearedFields: string[]
+  /** True when unpaid deposit/final invoices will be voided. */
+  voidsInvoices: boolean
+  /** Human-readable lines for the confirmation dialog. */
+  summary: string[]
+  /** False when the booking is already at or behind the reset floor. */
+  changesStage: boolean
+}
+
+function stageIndex(stage: PipelineStage): number {
+  return FORWARD_STAGES.indexOf(getCanonicalPipelineStage(stage))
+}
+
+/**
+ * Works out how far a quote revision rewinds the booking.
+ *
+ * A revision starts life as a `draft` quote, so the booking normally returns to
+ * Enquiry and the salesperson re-walks send → accept → deposit. Once money has
+ * been received the reset stops at Deposit Invoice Sent: the payments and the
+ * `deposit_paid` flag stay, and the salesperson re-issues an amended invoice at
+ * the new total.
+ */
+export function planRevisionReset(input: RevisionResetInput): RevisionResetPlan {
+  const currentStage = getCanonicalPipelineStage(input.stage)
+  const keepsDeposit = input.depositPaid || input.totalPaid > 0
+  const floorStage: PipelineStage = keepsDeposit ? "deposit_requested" : "enquiry"
+
+  const currentIndex = stageIndex(currentStage)
+  const floorIndex = stageIndex(floorStage)
+  // `lost` and other off-ladder stages have no index — leave them alone.
+  const changesStage = currentIndex > floorIndex && floorIndex !== -1
+  const targetStage = changesStage ? floorStage : currentStage
+
+  const clearedFields: string[] = []
+  if (changesStage) {
+    for (const stage of FORWARD_STAGES.slice(floorIndex + 1, currentIndex + 1)) {
+      const column = STAGE_TIMESTAMP_COLUMN[stage]
+      if (column) clearedFields.push(column)
+    }
+    if (!keepsDeposit) {
+      clearedFields.push("deposit_paid", "deposit_confirmed_manually", "invoice_balance")
+    }
+    if (input.outcome === "Won") {
+      clearedFields.push("outcome", "outcome_set_at")
+    }
+  }
+
+  const summary: string[] = []
+  if (changesStage) {
+    summary.push(
+      `Booking moves back from ${PIPELINE_STAGE_LABELS[currentStage]} to ${PIPELINE_STAGE_LABELS[targetStage]}.`,
+    )
+  } else {
+    summary.push(`Booking stays at ${PIPELINE_STAGE_LABELS[currentStage]}.`)
+  }
+  summary.push("Unpaid deposit and final invoices are voided so a new one can be issued at the revised total.")
+  summary.push("The quote being revised is marked Superseded.")
+  if (keepsDeposit) {
+    summary.push("Payments already received are kept — the deposit stays marked as paid.")
+  }
+
+  return {
+    targetStage,
+    keepsDeposit,
+    clearedFields,
+    voidsInvoices: true,
+    summary,
+    changesStage,
+  }
+}
+
+export interface ApplyRevisionResetInput {
+  bookingId: string
+  /** The quote being revised — marked superseded. */
+  parentQuoteId: string
+  plan: RevisionResetPlan
+  fromStage: PipelineStage
+  actorName: string
+  actorUserId: string | null
+  now?: Date
+}
+
+export interface ApplyRevisionResetResult {
+  voidedInvoiceIds: string[]
+  stageChanged: boolean
+}
+
+/**
+ * Applies a {@link planRevisionReset} result: rewinds the booking, voids unpaid
+ * invoices, supersedes the parent quote, and writes the audit trail.
+ */
+export async function applyRevisionReset(
+  supabase: SupabaseClient<Database>,
+  input: ApplyRevisionResetInput,
+): Promise<ApplyRevisionResetResult> {
+  const nowIso = (input.now ?? new Date()).toISOString()
+  const { plan } = input
+
+  if (plan.changesStage) {
+    const updates: BookingUpdate = { stage: plan.targetStage, updated_at: nowIso }
+
+    for (const field of plan.clearedFields) {
+      if (field === "deposit_paid") updates.deposit_paid = false
+      else if (field === "deposit_confirmed_manually") updates.deposit_confirmed_manually = false
+      else if (field === "outcome") updates.outcome = "Open"
+      else (updates as Record<string, unknown>)[field] = null
+    }
+
+    const { error } = await supabase.from("bookings").update(updates).eq("id", input.bookingId)
+    if (error) throw new Error(error.message)
+  }
+
+  const { data: voided, error: voidError } = await supabase
+    .from("invoices")
+    .update({ status: "void", updated_at: nowIso })
+    .eq("booking_id", input.bookingId)
+    .in("status", VOIDABLE_INVOICE_STATUSES)
+    .select("id")
+
+  if (voidError) throw new Error(voidError.message)
+
+  const { error: supersedeError } = await supabase
+    .from("quotes")
+    .update({ status: "superseded", updated_at: nowIso })
+    .eq("id", input.parentQuoteId)
+
+  if (supersedeError) throw new Error(supersedeError.message)
+
+  const voidedInvoiceIds = (voided ?? []).map((invoice) => invoice.id)
+
+  await writeAuditLog(supabase, {
+    actor: input.actorName,
+    actorUserId: input.actorUserId,
+    entityType: "Booking",
+    entityId: input.bookingId,
+    action: "quote_revision_reset",
+    before: { stage: input.fromStage },
+    after: {
+      stage: plan.targetStage,
+      cleared_fields: plan.clearedFields,
+      voided_invoice_ids: voidedInvoiceIds,
+      superseded_quote_id: input.parentQuoteId,
+      kept_deposit: plan.keepsDeposit,
+    },
+  })
+
+  return { voidedInvoiceIds, stageChanged: plan.changesStage }
+}

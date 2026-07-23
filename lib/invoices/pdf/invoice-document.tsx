@@ -74,6 +74,8 @@ export interface InvoiceTotals {
   amountReceived: number
   amountReceivedAt?: string | null
   outstanding: number
+  /** True when the client owes the full amount in one payment (no deposit split). */
+  fullPayment?: boolean
 }
 
 export interface InvoicePdfData {
@@ -721,9 +723,13 @@ export function InvoiceDocument({
             ) : null}
             <View style={styles.totalsRow}>
               <Text style={styles.totalsLabel}>
-                {totals.finalDueDate
-                  ? `Final amount due ${formatDate(totals.finalDueDate)}`
-                  : "Final amount due now"}
+                {totals.fullPayment
+                  ? totals.finalDueDate
+                    ? `Full amount due ${formatDate(totals.finalDueDate)}`
+                    : "Full amount due now"
+                  : totals.finalDueDate
+                    ? `Final amount due ${formatDate(totals.finalDueDate)}`
+                    : "Final amount due now"}
               </Text>
               <Text style={styles.totalsValue}>{formatMoney(totals.finalAmount, currency)}</Text>
             </View>

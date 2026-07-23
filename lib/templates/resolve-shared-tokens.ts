@@ -133,6 +133,7 @@ interface TravellerRow {
   prefix: string | null
   first_name: string
   last_name: string
+  id_passport: string | null
   is_child: boolean
   sort_order: number | null
 }
@@ -166,7 +167,7 @@ export async function resolveSharedEmailTokens(
       safeQuery<TravellerRow[]>(() =>
         supabase
           .from("travellers")
-          .select("prefix, first_name, last_name, is_child, sort_order")
+          .select("prefix, first_name, last_name, id_passport, is_child, sort_order")
           .eq("booking_id", bookingId),
       ),
       safely(() => loadSuiteSelections(supabase, bookingId), []),
@@ -185,15 +186,18 @@ export async function resolveSharedEmailTokens(
   const departureDate = formatDisplayDateLong(booking?.departure_date ?? null)
 
   const guestTravellers = (travellers ?? []).slice().sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-  const guestNames = guestTravellers
+  const guests = guestTravellers
     .filter((t) => !t.is_child)
-    .map((t) => [t.prefix, t.first_name, t.last_name].filter(Boolean).join(" "))
-    .filter((name) => name.length > 0)
+    .map((t) => ({
+      name: [t.prefix, t.first_name, t.last_name].filter(Boolean).join(" "),
+      idNumber: t.id_passport,
+    }))
+    .filter((guest) => guest.name.length > 0)
 
   const guestInfo = buildGuestInfoBlock({
     customerName: formatCustomerSalutation(customer) || "the traveller",
     customerEmail: customer?.email ?? null,
-    guestNames,
+    guests,
     adults: booking?.no_of_adults ?? 0,
     children: booking?.no_of_children ?? 0,
   })

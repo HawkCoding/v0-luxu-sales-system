@@ -36,6 +36,11 @@ export const DEFAULT_TEMPLATES: Record<SystemTemplateKey, { subject: string; bod
     bodyHtml:
       "<p>Dear {{customerName}},</p><p>Thank you for confirming your reservation. A deposit of <strong>R {{depositAmount}}</strong> ({{depositPercentage}}%) is required to secure your booking, due by <strong>{{dueDate}}</strong>. Invoice <strong>{{invoiceNumber}}</strong> is attached.</p>{{guestInfo}}{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
   },
+  full_payment_request: {
+    subject: "Confirmation Invoice {{invoiceNumber}} — {{jobNumber}}",
+    bodyHtml:
+      "<p>Dear {{customerName}},</p><p>As this reservation falls within 60 days of departure, full payment of <strong>R {{amountDue}}</strong> is required to secure your booking, due by <strong>{{dueDate}}</strong>. Invoice <strong>{{invoiceNumber}}</strong> is attached.</p>{{guestInfo}}{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
+  },
   final_invoice: {
     subject: "Final Invoice — {{jobNumber}}",
     bodyHtml:

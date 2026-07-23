@@ -448,6 +448,7 @@ export type Database = {
           service_date: string | null
           suite_type_id: string | null
           supplier_id: string | null
+          supplier_reference: string | null
           updated_at: string
         }
         Insert: {
@@ -465,6 +466,7 @@ export type Database = {
           service_date?: string | null
           suite_type_id?: string | null
           supplier_id?: string | null
+          supplier_reference?: string | null
           updated_at?: string
         }
         Update: {
@@ -482,6 +484,7 @@ export type Database = {
           service_date?: string | null
           suite_type_id?: string | null
           supplier_id?: string | null
+          supplier_reference?: string | null
           updated_at?: string
         }
         Relationships: [
@@ -703,6 +706,7 @@ export type Database = {
           sort_order: number
           suite_type_id: string | null
           supplier_id: string | null
+          supplier_reference: string | null
           updated_at: string
         }
         Insert: {
@@ -723,6 +727,7 @@ export type Database = {
           sort_order?: number
           suite_type_id?: string | null
           supplier_id?: string | null
+          supplier_reference?: string | null
           updated_at?: string
         }
         Update: {
@@ -743,6 +748,7 @@ export type Database = {
           sort_order?: number
           suite_type_id?: string | null
           supplier_id?: string | null
+          supplier_reference?: string | null
           updated_at?: string
         }
         Relationships: [

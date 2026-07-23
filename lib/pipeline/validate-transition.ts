@@ -88,7 +88,7 @@ const CANONICAL_STAGE: Partial<Record<PipelineStage, PipelineStage>> = {
   trip_active: "voucher_sent",
 }
 
-const FORWARD_STAGES: PipelineStage[] = [
+export const FORWARD_STAGES: PipelineStage[] = [
   "enquiry",
   "quote_sent",
   "accepted",
@@ -272,11 +272,16 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
   }
 
   if (crossedStages.includes("deposit_requested")) {
+    // A full-payment invoice (booking made inside 60 days of departure, or
+    // opted into by the salesperson) covers the whole amount in one go and
+    // satisfies the deposit-invoice gate the same way a deposit invoice does.
     const hasDepositInvoice = invoices.some(
-      (invoice) => invoice.kind === "deposit" && invoice.status !== "void",
+      (invoice) => (invoice.kind === "deposit" || invoice.kind === "full") && invoice.status !== "void",
     )
     const hasSentDepositInvoice = invoices.some(
-      (invoice) => invoice.kind === "deposit" && (invoice.status === "sent" || invoice.status === "paid"),
+      (invoice) =>
+        (invoice.kind === "deposit" || invoice.kind === "full") &&
+        (invoice.status === "sent" || invoice.status === "paid"),
     )
     const hasInvoiceDocument = hasDocument(documents, "invoice_pdf")
     if (!hasDepositInvoice && !hasInvoiceDocument && !manualConfirmations.createDepositInvoice) {
@@ -312,8 +317,10 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
   }
 
   if (crossedStages.includes("final_paid")) {
+    // A full-payment invoice satisfies the final-invoice gate too — it's the
+    // one invoice covering both.
     const hasFinalInvoice = invoices.some(
-      (invoice) => invoice.kind === "final" && invoice.status !== "void",
+      (invoice) => (invoice.kind === "final" || invoice.kind === "full") && invoice.status !== "void",
     )
     if (!hasFinalInvoice && !manualConfirmations.createFinalInvoice) {
       failures.push({
@@ -323,7 +330,16 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
         severity: "confirm",
         autoFixable: "create_final_invoice",
       })
-    } else if (hasFinalInvoice && !hasSubjectCorrespondence(correspondences, ["final invoice"])) {
+    } else if (
+      hasFinalInvoice &&
+      !hasSubjectCorrespondence(correspondences, ["final invoice"]) &&
+      // A full-payment invoice's confirmation email doesn't say "final invoice" —
+      // any sent invoice correspondence covers it since it's the one email sent.
+      !(
+        invoices.some((invoice) => invoice.kind === "full" && invoice.status !== "void") &&
+        hasSentCorrespondence(correspondences, "invoice", ["invoice"])
+      )
+    ) {
       failures.push({
         gateId: "final_invoice_correspondence",
         message: "Final invoice correspondence must exist before the booking is paid in full.",

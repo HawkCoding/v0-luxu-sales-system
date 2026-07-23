@@ -43,7 +43,9 @@ interface MockOptions {
   updateResult?: { data: unknown; error: unknown }
   totalPaid?: number
   depositInvoiceAmount?: number
+  fullInvoiceAmount?: number
   depositRefundable?: boolean
+  defaultDepositPercentage?: number
 }
 
 function createSupabaseMock(opts: MockOptions = {}) {
@@ -58,7 +60,9 @@ function createSupabaseMock(opts: MockOptions = {}) {
     updateResult = { data: { id: BOOKING_ID, booking_number: "BT-2026-0001", stage: "lost", updated_at: "2026-05-17T10:00:00Z" }, error: null },
     totalPaid = 0,
     depositInvoiceAmount = 0,
+    fullInvoiceAmount = 0,
     depositRefundable = false,
+    defaultDepositPercentage = 25,
   } = opts
 
   const supabase = {
@@ -119,9 +123,12 @@ function createSupabaseMock(opts: MockOptions = {}) {
       if (table === "app_settings") {
         return {
           select: vi.fn(() => ({
-            eq: vi.fn(() => ({
+            eq: vi.fn((_col: string, key?: string) => ({
               maybeSingle: vi.fn(async () => ({
-                data: { value: depositRefundable ? "true" : "false" },
+                data:
+                  key === "default_deposit_percentage"
+                    ? { value: String(defaultDepositPercentage) }
+                    : { value: depositRefundable ? "true" : "false" },
                 error: null,
               })),
             })),
@@ -138,14 +145,31 @@ function createSupabaseMock(opts: MockOptions = {}) {
         }
       }
       if (table === "invoices") {
-        const invoiceData = depositInvoiceAmount > 0 ? { amount: depositInvoiceAmount } : null
-        const maybeSingleFn = vi.fn(async () => ({ data: invoiceData, error: null }))
-        const limitMock = { maybeSingle: maybeSingleFn }
-        const orderMock = { limit: vi.fn(() => limitMock) }
-        const inMock = { order: vi.fn(() => orderMock) }
-        const eq2Mock = { in: vi.fn(() => inMock) }
-        const eq1Mock = { eq: vi.fn(() => eq2Mock) }
-        return { select: vi.fn(() => ({ eq: vi.fn(() => eq1Mock) })) }
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              eq: vi.fn((_col: string, kind?: string) => {
+                const invoiceData =
+                  kind === "full"
+                    ? fullInvoiceAmount > 0
+                      ? { amount: fullInvoiceAmount }
+                      : null
+                    : depositInvoiceAmount > 0
+                      ? { amount: depositInvoiceAmount }
+                      : null
+                return {
+                  in: vi.fn(() => ({
+                    order: vi.fn(() => ({
+                      limit: vi.fn(() => ({
+                        maybeSingle: vi.fn(async () => ({ data: invoiceData, error: null })),
+                      })),
+                    })),
+                  })),
+                }
+              }),
+            })),
+          })),
+        }
       }
       return {}
     }),
@@ -316,6 +340,32 @@ describe("POST /api/jobs/[id]/cancel", () => {
     expect(body.ok).toBe(true)
 
     // syncBookingPaymentState is called only when finalRefundAmount > 0 (3000 in this case)
+    expect(vi.mocked(syncBookingPaymentState)).toHaveBeenCalledWith(
+      expect.anything(),
+      BOOKING_ID,
+      expect.objectContaining({ actorUserId: USER_ID }),
+    )
+  })
+
+  it("suggests a notional deposit-percentage cancellation fee when only a full-payment invoice exists", async () => {
+    // totalPaid=10000, fullInvoiceAmount=10000, no separate deposit invoice, default 25%
+    // → notional fee = 2500, suggestedRefund = 7500
+    createSupabaseMock({
+      role: "manager",
+      bookingStage: "deposit_paid",
+      totalPaid: 10000,
+      depositInvoiceAmount: 0,
+      fullInvoiceAmount: 10000,
+      depositRefundable: false,
+      defaultDepositPercentage: 25,
+    })
+
+    const res = await POST(
+      postJson({ outcomeReasonId: REASON_ID, refundStatus: "refunded" }),
+      makeParams(),
+    )
+    expect(res.status).toBe(200)
+
     expect(vi.mocked(syncBookingPaymentState)).toHaveBeenCalledWith(
       expect.anything(),
       BOOKING_ID,

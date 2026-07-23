@@ -15,6 +15,7 @@ import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import type { Json } from "@/lib/supabase/types"
 import type { PipelineStage } from "@/lib/types"
 import { checkVoucherReadiness } from "@/lib/voucher/check-readiness"
+import { loadLegReferenceRows, missingLegReferenceLabels } from "@/lib/voucher/leg-references"
 
 export const runtime = "nodejs"
 
@@ -122,11 +123,19 @@ export async function POST(req: Request) {
 
   const customerRecord = Array.isArray(booking.customer) ? booking.customer[0] : booking.customer
   if (isVoucherSend(parsed.data.kind, parsed.data.moveStage)) {
+    let legReferenceRows: Awaited<ReturnType<typeof loadLegReferenceRows>> = []
+    try {
+      legReferenceRows = await loadLegReferenceRows(supabase, booking.id)
+    } catch (error) {
+      return safeSupabaseError("correspondence:load-leg-references", error)
+    }
+
     const readiness = checkVoucherReadiness({
       stage: booking.stage,
       invoiceBalance: booking.invoice_balance !== null ? Number(booking.invoice_balance) : null,
       departureDate: booking.departure_date,
       customerEmail: customerRecord?.email ?? null,
+      missingLegReferenceLabels: missingLegReferenceLabels(legReferenceRows),
     })
 
     if (!readiness.ready) {

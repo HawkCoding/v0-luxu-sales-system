@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { writeAuditLog } from "@/lib/audit-write"
+import { getCrossedForwardStages } from "@/lib/pipeline/validate-transition"
 import type { Database } from "@/lib/supabase/types"
 
 export interface BookingPaymentState {
@@ -30,6 +31,7 @@ export async function syncBookingPaymentState(
     { data: payments },
     { data: depositInvoice },
     { data: finalInvoice },
+    { data: fullInvoice },
     { data: currentBooking },
   ] = await Promise.all([
     supabase
@@ -59,6 +61,17 @@ export async function syncBookingPaymentState(
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    // A full-payment invoice covers the deposit and the final amount in one
+    // go — its amount also serves as the deposit_paid threshold below.
+    supabase
+      .from("invoices")
+      .select("id, amount, status")
+      .eq("booking_id", bookingId)
+      .eq("kind", "full")
+      .in("status", ["draft", "sent", "paid"])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
     supabase
       .from("bookings")
       .select("deposit_paid, deposit_paid_at, invoice_balance, stage, deposit_confirmed_manually")
@@ -75,7 +88,13 @@ export async function syncBookingPaymentState(
   const totalPaid = (payments ?? []).reduce((sum, p) => sum + Number(p.amount ?? 0), 0)
   const invoiceBalance = Math.max(0, Math.round((quoteTotal - totalPaid) * 100) / 100)
 
-  const depositThreshold = depositInvoice ? Number(depositInvoice.amount) : null
+  // A full-payment invoice has no separate deposit — its full amount is the
+  // threshold for both deposit_paid and (via invoiceBalance below) final_paid.
+  const depositThreshold = depositInvoice
+    ? Number(depositInvoice.amount)
+    : fullInvoice
+      ? Number(fullInvoice.amount)
+      : null
   const derivedDepositPaid = depositThreshold !== null && totalPaid >= depositThreshold
   // A manual "deposit received" confirmation is sticky: amounts can still
   // set deposit_paid true, but they can never clear a confirmed deposit.
@@ -92,10 +111,35 @@ export async function syncBookingPaymentState(
     bookingUpdates.deposit_paid_at = new Date().toISOString()
   }
 
+  // The client paid the whole amount in one go — whether via a full-payment
+  // invoice or by settling a deposit request in full — so the booking can
+  // skip straight to Paid in Full instead of waiting on a manual gate.
+  const crossesToFinalPaid = getCrossedForwardStages(
+    currentBooking?.stage ?? "enquiry",
+    "final_paid",
+  ).includes("final_paid")
+  const autoAdvancedToFinalPaid = invoiceBalance === 0 && crossesToFinalPaid
+  if (autoAdvancedToFinalPaid) {
+    bookingUpdates.stage = "final_paid"
+    bookingUpdates.final_paid_at = new Date().toISOString()
+  }
+
   await supabase.from("bookings").update(bookingUpdates).eq("id", bookingId)
 
   const actorName = auditContext?.actorName ?? "system"
   const actorUserId = auditContext?.actorUserId ?? null
+
+  if (autoAdvancedToFinalPaid) {
+    await writeAuditLog(supabase, {
+      actor: actorName,
+      actorUserId,
+      entityType: "Booking",
+      entityId: bookingId,
+      action: "booking_paid_in_full",
+      before: { stage: currentBooking?.stage ?? null },
+      after: { stage: "final_paid", invoice_balance: invoiceBalance },
+    })
+  }
 
   // Mark deposit invoice as paid if threshold crossed
   if (depositInvoice && isDepositPaid && depositInvoice.status !== "paid") {
@@ -130,6 +174,24 @@ export async function syncBookingPaymentState(
       action: "invoice_marked_paid",
       before: { invoice_id: finalInvoice.id, status: finalInvoice.status },
       after: { invoice_id: finalInvoice.id, status: "paid", invoice_balance: invoiceBalance },
+    })
+  }
+
+  // Mark full-payment invoice as paid if balance is zero
+  if (fullInvoice && invoiceBalance === 0 && fullInvoice.status !== "paid") {
+    await supabase
+      .from("invoices")
+      .update({ status: "paid", updated_at: new Date().toISOString() })
+      .eq("id", fullInvoice.id)
+
+    await writeAuditLog(supabase, {
+      actor: actorName,
+      actorUserId,
+      entityType: "Booking",
+      entityId: bookingId,
+      action: "invoice_marked_paid",
+      before: { invoice_id: fullInvoice.id, status: fullInvoice.status },
+      after: { invoice_id: fullInvoice.id, status: "paid", invoice_balance: invoiceBalance },
     })
   }
 

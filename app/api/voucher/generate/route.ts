@@ -6,6 +6,7 @@ import { formatDisplayDateLong } from "@/lib/date-format"
 import type { VoucherData } from "@/lib/generate-voucher"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 import { checkVoucherReadiness } from "@/lib/voucher/check-readiness"
+import { loadLegReferenceRows, missingLegReferenceLabels } from "@/lib/voucher/leg-references"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import { buildSuiteTokens } from "@/lib/templates/suite-description"
@@ -148,11 +149,19 @@ export async function POST(req: Request) {
   const booking = bookingRaw as unknown as BookingVoucherRecord
   const customer = firstRecord(booking.customer)
 
+  let legReferenceRows: Awaited<ReturnType<typeof loadLegReferenceRows>> = []
+  try {
+    legReferenceRows = await loadLegReferenceRows(supabase, booking.id)
+  } catch (error) {
+    return safeSupabaseError("voucher:load-leg-references", error)
+  }
+
   const readiness = checkVoucherReadiness({
     stage: booking.stage,
     invoiceBalance: booking.invoice_balance,
     departureDate: booking.departure_date,
     customerEmail: customer?.email ?? null,
+    missingLegReferenceLabels: missingLegReferenceLabels(legReferenceRows),
   })
   if (!readiness.ready) {
     return jsonError(readiness.failures[0]?.message ?? "Booking is not ready for voucher generation", 422)

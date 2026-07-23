@@ -61,6 +61,20 @@ describe("describeInvoiceLine", () => {
     )
   })
 
+  it("swaps the one-way route arrow for 'to' (Helvetica core font has no arrow glyph)", () => {
+    const snapshot = makeSnapshot({ routeName: "Pretoria → Cape Town" })
+    expect(describeInvoiceLine("Rovos Rail - Deluxe Suite - Pretoria → Cape Town - Adult", snapshot)).toBe(
+      "Rovos Rail — Pretoria to Cape Town",
+    )
+  })
+
+  it("swaps the round-trip route arrow for 'to'", () => {
+    const snapshot = makeSnapshot({ routeName: "Pretoria ↔ Cape Town" })
+    expect(describeInvoiceLine("Rovos Rail - Deluxe Suite - Pretoria ↔ Cape Town - Adult", snapshot)).toBe(
+      "Rovos Rail — Pretoria to Cape Town",
+    )
+  })
+
   it("falls back to supplier only when there is no route", () => {
     const snapshot = makeSnapshot({ routeName: null })
     expect(describeInvoiceLine("Rovos Rail - Deluxe Suite", snapshot)).toBe("Rovos Rail")

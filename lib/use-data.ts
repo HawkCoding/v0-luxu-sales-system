@@ -216,6 +216,23 @@ export function useJobReservationDetails(bookingId: string | null | undefined) {
   )
 }
 
+export interface JobLegReferenceRow {
+  key: string
+  kind: "selection" | "transport_request"
+  id: string
+  label: string
+  supplierName: string | null
+  supplierReference: string | null
+}
+
+export function useJobLegReferences(bookingId: string | null | undefined) {
+  return useSWR<{ rows: JobLegReferenceRow[] }>(
+    bookingId ? `/api/jobs/${bookingId}/leg-references` : null,
+    fetcher,
+    swrOptions,
+  )
+}
+
 export function useTemplates() {
   return useSWR("/api/templates", fetcher, swrOptions)
 }

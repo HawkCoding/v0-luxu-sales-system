@@ -235,6 +235,16 @@ function buildAuth({ stage, invoiceBalance, existingDocumentId, existingVoucherI
             resolve({ data: [], error: null }),
         }
       }
+      // No leg reference rows in these fixtures — readiness check sees nothing missing.
+      if (table === "booking_transport_requests") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              order: vi.fn(async () => ({ data: [], error: null })),
+            })),
+          })),
+        }
+      }
 
       throw new Error(`Unexpected table ${table}`)
     }),

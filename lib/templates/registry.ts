@@ -25,6 +25,7 @@ export const SYSTEM_TEMPLATE_KEYS = [
   "follow_up",
   "reservation_received",
   "deposit_request",
+  "full_payment_request",
   "payment_received",
   "final_invoice",
   "payment_reminder",
@@ -108,10 +109,10 @@ const bankingDetails: TemplateTokenSpec = {
 }
 const guestInfo: TemplateTokenSpec = {
   name: "guestInfo",
-  description: "Booking contact and named guests, for the customer to confirm (falls back to guest counts if names aren't captured yet)",
+  description: "Booking contact and each named guest with their ID/passport number, for the customer to confirm (falls back to guest counts if names aren't captured yet)",
   kind: "block",
   sample:
-    '<div data-label="Guest Information"><p><strong>Booking contact:</strong> Mr Smith (mr.smith@example.com)</p><p><strong>Guests:</strong> Mr John Smith, Mrs Jane Smith</p></div>',
+    '<div data-label="Guest Information"><p><strong>Booking contact:</strong> Mr Smith (mr.smith@example.com)</p><p><strong>Guests:</strong></p><p>Mr John Smith — ID: 8001015800083</p><p>Mrs Jane Smith — ID: 8203125800084</p></div>',
 }
 
 // Every token below is resolvable in every template type (lib/templates/resolve-shared-tokens.ts

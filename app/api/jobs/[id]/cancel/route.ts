@@ -5,6 +5,7 @@ import { createSessionClient } from "@/lib/supabase/server"
 import { extractRoleFromJwt } from "@/lib/role-utils"
 import { writeAuditLog } from "@/lib/audit-write"
 import { calculateRefund } from "@/lib/invoices/calculate-refund"
+import { calculateDepositAmount, getDefaultDepositPercentage } from "@/lib/pipeline/constants"
 import { getDepositRefundable } from "@/lib/settings-access"
 import { syncBookingPaymentState } from "@/lib/invoices/sync-booking-payment-state"
 
@@ -94,22 +95,40 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   let cancellationFee: number | null = null
 
   if (body.refundStatus === "refunded") {
-    const [{ data: paymentsData }, { data: depositInvoice }, depositRefundable] = await Promise.all([
-      supabase.from("payments").select("amount").eq("booking_id", id),
-      supabase
-        .from("invoices")
-        .select("amount")
-        .eq("booking_id", id)
-        .eq("kind", "deposit")
-        .in("status", ["draft", "sent", "paid"])
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      getDepositRefundable(supabase),
-    ])
+    const [{ data: paymentsData }, { data: depositInvoice }, { data: fullInvoice }, depositRefundable, defaultDepositPercentage] =
+      await Promise.all([
+        supabase.from("payments").select("amount").eq("booking_id", id),
+        supabase
+          .from("invoices")
+          .select("amount")
+          .eq("booking_id", id)
+          .eq("kind", "deposit")
+          .in("status", ["draft", "sent", "paid"])
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        // A full-payment booking never had a separate deposit invoice — fall
+        // back to a notional deposit % of the full amount as the
+        // non-refundable cancellation fee.
+        supabase
+          .from("invoices")
+          .select("amount")
+          .eq("booking_id", id)
+          .eq("kind", "full")
+          .in("status", ["draft", "sent", "paid"])
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        getDepositRefundable(supabase),
+        getDefaultDepositPercentage(supabase),
+      ])
 
     const totalPaid = (paymentsData ?? []).reduce((sum, p) => sum + Number(p.amount ?? 0), 0)
-    const depositAmount = depositInvoice ? Number(depositInvoice.amount) : 0
+    const depositAmount = depositInvoice
+      ? Number(depositInvoice.amount)
+      : fullInvoice
+        ? calculateDepositAmount(Number(fullInvoice.amount), defaultDepositPercentage)
+        : 0
 
     const calc = calculateRefund(totalPaid, depositAmount, depositRefundable)
     cancellationFee = calc.cancellationFee

@@ -75,6 +75,7 @@ interface TransportRequestJoinRow {
   flight_number: string | null
   notes: string | null
   sort_order: number
+  supplier_reference: string | null
   suppliers: SupplierJoin | SupplierJoin[] | null
   suite_types: { name: string | null } | { name: string | null }[] | null
   rental_details:
@@ -100,6 +101,7 @@ interface SelectionJoinRow {
   service_date: string | null
   nights: number | null
   notes: string | null
+  supplier_reference: string | null
   package_legs: { sort_order: number; label: string | null } | { sort_order: number; label: string | null }[] | null
   suppliers: SupplierJoin | SupplierJoin[] | null
   routes: RouteJoin | RouteJoin[] | null
@@ -227,7 +229,7 @@ export async function buildVoucherServiceBlocks(
   const { data: rows, error } = await supabase
     .from("booking_package_selections")
     .select(
-      `id, package_leg_id, selected, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, notes,
+      `id, package_leg_id, selected, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, notes, supplier_reference,
        package_legs(sort_order, label),
        suppliers(name, phone, email, website, location, kind, default_time_start, default_time_end, inclusions, exclusions),
        routes(name, duration_days, direction_mode, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name)),
@@ -243,7 +245,7 @@ export async function buildVoucherServiceBlocks(
   const { data: transportRows, error: transportError } = await supabase
     .from("booking_transport_requests")
     .select(
-      `id, package_leg_id, service_type, pickup_point, dropoff_point, pickup_at, flight_number, notes, sort_order,
+      `id, package_leg_id, service_type, pickup_point, dropoff_point, pickup_at, flight_number, notes, sort_order, supplier_reference,
        suppliers(name, phone, email, website, location, kind, default_time_start, default_time_end, inclusions, exclusions),
        suite_types(name),
        rental_details:booking_vehicle_rental_details(return_at)`,
@@ -299,7 +301,7 @@ export async function buildVoucherServiceBlocks(
             contactDetails,
             supplier,
             fallbackVehicle: suite?.name ?? null,
-            supplierReference: context.supplierReferenceFallback ?? null,
+            supplierReference: request.supplier_reference ?? context.supplierReferenceFallback ?? null,
           }),
         )
       }
@@ -349,7 +351,7 @@ export async function buildVoucherServiceBlocks(
       {
         serviceType,
         title,
-        supplierReference: context.supplierReferenceFallback ?? null,
+        supplierReference: row.supplier_reference ?? context.supplierReferenceFallback ?? null,
         contactDetails,
         serviceData,
         displayOrder,
@@ -376,7 +378,7 @@ export async function buildVoucherServiceBlocks(
           },
           supplier,
           fallbackVehicle: null,
-          supplierReference: context.supplierReferenceFallback ?? null,
+          supplierReference: request.supplier_reference ?? context.supplierReferenceFallback ?? null,
         }),
       )
     })

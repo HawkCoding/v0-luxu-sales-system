@@ -14,7 +14,7 @@ export function GuestInfo({ data, styles }: GuestInfoProps) {
   const childText = data.enquiry.noOfChildren ? `, ${data.enquiry.noOfChildren} children` : ""
 
   return (
-    <View style={styles.section}>
+    <View style={styles.section} wrap={false}>
       <Text style={styles.sectionTitle}>Guest Information</Text>
       <InfoRow label="Guest Names" value={data.guestNames} styles={styles} />
       <InfoRow

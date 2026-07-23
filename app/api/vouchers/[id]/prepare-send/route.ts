@@ -3,6 +3,7 @@ import { jsonError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDateLong } from "@/lib/date-format"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { checkVoucherReadiness } from "@/lib/voucher/check-readiness"
+import { loadLegReferenceRows, missingLegReferenceLabels } from "@/lib/voucher/leg-references"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import { buildSuiteTokens } from "@/lib/templates/suite-description"
@@ -113,11 +114,19 @@ export async function POST(_req: Request, { params }: RouteParams) {
   const route = firstRecord(booking.route)
   const voucherDocument = firstRecord(voucher.document)
 
+  let legReferenceRows: Awaited<ReturnType<typeof loadLegReferenceRows>> = []
+  try {
+    legReferenceRows = await loadLegReferenceRows(supabase, booking.id)
+  } catch (error) {
+    return safeSupabaseError("voucher-prepare-send:load-leg-references", error)
+  }
+
   const readiness = checkVoucherReadiness({
     stage: booking.stage,
     invoiceBalance: booking.invoice_balance,
     departureDate: booking.departure_date,
     customerEmail: customer?.email ?? null,
+    missingLegReferenceLabels: missingLegReferenceLabels(legReferenceRows),
   })
   if (!readiness.ready) {
     return jsonError("Voucher is not ready to send", 400, { failures: readiness.failures })
