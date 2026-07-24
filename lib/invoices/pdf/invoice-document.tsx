@@ -125,10 +125,16 @@ function legDate(value: string | null | undefined): string {
   return formatDisplayDate(value.slice(0, 10)) || EMPTY
 }
 
-/** The deposit line always reads "due now" — never swapped to a receipted label. */
+/**
+ * "25% Deposit due now" reads as a fresh demand once the deposit has actually
+ * been paid — swap to a receipted label instead. A cent of rounding slack
+ * covers float drift between the stored deposit amount and payments received.
+ */
 function depositRowLabel(totals: InvoiceTotals): string {
   const pctPrefix = totals.depositPercentage ? `${totals.depositPercentage}% Deposit` : "Deposit"
-  return `${pctPrefix} due now`
+  const depositAmount = totals.depositAmount ?? 0
+  const isPaid = depositAmount > 0 && totals.amountReceived >= depositAmount - 0.01
+  return isPaid ? `${pctPrefix} — received` : `${pctPrefix} due now`
 }
 
 const styles = StyleSheet.create({
