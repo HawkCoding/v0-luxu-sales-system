@@ -162,7 +162,6 @@ describe("applyTransition", () => {
       actorUserId: "user-1",
       manualConfirmations: {
         createDepositInvoice: true,
-        depositReceived: true,
         finalPaymentReceived: true,
       },
       quotes: [{ id: "quote-1", status: "sent", total: 1000, created_at: "2026-05-01T08:00:00.000Z" }],

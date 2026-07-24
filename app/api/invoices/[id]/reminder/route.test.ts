@@ -88,7 +88,14 @@ function seed(invoiceOverrides: Record<string, unknown> = {}) {
         ...invoiceOverrides,
       },
     ],
-    bookings: [{ id: BOOKING_ID, booking_number: "BT-2026-0001", customer_id: "customer-1" }],
+    bookings: [
+      {
+        id: BOOKING_ID,
+        booking_number: "BT-2026-0001",
+        customer_invoice_number: "INV-CUSTOM-99",
+        customer_id: "customer-1",
+      },
+    ],
     customers: [
       { id: "customer-1", first_name: "Ada", last_name: "Lovelace", email: "ada@example.test" },
     ],
@@ -128,14 +135,17 @@ describe("POST /api/invoices/[id]/reminder", () => {
     expect(res.status).toBe(200)
     expect(body.email.subject).toContain("Payment Reminder")
     expect(body.email.to).toBe("ada@example.test")
+    // Filename stays on the internal invoice number; the customer-facing number
+    // (salesperson-entered) is what appears in the email + response.
     expect(body.attachment.filename).toBe("invoice-BT-2026-0001-DEP1.pdf")
+    expect(body.invoice.invoiceNumber).toBe("INV-CUSTOM-99")
     expect(body.invoice.daysOverdue).toBe(3)
     expect(composeMocks.composeEmail).toHaveBeenCalledWith(
       expect.anything(),
       "payment_reminder",
       expect.objectContaining({
         tokens: expect.objectContaining({
-          invoiceNumber: "BT-2026-0001-DEP1",
+          invoiceNumber: "INV-CUSTOM-99",
           daysOverdue: "3",
         }),
       }),

@@ -50,7 +50,6 @@ export function sampleInvoicePdfData(): Omit<
       {
         pax: 2,
         description: "Cape Town Journey — Deluxe Suite",
-        status: "OK",
         unitPrice,
         total,
       },

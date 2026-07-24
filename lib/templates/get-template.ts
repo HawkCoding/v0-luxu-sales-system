@@ -34,22 +34,22 @@ export const DEFAULT_TEMPLATES: Record<SystemTemplateKey, { subject: string; bod
   deposit_request: {
     subject: "Deposit Invoice — {{jobNumber}}",
     bodyHtml:
-      "<p>Dear {{customerName}},</p><p>Thank you for confirming your reservation. A deposit of <strong>R {{depositAmount}}</strong> ({{depositPercentage}}%) is required to secure your booking, due by <strong>{{dueDate}}</strong>. Invoice <strong>{{invoiceNumber}}</strong> is attached.</p>{{guestInfo}}{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
+      "<p>Dear {{customerName}},</p><p>Thank you for confirming your reservation. A deposit of <strong>{{depositAmount}}</strong> ({{depositPercentage}}%) is required to secure your booking, due by <strong>{{dueDate}}</strong>. Invoice <strong>{{invoiceNumber}}</strong> is attached.</p>{{guestInfo}}{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
   },
   full_payment_request: {
     subject: "Confirmation Invoice {{invoiceNumber}} — {{jobNumber}}",
     bodyHtml:
-      "<p>Dear {{customerName}},</p><p>As this reservation falls within 60 days of departure, full payment of <strong>R {{amountDue}}</strong> is required to secure your booking, due by <strong>{{dueDate}}</strong>. Invoice <strong>{{invoiceNumber}}</strong> is attached.</p>{{guestInfo}}{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
+      "<p>Dear {{customerName}},</p><p>As this reservation falls within 60 days of departure, full payment of <strong>{{amountDue}}</strong> is required to secure your booking, due by <strong>{{dueDate}}</strong>. Invoice <strong>{{invoiceNumber}}</strong> is attached.</p>{{guestInfo}}{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
   },
   final_invoice: {
     subject: "Final Invoice — {{jobNumber}}",
     bodyHtml:
-      "<p>Dear {{customerName}},</p><p>Please find attached your final invoice <strong>{{invoiceNumber}}</strong> for <strong>R {{amountDue}}</strong>, due by <strong>{{dueDate}}</strong>.</p>{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
+      "<p>Dear {{customerName}},</p><p>Please find attached your final invoice <strong>{{invoiceNumber}}</strong> for <strong>{{amountDue}}</strong>, due by <strong>{{dueDate}}</strong>.</p>{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
   },
   payment_reminder: {
     subject: "Payment Reminder — Invoice {{invoiceNumber}}",
     bodyHtml:
-      "<p>Dear {{customerName}},</p><p>This is a friendly reminder that invoice <strong>{{invoiceNumber}}</strong> for <strong>R {{amountDue}}</strong> is due by <strong>{{dueDate}}</strong>. Please find the invoice attached.</p>{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
+      "<p>Dear {{customerName}},</p><p>This is a friendly reminder that invoice <strong>{{invoiceNumber}}</strong> for <strong>{{amountDue}}</strong> is due by <strong>{{dueDate}}</strong>. Please find the invoice attached.</p>{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
   },
   voucher_email: {
     subject: "Your Travel Voucher — {{jobNumber}}",

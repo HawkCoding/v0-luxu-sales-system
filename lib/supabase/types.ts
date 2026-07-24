@@ -834,6 +834,7 @@ export type Database = {
           consultant: string | null
           created_at: string
           customer_id: string
+          customer_invoice_number: string | null
           departure_date: string | null
           deposit_confirmed_manually: boolean
           deposit_paid: boolean
@@ -884,7 +885,6 @@ export type Database = {
           route_reversed: boolean
           source: Database["public"]["Enums"]["source_kind"]
           stage: Database["public"]["Enums"]["pipeline_stage"]
-          supplier_reference: string | null
           terms_accepted: boolean
           trip_end_date: string | null
           trip_start_date: string | null
@@ -903,6 +903,7 @@ export type Database = {
           consultant?: string | null
           created_at?: string
           customer_id: string
+          customer_invoice_number?: string | null
           departure_date?: string | null
           deposit_confirmed_manually?: boolean
           deposit_paid?: boolean
@@ -953,7 +954,6 @@ export type Database = {
           route_reversed?: boolean
           source?: Database["public"]["Enums"]["source_kind"]
           stage?: Database["public"]["Enums"]["pipeline_stage"]
-          supplier_reference?: string | null
           terms_accepted?: boolean
           trip_end_date?: string | null
           trip_start_date?: string | null
@@ -972,6 +972,7 @@ export type Database = {
           consultant?: string | null
           created_at?: string
           customer_id?: string
+          customer_invoice_number?: string | null
           departure_date?: string | null
           deposit_confirmed_manually?: boolean
           deposit_paid?: boolean
@@ -1022,7 +1023,6 @@ export type Database = {
           route_reversed?: boolean
           source?: Database["public"]["Enums"]["source_kind"]
           stage?: Database["public"]["Enums"]["pipeline_stage"]
-          supplier_reference?: string | null
           terms_accepted?: boolean
           trip_end_date?: string | null
           trip_start_date?: string | null

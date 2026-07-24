@@ -38,7 +38,7 @@ describe("local Supabase seed", () => {
     expect(seedSql).not.toContain("nextval")
     expect(seedSql).not.toContain("::regclass")
     expect(seedSql).not.toContain("job_number_counters")
-    expect(seedSql).toContain("'Blue Train', 'blue-train', 'train_operator'")
+    expect(seedSql).toContain("'The Blue Train'")
     expect(seedSql).toContain("'LTT-2025-0001'")
     expect(seedSql).toContain("insert into public.booking_number_sequences")
     expect(seedSql).toContain("max(parsed.sequence_number)")

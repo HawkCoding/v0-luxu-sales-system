@@ -16,7 +16,7 @@ import { resolveBookingSupplierName } from "@/lib/quotes/resolve-supplier-name"
 import { resolveDirectedRouteName } from "@/lib/routes/route-name"
 import { calculateInvoiceBalance } from "@/lib/invoices/calculate-balance"
 import { buildUnifiedTotals } from "@/lib/invoices/build-unified-totals"
-import { unifiedInvoiceNumber } from "@/lib/invoices/invoice-status"
+import { clientInvoiceNumber } from "@/lib/invoices/invoice-status"
 import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
 import { buildGuestInfoBlock } from "@/lib/templates/guest-info-block"
 import { buildSuiteTokens } from "@/lib/templates/suite-description"
@@ -79,6 +79,7 @@ async function safely<T>(run: () => Promise<T>, fallback: T): Promise<T> {
 interface BookingRow {
   id: string
   booking_number: string
+  customer_invoice_number: string | null
   consultant: string | null
   departure_date: string | null
   trip_end_date: string | null
@@ -148,7 +149,7 @@ export async function resolveSharedEmailTokens(
         supabase
           .from("bookings")
           .select(
-            "id, booking_number, consultant, departure_date, trip_end_date, no_of_adults, no_of_children, route_reversed, customer:customers(title, first_name, last_name, email), route:routes(name, direction_mode, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name))",
+            "id, booking_number, customer_invoice_number, consultant, departure_date, trip_end_date, no_of_adults, no_of_children, route_reversed, customer:customers(title, first_name, last_name, email), route:routes(name, direction_mode, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name))",
           )
           .eq("id", bookingId)
           .maybeSingle(),
@@ -306,7 +307,7 @@ export async function resolveSharedEmailTokens(
     quoteDate: orPlaceholder(latestQuote ? formatDisplayDateLong(latestQuote.created_at?.slice(0, 10) ?? null) : null),
     validityDate: orPlaceholder(latestQuote ? formatDisplayDateLong(latestQuote.validity_until) : null),
     total: orPlaceholder(latestQuote ? formatMoney(latestQuote.total ?? 0) : null),
-    invoiceNumber: orPlaceholder(booking?.booking_number ? unifiedInvoiceNumber(booking.booking_number) : null),
+    invoiceNumber: orPlaceholder(booking?.booking_number ? clientInvoiceNumber(booking) : null),
     amountDue: orPlaceholder(latestInvoice ? formatCurrency(latestInvoice.amount, latestInvoice.currency) : null),
     dueDate: orPlaceholder(latestInvoice ? formatDisplayDateLong(latestInvoice.due_date) : null),
     depositAmount: orPlaceholder(

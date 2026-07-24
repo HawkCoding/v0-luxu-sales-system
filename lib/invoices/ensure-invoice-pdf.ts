@@ -31,6 +31,13 @@ export interface EnsureInvoicePdfInput {
     status: string
   }
   bookingNumber: string
+  /**
+   * The number printed on the PDF as "Invoice No." and reused as the bank
+   * payment reference — the salesperson-entered `customer_invoice_number`,
+   * resolved via `clientInvoiceNumber` (falls back to `invoice.invoice_number`).
+   * Storage path/filename stay on the internal `invoice.invoice_number`.
+   */
+  displayInvoiceNumber: string
   customerName: string
   /**
    * Client-facing status printed in the invoice header (Provisional /
@@ -57,7 +64,7 @@ export interface EnsuredInvoicePdf {
  */
 export async function ensureInvoicePdf(
   supabase: SupabaseClient<Database>,
-  { invoice, bookingNumber, customerName, statusLabel, totals }: EnsureInvoicePdfInput,
+  { invoice, bookingNumber, displayInvoiceNumber, customerName, statusLabel, totals }: EnsureInvoicePdfInput,
 ): Promise<EnsuredInvoicePdf> {
   const [banking, documentText, documentBrand] = await Promise.all([
     getBankingSettings(supabase),
@@ -76,7 +83,7 @@ export async function ensureInvoicePdf(
   let pdfBuffer: Buffer
   try {
     pdfBuffer = await renderInvoicePdf({
-      invoiceNumber: invoice.invoice_number,
+      invoiceNumber: displayInvoiceNumber,
       bookingNumber,
       customerName,
       issueDate: invoice.created_at.slice(0, 10),

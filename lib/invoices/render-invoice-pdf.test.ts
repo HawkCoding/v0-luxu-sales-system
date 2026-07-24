@@ -48,7 +48,7 @@ const departure = {
 }
 
 const items = [
-  { pax: 2, description: "Cape Town Journey — Deluxe Suite", status: "OK" as const, unitPrice: 29450, total: 58900 },
+  { pax: 2, description: "Cape Town Journey — Deluxe Suite", unitPrice: 29450, total: 58900 },
 ]
 
 describe("renderInvoicePdf smoke", () => {

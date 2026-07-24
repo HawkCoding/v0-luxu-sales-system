@@ -146,7 +146,7 @@ const trainBlock: VoucherServiceBlock = {
     arrivalDate: "2026-07-22",
     startTime: "12:00",
     endTime: "18:00",
-    route: "Pretoria to Cape Town",
+    route: "Pretoria → Cape Town",
     suiteType: "Deluxe Suite",
     durationDays: 3,
     inclusions: ["High Tea", "Wi-Fi"],
@@ -201,7 +201,7 @@ describe("buildQuoteItineraryLines", () => {
         displayOrder: 1,
       },
     ])
-    expect(line.text).toBe("Luxus Chauffeur transfer from the hotel to the station | at 10h00")
+    expect(line.text).toBe("Transfer from the hotel to the station | at 10h00")
   })
 
   it("omits the closing line when there is no end date", () => {

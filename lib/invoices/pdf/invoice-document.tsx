@@ -8,12 +8,6 @@ import { BrandBlock } from "@/lib/pdf/brand-block"
 import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
 import type { BankingSettings, BrandBlockPosition, DocumentBrand } from "@/lib/settings-access"
 
-/** Per-line confirmation state. Codes are printed against the legend below the table. */
-export type InvoiceItemStatus = "OK" | "WL" | "RP" | "NO"
-
-export const INVOICE_STATUS_LEGEND =
-  "Status — OK: Confirmed  //  WL: Waitlisted  //  RP: Request Pending  //  NO: Not Booked"
-
 /** The invoice recipient. A full tax invoice must name and address them. */
 export interface InvoiceBillingParty {
   companyName?: string | null
@@ -55,7 +49,6 @@ export interface InvoiceDeparture {
 export interface InvoiceItem {
   pax: number
   description: string
-  status: InvoiceItemStatus
   unitPrice: number
   total: number
 }
@@ -212,6 +205,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     marginBottom: 8,
   },
+  // Narrower centered column for guest identity + journey details, distinct
+  // from the full-width billing grid below it.
+  centeredBlock: {
+    width: 400,
+    alignSelf: "center",
+  },
   guestLabel: {
     fontSize: 10,
     fontFamily: "Helvetica-Bold",
@@ -292,20 +291,11 @@ const styles = StyleSheet.create({
     borderBottomColor: "#eee6dc",
     paddingVertical: 5,
   },
-  colPax: { width: 34, fontSize: 8.5, textAlign: "center" },
   colDesc: { flex: 1, fontSize: 8.5, paddingRight: 8 },
-  colStatus: { width: 46, fontSize: 8.5, textAlign: "center" },
-  colUnit: { width: 78, fontSize: 8.5, textAlign: "right" },
-  colTotal: { width: 84, fontSize: 8.5, textAlign: "right" },
   headText: {
     fontSize: 8.5,
     fontFamily: "Helvetica-Bold",
     color: "#172018",
-  },
-  legend: {
-    fontSize: 7,
-    color: "#8a7f74",
-    marginTop: 6,
   },
 
   // Totals ladder right-aligned; banking details full-width beneath it.
@@ -627,20 +617,20 @@ export function InvoiceDocument({
           </View>
         </View>
 
-        <View style={styles.guestRow}>
-          <Text style={styles.guestLabel}>Guest 1</Text>
-          <Text style={styles.guestValue}>{guest1}</Text>
-          <Text style={styles.guestLabel}>Guest 2</Text>
-          <Text style={styles.guestValue}>{guest2 ?? EMPTY}</Text>
-        </View>
-        {extraGuests.length > 0 ? (
+        <View style={styles.centeredBlock}>
           <View style={styles.guestRow}>
-            <Text style={styles.guestLabel}>Guests</Text>
-            <Text style={styles.guestValue}>{extraGuests.join(", ")}</Text>
+            <Text style={styles.guestLabel}>Guest 1</Text>
+            <Text style={styles.guestValue}>{guest1}</Text>
+            <Text style={styles.guestLabel}>Guest 2</Text>
+            <Text style={styles.guestValue}>{guest2 ?? EMPTY}</Text>
           </View>
-        ) : null}
-
-        <View style={styles.billingGrid}>
+          {extraGuests.length > 0 ? (
+            <View style={styles.guestRow}>
+              <Text style={styles.guestLabel}>Guests</Text>
+              <Text style={styles.guestValue}>{extraGuests.join(", ")}</Text>
+            </View>
+          ) : null}
+          <View style={styles.billingGrid}>
           <View style={styles.billingColumn}>
             <View style={styles.billingRow}>
               <Text style={styles.billingLabel}>Company</Text>
@@ -679,28 +669,24 @@ export function InvoiceDocument({
               <Text style={styles.billingValue}>{orDash(billing?.postalCode)}</Text>
             </View>
           </View>
+          </View>
         </View>
 
-        {departure ? <DepartureBlock departure={departure} /> : null}
+        {departure ? (
+          <View style={styles.centeredBlock}>
+            <DepartureBlock departure={departure} />
+          </View>
+        ) : null}
 
         <View style={styles.table}>
           <View style={styles.tableHead}>
-            <Text style={[styles.colPax, styles.headText]}>Pax</Text>
             <Text style={[styles.colDesc, styles.headText]}>Travel Package Description</Text>
-            <Text style={[styles.colStatus, styles.headText]}>Status</Text>
-            <Text style={[styles.colUnit, styles.headText]}>PP Rate</Text>
-            <Text style={[styles.colTotal, styles.headText]}>TOTAL</Text>
           </View>
           {items.map((item, index) => (
             <View key={index} style={styles.tableRow} wrap={false}>
-              <Text style={styles.colPax}>{item.pax}</Text>
               <Text style={styles.colDesc}>{item.description}</Text>
-              <Text style={styles.colStatus}>{item.status}</Text>
-              <Text style={styles.colUnit}>{formatMoney(item.unitPrice, currency)}</Text>
-              <Text style={styles.colTotal}>{formatMoney(item.total, currency)}</Text>
             </View>
           ))}
-          <Text style={styles.legend}>{INVOICE_STATUS_LEGEND}</Text>
         </View>
 
         <View style={styles.paymentSplit}>

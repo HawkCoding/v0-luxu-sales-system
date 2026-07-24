@@ -386,7 +386,12 @@ export async function buildPackageQuoteLineItems({
         baseUnitPrice: unitPrice,
         markupPct: 0,
         singleSupplementPct: null,
-        serviceType: null,
+        serviceType:
+          activeLeg?.supplierKind === "transfers"
+            ? "transfer"
+            : activeLeg?.supplierKind === "vehicle_rental"
+              ? "rental"
+              : null,
         suiteVariants,
         commission: commissionBreakdown,
         unit: unit ?? null,

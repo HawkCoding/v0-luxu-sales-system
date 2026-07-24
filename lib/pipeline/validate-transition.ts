@@ -4,7 +4,6 @@ export type GateSeverity = "block" | "confirm"
 
 export type GateAutoFix =
   | "create_invoice_25pct"
-  | "create_final_invoice"
   | "create_voucher_pdf"
 
 export interface GateFailure {
@@ -21,6 +20,8 @@ export interface TransitionBooking {
   source?: string | null
   email_import_needs_review?: boolean | null
   email_import_review_resolved_at?: string | null
+  reservation_form_received_at?: string | null
+  customer_invoice_number?: string | null
 }
 
 export interface TransitionCustomer {
@@ -47,6 +48,10 @@ export interface TransitionInvoice {
   status?: string | null
 }
 
+export interface TransitionPayment {
+  amount?: number | null
+}
+
 export interface TransitionCorrespondence {
   kind?: string | null
   subject?: string | null
@@ -55,9 +60,7 @@ export interface TransitionCorrespondence {
 
 export interface ManualConfirmations {
   createDepositInvoice?: boolean
-  createFinalInvoice?: boolean
   createInvoiceCorrespondence?: boolean
-  depositReceived?: boolean
   finalPaymentReceived?: boolean
 }
 
@@ -77,6 +80,7 @@ export interface ValidateTransitionInput {
   documents?: TransitionDocument[]
   invoices?: TransitionInvoice[]
   correspondences?: TransitionCorrespondence[]
+  payments?: TransitionPayment[]
   manualConfirmations?: ManualConfirmations
   lostContext?: LostContext
 }
@@ -245,6 +249,7 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
   const documents = input.documents ?? []
   const invoices = input.invoices ?? []
   const correspondences = input.correspondences ?? []
+  const payments = input.payments ?? []
   const manualConfirmations = input.manualConfirmations ?? {}
   const crossedStages = FORWARD_STAGES.slice(fromIndex + 1, toIndex + 1)
   const hasSentOrAcceptedQuote = quotes.some((quote) => quote.status === "sent" || quote.status === "accepted")
@@ -267,6 +272,27 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
       gateId: "quote_sent_or_accepted",
       message: "At least one sent or accepted quote is required before quote acceptance.",
       fixHint: "Send a quote for this job before moving it to Quote Accepted.",
+      severity: "block",
+    })
+  }
+
+  if (crossedStages.includes("accepted") && !input.booking.reservation_form_received_at) {
+    failures.push({
+      gateId: "reservation_form_received",
+      message: "The signed reservation form must be received before quote acceptance.",
+      fixHint: "Tick 'Reservation form received' on the Reservation tab and send the acknowledgement.",
+      severity: "block",
+    })
+  }
+
+  if (crossedStages.includes("deposit_requested") && !isPresent(input.booking.customer_invoice_number)) {
+    // The salesperson-entered invoice number is what prints on the customer's
+    // invoice PDF and emails (and doubles as the bank payment reference), so it
+    // must exist before the deposit invoice can be sent.
+    failures.push({
+      gateId: "invoice_number_required",
+      message: "An invoice number is required before sending the deposit invoice.",
+      fixHint: "Enter the invoice number in the field at the top of the job.",
       severity: "block",
     })
   }
@@ -307,32 +333,30 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
     }
   }
 
-  if (crossedStages.includes("deposit_paid") && !manualConfirmations.depositReceived) {
+  if (crossedStages.includes("deposit_paid") && payments.length === 0) {
     failures.push({
       gateId: "deposit_received_confirmation",
-      message: "Confirm the deposit has been received.",
-      fixHint: "Tick to confirm — no amount entry needed.",
-      severity: "confirm",
+      message: "A payment must be recorded before the deposit can be marked received.",
+      fixHint: "Record a payment on the Payments tab, then send the payment confirmation email.",
+      severity: "block",
     })
   }
 
   if (crossedStages.includes("final_paid")) {
-    // A full-payment invoice satisfies the final-invoice gate too — it's the
-    // one invoice covering both.
-    const hasFinalInvoice = invoices.some(
-      (invoice) => (invoice.kind === "final" || invoice.kind === "full") && invoice.status !== "void",
-    )
-    if (!hasFinalInvoice && !manualConfirmations.createFinalInvoice) {
+    // One-invoice model: the booking's single invoice (deposit or full) is
+    // amended in place, so there is no separate "final" invoice to require —
+    // just confirm an invoice exists at all.
+    const hasInvoice = invoices.some((invoice) => invoice.status !== "void")
+    if (!hasInvoice) {
       failures.push({
         gateId: "final_invoice",
-        message: "A final invoice is required before marking the booking paid in full.",
-        fixHint: "Generate the final invoice, preview it, and send it to the customer.",
+        message: "An invoice is required before marking the booking paid in full.",
+        fixHint: "Generate the booking's invoice before moving to Paid in Full.",
         severity: "confirm",
-        autoFixable: "create_final_invoice",
       })
     } else if (
-      hasFinalInvoice &&
       !hasSubjectCorrespondence(correspondences, ["final invoice"]) &&
+      !hasSentCorrespondence(correspondences, "payment_received", ["payment received"]) &&
       // A full-payment invoice's confirmation email doesn't say "final invoice" —
       // any sent invoice correspondence covers it since it's the one email sent.
       !(
@@ -342,8 +366,8 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
     ) {
       failures.push({
         gateId: "final_invoice_correspondence",
-        message: "Final invoice correspondence must exist before the booking is paid in full.",
-        fixHint: "Send the final invoice email from the booking before moving to Paid in Full.",
+        message: "The payment-received confirmation must be sent before the booking is paid in full.",
+        fixHint: "Send the payment confirmation email from the booking before moving to Paid in Full.",
         severity: "block",
       })
     }

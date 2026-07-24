@@ -7,7 +7,7 @@ import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
 import { buildUnifiedTotals } from "@/lib/invoices/build-unified-totals"
 import { calculateInvoiceBalance } from "@/lib/invoices/calculate-balance"
 import { ensureInvoicePdf } from "@/lib/invoices/ensure-invoice-pdf"
-import { resolveInvoiceStatusLabel, unifiedInvoiceNumber } from "@/lib/invoices/invoice-status"
+import { clientInvoiceNumber, resolveInvoiceStatusLabel, unifiedInvoiceNumber } from "@/lib/invoices/invoice-status"
 import { logError } from "@/lib/error-log"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
@@ -70,7 +70,7 @@ export async function POST(req: Request) {
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
     .select(
-      "id, booking_number, departure_date, deposit_paid, cancelled_at, assigned_salesperson_id, no_of_adults, no_of_children, customer:customers(title, first_name, last_name, email)",
+      "id, booking_number, customer_invoice_number, departure_date, deposit_paid, cancelled_at, assigned_salesperson_id, no_of_adults, no_of_children, customer:customers(title, first_name, last_name, email)",
     )
     .eq("id", parsed.data.jobId)
     .single()
@@ -82,6 +82,17 @@ export async function POST(req: Request) {
     .select("prefix, first_name, last_name, id_passport")
     .eq("booking_id", parsed.data.jobId)
     .order("sort_order")
+
+  const guestsIncomplete =
+    (travellers ?? []).length === 0 ||
+    (travellers ?? []).some((t) => !t.first_name?.trim() || !t.last_name?.trim() || !t.id_passport?.trim())
+
+  if (guestsIncomplete) {
+    return jsonError(
+      "Guest details (name, surname, ID/passport) are required for every traveller before a deposit invoice can be generated. Fill them in on the Reservation tab.",
+      422,
+    )
+  }
 
   const { data: existingInvoice, error: existingInvoiceError } = await supabase
     .from("invoices")
@@ -110,9 +121,11 @@ export async function POST(req: Request) {
   // of departure) default to 48 hours, but the salesperson can override.
   const dueDate = isFullPayment ? parsed.data.dueDate ?? addDays(now, 2) : addDays(now, 3)
   const amount = isFullPayment ? quote.total : calculateDepositAmount(quote.total, depositPercentage)
-  // One client-facing invoice per booking — the number stays fixed for the life
-  // of the booking and doubles as the payment reference.
+  // Internal invoice number stored on the row — backend tracking only.
   const invoiceNumber = unifiedInvoiceNumber(booking.booking_number)
+  // What the customer sees on the PDF/emails and uses as the bank reference:
+  // the salesperson-entered number, falling back to the internal one.
+  const displayInvoiceNumber = clientInvoiceNumber(booking)
 
   const invoice = existingInvoice ?? await (async () => {
     const { data, error } = await supabase
@@ -180,6 +193,7 @@ export async function POST(req: Request) {
         status: invoice.status,
       },
       bookingNumber: booking.booking_number,
+      displayInvoiceNumber,
       customerName,
       statusLabel,
       totals,
@@ -203,7 +217,7 @@ export async function POST(req: Request) {
           ...shared.tokens,
           customerName: customerName || "Valued Guest",
           jobNumber: booking.booking_number,
-          invoiceNumber: invoice.invoice_number,
+          invoiceNumber: displayInvoiceNumber,
           amountDue: formatMoney(invoice.amount, invoice.currency),
           dueDate: formatDisplayDateLong(invoice.due_date),
         },
@@ -225,7 +239,7 @@ export async function POST(req: Request) {
           ...shared.tokens,
           customerName: customerName || "Valued Guest",
           jobNumber: booking.booking_number,
-          invoiceNumber: invoice.invoice_number,
+          invoiceNumber: displayInvoiceNumber,
           depositAmount: formatMoney(invoice.amount, invoice.currency),
           depositPercentage: String(invoice.deposit_percentage ?? depositPercentage),
           dueDate: formatDisplayDateLong(invoice.due_date),
@@ -255,7 +269,7 @@ export async function POST(req: Request) {
       quoteId: invoice.quote_id,
       kind: invoice.kind,
       status: invoice.status,
-      invoiceNumber: invoice.invoice_number,
+      invoiceNumber: displayInvoiceNumber,
       depositPercentage: invoice.deposit_percentage,
       amount: invoice.amount,
       amountDisplay: formatMoney(invoice.amount, invoice.currency),

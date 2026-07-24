@@ -93,4 +93,48 @@ describe("describeInvoiceLine", () => {
     const snapshot = makeSnapshot({ supplierName: null, legLabel: null })
     expect(describeInvoiceLine("Package Total", snapshot)).toBe("Package Total")
   })
+
+  it("labels a transfer line with the category word plus route, never the supplier", () => {
+    const snapshot = makeSnapshot({
+      supplierName: "Ulysses Tours & Transfers",
+      legLabel: "Ulysses Tours & Transfers",
+      routeName: "Cape Town Station to The President Hotel",
+      serviceType: "transfer",
+    })
+    expect(describeInvoiceLine("Ulysses Tours & Transfers - Transfer", snapshot)).toBe(
+      "Transfer Cape Town Station to The President Hotel",
+    )
+  })
+
+  it("labels a car-rental line with the category word plus route, never the supplier", () => {
+    const snapshot = makeSnapshot({
+      supplierName: "Avis",
+      legLabel: "Avis",
+      routeName: "Cape Town Airport",
+      serviceType: "rental",
+    })
+    expect(describeInvoiceLine("Avis - Vehicle Rental", snapshot)).toBe("Rental Cape Town Airport")
+  })
+
+  it("uses the category word alone for a transfer line with no route", () => {
+    const snapshot = makeSnapshot({
+      supplierName: "Ulysses Tours & Transfers",
+      legLabel: null,
+      routeName: null,
+      serviceType: "transfer",
+    })
+    expect(describeInvoiceLine("Transfer", snapshot)).toBe("Transfer")
+  })
+
+  it("still appends (Child)/(Infant) on a generic transfer line", () => {
+    const snapshot = makeSnapshot({
+      supplierName: "Ulysses Tours & Transfers",
+      routeName: "Cape Town Station to The President Hotel",
+      serviceType: "transfer",
+      passengerKind: "child",
+    })
+    expect(describeInvoiceLine("Ulysses Tours & Transfers - Transfer - Child", snapshot)).toBe(
+      "Transfer Cape Town Station to The President Hotel (Child)",
+    )
+  })
 })

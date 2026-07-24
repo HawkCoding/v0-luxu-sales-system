@@ -2,7 +2,7 @@
 
 import { useJobDetail, useAssignableUsers } from "@/lib/use-data"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -50,7 +50,6 @@ import { CancelBookingDialog } from "@/components/cancel-booking-dialog"
 import { StageTransitionModal } from "@/components/stage-transition-modal"
 import { GenerateDepositInvoiceDialog } from "@/components/generate-deposit-invoice-dialog"
 import { SendPaymentConfirmationButton } from "@/components/send-payment-confirmation-button"
-import { GenerateFinalInvoiceDialog } from "@/components/generate-final-invoice-dialog"
 import { SendPaymentReminderButton } from "@/components/send-payment-reminder-button"
 import { GenerateVoucherDialog } from "@/components/generate-voucher-dialog"
 import { PresenceAvatars } from "@/components/presence-avatars"
@@ -59,7 +58,6 @@ import { useVersionedSave } from "@/hooks/use-versioned-save"
 import { useBookingNotes } from "@/lib/use-data"
 import type { GateFailure, ManualConfirmations } from "@/lib/pipeline/validate-transition"
 import { getApiErrorMessage, parseStageTransitionFailurePayload } from "@/lib/pipeline/stage-transition-response"
-import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
 interface JobPatchResponse {
@@ -180,11 +178,9 @@ export default function JobDetailPage() {
   const [transitionFailures, setTransitionFailures] = useState<GateFailure[]>([])
   const [transitionIsManager, setTransitionIsManager] = useState(false)
   const [transitionSubmitting, setTransitionSubmitting] = useState(false)
-  const [depositReceivedTick, setDepositReceivedTick] = useState(false)
-  const [depositTickFlash, setDepositTickFlash] = useState(false)
-  const depositTickRef = useRef<HTMLDivElement>(null)
   const [depositInvoiceOpen, setDepositInvoiceOpen] = useState(false)
-  const [finalInvoiceOpen, setFinalInvoiceOpen] = useState(false)
+  const [paymentConfirmationOpen, setPaymentConfirmationOpen] = useState(false)
+  const [depositPaymentConfirmationOpen, setDepositPaymentConfirmationOpen] = useState(false)
   const [voucherOpen, setVoucherOpen] = useState(false)
   const [pendingStage, setPendingStage] = useState<PipelineStage | null>(null)
   const [customerSearch, setCustomerSearch] = useState("")
@@ -195,8 +191,8 @@ export default function JobDetailPage() {
   const [ownerSubmitting, setOwnerSubmitting] = useState(false)
   const [lastJobPayload, setLastJobPayload] = useState<Record<string, unknown> | null>(null)
   const [activeTab, setActiveTab] = useState<JobDetailTab>(() => parseJobDetailTab(searchParams.get("tab")))
-  const [supplierRefDraft, setSupplierRefDraft] = useState<string>("")
-  const [supplierRefSaving, setSupplierRefSaving] = useState(false)
+  const [invoiceNumberDraft, setInvoiceNumberDraft] = useState<string>("")
+  const [invoiceNumberSaving, setInvoiceNumberSaving] = useState(false)
   const [reassignOpen, setReassignOpen] = useState(false)
   const [reassignTarget, setReassignTarget] = useState<string>("")
   const [reassignSubmitting, setReassignSubmitting] = useState(false)
@@ -233,22 +229,33 @@ export default function JobDetailPage() {
   }, [hasLoadError, router])
 
   useEffect(() => {
-    setEditing(cancelOpen || changeCustomerOpen || transitionModalOpen || depositInvoiceOpen || finalInvoiceOpen || voucherOpen)
-  }, [cancelOpen, changeCustomerOpen, depositInvoiceOpen, finalInvoiceOpen, transitionModalOpen, voucherOpen, setEditing])
+    setEditing(
+      cancelOpen ||
+        changeCustomerOpen ||
+        transitionModalOpen ||
+        depositInvoiceOpen ||
+        paymentConfirmationOpen ||
+        depositPaymentConfirmationOpen ||
+        voucherOpen,
+    )
+  }, [
+    cancelOpen,
+    changeCustomerOpen,
+    depositInvoiceOpen,
+    paymentConfirmationOpen,
+    depositPaymentConfirmationOpen,
+    transitionModalOpen,
+    voucherOpen,
+    setEditing,
+  ])
 
   useEffect(() => {
     setActiveTab(parseJobDetailTab(searchParams.get("tab")))
   }, [searchParams])
 
   useEffect(() => {
-    if (!depositTickFlash) return
-    const timer = setTimeout(() => setDepositTickFlash(false), 1200)
-    return () => clearTimeout(timer)
-  }, [depositTickFlash])
-
-  useEffect(() => {
-    const next = (data?.job as { supplierReference?: string | null } | undefined)?.supplierReference ?? ""
-    setSupplierRefDraft(next)
+    const next = (data?.job as { customerInvoiceNumber?: string | null } | undefined)?.customerInvoiceNumber ?? ""
+    setInvoiceNumberDraft(next)
   }, [data?.job])
 
   if (isLoading || !data || hasLoadError) {
@@ -272,10 +279,11 @@ export default function JobDetailPage() {
   const currentStage = getCanonicalPipelineStage(job.stage as PipelineStage)
   const currentStageIdx = PIPELINE_STAGES.findIndex(s => s.key === currentStage)
   const forwardTargetStage = currentStageIdx >= 0 ? PIPELINE_STAGES[currentStageIdx + 1]?.key ?? null : null
-  const forwardNeedsDepositTick = forwardTargetStage === "deposit_paid"
+  const forwardTargetIsDepositPaid = forwardTargetStage === "deposit_paid"
+  const hasAnyPayment = payments.length > 0
   const consultantName = CONSULTANTS.find((consultant) => consultant.key === job.consultant)?.name ?? job.consultant ?? undefined
   const needsEmailReview = Boolean(enquiry?.emailImportNeedsReview)
-  const nextBlockedByTick = forwardNeedsDepositTick && !depositReceivedTick && !needsEmailReview
+  const nextBlockedByMissingPayment = forwardTargetIsDepositPaid && !hasAnyPayment && !needsEmailReview
   const assignedSalespersonName = job.assignedSalespersonName ?? "Unassigned"
   const assignedSalespersonId = (job as { assignedSalespersonId?: string | null }).assignedSalespersonId ?? null
   const canReassign = role === "manager" || role === "admin"
@@ -291,46 +299,39 @@ export default function JobDetailPage() {
       (invoice.kind === "deposit" || invoice.kind === "full") &&
       (invoice.status === "sent" || invoice.status === "paid"),
   )
-  const hasSentFinalInvoice = invoices.some(
-    (invoice: { kind: string; status: string }) =>
-      (invoice.kind === "final" || invoice.kind === "full") &&
-      (invoice.status === "sent" || invoice.status === "paid"),
-  )
+  const depositInvoiceStageReached =
+    currentStageIdx >= PIPELINE_STAGES.findIndex((s) => s.key === "accepted")
   const draftDepositInvoice =
     (invoices.find(
       (invoice: { kind: string; status: string }) =>
         (invoice.kind === "deposit" || invoice.kind === "full") && invoice.status === "draft",
     ) as Invoice | undefined) ?? null
-  // A full-payment invoice replaces the separate final invoice entirely.
-  const hasFullInvoice = invoices.some(
-    (invoice: { kind: string; status: string }) => invoice.kind === "full" && invoice.status !== "void",
-  )
 
-  const canEditSupplierRef = can("edit:jobs")
-  const currentSupplierRef = (job as { supplierReference?: string | null } | undefined)?.supplierReference ?? ""
-  const supplierRefDirty = supplierRefDraft !== currentSupplierRef
+  const canEditInvoiceNumber = can("edit:jobs")
+  const currentInvoiceNumber = (job as { customerInvoiceNumber?: string | null } | undefined)?.customerInvoiceNumber ?? ""
+  const invoiceNumberDirty = invoiceNumberDraft !== currentInvoiceNumber
 
-  const saveSupplierReference = async () => {
-    if (!supplierRefDirty || supplierRefSaving) return
-    setSupplierRefSaving(true)
+  const saveInvoiceNumber = async () => {
+    if (!invoiceNumberDirty || invoiceNumberSaving) return
+    setInvoiceNumberSaving(true)
     try {
       const response = await fetch(`/api/jobs/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          supplierReference: supplierRefDraft.trim().length > 0 ? supplierRefDraft.trim() : null,
+          customerInvoiceNumber: invoiceNumberDraft.trim().length > 0 ? invoiceNumberDraft.trim() : null,
           expectedUpdatedAt: data?.job?.updatedAt,
         }),
       })
       if (!response.ok) {
         const payload = await response.json().catch(() => null)
-        toast.error(typeof payload?.error === "string" ? payload.error : "Could not save supplier reference")
+        toast.error(typeof payload?.error === "string" ? payload.error : "Could not save invoice number")
         return
       }
-      toast.success("Supplier reference saved")
+      toast.success("Invoice number saved")
       await mutate()
     } finally {
-      setSupplierRefSaving(false)
+      setInvoiceNumberSaving(false)
     }
   }
 
@@ -421,16 +422,6 @@ export default function JobDetailPage() {
           setDepositInvoiceOpen(true)
           return
         }
-        const canGenerateFinalInvoice =
-          targetStage === "final_paid" &&
-          stageGatePayload.failures.some((failure) => failure.autoFixable === "create_final_invoice")
-        if (canGenerateFinalInvoice) {
-          setPendingStage(targetStage)
-          setTransitionFailures(stageGatePayload.failures)
-          setTransitionIsManager(stageGatePayload.isManager)
-          setFinalInvoiceOpen(true)
-          return
-        }
         const canGenerateVoucher =
           targetStage === "voucher_sent" &&
           stageGatePayload.failures.some((failure) => failure.autoFixable === "create_voucher_pdf")
@@ -468,14 +459,7 @@ export default function JobDetailPage() {
     const newIdx = direction === "forward" ? currentStageIdx + 1 : currentStageIdx - 1
     if (newIdx < 0 || newIdx >= PIPELINE_STAGES.length) return
     const target = PIPELINE_STAGES[newIdx].key
-    // Deposit received is a manual tick beside Next — satisfy the gate
-    // inline so the confirmation modal never has to open for it.
-    const options =
-      direction === "forward" && target === "deposit_paid" && depositReceivedTick
-        ? { manualConfirmations: { depositReceived: true } }
-        : undefined
-    await moveStageTo(target, options)
-    if (direction === "forward" && target === "deposit_paid") setDepositReceivedTick(false)
+    await moveStageTo(target)
   }
 
   const resolveEmailReview = async () => {
@@ -592,9 +576,15 @@ export default function JobDetailPage() {
         needsEmailReview ||
         isSavingJob ||
         transitionSubmitting ||
-        (forwardNeedsDepositTick && !depositReceivedTick)
+        (forwardTargetIsDepositPaid && !hasAnyPayment)
       }
-      onClick={() => moveStage("forward")}
+      onClick={() => {
+        if (forwardTargetIsDepositPaid) {
+          setDepositPaymentConfirmationOpen(true)
+        } else {
+          moveStage("forward")
+        }
+      }}
     >
       Next <ChevronRight className="w-4 h-4 ml-1" />
     </Button>
@@ -692,41 +682,41 @@ export default function JobDetailPage() {
               )}
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <Label htmlFor="booking-supplier-reference" className="font-medium text-foreground">
-                Supplier ref
+              <Label htmlFor="booking-invoice-number" className="font-medium text-foreground">
+                Invoice number
               </Label>
-              {canEditSupplierRef ? (
+              {canEditInvoiceNumber ? (
                 <>
                   <Input
-                    id="booking-supplier-reference"
-                    value={supplierRefDraft}
-                    onChange={(e) => setSupplierRefDraft(e.target.value)}
-                    onBlur={() => void saveSupplierReference()}
+                    id="booking-invoice-number"
+                    value={invoiceNumberDraft}
+                    onChange={(e) => setInvoiceNumberDraft(e.target.value)}
+                    onBlur={() => void saveInvoiceNumber()}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
                         e.preventDefault()
-                        void saveSupplierReference()
+                        void saveInvoiceNumber()
                       }
                     }}
-                    placeholder="Supplier confirmation #"
+                    placeholder="Invoice number"
                     maxLength={120}
-                    disabled={supplierRefSaving}
+                    disabled={invoiceNumberSaving}
                     className="h-8 w-56 bg-background"
                   />
-                  {supplierRefDirty ? (
+                  {invoiceNumberDirty ? (
                     <Button
                       size="sm"
                       variant="outline"
                       className="h-8"
-                      onClick={() => void saveSupplierReference()}
-                      disabled={supplierRefSaving}
+                      onClick={() => void saveInvoiceNumber()}
+                      disabled={invoiceNumberSaving}
                     >
-                      {supplierRefSaving ? "Saving..." : "Save"}
+                      {invoiceNumberSaving ? "Saving..." : "Save"}
                     </Button>
                   ) : null}
                 </>
               ) : (
-                <span>{currentSupplierRef || "—"}</span>
+                <span>{currentInvoiceNumber || "—"}</span>
               )}
             </div>
           </div>
@@ -737,20 +727,14 @@ export default function JobDetailPage() {
               <Button variant="outline" size="sm" disabled={currentStageIdx <= 0 || transitionSubmitting} onClick={() => moveStage("back")}>
                 <ChevronLeftIcon className="w-4 h-4 mr-1" /> Back
               </Button>
-              {nextBlockedByTick ? (
+              {nextBlockedByMissingPayment ? (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <span
-                      className="inline-flex"
-                      onClick={() => {
-                        setDepositTickFlash(true)
-                        depositTickRef.current?.scrollIntoView({ block: "nearest" })
-                      }}
-                    >
+                    <span className="inline-flex" onClick={() => setActiveTab("payments")}>
                       {nextButton}
                     </span>
                   </TooltipTrigger>
-                  <TooltipContent>Tick the box for deposit received to continue</TooltipContent>
+                  <TooltipContent>Record a payment on the Payments tab to continue</TooltipContent>
                 </Tooltip>
               ) : (
                 nextButton
@@ -763,32 +747,6 @@ export default function JobDetailPage() {
             </div>
             {needsEmailReview && (
               <p className="text-[11px] text-muted-foreground">Resolve email review to advance</p>
-            )}
-            {forwardNeedsDepositTick && !needsEmailReview && (
-              <div
-                ref={depositTickRef}
-                className={cn(
-                  "flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 transition-shadow",
-                  depositTickFlash && "ring-2 ring-amber-500 ring-offset-2 ring-offset-background",
-                )}
-              >
-                <Checkbox
-                  id="deposit-received-tick"
-                  checked={depositReceivedTick}
-                  onCheckedChange={(checked) => {
-                    setDepositReceivedTick(checked === true)
-                    if (checked === true) setDepositTickFlash(false)
-                  }}
-                  disabled={transitionSubmitting}
-                  className="border-amber-600/60 bg-background dark:bg-background"
-                />
-                <Label htmlFor="deposit-received-tick" className="cursor-pointer text-sm font-medium whitespace-nowrap">
-                  Deposit received
-                  <span className="ml-2 text-[11px] font-normal text-muted-foreground">
-                    Tick to confirm — no amount entry needed
-                  </span>
-                </Label>
-              </div>
             )}
           </div>
         )}
@@ -896,69 +854,6 @@ export default function JobDetailPage() {
         </Alert>
       )}
 
-      {can("send:correspondence") && draftDepositInvoice && (
-        <Alert className="border-yellow-300 bg-yellow-50 text-yellow-950">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Deposit invoice not sent yet</AlertTitle>
-          <AlertDescription>
-            {draftDepositInvoice.invoiceNumber} was generated but has not been emailed to the customer. Use
-            &quot;Preview &amp; Send Deposit Invoice&quot; to finish sending it.
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {can("send:correspondence") &&
-        invoices.some((invoice: { status: string }) => invoice.status === "sent") && (
-          <div className="flex justify-end gap-2">
-            {invoices
-              .filter((invoice: { status: string }) => invoice.status === "sent")
-              .map((invoice: { id: string; invoiceNumber: string }) => (
-                <SendPaymentReminderButton
-                  key={invoice.id}
-                  invoiceId={invoice.id}
-                  invoiceNumber={invoice.invoiceNumber}
-                  bookingId={id}
-                  onSent={async () => {
-                    await mutate()
-                  }}
-                />
-              ))}
-          </div>
-        )}
-
-      {can("send:correspondence") && (!hasSentDepositInvoice || !hasSentFinalInvoice) && (
-        <div className="flex justify-end gap-2">
-          {!hasSentFinalInvoice && !hasFullInvoice ? (
-            <GenerateFinalInvoiceDialog
-              jobId={id}
-              bookingNumber={job.jobNumber}
-              customerName={`${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()}
-              quotes={quotes}
-              payments={payments}
-              onSent={async () => {
-                await mutate()
-                resetPendingTransition()
-              }}
-            />
-          ) : null}
-          {!hasSentDepositInvoice ? (
-          <GenerateDepositInvoiceDialog
-            jobId={id}
-            bookingNumber={job.jobNumber}
-            customerName={`${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()}
-            quotes={quotes}
-            defaultDepositPercentage={settings?.defaultDepositPercentage ?? 25}
-            departureDate={enquiry?.departureDate ?? null}
-            draftInvoice={draftDepositInvoice}
-            onSent={async () => {
-              await mutate()
-              resetPendingTransition()
-            }}
-          />
-          ) : null}
-        </div>
-      )}
-
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(parseJobDetailTab(value))} className="space-y-4">
         <TabsList className="bg-secondary/50">
@@ -1007,6 +902,7 @@ export default function JobDetailPage() {
             mutateJob={mutate}
             additionalServicesDetails={enquiry?.additionalServicesDetails}
             customer={customer ?? null}
+            stage={currentStage}
           />
         </TabsContent>
         <TabsContent value="references">
@@ -1077,6 +973,56 @@ export default function JobDetailPage() {
           />
         </TabsContent>
       </Tabs>
+
+      {can("send:correspondence") && draftDepositInvoice && (
+        <Alert className="border-yellow-300 bg-yellow-50 text-yellow-950">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Deposit invoice not sent yet</AlertTitle>
+          <AlertDescription>
+            {draftDepositInvoice.invoiceNumber} was generated but has not been emailed to the customer. Use
+            &quot;Preview &amp; Send Deposit Invoice&quot; to finish sending it.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {can("send:correspondence") &&
+        invoices.some((invoice: { status: string }) => invoice.status === "sent") && (
+          <div className="flex justify-end gap-2">
+            {invoices
+              .filter((invoice: { status: string }) => invoice.status === "sent")
+              .map((invoice: { id: string; invoiceNumber: string }) => (
+                <SendPaymentReminderButton
+                  key={invoice.id}
+                  invoiceId={invoice.id}
+                  invoiceNumber={invoice.invoiceNumber}
+                  bookingId={id}
+                  onSent={async () => {
+                    await mutate()
+                  }}
+                />
+              ))}
+          </div>
+        )}
+
+      {can("send:correspondence") && !hasSentDepositInvoice && depositInvoiceStageReached && (
+        <div className="flex justify-end gap-2">
+          {!hasSentDepositInvoice ? (
+          <GenerateDepositInvoiceDialog
+            jobId={id}
+            bookingNumber={job.jobNumber}
+            customerName={`${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()}
+            quotes={quotes}
+            defaultDepositPercentage={settings?.defaultDepositPercentage ?? 25}
+            departureDate={enquiry?.departureDate ?? null}
+            draftInvoice={draftDepositInvoice}
+            onSent={async () => {
+              await mutate()
+              resetPendingTransition()
+            }}
+          />
+          ) : null}
+        </div>
+      )}
       </div>
 
       <CancelBookingDialog
@@ -1107,8 +1053,8 @@ export default function JobDetailPage() {
           if (!pendingStage) return
           await moveStageTo(pendingStage, { overrideReason })
         }}
-        onSendFinalInvoice={() => {
-          setFinalInvoiceOpen(true)
+        onSendPaymentConfirmation={() => {
+          setPaymentConfirmationOpen(true)
         }}
         onSendDepositInvoice={() => {
           setDepositInvoiceOpen(true)
@@ -1133,19 +1079,28 @@ export default function JobDetailPage() {
         }}
       />
 
-      <GenerateFinalInvoiceDialog
-        open={finalInvoiceOpen}
-        onOpenChange={setFinalInvoiceOpen}
+      <SendPaymentConfirmationButton
+        open={paymentConfirmationOpen}
+        onOpenChange={setPaymentConfirmationOpen}
         trigger={false}
         jobId={id}
-        bookingNumber={job.jobNumber}
-        customerName={`${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()}
-        quotes={quotes}
-        payments={payments}
-        onSent={async () => {
-          setFinalInvoiceOpen(false)
+        hasPayments={payments.length > 0}
+        mutate={async () => {
+          setPaymentConfirmationOpen(false)
           await mutate()
           resetPendingTransition()
+        }}
+      />
+
+      <SendPaymentConfirmationButton
+        open={depositPaymentConfirmationOpen}
+        onOpenChange={setDepositPaymentConfirmationOpen}
+        trigger={false}
+        jobId={id}
+        hasPayments={payments.length > 0}
+        mutate={async () => {
+          setDepositPaymentConfirmationOpen(false)
+          await moveStageTo("deposit_paid")
         }}
       />
 

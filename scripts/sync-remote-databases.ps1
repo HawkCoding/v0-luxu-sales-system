@@ -178,17 +178,17 @@ function Compare-Target {
 
   Write-Section "Comparing local to $TargetName"
 
-  Invoke-Checked -Command @("npx", "supabase", "migration", "list", "--local") -OutputPath (Join-Path $targetReportDir "local-migrations.txt")
-  Invoke-Checked -Command @("npx", "supabase", "migration", "list", "--db-url", $DbUrl) -OutputPath (Join-Path $targetReportDir "remote-migrations.txt")
+  Invoke-Checked -Command @("supabase", "migration", "list", "--local") -OutputPath (Join-Path $targetReportDir "local-migrations.txt")
+  Invoke-Checked -Command @("supabase", "migration", "list", "--db-url", $DbUrl) -OutputPath (Join-Path $targetReportDir "remote-migrations.txt")
 
-  Invoke-Checked -Command @("npx", "supabase", "db", "dump", "--local", "--schema", "public", "--file", (Join-Path $targetReportDir "local-schema.sql"))
-  Invoke-Checked -Command @("npx", "supabase", "db", "dump", "--db-url", $DbUrl, "--schema", "public", "--file", (Join-Path $targetReportDir "remote-schema.sql"))
+  Invoke-Checked -Command @("supabase", "db", "dump", "--local", "--schema", "public", "--file", (Join-Path $targetReportDir "local-schema.sql"))
+  Invoke-Checked -Command @("supabase", "db", "dump", "--db-url", $DbUrl, "--schema", "public", "--file", (Join-Path $targetReportDir "remote-schema.sql"))
 
   if (-not $SkipDiff) {
-    Invoke-Checked -Command @("npx", "supabase", "db", "diff", "--from", $DbUrl, "--to", "local", "--schema", "public", "--output", (Join-Path $targetReportDir "remote-to-local-schema-diff.sql"))
+    Invoke-Checked -Command @("supabase", "db", "diff", "--from", $DbUrl, "--to", "local", "--schema", "public") -OutputPath (Join-Path $targetReportDir "remote-to-local-schema-diff.sql")
   }
 
-  Invoke-Checked -Command @("npx", "supabase", "db", "push", "--db-url", $DbUrl, "--dry-run") -OutputPath (Join-Path $targetReportDir "push-dry-run.txt")
+  Invoke-Checked -Command @("supabase", "db", "push", "--db-url", $DbUrl, "--dry-run") -OutputPath (Join-Path $targetReportDir "push-dry-run.txt")
 
   Write-Host "Report: $targetReportDir"
 }
@@ -208,7 +208,7 @@ function Push-Target {
 
   Write-Section "Pushing local migrations to $TargetName"
 
-  $command = @("npx", "supabase", "db", "push", "--db-url", $DbUrl, "--yes")
+  $command = @("supabase", "db", "push", "--db-url", $DbUrl, "--yes")
   if ($IncludeAll) {
     $command += "--include-all"
   }

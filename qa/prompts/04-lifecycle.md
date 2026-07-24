@@ -81,8 +81,8 @@ the gap, optionally call `forceAdvanceStage(bookingId, toStage, reason)` from
    the UI must block this per CLAUDE.md.
 7. **booking_made** — flag the README-vs-enum discrepancy if the system has
    no explicit `booking_made` stage.
-8. **→ final_paid** — generate final invoice for the balance, send it, record
-   the balance payment, verify `invoice_balance = 0`.
+8. **→ final_paid** — record the balance payment, send the payment-received
+   confirmation (amended invoice), verify `invoice_balance = 0`.
 9. **final_paid → voucher_sent** — generate voucher PDF, verify storage upload
    and `documents` row, send voucher. Probe: try generating the voucher
    before `invoice_balance = 0` and confirm the guard blocks it.

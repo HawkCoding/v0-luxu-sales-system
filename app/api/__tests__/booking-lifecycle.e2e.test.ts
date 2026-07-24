@@ -100,6 +100,8 @@ function seedStore(): SupabaseMock {
         stage: "enquiry",
         email_import_needs_review: false,
         email_import_review_resolved_at: null,
+        reservation_form_received_at: "2026-05-05T00:00:00.000Z",
+        customer_invoice_number: "BT-2026-0001-INV",
         departure_date: DEPARTURE_DATE,
         deposit_paid: false,
         invoice_balance: null,
@@ -114,6 +116,9 @@ function seedStore(): SupabaseMock {
     correspondences: [],
     audit_logs: [],
     app_settings: [],
+    travellers: [
+      { id: "traveller-1", booking_id: BOOKING_ID, prefix: "Mrs", first_name: "Ada", last_name: "Lovelace", id_passport: "A1234567", sort_order: 0 },
+    ],
   })
 }
 
@@ -150,6 +155,10 @@ async function movePipeline(
   const correspondences = mock.store
     .rows("correspondences")
     .map((c) => ({ id: c.id as string, kind: c.kind as string, subject: c.subject as string, status: c.status as string }))
+  const payments = mock.store
+    .rows("payments")
+    .filter((p) => p.booking_id === booking.id)
+    .map((p) => ({ amount: p.amount as number }))
 
   const failures = validateTransition({
     booking: {
@@ -158,12 +167,15 @@ async function movePipeline(
       source: booking.source as string,
       email_import_needs_review: booking.email_import_needs_review as boolean,
       email_import_review_resolved_at: booking.email_import_review_resolved_at as string | null,
+      reservation_form_received_at: booking.reservation_form_received_at as string | null,
+      customer_invoice_number: booking.customer_invoice_number as string | null,
     },
     customer,
     targetStage,
     quotes,
     documents,
     correspondences,
+    payments,
     manualConfirmations,
   })
   expect(failures).toEqual([])
@@ -248,7 +260,7 @@ describe("booking lifecycle (route-level E2E)", () => {
     expect(store.rows("invoices")[0]).toMatchObject({ status: "paid" })
 
     // Pipeline: accepted -> deposit_paid
-    await movePipeline(mock, "deposit_paid", { createInvoiceCorrespondence: true, depositReceived: true })
+    await movePipeline(mock, "deposit_paid", { createInvoiceCorrespondence: true })
     expect(store.rows("bookings")[0]).toMatchObject({ stage: "deposit_paid" })
 
     // 6. Record the final payment -> balance reaches zero
@@ -265,8 +277,16 @@ describe("booking lifecycle (route-level E2E)", () => {
     const balance = await calculateInvoiceBalance(mock.supabase as never, BOOKING_ID)
     expect(balance).toMatchObject({ quoteTotal: 1000, totalPaid: 1000, balance: 0 })
 
+    // Payment-received confirmation clears the final_invoice_correspondence gate.
+    await mock.supabase.from("correspondences").insert({
+      booking_id: BOOKING_ID,
+      kind: "payment_received",
+      subject: "Payment received — BT-2026-0001",
+      status: "sent",
+    })
+
     // Pipeline: deposit_paid -> final_paid
-    await movePipeline(mock, "final_paid", { createFinalInvoice: true, finalPaymentReceived: true })
+    await movePipeline(mock, "final_paid", { finalPaymentReceived: true })
     expect(store.rows("bookings")[0]).toMatchObject({ stage: "final_paid", invoice_balance: 0 })
 
     // 7. Voucher readiness gate passes once the balance is zero
@@ -318,7 +338,12 @@ describe("booking lifecycle (route-level E2E)", () => {
 
   it("blocks quote acceptance when no quote has been sent", () => {
     const failures = validateTransition({
-      booking: { id: BOOKING_ID, stage: "quote_sent", source: "web_form" },
+      booking: {
+        id: BOOKING_ID,
+        stage: "quote_sent",
+        source: "web_form",
+        reservation_form_received_at: "2026-05-05T00:00:00.000Z",
+      },
       customer,
       targetStage: "accepted",
       quotes: [],

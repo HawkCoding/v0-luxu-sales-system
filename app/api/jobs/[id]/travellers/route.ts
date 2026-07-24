@@ -16,7 +16,7 @@ const travellerInputSchema = z.object({
   prefix: z.string().trim().max(20).nullable().optional(),
   firstName: z.string().trim().min(1).max(100),
   lastName: z.string().trim().min(1).max(100),
-  idPassport: z.string().trim().max(50).nullable().optional(),
+  idPassport: z.string().trim().min(1, "ID/passport number is required").max(50),
   dateOfBirth: z.string().trim().max(50).nullable().optional(),
   residence: z.string().trim().max(100).nullable().optional(),
   isChild: z.boolean().default(false),

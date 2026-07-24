@@ -15,9 +15,9 @@ Login through the real form with Playwright (`@playwright/test` is a dev dep —
 - Seed user: `dirk@luxustravel.co.za` / `password123` (manager clearance).
 - After login, `page.request.*` carries the session cookies — drive any `/api/*` route with it.
 
-## Useful seed data (supabase/seed.sql)
+## Useful seed data (supabase/seed.sql — production-sourced catalog as of 2026-07-23)
 - Booking in `enquiry` stage: `00000000-0000-0000-0000-000000009002` (2 adults, 0 children).
-- Package `grand-south-africa-rail-tour` (`...3008`): train leg `...3110` (Rovos, route `...4001` Pretoria↔Cape Town, suite Deluxe `...5002`), transfer leg `...3114` (Cape Executive Transfers `...2015`, vehicles Sedan `...5281` R950 / SUV `...5282` R1350 / Viano `...5283` R1850), rental leg `...3115`.
+- Package `blue-train-five-night-package` (`7af631c8-99ff-4eff-8964-96971736278f`): train leg `1631c0a8-...` (The Blue Train, route `a409fa56-...` Pretoria↔Cape Town), transfer legs `5bd4c566-...`/`c68f1ea0-...` (Ulysses Tours & Transfers), hotel leg `18da3cc2-...` (The President Hotel), tour leg `569ef307-...` (City Sightseeing Bus Tours), flight leg `54e9d8bd-...` (FlySafair). Per-vehicle transfer pricing isn't in the prod pull (`supplier_pricing_options` was empty) — re-derive current pricing config from the app before relying on specific transfer prices.
 
 ## Quote flow via API (mirrors apply-package-dialog)
 1. `POST /api/jobs/{id}/start-quote` `{}` → `quote.id`.

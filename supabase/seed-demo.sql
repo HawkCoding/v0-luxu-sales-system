@@ -37,7 +37,7 @@ insert into public.customers (
   '+27820000000', 'South Africa', 'Gauteng',
   'Synthetic demo customer for sales demonstrations. Safe to delete.',
   true,
-  'Royal Double Suite. Champagne on arrival.',
+  'Luxury Suite. Champagne on arrival.',
   'Email preferred for written confirmations.',
   false,
   now(), now()
@@ -45,8 +45,8 @@ insert into public.customers (
 
 -- ------------------------------------------------------------
 -- Demo booking at "accepted" stage
--- Reuses Rovos Rail (supplier) + Cape Town Classic (package)
--- from the base seed.sql so package legs/routes resolve.
+-- Reuses Blue Train (supplier) + Blue Train Five Night Package
+-- from the base seed.sql (production-sourced) so package legs/routes resolve.
 -- ------------------------------------------------------------
 insert into public.bookings (
   id, booking_number, customer_id, package_id, route_id,
@@ -61,14 +61,14 @@ insert into public.bookings (
   '00000000-0000-0000-0000-0000000099d0',
   'DEMO-2026-0001',
   '00000000-0000-0000-0000-0000000088d0',
-  '00000000-0000-0000-0000-000000003001', -- cape-town-classic
-  '00000000-0000-0000-0000-000000004001', -- existing route from seed
+  '7af631c8-99ff-4eff-8964-96971736278f', -- blue-train-five-night-package
+  'a409fa56-f2d0-4981-a211-798ab54f1fa6', -- Blue Train Pretoria <-> Cape Town
   'reservation', 'web_form', 'accepted', 'CDJ',
   '00000000-0000-0000-0000-0000000000a1', -- carmen (admin)
   '00000000-0000-0000-0000-0000000000a1',
   current_date + interval '90 days',
   3, 2, 0, 1,
-  'pre', '00000000-0000-0000-0000-000000002002', -- irene-country-lodge
+  'pre', '100f03b0-fefd-4d50-85e7-64a715914c47', -- apogee-boutique-hotel-and-spa
   false, null, false, null,
   true, false, 142600.00,
   now() - interval '5 days',
@@ -103,6 +103,6 @@ insert into public.quote_line_items (
 ) values (
   '00000000-0000-0000-0000-00000000ed01',
   '00000000-0000-0000-0000-00000000dd01',
-  'Royal Double Suite (2 pax) - Cape Town Classic',
+  'Luxury Suite (2 pax) - Blue Train Five Night Package',
   1, 124000.00, 124000.00, 1, now() - interval '5 days'
 );

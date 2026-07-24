@@ -28,7 +28,8 @@ import { applyTransition } from "@/lib/pipeline/apply-transition"
 import { validateTransition } from "@/lib/pipeline/validate-transition"
 import { mapBookingTransportRequest } from "@/lib/suppliers"
 import { getDefaultDepositPercentage } from "@/lib/pipeline/constants"
-import { updateSupplierReference } from "@/lib/bookings/supplier-reference"
+import { updateInvoiceNumber } from "@/lib/bookings/invoice-number"
+import { clientInvoiceNumber } from "@/lib/invoices/invoice-status"
 
 const pipelineStageSchema = z.enum([
   "enquiry",
@@ -55,9 +56,7 @@ const patchJobSchema = z.object({
   manualConfirmations: z
     .object({
       createDepositInvoice: z.boolean().optional(),
-      createFinalInvoice: z.boolean().optional(),
       createInvoiceCorrespondence: z.boolean().optional(),
-      depositReceived: z.boolean().optional(),
       finalPaymentReceived: z.boolean().optional(),
     })
     .optional(),
@@ -74,7 +73,7 @@ const patchJobSchema = z.object({
   reservationFormReceived: z.boolean().optional(),
   assignedSalespersonId: z.string().uuid().nullable().optional(),
   customerId: z.string().optional(),
-  supplierReference: z.string().trim().max(120).nullable().optional(),
+  customerInvoiceNumber: z.string().trim().max(120).nullable().optional(),
   expectedUpdatedAt: z.string().datetime({ offset: true }).optional(),
   parsedFieldEdits: z
     .object({
@@ -198,7 +197,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     outcomeSetAt: booking.outcome_set_at ?? null,
     outcomeSetAtDisplay: formatDisplayDateTime(booking.outcome_set_at),
     outcomeSetBy: booking.outcome_set_by ?? null,
-    supplierReference: (booking as Record<string, unknown>).supplier_reference as string | null ?? null,
+    customerInvoiceNumber: (booking as Record<string, unknown>).customer_invoice_number as string | null ?? null,
     suggestedRefund: null as number | null,
   }
 
@@ -347,7 +346,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     quoteId: invoice.quote_id,
     kind: invoice.kind,
     status: invoice.status,
-    invoiceNumber: invoice.invoice_number,
+    // Customer-facing number (salesperson-entered, falling back to the internal
+    // one) — the auto -INV number is never surfaced to the front end.
+    invoiceNumber: clientInvoiceNumber(booking),
     depositPercentage: invoice.deposit_percentage,
     amount: invoice.amount,
     amountDisplay: new Intl.NumberFormat("en-ZA", {
@@ -485,7 +486,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const { data: booking } = await supabase
     .from("bookings")
     .select(
-      "id, stage, booking_number, customer_id, consultant, assigned_salesperson_id, source, raw_text, email_import_needs_review, email_import_review_resolved_at, updated_at, departure_date, duration_nights, deposit_paid, invoice_balance, no_of_adults, no_of_children, no_of_suites",
+      "id, stage, booking_number, customer_id, consultant, assigned_salesperson_id, source, raw_text, email_import_needs_review, email_import_review_resolved_at, reservation_form_received_at, updated_at, departure_date, duration_nights, deposit_paid, invoice_balance, no_of_adults, no_of_children, no_of_suites, customer_invoice_number",
     )
     .eq("id", id)
     .single()
@@ -597,12 +598,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       id: booking.id,
       stage: fromStage,
       source: booking.source,
+      customer_invoice_number: booking.customer_invoice_number,
       email_import_needs_review:
         body.resolveEmailImportReview === true ? false : booking.email_import_needs_review,
       email_import_review_resolved_at:
         body.resolveEmailImportReview === true
           ? new Date().toISOString()
           : booking.email_import_review_resolved_at,
+      reservation_form_received_at:
+        body.reservationFormReceived !== undefined
+          ? (updates.reservation_form_received_at as string | null)
+          : booking.reservation_form_received_at,
     }
     const failures = validateTransition({
       booking: validationBooking,
@@ -612,6 +618,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       documents: documents ?? [],
       invoices: invoices ?? [],
       correspondences: correspondences ?? [],
+      payments: payments ?? [],
       manualConfirmations: body.manualConfirmations,
       lostContext,
     })
@@ -814,7 +821,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     })
   }
 
-  if (body.supplierReference !== undefined) {
+  if (body.customerInvoiceNumber !== undefined) {
     const { data: actorProfile } = await supabase
       .from("profiles")
       .select("name, surname, email")
@@ -827,9 +834,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       user.email ||
       "System"
 
-    const result = await updateSupplierReference(supabase, {
+    const result = await updateInvoiceNumber(supabase, {
       bookingId: id,
-      value: body.supplierReference,
+      value: body.customerInvoiceNumber,
       actor: actorName,
       actorUserId: user.id,
     })

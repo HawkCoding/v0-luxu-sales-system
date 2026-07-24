@@ -70,13 +70,16 @@ function postJson(body: unknown) {
   })
 }
 
-function seedSupabase(quotes: MockRow[]) {
+function seedSupabase(quotes: MockRow[], travellers: MockRow[] = [
+  { id: "traveller-1", booking_id: BOOKING_ID, prefix: "Mrs", first_name: "Ada", last_name: "Lovelace", id_passport: "A1234567", sort_order: 0 },
+]) {
   return createSupabaseMock({
     bookings: [{ id: BOOKING_ID, booking_number: "BT-2026-0001", customer_id: "customer-1" }],
     customers: [{ id: "customer-1", first_name: "Ada", last_name: "Lovelace", email: "ada@example.test" }],
     quotes,
     invoices: [],
     documents: [],
+    travellers,
   })
 }
 
@@ -128,6 +131,32 @@ describe("POST /api/invoices/deposit", () => {
     const { supabase, store } = seedSupabase([
       { id: "quote-sent", booking_id: BOOKING_ID, total: 1000, status: "sent", created_at: "2026-05-02T00:00:00.000Z" },
     ])
+    mockAuthOk(supabase)
+
+    const res = await POST(postJson({ jobId: BOOKING_ID, depositPercentage: 25 }))
+
+    expect(res.status).toBe(422)
+    expect(store.rows("invoices")).toHaveLength(0)
+  })
+
+  it("returns 422 when no travellers have been captured", async () => {
+    const { supabase, store } = seedSupabase(
+      [{ id: "quote-accepted", booking_id: BOOKING_ID, total: 1000, status: "accepted", created_at: "2026-05-01T00:00:00.000Z" }],
+      [],
+    )
+    mockAuthOk(supabase)
+
+    const res = await POST(postJson({ jobId: BOOKING_ID, depositPercentage: 25 }))
+
+    expect(res.status).toBe(422)
+    expect(store.rows("invoices")).toHaveLength(0)
+  })
+
+  it("returns 422 when a traveller is missing an ID/passport number", async () => {
+    const { supabase, store } = seedSupabase(
+      [{ id: "quote-accepted", booking_id: BOOKING_ID, total: 1000, status: "accepted", created_at: "2026-05-01T00:00:00.000Z" }],
+      [{ id: "traveller-1", booking_id: BOOKING_ID, first_name: "Ada", last_name: "Lovelace", id_passport: "" }],
+    )
     mockAuthOk(supabase)
 
     const res = await POST(postJson({ jobId: BOOKING_ID, depositPercentage: 25 }))

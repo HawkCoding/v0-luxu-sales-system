@@ -8,6 +8,7 @@ const baseInput: ValidateTransitionInput = {
     source: "web_form",
     email_import_needs_review: false,
     email_import_review_resolved_at: null,
+    customer_invoice_number: "INV-2026-0001",
   },
   customer: {
     first_name: "Ada",
@@ -53,6 +54,7 @@ describe("validateTransition", () => {
   it("aggregates intermediate failures when stages are skipped", () => {
     const failures = validateTransition({
       ...baseInput,
+      booking: { ...baseInput.booking, reservation_form_received_at: "2026-01-01T00:00:00Z" },
       targetStage: "deposit_requested",
     })
 
@@ -90,6 +92,7 @@ describe("validateTransition", () => {
   it("does not duplicate quote failures when quote sent is skipped", () => {
     const failures = validateTransition({
       ...baseInput,
+      booking: { ...baseInput.booking, reservation_form_received_at: "2026-01-01T00:00:00Z" },
       targetStage: "accepted",
     })
 
@@ -114,11 +117,99 @@ describe("validateTransition", () => {
     expect(
       validateTransition({
         ...baseInput,
-        booking: { ...baseInput.booking, stage: "quote_sent" },
+        booking: {
+          ...baseInput.booking,
+          stage: "quote_sent",
+          reservation_form_received_at: "2026-01-01T00:00:00Z",
+        },
         targetStage: "accepted",
         quotes: [{ status: "sent", total: 1000 }],
       }),
     ).toEqual([])
+  })
+
+  it("requires the reservation form to be received before quote acceptance", () => {
+    const withoutForm = validateTransition({
+      ...baseInput,
+      booking: { ...baseInput.booking, stage: "quote_sent" },
+      targetStage: "accepted",
+      quotes: [{ status: "sent", total: 1000 }],
+    })
+
+    expect(withoutForm).toEqual([
+      expect.objectContaining({
+        gateId: "reservation_form_received",
+        severity: "block",
+      }),
+    ])
+
+    const withForm = validateTransition({
+      ...baseInput,
+      booking: {
+        ...baseInput.booking,
+        stage: "quote_sent",
+        reservation_form_received_at: "2026-01-01T00:00:00Z",
+      },
+      targetStage: "accepted",
+      quotes: [{ status: "sent", total: 1000 }],
+    })
+
+    expect(withForm).toEqual([])
+  })
+
+  it("blocks the deposit invoice stage when no invoice number was entered", () => {
+    const failures = validateTransition({
+      ...baseInput,
+      booking: {
+        ...baseInput.booking,
+        stage: "accepted",
+        customer_invoice_number: null,
+      },
+      targetStage: "deposit_requested",
+      quotes: [{ status: "accepted", total: 1000 }],
+      invoices: [{ kind: "deposit", status: "sent" }],
+      correspondences: [],
+    })
+
+    expect(failures).toContainEqual(
+      expect.objectContaining({ gateId: "invoice_number_required", severity: "block" }),
+    )
+  })
+
+  it("treats a blank invoice number as missing", () => {
+    const failures = validateTransition({
+      ...baseInput,
+      booking: {
+        ...baseInput.booking,
+        stage: "accepted",
+        customer_invoice_number: "   ",
+      },
+      targetStage: "deposit_requested",
+      quotes: [{ status: "accepted", total: 1000 }],
+      invoices: [{ kind: "deposit", status: "sent" }],
+      correspondences: [],
+    })
+
+    expect(failures).toContainEqual(
+      expect.objectContaining({ gateId: "invoice_number_required" }),
+    )
+  })
+
+  it("passes the invoice number gate once a value is entered", () => {
+    const failures = validateTransition({
+      ...baseInput,
+      booking: {
+        ...baseInput.booking,
+        stage: "accepted",
+        customer_invoice_number: "INV-777",
+      },
+      targetStage: "deposit_requested",
+      quotes: [{ status: "accepted", total: 1000 }],
+      invoices: [{ kind: "deposit", status: "sent" }],
+      correspondences: [],
+    })
+
+    expect(failures.map((f) => f.gateId)).not.toContain("invoice_number_required")
   })
 
   it("marks missing invoice document as an auto-fixable confirmation", () => {
@@ -212,23 +303,23 @@ describe("validateTransition", () => {
     expect(failures).toEqual([])
   })
 
-  it("requires manual deposit confirmation", () => {
-    const withoutConfirmation = validateTransition({
+  it("requires a recorded payment before deposit paid", () => {
+    const withoutPayment = validateTransition({
       ...baseInput,
       booking: { ...baseInput.booking, stage: "deposit_requested" },
       targetStage: "deposit_paid",
     })
-    const withConfirmation = validateTransition({
+    const withPayment = validateTransition({
       ...baseInput,
       booking: { ...baseInput.booking, stage: "deposit_requested" },
       targetStage: "deposit_paid",
-      manualConfirmations: { depositReceived: true },
+      payments: [{ amount: 250 }],
     })
 
-    expect(withoutConfirmation).toContainEqual(
-      expect.objectContaining({ gateId: "deposit_received_confirmation" }),
+    expect(withoutPayment).toContainEqual(
+      expect.objectContaining({ gateId: "deposit_received_confirmation", severity: "block" }),
     )
-    expect(withConfirmation).toEqual([])
+    expect(withPayment).toEqual([])
   })
 
   it("prompts for a final invoice before paid in full", () => {
@@ -243,7 +334,6 @@ describe("validateTransition", () => {
       expect.objectContaining({
         gateId: "final_invoice",
         severity: "confirm",
-        autoFixable: "create_final_invoice",
       }),
       expect.objectContaining({ gateId: "final_payment_confirmation" }),
     ])
@@ -273,6 +363,20 @@ describe("validateTransition", () => {
       quotes: [{ status: "accepted", total: 1000 }],
       invoices: [{ kind: "final", status: "sent" }],
       correspondences: [{ kind: "invoice", subject: "Final invoice BT-2026-0001-FIN1", status: "sent" }],
+      manualConfirmations: { finalPaymentReceived: true },
+    })
+
+    expect(failures).toEqual([])
+  })
+
+  it("allows paid in full after a sent payment-received confirmation", () => {
+    const failures = validateTransition({
+      ...baseInput,
+      booking: { ...baseInput.booking, stage: "deposit_paid" },
+      targetStage: "final_paid",
+      quotes: [{ status: "accepted", total: 1000 }],
+      invoices: [{ kind: "deposit", status: "sent" }],
+      correspondences: [{ kind: "payment_received", subject: "Payment received — BT-2026-0001", status: "sent" }],
       manualConfirmations: { finalPaymentReceived: true },
     })
 

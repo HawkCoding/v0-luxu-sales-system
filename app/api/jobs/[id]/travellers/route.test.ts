@@ -161,7 +161,18 @@ describe("PUT /api/jobs/[id]/travellers", () => {
     authMocks.requireRole.mockResolvedValue({ ok: true, value: buildAuthValue() })
     const req = new Request("http://localhost", {
       method: "PUT",
-      body: JSON.stringify({ travellers: [{ firstName: "", lastName: "Smith", isChild: false }] }),
+      body: JSON.stringify({ travellers: [{ firstName: "", lastName: "Smith", idPassport: "A1234567", isChild: false }] }),
+      headers: { "Content-Type": "application/json" },
+    })
+    const res = await PUT(req, { params })
+    expect(res.status).toBe(400)
+  })
+
+  it("returns 400 when a guest is missing an ID/passport number", async () => {
+    authMocks.requireRole.mockResolvedValue({ ok: true, value: buildAuthValue() })
+    const req = new Request("http://localhost", {
+      method: "PUT",
+      body: JSON.stringify({ travellers: [{ firstName: "John", lastName: "Smith", idPassport: "", isChild: false }] }),
       headers: { "Content-Type": "application/json" },
     })
     const res = await PUT(req, { params })

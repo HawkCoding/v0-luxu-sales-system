@@ -24,7 +24,7 @@ import { AlertCircle, Plus, RotateCcw, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { ReservationFormCard } from "@/components/reservation-form-card"
 import { useJobReservationDetails, useJobTravellers, type JobTraveller } from "@/lib/use-data"
-import type { Customer } from "@/lib/types"
+import type { Customer, PipelineStage } from "@/lib/types"
 
 interface JobReservationTabProps {
   bookingId: string
@@ -32,6 +32,7 @@ interface JobReservationTabProps {
   mutateJob: () => void
   additionalServicesDetails?: string
   customer: Customer | null
+  stage: PipelineStage
 }
 
 interface TravellerDraft {
@@ -130,6 +131,7 @@ export function JobReservationTab({
   mutateJob,
   additionalServicesDetails,
   customer,
+  stage,
 }: JobReservationTabProps) {
   const {
     data: travellersData,
@@ -274,9 +276,9 @@ export function JobReservationTab({
   }
 
   const saveTravellers = async () => {
-    const invalid = travellers.some((t) => !t.firstName.trim() || !t.lastName.trim())
+    const invalid = travellers.some((t) => !t.firstName.trim() || !t.lastName.trim() || !t.idPassport.trim())
     if (invalid) {
-      toast.error("Each guest needs a first name and surname")
+      toast.error("Each guest needs a first name, surname, and ID/passport number")
       return
     }
     setSavingTravellers(true)
@@ -362,6 +364,7 @@ export function JobReservationTab({
         reservationFormReceivedAt={reservationFormReceivedAt}
         mutate={mutateJob}
         onMarkedReceived={() => setShowReceivedPrompt(true)}
+        stage={stage}
       />
 
       <AlertDialog open={showReceivedPrompt} onOpenChange={setShowReceivedPrompt}>
@@ -439,16 +442,18 @@ export function JobReservationTab({
                       onChange={(e) => updateTraveller(traveller.key, { prefix: e.target.value })}
                     />
                     <Input
-                      placeholder="First name"
+                      placeholder="First name *"
                       value={traveller.firstName}
                       onChange={(e) => updateTraveller(traveller.key, { firstName: e.target.value })}
                       className="sm:col-span-2"
+                      required
                     />
                     <Input
-                      placeholder="Surname"
+                      placeholder="Surname *"
                       value={traveller.lastName}
                       onChange={(e) => updateTraveller(traveller.key, { lastName: e.target.value })}
                       className="sm:col-span-2"
+                      required
                     />
                     <div className="flex items-center gap-1.5">
                       <Checkbox
@@ -481,10 +486,11 @@ export function JobReservationTab({
                       className="sm:col-span-2"
                     />
                     <Input
-                      placeholder="ID / Passport number"
+                      placeholder="ID / Passport number *"
                       value={traveller.idPassport}
                       onChange={(e) => updateTraveller(traveller.key, { idPassport: e.target.value })}
                       className="sm:col-span-2"
+                      required
                     />
                     <Button
                       type="button"

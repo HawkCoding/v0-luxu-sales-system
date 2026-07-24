@@ -240,7 +240,12 @@ describe("booking lifecycle workflow regression", () => {
 
     expect(
       validateTransition({
-        booking: { id: BOOKING_ID, stage: "quote_sent", source: "web_form" },
+        booking: {
+          id: BOOKING_ID,
+          stage: "quote_sent",
+          source: "web_form",
+          reservation_form_received_at: "2026-05-14T00:00:00.000Z",
+        },
         customer,
         targetStage: "accepted",
         quotes: [{ status: "sent", total: 1000 }],
@@ -249,7 +254,7 @@ describe("booking lifecycle workflow regression", () => {
 
     expect(
       validateTransition({
-        booking: { id: BOOKING_ID, stage: "accepted", source: "web_form" },
+        booking: { id: BOOKING_ID, stage: "accepted", source: "web_form", customer_invoice_number: "INV-2026-0001" },
         customer,
         targetStage: "deposit_requested",
         quotes: [{ status: "accepted", total: 1000 }],
@@ -263,7 +268,7 @@ describe("booking lifecycle workflow regression", () => {
         booking: { id: BOOKING_ID, stage: "deposit_requested", source: "web_form" },
         customer,
         targetStage: "deposit_paid",
-        manualConfirmations: { depositReceived: true },
+        payments: [{ amount: 250 }],
       }),
     ).toEqual([])
 
@@ -400,7 +405,12 @@ describe("booking lifecycle workflow regression", () => {
   it("fails loudly for important blocked lifecycle moves", () => {
     expect(
       validateTransition({
-        booking: { id: BOOKING_ID, stage: "quote_sent", source: "web_form" },
+        booking: {
+          id: BOOKING_ID,
+          stage: "quote_sent",
+          source: "web_form",
+          reservation_form_received_at: "2026-05-14T00:00:00.000Z",
+        },
         customer,
         targetStage: "accepted",
         quotes: [],
@@ -413,7 +423,7 @@ describe("booking lifecycle workflow regression", () => {
         customer,
         targetStage: "deposit_paid",
       }),
-    ).toContainEqual(expect.objectContaining({ gateId: "deposit_received_confirmation" }))
+    ).toContainEqual(expect.objectContaining({ gateId: "deposit_received_confirmation", severity: "block" }))
 
     expect(
       validateTransition({
