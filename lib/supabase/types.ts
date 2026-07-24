@@ -626,13 +626,19 @@ export type Database = {
       }
       booking_supplier_schedules: {
         Row: {
+          amount_payable: number | null
+          amount_receivable: number | null
+          booking_date: string | null
           booking_id: string
+          confirmation_date: string | null
           created_at: string
           date_from: string | null
           date_to: string | null
           id: string
           label: string | null
           notes: string | null
+          paid_with: string | null
+          payment_made_date: string | null
           sort_order: number
           supplier_id: string | null
           supplier_kind: Database["public"]["Enums"]["supplier_kind"]
@@ -641,13 +647,19 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          amount_payable?: number | null
+          amount_receivable?: number | null
+          booking_date?: string | null
           booking_id: string
+          confirmation_date?: string | null
           created_at?: string
           date_from?: string | null
           date_to?: string | null
           id?: string
           label?: string | null
           notes?: string | null
+          paid_with?: string | null
+          payment_made_date?: string | null
           sort_order?: number
           supplier_id?: string | null
           supplier_kind: Database["public"]["Enums"]["supplier_kind"]
@@ -656,13 +668,19 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          amount_payable?: number | null
+          amount_receivable?: number | null
+          booking_date?: string | null
           booking_id?: string
+          confirmation_date?: string | null
           created_at?: string
           date_from?: string | null
           date_to?: string | null
           id?: string
           label?: string | null
           notes?: string | null
+          paid_with?: string | null
+          payment_made_date?: string | null
           sort_order?: number
           supplier_id?: string | null
           supplier_kind?: Database["public"]["Enums"]["supplier_kind"]
@@ -3363,6 +3381,8 @@ export type Database = {
           last_name: string
           prefix: string | null
           residence: string | null
+          room_type: string | null
+          room_with: string | null
           sort_order: number
         }
         Insert: {
@@ -3377,6 +3397,8 @@ export type Database = {
           last_name: string
           prefix?: string | null
           residence?: string | null
+          room_type?: string | null
+          room_with?: string | null
           sort_order?: number
         }
         Update: {
@@ -3391,6 +3413,8 @@ export type Database = {
           last_name?: string
           prefix?: string | null
           residence?: string | null
+          room_type?: string | null
+          room_with?: string | null
           sort_order?: number
         }
         Relationships: [

@@ -704,6 +704,25 @@ export async function buildPackageQuoteLineItems({
             commission,
             unit,
           })
+
+          if (
+            SUPPLIER_VOCABULARY[leg.supplierKind].showSingleSupplement &&
+            packageDetail.singleSupplementPct > 0 &&
+            (unitSelection.adultCount ?? 0) === 1 &&
+            (unitSelection.childCount ?? 0) === 0 &&
+            (unitSelection.infantCount ?? 0) === 0
+          ) {
+            addLineItem({
+              description: `${description} - Single supplement`,
+              qty: 1,
+              unitPrice: validRateCard.pricePerPerson * (packageDetail.singleSupplementPct / 100),
+              supplierDescription,
+              suiteTypeId: unitSelection.suiteTypeId,
+              variantNames,
+              commission,
+              unit,
+            })
+          }
         }
       }
     }

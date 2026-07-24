@@ -112,6 +112,12 @@ function createEmptySupplierSchedule(
     sortOrder,
     createdAt: now,
     updatedAt: now,
+    bookingDate: null,
+    confirmationDate: null,
+    paymentMadeDate: null,
+    paidWith: null,
+    amountPayable: null,
+    amountReceivable: null,
     isDraft: true,
   }
 }
@@ -415,6 +421,12 @@ export function JobEnquiryTab({
             timeEnd: schedule.timeEnd,
             notes: schedule.notes,
             sortOrder: index,
+            bookingDate: schedule.bookingDate,
+            confirmationDate: schedule.confirmationDate,
+            paymentMadeDate: schedule.paymentMadeDate,
+            paidWith: schedule.paidWith,
+            amountPayable: schedule.amountPayable,
+            amountReceivable: schedule.amountReceivable,
           })),
         }),
       })
@@ -1160,6 +1172,59 @@ function SupplierScheduleSection({
                       onChange={(event) => onUpdate(schedule.id, "timeEnd", event.target.value || null)}
                     />
                   </div>
+                  <div className="space-y-1.5">
+                    <Label>Booking date</Label>
+                    <DatePicker
+                      value={schedule.bookingDate ?? ""}
+                      onChange={(value) => onUpdate(schedule.id, "bookingDate", value || null)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Confirmation date</Label>
+                    <DatePicker
+                      value={schedule.confirmationDate ?? ""}
+                      onChange={(value) => onUpdate(schedule.id, "confirmationDate", value || null)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Payment made date</Label>
+                    <DatePicker
+                      value={schedule.paymentMadeDate ?? ""}
+                      onChange={(value) => onUpdate(schedule.id, "paymentMadeDate", value || null)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Paid with</Label>
+                    <Input
+                      value={schedule.paidWith ?? ""}
+                      onChange={(event) => onUpdate(schedule.id, "paidWith", event.target.value || null)}
+                      placeholder="EFT, Card, ..."
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Amount payable (cost)</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={schedule.amountPayable ?? ""}
+                      onChange={(event) =>
+                        onUpdate(schedule.id, "amountPayable", event.target.value === "" ? null : Number(event.target.value))
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Amount receivable</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={schedule.amountReceivable ?? ""}
+                      onChange={(event) =>
+                        onUpdate(schedule.id, "amountReceivable", event.target.value === "" ? null : Number(event.target.value))
+                      }
+                    />
+                  </div>
                   <div className="space-y-1.5 md:col-span-2">
                     <Label>Notes</Label>
                     <Textarea
@@ -1220,6 +1285,11 @@ function SupplierScheduleSummary({
             <Field label={fields?.dateToLabel ?? "End date"} value={schedule.dateToDisplay ?? formatDisplayDate(schedule.dateTo)} />
             <Field label={fields?.timeStartLabel ?? "Start time"} value={schedule.timeStart ?? "Not set"} />
             <Field label={fields?.timeEndLabel ?? "End time"} value={schedule.timeEnd ?? "Not set"} />
+            <Field label="Paid with" value={schedule.paidWith ?? "Not set"} />
+            <Field
+              label="Payable / Receivable"
+              value={`${schedule.amountPayable != null ? schedule.amountPayable : "–"} / ${schedule.amountReceivable != null ? schedule.amountReceivable : "–"}`}
+            />
           </div>
           {schedule.notes ? (
             <p className="text-sm text-muted-foreground">{schedule.notes}</p>

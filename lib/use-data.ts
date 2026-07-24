@@ -184,6 +184,8 @@ export interface JobTraveller {
   idPassport: string
   dateOfBirth: string
   residence: string
+  roomWith: string
+  roomType: string
   isChild: boolean
   isPrimary: boolean
   sortOrder: number

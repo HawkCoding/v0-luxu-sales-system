@@ -123,6 +123,8 @@ describe("GET /api/jobs/[id]/travellers", () => {
         idPassport: "A1234567",
         dateOfBirth: "1980-01-01",
         residence: "South Africa",
+        roomWith: "",
+        roomType: "",
         isChild: false,
         sortOrder: 0,
       },

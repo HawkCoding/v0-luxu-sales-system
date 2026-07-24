@@ -82,7 +82,7 @@ export async function buildWorksheetView(
       .maybeSingle(),
     supabase
       .from("travellers")
-      .select("prefix, first_name, last_name, residence, date_of_birth, is_primary, sort_order")
+      .select("prefix, first_name, last_name, residence, date_of_birth, room_with, room_type, is_primary, sort_order")
       .eq("booking_id", bookingId)
       .order("sort_order"),
     supabase
@@ -92,7 +92,9 @@ export async function buildWorksheetView(
       .maybeSingle(),
     supabase
       .from("booking_supplier_schedules")
-      .select("supplier_kind, label, date_from, date_to, notes, sort_order, supplier:suppliers(name)")
+      .select(
+        "supplier_kind, label, date_from, date_to, notes, sort_order, booking_date, confirmation_date, payment_made_date, paid_with, amount_payable, amount_receivable, supplier:suppliers(name)",
+      )
       .eq("booking_id", bookingId)
       .order("sort_order"),
     supabase
@@ -134,9 +136,8 @@ export async function buildWorksheetView(
     lastName: t.last_name,
     nationality: t.residence,
     age: computeAge(t.date_of_birth, arriveDate),
-    // Room with / Room type: v2 manual-capture columns, not yet on `travellers`.
-    roomWith: null,
-    roomType: null,
+    roomWith: t.room_with,
+    roomType: t.room_type,
     // The reservation-form remark (seating/smoking/dietary/medical/occasion) is
     // recorded once per booking, not per traveller — attach it to the primary
     // guest's row rather than fabricating a per-pax value.
@@ -151,15 +152,13 @@ export async function buildWorksheetView(
       fromDate: s.date_from,
       toDate: s.date_to,
       description: description || kindLabel,
-      // Booking/confirmation/payment-made dates, paid-with, payable, receivable:
-      // v2 manual-capture columns, not yet on `booking_supplier_schedules`.
-      bookingDate: null,
-      confirmationDate: null,
+      bookingDate: s.booking_date,
+      confirmationDate: s.confirmation_date,
       reservationReference: null,
-      paymentMadeDate: null,
-      paidWith: null,
-      amountPayable: null,
-      amountReceivable: null,
+      paymentMadeDate: s.payment_made_date,
+      paidWith: s.paid_with,
+      amountPayable: s.amount_payable,
+      amountReceivable: s.amount_receivable,
       notes: s.notes,
     }
   })

@@ -16,13 +16,13 @@ export const BOOKING_WITH_SUPPLIER_COLUMNS = `${BOOKING_COLUMNS}, route:routes(i
 export const BOOKING_SUITE_COLUMNS = "id, booking_id, suite_number, suite_type_id, suite_type_name"
 
 export const TRAVELLER_COLUMNS =
-  "id, booking_id, prefix, first_name, last_name, id_passport, date_of_birth, residence, is_child, is_primary, sort_order"
+  "id, booking_id, prefix, first_name, last_name, id_passport, date_of_birth, residence, room_with, room_type, is_child, is_primary, sort_order"
 
 export const BOOKING_TRANSPORT_REQUEST_COLUMNS =
   "id, booking_id, supplier_id, route_id, suite_type_id, package_leg_id, service_type, pickup_point, dropoff_point, pickup_at, passenger_count, luggage_count, flight_number, price_override, notes, sort_order, supplier_reference, created_at, updated_at, rental_details:booking_vehicle_rental_details(transport_request_id, return_at, return_cutoff_time, created_at, updated_at)"
 
 export const BOOKING_SUPPLIER_SCHEDULE_COLUMNS =
-  "id, booking_id, supplier_id, supplier_kind, label, date_from, date_to, time_start, time_end, notes, sort_order, created_at, updated_at"
+  "id, booking_id, supplier_id, supplier_kind, label, date_from, date_to, time_start, time_end, notes, sort_order, created_at, updated_at, booking_date, confirmation_date, payment_made_date, paid_with, amount_payable, amount_receivable"
 
 export const PAYMENT_COLUMNS =
   "id, booking_id, amount, received_at, method, reference, notes, created_at"

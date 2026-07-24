@@ -816,6 +816,15 @@ export interface BookingSupplierSchedule {
   createdAtDisplay?: string
   updatedAt: string
   updatedAtDisplay?: string
+  bookingDate: string | null
+  bookingDateDisplay?: string
+  confirmationDate: string | null
+  confirmationDateDisplay?: string
+  paymentMadeDate: string | null
+  paymentMadeDateDisplay?: string
+  paidWith: string | null
+  amountPayable: number | null
+  amountReceivable: number | null
 }
 
 // Legacy alias — kept so existing components that reference Job still compile

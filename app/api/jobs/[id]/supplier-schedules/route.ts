@@ -21,6 +21,12 @@ const supplierScheduleSchema = z.object({
   timeEnd: nullableTime,
   notes: z.string().trim().max(2000).nullable().optional(),
   sortOrder: z.number().int().nonnegative().optional(),
+  bookingDate: z.union([dateString, z.literal(""), z.null()]).optional(),
+  confirmationDate: z.union([dateString, z.literal(""), z.null()]).optional(),
+  paymentMadeDate: z.union([dateString, z.literal(""), z.null()]).optional(),
+  paidWith: z.string().trim().max(100).nullable().optional(),
+  amountPayable: z.number().nonnegative().nullable().optional(),
+  amountReceivable: z.number().nonnegative().nullable().optional(),
 }).superRefine((schedule, context) => {
   if (schedule.supplierKind === "hotel_property" && schedule.dateTo <= schedule.dateFrom) {
     context.addIssue({
@@ -67,6 +73,14 @@ function normalizeNullableText(value: string | null | undefined): string | null 
 
 function normalizeNullableTime(value: string | null | undefined): string | null {
   return value && value.length > 0 ? value : null
+}
+
+function normalizeNullableDate(value: string | null | undefined): string | null {
+  return value && value.length > 0 ? value : null
+}
+
+function normalizeNullableAmount(value: number | null | undefined): number | null {
+  return value ?? null
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -154,6 +168,12 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     time_end: normalizeNullableTime(schedule.timeEnd),
     notes: normalizeNullableText(schedule.notes),
     sort_order: schedule.sortOrder ?? index,
+    booking_date: normalizeNullableDate(schedule.bookingDate),
+    confirmation_date: normalizeNullableDate(schedule.confirmationDate),
+    payment_made_date: normalizeNullableDate(schedule.paymentMadeDate),
+    paid_with: normalizeNullableText(schedule.paidWith),
+    amount_payable: normalizeNullableAmount(schedule.amountPayable),
+    amount_receivable: normalizeNullableAmount(schedule.amountReceivable),
   }))
 
   const { error: deleteError } = await supabase
