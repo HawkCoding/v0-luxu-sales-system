@@ -1,13 +1,14 @@
 "use client"
 
 import { useState } from "react"
+import { toast } from "sonner"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import type { DocRecord, Enquiry, Job, Customer } from "@/lib/types"
-import { AlertCircle, FileOutput, FileText } from "lucide-react"
+import { AlertCircle, ClipboardList, FileOutput, FileText } from "lucide-react"
 import { GenerateVoucherDialog } from "@/components/generate-voucher-dialog"
 import { formatDisplayDateTime } from "@/lib/date-format"
 
@@ -33,8 +34,27 @@ export function JobDocumentsTab({
   error = null,
 }: JobDocumentsTabProps) {
   const [voucherOpen, setVoucherOpen] = useState(false)
+  const [generatingWorksheet, setGeneratingWorksheet] = useState(false)
 
   const canGenerateVoucher = job && enquiry && customer && VOUCHER_STAGES.has(job.stage ?? "")
+
+  async function downloadWorksheet() {
+    if (!job) return
+    setGeneratingWorksheet(true)
+    try {
+      const response = await fetch(`/api/jobs/${job.id}/worksheet`, { method: "POST" })
+      const payload = (await response.json().catch(() => ({}))) as { url?: string; error?: string }
+      if (!response.ok) throw new Error(payload.error ?? "Failed to generate worksheet")
+      if (payload.url) {
+        window.open(payload.url, "_blank", "noopener,noreferrer")
+      }
+      await onChange?.()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to generate worksheet")
+    } finally {
+      setGeneratingWorksheet(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -82,6 +102,32 @@ export function JobDocumentsTab({
 
   return (
     <div className="space-y-3">
+      {job && (
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-foreground">Booking Worksheet</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Internal place-of-record: pax, invoices, payments, suppliers, gross profit
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={generatingWorksheet}
+                onClick={() => {
+                  void downloadWorksheet()
+                }}
+              >
+                <ClipboardList data-icon="inline-start" />
+                {generatingWorksheet ? "Generating…" : "Generate Worksheet"}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {canGenerateVoucher && (
         <Card className="border-primary/20 bg-primary/5">
           <CardContent className="p-4">
@@ -126,7 +172,9 @@ export function JobDocumentsTab({
               </div>
               <div>
                 <p className="text-sm font-medium text-foreground">
-                  {d.kind.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())}
+                  {d.kind === "summary_pdf"
+                    ? "Booking Worksheet"
+                    : d.kind.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())}
                 </p>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   Generated: {formatDisplayDateTime(d.generatedAt)}
