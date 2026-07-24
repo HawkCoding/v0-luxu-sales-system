@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
-import { InboundEmailSettings } from "@/components/inbound-email-settings"
+import { EmailAccountsSettings } from "@/components/email-accounts-settings"
 import { BackupSettings } from "@/components/backup-settings"
 import { BankingSettingsEditor } from "@/components/banking-settings-editor"
 import { InvoiceStatusSettingsEditor } from "@/components/invoice-status-settings-editor"
@@ -1912,7 +1912,12 @@ export default function SettingsPage() {
 
       {can("manage:users") && <UserManagementCard />}
 
-      {canEditSettings && <InboundEmailSettings />}
+      {(canEditDepositSettings || canEditSettings) && (
+        <EmailAccountsSettings
+          canManageOutbound={canEditDepositSettings}
+          canManageInbound={canEditSettings}
+        />
+      )}
 
       {BACKUPS_ENABLED && canEditDepositSettings && <BackupSettings isAdmin={role === "admin"} />}
 

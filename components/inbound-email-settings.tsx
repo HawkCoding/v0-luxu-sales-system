@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
 interface InboundAccount {
   id: string
@@ -388,46 +389,66 @@ export function InboundEmailSettings() {
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    disabled={busyId === account.id}
-                    onClick={() => toggleAccount(account)}
-                    aria-label={account.enabled ? "Disable mailbox" : "Enable mailbox"}
-                  >
-                    <Save className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    disabled={busyId === account.id}
-                    onClick={() => testAccount(account.id)}
-                    aria-label="Test connection"
-                  >
-                    <PlugZap className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    disabled={busyId === account.id}
-                    onClick={() => syncAccount(account.id)}
-                    aria-label="Sync now"
-                  >
-                    <Play className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    disabled={busyId === account.id}
-                    onClick={() => deleteAccount(account.id)}
-                    aria-label="Delete mailbox"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        disabled={busyId === account.id}
+                        onClick={() => toggleAccount(account)}
+                        aria-label={account.enabled ? "Disable mailbox" : "Enable mailbox"}
+                      >
+                        <Save className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{account.enabled ? "Disable mailbox" : "Enable mailbox"}</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        disabled={busyId === account.id}
+                        onClick={() => testAccount(account.id)}
+                        aria-label="Test connection"
+                      >
+                        <PlugZap className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Test connection</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        disabled={busyId === account.id}
+                        onClick={() => syncAccount(account.id)}
+                        aria-label="Sync now"
+                      >
+                        <Play className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Sync now</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        disabled={busyId === account.id}
+                        onClick={() => deleteAccount(account.id)}
+                        aria-label="Delete mailbox"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Delete mailbox</TooltipContent>
+                  </Tooltip>
                 </div>
               </div>
             ))}
@@ -505,16 +526,21 @@ export function InboundEmailSettings() {
                     onCheckedChange={() => toggleRule(rule)}
                     aria-label={rule.active ? "Disable rule" : "Enable rule"}
                   />
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    disabled={busyId === rule.id}
-                    onClick={() => deleteRule(rule.id)}
-                    aria-label="Delete rule"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        disabled={busyId === rule.id}
+                        onClick={() => deleteRule(rule.id)}
+                        aria-label="Delete rule"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Delete rule</TooltipContent>
+                  </Tooltip>
                 </div>
               </div>
             ))}
