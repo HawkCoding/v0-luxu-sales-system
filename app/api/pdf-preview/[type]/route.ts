@@ -12,10 +12,12 @@ import { renderVoucherPdf } from "@/lib/voucher/render-pdf"
 import { renderItineraryPdf } from "@/lib/itinerary/render-pdf"
 import { renderQuotePdf } from "@/lib/quotes/render-quote-pdf"
 import { renderInvoicePdf } from "@/lib/invoices/render-invoice-pdf"
+import { renderWorksheetPdf } from "@/lib/worksheet/render-worksheet-pdf"
 import { sampleVoucherData, sampleVoucherServiceBlocks } from "@/lib/voucher/pdf/sample-data"
 import { sampleItineraryData } from "@/lib/itinerary/sample-data"
 import { sampleQuotePdfData } from "@/lib/quotes/pdf/sample-data"
 import { sampleInvoicePdfData } from "@/lib/invoices/sample-data"
+import { sampleWorksheetData } from "@/lib/worksheet/pdf/sample-data"
 import { VOUCHER_TEMPLATE_DEFAULTS, type VoucherTemplate } from "@/lib/types"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
@@ -23,7 +25,7 @@ import type { Database } from "@/lib/supabase/types"
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-const typeSchema = z.enum(["voucher", "itinerary", "quote", "invoice"])
+const typeSchema = z.enum(["voucher", "itinerary", "quote", "invoice", "worksheet"])
 export type PdfPreviewType = z.infer<typeof typeSchema>
 
 async function fetchVoucherTemplate(supabase: SupabaseClient<Database>): Promise<VoucherTemplate> {
@@ -90,6 +92,12 @@ export async function GET(
         packageExcludesDefault: documentText.quote_doc_excludes_default,
         brand,
         brandPosition: position.quote,
+        brandLogo,
+      })
+    } else if (type === "worksheet") {
+      buffer = await renderWorksheetPdf({
+        ...sampleWorksheetData(),
+        brand,
         brandLogo,
       })
     } else {

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
-import { Inbox, Play, PlugZap, Plus, Save, Trash2 } from "lucide-react"
+import { Eye, EyeOff, Inbox, Play, PlugZap, Plus, Save, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -89,6 +89,7 @@ export function InboundEmailSettings() {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [savingAccount, setSavingAccount] = useState(false)
   const [savingRule, setSavingRule] = useState(false)
+  const [showPassword, setShowPassword] = useState(false)
 
   const loadSettings = useCallback(async () => {
     setLoading(true)
@@ -315,12 +316,24 @@ export function InboundEmailSettings() {
               />
             </Field>
             <Field label="Password">
-              <Input
-                type="password"
-                value={accountForm.password}
-                onChange={(event) => setAccountForm((prev) => ({ ...prev, password: event.target.value }))}
-                required
-              />
+              <div className="relative">
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  value={accountForm.password}
+                  onChange={(event) => setAccountForm((prev) => ({ ...prev, password: event.target.value }))}
+                  required
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
+                  className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-r-md"
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
             </Field>
             <Field label="INBOX folder">
               <Input
