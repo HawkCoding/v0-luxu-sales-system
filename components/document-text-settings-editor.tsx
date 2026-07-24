@@ -9,6 +9,8 @@ import { useDocumentTextSettings, type DocumentTextSettings } from "@/lib/use-da
 
 interface DocumentTextSettingsEditorProps {
   canEdit: boolean
+  /** Restrict rendered fields to these `group` values; defaults to all groups. */
+  groups?: string[]
 }
 
 interface FieldConfig {
@@ -34,7 +36,7 @@ const FIELDS: FieldConfig[] = [
   { key: "itinerary_doc_intro_text", label: "Itinerary intro paragraph (leave empty to omit)", group: "Itinerary document", multiline: true, allowEmpty: true },
 ]
 
-export function DocumentTextSettingsEditor({ canEdit }: DocumentTextSettingsEditorProps) {
+export function DocumentTextSettingsEditor({ canEdit, groups: groupsFilter }: DocumentTextSettingsEditorProps) {
   const { data, isLoading, error, mutate } = useDocumentTextSettings()
   const [values, setValues] = useState<Partial<DocumentTextSettings>>({})
   const [savingField, setSavingField] = useState<string | null>(null)
@@ -82,7 +84,9 @@ export function DocumentTextSettingsEditor({ canEdit }: DocumentTextSettingsEdit
     )
   }
 
-  const groups = Array.from(new Set(FIELDS.map((f) => f.group)))
+  const groups = Array.from(new Set(FIELDS.map((f) => f.group))).filter(
+    (g) => !groupsFilter || groupsFilter.includes(g),
+  )
 
   return (
     <div className="space-y-6">

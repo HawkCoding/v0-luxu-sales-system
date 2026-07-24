@@ -357,6 +357,124 @@ describe("buildPackageQuoteLineItems", () => {
     ).rejects.toThrow(/must sum to the booking's traveller totals/)
   })
 
+  it("charges a single supplement for a unit with exactly one adult and no children", async () => {
+    const trainLeg = leg({
+      id: "leg-train",
+      supplierKind: "train_operator",
+      routes: [route("route-cpt", "supplier-leg-train", "CPT-PTA")],
+      suiteTypes: [suiteType("suite-dlx", "supplier-leg-train", "Deluxe")],
+      rateCards: [
+        rateCard({ id: "rc-train", routeId: "route-cpt", suiteTypeId: "suite-dlx", pricePerPerson: 10000 }),
+      ],
+    })
+    const soloBooking = {
+      id: JOB_ID,
+      no_of_adults: 1,
+      no_of_children: 0,
+      no_of_suites: 1,
+      child_ages: [],
+      departure_date: "2026-09-01",
+    }
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({ booking: soloBooking }),
+      packageDetail: { ...detail([trainLeg]), singleSupplementPct: 25 },
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-train",
+          selected: true,
+          units: [{ suiteTypeId: "suite-dlx", adultCount: 1, childCount: 0, infantCount: 0 }],
+        },
+      ],
+    })
+
+    const supplementLine = lineItems.find((li) => li.description.includes("Single supplement"))
+    expect(supplementLine).toBeDefined()
+    expect(supplementLine?.qty).toBe(1)
+    expect(supplementLine?.unitPrice).toBe(2500)
+    expect(supplementLine?.total).toBe(2500)
+  })
+
+  it("does not charge a single supplement when a unit has two adults sharing", async () => {
+    const trainLeg = leg({
+      id: "leg-train",
+      supplierKind: "train_operator",
+      routes: [route("route-cpt", "supplier-leg-train", "CPT-PTA")],
+      suiteTypes: [suiteType("suite-dlx", "supplier-leg-train", "Deluxe")],
+      rateCards: [
+        rateCard({ id: "rc-train", routeId: "route-cpt", suiteTypeId: "suite-dlx", pricePerPerson: 10000 }),
+      ],
+    })
+    const sharingBooking = {
+      id: JOB_ID,
+      no_of_adults: 2,
+      no_of_children: 0,
+      no_of_suites: 1,
+      child_ages: [],
+      departure_date: "2026-09-01",
+    }
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({ booking: sharingBooking }),
+      packageDetail: { ...detail([trainLeg]), singleSupplementPct: 25 },
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-train",
+          selected: true,
+          units: [{ suiteTypeId: "suite-dlx", adultCount: 2, childCount: 0, infantCount: 0 }],
+        },
+      ],
+    })
+
+    expect(lineItems.some((li) => li.description.includes("Single supplement"))).toBe(false)
+  })
+
+  it("does not charge a single supplement when a lone adult shares a unit with a child", async () => {
+    const trainLeg = leg({
+      id: "leg-train",
+      supplierKind: "train_operator",
+      routes: [route("route-cpt", "supplier-leg-train", "CPT-PTA")],
+      suiteTypes: [suiteType("suite-dlx", "supplier-leg-train", "Deluxe")],
+      rateCards: [
+        rateCard({
+          id: "rc-train",
+          routeId: "route-cpt",
+          suiteTypeId: "suite-dlx",
+          pricePerPerson: 10000,
+          childPrice: 5000,
+        }),
+      ],
+    })
+    const familyBooking = {
+      id: JOB_ID,
+      no_of_adults: 1,
+      no_of_children: 1,
+      no_of_suites: 1,
+      child_ages: [8],
+      departure_date: "2026-09-01",
+    }
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({ booking: familyBooking }),
+      packageDetail: { ...detail([trainLeg]), singleSupplementPct: 25 },
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-train",
+          selected: true,
+          units: [{ suiteTypeId: "suite-dlx", adultCount: 1, childCount: 1, infantCount: 0 }],
+        },
+      ],
+    })
+
+    expect(lineItems.some((li) => li.description.includes("Single supplement"))).toBe(false)
+  })
+
   it("renders the flipped travel direction for a reversed two-way route, without changing price", async () => {
     const twoWayLeg = leg({
       id: "leg-train",

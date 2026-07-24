@@ -44,6 +44,8 @@ interface TravellerDraft {
   idPassport: string
   dateOfBirth: string
   residence: string
+  roomWith: string
+  roomType: string
   isChild: boolean
   isPrimary: boolean
 }
@@ -64,6 +66,8 @@ function toDraft(t: JobTraveller): TravellerDraft {
     idPassport: t.idPassport,
     dateOfBirth: t.dateOfBirth,
     residence: t.residence,
+    roomWith: t.roomWith,
+    roomType: t.roomType,
     isChild: t.isChild,
     isPrimary: t.isPrimary,
   }
@@ -78,6 +82,8 @@ function emptyDraft(isChild: boolean): TravellerDraft {
     idPassport: "",
     dateOfBirth: "",
     residence: "",
+    roomWith: "",
+    roomType: "",
     isChild,
     isPrimary: false,
   }
@@ -92,6 +98,8 @@ function travellerFromCustomer(customer: Customer): TravellerDraft {
     idPassport: customer.idPassport ?? "",
     dateOfBirth: customer.dateOfBirth ?? "",
     residence: customer.country ?? "",
+    roomWith: "",
+    roomType: "",
     isChild: false,
     isPrimary: true,
   }
@@ -105,6 +113,8 @@ function travellerRowDiffers(a: TravellerDraft, b: TravellerDraft): boolean {
     a.idPassport !== b.idPassport ||
     a.dateOfBirth !== b.dateOfBirth ||
     a.residence !== b.residence ||
+    a.roomWith !== b.roomWith ||
+    a.roomType !== b.roomType ||
     a.isChild !== b.isChild
   )
 }
@@ -295,6 +305,8 @@ export function JobReservationTab({
             idPassport: t.idPassport || null,
             dateOfBirth: t.dateOfBirth || null,
             residence: t.residence || null,
+            roomWith: t.roomWith || null,
+            roomType: t.roomType || null,
             isChild: t.isChild,
             isPrimary: t.isPrimary,
           })),
@@ -491,6 +503,18 @@ export function JobReservationTab({
                       onChange={(e) => updateTraveller(traveller.key, { idPassport: e.target.value })}
                       className="sm:col-span-2"
                       required
+                    />
+                    <Input
+                      placeholder="Room with"
+                      value={traveller.roomWith}
+                      onChange={(e) => updateTraveller(traveller.key, { roomWith: e.target.value })}
+                      className="sm:col-span-2"
+                    />
+                    <Input
+                      placeholder="Room type"
+                      value={traveller.roomType}
+                      onChange={(e) => updateTraveller(traveller.key, { roomType: e.target.value })}
+                      className="sm:col-span-2"
                     />
                     <Button
                       type="button"

@@ -661,6 +661,8 @@ export function BuildBookingDialog({
               })}
             </div>
 
+            {/* TODO: remove later — Extras section hidden per request, keep logic intact for re-enable */}
+            {false && (
             <div className="space-y-3 border-t pt-4">
               <div>
                 <Label>Extras (optional)</Label>
@@ -714,6 +716,7 @@ export function BuildBookingDialog({
                 addLabel="Add extra"
               />
             </div>
+            )}
 
             {validationErrors.length > 0 && (
               <ul className="space-y-1 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">

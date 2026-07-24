@@ -295,6 +295,15 @@ export function mapBookingSupplierSchedule(row: BookingSupplierScheduleRow): Boo
     createdAtDisplay: formatDisplayDateTime(row.created_at),
     updatedAt: row.updated_at,
     updatedAtDisplay: formatDisplayDateTime(row.updated_at),
+    bookingDate: row.booking_date ?? null,
+    bookingDateDisplay: formatDisplayDate(row.booking_date),
+    confirmationDate: row.confirmation_date ?? null,
+    confirmationDateDisplay: formatDisplayDate(row.confirmation_date),
+    paymentMadeDate: row.payment_made_date ?? null,
+    paymentMadeDateDisplay: formatDisplayDate(row.payment_made_date),
+    paidWith: row.paid_with ?? null,
+    amountPayable: row.amount_payable ?? null,
+    amountReceivable: row.amount_receivable ?? null,
   }
 }
 

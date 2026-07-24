@@ -19,6 +19,8 @@ const travellerInputSchema = z.object({
   idPassport: z.string().trim().min(1, "ID/passport number is required").max(50),
   dateOfBirth: z.string().trim().max(50).nullable().optional(),
   residence: z.string().trim().max(100).nullable().optional(),
+  roomWith: z.string().trim().max(200).nullable().optional(),
+  roomType: z.string().trim().max(100).nullable().optional(),
   isChild: z.boolean().default(false),
   isPrimary: z.boolean().default(false),
 })
@@ -36,6 +38,8 @@ type TravellerRow = {
   id_passport: string | null
   date_of_birth: string | null
   residence: string | null
+  room_with: string | null
+  room_type: string | null
   is_child: boolean
   is_primary: boolean
   sort_order: number
@@ -50,6 +54,8 @@ function mapTraveller(row: TravellerRow) {
     idPassport: row.id_passport ?? "",
     dateOfBirth: row.date_of_birth ?? "",
     residence: row.residence ?? "",
+    roomWith: row.room_with ?? "",
+    roomType: row.room_type ?? "",
     isChild: row.is_child,
     isPrimary: row.is_primary,
     sortOrder: row.sort_order,
@@ -110,6 +116,8 @@ export async function PUT(req: Request, { params }: RouteParams) {
     id_passport: traveller.idPassport?.trim() || null,
     date_of_birth: traveller.dateOfBirth?.trim() || null,
     residence: traveller.residence?.trim() || null,
+    room_with: traveller.roomWith?.trim() || null,
+    room_type: traveller.roomType?.trim() || null,
     is_child: traveller.isChild,
     is_primary: traveller.isPrimary,
     sort_order: index,
