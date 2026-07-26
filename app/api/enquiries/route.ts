@@ -6,6 +6,19 @@ import { detectCountryInText, loadCountryAliasMap, normalizeCountry } from "@/li
 import { allocateJobNumberForBooking, type JobNumberAllocation } from "@/lib/job-numbering"
 import { isAuthorizedWebhookRequest } from "@/lib/api/webhook-secret"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
+import { normalizeLookupValue } from "@/lib/normalize-lookup-value"
+import {
+  legacySuiteNamesToUnits,
+  resolveEnquirySuiteUnits,
+  unitAxisValue,
+  type IncomingSuiteUnit,
+} from "@/lib/suites/enquiry-suite-units"
+import {
+  promoteSuiteAliases,
+  recordSuiteAliasCorrections,
+  type SuiteAliasWrite,
+} from "@/lib/suites/suite-alias-store"
+import { withSuiteTypeMissingField } from "@/lib/suites/missing-fields"
 import { buildPackageQuoteLineItems, calculateQuoteTotals } from "@/lib/quotes/build-from-package"
 import { buildQuoteNumber } from "@/lib/quotes/quote-number"
 import { isOptionalPackageLegKind } from "@/lib/types"
@@ -39,15 +52,6 @@ type VehicleRentalDetailsInsert = {
   return_cutoff_time: string | null
 }
 
-type SuiteSelection = {
-  suiteTypeId: string | null
-  suiteTypeName: string
-}
-
-function normalizeLookupValue(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
-}
-
 function normalizeTransportServiceType(value: unknown): TransportServiceType {
   return value === "rental" ? "rental" : "transfer"
 }
@@ -58,68 +62,6 @@ function normalizeNullableText(value: unknown): string | null {
 
 function normalizeNullableNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null
-}
-
-export function normalizeSuiteSelections(body: Record<string, unknown>): SuiteSelection[] {
-  const structuredSelections = Array.isArray(body.suiteSelections)
-    ? body.suiteSelections
-        .map((selection: unknown): SuiteSelection | null => {
-          if (!selection || typeof selection !== "object") return null
-
-          const suiteTypeId = normalizeNullableText((selection as Record<string, unknown>).suiteTypeId)
-          const suiteTypeName = normalizeNullableText((selection as Record<string, unknown>).suiteTypeName)
-          if (!suiteTypeName) return null
-
-          return { suiteTypeId, suiteTypeName }
-        })
-        .filter((selection: SuiteSelection | null): selection is SuiteSelection => Boolean(selection))
-    : []
-
-  if (structuredSelections.length > 0) {
-    return structuredSelections
-  }
-
-  return Array.isArray(body.suiteTypes)
-    ? body.suiteTypes
-        .map((suiteName: unknown): SuiteSelection | null => {
-          const suiteTypeName = normalizeNullableText(suiteName)
-          return suiteTypeName ? { suiteTypeId: null, suiteTypeName } : null
-        })
-        .filter((selection: SuiteSelection | null): selection is SuiteSelection => Boolean(selection))
-    : []
-}
-
-export async function resolveSuiteSelectionIds(
-  supabase: ServiceClient,
-  supplierId: unknown,
-  selections: SuiteSelection[],
-): Promise<SuiteSelection[]> {
-  const normalizedSupplierId = normalizeNullableText(supplierId)
-  if (!normalizedSupplierId || selections.length === 0) {
-    return selections
-  }
-
-  const unresolvedNames = selections
-    .filter((selection) => !selection.suiteTypeId)
-    .map((selection) => selection.suiteTypeName)
-  if (unresolvedNames.length === 0) {
-    return selections
-  }
-
-  const { data: suiteTypes } = await supabase
-    .from("suite_types")
-    .select("id, name")
-    .eq("supplier_id", normalizedSupplierId)
-    .eq("active", true)
-
-  const suiteTypeByName = new Map(
-    (suiteTypes ?? []).map((suiteType) => [normalizeLookupValue(suiteType.name), suiteType.id]),
-  )
-
-  return selections.map((selection) => ({
-    ...selection,
-    suiteTypeId: selection.suiteTypeId ?? suiteTypeByName.get(normalizeLookupValue(selection.suiteTypeName)) ?? null,
-  }))
 }
 
 function addDaysToDateString(value: string, days: number): string {
@@ -207,7 +149,9 @@ function buildDefaultPackageSelections(packageDetail: PackageDetail, suiteTypeNa
       legId: leg.id,
       selected: !isOptional,
       routeId: leg.routes.length === 1 ? leg.routes[0].id : undefined,
-      suiteTypeId: matchedSuiteType?.id ?? (activeSuiteTypes.length === 1 ? activeSuiteTypes[0].id : undefined),
+      // Never fall back to "the only option" — an auto-picked suite type is indistinguishable
+      // from a real match downstream, and quote build would then happily price the wrong room.
+      suiteTypeId: matchedSuiteType?.id ?? undefined,
     }
   })
 }
@@ -485,15 +429,27 @@ const enquiryBodySchema = z.object({
   flightBooking: z.string().trim().max(255).nullish(),
   flightDepartureDate: z.string().trim().max(40).nullish(),
   extractedJson: z.record(z.unknown()).nullish(),
-  suiteSelections: z
+  suiteUnits: z
     .array(
       z.object({
+        suiteNumber: z.number().int().min(1).max(500).nullish().catch(null),
+        rawPhrase: z.string().trim().max(500).nullish(),
         suiteTypeId: lenientUuid,
         suiteTypeName: z.string().trim().max(255).nullish(),
+        bedroomTypeId: lenientUuid,
+        bedroomLayoutId: lenientUuid,
+        bathroomTypeId: lenientUuid,
+        editedAxes: z
+          .array(z.enum(["suiteType", "bedroomType", "bedroomLayout", "bathroomType"]))
+          .max(4)
+          .nullish()
+          .catch(null),
+        match: z.unknown().nullish(),
       }),
     )
     .max(50)
     .nullish(),
+  // Legacy name-only shape, still sent by the public website form.
   suiteTypes: z.array(z.string().max(255)).max(50).nullish(),
   travellers: z.array(travellerInputSchema).max(100).nullish(),
   childTravellers: z.array(travellerInputSchema).max(100).nullish(),
@@ -575,6 +531,16 @@ export async function POST(req: Request) {
   }
 
   // --- 2. Insert booking ---
+  // Two shapes arrive here: structured units from the review modal, and the public web form's
+  // legacy name-only `suiteTypes`. Both become units so one code path handles them.
+  const incomingSuiteUnits: IncomingSuiteUnit[] = Array.isArray(body.suiteUnits) && body.suiteUnits.length > 0
+    ? (body.suiteUnits as IncomingSuiteUnit[])
+    : legacySuiteNamesToUnits(Array.isArray(body.suiteTypes) ? body.suiteTypes : [])
+  // Gaps worth flagging that the parser can't fabricate its way out of.
+  const suiteReviewMissingFields: string[] = []
+  if (!body.noOfSuites) suiteReviewMissingFields.push("Number of suites")
+  if (!normalizeNullableText(body.direction)) suiteReviewMissingFields.push("Direction")
+
   const source = body.rawText ? "paste_import" : "web_form"
   const routeId = await findRouteId(supabase, body.direction)
   const packageId = await findPackageId(supabase, body.packageOption)
@@ -649,20 +615,83 @@ export async function POST(req: Request) {
   }
 
   // --- 3. Insert booking_suites ---
-  const suiteSelections = await resolveSuiteSelectionIds(
+  // Client ids are re-validated server-side against the supplier's real vocabulary, and any unit
+  // that arrived unresolved but carries raw wording is resolved here.
+  const { units: resolvedSuiteUnits, vocabulary: suiteVocabulary } = await resolveEnquirySuiteUnits(
     supabase,
-    body.supplierId,
-    normalizeSuiteSelections(body),
+    normalizeNullableText(body.supplierId),
+    incomingSuiteUnits,
   )
-  const suiteTypes = suiteSelections.map((selection) => selection.suiteTypeName)
-  if (suiteSelections.length > 0) {
-    const suiteRows = suiteSelections.map((selection, idx) => ({
-      booking_id: booking.id,
-      suite_number: idx + 1,
-      suite_type_id: selection.suiteTypeId,
-      suite_type_name: selection.suiteTypeName,
-    }))
-    await supabase.from("booking_suites").insert(suiteRows)
+  const suiteTypes = resolvedSuiteUnits
+    .map((unit) => unit.suiteTypeName)
+    .filter((name): name is string => Boolean(name))
+  const unresolvedSuiteCount = resolvedSuiteUnits.filter((unit) => !unit.suiteTypeId).length
+
+  if (resolvedSuiteUnits.length > 0) {
+    await supabase.from("booking_suites").insert(
+      resolvedSuiteUnits.map((unit) => ({
+        booking_id: booking.id,
+        suite_number: unit.suiteNumber,
+        suite_type_id: unit.suiteTypeId,
+        // Fall back to the customer's own wording so the row still says what was asked for.
+        suite_type_name: unit.suiteTypeName ?? unit.rawPhrase,
+        bedroom_type_id: unit.bedroomTypeId,
+        bedroom_layout_id: unit.bedroomLayoutId,
+        bathroom_type_id: unit.bathroomTypeId,
+        source_phrase: unit.rawPhrase || null,
+        match_json: unit.matchJson,
+      })),
+    )
+  }
+
+  // Report an unidentified suite on the booking. This never blocks: quote build is the hard gate.
+  if (unresolvedSuiteCount > 0 || suiteReviewMissingFields.length > 0) {
+    const missingFields = withSuiteTypeMissingField(suiteReviewMissingFields, unresolvedSuiteCount > 0)
+    if (missingFields.length > 0) {
+      await supabase
+        .from("bookings")
+        .update({
+          email_import_needs_review: true,
+          email_import_missing_fields: missingFields,
+        })
+        .eq("id", booking.id)
+    }
+  }
+
+  // Alias learning (service-role only, best-effort — a failed write must never fail an enquiry).
+  if (suiteVocabulary) {
+    const supplierIdForAliases = suiteVocabulary.supplierId
+    try {
+      const corrections: SuiteAliasWrite[] = []
+      for (const unit of resolvedSuiteUnits) {
+        if (!unit.rawPhrase) continue
+        for (const axis of unit.editedAxes) {
+          const targetId = unitAxisValue(axis, unit)
+          if (targetId) {
+            corrections.push({ supplierId: supplierIdForAliases, phrase: unit.rawPhrase, axis, targetId })
+          }
+        }
+      }
+      if (corrections.length > 0) {
+        await recordSuiteAliasCorrections(supabase, corrections, user?.id ?? null)
+        await supabase.from("audit_logs").insert({
+          actor: user?.email ?? "system",
+          actor_user_id: user?.id ?? null,
+          entity_type: "Booking",
+          entity_id: booking.id,
+          action: "suite_alias_learned",
+          meta_json: { corrections: corrections.map(({ phrase, axis, targetId }) => ({ phrase, axis, targetId })) },
+        })
+      }
+
+      // A suggestion that came from an unconfirmed alias and survived untouched is now trusted.
+      for (const unit of resolvedSuiteUnits) {
+        if (!unit.rawPhrase || unit.aliasAcceptedAxes.length === 0) continue
+        await promoteSuiteAliases(supabase, supplierIdForAliases, unit.rawPhrase, unit.aliasAcceptedAxes)
+      }
+    } catch (error) {
+      console.error("enquiries:suiteAliasLearning", error)
+    }
   }
 
   // --- 4. Insert travellers (if provided) ---

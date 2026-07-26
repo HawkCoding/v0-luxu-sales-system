@@ -65,6 +65,9 @@ interface BuildBookingDialogProps {
   /** Customer's default rate type — pre-selects the rate version when pricing. */
   customerDefaultRateTypeId?: string | null
   onApplied: () => void
+  /** Opens the dialog immediately on mount — used to skip the extra click right after a quote is created. */
+  autoOpen?: boolean
+  onAutoOpenHandled?: () => void
 }
 
 interface QuotePatchPayload {
@@ -112,6 +115,8 @@ export function BuildBookingDialog({
   expectedUpdatedAt,
   customerDefaultRateTypeId,
   onApplied,
+  autoOpen = false,
+  onAutoOpenHandled,
 }: BuildBookingDialogProps) {
   const { data: suppliers = [] } = useActiveSuppliers()
   const { data: rateTypesData } = useRateTypes()
@@ -158,6 +163,12 @@ export function BuildBookingDialog({
   useEffect(() => {
     setEditing(open && step !== "services")
   }, [open, setEditing, step])
+
+  useEffect(() => {
+    if (!autoOpen) return
+    setOpen(true)
+    onAutoOpenHandled?.()
+  }, [autoOpen, onAutoOpenHandled])
 
   // Reconcile per-leg/per-extra rate types once the rate-type list resolves (it may load after
   // the configure step opens): fill empty ones and replace archived ones with the default.
@@ -661,8 +672,6 @@ export function BuildBookingDialog({
               })}
             </div>
 
-            {/* TODO: remove later — Extras section hidden per request, keep logic intact for re-enable */}
-            {false && (
             <div className="space-y-3 border-t pt-4">
               <div>
                 <Label>Extras (optional)</Label>
@@ -716,7 +725,6 @@ export function BuildBookingDialog({
                 addLabel="Add extra"
               />
             </div>
-            )}
 
             {validationErrors.length > 0 && (
               <ul className="space-y-1 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">

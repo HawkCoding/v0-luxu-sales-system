@@ -5,6 +5,7 @@ import { writeAuditLog } from "@/lib/audit-write"
 import { loadAllowedSuiteVariantIds, findInvalidVariantField } from "@/lib/packages/suite-config"
 import { computeLegPassengerTotals } from "@/lib/packages/passenger-totals"
 import { recomputeBookingTripDates } from "@/lib/packages/recompute-trip-dates"
+import { learnSuiteAliasesFromUnits } from "@/lib/suites/learn-from-units"
 import type { Database } from "@/lib/supabase/types"
 
 export const runtime = "nodejs"
@@ -244,6 +245,22 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
         if (insertUnitsError) return safeSupabaseError("package-selections:insert-units", insertUnitsError)
       }
+    }
+  }
+
+  // Learn from the correction. This is the higher-traffic correction point -- consultants fix
+  // suites here far more often than in the import review modal -- and it uses the same alias
+  // store. Best-effort: a failed alias write must never fail the selection update.
+  if (legsWithUnits.length > 0) {
+    try {
+      await learnSuiteAliasesFromUnits(
+        supabase,
+        id,
+        legsWithUnits.flatMap((selection) => selection.units ?? []),
+        user.id,
+      )
+    } catch (error) {
+      console.error("package-selections:suiteAliasLearning", error)
     }
   }
 

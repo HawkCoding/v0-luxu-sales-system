@@ -16,6 +16,7 @@ import type {
   SupplierRateCard,
   SupplierRoute,
   SupplierSuiteType,
+  SupplierSuiteAlias,
   SupplierVariantValue,
   TransportRequestServiceType,
   VehicleRentalRouteDetails,
@@ -361,6 +362,38 @@ export interface SupplierDetailMapInput {
   rateTypes?: RateTypeRow[]
   rateAdjustments?: SupplierRateAdjustmentRow[]
   kindDefaultRateTypes?: SupplierKindDefaultRateTypeRow[]
+  suiteAliases?: SuiteVocabAliasRow[]
+}
+
+type SuiteVocabAliasRow = {
+  axis: string
+  phrase: string
+  status: string
+  suite_type_id: string | null
+  bedroom_type_id: string | null
+  bedroom_layout_id: string | null
+  bathroom_type_id: string | null
+}
+
+const SUITE_ALIAS_AXIS_BY_DB_VALUE: Record<string, SupplierSuiteAlias["axis"]> = {
+  suite_type: "suiteType",
+  bedroom_type: "bedroomType",
+  bedroom_layout: "bedroomLayout",
+  bathroom_type: "bathroomType",
+}
+
+function mapSuiteAlias(row: SuiteVocabAliasRow): SupplierSuiteAlias | null {
+  const axis = SUITE_ALIAS_AXIS_BY_DB_VALUE[row.axis]
+  const targetId =
+    row.suite_type_id ?? row.bedroom_type_id ?? row.bedroom_layout_id ?? row.bathroom_type_id ?? null
+  if (!axis || !targetId) return null
+
+  return {
+    axis,
+    phrase: row.phrase,
+    targetId,
+    status: row.status === "confirmed" ? "confirmed" : "provisional",
+  }
 }
 
 function buildSuiteTypeMemberships(
@@ -461,6 +494,9 @@ export function mapSupplierDetail(
     bathroomTypes: [...bathroomTypeRows]
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name))
       .map(mapVariantValue),
+    suiteAliases: (variants.suiteAliases ?? [])
+      .map(mapSuiteAlias)
+      .filter((alias): alias is SupplierSuiteAlias => alias !== null),
     rateTypes: rateTypes,
     rateAdjustments: (variants.rateAdjustments ?? []).map((row) => ({
       rateTypeId: row.rate_type_id,

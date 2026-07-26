@@ -1,3 +1,5 @@
+import type { DraftSuiteUnit } from "@/lib/suites/draft-suite-unit"
+
 export interface ParsedDraft {
   customer: {
     title: string
@@ -23,12 +25,16 @@ export interface ParsedDraft {
     adults: number
     children: number
     suites: number
+    /**
+     * The customer's own suite wording, verbatim, one entry per requested suite. NOT a DB name --
+     * resolving these to suite_types + config axes needs the supplier's vocabulary and happens in
+     * lib/suites/, outside this pure parser.
+     */
+    suitePhrases: string[]
+    /** Compatibility view of `suitePhrases[0]`; raw wording, not a resolved suite type name. */
     suiteType: string
-    suiteTypes?: string[]
-    suiteSelections?: Array<{
-      suiteTypeId: string
-      suiteTypeName: string
-    }>
+    /** Resolved units. Populated by the resolver step, never by the parser. */
+    suiteUnits?: DraftSuiteUnit[]
   }
   notes: string
   formFields: {
@@ -126,6 +132,87 @@ function getLabeledFieldValue(text: string, labelPatterns: RegExp[]): string {
   }
 
   return ''
+}
+
+/**
+ * Leading words that are request framing or quantities rather than part of the suite description.
+ * Stripped iteratively from the front, since prose stacks them ("would like 1 Royal double suite").
+ */
+const SUITE_PHRASE_LEADING_NOISE = new Set([
+  'a', 'an', 'the', 'x', 'need', 'needs', 'want', 'wants', 'would', 'like', 'love', 'book',
+  'booking', 'please', 'quote', 'for', 'in', 'on', 'we', 'i', 'us', 'my', 'our', 'prefer',
+  'prefers', 'request', 'requesting', 'reserve', 'is', 'are', 'be', 'looking', 'after', 'to',
+  'and', 'travelling', 'travel', 'require', 'requires', 'take', 'want,',
+])
+
+function cleanSuitePhrase(value: string): string {
+  const words = value
+    .replace(/[.,;:!?]+$/, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+
+  let start = 0
+  while (start < words.length) {
+    const word = words[start].toLowerCase().replace(/[.,;:!?]+$/, "")
+    if (SUITE_PHRASE_LEADING_NOISE.has(word) || /^\d+$/.test(word)) {
+      start += 1
+      continue
+    }
+    break
+  }
+
+  return words.slice(start).join(" ").trim()
+}
+
+/**
+ * Pulls the customer's raw suite wording out of the email. Structured `Suite Type` / `Suite Type 2`
+ * labels win (the Gravity Forms shape); otherwise falls back to a sentence-scoped capture around
+ * the word "suite" for prose enquiries. Returns wording exactly as written -- never a DB name.
+ */
+function extractSuitePhrases(text: string): string[] {
+  const phrases: string[] = []
+
+  const lines = text.split(/\r?\n/)
+  for (let index = 0; index < lines.length; index += 1) {
+    const sameLineMatch = lines[index].trim().match(/^(.+?)\s*[:|]\s*(.+)$/)
+    if (sameLineMatch && /^suite\s*type(?:\s*\d+)?$/i.test(normalizeLabel(sameLineMatch[1]))) {
+      const cleaned = cleanSuitePhrase(sameLineMatch[2])
+      if (cleaned) phrases.push(cleaned)
+      continue
+    }
+
+    if (!/^suite\s*type(?:\s*\d+)?$/i.test(normalizeLabel(lines[index]))) continue
+
+    const value = lines.slice(index + 1).map((line) => line.trim()).find((line) => line.length > 0)
+    if (value && !isFormFieldLabel(value)) {
+      const cleaned = cleanSuitePhrase(value)
+      if (cleaned) phrases.push(cleaned)
+    }
+  }
+
+  if (phrases.length > 0) return phrases
+
+  // Prose fallback: the noun phrase ending in "suite", plus any trailing "with ..." qualifier
+  // that carries the bathroom/layout wording (e.g. "Deluxe Twin with shower").
+  const proseMatch = text.match(
+    /\b((?:[A-Za-z0-9/'-]+[ \t]+){0,4}suites?(?:[ \t]+with[ \t]+(?:[A-Za-z0-9/'-]+[ \t]*){1,4})?)/i,
+  )
+  if (proseMatch) {
+    const cleaned = cleanSuitePhrase(proseMatch[1])
+    if (cleaned && !/^suites?$/i.test(cleaned)) return [cleaned]
+  }
+
+  // "Deluxe Twin with shower" style wording that never says "suite" at all.
+  const withQualifierMatch = text.match(
+    /\b((?:[A-Za-z0-9/'-]+[ \t]+){1,3}with[ \t]+(?:shower|bath|bathroom)[A-Za-z0-9/' \t-]{0,20})/i,
+  )
+  if (withQualifierMatch) {
+    const cleaned = cleanSuitePhrase(withQualifierMatch[1])
+    if (cleaned) return [cleaned]
+  }
+
+  return []
 }
 
 export function parseEmailDraft(text: string): ParsedDraft {
@@ -304,7 +391,9 @@ export function parseEmailDraft(text: string): ParsedDraft {
     confidence['guests.children'] = 'high'
   }
   
-  // Extract suites
+  // Extract suites. Deliberately NOT defaulted to 1 when unstated: an invented suite count
+  // silently manufactures a room nobody asked for. Unstated stays 0 and is reported as a
+  // missing field instead.
   let suites = 0
   const suitesLabelValue = getLabeledFieldValue(text, [
     /^(?:no\.?|number)\s*of\s*suites?$/i,
@@ -317,37 +406,15 @@ export function parseEmailDraft(text: string): ParsedDraft {
   } else if (suitesInlineMatch) {
     suites = parseInt(suitesInlineMatch[1])
     confidence['guests.suites'] = 'high'
-  } else if (adults > 0) {
-    // Default to 1 suite if not specified
-    suites = 1
-    confidence['guests.suites'] = 'low'
   }
-  
-  // Extract suite type
-  let suiteType = ''
-  if (/royal/i.test(text)) {
-    suiteType = 'Royal'
-    confidence['guests.suiteType'] = 'high'
-    if (/double|couple/i.test(text)) suiteType = 'Royal Double Suite'
-    else if (/twin/i.test(text)) suiteType = 'Royal Twin Suite'
-    else suiteType = 'Royal Double Suite'
-  } else if (/deluxe/i.test(text)) {
-    suiteType = 'Deluxe'
-    confidence['guests.suiteType'] = 'high'
-    if (/double|couple/i.test(text)) suiteType = 'Deluxe Double Suite'
-    else if (/twin/i.test(text)) suiteType = 'Deluxe Twin Suite'
-    else suiteType = 'Deluxe Double Suite'
-  } else if (/pullman/i.test(text)) {
-    suiteType = 'Pullman'
-    confidence['guests.suiteType'] = 'high'
-    if (/double|couple/i.test(text)) suiteType = 'Pullman Double Suite'
-    else if (/twin/i.test(text)) suiteType = 'Pullman Twin Suite'
-    else suiteType = 'Pullman Double Suite'
-  } else if (/\bsuite\b/i.test(text)) {
-    suiteType = 'Other'
-    confidence['guests.suiteType'] = 'low'
-  }
-  
+
+  // Capture the customer's own suite wording verbatim. Matching it to real suite_types and
+  // config axes is the resolver's job (lib/suites/) -- it needs the supplier's vocabulary from
+  // the DB, which this pure parser has no access to. Synthesising names here is what produced
+  // composite strings like "Deluxe Twin Suite" that exist in no supplier's vocabulary.
+  const suitePhrases = extractSuitePhrases(text)
+  if (suitePhrases.length > 0) confidence['guests.suiteType'] = 'high'
+
   // Notes: everything not explicitly extracted
   const notes = text
   
@@ -375,7 +442,8 @@ export function parseEmailDraft(text: string): ParsedDraft {
       adults,
       children,
       suites,
-      suiteType
+      suitePhrases,
+      suiteType: suitePhrases[0] ?? ''
     },
     notes,
     formFields: {
@@ -407,6 +475,18 @@ export function validateDraft(draft: ParsedDraft): ValidationResult {
   if (!draft.trip.departureDate) missingRequired.push('Departure date')
   if (!draft.guests.adults || draft.guests.adults < 1) missingRequired.push('Adults')
   if (!draft.guests.suites || draft.guests.suites < 1) missingRequired.push('Suites')
+
+  // Suite type is reported but NOT required: an enquiry saves with it blank rather than being
+  // blocked, and the hard gate stays where it already was -- quote build, which refuses to price
+  // a leg with no suite type (lib/quotes/build-from-package.ts).
+  const unresolvedSuites = (draft.guests.suiteUnits ?? []).filter((unit) => !unit.suiteTypeId)
+  if (draft.guests.suiteUnits && unresolvedSuites.length > 0) {
+    warnings.push(
+      unresolvedSuites.length === 1
+        ? 'Suite type not identified — select one before building a quote'
+        : `${unresolvedSuites.length} suite types not identified — select them before building a quote`,
+    )
+  }
   
   // Check low confidence fields
   Object.entries(draft.confidence).forEach(([field, conf]) => {

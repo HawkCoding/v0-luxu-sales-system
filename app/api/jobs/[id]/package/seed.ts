@@ -23,7 +23,62 @@ interface SeedOptions {
   tripEndDate: string | null
 }
 
-/** Fan out a package's legs into booking_package_selections (+ blank units) and
+interface CapturedSuite {
+  suiteTypeId: string
+  bedroomTypeId: string | null
+  bedroomLayoutId: string | null
+  bathroomTypeId: string | null
+}
+
+/**
+ * The suites captured on the enquiry, grouped by the supplier that owns each suite type, so a
+ * package leg can pick up the ones belonging to its own supplier. Suites with no resolved suite
+ * type are skipped -- there is nothing to carry, and a unit must not be invented for a room whose
+ * type is still unknown.
+ */
+async function loadCapturedSuitesBySupplier(
+  supabase: SupabaseClient<Database>,
+  bookingId: string,
+): Promise<Map<string, CapturedSuite[]>> {
+  const { data: suites } = await supabase
+    .from("booking_suites")
+    .select("suite_number, suite_type_id, bedroom_type_id, bedroom_layout_id, bathroom_type_id")
+    .eq("booking_id", bookingId)
+    .order("suite_number", { ascending: true })
+
+  const resolved = (suites ?? []).filter(
+    (suite): suite is typeof suite & { suite_type_id: string } => Boolean(suite.suite_type_id),
+  )
+  if (resolved.length === 0) return new Map()
+
+  const { data: suiteTypes } = await supabase
+    .from("suite_types")
+    .select("id, supplier_id")
+    .in("id", resolved.map((suite) => suite.suite_type_id))
+
+  const supplierBySuiteTypeId = new Map(
+    (suiteTypes ?? []).map((suiteType) => [suiteType.id, suiteType.supplier_id]),
+  )
+
+  const grouped = new Map<string, CapturedSuite[]>()
+  for (const suite of resolved) {
+    const supplierId = supplierBySuiteTypeId.get(suite.suite_type_id)
+    if (!supplierId) continue
+
+    const list = grouped.get(supplierId) ?? []
+    list.push({
+      suiteTypeId: suite.suite_type_id,
+      bedroomTypeId: suite.bedroom_type_id,
+      bedroomLayoutId: suite.bedroom_layout_id,
+      bathroomTypeId: suite.bathroom_type_id,
+    })
+    grouped.set(supplierId, list)
+  }
+
+  return grouped
+}
+
+/** Fan out a package's legs into booking_package_selections (+ units seeded from the enquiry) and
  * booking_transport_requests (+ blank rental details) for a booking. Shared by the
  * predefined-package assign flow and the Build Booking (hidden-package) flow. */
 export async function seedSelectionsForLegs(
@@ -49,14 +104,33 @@ export async function seedSelectionsForLegs(
 
   if (insertError) return { error: insertError.message }
 
-  // Seed one blank unit per non-transport leg so the UI has a row to fill in immediately.
+  // Seed units per non-transport leg. Where the enquiry already captured a suite for this leg's
+  // supplier, carry its suite type AND configuration across -- otherwise the bedroom/layout/
+  // bathroom values captured at intake would be silently dropped at the point they finally
+  // matter, since booking_package_selection_units is what quote build and the voucher read.
   const selectionIdByLegId = new Map((insertedSelections ?? []).map((row) => [row.package_leg_id, row.id]))
   const unitLegs = legs.filter((leg) => !TRANSPORT_SUPPLIER_KINDS.has(leg.kind ?? ""))
   if (unitLegs.length > 0) {
-    const unitRows: BookingPackageSelectionUnitInsert[] = unitLegs
-      .map((leg) => selectionIdByLegId.get(leg.id))
-      .filter((selectionId): selectionId is string => Boolean(selectionId))
-      .map((selectionId) => ({ selection_id: selectionId, sort_order: 0 }))
+    const capturedSuitesBySupplier = await loadCapturedSuitesBySupplier(supabase, bookingId)
+
+    const unitRows: BookingPackageSelectionUnitInsert[] = unitLegs.flatMap((leg) => {
+      const selectionId = selectionIdByLegId.get(leg.id)
+      if (!selectionId) return []
+
+      const captured = capturedSuitesBySupplier.get(leg.supplier_id) ?? []
+      if (captured.length === 0) {
+        return [{ selection_id: selectionId, sort_order: 0 }]
+      }
+
+      return captured.map((suite, index) => ({
+        selection_id: selectionId,
+        suite_type_id: suite.suiteTypeId,
+        bedroom_type_id: suite.bedroomTypeId,
+        bedroom_layout_id: suite.bedroomLayoutId,
+        bathroom_type_id: suite.bathroomTypeId,
+        sort_order: index,
+      }))
+    })
 
     if (unitRows.length > 0) {
       const { error: unitInsertError } = await supabase

@@ -584,30 +584,66 @@ export type Database = {
       }
       booking_suites: {
         Row: {
+          bathroom_type_id: string | null
+          bedroom_layout_id: string | null
+          bedroom_type_id: string | null
           booking_id: string
           created_at: string
           id: string
+          match_json: Json | null
+          source_phrase: string | null
           suite_number: number
           suite_type_id: string | null
           suite_type_name: string | null
         }
         Insert: {
+          bathroom_type_id?: string | null
+          bedroom_layout_id?: string | null
+          bedroom_type_id?: string | null
           booking_id: string
           created_at?: string
           id?: string
+          match_json?: Json | null
+          source_phrase?: string | null
           suite_number: number
           suite_type_id?: string | null
           suite_type_name?: string | null
         }
         Update: {
+          bathroom_type_id?: string | null
+          bedroom_layout_id?: string | null
+          bedroom_type_id?: string | null
           booking_id?: string
           created_at?: string
           id?: string
+          match_json?: Json | null
+          source_phrase?: string | null
           suite_number?: number
           suite_type_id?: string | null
           suite_type_name?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "booking_suites_bathroom_type_id_fkey"
+            columns: ["bathroom_type_id"]
+            isOneToOne: false
+            referencedRelation: "bathroom_types"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_suites_bedroom_layout_id_fkey"
+            columns: ["bedroom_layout_id"]
+            isOneToOne: false
+            referencedRelation: "bedroom_layouts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_suites_bedroom_type_id_fkey"
+            columns: ["bedroom_type_id"]
+            isOneToOne: false
+            referencedRelation: "bedroom_types"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "booking_suites_booking_id_fkey"
             columns: ["booking_id"]
@@ -2979,6 +3015,96 @@ export type Database = {
           },
         ]
       }
+      suite_vocab_aliases: {
+        Row: {
+          axis: Database["public"]["Enums"]["suite_alias_axis"]
+          bathroom_type_id: string | null
+          bedroom_layout_id: string | null
+          bedroom_type_id: string | null
+          confirmed_at: string | null
+          created_at: string
+          created_by: string | null
+          hit_count: number
+          id: string
+          last_seen_at: string | null
+          phrase: string
+          status: Database["public"]["Enums"]["suite_alias_status"]
+          suite_type_id: string | null
+          supplier_id: string
+          updated_at: string
+        }
+        Insert: {
+          axis: Database["public"]["Enums"]["suite_alias_axis"]
+          bathroom_type_id?: string | null
+          bedroom_layout_id?: string | null
+          bedroom_type_id?: string | null
+          confirmed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          hit_count?: number
+          id?: string
+          last_seen_at?: string | null
+          phrase: string
+          status?: Database["public"]["Enums"]["suite_alias_status"]
+          suite_type_id?: string | null
+          supplier_id: string
+          updated_at?: string
+        }
+        Update: {
+          axis?: Database["public"]["Enums"]["suite_alias_axis"]
+          bathroom_type_id?: string | null
+          bedroom_layout_id?: string | null
+          bedroom_type_id?: string | null
+          confirmed_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          hit_count?: number
+          id?: string
+          last_seen_at?: string | null
+          phrase?: string
+          status?: Database["public"]["Enums"]["suite_alias_status"]
+          suite_type_id?: string | null
+          supplier_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "suite_vocab_aliases_bathroom_type_id_fkey"
+            columns: ["bathroom_type_id"]
+            isOneToOne: false
+            referencedRelation: "bathroom_types"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "suite_vocab_aliases_bedroom_layout_id_fkey"
+            columns: ["bedroom_layout_id"]
+            isOneToOne: false
+            referencedRelation: "bedroom_layouts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "suite_vocab_aliases_bedroom_type_id_fkey"
+            columns: ["bedroom_type_id"]
+            isOneToOne: false
+            referencedRelation: "bedroom_types"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "suite_vocab_aliases_suite_type_id_fkey"
+            columns: ["suite_type_id"]
+            isOneToOne: false
+            referencedRelation: "suite_types"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "suite_vocab_aliases_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       supplier_email_labels: {
         Row: {
           created_at: string
@@ -3703,6 +3829,12 @@ export type Database = {
         | "phone_call"
         | "email"
         | "travel_agent"
+      suite_alias_axis:
+        | "suite_type"
+        | "bedroom_type"
+        | "bedroom_layout"
+        | "bathroom_type"
+      suite_alias_status: "provisional" | "confirmed"
       supplier_kind:
         | "train_operator"
         | "hotel_property"
@@ -3891,6 +4023,13 @@ export const Constants = {
         "email",
         "travel_agent",
       ],
+      suite_alias_axis: [
+        "suite_type",
+        "bedroom_type",
+        "bedroom_layout",
+        "bathroom_type",
+      ],
+      suite_alias_status: ["provisional", "confirmed"],
       supplier_kind: [
         "train_operator",
         "hotel_property",

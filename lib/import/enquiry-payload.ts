@@ -1,5 +1,18 @@
 import { type ParsedDraft } from "@/lib/import/parseEmailDraft"
-import { getDraftSuiteTypeNames } from "@/lib/import/suite-selections"
+import { getDraftSuiteUnits } from "@/lib/import/suite-selections"
+import type { SuiteAxis } from "@/lib/suites/suite-vocabulary"
+
+export interface EnquirySuiteUnitPayload {
+  suiteNumber: number
+  rawPhrase: string
+  suiteTypeId: string | null
+  suiteTypeName: string | null
+  bedroomTypeId: string | null
+  bedroomLayoutId: string | null
+  bathroomTypeId: string | null
+  match: Record<SuiteAxis, { score: number; source: string; notApplicable: boolean }>
+  editedAxes: SuiteAxis[]
+}
 
 export interface EnquiryImportPayload {
   rawText: string
@@ -16,11 +29,7 @@ export interface EnquiryImportPayload {
   noOfSuites: number
   noOfAdults: number
   noOfChildren: number
-  suiteTypes: string[]
-  suiteSelections?: Array<{
-    suiteTypeId: string
-    suiteTypeName: string
-  }>
+  suiteUnits: EnquirySuiteUnitPayload[]
   packageOption?: string
   hotelOption?: string
   flightBooking?: string
@@ -37,10 +46,38 @@ export interface EnquiryImportPayload {
 }
 
 export function buildEnquiryImportPayload(draft: ParsedDraft): EnquiryImportPayload {
-  const suiteTypes = getDraftSuiteTypeNames(draft)
-  const suiteSelections = draft.guests.suiteSelections?.filter(
-    (selection) => selection.suiteTypeId && selection.suiteTypeName,
-  )
+  const suiteUnits: EnquirySuiteUnitPayload[] = getDraftSuiteUnits(draft).map((unit) => ({
+    suiteNumber: unit.suiteNumber,
+    rawPhrase: unit.rawPhrase,
+    suiteTypeId: unit.suiteTypeId,
+    suiteTypeName: unit.suiteTypeName,
+    bedroomTypeId: unit.bedroomTypeId,
+    bedroomLayoutId: unit.bedroomLayoutId,
+    bathroomTypeId: unit.bathroomTypeId,
+    match: {
+      suiteType: {
+        score: unit.match.suiteType.score,
+        source: unit.match.suiteType.source,
+        notApplicable: unit.match.suiteType.notApplicable,
+      },
+      bedroomType: {
+        score: unit.match.bedroomType.score,
+        source: unit.match.bedroomType.source,
+        notApplicable: unit.match.bedroomType.notApplicable,
+      },
+      bedroomLayout: {
+        score: unit.match.bedroomLayout.score,
+        source: unit.match.bedroomLayout.source,
+        notApplicable: unit.match.bedroomLayout.notApplicable,
+      },
+      bathroomType: {
+        score: unit.match.bathroomType.score,
+        source: unit.match.bathroomType.source,
+        notApplicable: unit.match.bathroomType.notApplicable,
+      },
+    },
+    editedAxes: unit.editedAxes ?? [],
+  }))
 
   return {
     rawText: draft.rawText,
@@ -51,14 +88,17 @@ export function buildEnquiryImportPayload(draft: ParsedDraft): EnquiryImportPayl
     contactNumber: draft.customer.phone,
     email: draft.customer.email,
     country: draft.customer.country,
-    direction: draft.trip.route || "Pretoria to Cape Town",
+    // No fabricated fallback: an unparsed route must stay empty and be reported, not silently
+    // become a Pretoria-Cape Town enquiry.
+    direction: draft.trip.route,
     departureDate: draft.trip.departureDate,
     supplierId: draft.trip.supplierId || undefined,
     noOfSuites: draft.guests.suites,
     noOfAdults: draft.guests.adults,
     noOfChildren: draft.guests.children,
-    suiteTypes: suiteTypes.length > 0 ? suiteTypes : ["Pullman Twin Suite"],
-    suiteSelections: suiteSelections && suiteSelections.length > 0 ? suiteSelections : undefined,
+    // Likewise no placeholder suite type: unresolved units travel with null ids and the raw
+    // wording, so the consultant sees what the customer asked for and picks it themselves.
+    suiteUnits,
     packageOption: draft.trip.packageOption || undefined,
     hotelOption: draft.trip.hotelOption || undefined,
     flightBooking: draft.trip.flightBooking || undefined,
@@ -68,7 +108,7 @@ export function buildEnquiryImportPayload(draft: ParsedDraft): EnquiryImportPayl
     extractedJson: {
       parsedFrom: "email_draft",
       formFields: draft.formFields,
-      requestedSuite: suiteTypes[0] || null,
+      requestedSuite: draft.guests.suitePhrases[0] ?? null,
       purpose: draft.trip.purpose,
     },
     termsAccepted: true,

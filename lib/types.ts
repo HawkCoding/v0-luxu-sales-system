@@ -527,6 +527,14 @@ export interface SupplierVariantValue {
   archivedAt: string | null
 }
 
+export interface SupplierSuiteAlias {
+  axis: "suiteType" | "bedroomType" | "bedroomLayout" | "bathroomType"
+  /** Already normalized; matched by exact equality only, never fuzzily. */
+  phrase: string
+  targetId: string
+  status: "provisional" | "confirmed"
+}
+
 export interface SupplierSuiteType {
   id: string
   supplierId: string
@@ -753,6 +761,11 @@ export interface SupplierDetail extends Supplier {
   bedroomTypes: SupplierVariantValue[]
   bedroomLayouts: SupplierVariantValue[]
   bathroomTypes: SupplierVariantValue[]
+  /**
+   * Learned phrase -> vocabulary mappings for this supplier. Lets client code run the same pure
+   * suite resolver the server uses, so both agree by construction. See lib/suites/.
+   */
+  suiteAliases: SupplierSuiteAlias[]
   rateTypes: RateType[]
   /** Non-default rates that apply to this supplier and their markdown. */
   rateAdjustments: SupplierRateAdjustment[]

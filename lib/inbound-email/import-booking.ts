@@ -2,6 +2,10 @@ import { detectCountryInText, loadCountryAliasMap, normalizeCountry } from "@/li
 import { buildEnquiryImportPayload } from "@/lib/import/enquiry-payload"
 import { type ParsedDraft } from "@/lib/import/parseEmailDraft"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
+import { normalizeLookupValue } from "@/lib/normalize-lookup-value"
+import { resolveSuitePhrases, unresolvedSuitePhrase } from "@/lib/suites/resolve-suite-phrase"
+import { loadSupplierSuiteVocabulary } from "@/lib/suites/suite-vocabulary"
+import { SUITE_TYPE_MISSING_FIELD } from "@/lib/suites/missing-fields"
 import { createServiceClient } from "@/lib/supabase/server"
 import { allocateJobNumberForBooking } from "@/lib/job-numbering"
 import { createRawEmailPreview } from "@/lib/inbound-email/html"
@@ -26,10 +30,6 @@ export interface CreatedEmailBooking {
   bookingNumber: string
   duplicateOfBookingId: string | null
   rawPreview: string
-}
-
-function normalizeLookupValue(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
 }
 
 async function resolveTrainSupplierId(
@@ -302,6 +302,16 @@ export async function createEmailBookingFromParsedDraft(
   const routeId = await findRouteId(supabase, payload.direction, trainSupplierId)
   const packageId = await findPackageId(supabase, payload.packageOption)
   const hotelSupplierId = await findHotelSupplierId(supabase, payload.hotelOption)
+
+  // Suite resolution needs the supplier's vocabulary, so it can only run once the train operator
+  // is known. Without one, the raw wording is kept but nothing is resolved.
+  const suiteVocabulary = trainSupplierId
+    ? await loadSupplierSuiteVocabulary(supabase, trainSupplierId)
+    : null
+  const suiteResolutions = suiteVocabulary
+    ? resolveSuitePhrases(parsed.guests.suitePhrases, suiteVocabulary)
+    : parsed.guests.suitePhrases.map((phrase) => unresolvedSuitePhrase(phrase))
+  const unresolvedSuiteCount = suiteResolutions.filter((resolution) => !resolution.suiteTypeId).length
   const rawPreview = createRawEmailPreview(context.rawText)
   const extractedJson = {
     ...payload.extractedJson,
@@ -329,6 +339,13 @@ export async function createEmailBookingFromParsedDraft(
     },
   } satisfies Json
 
+  // An unidentified suite is a reported gap, never a blocker: the booking is created either way
+  // and quote build stays the only hard stop.
+  const missingFieldsWithSuites =
+    unresolvedSuiteCount > 0 && !context.missingFields.includes(SUITE_TYPE_MISSING_FIELD)
+      ? [...context.missingFields, SUITE_TYPE_MISSING_FIELD]
+      : context.missingFields
+
   const { bookingNumber: allocatedBookingNumber } = await allocateJobNumberForBooking(supabase)
 
   const bookingInsert: BookingInsert = {
@@ -348,8 +365,9 @@ export async function createEmailBookingFromParsedDraft(
     raw_text: context.rawText,
     extracted_json: extractedJson,
     terms_accepted: true,
-    email_import_needs_review: context.missingFields.length > 0 || context.warnings.length > 0,
-    email_import_missing_fields: context.missingFields,
+    email_import_needs_review:
+      missingFieldsWithSuites.length > 0 || context.warnings.length > 0,
+    email_import_missing_fields: missingFieldsWithSuites,
     email_import_warnings: context.warnings,
     email_import_duplicate_of_booking_id: duplicateOfBookingId,
     email_import_subject: context.subject,
@@ -368,13 +386,30 @@ export async function createEmailBookingFromParsedDraft(
     throw new Error(bookingError?.message || "Failed to create booking")
   }
 
-  const suiteTypes = payload.suiteTypes.filter(Boolean)
-  if (suiteTypes.length > 0) {
+  // Resolve the customer's raw suite wording against this supplier's real vocabulary. Anything
+  // uncertain is stored as null with its provenance rather than guessed -- and no alias is ever
+  // recorded or promoted here, because there is no human in this path to learn from.
+  if (suiteResolutions.length > 0) {
     await supabase.from("booking_suites").insert(
-      suiteTypes.map((suiteName, index) => ({
+      suiteResolutions.map((resolution, index) => ({
         booking_id: booking.id,
         suite_number: index + 1,
-        suite_type_name: suiteName,
+        suite_type_id: resolution.suiteTypeId,
+        suite_type_name:
+          suiteVocabulary?.suiteTypes.find((entry) => entry.id === resolution.suiteTypeId)?.name
+          ?? resolution.rawPhrase,
+        bedroom_type_id: resolution.bedroomTypeId,
+        bedroom_layout_id: resolution.bedroomLayoutId,
+        bathroom_type_id: resolution.bathroomTypeId,
+        source_phrase: resolution.rawPhrase,
+        match_json: JSON.parse(
+          JSON.stringify({
+            score: resolution.score,
+            source: resolution.source,
+            unresolvedAxes: resolution.unresolvedAxes,
+            axes: resolution.axes,
+          }),
+        ) as Json,
       })),
     )
   }

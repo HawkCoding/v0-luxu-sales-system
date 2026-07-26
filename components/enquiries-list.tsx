@@ -8,6 +8,7 @@ import { FileText, Clipboard, Send, AlertCircle } from "lucide-react"
 import Link from "next/link"
 import { Skeleton } from "@/components/ui/skeleton"
 import { formatDisplayDate } from "@/lib/date-format"
+import { SUITE_TYPE_MISSING_FIELD } from "@/lib/suites/missing-fields"
 import type { EnquiryListItem } from "@/lib/use-data"
 
 interface EnquiriesListProps {
@@ -105,6 +106,15 @@ export function EnquiriesList({ enquiries, isLoading, error, onSendQuote, active
                       {e.emailImportDuplicateOfBookingId && (
                         <Badge variant="outline" className="text-xs">
                           Possible duplicate
+                        </Badge>
+                      )}
+                      {(e.emailImportMissingFields || []).includes(SUITE_TYPE_MISSING_FIELD) && (
+                        <Badge
+                          variant="outline"
+                          className="text-xs border-yellow-600 text-yellow-700"
+                          title="The suite could not be identified from the enquiry wording — choose one before quoting"
+                        >
+                          Suite not identified
                         </Badge>
                       )}
                     </div>

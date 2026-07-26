@@ -20,7 +20,7 @@ import { DEFAULT_QUOTE_VALIDITY_DAYS, isoDateDaysFromNow } from "@/lib/quotes/qu
 
 interface CreateQuoteDialogProps {
   jobId: string
-  onCreated: () => void
+  onCreated: (quoteId: string) => void
 }
 
 function defaultValidityDate(): string {
@@ -58,15 +58,35 @@ export function CreateQuoteDialog({ jobId, onCreated }: CreateQuoteDialogProps) 
 
     setSaving(false)
 
+    const body = await res.json().catch(() => ({}))
+
     if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      setError(body.error ?? "Failed to create quote. Please try again.")
+      const message = body.error ?? "Failed to create quote. Please try again."
+      setError(message)
+      toast.error(message)
       return
     }
 
     toast.success("Draft quote created.")
     setOpen(false)
-    onCreated()
+    onCreated(body.id as string)
+  }
+
+  // No validity picker to confirm right now, so skip the intermediate dialog
+  // and create the quote directly on click — the caller auto-opens Build Booking after.
+  if (!QUOTE_VALIDITY_ENABLED) {
+    return (
+      <Button
+        variant="outline"
+        size="sm"
+        data-testid="create-quote-button"
+        onClick={handleSubmit}
+        disabled={saving}
+      >
+        <PlusCircle className="h-4 w-4 mr-1.5" />
+        {saving ? "Creating…" : "Create Quote"}
+      </Button>
+    )
   }
 
   return (

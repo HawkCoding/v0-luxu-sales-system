@@ -15,19 +15,57 @@ import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight } from "lucide-rea
 import { type ParsedDraft, validateDraft, countRequiredComplete } from "@/lib/import/parseEmailDraft"
 import { buildEnquiryImportPayload } from "@/lib/import/enquiry-payload"
 import {
-  applySuiteSelections,
-  getDraftSuiteTypeNames,
-  normalizeDraftSuiteTypes,
-  resizeSuiteTypeNames,
+  applySuiteResolutions,
+  getDraftSuiteUnits,
+  normalizeDraftSuiteUnits,
+  updateDraftSuiteAxisAtIndex,
   updateDraftSuiteCount,
-  updateDraftSuiteTypeAtIndex,
-  type DraftSuiteSelection,
 } from "@/lib/import/suite-selections"
+import { suiteVocabularyFromSupplierDetail, type SuiteAxis } from "@/lib/suites/suite-vocabulary"
 import { useActiveSuppliers, useSupplierDetail } from "@/lib/use-data"
+import { normalizeLookupValue } from "@/lib/normalize-lookup-value"
 import { cn } from "@/lib/utils"
 
-function normalizeLookupValue(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
+const CONFIG_AXES: ReadonlyArray<{
+  axis: Exclude<SuiteAxis, "suiteType">
+  label: string
+  idField: "bedroomTypeId" | "bedroomLayoutId" | "bathroomTypeId"
+  vocabKey: "bedroomTypes" | "bedroomLayouts" | "bathroomTypes"
+  allowedKey: "bedroomTypeIds" | "bedroomLayoutIds" | "bathroomTypeIds"
+}> = [
+  { axis: "bedroomType", label: "Bedroom Type", idField: "bedroomTypeId", vocabKey: "bedroomTypes", allowedKey: "bedroomTypeIds" },
+  { axis: "bedroomLayout", label: "Bedroom Layout", idField: "bedroomLayoutId", vocabKey: "bedroomLayouts", allowedKey: "bedroomLayoutIds" },
+  { axis: "bathroomType", label: "Bathroom Type", idField: "bathroomTypeId", vocabKey: "bathroomTypes", allowedKey: "bathroomTypeIds" },
+]
+
+interface FieldFlagsProps {
+  confidence?: "high" | "low"
+  dirty?: boolean
+  learned?: boolean
+}
+
+/**
+ * Per-field status badge. A field the consultant has edited shows nothing -- the parser's
+ * confidence for it is stale the moment a human overrides it, which is why the old inline
+ * `confidence === 'low'` checks left a "Check" badge stuck on corrected fields forever.
+ */
+function FieldFlags({ confidence, dirty, learned }: FieldFlagsProps) {
+  if (dirty) return null
+  if (learned) {
+    return (
+      <Badge variant="secondary" className="text-[10px] h-4" title="Filled from a previously learned phrase — confirm or correct it">
+        Learned
+      </Badge>
+    )
+  }
+  if (confidence === "low") {
+    return (
+      <Badge variant="outline" className="text-[10px] h-4" title="Parsed with low confidence — please check">
+        Check
+      </Badge>
+    )
+  }
+  return null
 }
 
 interface ReviewImportedDraftModalProps {
@@ -41,6 +79,8 @@ interface ReviewImportedDraftModalProps {
 export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBack, onSaveAndOpen }: ReviewImportedDraftModalProps) {
   const [draft, setDraft] = useState<ParsedDraft | null>(null)
   const [saving, setSaving] = useState(false)
+  /** Field paths the consultant has edited -- suppresses stale parser-confidence badges. */
+  const [dirtyFields, setDirtyFields] = useState<ReadonlySet<string>>(new Set())
   const [customerExpanded, setCustomerExpanded] = useState(true)
   const [tripExpanded, setTripExpanded] = useState(true)
   const [guestsExpanded, setGuestsExpanded] = useState(true)
@@ -62,7 +102,8 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
 
   useEffect(() => {
     if (parsedDraft) {
-      setDraft(normalizeDraftSuiteTypes(parsedDraft))
+      setDraft(normalizeDraftSuiteUnits(parsedDraft))
+      setDirtyFields(new Set())
     }
   }, [parsedDraft])
 
@@ -86,33 +127,16 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
     () => supplierDetail?.suiteTypes.filter((suiteType) => suiteType.active) ?? [],
     [supplierDetail],
   )
-  const suiteTypeNames = draft ? resizeSuiteTypeNames(getDraftSuiteTypeNames(draft), draft.guests.suites) : []
-  const suiteSelections = useMemo<DraftSuiteSelection[]>(() => {
-    const suiteTypeByName = new Map(
-      activeSuiteTypes.map((suiteType) => [normalizeLookupValue(suiteType.name), suiteType]),
-    )
-
-    return suiteTypeNames.flatMap((suiteTypeName) => {
-      const matchedSuiteType = suiteTypeByName.get(normalizeLookupValue(suiteTypeName))
-      if (!matchedSuiteType) return []
-
-      return [{
-        suiteTypeId: matchedSuiteType.id,
-        suiteTypeName: matchedSuiteType.name,
-      }]
-    })
-  }, [activeSuiteTypes, suiteTypeNames])
+  // The matcher is pure, so running it here against the same vocabulary the server uses means
+  // client and server agree by construction -- no extra endpoint, and it re-runs live when the
+  // consultant switches supplier.
+  const suiteVocabulary = useMemo(
+    () => (supplierDetail ? suiteVocabularyFromSupplierDetail(supplierDetail) : null),
+    [supplierDetail],
+  )
+  const suiteUnits = draft ? getDraftSuiteUnits(draft) : []
   const hasSuiteSelectorData = Boolean(selectedSupplier) && !supplierDetailLoading && activeSuiteTypes.length > 0
-  const suiteCount = draft?.guests.suites ?? 0
-  const hasCompleteSuiteSelections =
-    suiteCount > 0 &&
-    suiteSelections.length === suiteCount &&
-    suiteTypeNames.every((suiteTypeName) => suiteTypeName.trim().length > 0)
-  const suiteSelectionMissing = Boolean(draft) && (!selectedSupplier || !hasCompleteSuiteSelections)
-  const suiteSelectionWarning = selectedSupplier && suiteTypeNames.some((suiteTypeName) => {
-    if (!suiteTypeName.trim()) return false
-    return !activeSuiteTypes.some((suiteType) => normalizeLookupValue(suiteType.name) === normalizeLookupValue(suiteTypeName))
-  })
+  const unresolvedSuiteCount = suiteUnits.filter((unit) => !unit.suiteTypeId).length
 
   useEffect(() => {
     if (!draft || !selectedSupplier || draft.trip.supplierId === selectedSupplier.id) return
@@ -129,16 +153,34 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
         },
       }
     })
+    // Deliberately setDraft, not mutateDraft: this is system reconciliation, not a consultant
+    // edit, so it must not mark the supplier field dirty and suppress its badge.
   }, [draft?.trip.supplierId, selectedSupplier])
+
+  // Resolve the raw suite wording once the supplier's vocabulary is available. Axes the
+  // consultant has already edited are preserved by applySuiteResolutions.
+  useEffect(() => {
+    if (!suiteVocabulary || !draft) return
+    setDraft((prev) => (prev ? applySuiteResolutions(prev, suiteVocabulary) : prev))
+  }, [suiteVocabulary, draft?.guests.suitePhrases, draft?.guests.suites])
 
   if (!draft) return null
 
   const validation = validateDraft(draft)
   const progress = countRequiredComplete(draft)
 
+  /**
+   * The single mutation point for the draft. Every edit records its field path so FieldFlags can
+   * drop a stale badge, and so suite axis edits can be told apart from accepted suggestions.
+   */
+  const mutateDraft = (paths: string | string[], update: (prev: ParsedDraft) => ParsedDraft) => {
+    const touched = Array.isArray(paths) ? paths : [paths]
+    setDirtyFields((prev) => new Set([...prev, ...touched]))
+    setDraft((prev) => (prev ? update(prev) : prev))
+  }
+
   const updateDraft = (path: string, value: any) => {
-    setDraft(prev => {
-      if (!prev) return prev
+    mutateDraft(path, (prev) => {
       const keys = path.split('.')
       const updated = { ...prev }
       let current: any = updated
@@ -152,9 +194,11 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
   }
 
   const handleSave = async (openAfterSave: boolean = false) => {
-    if (!validation.isValid || suiteSelectionMissing) return
+    // An unidentified suite no longer blocks the save. The hard gate stays at quote build, which
+    // refuses to price a leg without a suite type; blocking here just stranded the enquiry.
+    if (!validation.isValid || saving) return
 
-    const draftToSave = applySuiteSelections(draft, suiteSelections)
+    const draftToSave = draft
 
     if (openAfterSave) {
       onSaveAndOpen(draftToSave)
@@ -222,9 +266,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                     <div className="space-y-1.5">
                       <Label className="text-sm flex items-center gap-1.5">
                         Title
-                        {draft.confidence['customer.title'] === 'low' && (
-                          <Badge variant="outline" className="text-[10px] h-4">Check</Badge>
-                        )}
+                        <FieldFlags confidence={draft.confidence['customer.title']} dirty={dirtyFields.has('customer.title')} />
                       </Label>
                       <Input
                         value={draft.customer.title}
@@ -235,9 +277,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                     <div className="space-y-1.5">
                       <Label className="text-sm flex items-center gap-1.5">
                         Country <span className="text-destructive">*</span>
-                        {draft.confidence['customer.country'] === 'low' && (
-                          <Badge variant="outline" className="text-[10px] h-4">Check</Badge>
-                        )}
+                        <FieldFlags confidence={draft.confidence['customer.country']} dirty={dirtyFields.has('customer.country')} />
                       </Label>
                       <Input
                         value={draft.customer.country}
@@ -251,9 +291,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                     <div className="space-y-1.5">
                       <Label className="text-sm flex items-center gap-1.5">
                         First name <span className="text-destructive">*</span>
-                        {draft.confidence['customer.firstName'] === 'low' && (
-                          <Badge variant="outline" className="text-[10px] h-4">Check</Badge>
-                        )}
+                        <FieldFlags confidence={draft.confidence['customer.firstName']} dirty={dirtyFields.has('customer.firstName')} />
                       </Label>
                       <Input
                         value={draft.customer.firstName}
@@ -265,9 +303,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                     <div className="space-y-1.5">
                       <Label className="text-sm flex items-center gap-1.5">
                         Surname <span className="text-destructive">*</span>
-                        {draft.confidence['customer.surname'] === 'low' && (
-                          <Badge variant="outline" className="text-[10px] h-4">Check</Badge>
-                        )}
+                        <FieldFlags confidence={draft.confidence['customer.surname']} dirty={dirtyFields.has('customer.surname')} />
                       </Label>
                       <Input
                         value={draft.customer.surname}
@@ -280,9 +316,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                   <div className="space-y-1.5">
                     <Label className="text-sm flex items-center gap-1.5">
                       Email <span className="text-destructive">*</span>
-                      {draft.confidence['customer.email'] === 'low' && (
-                        <Badge variant="outline" className="text-[10px] h-4">Check</Badge>
-                      )}
+                      <FieldFlags confidence={draft.confidence['customer.email']} dirty={dirtyFields.has('customer.email')} />
                     </Label>
                     <Input
                       type="email"
@@ -295,9 +329,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                   <div className="space-y-1.5">
                     <Label className="text-sm flex items-center gap-1.5">
                       Phone <span className="text-destructive">*</span>
-                      {draft.confidence['customer.phone'] === 'low' && (
-                        <Badge variant="outline" className="text-[10px] h-4">Check</Badge>
-                      )}
+                      <FieldFlags confidence={draft.confidence['customer.phone']} dirty={dirtyFields.has('customer.phone')} />
                     </Label>
                     <Input
                       value={draft.customer.phone}
@@ -309,9 +341,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                   <div className="space-y-1.5">
                     <Label className="text-sm flex items-center gap-1.5">
                       Province / Region
-                      {draft.confidence['customer.province'] === 'low' && (
-                        <Badge variant="outline" className="text-[10px] h-4">Check</Badge>
-                      )}
+                      <FieldFlags confidence={draft.confidence['customer.province']} dirty={dirtyFields.has('customer.province')} />
                     </Label>
                     <Input
                       value={draft.customer.province}
@@ -343,9 +373,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                   <div className="space-y-1.5">
                     <Label className="text-sm flex items-center gap-1.5">
                       Supplier <span className="text-destructive">*</span>
-                      {draft.confidence['trip.supplier'] === 'low' && (
-                        <Badge variant="outline" className="text-[10px] h-4">Check</Badge>
-                      )}
+                      <FieldFlags confidence={draft.confidence['trip.supplier']} dirty={dirtyFields.has('trip.supplier')} />
                     </Label>
                     <Select
                       value={selectedSupplier?.slug ?? ""}
@@ -382,9 +410,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                   <div className="space-y-1.5">
                     <Label className="text-sm flex items-center gap-1.5">
                       Route / Direction <span className="text-destructive">*</span>
-                      {draft.confidence['trip.route'] === 'low' && (
-                        <Badge variant="outline" className="text-[10px] h-4">Check</Badge>
-                      )}
+                      <FieldFlags confidence={draft.confidence['trip.route']} dirty={dirtyFields.has('trip.route')} />
                     </Label>
                     <Input
                       value={draft.trip.route}
@@ -396,9 +422,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                   <div className="space-y-1.5">
                     <Label className="text-sm flex items-center gap-1.5">
                       Departure Date <span className="text-destructive">*</span>
-                      {draft.confidence['trip.departureDate'] === 'low' && (
-                        <Badge variant="outline" className="text-[10px] h-4">Check</Badge>
-                      )}
+                      <FieldFlags confidence={draft.confidence['trip.departureDate']} dirty={dirtyFields.has('trip.departureDate')} />
                     </Label>
                     <DatePicker
                       value={draft.trip.departureDate}
@@ -465,9 +489,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                     <div className="space-y-1.5">
                       <Label className="text-sm flex items-center gap-1.5">
                         Adults <span className="text-destructive">*</span>
-                        {draft.confidence['guests.adults'] === 'low' && (
-                          <Badge variant="outline" className="text-[10px] h-4">Check</Badge>
-                        )}
+                        <FieldFlags confidence={draft.confidence['guests.adults']} dirty={dirtyFields.has('guests.adults')} />
                       </Label>
                       <Input
                         type="number"
@@ -492,9 +514,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                   <div className="space-y-1.5">
                     <Label className="text-sm flex items-center gap-1.5">
                       Number of Suites <span className="text-destructive">*</span>
-                      {draft.confidence['guests.suites'] === 'low' && (
-                        <Badge variant="outline" className="text-[10px] h-4">Check</Badge>
-                      )}
+                      <FieldFlags confidence={draft.confidence['guests.suites']} dirty={dirtyFields.has('guests.suites')} />
                     </Label>
                     <Input
                       type="number"
@@ -502,19 +522,16 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                       value={draft.guests.suites || ''}
                       onChange={(e) => {
                         const suiteCount = parseInt(e.target.value) || 0
-                        setDraft((prev) => prev ? updateDraftSuiteCount(prev, suiteCount) : prev)
+                        mutateDraft('guests.suites', (prev) => updateDraftSuiteCount(prev, suiteCount))
                       }}
                       placeholder="Number of suites"
                       className={!draft.guests.suites ? 'border-destructive' : ''}
                     />
                   </div>
-                  <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-4">
                     <div className="flex items-center justify-between gap-3">
                       <Label className="text-sm flex items-center gap-1.5">
-                        Suite Types <span className="text-destructive">*</span>
-                        {draft.confidence['guests.suiteType'] === 'low' && (
-                          <Badge variant="outline" className="text-[10px] h-4">Check</Badge>
-                        )}
+                        Suites &amp; Configuration
                       </Label>
                       {supplierDetailLoading && selectedSupplier ? (
                         <Badge variant="secondary" className="text-xs">Loading suites</Badge>
@@ -527,42 +544,145 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                       <p className="text-xs text-destructive">This supplier has no active suite types configured.</p>
                     ) : null}
 
-                    {suiteSelectionWarning ? (
-                      <p className="text-xs text-yellow-700">
-                        The imported suite name does not match this supplier. Please choose a configured suite type.
-                      </p>
-                    ) : null}
-
-                    {suiteTypeNames.map((suiteTypeName, index) => {
-                      const selectedSuiteType = activeSuiteTypes.find(
-                        (suiteType) => normalizeLookupValue(suiteType.name) === normalizeLookupValue(suiteTypeName),
-                      )
+                    {suiteUnits.map((unit, index) => {
+                      const suiteType = activeSuiteTypes.find((entry) => entry.id === unit.suiteTypeId)
+                      const suiteTypeCandidates = unit.match.suiteType.candidates
+                      const suiteTypeLearned = unit.match.suiteType.source === "alias"
+                      const vocabSuiteType = suiteVocabulary?.suiteTypes.find((entry) => entry.id === unit.suiteTypeId)
 
                       return (
-                        <div key={index} className="space-y-1.5">
-                          <Label className="text-xs text-muted-foreground">Suite {index + 1}</Label>
-                          <Select
-                            value={selectedSuiteType?.name ?? ""}
-                            onValueChange={(value) => {
-                              setDraft((prev) => prev ? updateDraftSuiteTypeAtIndex(prev, index, value) : prev)
-                            }}
-                            disabled={!hasSuiteSelectorData}
-                          >
-                            <SelectTrigger
-                              className={cn(
-                                !selectedSuiteType && selectedSupplier && !supplierDetailLoading ? "border-destructive" : "",
-                              )}
+                        <div key={index} className="space-y-2 rounded-md border p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <Label className="text-xs font-medium">Suite {index + 1}</Label>
+                            {!unit.suiteTypeId && selectedSupplier && !supplierDetailLoading ? (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] h-4 border-yellow-600 text-yellow-700"
+                                title="We could not identify this suite from the enquiry wording — please choose it"
+                              >
+                                Not identified
+                              </Badge>
+                            ) : null}
+                          </div>
+
+                          {/* Always show what the customer actually asked for. */}
+                          {unit.rawPhrase ? (
+                            <p className="text-xs text-muted-foreground">
+                              Requested: &ldquo;{unit.rawPhrase}&rdquo;
+                            </p>
+                          ) : null}
+
+                          <div className="space-y-1.5">
+                            <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                              Suite Type
+                              <FieldFlags
+                                learned={suiteTypeLearned}
+                                dirty={unit.editedAxes?.includes("suiteType")}
+                              />
+                            </Label>
+                            <Select
+                              value={unit.suiteTypeId ?? ""}
+                              onValueChange={(value) => {
+                                const name = activeSuiteTypes.find((entry) => entry.id === value)?.name ?? null
+                                mutateDraft(`guests.suiteUnits.${index}.suiteType`, (prev) =>
+                                  updateDraftSuiteAxisAtIndex(prev, index, "suiteType", value, name),
+                                )
+                              }}
+                              disabled={!hasSuiteSelectorData}
                             >
-                              <SelectValue placeholder="Select suite type" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {activeSuiteTypes.map((suiteType) => (
-                                <SelectItem key={suiteType.id} value={suiteType.name}>
-                                  {suiteType.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                              <SelectTrigger
+                                className={cn(
+                                  // Yellow, not destructive: an unidentified suite is an open
+                                  // question for the consultant, not an error.
+                                  !unit.suiteTypeId && selectedSupplier && !supplierDetailLoading
+                                    ? "border-yellow-500"
+                                    : "",
+                                )}
+                              >
+                                <SelectValue placeholder="Select suite type" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {suiteTypeCandidates.length > 0 && !unit.suiteTypeId ? (
+                                  <>
+                                    <div className="px-2 py-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                                      Suggested from &ldquo;{unit.rawPhrase}&rdquo;
+                                    </div>
+                                    {suiteTypeCandidates.map((candidate) => (
+                                      <SelectItem key={`suggested-${candidate.id}`} value={candidate.id}>
+                                        {candidate.name}
+                                      </SelectItem>
+                                    ))}
+                                    <Separator className="my-1" />
+                                  </>
+                                ) : null}
+                                {activeSuiteTypes.map((entry) => (
+                                  <SelectItem key={entry.id} value={entry.id}>
+                                    {entry.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          {/* Configuration axes. Each is hidden entirely when this suite type
+                              offers no vocabulary for it, so e.g. Blue Train shows no layout
+                              dropdown rather than an empty one. */}
+                          {suiteType && suiteVocabulary
+                            ? CONFIG_AXES.map(({ axis, label, idField, vocabKey, allowedKey }) => {
+                                const allowedIds = vocabSuiteType?.[allowedKey]
+                                if (!allowedIds || allowedIds.size === 0) return null
+
+                                const options = suiteVocabulary[vocabKey].filter((entry) => allowedIds.has(entry.id))
+                                if (options.length === 0) return null
+
+                                const selectedId = unit[idField]
+                                const candidates = unit.match[axis].candidates
+
+                                return (
+                                  <div key={axis} className="space-y-1.5">
+                                    <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                                      {label}
+                                      <FieldFlags
+                                        learned={unit.match[axis].source === "alias"}
+                                        dirty={unit.editedAxes?.includes(axis)}
+                                      />
+                                    </Label>
+                                    <Select
+                                      value={selectedId ?? ""}
+                                      onValueChange={(value) => {
+                                        mutateDraft(`guests.suiteUnits.${index}.${axis}`, (prev) =>
+                                          updateDraftSuiteAxisAtIndex(prev, index, axis, value),
+                                        )
+                                      }}
+                                    >
+                                      <SelectTrigger>
+                                        <SelectValue placeholder={`Select ${label.toLowerCase()}`} />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {candidates.length > 0 && !selectedId ? (
+                                          <>
+                                            <div className="px-2 py-1.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+                                              Suggested
+                                            </div>
+                                            {candidates.map((candidate) => (
+                                              <SelectItem key={`suggested-${candidate.id}`} value={candidate.id}>
+                                                {candidate.name}
+                                              </SelectItem>
+                                            ))}
+                                            <Separator className="my-1" />
+                                          </>
+                                        ) : null}
+                                        {options.map((entry) => (
+                                          <SelectItem key={entry.id} value={entry.id}>
+                                            {entry.name}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                )
+                              })
+                            : null}
                         </div>
                       )
                     })}
@@ -635,17 +755,15 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                   </Card>
                 )}
 
-                {suiteSelectionMissing && (
-                  <Card className="border-destructive/50 bg-destructive/5">
+                {unresolvedSuiteCount > 0 && (
+                  <Card className="border-yellow-500/50 bg-yellow-50">
                     <CardContent className="p-3 space-y-2">
-                      <div className="flex items-center gap-2 text-sm font-medium text-destructive">
+                      <div className="flex items-center gap-2 text-sm font-medium text-yellow-700">
                         <AlertCircle className="w-4 h-4" />
-                        Missing Suite Types
+                        {unresolvedSuiteCount === 1 ? "Suite not identified" : `${unresolvedSuiteCount} suites not identified`}
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        {selectedSupplier
-                          ? `Choose one active suite type from ${selectedSupplier.name} for each suite.`
-                          : "Choose a supplier, then select one active suite type for each suite."}
+                        This enquiry will still save. A suite type must be chosen before a quote can be built.
                       </p>
                     </CardContent>
                   </Card>
@@ -670,7 +788,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                   </Card>
                 )}
 
-                {validation.isValid && !suiteSelectionMissing && validation.warnings.length === 0 && (
+                {validation.isValid && unresolvedSuiteCount === 0 && validation.warnings.length === 0 && (
                   <Card className="border-green-500/50 bg-green-50">
                     <CardContent className="p-3">
                       <div className="flex items-center gap-2 text-sm font-medium text-green-700">
@@ -696,10 +814,10 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
             <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={saving}>
               Cancel
             </Button>
-            <Button size="sm" onClick={() => handleSave(false)} disabled={!validation.isValid || suiteSelectionMissing || saving}>
+            <Button size="sm" onClick={() => handleSave(false)} disabled={!validation.isValid || saving}>
               {saving ? "Saving..." : "Save Draft"}
             </Button>
-            <Button size="sm" variant="default" onClick={() => handleSave(true)} disabled={!validation.isValid || suiteSelectionMissing || saving}>
+            <Button size="sm" variant="default" onClick={() => handleSave(true)} disabled={!validation.isValid || saving}>
               {saving ? "Saving..." : "Save & Open"}
             </Button>
           </div>
