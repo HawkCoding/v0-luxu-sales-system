@@ -199,6 +199,24 @@ function buildSupabase(state: MockState) {
         }
       }
 
+      // Seeding units now carries the enquiry's captured suite configuration forward
+      // (app/api/jobs/[id]/package/seed.ts). These tests cover leg fan-out, so no suites are
+      // captured and every seeded unit is blank -- the carry-forward itself is covered in
+      // lib/suites/.
+      if (table === "booking_suites" || table === "suite_types") {
+        return {
+          select: vi.fn(() => {
+            const query: Record<string, unknown> = {}
+            query.eq = vi.fn(() => query)
+            query.in = vi.fn(() => query)
+            query.order = vi.fn(async () => ({ data: [], error: null }))
+            query.then = (resolve: (value: unknown) => unknown) =>
+              Promise.resolve({ data: [], error: null }).then(resolve)
+            return query
+          }),
+        }
+      }
+
       throw new Error(`Unexpected table ${table}`)
     }),
   }

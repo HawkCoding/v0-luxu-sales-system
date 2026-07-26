@@ -42,7 +42,7 @@ function emptyDraft(): ParsedDraft {
   return {
     customer: { title: "", firstName: "", surname: "", email: "", phone: "", country: "", province: "" },
     trip: { supplier: "", route: "", departureDate: "", purpose: "quote", packageOption: "", hotelOption: "", flightBooking: "", flightDepartureDate: "" },
-    guests: { adults: 0, children: 0, suites: 0, suiteType: "" },
+    guests: { adults: 0, children: 0, suites: 0, suitePhrases: [], suiteType: "" },
     notes: "",
     formFields: { title: "", country: "", province: "", packageOption: "", hotelOption: "", flightBooking: "", flightDepartureDate: "" },
     confidence: {},

@@ -106,9 +106,19 @@ function createFilterableListQuery<T>(rows: T[]) {
       filters[column] = value
       return query
     }),
+    is: vi.fn((column: string, value: unknown) => {
+      filters[column] = value
+      return query
+    }),
+    in: vi.fn(() => query),
     ...createThenable(() => ({
       data: rows.filter((row) =>
-        Object.entries(filters).every(([key, value]) => (row as Record<string, unknown>)[key] === value),
+        Object.entries(filters).every(([key, value]) => {
+          const cell = (row as Record<string, unknown>)[key]
+          // `.is(col, null)` also matches an absent key, mirroring SQL IS NULL.
+          if (value === null) return cell === null || cell === undefined
+          return cell === value
+        }),
       ),
       error: null,
     })),
@@ -291,6 +301,25 @@ function createSupabase(state: MockState) {
             state.auditRows.push(row)
             return { error: null }
           }),
+        }
+      }
+
+      // Suite vocabulary + alias lookups (lib/suites). These tests cover customer/route/duplicate
+      // matching, so the vocabulary is intentionally empty: with nothing to match against, suite
+      // wording is preserved verbatim and resolves to null, which is the behaviour under test
+      // elsewhere (lib/suites/resolve-suite-phrase.test.ts).
+      if (
+        table === "suite_types" ||
+        table === "bedroom_types" ||
+        table === "bedroom_layouts" ||
+        table === "bathroom_types" ||
+        table === "suite_vocab_aliases" ||
+        table === "suite_type_bedroom_types" ||
+        table === "suite_type_bedroom_layouts" ||
+        table === "suite_type_bathroom_types"
+      ) {
+        return {
+          select: vi.fn(() => createFilterableListQuery([])),
         }
       }
 

@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest"
+import { resolveEnquiryCustomer } from "./route"
+import { createSupabaseMock } from "@/lib/testing/supabase-mock"
 import {
-  normalizeSuiteSelections,
-  resolveEnquiryCustomer,
-  resolveSuiteSelectionIds,
-} from "./route"
+  legacySuiteNamesToUnits,
+  resolveEnquirySuiteUnits,
+} from "@/lib/suites/enquiry-suite-units"
 
 const CUSTOMER_ID = "22222222-2222-4222-8222-222222222222"
 const SUPPLIER_ID = "44444444-4444-4444-8444-444444444444"
@@ -111,39 +112,135 @@ function enquiryCustomerInput(overrides: Partial<Parameters<typeof resolveEnquir
   }
 }
 
-describe("POST /api/enquiries suite selections", () => {
-  it("saves structured suite selections with suite_type_id", async () => {
-    const state = createMockState()
-    const supabase = createSupabase(state)
+const BEDROOM_TWIN_ID = "66666666-6666-4666-8666-666666666666"
+const BEDROOM_DOUBLE_ID = "77777777-7777-4777-8777-777777777777"
+const BATHROOM_SHOWER_ID = "88888888-8888-4888-8888-888888888888"
+const OTHER_SUPPLIER_SUITE_ID = "99999999-9999-4999-8999-999999999999"
 
-    const selections = normalizeSuiteSelections({
-      suiteSelections: [
-        { suiteTypeId: SUITE_ID, suiteTypeName: "Deluxe Double Suite" },
-        { suiteTypeId: SUITE_ID, suiteTypeName: "Deluxe Double Suite" },
-      ],
-    })
-    const resolved = await resolveSuiteSelectionIds(supabase as never, SUPPLIER_ID, selections)
+function suiteVocabMock() {
+  return createSupabaseMock({
+    suite_types: [
+      { id: SUITE_ID, supplier_id: SUPPLIER_ID, name: "Deluxe", active: true },
+      { id: OTHER_SUPPLIER_SUITE_ID, supplier_id: "other-supplier", name: "Royal Suite", active: true },
+    ],
+    bedroom_types: [
+      { id: BEDROOM_TWIN_ID, supplier_id: SUPPLIER_ID, name: "Twin", archived_at: null },
+      { id: BEDROOM_DOUBLE_ID, supplier_id: SUPPLIER_ID, name: "Double", archived_at: null },
+    ],
+    bedroom_layouts: [],
+    bathroom_types: [
+      { id: BATHROOM_SHOWER_ID, supplier_id: SUPPLIER_ID, name: "Shower", archived_at: null },
+    ],
+    suite_type_bedroom_types: [
+      { suite_type_id: SUITE_ID, bedroom_type_id: BEDROOM_TWIN_ID },
+      { suite_type_id: SUITE_ID, bedroom_type_id: BEDROOM_DOUBLE_ID },
+    ],
+    suite_type_bedroom_layouts: [],
+    suite_type_bathroom_types: [
+      { suite_type_id: SUITE_ID, bathroom_type_id: BATHROOM_SHOWER_ID },
+    ],
+    suite_vocab_aliases: [],
+  })
+}
 
-    expect(state.suiteTypesQueried).toBe(false)
-    expect(resolved).toEqual([
-      { suiteTypeId: SUITE_ID, suiteTypeName: "Deluxe Double Suite" },
-      { suiteTypeId: SUITE_ID, suiteTypeName: "Deluxe Double Suite" },
+describe("POST /api/enquiries suite units", () => {
+  it("keeps client-supplied ids that belong to the supplier", async () => {
+    const { supabase } = suiteVocabMock()
+
+    const { units } = await resolveEnquirySuiteUnits(supabase as never, SUPPLIER_ID, [
+      {
+        suiteNumber: 1,
+        rawPhrase: "Deluxe Twin with shower",
+        suiteTypeId: SUITE_ID,
+        bedroomTypeId: BEDROOM_TWIN_ID,
+        bathroomTypeId: BATHROOM_SHOWER_ID,
+      },
     ])
+
+    expect(units[0]).toMatchObject({
+      suiteTypeId: SUITE_ID,
+      suiteTypeName: "Deluxe",
+      bedroomTypeId: BEDROOM_TWIN_ID,
+      bathroomTypeId: BATHROOM_SHOWER_ID,
+    })
   })
 
-  it("resolves legacy suiteTypes by supplier when possible", async () => {
-    const state = createMockState()
-    const supabase = createSupabase(state)
+  it("nulls an id that belongs to a different supplier instead of rejecting the enquiry", async () => {
+    const { supabase } = suiteVocabMock()
 
-    const selections = normalizeSuiteSelections({
-      suiteTypes: ["Deluxe Double Suite"],
-    })
-    const resolved = await resolveSuiteSelectionIds(supabase as never, SUPPLIER_ID, selections)
-
-    expect(state.suiteTypesQueried).toBe(true)
-    expect(resolved).toEqual([
-      { suiteTypeId: SUITE_ID, suiteTypeName: "Deluxe Double Suite" },
+    const { units } = await resolveEnquirySuiteUnits(supabase as never, SUPPLIER_ID, [
+      { suiteNumber: 1, rawPhrase: "", suiteTypeId: OTHER_SUPPLIER_SUITE_ID },
     ])
+
+    // Losing one bad reference beats losing the whole enquiry.
+    expect(units[0].suiteTypeId).toBeNull()
+  })
+
+  it("drops a config value the chosen suite type does not offer", async () => {
+    const { supabase } = suiteVocabMock()
+
+    const { units } = await resolveEnquirySuiteUnits(supabase as never, SUPPLIER_ID, [
+      {
+        suiteNumber: 1,
+        rawPhrase: "",
+        suiteTypeId: SUITE_ID,
+        // This supplier has no bedroom layouts at all, so any layout id is invalid.
+        bedroomLayoutId: "11111111-1111-4111-8111-111111111111",
+      },
+    ])
+
+    expect(units[0].suiteTypeId).toBe(SUITE_ID)
+    expect(units[0].bedroomLayoutId).toBeNull()
+  })
+
+  it("re-resolves server-side when the client sent wording but no ids", async () => {
+    const { supabase } = suiteVocabMock()
+
+    const { units } = await resolveEnquirySuiteUnits(supabase as never, SUPPLIER_ID, [
+      { suiteNumber: 1, rawPhrase: "Deluxe Twin with shower", suiteTypeId: null },
+    ])
+
+    expect(units[0]).toMatchObject({
+      suiteTypeId: SUITE_ID,
+      bedroomTypeId: BEDROOM_TWIN_ID,
+      bathroomTypeId: BATHROOM_SHOWER_ID,
+    })
+  })
+
+  it("leaves everything null when wording matches nothing, rather than picking a placeholder", async () => {
+    const { supabase } = suiteVocabMock()
+
+    const { units } = await resolveEnquirySuiteUnits(supabase as never, SUPPLIER_ID, [
+      { suiteNumber: 1, rawPhrase: "Harmonic Mountain Suite" },
+    ])
+
+    expect(units[0].suiteTypeId).toBeNull()
+    expect(units[0].rawPhrase).toBe("Harmonic Mountain Suite")
+  })
+
+  it("converts the public web form's name-only shape into units", async () => {
+    const { supabase } = suiteVocabMock()
+
+    const { units } = await resolveEnquirySuiteUnits(
+      supabase as never,
+      SUPPLIER_ID,
+      legacySuiteNamesToUnits(["Deluxe"]),
+    )
+
+    expect(units).toHaveLength(1)
+    expect(units[0].suiteTypeId).toBe(SUITE_ID)
+  })
+
+  it("keeps wording but resolves nothing when no supplier is known", async () => {
+    const { supabase } = suiteVocabMock()
+
+    const { units, vocabulary } = await resolveEnquirySuiteUnits(supabase as never, null, [
+      { suiteNumber: 1, rawPhrase: "Deluxe Twin with shower", suiteTypeId: SUITE_ID },
+    ])
+
+    expect(vocabulary).toBeNull()
+    expect(units[0].suiteTypeId).toBeNull()
+    expect(units[0].rawPhrase).toBe("Deluxe Twin with shower")
   })
 })
 

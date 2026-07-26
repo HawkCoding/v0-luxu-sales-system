@@ -37,7 +37,8 @@ John Smith
       adults: 2,
       children: 1,
       suites: 1,
-      suiteType: "Royal Double Suite",
+      suitePhrases: ["Royal double suite"],
+      suiteType: "Royal double suite",
     })
     expect(draft.confidence).toMatchObject({
       "customer.email": "high",
@@ -90,13 +91,15 @@ John Smith
     expect(slash.confidence["trip.departureDate"]).toBe("low")
   })
 
-  it("infers adults and default suites for 'myself and my wife'", () => {
+  it("infers adults from 'myself and my wife' but never invents a suite count", () => {
     const draft = parseEmailDraft("Please quote Blue Train for myself and my wife.")
 
     expect(draft.guests.adults).toBe(2)
-    expect(draft.guests.suites).toBe(1)
     expect(draft.confidence["guests.adults"]).toBe("low")
-    expect(draft.confidence["guests.suites"]).toBe("low")
+    // An invented suite count manufactures a room nobody asked for; unstated stays 0 and is
+    // reported as a missing field instead.
+    expect(draft.guests.suites).toBe(0)
+    expect(draft.confidence["guests.suites"]).toBeUndefined()
   })
 
   it("extracts labeled name and surname with high confidence", () => {
@@ -136,8 +139,8 @@ Suite Type: Deluxe Double Suite
 `)
 
     expect(draft.guests.adults).toBe(2)
-    expect(draft.guests.suites).toBe(1)
-    expect(draft.confidence["guests.suites"]).toBe("low")
+    expect(draft.guests.suites).toBe(0)
+    expect(draft.confidence["guests.suites"]).toBeUndefined()
     expect(draft.guests.suiteType).toBe("Deluxe Double Suite")
   })
 
@@ -146,16 +149,18 @@ Suite Type: Deluxe Double Suite
     expect(parseEmailDraft("1 x Deluxe Double Suite").guests.suites).toBe(1)
   })
 
-  it("extracts suite types for deluxe and pullman options", () => {
-    expect(parseEmailDraft("We need a deluxe twin suite for 2 adults.").guests.suiteType).toBe("Deluxe Twin Suite")
-    expect(parseEmailDraft("We need a pullman double suite for 2 adults.").guests.suiteType).toBe("Pullman Double Suite")
+  it("captures the customer's suite wording verbatim rather than synthesising a name", () => {
+    // The old parser emitted composite names ("Deluxe Twin Suite") that exist in no supplier's
+    // vocabulary. Matching against real suite_types is the resolver's job (lib/suites/).
+    expect(parseEmailDraft("We need a deluxe twin suite for 2 adults.").guests.suiteType).toBe("deluxe twin suite")
+    expect(parseEmailDraft("We need a pullman double suite for 2 adults.").guests.suiteType).toBe("pullman double suite")
   })
 
-  it("marks unknown suite types as Other with low confidence", () => {
+  it("captures unknown suite wording as-is instead of bucketing it as Other", () => {
     const draft = parseEmailDraft("Suite Type: Harmonic Mountain Suite")
 
-    expect(draft.guests.suiteType).toBe("Other")
-    expect(draft.confidence["guests.suiteType"]).toBe("low")
+    expect(draft.guests.suitePhrases).toEqual(["Harmonic Mountain Suite"])
+    expect(draft.guests.suiteType).toBe("Harmonic Mountain Suite")
   })
 
   it("parses a Blue Train form email with values on the lines after labels", () => {
@@ -251,7 +256,8 @@ I have read and accept the Terms and Conditions*
       adults: 2,
       children: 0,
       suites: 1,
-      suiteType: "Deluxe Twin Suite",
+      suitePhrases: ["Deluxe Twin with shower"],
+      suiteType: "Deluxe Twin with shower",
     })
     expect(draft.confidence).toMatchObject({
       "customer.firstName": "high",
@@ -283,6 +289,7 @@ I have read and accept the Terms and Conditions*
       adults: 0,
       children: 0,
       suites: 0,
+      suitePhrases: [],
       suiteType: "",
     })
     expect(draft.confidence).toEqual({})
@@ -348,7 +355,7 @@ John Smith
         flightBooking: "",
         flightDepartureDate: "",
       },
-      guests: { adults: 2, children: 0, suites: 1, suiteType: "Royal Double Suite" },
+      guests: { adults: 2, children: 0, suites: 1, suitePhrases: ["Royal Double Suite"], suiteType: "Royal Double Suite" },
       notes: "",
       formFields: {
         title: "",
@@ -376,7 +383,6 @@ John Smith
         "Surname parsed with low confidence",
         "DepartureDate parsed with low confidence",
         "Adults parsed with low confidence",
-        "Suites parsed with low confidence",
       ]),
     )
   })
@@ -406,6 +412,8 @@ John Smith
   it("counts only the fields that are present", () => {
     const draft = parseEmailDraft("Blue Train 2026-05-15 2 adults")
 
-    expect(countRequiredComplete(draft)).toEqual({ completed: 4, total: 8 })
+    // Supplier + departure date + adults. The suite count is no longer invented, so it does not
+    // count toward completion until someone states it.
+    expect(countRequiredComplete(draft)).toEqual({ completed: 3, total: 8 })
   })
 })

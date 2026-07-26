@@ -166,6 +166,23 @@ function buildSupabase(state: MockState = {}) {
           })),
         }
       }
+      // Alias learning reads the enquiry's captured wording from booking_suites. These tests
+      // cover selection persistence, so nothing was captured -- learning finds no phrase to key
+      // on and no-ops. The learning rules themselves are covered in lib/suites/.
+      if (table === "booking_suites" || table === "suite_types") {
+        return {
+          select: vi.fn(() => {
+            const query: Record<string, unknown> = {}
+            query.eq = vi.fn(() => query)
+            query.in = vi.fn(() => query)
+            query.order = vi.fn(async () => ({ data: [], error: null }))
+            query.then = (resolve: (value: unknown) => unknown) =>
+              Promise.resolve({ data: [], error: null }).then(resolve)
+            return query
+          }),
+        }
+      }
+
       throw new Error(`Unexpected table ${table}`)
     }),
   }

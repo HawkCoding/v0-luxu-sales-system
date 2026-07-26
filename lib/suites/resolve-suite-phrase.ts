@@ -200,6 +200,14 @@ function emptyResolution(rawPhrase: string, normalizedPhrase: string): SuiteReso
   }
 }
 
+/**
+ * An all-null resolution for a phrase that could not be resolved at all -- used when there is no
+ * supplier vocabulary to match against, so the customer's wording is still preserved verbatim.
+ */
+export function unresolvedSuitePhrase(rawPhrase: string): SuiteResolution {
+  return emptyResolution(rawPhrase, normalizeSuitePhrase(rawPhrase))
+}
+
 export interface ResolveSuitePhraseOptions {
   acceptThreshold?: number
   ambiguityMargin?: number
