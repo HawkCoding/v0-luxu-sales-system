@@ -2,6 +2,7 @@ import { detectCountryInText, loadCountryAliasMap, normalizeCountry } from "@/li
 import { buildEnquiryImportPayload } from "@/lib/import/enquiry-payload"
 import { type ParsedDraft } from "@/lib/import/parseEmailDraft"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
+import { normalizeLookupValue } from "@/lib/normalize-lookup-value"
 import { createServiceClient } from "@/lib/supabase/server"
 import { allocateJobNumberForBooking } from "@/lib/job-numbering"
 import { createRawEmailPreview } from "@/lib/inbound-email/html"
@@ -26,10 +27,6 @@ export interface CreatedEmailBooking {
   bookingNumber: string
   duplicateOfBookingId: string | null
   rawPreview: string
-}
-
-function normalizeLookupValue(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
 }
 
 async function resolveTrainSupplierId(

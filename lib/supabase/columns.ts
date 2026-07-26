@@ -13,7 +13,8 @@ export const BOOKING_WITH_ROUTE_COLUMNS = `${BOOKING_COLUMNS}, route:routes(id, 
 // so list views can show the real supplier instead of guessing from the route name.
 export const BOOKING_WITH_SUPPLIER_COLUMNS = `${BOOKING_COLUMNS}, route:routes(id, name, supplier:suppliers(id, name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(id, name)`
 
-export const BOOKING_SUITE_COLUMNS = "id, booking_id, suite_number, suite_type_id, suite_type_name"
+export const BOOKING_SUITE_COLUMNS =
+  "id, booking_id, suite_number, suite_type_id, suite_type_name, bedroom_type_id, bedroom_layout_id, bathroom_type_id, source_phrase, match_json"
 
 export const TRAVELLER_COLUMNS =
   "id, booking_id, prefix, first_name, last_name, id_passport, date_of_birth, residence, room_with, room_type, is_child, is_primary, sort_order"

@@ -9,7 +9,7 @@ export type CountryAliasMap = Map<string, string>
 let cachedCountryAliasMap: CountryAliasMap | null = null
 let countryAliasCacheExpiresAt = 0
 
-function normalizeAliasKey(value: string): string {
+export function normalizeAliasKey(value: string): string {
   return value
     .normalize("NFKD")
     .toLowerCase()

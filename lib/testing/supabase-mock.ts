@@ -18,6 +18,7 @@ type Filter =
   | { kind: "lte"; column: string; value: unknown }
   | { kind: "ilike"; column: string; pattern: string }
   | { kind: "notNull"; column: string }
+  | { kind: "isNull"; column: string }
 
 export interface MockStore {
   tables: Record<string, Row[]>
@@ -53,7 +54,7 @@ function ilikeToRegExp(pattern: string): RegExp {
 }
 
 export class MockQueryBuilder implements PromiseLike<{ data: unknown; error: unknown }> {
-  private op: "select" | "insert" | "update" | "delete" = "select"
+  private op: "select" | "insert" | "update" | "delete" | "upsert" = "select"
   private selectColumns = "*"
   private payload: Row[] = []
   private patch: Row = {}
@@ -62,6 +63,7 @@ export class MockQueryBuilder implements PromiseLike<{ data: unknown; error: unk
   private limitCount: number | null = null
   private selectAfterWrite = false
   private resolved = false
+  private conflictColumns: string[] = []
 
   constructor(
     private readonly table: string,
@@ -88,6 +90,17 @@ export class MockQueryBuilder implements PromiseLike<{ data: unknown; error: unk
   update(values: Row): this {
     this.op = "update"
     this.patch = values
+    this.selectAfterWrite = false
+    return this
+  }
+
+  /** Upsert keyed on `onConflict` columns: matching row is merged, otherwise inserted. */
+  upsert(values: Row | Row[], opts?: { onConflict?: string }): this {
+    this.op = "upsert"
+    this.payload = Array.isArray(values) ? values : [values]
+    this.conflictColumns = opts?.onConflict
+      ? opts.onConflict.split(",").map((column) => column.trim()).filter(Boolean)
+      : ["id"]
     this.selectAfterWrite = false
     return this
   }
@@ -124,6 +137,11 @@ export class MockQueryBuilder implements PromiseLike<{ data: unknown; error: unk
 
   not(column: string, operator: string, value: unknown): this {
     if (operator === "is" && value === null) this.filters.push({ kind: "notNull", column })
+    return this
+  }
+
+  is(column: string, value: unknown): this {
+    if (value === null) this.filters.push({ kind: "isNull", column })
     return this
   }
 
@@ -184,6 +202,8 @@ export class MockQueryBuilder implements PromiseLike<{ data: unknown; error: unk
           return typeof value === "string" && ilikeToRegExp(filter.pattern).test(value)
         case "notNull":
           return value !== null && value !== undefined
+        case "isNull":
+          return value === null || value === undefined
       }
     })
   }
@@ -220,6 +240,29 @@ export class MockQueryBuilder implements PromiseLike<{ data: unknown; error: unk
         return withDefaults
       })
       return { rows: this.applyEmbedsAndShape(inserted), error: null }
+    }
+
+    if (this.op === "upsert") {
+      const table = this.table_()
+      const upserted = this.payload.map((row) => {
+        const existing = table.find((candidate) =>
+          this.conflictColumns.every((column) => candidate[column] === row[column]),
+        )
+        if (existing) {
+          Object.assign(existing, row, { updated_at: new Date().toISOString() })
+          return existing
+        }
+        const nowIso = new Date().toISOString()
+        const withDefaults: Row = {
+          id: row.id ?? this.nextId(this.table),
+          created_at: row.created_at ?? nowIso,
+          updated_at: row.updated_at ?? nowIso,
+          ...row,
+        }
+        table.push(withDefaults)
+        return withDefaults
+      })
+      return { rows: this.applyEmbedsAndShape(upserted), error: null }
     }
 
     if (this.op === "update") {
@@ -259,6 +302,7 @@ export interface MockFrom {
   select(columns?: string): MockQueryBuilder
   insert(values: Row | Row[]): MockQueryBuilder
   update(values: Row): MockQueryBuilder
+  upsert(values: Row | Row[], opts?: { onConflict?: string }): MockQueryBuilder
   delete(): MockQueryBuilder
 }
 
@@ -305,6 +349,7 @@ export function createSupabaseMock(seed: Record<string, Row[]> = {}): SupabaseMo
         select: (columns?: string) => builder.select(columns),
         insert: (values: Row | Row[]) => builder.insert(values),
         update: (values: Row) => builder.update(values),
+        upsert: (values: Row | Row[], opts?: { onConflict?: string }) => builder.upsert(values, opts),
         delete: () => builder.delete(),
       }
     },

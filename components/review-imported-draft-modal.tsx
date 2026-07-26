@@ -24,11 +24,8 @@ import {
   type DraftSuiteSelection,
 } from "@/lib/import/suite-selections"
 import { useActiveSuppliers, useSupplierDetail } from "@/lib/use-data"
+import { normalizeLookupValue } from "@/lib/normalize-lookup-value"
 import { cn } from "@/lib/utils"
-
-function normalizeLookupValue(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
-}
 
 interface ReviewImportedDraftModalProps {
   open: boolean

@@ -6,6 +6,7 @@ import { detectCountryInText, loadCountryAliasMap, normalizeCountry } from "@/li
 import { allocateJobNumberForBooking, type JobNumberAllocation } from "@/lib/job-numbering"
 import { isAuthorizedWebhookRequest } from "@/lib/api/webhook-secret"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
+import { normalizeLookupValue } from "@/lib/normalize-lookup-value"
 import { buildPackageQuoteLineItems, calculateQuoteTotals } from "@/lib/quotes/build-from-package"
 import { buildQuoteNumber } from "@/lib/quotes/quote-number"
 import { isOptionalPackageLegKind } from "@/lib/types"
@@ -42,10 +43,6 @@ type VehicleRentalDetailsInsert = {
 type SuiteSelection = {
   suiteTypeId: string | null
   suiteTypeName: string
-}
-
-function normalizeLookupValue(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()
 }
 
 function normalizeTransportServiceType(value: unknown): TransportServiceType {
