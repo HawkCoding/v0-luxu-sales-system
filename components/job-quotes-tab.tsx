@@ -12,7 +12,6 @@ import { useRole } from "@/lib/role-context"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 import { BuildBookingDialog } from "@/components/build-booking-dialog"
-import { AddQuoteLineDialog } from "@/components/add-quote-line-dialog"
 import { CreateQuoteDialog } from "@/components/create-quote-dialog"
 import { QuotePreviewSendDialog } from "@/components/quote-preview-send-dialog"
 import { ReviseQuoteDialog } from "@/components/revise-quote-dialog"
@@ -58,6 +57,7 @@ export function JobQuotesTab({
   const [generatingLinkForId, setGeneratingLinkForId] = useState<string | null>(null)
   const [generatingPdfForId, setGeneratingPdfForId] = useState<string | null>(null)
   const [removingLineKey, setRemovingLineKey] = useState<string | null>(null)
+  const [autoOpenBuildBookingQuoteId, setAutoOpenBuildBookingQuoteId] = useState<string | null>(null)
 
   async function removeLineItem(quote: Quote, index: number) {
     const key = `${quote.id}:${index}`
@@ -141,7 +141,13 @@ export function JobQuotesTab({
         <p className="text-sm text-muted-foreground">No quotes yet</p>
         {can("edit:quotes") && (
           <div className="flex flex-wrap justify-center gap-2">
-            <CreateQuoteDialog jobId={jobId} onCreated={mutate} />
+            <CreateQuoteDialog
+              jobId={jobId}
+              onCreated={(quoteId) => {
+                mutate()
+                setAutoOpenBuildBookingQuoteId(quoteId)
+              }}
+            />
           </div>
         )}
       </div>
@@ -152,7 +158,13 @@ export function JobQuotesTab({
     <div className="space-y-4">
       {can("edit:quotes") && (
         <div className="flex justify-end gap-2">
-          <CreateQuoteDialog jobId={jobId} onCreated={mutate} />
+          <CreateQuoteDialog
+            jobId={jobId}
+            onCreated={(quoteId) => {
+              mutate()
+              setAutoOpenBuildBookingQuoteId(quoteId)
+            }}
+          />
           <Button
             size="sm"
             disabled={!latestSendableQuote}
@@ -252,14 +264,6 @@ export function JobQuotesTab({
                         )}
                         PDF
                       </Button>
-                      {EDITABLE_QUOTE_STATUSES.includes(q.status) && (
-                        <AddQuoteLineDialog
-                          quoteId={q.id}
-                          expectedUpdatedAt={q.updatedAt}
-                          existingLineItems={q.lineItems}
-                          onAdded={mutate}
-                        />
-                      )}
                       <BuildBookingDialog
                         jobId={jobId}
                         quoteId={q.id}
@@ -269,6 +273,8 @@ export function JobQuotesTab({
                         expectedUpdatedAt={q.updatedAt}
                         customerDefaultRateTypeId={customerDefaultRateTypeId}
                         onApplied={mutate}
+                        autoOpen={autoOpenBuildBookingQuoteId === q.id}
+                        onAutoOpenHandled={() => setAutoOpenBuildBookingQuoteId(null)}
                       />
                     </>
                   )}
