@@ -311,6 +311,7 @@ export async function buildPackageQuoteLineItems({
     unitPrice: number
     supplierDescription?: string | null
     suiteTypeId?: string | null
+    suiteTypeName?: string | null
     /** A specific unit's chosen bedroom/layout/bathroom names — overrides the suite type's full
      * list of associated vocab when the unit narrowed its selection to specific values. */
     variantNames?: string[] | null
@@ -325,6 +326,7 @@ export async function buildPackageQuoteLineItems({
     unitPrice,
     supplierDescription,
     suiteTypeId,
+    suiteTypeName,
     variantNames,
     commission,
     unit,
@@ -376,7 +378,7 @@ export async function buildPackageQuoteLineItems({
         routeName: activeRouteName,
         routeReversed: activeRouteReversed,
         suiteTypeId: suiteTypeId ?? null,
-        suiteTypeName: null,
+        suiteTypeName: suiteTypeName ?? null,
         rateCardId: activeRateCard?.id ?? null,
         rateTypeId: activeRateCard?.rateTypeId ?? null,
         rateTypeCode: rateTypeMeta?.code ?? null,
@@ -575,7 +577,7 @@ export async function buildPackageQuoteLineItems({
           )
         }
         const description = [legLabel, suiteTypeName, routeName].filter(Boolean).join(" - ")
-        return { validRateCard, description }
+        return { validRateCard, description, suiteTypeName }
       }
 
       if (isHotel) {
@@ -590,7 +592,7 @@ export async function buildPackageQuoteLineItems({
         const nightsLabel = `${nights} night${nights === 1 ? "" : "s"}`
 
         for (const unitSelection of units) {
-          const { validRateCard, description } = resolveUnit(unitSelection.suiteTypeId)
+          const { validRateCard, description, suiteTypeName } = resolveUnit(unitSelection.suiteTypeId)
           activeRateCard = validRateCard
           addLineItem({
             description: `${description} — ${nightsLabel}`,
@@ -598,6 +600,7 @@ export async function buildPackageQuoteLineItems({
             unitPrice: validRateCard.pricePerPerson,
             supplierDescription,
             suiteTypeId: unitSelection.suiteTypeId,
+            suiteTypeName,
             variantNames: specificUnitVariantNames(unitSelection),
             commission,
             unit,
@@ -620,7 +623,7 @@ export async function buildPackageQuoteLineItems({
           }
           const requestPricingDate = dateOnly(transportRequest?.pickup_at) ?? legPricingDate
           activePricingDate = requestPricingDate
-          const { validRateCard, description } = resolveUnit(suiteTypeId, requestPricingDate)
+          const { validRateCard, description, suiteTypeName } = resolveUnit(suiteTypeId, requestPricingDate)
           activeRateCard = validRateCard
 
           const pointLabel =
@@ -636,6 +639,7 @@ export async function buildPackageQuoteLineItems({
             unitPrice: transportRequest?.price_override ?? validRateCard.pricePerPerson,
             supplierDescription,
             suiteTypeId,
+            suiteTypeName,
             commission,
             unit,
           })
@@ -667,7 +671,7 @@ export async function buildPackageQuoteLineItems({
         }
 
         for (const unitSelection of units) {
-          const { validRateCard, description } = resolveUnit(unitSelection.suiteTypeId)
+          const { validRateCard, description, suiteTypeName } = resolveUnit(unitSelection.suiteTypeId)
           activeRateCard = validRateCard
           const variantNames = specificUnitVariantNames(unitSelection)
 
@@ -677,6 +681,7 @@ export async function buildPackageQuoteLineItems({
             unitPrice: validRateCard.pricePerPerson,
             supplierDescription,
             suiteTypeId: unitSelection.suiteTypeId,
+            suiteTypeName,
             variantNames,
             commission,
             unit,
@@ -687,6 +692,7 @@ export async function buildPackageQuoteLineItems({
             unitPrice: validRateCard.childPrice ?? validRateCard.pricePerPerson,
             supplierDescription,
             suiteTypeId: unitSelection.suiteTypeId,
+            suiteTypeName,
             variantNames,
             commission,
             unit,
@@ -700,6 +706,7 @@ export async function buildPackageQuoteLineItems({
               validRateCard.pricePerPerson,
             supplierDescription,
             suiteTypeId: unitSelection.suiteTypeId,
+            suiteTypeName,
             variantNames,
             commission,
             unit,
@@ -718,6 +725,7 @@ export async function buildPackageQuoteLineItems({
               unitPrice: validRateCard.pricePerPerson * (packageDetail.singleSupplementPct / 100),
               supplierDescription,
               suiteTypeId: unitSelection.suiteTypeId,
+              suiteTypeName,
               variantNames,
               commission,
               unit,

@@ -1,6 +1,5 @@
 import { BaseLayout } from "@/emails/base-layout"
 import type { EmailFontFamily, EmailFontSize } from "@/lib/email/appearance"
-import type { ResolvedEmailSignature } from "@/lib/email/signature"
 import type { BrandBlockPosition, DocumentBrand } from "@/lib/settings-access"
 import { CONTENT_CLASS_NAME, CONTENT_SLOT_END, CONTENT_SLOT_START } from "@/lib/templates/content-slot"
 
@@ -14,8 +13,8 @@ export interface TemplateEmailProps {
   brandPosition?: BrandBlockPosition
   fontFamily?: EmailFontFamily
   fontSize?: EmailFontSize
-  /** Sender signature, rendered below the content, above the bottom brand block. */
-  signature?: ResolvedEmailSignature | null
+  /** Pre-rendered signature fragment, bracketed with slot markers below the content. */
+  signatureHtml?: string
 }
 
 /**
@@ -30,7 +29,7 @@ export function TemplateEmail({
   brandPosition,
   fontFamily,
   fontSize,
-  signature,
+  signatureHtml,
 }: TemplateEmailProps) {
   return (
     <BaseLayout
@@ -39,7 +38,7 @@ export function TemplateEmail({
       brandPosition={brandPosition}
       fontFamily={fontFamily}
       fontSize={fontSize}
-      signature={signature}
+      signatureHtml={signatureHtml}
     >
       <div
         className={CONTENT_CLASS_NAME}

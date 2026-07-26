@@ -1,8 +1,10 @@
 "use client"
 
 import Link from "next/link"
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { mutate } from "swr"
 import { toast } from "sonner"
+import { AppLogo } from "@/components/app-logo"
 import { EmailAccountsSettings } from "@/components/email-accounts-settings"
 import { BackupSettings } from "@/components/backup-settings"
 import { BankingSettingsEditor } from "@/components/banking-settings-editor"
@@ -847,12 +849,15 @@ function UserManagementCard() {
   )
 }
 
-function CompanyInfoCard({ canEdit }: { canEdit: boolean }) {
+function CompanyInfoCard({ canEdit, canEditLogo }: { canEdit: boolean; canEditLogo: boolean }) {
   const [businessName, setBusinessName] = useState("")
   const [companyEmail, setCompanyEmail] = useState("")
   const [companyPhone, setCompanyPhone] = useState("")
   const [vatRate, setVatRate] = useState("")
+  const [logoUrl, setLogoUrl] = useState<string | null>(null)
   const [savingField, setSavingField] = useState<string | null>(null)
+  const [logoBusy, setLogoBusy] = useState(false)
+  const logoInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     fetch("/api/settings/company")
@@ -862,9 +867,65 @@ function CompanyInfoCard({ canEdit }: { canEdit: boolean }) {
         if (d.company_email) setCompanyEmail(d.company_email)
         if (d.company_phone) setCompanyPhone(d.company_phone)
         if (d.vat_rate) setVatRate(d.vat_rate)
+        setLogoUrl(d.app_logo_url || null)
       })
       .catch(() => {})
   }, [])
+
+  const handleLogoUpload = async (file: File) => {
+    if (file.type !== "image/png") {
+      toast.error("The logo must be a PNG image.")
+      return
+    }
+
+    // Best-effort square check — a favicon crops oddly otherwise. Doesn't
+    // block the upload, just warns.
+    try {
+      const bitmap = await createImageBitmap(file)
+      const diff = Math.abs(bitmap.width - bitmap.height) / Math.max(bitmap.width, bitmap.height)
+      if (diff > 0.1) {
+        toast.warning("Logo isn't square — it may crop oddly in the browser tab icon.")
+      }
+      bitmap.close()
+    } catch {
+      // Non-fatal: some browsers can't decode via createImageBitmap for all inputs.
+    }
+
+    setLogoBusy(true)
+    try {
+      const body = new FormData()
+      body.append("file", file)
+      const res = await fetch("/api/settings/app-logo", { method: "POST", body })
+      if (!res.ok) {
+        const { error: message } = await res.json().catch(() => ({ error: "" }))
+        throw new Error(message || "upload failed")
+      }
+      const { url } = (await res.json()) as { url: string }
+      setLogoUrl(url)
+      toast.success("Logo uploaded. The tab icon updates after a page reload.")
+      mutate("/api/settings/company")
+    } catch (e) {
+      toast.error(e instanceof Error && e.message ? e.message : "Failed to upload logo")
+    } finally {
+      setLogoBusy(false)
+      if (logoInputRef.current) logoInputRef.current.value = ""
+    }
+  }
+
+  const handleLogoRemove = async () => {
+    setLogoBusy(true)
+    try {
+      const res = await fetch("/api/settings/app-logo", { method: "DELETE" })
+      if (!res.ok) throw new Error()
+      setLogoUrl(null)
+      toast.success("Logo removed")
+      mutate("/api/settings/company")
+    } catch {
+      toast.error("Failed to remove logo")
+    } finally {
+      setLogoBusy(false)
+    }
+  }
 
   const handleSave = async (
     field: "business_name" | "company_email" | "company_phone" | "vat_rate",
@@ -893,6 +954,55 @@ function CompanyInfoCard({ canEdit }: { canEdit: boolean }) {
         <CardTitle className="text-sm font-medium">Company Information</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <label className="text-xs font-medium text-muted-foreground">
+            App Logo (sidebar, browser tab, login screen)
+          </label>
+          <div className="flex items-center gap-4">
+            <div className="flex h-20 w-20 items-center justify-center rounded border bg-secondary/40 overflow-hidden">
+              {logoUrl ? (
+                <AppLogo logoUrl={logoUrl} businessName={businessName} size={80} />
+              ) : (
+                <span className="text-[10px] text-muted-foreground text-center px-1">No logo</span>
+              )}
+            </div>
+            {canEditLogo && (
+              <div className="flex flex-col gap-1">
+                <input
+                  id="app-logo-input"
+                  ref={logoInputRef}
+                  type="file"
+                  accept="image/png"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) void handleLogoUpload(file)
+                  }}
+                />
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={logoBusy}
+                    onClick={() => logoInputRef.current?.click()}
+                  >
+                    {logoBusy ? "Working…" : "Upload logo"}
+                  </Button>
+                  {logoUrl && (
+                    <Button size="sm" variant="ghost" disabled={logoBusy} onClick={handleLogoRemove}>
+                      Remove
+                    </Button>
+                  )}
+                </div>
+                <p className="text-[11px] text-muted-foreground max-w-xs">
+                  PNG, up to 5 MB, square recommended. Without a logo the app shows the
+                  company name's initials. The browser tab icon updates on next reload;
+                  removing it clears the tab icon entirely.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="text-xs font-medium text-muted-foreground">Company Name</label>
@@ -1810,7 +1920,7 @@ export default function SettingsPage() {
         <p className="text-sm text-muted-foreground mt-1">System configuration</p>
       </div>
 
-      <CompanyInfoCard canEdit={canEditSettings} />
+      <CompanyInfoCard canEdit={canEditSettings} canEditLogo={role === "admin"} />
 
       <Card>
         <CardHeader className="pb-2">

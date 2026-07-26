@@ -24,6 +24,8 @@ interface PreparedEmail {
     subject: string
     bodyHtml: string
     bodyContentHtml?: string
+    signatureProfileId?: string | null
+    signatureBrandId?: string | null
   }
 }
 
@@ -134,6 +136,8 @@ export function ReservationFormCard({
           initialSubject={prepared.email.subject}
           bodyHtml={prepared.email.bodyHtml}
           bodyContentHtml={prepared.email.bodyContentHtml}
+          signatureProfileId={prepared.email.signatureProfileId}
+          signatureBrandId={prepared.email.signatureBrandId}
           kind="reservation_received"
           moveStage={moveStage}
           to={prepared.email.to}

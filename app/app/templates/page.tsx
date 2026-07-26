@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useTemplates, useVoucherTemplate } from "@/lib/use-data"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -14,7 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useRole } from "@/lib/role-context"
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
-import { Edit3, Eye, BookOpen, Plus, Trash2 } from "lucide-react"
+import { Edit3, Eye, BookOpen, Mail, Plus, Trash2 } from "lucide-react"
 import { getTokenSpecs, TEMPLATE_TOKENS, type TemplateTokenSpec } from "@/lib/templates/registry"
 import {
   AlertDialog,
@@ -32,7 +33,6 @@ import { VoucherTemplateEditor } from "@/components/voucher-template-editor"
 import { BrandBlockSettingsEditor } from "@/components/brand-block-settings-editor"
 import { DocumentTextSettingsEditor } from "@/components/document-text-settings-editor"
 import { EmailAppearanceSettingsEditor } from "@/components/email-appearance-settings-editor"
-import { EmailSignatureSettingsEditor } from "@/components/email-signature-settings-editor"
 import { EmailAttachmentLibraryEditor } from "@/components/email-attachment-library-editor"
 import { PdfPreviewButtons } from "@/components/pdf-preview-buttons"
 
@@ -307,19 +307,6 @@ export default function TemplatesPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg">Email Signature</CardTitle>
-              <p className="text-sm text-muted-foreground mt-1.5">
-                Company chrome appended below every salesperson&apos;s signature. Per-person name,
-                title and contact details are set on each mailbox under Settings › Communication.
-              </p>
-            </CardHeader>
-            <CardContent>
-              <EmailSignatureSettingsEditor canEdit={role === "admin"} />
-            </CardContent>
-          </Card>
-
           <SortableList
             items={orderedTemplates}
             onReorder={handleReorder}
@@ -384,6 +371,24 @@ export default function TemplatesPage() {
             </CardHeader>
             <CardContent className="pb-6">
               <EmailAttachmentLibraryEditor canEdit={role === "admin" || role === "manager"} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg">Email Signature</CardTitle>
+              <p className="text-sm text-muted-foreground mt-1.5">
+                Division brand templates (banner, badges, legal text) for the outgoing-email
+                signature. Any salesperson can pick which brand to send with.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <Button asChild size="sm" variant="outline" className="gap-2">
+                <Link href="/app/settings/email-signatures">
+                  <Mail className="h-4 w-4" />
+                  Manage Email Signatures
+                </Link>
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>

@@ -356,16 +356,30 @@ export function useEmailAppearanceSettings() {
 
 export interface EmailSignatureSettings {
   signature_enabled: string
-  signature_banner_url: string
   signature_company_line: string
   signature_registration_line: string
   signature_trading_hours: string
   signature_divisions_line: string
   signature_confidentiality: string
+  signature_office_address: string
 }
 
 export function useEmailSignatureSettings() {
   return useSWR<EmailSignatureSettings>("/api/settings/email-signature", fetcher, swrOptions)
+}
+
+export interface SignatureBrandSummary {
+  id: string
+  name: string
+  sortOrder: number
+}
+
+export function useSignatureBrands() {
+  return useSWR<{ brands: SignatureBrandSummary[]; enabled: boolean }>(
+    "/api/settings/signature-brands",
+    fetcher,
+    swrOptions,
+  )
 }
 
 export interface SystemInfo {

@@ -3,7 +3,16 @@ import { requireRole, requireUser } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 
-const SETTING_KEYS = ["business_name", "company_email", "company_phone", "vat_rate"] as const
+// app_logo_url is read-only here — it's written by /api/settings/app-logo,
+// which owns validation and storage for the upload. Included in GET so the
+// sidebar's existing useSWR("/api/settings/company") picks it up for free.
+const SETTING_KEYS = [
+  "business_name",
+  "company_email",
+  "company_phone",
+  "vat_rate",
+  "app_logo_url",
+] as const
 
 export async function GET() {
   const auth = await requireUser()

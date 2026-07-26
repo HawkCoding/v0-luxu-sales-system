@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { writeAuditLog } from "@/lib/audit-write"
 import { formatDisplayDateLong } from "@/lib/date-format"
 import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
+import { syncBookingPaymentState } from "@/lib/invoices/sync-booking-payment-state"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { getBankingSettings } from "@/lib/settings-access"
 import type { Database } from "@/lib/supabase/types"
@@ -149,6 +150,13 @@ export async function applyTransition(
       .eq("id", latestQuote.id)
 
     if (quoteError) throw new Error(quoteError.message)
+
+    // Recompute invoice_balance/deposit_paid off the newly-accepted quote total so a
+    // revised (e.g. higher) total is reflected immediately, not just on the next payment.
+    await syncBookingPaymentState(supabase, input.booking.id, {
+      actorName: input.actorName,
+      actorUserId: input.actorUserId,
+    })
   }
 
   if (crossedStages.includes("deposit_paid")) {

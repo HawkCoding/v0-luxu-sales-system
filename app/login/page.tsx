@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { LoadingState } from "@/components/ui/loading-state"
 import { Spinner } from "@/components/ui/spinner"
+import { AppLogo } from "@/components/app-logo"
 
 const loginPageClassName = "min-h-screen bg-background flex items-center justify-center p-4"
 // DEV_QUICK_LOGIN_START
@@ -125,6 +126,16 @@ function LoginForm() {
   const [forgotSubmitting, setForgotSubmitting] = useState(false)
   const [forgotSent, setForgotSent] = useState(false)
   const [slowLoad, setSlowLoad] = useState(false)
+  const [branding, setBranding] = useState<{ logoUrl: string | null; businessName: string } | null>(null)
+
+  useEffect(() => {
+    fetch("/api/branding")
+      .then((r) => r.json())
+      .then(setBranding)
+      .catch(() => {})
+  }, [])
+
+  const businessName = branding?.businessName || "Luxus Travel"
 
   useEffect(() => {
     setHydrated(true)
@@ -259,11 +270,14 @@ function LoginForm() {
     <LoginShell>
       <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="text-center pb-6">
-          <div className="mx-auto w-16 h-16 rounded-full bg-primary flex items-center justify-center mb-4">
-            <span className="text-2xl font-bold text-primary-foreground">LT</span>
-          </div>
+          <AppLogo
+            logoUrl={branding?.logoUrl}
+            businessName={businessName}
+            className="mx-auto mb-4"
+            size={64}
+          />
           <CardTitle className="text-3xl">Welcome Back</CardTitle>
-          <CardDescription className="text-base mt-2">Sign in to Luxus Sales Operations</CardDescription>
+          <CardDescription className="text-base mt-2">Sign in to {businessName} Sales Operations</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-5">

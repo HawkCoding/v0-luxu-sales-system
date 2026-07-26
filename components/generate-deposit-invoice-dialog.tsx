@@ -48,6 +48,8 @@ interface GenerateDepositInvoiceResponse {
     bodyHtml: string
     bodyContentHtml?: string
     warnings?: string[]
+    signatureProfileId?: string | null
+    signatureBrandId?: string | null
   }
   attachment?: {
     filename: string
@@ -311,6 +313,8 @@ export function GenerateDepositInvoiceDialog({
           initialSubject={generated.email.subject}
           bodyHtml={generated.email.bodyHtml}
           bodyContentHtml={generated.email.bodyContentHtml}
+          signatureProfileId={generated.email.signatureProfileId}
+          signatureBrandId={generated.email.signatureBrandId}
           to={generated.email.to}
           kind="invoice"
           moveStage="deposit_requested"

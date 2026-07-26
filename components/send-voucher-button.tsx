@@ -27,6 +27,8 @@ interface PreparedVoucherSend {
     bodyHtml: string
     bodyContentHtml?: string
     warnings?: string[]
+    signatureProfileId?: string | null
+    signatureBrandId?: string | null
   }
   attachments: Array<{
     filename: string
@@ -96,6 +98,8 @@ export function SendVoucherButton({
           initialSubject={prepared.email.subject}
           bodyHtml={prepared.email.bodyHtml}
           bodyContentHtml={prepared.email.bodyContentHtml}
+          signatureProfileId={prepared.email.signatureProfileId}
+          signatureBrandId={prepared.email.signatureBrandId}
           to={prepared.email.to}
           kind="voucher"
           moveStage="voucher_sent"

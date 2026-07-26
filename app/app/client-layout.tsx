@@ -23,7 +23,7 @@ import { useEnquiryCount } from "@/lib/use-data"
 import { useRealtimeSync } from "@/hooks/use-realtime-sync"
 import { APP_VERSION } from "@/lib/version"
 import type { User } from "@/lib/auth-context"
-import { LuxusLogo } from "@/components/luxus-logo"
+import { AppLogo } from "@/components/app-logo"
 import useSWR from "swr"
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
@@ -234,14 +234,24 @@ function AppShell({ children }: { children: ReactNode }) {
         <div className="app-header h-14 flex items-center px-4 border-b border-stroke">
           {!collapsed && (
             <Link href="/app" className="flex items-center gap-2 w-full">
-              <LuxusLogo className="w-16 h-16 flex-shrink-0 text-foreground" size={64} />
+              <AppLogo
+                logoUrl={companySettings?.app_logo_url}
+                businessName={businessName}
+                className="flex-shrink-0"
+                size={36}
+              />
               <span className="text-xs font-semibold text-foreground tracking-tight leading-tight text-center flex-1">
                 {businessName}
               </span>
             </Link>
           )}
           {collapsed && (
-            <LuxusLogo className="w-16 h-16 mx-auto text-foreground" size={64} />
+            <AppLogo
+              logoUrl={companySettings?.app_logo_url}
+              businessName={businessName}
+              className="mx-auto"
+              size={32}
+            />
           )}
         </div>
         <div className="relative flex-1 min-h-0 py-2">

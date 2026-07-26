@@ -518,19 +518,18 @@ export async function getEmailBrandingSettings(): Promise<EmailBrandingSettings>
 // copy shown in the outgoing-mail signature block.
 export const EMAIL_SIGNATURE_SETTING_KEYS = [
   "signature_enabled",
-  "signature_banner_url",
   "signature_company_line",
   "signature_registration_line",
   "signature_trading_hours",
   "signature_divisions_line",
   "signature_confidentiality",
+  "signature_office_address",
 ] as const
 
 export type EmailSignatureSettings = Record<(typeof EMAIL_SIGNATURE_SETTING_KEYS)[number], string>
 
 const EMAIL_SIGNATURE_DEFAULTS: EmailSignatureSettings = {
   signature_enabled: "true",
-  signature_banner_url: "",
   signature_company_line:
     "SA-Rail is a division of Luxus Travel & Tours. We are authorized reservation agents for The Blue Train, Rovos Rail & Kruger Shalati since 2014.",
   signature_registration_line: "Registered in South Africa CK2007/049324/23",
@@ -538,6 +537,7 @@ const EMAIL_SIGNATURE_DEFAULTS: EmailSignatureSettings = {
   signature_divisions_line: "DIVISIONS OF LUXUS TRAVEL & TOURS",
   signature_confidentiality:
     "CONFIDENTIALITY CAUTION: This message is intended for the use of the addressed party only. If the reader is not the intended recipient, please notify us immediately and destroy this message.",
+  signature_office_address: "",
 }
 
 /**

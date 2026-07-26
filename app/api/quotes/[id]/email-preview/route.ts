@@ -187,5 +187,7 @@ export async function POST(req: Request, { params }: RouteParams) {
     subject,
     quoteNumber,
     warnings: composed.warnings,
+    signatureProfileId: composed.signatureProfileId,
+    signatureBrandId: composed.signatureBrandId,
   })
 }

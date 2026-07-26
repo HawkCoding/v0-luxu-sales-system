@@ -3,6 +3,7 @@ import { Playfair_Display, Inter } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
 import { Toaster } from '@/components/ui/sonner'
 import { ThemeProvider } from '@/components/theme-provider'
+import { getAppBranding } from '@/lib/branding/app-logo'
 import './globals.css'
 
 const playfair = Playfair_Display({
@@ -16,9 +17,18 @@ const inter = Inter({
   variable: "--font-inter",
 })
 
-export const metadata: Metadata = {
-  title: 'Luxus Travel and Tourist - Sales Operations',
-  description: 'Internal sales ops system for Luxus Travel and Tourist',
+// Dynamic so an uploaded logo (Settings > Company Information) becomes the
+// browser tab icon. There's no committed favicon file to fall back to — a
+// removed logo means no favicon, which is the chosen behavior; the browser's
+// default icon takes over.
+export async function generateMetadata(): Promise<Metadata> {
+  const { logoUrl, businessName } = await getAppBranding()
+
+  return {
+    title: `${businessName} - Sales Operations`,
+    description: `Internal sales ops system for ${businessName}`,
+    icons: logoUrl ? { icon: [{ url: logoUrl, type: 'image/png' }] } : { icon: [] },
+  }
 }
 
 export default function RootLayout({
