@@ -14,9 +14,8 @@ import {
 } from "@/lib/email/appearance"
 import type { BrandBlockPosition, DocumentBrand } from "@/lib/settings-access"
 import { CONTENT_CLASS_NAME } from "@/lib/templates/content-slot"
+import { SIGNATURE_SLOT_END, SIGNATURE_SLOT_START } from "@/lib/templates/signature-slot"
 import { FooterBrandBlock } from "@/emails/footer-brand-block"
-import { EmailSignature } from "@/emails/email-signature"
-import type { ResolvedEmailSignature } from "@/lib/email/signature"
 
 interface BaseLayoutProps {
   preview: string
@@ -27,8 +26,12 @@ interface BaseLayoutProps {
   brandPosition?: BrandBlockPosition
   fontFamily?: EmailFontFamily
   fontSize?: EmailFontSize
-  /** Sender signature, rendered below the content, above the bottom brand block. Omitted renders nothing. */
-  signature?: ResolvedEmailSignature | null
+  /**
+   * Pre-rendered signature fragment, bracketed with slot markers so the send
+   * dialog can swap in a different brand's rendering client-side. Rendered
+   * unconditionally (even empty) so the slot always exists to swap into.
+   */
+  signatureHtml?: string
 }
 
 export function BaseLayout({
@@ -38,7 +41,7 @@ export function BaseLayout({
   brandPosition = "top",
   fontFamily = EMAIL_APPEARANCE_DEFAULTS.email_font_family,
   fontSize = EMAIL_APPEARANCE_DEFAULTS.email_font_size,
-  signature,
+  signatureHtml,
 }: BaseLayoutProps) {
   // Outlook's Word engine resets fonts on block elements, so a font-family on
   // <Body> alone never reaches the template content's <p> tags. The head rule
@@ -77,7 +80,11 @@ export function BaseLayout({
             </Section>
           )}
           <Section style={content}>{children}</Section>
-          {signature ? <EmailSignature signature={signature} /> : null}
+          <div
+            dangerouslySetInnerHTML={{
+              __html: `${SIGNATURE_SLOT_START}${signatureHtml ?? ""}${SIGNATURE_SLOT_END}`,
+            }}
+          />
           {brandPosition === "bottom" && (
             <Section style={footer}>
               <FooterBrandBlock brand={brand} />

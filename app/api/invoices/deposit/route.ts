@@ -284,6 +284,8 @@ export async function POST(req: Request) {
       bodyHtml: composed.bodyHtml,
       bodyContentHtml: composed.bodyContentHtml,
       warnings: composed.warnings,
+      signatureProfileId: composed.signatureProfileId,
+      signatureBrandId: composed.signatureBrandId,
     },
     attachment: {
       filename: pdf.filename,

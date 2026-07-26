@@ -2869,6 +2869,66 @@ export type Database = {
           },
         ]
       }
+      signature_brands: {
+        Row: {
+          badges: Json
+          banner_height: number | null
+          banner_url: string | null
+          banner_width: number | null
+          company_line: string | null
+          confidentiality: string | null
+          created_at: string
+          divisions_line: string | null
+          enabled: boolean
+          id: string
+          name: string
+          office_address: string | null
+          registration_line: string | null
+          slug: string
+          sort_order: number
+          trading_hours: string | null
+          updated_at: string
+        }
+        Insert: {
+          badges?: Json
+          banner_height?: number | null
+          banner_url?: string | null
+          banner_width?: number | null
+          company_line?: string | null
+          confidentiality?: string | null
+          created_at?: string
+          divisions_line?: string | null
+          enabled?: boolean
+          id?: string
+          name: string
+          office_address?: string | null
+          registration_line?: string | null
+          slug: string
+          sort_order?: number
+          trading_hours?: string | null
+          updated_at?: string
+        }
+        Update: {
+          badges?: Json
+          banner_height?: number | null
+          banner_url?: string | null
+          banner_width?: number | null
+          company_line?: string | null
+          confidentiality?: string | null
+          created_at?: string
+          divisions_line?: string | null
+          enabled?: boolean
+          id?: string
+          name?: string
+          office_address?: string | null
+          registration_line?: string | null
+          slug?: string
+          sort_order?: number
+          trading_hours?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       suite_type_bathroom_types: {
         Row: {
           bathroom_type_id: string

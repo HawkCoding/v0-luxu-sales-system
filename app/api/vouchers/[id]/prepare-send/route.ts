@@ -212,6 +212,8 @@ export async function POST(_req: Request, { params }: RouteParams) {
       bodyHtml: composed.bodyHtml,
       bodyContentHtml: composed.bodyContentHtml,
       warnings: composed.warnings,
+      signatureProfileId: composed.signatureProfileId,
+      signatureBrandId: composed.signatureBrandId,
     },
     attachments: [
       {

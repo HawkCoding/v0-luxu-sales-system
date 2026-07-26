@@ -21,6 +21,8 @@ interface PreparedReminder {
     bodyHtml: string
     bodyContentHtml?: string
     warnings?: string[]
+    signatureProfileId?: string | null
+    signatureBrandId?: string | null
   }
   attachment: {
     filename: string
@@ -86,6 +88,8 @@ export function SendPaymentReminderButton({
           initialSubject={prepared.email.subject}
           bodyHtml={prepared.email.bodyHtml}
           bodyContentHtml={prepared.email.bodyContentHtml}
+          signatureProfileId={prepared.email.signatureProfileId}
+          signatureBrandId={prepared.email.signatureBrandId}
           to={prepared.email.to}
           kind="payment_reminder"
           attachments={[prepared.attachment]}

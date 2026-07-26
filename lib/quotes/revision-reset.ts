@@ -9,6 +9,9 @@ type BookingUpdate = Database["public"]["Tables"]["bookings"]["Update"]
 /** Invoice statuses that a revision supersedes. A `paid` invoice is never voided. */
 const VOIDABLE_INVOICE_STATUSES = ["draft", "sent"]
 
+/** Paid invoice kinds reopened (set back to `sent`) so the delta can be billed once the revision is accepted. */
+const REOPENABLE_INVOICE_KINDS = ["final", "full"]
+
 /** Timestamp column cleared when the stage it records is rewound past. */
 const STAGE_TIMESTAMP_COLUMN: Partial<Record<PipelineStage, keyof BookingUpdate>> = {
   quote_sent: "quote_sent_at",
@@ -42,6 +45,8 @@ export interface RevisionResetPlan {
   summary: string[]
   /** False when the booking is already at or behind the reset floor. */
   changesStage: boolean
+  /** True when the booking had already reached Paid in Full or later — needs explicit confirmation. */
+  farAlong: boolean
 }
 
 function stageIndex(stage: PipelineStage): number {
@@ -67,6 +72,7 @@ export function planRevisionReset(input: RevisionResetInput): RevisionResetPlan 
   // `lost` and other off-ladder stages have no index — leave them alone.
   const changesStage = currentIndex > floorIndex && floorIndex !== -1
   const targetStage = changesStage ? floorStage : currentStage
+  const farAlong = currentIndex >= stageIndex("final_paid")
 
   const clearedFields: string[] = []
   if (changesStage) {
@@ -95,6 +101,12 @@ export function planRevisionReset(input: RevisionResetInput): RevisionResetPlan 
   if (keepsDeposit) {
     summary.push("Payments already received are kept — the deposit stays marked as paid.")
   }
+  if (farAlong) {
+    summary.push(
+      `This booking already reached ${PIPELINE_STAGE_LABELS[currentStage]} — any paid invoice is reopened ` +
+        "so the new balance can be billed once this revision is accepted.",
+    )
+  }
 
   return {
     targetStage,
@@ -103,6 +115,7 @@ export function planRevisionReset(input: RevisionResetInput): RevisionResetPlan 
     voidsInvoices: true,
     summary,
     changesStage,
+    farAlong,
   }
 }
 
@@ -119,6 +132,7 @@ export interface ApplyRevisionResetInput {
 
 export interface ApplyRevisionResetResult {
   voidedInvoiceIds: string[]
+  reopenedInvoiceIds: string[]
   stageChanged: boolean
 }
 
@@ -156,6 +170,18 @@ export async function applyRevisionReset(
 
   if (voidError) throw new Error(voidError.message)
 
+  // A paid final/full invoice is never voided (see VOIDABLE_INVOICE_STATUSES), but it
+  // must be reopened so the new balance can be billed once the revision is accepted.
+  const { data: reopened, error: reopenError } = await supabase
+    .from("invoices")
+    .update({ status: "sent", updated_at: nowIso })
+    .eq("booking_id", input.bookingId)
+    .in("kind", REOPENABLE_INVOICE_KINDS)
+    .eq("status", "paid")
+    .select("id")
+
+  if (reopenError) throw new Error(reopenError.message)
+
   const { error: supersedeError } = await supabase
     .from("quotes")
     .update({ status: "superseded", updated_at: nowIso })
@@ -164,6 +190,7 @@ export async function applyRevisionReset(
   if (supersedeError) throw new Error(supersedeError.message)
 
   const voidedInvoiceIds = (voided ?? []).map((invoice) => invoice.id)
+  const reopenedInvoiceIds = (reopened ?? []).map((invoice) => invoice.id)
 
   await writeAuditLog(supabase, {
     actor: input.actorName,
@@ -176,10 +203,11 @@ export async function applyRevisionReset(
       stage: plan.targetStage,
       cleared_fields: plan.clearedFields,
       voided_invoice_ids: voidedInvoiceIds,
+      reopened_invoice_ids: reopenedInvoiceIds,
       superseded_quote_id: input.parentQuoteId,
       kept_deposit: plan.keepsDeposit,
     },
   })
 
-  return { voidedInvoiceIds, stageChanged: plan.changesStage }
+  return { voidedInvoiceIds, reopenedInvoiceIds, stageChanged: plan.changesStage }
 }

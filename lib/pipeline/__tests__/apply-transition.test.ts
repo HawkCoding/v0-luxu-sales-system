@@ -40,6 +40,14 @@ vi.mock("@/lib/templates/resolve-shared-tokens", () => ({
   resolveSharedEmailTokens: vi.fn(async () => ({ tokens: {}, blocks: {} })),
 }))
 
+const syncMocks = vi.hoisted(() => ({
+  syncBookingPaymentState: vi.fn(async () => null),
+}))
+
+vi.mock("@/lib/invoices/sync-booking-payment-state", () => ({
+  syncBookingPaymentState: syncMocks.syncBookingPaymentState,
+}))
+
 import { applyTransition } from "../apply-transition"
 
 interface Operation {
@@ -208,6 +216,44 @@ describe("applyTransition", () => {
         payload: expect.objectContaining({ kind: "invoice", status: "scheduled" }),
       }),
     )
+    expect(syncMocks.syncBookingPaymentState).toHaveBeenCalledWith(
+      client,
+      "booking-1",
+      expect.objectContaining({ actorName: "Douwlien", actorUserId: "user-1" }),
+    )
+  })
+
+  it("does not resync payment state when the accepted stage isn't crossed", async () => {
+    const now = new Date("2026-05-01T10:00:00.000Z")
+    const { client } = createFakeSupabase({
+      id: "booking-bal",
+      stage: "deposit_requested",
+      invoice_balance: null,
+    })
+
+    syncMocks.syncBookingPaymentState.mockClear()
+
+    await applyTransition(client, {
+      booking: {
+        id: "booking-bal",
+        booking_number: "BT-2026-0009",
+        stage: "accepted",
+        source: "web_form",
+        raw_text: null,
+        updated_at: "2026-05-01T09:00:00.000Z",
+        customer_id: "customer-bal",
+        consultant: "DR",
+      },
+      targetStage: "deposit_requested",
+      actorName: "Douwlien",
+      actorUserId: "user-1",
+      quotes: [{ id: "quote-bal", status: "accepted", total: 1234.56, created_at: "2026-05-01T08:00:00.000Z" }],
+      documents: [{ id: "document-bal", kind: "invoice_pdf", status: "generated" }],
+      correspondences: [],
+      now,
+    })
+
+    expect(syncMocks.syncBookingPaymentState).not.toHaveBeenCalled()
   })
 
   it("backfills invoice_balance from the accepted quote when the booking balance is unset", async () => {

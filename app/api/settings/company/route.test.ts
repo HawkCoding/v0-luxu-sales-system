@@ -21,7 +21,7 @@ vi.mock("@/lib/audit-write", () => ({
   settingAuditMeta: auditMocks.settingAuditMeta,
 }))
 
-import { PATCH } from "./route"
+import { GET, PATCH } from "./route"
 
 const USER_ID = "00000000-0000-4000-8000-000000000001"
 
@@ -69,6 +69,50 @@ function makeRequest(body: unknown) {
     body: JSON.stringify(body),
   })
 }
+
+describe("GET /api/settings/company", () => {
+  beforeEach(() => {
+    authMocks.requireUser.mockReset()
+  })
+
+  it("returns 401 for unauthenticated request", async () => {
+    authMocks.requireUser.mockResolvedValue({
+      ok: false,
+      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    })
+
+    const res = await GET()
+    expect(res.status).toBe(401)
+  })
+
+  it("includes app_logo_url alongside the other company fields", async () => {
+    authMocks.requireUser.mockResolvedValue({
+      ok: true,
+      value: {
+        supabase: {
+          from: vi.fn(() => ({
+            select: vi.fn(() => ({
+              in: vi.fn(async () => ({
+                data: [
+                  { key: "business_name", value: "Existing Co" },
+                  { key: "app_logo_url", value: "https://cdn.example.com/brand/app-logo.png" },
+                ],
+                error: null,
+              })),
+            })),
+          })),
+        },
+      },
+    })
+
+    const body = await (await GET()).json()
+
+    expect(body).toEqual({
+      business_name: "Existing Co",
+      app_logo_url: "https://cdn.example.com/brand/app-logo.png",
+    })
+  })
+})
 
 describe("PATCH /api/settings/company", () => {
   beforeEach(() => {
@@ -120,6 +164,13 @@ describe("PATCH /api/settings/company", () => {
 
     expect(res.status).toBe(200)
     expect(body).toMatchObject({ business_name: "Luxus Travel" })
+  })
+
+  it("does not accept app_logo_url — that key is owned by /api/settings/app-logo", async () => {
+    makeAuth()
+
+    const res = await PATCH(makeRequest({ app_logo_url: "https://evil.example.com/logo.png" }))
+    expect(res.status).toBe(400)
   })
 
   it("writes an audit log entry on success", async () => {

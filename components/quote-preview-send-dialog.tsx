@@ -25,11 +25,13 @@ import {
 } from "@/components/ui/dialog"
 import dynamic from "next/dynamic"
 import { EmailAttachmentPicker } from "@/components/email-attachment-picker"
+import { SignaturePicker } from "@/components/signature-picker"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { replaceContentSlot } from "@/lib/templates/content-slot"
+import { replaceSignatureSlot } from "@/lib/templates/signature-slot"
 
 const HtmlBodyEditor = dynamic(
   () => import("@/components/ui/html-body-editor").then((m) => m.HtmlBodyEditor),
@@ -54,6 +56,8 @@ interface PreviewResponse {
   subject?: string
   quoteNumber?: string
   warnings?: string[]
+  signatureProfileId?: string | null
+  signatureBrandId?: string | null
   error?: string
 }
 
@@ -74,6 +78,9 @@ export function QuotePreviewSendDialog({
   const [subject, setSubject] = useState("")
   const [html, setHtml] = useState("")
   const [content, setContent] = useState<string | null>(null)
+  const [signatureHtml, setSignatureHtml] = useState<string | null>(null)
+  const [signatureProfileId, setSignatureProfileId] = useState<string | null>(null)
+  const [signatureBrandId, setSignatureBrandId] = useState<string | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [sending, setSending] = useState(false)
@@ -87,16 +94,21 @@ export function QuotePreviewSendDialog({
   }
 
   // The email is composed server-side from the quote_email template; edits
-  // here are spliced into the branded wrapper for this send only.
+  // here are spliced into the branded wrapper for this send only. Content
+  // splices innermost, signature after — the two slots are disjoint regions
+  // so the splices commute.
   const finalHtml = useMemo(() => {
     if (!html) return ""
-    if (content === null) return html
-    return replaceContentSlot(html, content) ?? content
-  }, [html, content])
+    let out = html
+    if (content !== null) out = replaceContentSlot(out, content) ?? content
+    if (signatureHtml !== null) out = replaceSignatureSlot(out, signatureHtml) ?? out
+    return out
+  }, [html, content, signatureHtml])
 
   async function loadPreview() {
     setLoadingPreview(true)
     setError(null)
+    setSignatureHtml(null)
 
     try {
       const response = await fetch(`/api/quotes/${quote.id}/email-preview`, {
@@ -112,6 +124,8 @@ export function QuotePreviewSendDialog({
 
       setHtml(payload.html)
       setContent(payload.bodyContentHtml ?? null)
+      setSignatureProfileId(payload.signatureProfileId ?? null)
+      setSignatureBrandId(payload.signatureBrandId ?? null)
       // Customer-facing fallback when the template resolves no subject, so it
       // follows the same reference rule as the quote email and PDF.
       const subjectReference = QUOTE_REFERENCE_ENABLED
@@ -247,6 +261,13 @@ export function QuotePreviewSendDialog({
                 kind="quote"
                 selected={libraryAttachmentIds}
                 onSelectedChange={setLibraryAttachmentIds}
+                disabled={sending}
+              />
+              <SignaturePicker
+                bodyHtml={html}
+                profileId={signatureProfileId}
+                initialBrandId={signatureBrandId}
+                onSignatureHtmlChange={setSignatureHtml}
                 disabled={sending}
               />
               {content !== null && (

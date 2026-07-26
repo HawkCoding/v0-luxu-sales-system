@@ -5,24 +5,24 @@ interface EmailSignatureProps {
   signature: ResolvedEmailSignature
 }
 
+const joinParts = (parts: (string | null | false | undefined)[]) => parts.filter(Boolean).join(" | ")
+
 /**
- * Per-sender signature (name/title/contact) plus the SARAIL company chrome,
- * rendered under the message body and above the FooterBrandBlock. Not
- * wrapped in the `.luxus-content` class — the sender's font settings scale
- * their message body, not the signature — same rule FooterBrandBlock follows.
+ * Per-sender signature (name/title/contact) plus the picked division's
+ * chrome, rendered under the message body and above the FooterBrandBlock.
+ * Not wrapped in the `.luxus-content` class — the sender's font settings
+ * scale their message body, not the signature — same rule FooterBrandBlock
+ * follows. The "Kind regards" sign-off deliberately lives in the template
+ * body, not here, so it is never doubled up.
  */
 export function EmailSignature({ signature }: EmailSignatureProps) {
-  const { fullName, jobTitle, tel, cell, fax, email, website, company } = signature
+  const { fullName, jobTitle, tel, cell, fax, email, website, brand } = signature
 
-  const contactLine = [
-    tel ? `Tel: ${tel}` : null,
-    cell ? `Cell: ${cell}` : null,
-    fax ? `Fax: ${fax}` : null,
-  ].filter(Boolean).join(" | ")
+  const contactLine = joinParts([tel && `Tel: ${tel}`, cell && `Cell: ${cell}`, fax && `Fax: ${fax}`])
+  const smallPrintLine = joinParts([brand.registrationLine, brand.tradingHours])
 
   return (
     <Section style={block}>
-      <Text style={kindRegards}>Kind regards,</Text>
       <Text style={nameLine}>
         <strong>{fullName}</strong>
         {jobTitle ? <span style={jobTitleStyle}> | {jobTitle}</span> : null}
@@ -44,34 +44,62 @@ export function EmailSignature({ signature }: EmailSignatureProps) {
         </Text>
       )}
 
-      {company.signature_banner_url ? (
+      {brand.bannerUrl ? (
         <Img
-          alt="SA-Rail — The Blue Train, Rovos Rail, Kruger Shalati"
-          src={company.signature_banner_url}
+          alt={brand.name}
+          src={brand.bannerUrl}
+          width={brand.bannerWidth ?? undefined}
+          height={brand.bannerHeight ?? undefined}
           style={banner}
         />
       ) : null}
 
+      {brand.badges.length > 0 ? (
+        <table role="presentation" cellPadding={0} cellSpacing={0} style={badgeTable}>
+          <tbody>
+            <tr>
+              {brand.badges.map((badge, i) => {
+                const img = (
+                  <Img
+                    key={i}
+                    alt={badge.alt}
+                    src={badge.url}
+                    width={badge.width}
+                    height={badge.height}
+                    style={badgeImg}
+                  />
+                )
+                return (
+                  <td key={i} style={badgeCell}>
+                    {badge.href ? (
+                      <Link href={badge.href} style={badgeLink}>
+                        {img}
+                      </Link>
+                    ) : (
+                      img
+                    )}
+                  </td>
+                )
+              })}
+            </tr>
+          </tbody>
+        </table>
+      ) : null}
+
+      {brand.officeAddress ? <Text style={smallPrint}>{brand.officeAddress}</Text> : null}
+
       <Hr style={hr} />
 
-      <Text style={smallPrint}>{company.signature_company_line}</Text>
-      <Text style={smallPrint}>
-        {company.signature_registration_line} | {company.signature_trading_hours}
-      </Text>
-      <Text style={smallPrint}>{company.signature_divisions_line}</Text>
-      <Text style={confidentiality}>{company.signature_confidentiality}</Text>
+      {brand.companyLine ? <Text style={smallPrint}>{brand.companyLine}</Text> : null}
+      {smallPrintLine ? <Text style={smallPrint}>{smallPrintLine}</Text> : null}
+      {brand.divisionsLine ? <Text style={smallPrint}>{brand.divisionsLine}</Text> : null}
+      {brand.confidentiality ? <Text style={confidentiality}>{brand.confidentiality}</Text> : null}
     </Section>
   )
 }
 
 const block = {
   padding: "4px 24px 0",
-}
-
-const kindRegards = {
-  margin: "0 0 6px",
-  color: "#2f2a24",
-  fontSize: "13px",
 }
 
 const nameLine = {
@@ -98,10 +126,37 @@ const link = {
 
 const banner = {
   display: "block",
-  width: "100%",
-  maxWidth: "480px",
+  maxWidth: "100%",
   height: "auto",
   margin: "12px 0",
+  border: "0",
+  outline: "none",
+  textDecoration: "none",
+  objectFit: "contain" as const,
+}
+
+const badgeTable = {
+  margin: "8px 0",
+}
+
+const badgeCell = {
+  paddingRight: "10px",
+  verticalAlign: "middle" as const,
+}
+
+const badgeImg = {
+  display: "block",
+  maxWidth: "100%",
+  height: "auto",
+  border: "0",
+  outline: "none",
+  textDecoration: "none",
+  objectFit: "contain" as const,
+}
+
+const badgeLink = {
+  textDecoration: "none",
+  border: "0",
 }
 
 const hr = {

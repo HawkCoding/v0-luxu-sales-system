@@ -189,6 +189,8 @@ describe("composeFromTemplate", () => {
 
   it("renders the sender's signature outside the content slot when senderProfileId is given", async () => {
     signatureMocks.resolveEmailSignature.mockResolvedValue({
+      profileId: "profile-1",
+      brandId: "brand-sa-rail",
       fullName: "Leonie Burke",
       jobTitle: "Tour Operating Consultant",
       tel: "+27 (0)21 100 3596",
@@ -196,14 +198,20 @@ describe("composeFromTemplate", () => {
       fax: null,
       email: "reservations2@sa-rail.co.za",
       website: "www.sa-rail.co.za",
-      company: {
-        signature_enabled: "true",
-        signature_banner_url: "",
-        signature_company_line: "SA-Rail is a division of Luxus Travel & Tours.",
-        signature_registration_line: "Registered in South Africa CK2007/049324/23",
-        signature_trading_hours: "Trading Hours: Mon – Fri 08h30 to 16h00",
-        signature_divisions_line: "DIVISIONS OF LUXUS TRAVEL & TOURS",
-        signature_confidentiality: "CONFIDENTIALITY CAUTION: ...",
+      brand: {
+        id: "brand-sa-rail",
+        slug: "sa-rail",
+        name: "SA Rail",
+        bannerUrl: null,
+        bannerWidth: null,
+        bannerHeight: null,
+        badges: [],
+        companyLine: "SA-Rail is a division of Luxus Travel & Tours.",
+        registrationLine: "Registered in South Africa CK2007/049324/23",
+        tradingHours: "Trading Hours: Mon – Fri 08h30 to 16h00",
+        divisionsLine: "DIVISIONS OF LUXUS TRAVEL & TOURS",
+        confidentiality: "CONFIDENTIALITY CAUTION: ...",
+        officeAddress: null,
       },
     })
 
@@ -212,9 +220,11 @@ describe("composeFromTemplate", () => {
       { tokens: {}, senderProfileId: "profile-1" },
     )
 
-    expect(signatureMocks.resolveEmailSignature).toHaveBeenCalledWith("profile-1")
+    expect(signatureMocks.resolveEmailSignature).toHaveBeenCalledWith("profile-1", undefined)
     expect(composed.bodyHtml).toContain("Leonie Burke")
     expect(composed.bodyHtml).toContain("Tour Operating Consultant")
+    expect(composed.signatureProfileId).toBe("profile-1")
+    expect(composed.signatureBrandId).toBe("brand-sa-rail")
     // The signature must sit after the slot markers, not inside them — the
     // send preview only lets the salesperson edit the slotted content.
     const contentEnd = composed.bodyHtml.indexOf(CONTENT_SLOT_END)
@@ -228,8 +238,10 @@ describe("composeFromTemplate", () => {
       { tokens: {} },
     )
 
-    expect(signatureMocks.resolveEmailSignature).toHaveBeenCalledWith(undefined)
+    expect(signatureMocks.resolveEmailSignature).toHaveBeenCalledWith(undefined, undefined)
     expect(composed.bodyHtml).not.toContain("Kind regards")
+    expect(composed.signatureProfileId).toBeNull()
+    expect(composed.signatureBrandId).toBeNull()
   })
 
   it("propagates warnings for unreplaced tokens", async () => {

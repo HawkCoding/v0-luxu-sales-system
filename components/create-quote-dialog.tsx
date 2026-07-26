@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { PlusCircle } from "lucide-react"
+import { Loader2, PlusCircle } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -27,7 +27,71 @@ function defaultValidityDate(): string {
   return isoDateDaysFromNow(DEFAULT_QUOTE_VALIDITY_DAYS)
 }
 
+async function createQuote(
+  jobId: string,
+  validityUntil?: string,
+): Promise<{ error?: string; id?: string }> {
+  const res = await fetch("/api/quotes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jobId,
+      // Validity is hidden: the server stamps the silent org default.
+      ...(QUOTE_VALIDITY_ENABLED && validityUntil ? { validityUntil } : {}),
+      status: "draft",
+    }),
+  })
+
+  const body = await res.json().catch(() => ({}))
+
+  if (!res.ok) {
+    return { error: body.error ?? "Failed to create quote. Please try again." }
+  }
+  return { id: body.id as string }
+}
+
 export function CreateQuoteDialog({ jobId, onCreated }: CreateQuoteDialogProps) {
+  if (!QUOTE_VALIDITY_ENABLED) {
+    return <CreateQuoteButton jobId={jobId} onCreated={onCreated} />
+  }
+  return <CreateQuoteWithValidityDialog jobId={jobId} onCreated={onCreated} />
+}
+
+function CreateQuoteButton({ jobId, onCreated }: CreateQuoteDialogProps) {
+  const [saving, setSaving] = useState(false)
+
+  async function handleClick() {
+    setSaving(true)
+    const { error, id } = await createQuote(jobId)
+    setSaving(false)
+
+    if (error || !id) {
+      toast.error(error ?? "Failed to create quote. Please try again.")
+      return
+    }
+    toast.success("Draft quote created.")
+    onCreated(id)
+  }
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      data-testid="create-quote-button"
+      disabled={saving}
+      onClick={() => void handleClick()}
+    >
+      {saving ? (
+        <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+      ) : (
+        <PlusCircle className="h-4 w-4 mr-1.5" />
+      )}
+      {saving ? "Creating…" : "Create Quote"}
+    </Button>
+  )
+}
+
+function CreateQuoteWithValidityDialog({ jobId, onCreated }: CreateQuoteDialogProps) {
   const [open, setOpen] = useState(false)
   const [validityUntil, setValidityUntil] = useState<string>(defaultValidityDate())
   const [saving, setSaving] = useState(false)
@@ -45,23 +109,11 @@ export function CreateQuoteDialog({ jobId, onCreated }: CreateQuoteDialogProps) 
     setSaving(true)
     setError(null)
 
-    const res = await fetch("/api/quotes", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jobId,
-        // Validity is hidden: the server stamps the silent org default.
-        ...(QUOTE_VALIDITY_ENABLED ? { validityUntil } : {}),
-        status: "draft",
-      }),
-    })
-
+    const { error, id } = await createQuote(jobId, validityUntil)
     setSaving(false)
 
-    const body = await res.json().catch(() => ({}))
-
-    if (!res.ok) {
-      const message = body.error ?? "Failed to create quote. Please try again."
+    if (error || !id) {
+      const message = error ?? "Failed to create quote. Please try again."
       setError(message)
       toast.error(message)
       return
@@ -69,7 +121,7 @@ export function CreateQuoteDialog({ jobId, onCreated }: CreateQuoteDialogProps) 
 
     toast.success("Draft quote created.")
     setOpen(false)
-    onCreated(body.id as string)
+    onCreated(id)
   }
 
   // No validity picker to confirm right now, so skip the intermediate dialog

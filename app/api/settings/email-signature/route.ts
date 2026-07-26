@@ -14,8 +14,6 @@ export async function GET() {
   return Response.json(settings)
 }
 
-// The banner URL is written by the upload route, not here, so it is
-// intentionally absent from this schema.
 const patchSchema = z
   .object({
     signature_enabled: z.enum(["true", "false"]).optional(),
@@ -24,6 +22,7 @@ const patchSchema = z
     signature_trading_hours: z.string().trim().max(200).optional(),
     signature_divisions_line: z.string().trim().max(200).optional(),
     signature_confidentiality: z.string().trim().max(1000).optional(),
+    signature_office_address: z.string().trim().max(300).optional(),
   })
   .refine((data) => Object.values(data).some((value) => value !== undefined), {
     message: "At least one field required",

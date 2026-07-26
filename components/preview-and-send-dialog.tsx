@@ -18,7 +18,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useOptimisticSend } from "@/hooks/use-optimistic-send"
 import { EmailAttachmentPicker } from "@/components/email-attachment-picker"
+import { SignaturePicker } from "@/components/signature-picker"
 import { extractContentSlot, replaceContentSlot } from "@/lib/templates/content-slot"
+import { replaceSignatureSlot } from "@/lib/templates/signature-slot"
 
 const HtmlBodyEditor = dynamic(
   () => import("@/components/ui/html-body-editor").then((m) => m.HtmlBodyEditor),
@@ -47,6 +49,10 @@ interface PreviewAndSendDialogProps {
   voucherId?: string
   /** Scheduled correspondence row this send fulfils (updated in place server-side). */
   scheduledCorrespondenceId?: string
+  /** Profile the embedded signature belongs to — may not be the logged-in user. */
+  signatureProfileId?: string | null
+  /** Brand compose originally resolved into the signature; the picker's initial selection. */
+  signatureBrandId?: string | null
   attachments?: Array<{
     filename: string
     contentBase64: string
@@ -70,6 +76,8 @@ export function PreviewAndSendDialog({
   quoteId,
   voucherId,
   scheduledCorrespondenceId,
+  signatureProfileId = null,
+  signatureBrandId = null,
   attachments,
   onSent,
 }: PreviewAndSendDialogProps) {
@@ -80,6 +88,7 @@ export function PreviewAndSendDialog({
     [bodyContentHtml, bodyHtml],
   )
   const [content, setContent] = useState<string | null>(initialContent)
+  const [signatureHtml, setSignatureHtml] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [libraryAttachmentIds, setLibraryAttachmentIds] = useState<string[]>([])
   const optimisticSend = useOptimisticSend()
@@ -87,11 +96,19 @@ export function PreviewAndSendDialog({
   const canEditBody = initialContent !== null
 
   // Splice the edited content back into the branded wrapper for live preview
-  // and for the actual send. Falls back to the raw content if markers vanish.
+  // and for the actual send, then swap in a picked signature. Both splices
+  // are pure window replacements over disjoint regions, so they commute —
+  // content innermost, signature after.
   const finalHtml = useMemo(() => {
-    if (!canEditBody || content === null) return bodyHtml
-    return replaceContentSlot(bodyHtml, content) ?? content
-  }, [bodyHtml, canEditBody, content])
+    let out = bodyHtml
+    if (canEditBody && content !== null) {
+      const spliced = replaceContentSlot(out, content)
+      if (spliced === null) return content
+      out = spliced
+    }
+    if (signatureHtml !== null) out = replaceSignatureSlot(out, signatureHtml) ?? out
+    return out
+  }, [bodyHtml, canEditBody, content, signatureHtml])
 
   async function handleSend() {
     if (!subject.trim()) return
@@ -204,6 +221,14 @@ export function PreviewAndSendDialog({
             kind={kind}
             selected={libraryAttachmentIds}
             onSelectedChange={setLibraryAttachmentIds}
+            disabled={sending}
+          />
+
+          <SignaturePicker
+            bodyHtml={bodyHtml}
+            profileId={signatureProfileId}
+            initialBrandId={signatureBrandId}
+            onSignatureHtmlChange={setSignatureHtml}
             disabled={sending}
           />
 

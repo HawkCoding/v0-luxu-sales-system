@@ -201,6 +201,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
       stageChanged: reset.stageChanged,
       keptDeposit: plan.keepsDeposit,
       voidedInvoiceCount: reset.voidedInvoiceIds.length,
+      reopenedInvoiceCount: reset.reopenedInvoiceIds.length,
       summary: plan.summary,
     },
   })

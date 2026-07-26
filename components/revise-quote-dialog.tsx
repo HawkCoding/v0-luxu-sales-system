@@ -14,10 +14,12 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
-import { Loader2, RotateCcw } from "lucide-react"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Loader2, RotateCcw, TriangleAlert } from "lucide-react"
 
 interface RevisionResetPreview {
   summary: string[]
+  farAlong?: boolean
 }
 
 interface ReviseQuoteDialogProps {
@@ -31,10 +33,12 @@ export function ReviseQuoteDialog({ quoteId, quoteNumber, onRevised }: ReviseQuo
   const [plan, setPlan] = useState<RevisionResetPreview | null>(null)
   const [loadingPlan, setLoadingPlan] = useState(false)
   const [revising, setRevising] = useState(false)
+  const [farAlongConfirmed, setFarAlongConfirmed] = useState(false)
 
   async function loadPlan() {
     setLoadingPlan(true)
     setPlan(null)
+    setFarAlongConfirmed(false)
     try {
       const response = await fetch(`/api/quotes/${quoteId}/revise`)
       const payload = (await response.json().catch(() => ({}))) as {
@@ -64,16 +68,17 @@ export function ReviseQuoteDialog({ quoteId, quoteNumber, onRevised }: ReviseQuo
       const response = await fetch(`/api/quotes/${quoteId}/revise`, { method: "POST" })
       const payload = (await response.json().catch(() => ({}))) as {
         error?: string
-        reset?: { voidedInvoiceCount: number }
+        reset?: { voidedInvoiceCount: number; reopenedInvoiceCount: number }
       }
       if (!response.ok) throw new Error(payload.error ?? "Failed to revise quote")
 
       const voided = payload.reset?.voidedInvoiceCount ?? 0
-      toast.success(
-        voided > 0
-          ? `Quote revision created. ${voided} invoice${voided === 1 ? "" : "s"} voided.`
-          : "Quote revision created.",
-      )
+      const reopened = payload.reset?.reopenedInvoiceCount ?? 0
+      const notes = [
+        voided > 0 ? `${voided} invoice${voided === 1 ? "" : "s"} voided` : null,
+        reopened > 0 ? `${reopened} invoice${reopened === 1 ? "" : "s"} reopened` : null,
+      ].filter(Boolean)
+      toast.success(notes.length > 0 ? `Quote revision created. ${notes.join(", ")}.` : "Quote revision created.")
       setOpen(false)
       onRevised()
     } catch (error) {
@@ -115,10 +120,28 @@ export function ReviseQuoteDialog({ quoteId, quoteNumber, onRevised }: ReviseQuo
           )
         )}
 
+        {plan?.farAlong && (
+          <div className="space-y-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
+            <p className="flex items-center gap-2 text-sm font-medium text-amber-700 dark:text-amber-400">
+              <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden="true" />
+              This booking is already far along
+            </p>
+            <label className="flex items-start gap-2 text-sm text-muted-foreground">
+              <Checkbox
+                checked={farAlongConfirmed}
+                onCheckedChange={(checked) => setFarAlongConfirmed(checked === true)}
+                className="mt-0.5"
+              />
+              I understand this booking already progressed past Paid in Full and that revising it requires
+              manually re-billing the difference once the new quote is accepted.
+            </label>
+          </div>
+        )}
+
         <AlertDialogFooter>
           <AlertDialogCancel disabled={revising}>Cancel</AlertDialogCancel>
           <AlertDialogAction
-            disabled={revising || loadingPlan || !plan}
+            disabled={revising || loadingPlan || !plan || (plan.farAlong && !farAlongConfirmed)}
             onClick={(event) => {
               event.preventDefault()
               void confirmRevise()
