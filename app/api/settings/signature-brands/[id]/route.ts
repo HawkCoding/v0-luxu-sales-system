@@ -2,6 +2,7 @@ import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 import { signatureBrandTextFieldsSchema } from "@/lib/email/signature-brands"
+import { SIGNATURE_BRAND_COLUMNS } from "@/lib/supabase/columns"
 
 const ADMIN_ROLES = ["admin", "manager"]
 
@@ -29,7 +30,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   const { data: existing, error: existingError } = await supabase
     .from("signature_brands")
-    .select("*")
+    .select(SIGNATURE_BRAND_COLUMNS)
     .eq("id", id)
     .maybeSingle()
 
@@ -57,7 +58,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     .from("signature_brands")
     .update(updates)
     .eq("id", id)
-    .select("*")
+    .select(SIGNATURE_BRAND_COLUMNS)
     .single()
 
   if (error) return safeSupabaseError("signature-brands/[id]:update", error)
@@ -95,7 +96,11 @@ export async function DELETE(_req: Request, { params }: RouteParams) {
   const { id } = await params
   const { supabase } = auth.value
 
-  const { data: existing } = await supabase.from("signature_brands").select("*").eq("id", id).maybeSingle()
+  const { data: existing } = await supabase
+    .from("signature_brands")
+    .select(SIGNATURE_BRAND_COLUMNS)
+    .eq("id", id)
+    .maybeSingle()
   if (!existing) return jsonError("Signature brand not found", 404)
 
   const { error } = await supabase.from("signature_brands").delete().eq("id", id)

@@ -53,3 +53,6 @@ export const TEMPLATE_COLUMNS = "id, key, subject, body_html, version, active, i
 
 export const AUDIT_LOG_COLUMNS =
   "id, actor, actor_user_id, entity_type, entity_id, action, before_json, after_json, meta_json, created_at"
+
+export const SIGNATURE_BRAND_COLUMNS =
+  "id, slug, name, banner_url, banner_width, banner_height, badges, enabled, sort_order, company_line, registration_line, trading_hours, divisions_line, confidentiality, office_address, created_at, updated_at"

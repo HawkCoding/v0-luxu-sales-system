@@ -4,6 +4,7 @@ import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 import { MAX_SIGNATURE_BRANDS, slugify } from "@/lib/email/signature-brands"
 import { getEmailSignatureSettings } from "@/lib/settings-access"
+import { SIGNATURE_BRAND_COLUMNS } from "@/lib/supabase/columns"
 
 const ADMIN_ROLES = ["admin", "manager"]
 
@@ -24,7 +25,7 @@ export async function GET() {
   // admins get the extra fields back in the response (see the map below).
   let query = supabase
     .from("signature_brands")
-    .select("*")
+    .select(SIGNATURE_BRAND_COLUMNS)
     .order("sort_order", { ascending: true })
     .order("created_at", { ascending: true })
 
@@ -124,7 +125,7 @@ export async function POST(req: Request) {
       slug,
       sort_order: (maxSort?.sort_order ?? -1) + 1,
     })
-    .select("*")
+    .select("id, slug, name, sort_order, enabled")
     .single()
 
   if (error) return safeSupabaseError("signature-brands:create", error)
