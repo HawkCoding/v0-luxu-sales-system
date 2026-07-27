@@ -62,12 +62,3 @@ export function buildCommissionBreakdown(
     source: resolved.source,
   }
 }
-
-export function describeCommissionSource(source: ResolvedCommission["source"]): string {
-  switch (source) {
-    case "line":
-      return "line override"
-    default:
-      return "no commission"
-  }
-}

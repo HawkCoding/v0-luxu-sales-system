@@ -54,6 +54,15 @@ export function EmailSignature({ signature }: EmailSignatureProps) {
         />
       ) : null}
 
+      {brand.officeAddress ? <Text style={smallPrint}>{brand.officeAddress}</Text> : null}
+
+      <Hr style={hr} />
+
+      {brand.companyLine ? <Text style={smallPrint}>{brand.companyLine}</Text> : null}
+      {smallPrintLine ? <Text style={smallPrint}>{smallPrintLine}</Text> : null}
+      {brand.divisionsLine ? <Text style={smallPrint}>{brand.divisionsLine}</Text> : null}
+      {brand.confidentiality ? <Text style={confidentiality}>{brand.confidentiality}</Text> : null}
+
       {brand.badges.length > 0 ? (
         <table role="presentation" cellPadding={0} cellSpacing={0} style={badgeTable}>
           <tbody>
@@ -85,15 +94,6 @@ export function EmailSignature({ signature }: EmailSignatureProps) {
           </tbody>
         </table>
       ) : null}
-
-      {brand.officeAddress ? <Text style={smallPrint}>{brand.officeAddress}</Text> : null}
-
-      <Hr style={hr} />
-
-      {brand.companyLine ? <Text style={smallPrint}>{brand.companyLine}</Text> : null}
-      {smallPrintLine ? <Text style={smallPrint}>{smallPrintLine}</Text> : null}
-      {brand.divisionsLine ? <Text style={smallPrint}>{brand.divisionsLine}</Text> : null}
-      {brand.confidentiality ? <Text style={confidentiality}>{brand.confidentiality}</Text> : null}
     </Section>
   )
 }
@@ -126,7 +126,9 @@ const link = {
 
 const banner = {
   display: "block",
-  maxWidth: "100%",
+  maxWidth: "400px",
+  maxHeight: "120px",
+  width: "auto",
   height: "auto",
   margin: "12px 0",
   border: "0",
@@ -136,17 +138,19 @@ const banner = {
 }
 
 const badgeTable = {
-  margin: "8px 0",
+  margin: "8px 0 0",
 }
 
 const badgeCell = {
-  paddingRight: "10px",
+  paddingRight: "8px",
   verticalAlign: "middle" as const,
 }
 
 const badgeImg = {
   display: "block",
   maxWidth: "100%",
+  maxHeight: "32px",
+  width: "auto",
   height: "auto",
   border: "0",
   outline: "none",

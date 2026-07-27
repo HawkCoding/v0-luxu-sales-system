@@ -671,7 +671,7 @@ export function BuildBookingDialog({
                 value={commission}
                 onChange={setCommission}
                 isEditing
-                description="Applied to every service line on this quote. Enter 0 if no commission applies."
+                description="Applied once to the booking's total. Enter 0 if no commission applies."
               />
             </div>
 

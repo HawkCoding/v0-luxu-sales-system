@@ -1,5 +1,4 @@
 import type { CommissionBreakdown } from "@/lib/types"
-import { describeCommissionSource } from "@/lib/pricing/commission"
 
 interface CommissionBadgeProps {
   commission: CommissionBreakdown | null | undefined
@@ -31,17 +30,14 @@ export function CommissionBadge({
 }: CommissionBadgeProps) {
   if (!commission || commission.type === null) return null
 
-  const sourceLabel = describeCommissionSource(commission.source)
-
   return (
     <span
       className={`inline-flex items-center gap-1 rounded-full bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground tabular-nums ${className ?? ""}`}
-      aria-label={`Commission ${formatValue(commission, currency)} (${sourceLabel})`}
+      aria-label={`Commission ${formatValue(commission, currency)}`}
       title={`Commission amount: ${formatAmount(commission.amount, currency)}`}
     >
       <span>Commission:</span>
       <span className="text-foreground">{formatValue(commission, currency)}</span>
-      <span className="text-muted-foreground/80">({sourceLabel})</span>
     </span>
   )
 }

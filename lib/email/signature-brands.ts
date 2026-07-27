@@ -51,9 +51,17 @@ export const signatureBrandTextFieldsSchema = z.object({
   sortOrder: z.number().int().optional(),
 })
 
-/** SVG or non-https assets never load reliably in Outlook/Gmail; blank rather than embed a broken image. */
+/**
+ * SVG or non-https assets never load reliably in Outlook/Gmail; blank rather
+ * than embed a broken image. Exception: local Supabase serves storage over
+ * plain http, so an asset under that exact origin is trusted too — this
+ * branch is inert in production, where NEXT_PUBLIC_SUPABASE_URL is https.
+ */
 export function isEmailSafeAssetUrl(url: string | null | undefined): url is string {
-  return isRasterAssetUrl(url) && url.startsWith("https://")
+  if (!isRasterAssetUrl(url)) return false
+  if (url.startsWith("https://")) return true
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+  return !!supabaseUrl && supabaseUrl.startsWith("http://") && url.startsWith(supabaseUrl)
 }
 
 function parseBadges(raw: unknown): SignatureBadge[] {
