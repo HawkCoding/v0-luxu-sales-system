@@ -781,6 +781,8 @@ export interface BookingTransportRequest {
   routeId: string | null
   suiteTypeId: string | null
   packageLegId: string | null
+  /** Set for booking-scoped services (Build Booking); packageLegId is set for catalogue packages. */
+  serviceId: string | null
   pickupPoint: string
   dropoffPoint: string
   pickupAt: string | null

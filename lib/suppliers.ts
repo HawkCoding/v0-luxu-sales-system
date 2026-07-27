@@ -258,6 +258,7 @@ export function mapBookingTransportRequest(row: BookingTransportRequestWithRenta
     routeId: row.route_id ?? null,
     suiteTypeId: row.suite_type_id ?? null,
     packageLegId: row.package_leg_id ?? null,
+    serviceId: row.service_id ?? null,
     pickupPoint: row.pickup_point,
     dropoffPoint: row.dropoff_point,
     pickupAt: row.pickup_at ?? null,

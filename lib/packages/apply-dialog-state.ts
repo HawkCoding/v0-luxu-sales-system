@@ -11,13 +11,17 @@ import { dateOnly } from "@/lib/packages/trip-date-range"
 import { findRateCardCandidates, hasAnyRateCardFor } from "@/lib/rate-cards/resolve"
 
 /**
- * Pure state model for the Apply Package dialog's configure step.
+ * Pure state model for Build Booking's configure step (components/build-booking-dialog.tsx --
+ * the only live consumer; the catalogue-package "apply package" dialog that once shared this is
+ * dead code with zero importers).
  *
- * The dialog owns one ApplyLegState per package leg. On "Next" the state is converted into the
- * three persistence payloads (package assignment is sent separately) and the pricing payload:
- * - toPackageSelectionsPatch  → PATCH /api/jobs/[id]/package-selections
+ * The dialog owns one ApplyLegState per booking_services row. On "Next" the state is converted
+ * into the persistence payloads and the pricing payload:
+ * - toPackageSelectionsPatch  → PATCH /api/jobs/[id]/services (field names kept identical to the
+ *                                catalogue endpoint's shape on purpose -- see that route's doc
+ *                                comment)
  * - toTransportRequestsPut    → PUT  /api/jobs/[id]/transport-requests
- * - toApplySelections         → POST /api/packages/[slug]/apply
+ * - toApplySelections         → POST /api/jobs/[id]/services/apply
  */
 
 export const TRANSPORT_SUPPLIER_KINDS = new Set<SupplierKind>(["transfers", "vehicle_rental"])
@@ -56,6 +60,9 @@ export interface SuiteLegState {
   /** Per-leg rate type; null falls back to the system default at pricing time. */
   rateTypeId: string | null
   units: SuiteUnitState[]
+  /** 'auto' drives the "Auto-filled" chip — cleared (by the caller, in updateLegState) the
+   *  moment any field on this leg is edited, mirroring FieldFlags' dirty-suppresses-badge rule. */
+  origin: "auto" | "consultant"
 }
 
 export interface TransportLegState {
@@ -67,6 +74,7 @@ export interface TransportLegState {
   /** Per-leg rate type; null falls back to the system default at pricing time. */
   rateTypeId: string | null
   requests: BookingTransportRequest[]
+  origin: "auto" | "consultant"
 }
 
 export type ApplyLegState = SuiteLegState | TransportLegState
@@ -98,6 +106,10 @@ export interface SavedSelectionRow {
   rate_type_id: string | null
   notes: string | null
   units: SavedSelectionUnitRow[]
+  /** Absent for a catalogue selection row (which has no such concept); present for a
+   *  booking_services row. Missing/undefined is treated as 'consultant' -- never surface a chip
+   *  on data this old. */
+  origin?: "auto" | "consultant"
 }
 
 export interface SavedPackageState {
@@ -134,7 +146,11 @@ export function createDraftTransportRequest(leg: PackageLeg, routeId?: string | 
     supplierId: leg.supplierId,
     routeId: null,
     suiteTypeId: null,
-    packageLegId: leg.id,
+    // apply-dialog-state.ts is Build Booking's state model exclusively (the catalogue "apply
+    // package" dialog that once shared it is dead code) -- leg.id here is always a
+    // booking_services.id, so it belongs in serviceId, not packageLegId.
+    packageLegId: null,
+    serviceId: leg.id,
     pickupPoint: route?.pickupPoint ?? "",
     dropoffPoint: route?.dropoffPoint ?? "",
     pickupAt: null,
@@ -196,6 +212,7 @@ function buildRawDefaultLegStates(
         routeId: defaultRouteId(leg),
         rateTypeId: options.defaultRateTypeId ?? null,
         requests: [createDraftTransportRequest(leg)],
+        origin: "consultant",
       } satisfies TransportLegState
     }
 
@@ -219,6 +236,7 @@ function buildRawDefaultLegStates(
       notes: null,
       rateTypeId: options.defaultRateTypeId ?? null,
       units: [createDraftUnit(totals)],
+      origin: "consultant",
     } satisfies SuiteLegState
   })
 }
@@ -311,7 +329,7 @@ export function hydrateFromSaved(
 
     if (fallback.kind === "transport") {
       const legRequests = transportRequests
-        .filter((request) => request.packageLegId === fallback.legId)
+        .filter((request) => request.serviceId === fallback.legId || request.packageLegId === fallback.legId)
         .slice()
         .sort((a, b) => a.sortOrder - b.sortOrder)
       return {
@@ -320,6 +338,7 @@ export function hydrateFromSaved(
         routeId: row?.route_id ?? fallback.routeId,
         rateTypeId: row?.rate_type_id ?? fallback.rateTypeId,
         requests: legRequests.length > 0 ? legRequests : fallback.requests,
+        origin: row?.origin ?? fallback.origin,
       } satisfies TransportLegState
     }
 
@@ -356,6 +375,7 @@ export function hydrateFromSaved(
       notes: row.notes,
       rateTypeId: row.rate_type_id ?? fallback.rateTypeId,
       units: units.length > 0 ? units : fallback.units,
+      origin: row.origin ?? fallback.origin,
     } satisfies SuiteLegState
   })
 
@@ -434,6 +454,7 @@ export interface TransportRequestsPutBody {
     routeId: string | null
     suiteTypeId: string | null
     packageLegId: string | null
+    serviceId: string | null
     pickupPoint: string
     dropoffPoint: string
     pickupAt: string | null
@@ -455,7 +476,7 @@ export function toTransportRequestsPut(
   states: ApplyLegState[],
   existing: BookingTransportRequest[],
 ): TransportRequestsPutBody {
-  const untouched = existing.filter((request) => !request.packageLegId)
+  const untouched = existing.filter((request) => !request.packageLegId && !request.serviceId)
   const managed = states.flatMap((state) =>
     state.kind === "transport" && state.selected ? state.requests : [],
   )
@@ -468,6 +489,7 @@ export function toTransportRequestsPut(
       routeId: request.routeId,
       suiteTypeId: request.suiteTypeId,
       packageLegId: request.packageLegId,
+      serviceId: request.serviceId,
       pickupPoint: request.pickupPoint,
       dropoffPoint: request.dropoffPoint,
       pickupAt: request.pickupAt,

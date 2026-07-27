@@ -284,6 +284,7 @@ describe("hydrateFromSaved", () => {
     routeId: null,
     suiteTypeId: "vehicle-1",
     packageLegId: "leg-transfer",
+    serviceId: null,
     pickupPoint: "Airport",
     dropoffPoint: "Hotel",
     pickupAt: "2026-09-01T08:00:00.000Z",
@@ -419,12 +420,14 @@ describe("toTransportRequestsPut", () => {
       ...transfer.requests[0],
       id: "manual-1",
       packageLegId: null,
+      serviceId: null,
       pickupPoint: "Manual pickup",
     }
     const staleOldPackageRow: BookingTransportRequest = {
       ...transfer.requests[0],
       id: "stale-1",
       packageLegId: "leg-of-old-package",
+      serviceId: null,
       pickupPoint: "Stale",
     }
 

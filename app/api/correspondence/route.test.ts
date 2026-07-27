@@ -207,6 +207,15 @@ function buildAuth(options: AuthOptions = {}) {
           })),
         }
       }
+      if (table === "booking_services") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              eq: vi.fn(async () => ({ data: [], error: null })),
+            })),
+          })),
+        }
+      }
       if (table === "booking_transport_requests") {
         return {
           select: vi.fn(() => ({

@@ -151,6 +151,41 @@ describe("buildPackageQuoteLineItems", () => {
     expect(lineItems[1].unitPrice).toBe(500)
   })
 
+  it("prices a transport request keyed by service_id (a Build Booking / booking_services leg) the same as one keyed by package_leg_id", async () => {
+    const transferLeg = leg({
+      id: "svc-transfer",
+      supplierKind: "transfers",
+      routes: [route("route-t", "supplier-svc-transfer", "Airport transfers")],
+      suiteTypes: [suiteType("vehicle-sedan", "supplier-svc-transfer", "Sedan")],
+      rateCards: [rateCard({ id: "rc-sedan", routeId: "route-t", suiteTypeId: "vehicle-sedan", pricePerPerson: 500 })],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({
+        transportRequests: [
+          {
+            service_type: "transfer",
+            route_id: null,
+            suite_type_id: "vehicle-sedan",
+            package_leg_id: null,
+            service_id: "svc-transfer",
+            pickup_point: "Airport",
+            dropoff_point: "Hotel",
+            pickup_at: null,
+            rental_details: null,
+          },
+        ],
+      }),
+      packageDetail: detail([transferLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [{ legId: "svc-transfer", selected: true }],
+    })
+
+    expect(lineItems).toHaveLength(1)
+    expect(lineItems[0].unitPrice).toBe(500)
+  })
+
   it("uses a request's price override instead of the rate card when set", async () => {
     const transferLeg = leg({
       id: "leg-transfer",

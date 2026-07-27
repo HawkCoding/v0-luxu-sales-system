@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { ArrowLeft, Archive, ArchiveRestore, Loader2, Plus } from "lucide-react"
+import { ArrowLeft, Archive, ArchiveRestore, Check, Loader2, Pencil, Plus, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -149,6 +149,8 @@ export default function RateTypesPage() {
   const [addCode, setAddCode] = useState("")
   const [addName, setAddName] = useState("")
   const [adding, setAdding] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editName, setEditName] = useState("")
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -192,6 +194,24 @@ export default function RateTypesPage() {
     } finally {
       setBusyId(null)
     }
+  }
+
+  const startEdit = (rt: RateType) => {
+    setEditingId(rt.id)
+    setEditName(rt.name)
+  }
+
+  const cancelEdit = () => {
+    setEditingId(null)
+    setEditName("")
+  }
+
+  const saveEdit = async (id: string) => {
+    const trimmed = editName.trim()
+    if (!trimmed) return
+    await patch(id, { name: trimmed }, "Rate type renamed")
+    setEditingId(null)
+    setEditName("")
   }
 
   const create = async () => {
@@ -264,33 +284,85 @@ export default function RateTypesPage() {
             <ul className="space-y-2">
               {active.map((rt) => (
                 <li key={rt.id} className="flex items-center justify-between gap-3 py-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-mono text-xs px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground shrink-0">
                       {rt.code}
                     </span>
-                    <span className="text-foreground">{rt.name}</span>
+                    {editingId === rt.id ? (
+                      <Input
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") void saveEdit(rt.id)
+                          if (e.key === "Escape") cancelEdit()
+                        }}
+                        maxLength={100}
+                        className="h-8 w-48"
+                        autoFocus
+                      />
+                    ) : (
+                      <span className="text-foreground truncate">{rt.name}</span>
+                    )}
                     {rt.isStandard && (
-                      <Badge variant="secondary" className="text-xs">
+                      <Badge variant="secondary" className="text-xs shrink-0">
                         Standard
                       </Badge>
                     )}
                   </div>
                   {canEdit && (
-                    <div className="flex items-center gap-1">
-                      {!rt.isDefault && !rt.isStandard && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={busyId === rt.id}
-                          onClick={() => void patch(rt.id, { archived: true }, "Rate type archived")}
-                          aria-label={`Archive ${rt.name}`}
-                        >
-                          {busyId === rt.id ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <Archive className="w-4 h-4" />
+                    <div className="flex items-center gap-1 shrink-0">
+                      {editingId === rt.id ? (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={busyId === rt.id || !editName.trim()}
+                            onClick={() => void saveEdit(rt.id)}
+                            aria-label={`Save name for ${rt.name}`}
+                          >
+                            {busyId === rt.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Check className="w-4 h-4" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={busyId === rt.id}
+                            onClick={cancelEdit}
+                            aria-label="Cancel rename"
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={busyId === rt.id}
+                            onClick={() => startEdit(rt)}
+                            aria-label={`Rename ${rt.name}`}
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </Button>
+                          {!rt.isDefault && !rt.isStandard && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={busyId === rt.id}
+                              onClick={() => void patch(rt.id, { archived: true }, "Rate type archived")}
+                              aria-label={`Archive ${rt.name}`}
+                            >
+                              {busyId === rt.id ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <Archive className="w-4 h-4" />
+                              )}
+                            </Button>
                           )}
-                        </Button>
+                        </>
                       )}
                     </div>
                   )}
@@ -300,6 +372,8 @@ export default function RateTypesPage() {
           )}
         </CardContent>
       </Card>
+
+      <SupplierDefaultRatesCard rateTypes={active} canEdit={canEdit} />
 
       {archived.length > 0 && (
         <Card>
@@ -313,26 +387,80 @@ export default function RateTypesPage() {
             <ul className="space-y-2">
               {archived.map((rt) => (
                 <li key={rt.id} className="flex items-center justify-between gap-3 py-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs px-1.5 py-0.5 rounded bg-secondary/50 text-muted-foreground line-through">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-mono text-xs px-1.5 py-0.5 rounded bg-secondary/50 text-muted-foreground line-through shrink-0">
                       {rt.code}
                     </span>
-                    <span className="text-muted-foreground line-through">{rt.name}</span>
+                    {editingId === rt.id ? (
+                      <Input
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") void saveEdit(rt.id)
+                          if (e.key === "Escape") cancelEdit()
+                        }}
+                        maxLength={100}
+                        className="h-8 w-48"
+                        autoFocus
+                      />
+                    ) : (
+                      <span className="text-muted-foreground line-through truncate">{rt.name}</span>
+                    )}
                   </div>
                   {canEdit && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={busyId === rt.id}
-                      onClick={() => void patch(rt.id, { archived: false }, "Rate type restored")}
-                      aria-label={`Restore ${rt.name}`}
-                    >
-                      {busyId === rt.id ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
+                    <div className="flex items-center gap-1 shrink-0">
+                      {editingId === rt.id ? (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={busyId === rt.id || !editName.trim()}
+                            onClick={() => void saveEdit(rt.id)}
+                            aria-label={`Save name for ${rt.name}`}
+                          >
+                            {busyId === rt.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Check className="w-4 h-4" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={busyId === rt.id}
+                            onClick={cancelEdit}
+                            aria-label="Cancel rename"
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </>
                       ) : (
-                        <ArchiveRestore className="w-4 h-4" />
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={busyId === rt.id}
+                            onClick={() => startEdit(rt)}
+                            aria-label={`Rename ${rt.name}`}
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={busyId === rt.id}
+                            onClick={() => void patch(rt.id, { archived: false }, "Rate type restored")}
+                            aria-label={`Restore ${rt.name}`}
+                          >
+                            {busyId === rt.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <ArchiveRestore className="w-4 h-4" />
+                            )}
+                          </Button>
+                        </>
                       )}
-                    </Button>
+                    </div>
                   )}
                 </li>
               ))}
@@ -340,8 +468,6 @@ export default function RateTypesPage() {
           </CardContent>
         </Card>
       )}
-
-      <SupplierDefaultRatesCard rateTypes={active} canEdit={canEdit} />
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="sm:max-w-sm">

@@ -80,6 +80,7 @@ interface MockState {
   bookingInsertRows: Array<Record<string, unknown>>
   suiteInsertRows: Array<Record<string, unknown>>
   auditRows: Array<Record<string, unknown>>
+  serviceInsertRows: Array<Record<string, unknown>>
 }
 
 function createState(overrides: Partial<MockState> = {}): MockState {
@@ -95,6 +96,7 @@ function createState(overrides: Partial<MockState> = {}): MockState {
     bookingInsertRows: [],
     suiteInsertRows: [],
     auditRows: [],
+    serviceInsertRows: [],
     ...overrides,
   }
 }
@@ -111,6 +113,7 @@ function createFilterableListQuery<T>(rows: T[]) {
       return query
     }),
     in: vi.fn(() => query),
+    order: vi.fn(() => query),
     ...createThenable(() => ({
       data: rows.filter((row) =>
         Object.entries(filters).every(([key, value]) => {
@@ -262,7 +265,10 @@ function createSupabase(state: MockState) {
 
       if (table === "locations") {
         return {
-          select: vi.fn(async () => ({ data: state.locations, error: null })),
+          select: vi.fn(() => ({
+            ...createFilterableListQuery(state.locations),
+            then: createThenable(() => ({ data: state.locations, error: null })).then,
+          })),
         }
       }
 
@@ -292,6 +298,10 @@ function createSupabase(state: MockState) {
             state.suiteInsertRows = rows
             return { error: null }
           }),
+          // seedUnitsForServices (auto-build) reads back what was just captured -- these tests
+          // never populate suiteInsertRows with a resolved suite_type_id, so there is nothing to
+          // carry across; that carry-over itself is covered in app/api/jobs/[id]/package/seed.test.ts.
+          select: vi.fn(() => createFilterableListQuery(state.suiteInsertRows)),
         }
       }
 
@@ -301,6 +311,42 @@ function createSupabase(state: MockState) {
             state.auditRows.push(row)
             return { error: null }
           }),
+        }
+      }
+
+      // Auto-build (lib/auto-build/build-from-enquiry.ts) and its draft-quote pricing
+      // (lib/quotes/create-draft-quote.ts). These tests cover customer/route/duplicate matching,
+      // so a graceful no-op here is enough -- auto-build's own behaviour is covered in
+      // lib/auto-build/build-from-enquiry.test.ts, and the quote-pricing wiring in
+      // lib/quotes/create-draft-quote.test.ts.
+      if (table === "booking_services") {
+        return {
+          select: vi.fn(() => createFilterableListQuery(state.serviceInsertRows)),
+          insert: vi.fn(async (rows: Array<Record<string, unknown>>) => {
+            state.serviceInsertRows.push(...rows)
+            return { error: null }
+          }),
+        }
+      }
+      if (table === "booking_service_units" || table === "quote_line_items" || table === "rate_cards" || table === "vehicle_rental_route_details") {
+        return {
+          select: vi.fn(() => createFilterableListQuery([])),
+          insert: vi.fn(async () => ({ error: null })),
+          in: vi.fn(() => createFilterableListQuery([])),
+        }
+      }
+      if (table === "rate_types") {
+        return {
+          select: vi.fn(() => ({ is: vi.fn(async () => ({ data: [], error: null })) })),
+        }
+      }
+      if (table === "quotes") {
+        return {
+          insert: vi.fn(() => ({
+            select: vi.fn(() => ({
+              single: vi.fn(async () => ({ data: { id: "quote-1" }, error: null })),
+            })),
+          })),
         }
       }
 
@@ -596,5 +642,101 @@ Deluxe Twin with shower
   it("does not auto-link an ambiguous city pair when the supplier is unknown", async () => {
     const state = createState({ trainSuppliers: [] })
     expect(await importRoute(state, "Rovos Rail Information", "Pretoria to Cape Town")).toBeNull()
+  })
+})
+
+describe("createEmailBookingFromParsedDraft auto-build wiring", () => {
+  beforeEach(() => {
+    importBookingMocks.createServiceClient.mockReset()
+    importBookingMocks.bookingSequence = 0
+  })
+
+  it("auto-builds a booking_services row from the resolved train supplier and route", async () => {
+    const state = createState()
+    importBookingMocks.createServiceClient.mockReturnValue(createSupabase(state))
+    const parsed = parseEmailDraft(`
+Please indicate the purpose of your request
+Quote
+Title
+Ms
+Name
+Jane
+Surname
+Doe
+Contact Number
+0723093611
+Email
+jane@example.com
+Country
+South Africa
+Blue Train Information
+Direction
+Pretoria to Cape Town
+Departure Date
+11 May 2026
+No. of Adults
+2
+No of Suites
+1
+Suite Type 1
+Deluxe Twin with shower
+`)
+
+    await createEmailBookingFromParsedDraft(parsed, {
+      emailAccountId: "account-1",
+      mailboxEmail: "bookings@example.com",
+      subject: "Train enquiry",
+      receivedAt: "2026-05-17T10:00:00.000Z",
+      rawText: parsed.rawText,
+      missingFields: [],
+      warnings: [],
+    })
+
+    expect(state.serviceInsertRows).toHaveLength(1)
+    expect(state.serviceInsertRows[0]).toMatchObject({
+      supplier_id: "sup-blue",
+      route_id: "route-blue-pta-cpt",
+      selected: true,
+      origin: "auto",
+    })
+    expect(state.auditRows.some((row) => row.action === "booking_auto_built")).toBe(true)
+  })
+
+  it("builds nothing when no train supplier resolves, and never fails the import", async () => {
+    const state = createState({ trainSuppliers: [] })
+    importBookingMocks.createServiceClient.mockReturnValue(createSupabase(state))
+    const parsed = parseEmailDraft(`
+Please indicate the purpose of your request
+Quote
+Title
+Ms
+Name
+Jane
+Surname
+Doe
+Contact Number
+0723093611
+Email
+jane@example.com
+Country
+South Africa
+Departure Date
+11 May 2026
+No. of Adults
+2
+`)
+
+    const result = await createEmailBookingFromParsedDraft(parsed, {
+      emailAccountId: "account-1",
+      mailboxEmail: "bookings@example.com",
+      subject: "Enquiry",
+      receivedAt: "2026-05-17T10:00:00.000Z",
+      rawText: parsed.rawText,
+      missingFields: [],
+      warnings: [],
+    })
+
+    expect(result.id).toBeTruthy()
+    expect(state.serviceInsertRows).toHaveLength(0)
   })
 })

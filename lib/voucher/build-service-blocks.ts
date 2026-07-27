@@ -68,6 +68,8 @@ interface RouteJoin {
 interface TransportRequestJoinRow {
   id: string
   package_leg_id: string | null
+  /** Set instead of package_leg_id for a Build Booking (booking_services) leg. */
+  service_id: string | null
   service_type: string
   pickup_point: string
   dropoff_point: string
@@ -112,6 +114,52 @@ interface SelectionJoinRow {
   /** Per-suite/room unit rows (train & hotel legs only). Suite type moved here — the
    * leg-level suite_type_id/suite_types join is now a legacy fallback for pre-cutover rows. */
   units: SelectionUnitJoinRow[] | null
+}
+
+interface BookingServiceJoinRow {
+  id: string
+  label: string | null
+  sort_order: number
+  selected: boolean
+  supplier_id: string | null
+  route_id: string | null
+  route_reversed: boolean | null
+  suite_type_id: string | null
+  service_date: string | null
+  nights: number | null
+  notes: string | null
+  supplier_reference: string | null
+  suppliers: SupplierJoin | SupplierJoin[] | null
+  routes: RouteJoin | RouteJoin[] | null
+  suite_types: { name: string | null } | { name: string | null }[] | null
+  units: SelectionUnitJoinRow[] | null
+}
+
+/** Reshapes a Build Booking (booking_services) row into the same SelectionJoinRow shape a
+ * catalogue-package selection has, so every rule below this point (dates, times, suite labels,
+ * transport-request matching) runs once, unaware of which table a booking actually used. The
+ * service row IS the leg (no separate package_legs indirection), so its own id doubles as
+ * package_leg_id -- transport-request matching and quote-version leg scoping both key off this
+ * same field regardless of which table produced the row. */
+function serviceRowToSelectionRow(row: BookingServiceJoinRow): SelectionJoinRow {
+  return {
+    id: row.id,
+    package_leg_id: row.id,
+    selected: row.selected,
+    supplier_id: row.supplier_id,
+    route_id: row.route_id,
+    route_reversed: row.route_reversed,
+    suite_type_id: row.suite_type_id,
+    service_date: row.service_date,
+    nights: row.nights,
+    notes: row.notes,
+    supplier_reference: row.supplier_reference,
+    package_legs: { sort_order: row.sort_order, label: row.label },
+    suppliers: row.suppliers,
+    routes: row.routes,
+    suite_types: row.suite_types,
+    units: row.units,
+  }
 }
 
 export interface BuildVoucherServiceBlocksResult {
@@ -275,12 +323,28 @@ export async function buildVoucherServiceBlocks(
 
   if (error) throw error
 
+  // Build Booking's per-booking equivalent of the query above -- a booking uses one or the
+  // other, never both. Reshaped to the same row shape immediately below so nothing downstream
+  // needs to know which table it came from.
+  const { data: serviceRows, error: servicesError } = await supabase
+    .from("booking_services")
+    .select(
+      `id, label, sort_order, selected, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, notes, supplier_reference,
+       suppliers(name, phone, email, website, location, kind, default_time_start, default_time_end, inclusions, exclusions),
+       routes(name, duration_days, direction_mode, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name)),
+       suite_types(name),
+       units:booking_service_units(suite_type_id, sort_order, suite_types(name), bedroom_types(name), bedroom_layouts(name), bathroom_types(name))`,
+    )
+    .eq("booking_id", context.bookingId)
+
+  if (servicesError) throw servicesError
+
   // Transfers/rentals render from what the salesperson actually captured per trip — the typed
   // pickup/drop-off, pickup time and flight — never from a route's static points.
   const { data: transportRows, error: transportError } = await supabase
     .from("booking_transport_requests")
     .select(
-      `id, package_leg_id, service_type, pickup_point, dropoff_point, pickup_at, flight_number, notes, sort_order, supplier_reference,
+      `id, package_leg_id, service_id, service_type, pickup_point, dropoff_point, pickup_at, flight_number, notes, sort_order, supplier_reference,
        suppliers(name, phone, email, website, location, kind, default_time_start, default_time_end, inclusions, exclusions),
        suite_types(name),
        rental_details:booking_vehicle_rental_details(return_at)`,
@@ -291,7 +355,11 @@ export async function buildVoucherServiceBlocks(
   if (transportError) throw transportError
   const transportRequests = (transportRows ?? []) as unknown as TransportRequestJoinRow[]
 
-  const selections = ((rows ?? []) as unknown as SelectionJoinRow[]).filter(
+  const packageSelectionRows = (rows ?? []) as unknown as SelectionJoinRow[]
+  const serviceSelectionRows = ((serviceRows ?? []) as unknown as BookingServiceJoinRow[]).map(
+    serviceRowToSelectionRow,
+  )
+  const selections = [...packageSelectionRows, ...serviceSelectionRows].filter(
     (row) => row.selected && (!context.legIds || context.legIds.has(row.package_leg_id)),
   )
 
@@ -324,8 +392,11 @@ export async function buildVoucherServiceBlocks(
     // A transfer leg renders one block per captured trip; the leg-level selection only supplies
     // the fallback vehicle category and supplier contact.
     if (serviceType === "transfer") {
+      // row.package_leg_id is either a real package_legs.id or (for a Build Booking leg) a
+      // booking_services.id stashed in the same field by serviceRowToSelectionRow -- a request
+      // matches whichever of the two columns the leg system it came from actually set.
       const legRequests = transportRequests.filter(
-        (request) => request.package_leg_id === row.package_leg_id,
+        (request) => request.package_leg_id === row.package_leg_id || request.service_id === row.package_leg_id,
       )
       if (legRequests.length > 0) {
         return legRequests.map((request, requestIndex) =>
@@ -394,8 +465,9 @@ export async function buildVoucherServiceBlocks(
     ]
   })
 
-  // Manually added transfers (not tied to a package leg) belong on the documents too.
-  const manualRequests = transportRequests.filter((request) => !request.package_leg_id)
+  // Manually added transfers (not tied to a package leg or a booking service) belong on the
+  // documents too.
+  const manualRequests = transportRequests.filter((request) => !request.package_leg_id && !request.service_id)
   if (manualRequests.length > 0) {
     const orderBase = blocks.reduce((max, block) => Math.max(max, block.displayOrder), -1) + 1
     manualRequests.forEach((request, index) => {

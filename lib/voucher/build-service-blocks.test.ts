@@ -7,10 +7,11 @@ const BOOKING_ID = "00000000-0000-4000-8000-00000000bbbb"
 
 interface MockTables {
   selections?: unknown[]
+  services?: unknown[]
   transportRequests?: unknown[]
 }
 
-/** Minimal chainable supabase mock covering the two tables the block builder reads. */
+/** Minimal chainable supabase mock covering the tables the block builder reads. */
 function buildSupabase(tables: MockTables = {}) {
   function chain(result: { data: unknown; error: null }) {
     const self: Record<string, unknown> = {}
@@ -27,6 +28,9 @@ function buildSupabase(tables: MockTables = {}) {
     from: (table: string) => {
       if (table === "booking_package_selections") {
         return chain({ data: tables.selections ?? [], error: null })
+      }
+      if (table === "booking_services") {
+        return chain({ data: tables.services ?? [], error: null })
       }
       if (table === "booking_transport_requests") {
         return chain({ data: tables.transportRequests ?? [], error: null })
@@ -438,5 +442,81 @@ describe("buildVoucherServiceBlocks", () => {
     expect(blocks).toHaveLength(1)
     expect(blocks[0].contactDetails.name).toBe("Blue Train")
     expect(blocks[0].serviceData.departureDate).toBe("2026-08-01")
+  })
+
+  it("renders a Build Booking (booking_services) leg the same as an equivalent catalogue-package selection", async () => {
+    const trainService = {
+      id: "svc-blue-train",
+      label: "The Blue Train",
+      sort_order: 0,
+      selected: true,
+      supplier_id: "supplier-blue-train",
+      route_id: "route-blue-train",
+      route_reversed: false,
+      suite_type_id: null,
+      service_date: "2026-08-01",
+      nights: null,
+      notes: null,
+      supplier_reference: null,
+      suppliers: supplier({ kind: "train_operator", name: "Blue Train" }),
+      routes: { name: "Pretoria ↔ Cape Town", duration_days: 1, direction_mode: null, origin: null, destination: null },
+      suite_types: { name: "Royal Suite" },
+      units: null,
+    }
+
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({ services: [trainService] }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].title).toBe("The Blue Train")
+    expect(blocks[0].contactDetails.name).toBe("Blue Train")
+    expect(blocks[0].serviceData.departureDate).toBe("2026-08-01")
+    expect(blocks[0].serviceData.roomType).toBeNull()
+  })
+
+  it("matches a transport request keyed by service_id to its booking_services leg, and never double-counts it as a manual request", async () => {
+    const transferService = {
+      id: "svc-transfer",
+      label: "Airport transfers",
+      sort_order: 0,
+      selected: true,
+      supplier_id: "supplier-transfer",
+      route_id: "route-1",
+      route_reversed: false,
+      suite_type_id: "vehicle-sedan",
+      service_date: null,
+      nights: null,
+      notes: null,
+      supplier_reference: null,
+      suppliers: supplier(),
+      routes: { name: "Airport → Hotel", duration_days: null, direction_mode: null, origin: null, destination: null },
+      suite_types: { name: "Sedan" },
+      units: null,
+    }
+    const request = {
+      id: "req-1",
+      package_leg_id: null,
+      service_id: "svc-transfer",
+      service_type: "transfer",
+      pickup_point: "Cape Town International Airport",
+      dropoff_point: "The Silo Hotel",
+      pickup_at: "2026-09-01T08:30:00",
+      flight_number: null,
+      notes: null,
+      sort_order: 0,
+      suppliers: supplier(),
+      suite_types: { name: "Sedan" },
+      rental_details: null,
+    }
+
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({ services: [transferService], transportRequests: [request] }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].serviceData.pickup).toBe("Cape Town International Airport")
   })
 })

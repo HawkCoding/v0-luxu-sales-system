@@ -6,7 +6,6 @@ import { detectCountryInText, loadCountryAliasMap, normalizeCountry } from "@/li
 import { allocateJobNumberForBooking, type JobNumberAllocation } from "@/lib/job-numbering"
 import { isAuthorizedWebhookRequest } from "@/lib/api/webhook-secret"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
-import { normalizeLookupValue } from "@/lib/normalize-lookup-value"
 import {
   legacySuiteNamesToUnits,
   resolveEnquirySuiteUnits,
@@ -19,14 +18,13 @@ import {
   type SuiteAliasWrite,
 } from "@/lib/suites/suite-alias-store"
 import { withSuiteTypeMissingField } from "@/lib/suites/missing-fields"
-import { buildPackageQuoteLineItems, calculateQuoteTotals } from "@/lib/quotes/build-from-package"
-import { buildQuoteNumber } from "@/lib/quotes/quote-number"
-import { isOptionalPackageLegKind } from "@/lib/types"
-import type { PackageDetail, QuoteLineItem } from "@/lib/types"
 import { createServiceClient, createSessionClient } from "@/lib/supabase/server"
 import type { Json } from "@/lib/supabase/types"
 import { COMPLETED_REPEAT_BOOKING_STAGES } from "@/lib/customer-repeat-status"
-import { loadPackageDetail } from "../packages/[slug]/helpers"
+import { findHotelSupplierId } from "@/lib/resolvers/supplier-resolver"
+import { autoBuildBookingServices } from "@/lib/auto-build/build-from-enquiry"
+import { createDraftQuoteForBooking } from "@/lib/quotes/create-draft-quote"
+import { findRouteId } from "@/lib/resolvers/route-resolver"
 
 type ServiceClient = ReturnType<typeof createServiceClient>
 type TransportServiceType = "transfer" | "rental"
@@ -62,190 +60,6 @@ function normalizeNullableText(value: unknown): string | null {
 
 function normalizeNullableNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null
-}
-
-function addDaysToDateString(value: string, days: number): string {
-  const [year = "1970", month = "1", day = "1"] = value.split("-")
-  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)))
-  date.setUTCDate(date.getUTCDate() + days)
-  return date.toISOString().slice(0, 10)
-}
-
-function getDefaultQuoteValidityDate(): string {
-  return addDaysToDateString(new Date().toISOString().slice(0, 10), 14)
-}
-
-async function findRouteId(supabase: ServiceClient, direction: unknown): Promise<string | null> {
-  if (typeof direction !== "string" || !direction.trim()) return null
-
-  const { data: exactRoute } = await supabase
-    .from("routes")
-    .select("id")
-    .ilike("name", direction.trim())
-    .maybeSingle()
-
-  return exactRoute?.id ?? null
-}
-
-async function findPackageId(supabase: ServiceClient, packageOption: unknown): Promise<string | null> {
-  if (typeof packageOption !== "string" || !packageOption.trim()) return null
-
-  const normalizedOption = normalizeLookupValue(packageOption)
-  const { data: packages } = await supabase
-    .from("packages")
-    .select("id, name")
-    .eq("active", true)
-    .is("booking_id", null)
-
-  const match = (packages ?? []).find((item) => {
-    const normalizedName = normalizeLookupValue(item.name)
-    return normalizedName === normalizedOption || normalizedOption.includes(normalizedName) || normalizedName.includes(normalizedOption)
-  })
-
-  return match?.id ?? null
-}
-
-async function findPackageSlugById(supabase: ServiceClient, packageId: string): Promise<string | null> {
-  const { data } = await supabase
-    .from("packages")
-    .select("slug")
-    .eq("id", packageId)
-    .maybeSingle()
-
-  return data?.slug ?? null
-}
-
-async function findHotelSupplierId(supabase: ServiceClient, hotelOption: unknown): Promise<string | null> {
-  if (typeof hotelOption !== "string" || !hotelOption.trim()) return null
-
-  const normalizedOption = normalizeLookupValue(hotelOption)
-  const { data: suppliers } = await supabase
-    .from("suppliers")
-    .select("id, name")
-    .eq("kind", "hotel_property")
-    .eq("active", true)
-
-  const match = (suppliers ?? []).find((item) => {
-    const normalizedName = normalizeLookupValue(item.name)
-    return normalizedName === normalizedOption || normalizedOption.includes(normalizedName) || normalizedName.includes(normalizedOption)
-  })
-
-  return match?.id ?? null
-}
-
-function buildDefaultPackageSelections(packageDetail: PackageDetail, suiteTypeNames: string[]) {
-  const normalizedSuiteTypeNames = suiteTypeNames.map(normalizeLookupValue).filter(Boolean)
-
-  return packageDetail.legs.map((leg) => {
-    // Only the rail leg is auto-included; every other leg is opt-in and stays
-    // deselected until a consultant turns it on. Mirrors the Apply Package dialog.
-    const isOptional = isOptionalPackageLegKind(leg.supplierKind)
-    const activeSuiteTypes = leg.suiteTypes.filter((suiteType) => suiteType.active)
-    const matchedSuiteType = activeSuiteTypes.find((suiteType) =>
-      normalizedSuiteTypeNames.includes(normalizeLookupValue(suiteType.name)),
-    )
-
-    return {
-      legId: leg.id,
-      selected: !isOptional,
-      routeId: leg.routes.length === 1 ? leg.routes[0].id : undefined,
-      // Never fall back to "the only option" — an auto-picked suite type is indistinguishable
-      // from a real match downstream, and quote build would then happily price the wrong room.
-      suiteTypeId: matchedSuiteType?.id ?? undefined,
-    }
-  })
-}
-
-async function createDraftQuoteForBooking({
-  supabase,
-  bookingId,
-  bookingNumber,
-  packageId,
-  travelDate,
-  suiteTypes,
-}: {
-  supabase: ServiceClient
-  bookingId: string
-  bookingNumber: string
-  packageId: string | null
-  travelDate: string | null
-  suiteTypes: string[]
-}): Promise<{ quoteId: string | null; warning: string | null }> {
-  let lineItems: QuoteLineItem[] = []
-  let status: "draft" | "pricing_incomplete" = "pricing_incomplete"
-  let noPackageMatch = true
-  let warning: string | null = null
-
-  if (packageId) {
-    noPackageMatch = false
-    const packageSlug = await findPackageSlugById(supabase, packageId)
-
-    if (packageSlug) {
-      const packageDetailResult = await loadPackageDetail(supabase, packageSlug)
-
-      const packageDetail = "detail" in packageDetailResult ? packageDetailResult.detail : undefined
-
-      if (packageDetail) {
-        try {
-          const built = await buildPackageQuoteLineItems({
-            supabase,
-            packageDetail,
-            jobId: bookingId,
-            travelDate: travelDate ?? new Date().toISOString().slice(0, 10),
-            selections: buildDefaultPackageSelections(packageDetail, suiteTypes),
-          })
-          lineItems = built.lineItems
-          status = lineItems.length > 0 ? "draft" : "pricing_incomplete"
-        } catch (error) {
-          warning = error instanceof Error ? error.message : "Package matched, but pricing could not be pre-filled."
-        }
-      } else {
-        warning = "Package matched, but package details could not be loaded."
-      }
-    } else {
-      warning = "Package matched, but package details could not be loaded."
-    }
-  } else {
-    warning = "No package was matched from the enquiry."
-  }
-
-  const totals = calculateQuoteTotals(lineItems)
-  const { data: quote, error: quoteError } = await supabase
-    .from("quotes")
-    .insert({
-      booking_id: bookingId,
-      status,
-      validity_until: getDefaultQuoteValidityDate(),
-      subtotal: totals.subtotal,
-      total: totals.total,
-      no_package_match: noPackageMatch,
-      quote_number: buildQuoteNumber(bookingNumber, []),
-    })
-    .select("id")
-    .single()
-
-  if (quoteError || !quote) {
-    return { quoteId: null, warning: "Booking was created, but the draft quote could not be created." }
-  }
-
-  if (lineItems.length > 0) {
-    const { error: lineItemsError } = await supabase.from("quote_line_items").insert(
-      lineItems.map((lineItem, index) => ({
-        quote_id: quote.id,
-        description: lineItem.description,
-        qty: lineItem.qty,
-        unit_price: lineItem.unitPrice,
-        total: lineItem.total,
-        sort_order: index,
-      })),
-    )
-
-    if (lineItemsError) {
-      warning = "Draft quote was created, but line items could not be saved."
-    }
-  }
-
-  return { quoteId: quote.id, warning }
 }
 
 const enquiryFilterSchema = z
@@ -542,8 +356,7 @@ export async function POST(req: Request) {
   if (!normalizeNullableText(body.direction)) suiteReviewMissingFields.push("Direction")
 
   const source = body.rawText ? "paste_import" : "web_form"
-  const routeId = await findRouteId(supabase, body.direction)
-  const packageId = await findPackageId(supabase, body.packageOption)
+  const routeId = await findRouteId(supabase, body.direction, body.supplierId ?? null)
   const hotelSupplierId = await findHotelSupplierId(supabase, body.hotelOption)
   let jobNumberAllocation: JobNumberAllocation
   try {
@@ -572,7 +385,6 @@ export async function POST(req: Request) {
     },
     resolvedReferences: {
       routeId,
-      packageId,
       hotelSupplierId,
       supplierId: normalizeNullableText(body.supplierId),
     },
@@ -592,7 +404,6 @@ export async function POST(req: Request) {
       stage: "enquiry",
       departure_date: body.departureDate || null,
       route_id: routeId,
-      package_id: packageId,
       hotel_supplier_id: hotelSupplierId,
       no_of_adults: body.noOfAdults ?? 1,
       no_of_children: body.noOfChildren ?? 0,
@@ -622,9 +433,6 @@ export async function POST(req: Request) {
     normalizeNullableText(body.supplierId),
     incomingSuiteUnits,
   )
-  const suiteTypes = resolvedSuiteUnits
-    .map((unit) => unit.suiteTypeName)
-    .filter((name): name is string => Boolean(name))
   const unresolvedSuiteCount = resolvedSuiteUnits.filter((unit) => !unit.suiteTypeId).length
 
   if (resolvedSuiteUnits.length > 0) {
@@ -692,6 +500,31 @@ export async function POST(req: Request) {
     } catch (error) {
       console.error("enquiries:suiteAliasLearning", error)
     }
+  }
+
+  // Auto-build the booking's services from what intake already resolved -- never a guess of its
+  // own (see lib/auto-build/build-from-enquiry.ts). A failed build must never fail the enquiry
+  // it came from, same contract as alias learning above.
+  try {
+    const autoBuildResult = await autoBuildBookingServices(supabase, {
+      bookingId: booking.id,
+      trainSupplierId: normalizeNullableText(body.supplierId),
+      hotelSupplierId,
+      routeId,
+      departureDate: body.departureDate || null,
+    })
+    if (autoBuildResult.servicesCreated > 0 || autoBuildResult.skipped.length > 0) {
+      await supabase.from("audit_logs").insert({
+        actor: user?.email ?? (body.rawText ? "consultant" : "system"),
+        actor_user_id: user?.id ?? null,
+        entity_type: "Booking",
+        entity_id: booking.id,
+        action: "booking_auto_built",
+        meta_json: autoBuildResult as unknown as Json,
+      })
+    }
+  } catch (error) {
+    console.error("enquiries:autoBuild", error)
   }
 
   // --- 4. Insert travellers (if provided) ---
@@ -792,9 +625,7 @@ export async function POST(req: Request) {
     supabase,
     bookingId: booking.id,
     bookingNumber: booking.booking_number,
-    packageId,
     travelDate: body.departureDate || null,
-    suiteTypes,
   })
 
   // --- 5. Audit log ---

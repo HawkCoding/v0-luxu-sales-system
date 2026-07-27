@@ -62,7 +62,7 @@ interface JobEnquiryTabProps {
   itineraries: Itinerary[]
   stage: PipelineStage
   hasDraftQuotes: boolean
-  onQuoteStarted?: () => Promise<void> | void
+  onQuoteStarted?: (quoteId: string) => Promise<void> | void
   onTransportRequestsChange?: () => void
   onFieldsUpdated?: () => void | Promise<void>
 }
@@ -77,6 +77,7 @@ function createEmptyTransportRequest(sortOrder: number): EditableTransportReques
     routeId: null,
     suiteTypeId: null,
     packageLegId: null,
+    serviceId: null,
     pickupPoint: "",
     dropoffPoint: "",
     pickupAt: null,
@@ -189,6 +190,7 @@ export function JobEnquiryTab({
       const payload = (await response.json().catch(() => ({}))) as {
         failures?: GateFailure[]
         error?: string
+        quote?: { id: string }
       }
 
       if (response.status === 422 && Array.isArray(payload.failures)) {
@@ -197,12 +199,12 @@ export function JobEnquiryTab({
         return
       }
 
-      if (!response.ok) {
+      if (!response.ok || !payload.quote) {
         throw new Error(payload.error ?? "Could not start quote")
       }
 
       setStartQuoteDialogOpen(false)
-      await onQuoteStarted?.()
+      await onQuoteStarted?.(payload.quote.id)
       toast.success("Draft quote created")
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not start quote")

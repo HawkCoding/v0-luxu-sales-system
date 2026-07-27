@@ -166,6 +166,15 @@ function buildSupabase(state: MockState = {}) {
           })),
         }
       }
+      // recomputeBookingTripDates also checks Build Booking's booking_services -- these fixtures
+      // are all catalogue-package bookings, so there are none.
+      if (table === "booking_services") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(async () => ({ data: [], error: null })),
+          })),
+        }
+      }
       // Alias learning reads the enquiry's captured wording from booking_suites. These tests
       // cover selection persistence, so nothing was captured -- learning finds no phrase to key
       // on and no-ops. The learning rules themselves are covered in lib/suites/.

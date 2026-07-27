@@ -1,11 +1,11 @@
-import { levenshteinDistance } from "@/lib/countries"
 import {
   SUITE_GENERIC_TOKENS,
   normalizeSuitePhrase,
   tokenizeSuitePhrase,
-  tokenWeight,
 } from "@/lib/suites/suite-phrase-tokens"
 import type { SuiteAxis, SuiteVocabEntry, SuiteVocabulary } from "@/lib/suites/suite-vocabulary"
+import { scoreCandidates, type ScoredCandidate } from "@/lib/matching/score-candidates"
+import { pickMatch } from "@/lib/matching/resolve-entity"
 
 export type SuiteMatchSource = "alias" | "exact" | "fuzzy" | "none"
 
@@ -59,116 +59,23 @@ export const SUITE_FUZZY_MIN_TOKEN_SIMILARITY = 0.75
  */
 export const SUITE_JOINED_TOKEN_SIMILARITY = 0.95
 
-interface ScoredCandidate {
-  id: string
-  name: string
-  score: number
-  source: "exact" | "fuzzy"
-}
-
-/** Coverage of a candidate's own tokens by the phrase's tokens -- not the reverse -- so a
- *  short candidate name ("Deluxe") isn't punished for the phrase containing other words. */
-function scoreCandidates(phraseTokens: readonly string[], candidates: readonly SuiteVocabEntry[]): ScoredCandidate[] {
-  const phraseSet = new Set(phraseTokens)
-  // Adjacent-token joins catch wording that split a single vocab word across a space, which is
-  // common in typed email ("De Luxe" for "Deluxe"). Levenshtein alone can't bridge these: it
-  // only ever sees the fragment, so lev("deluxe", "luxe") falls under the similarity floor.
-  const joinedPhraseTokens = new Set<string>()
-  for (let index = 0; index < phraseTokens.length - 1; index += 1) {
-    joinedPhraseTokens.add(`${phraseTokens[index]}${phraseTokens[index + 1]}`)
-  }
-
-  const scored = candidates.map((candidate): ScoredCandidate => {
-    const candidateTokens = tokenizeSuitePhrase(candidate.name)
-    if (candidateTokens.length === 0 || phraseTokens.length === 0) {
-      return { id: candidate.id, name: candidate.name, score: 0, source: "exact" }
-    }
-
-    let totalWeight = 0
-    let matchedWeight = 0
-    let usedFuzzy = false
-
-    for (const token of candidateTokens) {
-      const weight = tokenWeight(token)
-      totalWeight += weight
-
-      if (phraseSet.has(token)) {
-        matchedWeight += weight
-        continue
-      }
-
-      if (joinedPhraseTokens.has(token)) {
-        matchedWeight += weight * SUITE_JOINED_TOKEN_SIMILARITY
-        usedFuzzy = true
-        continue
-      }
-
-      if (token.length < SUITE_FUZZY_MIN_TOKEN_LENGTH) continue
-
-      let bestSimilarity = 0
-      for (const phraseToken of phraseTokens) {
-        if (phraseToken.length < SUITE_FUZZY_MIN_TOKEN_LENGTH) continue
-        const maxLen = Math.max(token.length, phraseToken.length)
-        const similarity = 1 - levenshteinDistance(token, phraseToken) / maxLen
-        if (similarity > bestSimilarity) bestSimilarity = similarity
-      }
-
-      if (bestSimilarity >= SUITE_FUZZY_MIN_TOKEN_SIMILARITY) {
-        matchedWeight += weight * bestSimilarity
-        usedFuzzy = true
-      }
-    }
-
-    const score = totalWeight > 0 ? matchedWeight / totalWeight : 0
-    return { id: candidate.id, name: candidate.name, score, source: usedFuzzy ? "fuzzy" : "exact" }
-  })
-
-  return scored.sort((a, b) => {
-    if (Math.abs(a.score - b.score) > 1e-9) return b.score - a.score
-    // Tie-break toward the longer/more specific candidate name.
-    return b.name.length - a.name.length
-  })
-}
-
-function candidatesAbove(scored: readonly ScoredCandidate[], threshold: number): SuiteMatchCandidate[] {
-  return scored
-    .filter((candidate) => candidate.score >= threshold)
-    .slice(0, 5)
-    .map((candidate) => ({ id: candidate.id, name: candidate.name, score: candidate.score }))
-}
-
 /**
- * True when the runner-up's tokens are a strict subset of the best's -- e.g. "Shower" against
- * "Shower and Bath" for the phrase "shower and bath". Both score full coverage, but they are not
- * competing interpretations: the runner-up is a less specific version of the same answer, so the
- * ambiguity guard must not treat the zero margin as a genuine tie.
+ * Thin wrapper over the shared lib/matching resolver: same scoring, same accept-threshold +
+ * ambiguity-margin gate, same candidate reporting. Kept as a suite-shaped function (returns
+ * SuiteMatchSource, not the plain matching module's MatchSource) so callers below don't need to
+ * know the generalization happened underneath them.
  */
-function isLessSpecificVariantOf(runnerUp: ScoredCandidate, best: ScoredCandidate): boolean {
-  const bestTokens = new Set(tokenizeSuitePhrase(best.name))
-  const runnerUpTokens = tokenizeSuitePhrase(runnerUp.name)
-  if (runnerUpTokens.length === 0 || runnerUpTokens.length >= bestTokens.size) return false
-  return runnerUpTokens.every((token) => bestTokens.has(token))
-}
-
 function pickAxisMatch(
   scored: readonly ScoredCandidate[],
   acceptThreshold: number,
   ambiguityMargin: number,
 ): Omit<SuiteAxisMatch, "notApplicable"> {
-  const candidates = candidatesAbove(scored, SUITE_MATCH_CANDIDATE_THRESHOLD)
-  const best = scored[0]
-  const runnerUp = scored[1]
-
-  const unambiguous =
-    !runnerUp ||
-    best.score - runnerUp.score >= ambiguityMargin ||
-    isLessSpecificVariantOf(runnerUp, best)
-
-  if (best && best.score >= acceptThreshold && unambiguous) {
-    return { value: best.id, name: best.name, score: best.score, source: best.source, candidates }
-  }
-
-  return { value: null, name: null, score: 0, source: "none", candidates }
+  const result = pickMatch(scored, {
+    acceptThreshold,
+    ambiguityMargin,
+    candidateThreshold: SUITE_MATCH_CANDIDATE_THRESHOLD,
+  })
+  return result
 }
 
 function aliasFor(vocabulary: SuiteVocabulary, axis: SuiteAxis, normalizedPhrase: string) {
