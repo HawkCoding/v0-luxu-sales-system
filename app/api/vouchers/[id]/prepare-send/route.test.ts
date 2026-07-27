@@ -122,6 +122,14 @@ function buildSupabase(options: BuildOptions = {}) {
             resolve({ data: [], error: null }),
         }
       }
+      if (table === "booking_services") {
+        return {
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          then: (resolve: (value: { data: unknown[]; error: null }) => unknown) =>
+            resolve({ data: [], error: null }),
+        }
+      }
       // No leg reference rows in these fixtures — readiness check sees nothing missing.
       if (table === "booking_transport_requests") {
         return {

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -39,6 +39,8 @@ interface JobQuotesTabProps {
   customerDefaultRateTypeId?: string | null
   emailImportNeedsReview?: boolean
   mutate: () => void
+  autoOpenBuildBookingQuoteId?: string | null
+  onAutoOpenBuildBookingHandled?: () => void
 }
 
 export function JobQuotesTab({
@@ -50,6 +52,8 @@ export function JobQuotesTab({
   customerDefaultRateTypeId,
   emailImportNeedsReview = false,
   mutate,
+  autoOpenBuildBookingQuoteId: externalAutoOpenBuildBookingQuoteId = null,
+  onAutoOpenBuildBookingHandled,
 }: JobQuotesTabProps) {
   const { can } = useRole()
   const [previewSendOpen, setPreviewSendOpen] = useState(false)
@@ -58,6 +62,12 @@ export function JobQuotesTab({
   const [generatingPdfForId, setGeneratingPdfForId] = useState<string | null>(null)
   const [removingLineKey, setRemovingLineKey] = useState<string | null>(null)
   const [autoOpenBuildBookingQuoteId, setAutoOpenBuildBookingQuoteId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (externalAutoOpenBuildBookingQuoteId) {
+      setAutoOpenBuildBookingQuoteId(externalAutoOpenBuildBookingQuoteId)
+    }
+  }, [externalAutoOpenBuildBookingQuoteId])
 
   async function removeLineItem(quote: Quote, index: number) {
     const key = `${quote.id}:${index}`
@@ -274,7 +284,10 @@ export function JobQuotesTab({
                         customerDefaultRateTypeId={customerDefaultRateTypeId}
                         onApplied={mutate}
                         autoOpen={autoOpenBuildBookingQuoteId === q.id}
-                        onAutoOpenHandled={() => setAutoOpenBuildBookingQuoteId(null)}
+                        onAutoOpenHandled={() => {
+                          setAutoOpenBuildBookingQuoteId(null)
+                          onAutoOpenBuildBookingHandled?.()
+                        }}
                       />
                     </>
                   )}

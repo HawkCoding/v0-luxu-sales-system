@@ -3,10 +3,12 @@ import { NextResponse } from "next/server"
 
 const authMocks = vi.hoisted(() => ({
   requireRole: vi.fn(),
+  requireUser: vi.fn(),
 }))
 
 vi.mock("@/lib/api/auth", () => ({
   requireRole: authMocks.requireRole,
+  requireUser: authMocks.requireUser,
 }))
 
 const auditMocks = vi.hoisted(() => ({
@@ -17,70 +19,49 @@ vi.mock("@/lib/audit-write", () => ({
   writeAuditLog: auditMocks.writeAuditLog,
 }))
 
-const helperMocks = vi.hoisted(() => ({
-  loadPackageDetail: vi.fn(async () => ({ detail: { id: "pkg", legs: [] } })),
-  makeUuid: vi.fn(),
-  resolveUniquePackageSlug: vi.fn(async (_supabase: unknown, name: string) => `slug-for-${name}`),
+const adapterMocks = vi.hoisted(() => ({
+  loadBookingServicesPackageDetail: vi.fn(async () => ({
+    detail: { id: "b1", legs: [] as Array<{ id: string }> },
+    services: [] as unknown[],
+    units: [] as unknown[],
+  })),
 }))
 
-vi.mock("@/app/api/packages/[slug]/helpers", () => ({
-  loadPackageDetail: helperMocks.loadPackageDetail,
-  makeUuid: helperMocks.makeUuid,
-  resolveUniquePackageSlug: helperMocks.resolveUniquePackageSlug,
+vi.mock("@/lib/quotes/adapters/from-booking-services", () => ({
+  loadBookingServicesPackageDetail: adapterMocks.loadBookingServicesPackageDetail,
 }))
 
-import { POST } from "./route"
+import { POST, GET } from "./route"
 
 const BOOKING_ID = "00000000-0000-4000-8000-000000000001"
-const EXISTING_PACKAGE_ID = "00000000-0000-4000-8000-000000000010"
 const SUPPLIER_A = "00000000-0000-4000-8000-0000000000b1"
 const SUPPLIER_B = "00000000-0000-4000-8000-0000000000b2"
-const LEG_A = "00000000-0000-4000-8000-0000000000a1"
-const NEW_LEG_ID_1 = "00000000-0000-4000-8000-0000000000e1"
-const NEW_LEG_ID_2 = "00000000-0000-4000-8000-0000000000e2"
+const SERVICE_A = "00000000-0000-4000-8000-0000000000a1"
 
 function makeParams(id = BOOKING_ID) {
   return { params: Promise.resolve({ id }) }
 }
 
-interface MockRoute {
-  id: string
-  supplier_id: string
-}
-
 interface MockState {
   bookingExists?: boolean
-  existingPackage?: { id: string; slug: string } | null
-  existingLegs?: { id: string; supplier_id: string; sort_order: number }[]
-  routes?: MockRoute[]
+  existingServices?: { id: string; supplier_id: string; sort_order: number }[]
 }
 
 function buildSupabase(state: MockState) {
-  const packageInsert = vi.fn((rows: unknown) => ({
-    select: vi.fn(() => ({
-      single: vi.fn(async () => ({
-        data: { id: "new-package-id", slug: (rows as { slug: string }).slug },
-        error: null,
-      })),
-    })),
-  }))
-  const legInsert = vi.fn(async (_rows?: unknown) => ({ error: null }))
-  const legDelete = vi.fn(async () => ({ error: null }))
-  const legUpdate = vi.fn(async () => ({ error: null }))
-  const legRouteInsert = vi.fn(async (_rows?: unknown) => ({ error: null }))
-  const legRouteDelete = vi.fn(async () => ({ error: null }))
+  const serviceInsert = vi.fn(async (_rows?: unknown) => ({ error: null }))
+  const serviceDelete = vi.fn(async () => ({ error: null }))
+  const serviceUpdate = vi.fn(async () => ({ error: null }))
   const transportDelete = vi.fn(async () => ({ error: null }))
-  const bookingUpdate = vi.fn(async () => ({ error: null }))
-  const selectionsInsert = vi.fn((rows: unknown[]) => ({
+  const unitInsert = vi.fn(async (_rows?: unknown) => ({ error: null }))
+  const transportInsert = vi.fn((rows: unknown[]) => ({
     select: vi.fn(async () => ({
-      data: (rows as Array<{ package_leg_id: string }>).map((row, index) => ({
-        id: `selection-${index}`,
-        package_leg_id: row.package_leg_id,
+      data: (rows as Array<{ service_type: string }>).map((row, index) => ({
+        id: `transport-${index}`,
+        service_type: row.service_type,
       })),
       error: null,
     })),
   }))
-  const unitInsert = vi.fn(async (_rows?: unknown) => ({ error: null }))
 
   const supabase = {
     from: vi.fn((table: string) => {
@@ -91,53 +72,24 @@ function buildSupabase(state: MockState) {
               maybeSingle: vi.fn(async () =>
                 state.bookingExists === false
                   ? { data: null, error: null }
-                  : { data: { id: BOOKING_ID, booking_number: "BT-2026-0001", package_id: null }, error: null },
+                  : { data: { id: BOOKING_ID, booking_number: "BT-2026-0001" }, error: null },
               ),
             })),
           })),
-          update: vi.fn(() => ({
-            eq: vi.fn(() => bookingUpdate()),
-          })),
         }
       }
 
-      if (table === "packages") {
+      if (table === "booking_services") {
         return {
           select: vi.fn(() => ({
-            eq: vi.fn(() => ({
-              maybeSingle: vi.fn(async () => ({
-                data: state.existingPackage ?? null,
-                error: null,
-              })),
-            })),
+            eq: vi.fn(async () => ({ data: state.existingServices ?? [], error: null })),
           })),
-          insert: vi.fn((rows: unknown) => packageInsert(rows)),
-        }
-      }
-
-      if (table === "package_legs") {
-        return {
-          select: vi.fn(() => ({
-            eq: vi.fn(async () => ({
-              data: state.existingLegs ?? [],
-              error: null,
-            })),
-          })),
-          insert: vi.fn((rows: unknown[]) => legInsert(rows)),
+          insert: vi.fn((rows: unknown[]) => serviceInsert(rows)),
           delete: vi.fn(() => ({
-            in: vi.fn(() => legDelete()),
+            in: vi.fn(() => serviceDelete()),
           })),
           update: vi.fn(() => ({
-            eq: vi.fn(() => legUpdate()),
-          })),
-        }
-      }
-
-      if (table === "package_leg_routes") {
-        return {
-          insert: vi.fn((rows: unknown[]) => legRouteInsert(rows)),
-          delete: vi.fn(() => ({
-            in: vi.fn(() => legRouteDelete()),
+            eq: vi.fn(() => serviceUpdate()),
           })),
         }
       }
@@ -156,40 +108,12 @@ function buildSupabase(state: MockState) {
         }
       }
 
-      if (table === "routes") {
-        return {
-          select: vi.fn(() => ({
-            in: vi.fn(async () => ({ data: state.routes ?? [], error: null })),
-          })),
-        }
-      }
-
       if (table === "booking_transport_requests") {
         return {
           delete: vi.fn(() => ({
             in: vi.fn(() => transportDelete()),
           })),
-          insert: vi.fn((rows: unknown[]) => ({
-            select: vi.fn(async () => ({
-              data: (rows as Array<{ service_type: string }>).map((row, index) => ({
-                id: `transport-${index}`,
-                service_type: row.service_type,
-              })),
-              error: null,
-            })),
-          })),
-        }
-      }
-
-      if (table === "booking_package_selections") {
-        return {
-          insert: vi.fn((rows: unknown[]) => selectionsInsert(rows)),
-        }
-      }
-
-      if (table === "booking_package_selection_units") {
-        return {
-          insert: vi.fn((rows: unknown[]) => unitInsert(rows)),
+          insert: vi.fn((rows: unknown[]) => transportInsert(rows)),
         }
       }
 
@@ -199,10 +123,14 @@ function buildSupabase(state: MockState) {
         }
       }
 
-      // Seeding units now carries the enquiry's captured suite configuration forward
-      // (app/api/jobs/[id]/package/seed.ts). These tests cover leg fan-out, so no suites are
-      // captured and every seeded unit is blank -- the carry-forward itself is covered in
-      // lib/suites/.
+      if (table === "booking_service_units") {
+        return {
+          insert: vi.fn((rows: unknown[]) => unitInsert(rows)),
+        }
+      }
+
+      // seedUnitsForServices carries the enquiry's captured suite configuration forward
+      // (app/api/jobs/[id]/package/seed.ts) -- covered separately in seed.test.ts.
       if (table === "booking_suites" || table === "suite_types") {
         return {
           select: vi.fn(() => {
@@ -221,24 +149,13 @@ function buildSupabase(state: MockState) {
     }),
   }
 
-  return {
-    supabase,
-    packageInsert,
-    legInsert,
-    legDelete,
-    legUpdate,
-    legRouteInsert,
-    legRouteDelete,
-    bookingUpdate,
-    selectionsInsert,
-    unitInsert,
-  }
+  return { supabase, serviceInsert, serviceDelete, serviceUpdate, transportDelete, transportInsert, unitInsert }
 }
 
 function mockAuth(state: MockState) {
   const built = buildSupabase(state)
-  authMocks.requireRole.mockResolvedValue({
-    ok: true,
+  const authValue = {
+    ok: true as const,
     value: {
       supabase: built.supabase,
       user: { id: "u1", email: "u@example.com" },
@@ -251,23 +168,18 @@ function mockAuth(state: MockState) {
         isActive: true,
       },
     },
-  })
+  }
+  authMocks.requireRole.mockResolvedValue(authValue)
+  authMocks.requireUser.mockResolvedValue(authValue)
   return built
 }
 
 describe("POST /api/jobs/[id]/build-booking", () => {
-  let uuidCounter = 0
-
   beforeEach(() => {
     authMocks.requireRole.mockReset()
+    authMocks.requireUser.mockReset()
     auditMocks.writeAuditLog.mockClear()
-    helperMocks.loadPackageDetail.mockClear()
-    helperMocks.resolveUniquePackageSlug.mockClear()
-    uuidCounter = 0
-    helperMocks.makeUuid.mockImplementation(() => {
-      uuidCounter += 1
-      return uuidCounter === 1 ? NEW_LEG_ID_1 : NEW_LEG_ID_2
-    })
+    adapterMocks.loadBookingServicesPackageDetail.mockClear()
   })
 
   it("returns 401 when unauthenticated", async () => {
@@ -278,11 +190,7 @@ describe("POST /api/jobs/[id]/build-booking", () => {
     const res = await POST(
       new Request("http://localhost", {
         method: "POST",
-        body: JSON.stringify({
-          services: [{ supplierId: SUPPLIER_A, supplierKind: "train_operator" }],
-          tripStartDate: "2026-08-15",
-          tripEndDate: "2026-08-20",
-        }),
+        body: JSON.stringify({ services: [{ supplierId: SUPPLIER_A, supplierKind: "train_operator" }] }),
       }),
       makeParams(),
     )
@@ -292,10 +200,7 @@ describe("POST /api/jobs/[id]/build-booking", () => {
   it("returns 400 when no services are provided", async () => {
     mockAuth({})
     const res = await POST(
-      new Request("http://localhost", {
-        method: "POST",
-        body: JSON.stringify({ services: [] }),
-      }),
+      new Request("http://localhost", { method: "POST", body: JSON.stringify({ services: [] }) }),
       makeParams(),
     )
     expect(res.status).toBe(400)
@@ -306,63 +211,42 @@ describe("POST /api/jobs/[id]/build-booking", () => {
     const res = await POST(
       new Request("http://localhost", {
         method: "POST",
-        body: JSON.stringify({
-          services: [{ supplierId: SUPPLIER_A, supplierKind: "train_operator" }],
-          tripStartDate: "2026-08-15",
-          tripEndDate: "2026-08-20",
-        }),
+        body: JSON.stringify({ services: [{ supplierId: SUPPLIER_A, supplierKind: "train_operator" }] }),
       }),
       makeParams(),
     )
     expect(res.status).toBe(404)
   })
 
-  it("creates a hidden package and seeds selections on first build", async () => {
-    const built = mockAuth({
-      existingPackage: null,
-      existingLegs: [],
-      routes: [{ id: "route-1", supplier_id: SUPPLIER_A }],
-    })
+  it("inserts a new booking_services row directly -- no hidden packages/package_legs involved", async () => {
+    const built = mockAuth({ existingServices: [] })
 
     const res = await POST(
       new Request("http://localhost", {
         method: "POST",
-        body: JSON.stringify({
-          services: [{ supplierId: SUPPLIER_A, supplierKind: "train_operator" }],
-          tripStartDate: "2026-08-15",
-          tripEndDate: "2026-08-20",
-        }),
+        body: JSON.stringify({ services: [{ supplierId: SUPPLIER_A, supplierKind: "train_operator" }] }),
       }),
       makeParams(),
     )
 
     expect(res.status).toBe(200)
-    const body = await res.json()
-    expect(body.packageId).toBe("new-package-id")
-    expect(built.packageInsert).toHaveBeenCalledWith(
-      expect.objectContaining({ booking_id: BOOKING_ID, active: false }),
-    )
-    expect(built.legInsert).toHaveBeenCalledWith([
-      expect.objectContaining({ id: NEW_LEG_ID_1, supplier_id: SUPPLIER_A, label: "Rovos Rail" }),
+    expect(built.serviceInsert).toHaveBeenCalledWith([
+      expect.objectContaining({ booking_id: BOOKING_ID, supplier_id: SUPPLIER_A, label: "Rovos Rail", sort_order: 0 }),
     ])
-    expect(built.legRouteInsert).toHaveBeenCalledWith([
-      expect.objectContaining({ package_leg_id: NEW_LEG_ID_1, route_id: "route-1" }),
-    ])
-    expect(built.bookingUpdate).toHaveBeenCalled()
-    expect(built.selectionsInsert).toHaveBeenCalledWith(
-      expect.arrayContaining([expect.objectContaining({ package_leg_id: NEW_LEG_ID_1, supplier_id: SUPPLIER_A })]),
-    )
     expect(auditMocks.writeAuditLog).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ action: "booking_services_built" }),
     )
+    expect(adapterMocks.loadBookingServicesPackageDetail).toHaveBeenCalledWith(
+      expect.anything(),
+      BOOKING_ID,
+      "BT-2026-0001",
+    )
   })
 
-  it("reuses the existing hidden package on a second build instead of creating a new one", async () => {
+  it("keeps an existing service (matched by legId) and only inserts the newly added one", async () => {
     const built = mockAuth({
-      existingPackage: { id: EXISTING_PACKAGE_ID, slug: "booking-bt-2026-0001" },
-      existingLegs: [{ id: LEG_A, supplier_id: SUPPLIER_A, sort_order: 0 }],
-      routes: [{ id: "route-2", supplier_id: SUPPLIER_B }],
+      existingServices: [{ id: SERVICE_A, supplier_id: SUPPLIER_A, sort_order: 0 }],
     })
 
     const res = await POST(
@@ -370,52 +254,77 @@ describe("POST /api/jobs/[id]/build-booking", () => {
         method: "POST",
         body: JSON.stringify({
           services: [
-            { legId: LEG_A, supplierId: SUPPLIER_A, supplierKind: "train_operator" },
+            { legId: SERVICE_A, supplierId: SUPPLIER_A, supplierKind: "train_operator" },
             { supplierId: SUPPLIER_B, supplierKind: "hotel_property" },
           ],
-          tripStartDate: "2026-08-15",
-          tripEndDate: "2026-08-20",
         }),
       }),
       makeParams(),
     )
 
     expect(res.status).toBe(200)
-    const body = await res.json()
-    expect(body.packageId).toBe(EXISTING_PACKAGE_ID)
-    expect(built.packageInsert).not.toHaveBeenCalled()
-    // Only the new hotel leg is inserted; the kept train leg is untouched.
-    expect(built.legInsert).toHaveBeenCalledWith([
+    expect(built.serviceInsert).toHaveBeenCalledWith([
       expect.objectContaining({ supplier_id: SUPPLIER_B, label: "Cape Grace" }),
     ])
-    expect(built.legDelete).not.toHaveBeenCalled()
+    expect(built.serviceDelete).not.toHaveBeenCalled()
   })
 
-  it("removes legs that are no longer in the requested services", async () => {
-    const LEG_REMOVED = "00000000-0000-4000-8000-0000000000f1"
+  it("removes services that are no longer in the requested list, cascading their transport requests first", async () => {
+    const SERVICE_REMOVED = "00000000-0000-4000-8000-0000000000f1"
     const built = mockAuth({
-      existingPackage: { id: EXISTING_PACKAGE_ID, slug: "booking-bt-2026-0001" },
-      existingLegs: [
-        { id: LEG_A, supplier_id: SUPPLIER_A, sort_order: 0 },
-        { id: LEG_REMOVED, supplier_id: SUPPLIER_B, sort_order: 1 },
+      existingServices: [
+        { id: SERVICE_A, supplier_id: SUPPLIER_A, sort_order: 0 },
+        { id: SERVICE_REMOVED, supplier_id: SUPPLIER_B, sort_order: 1 },
       ],
-      routes: [],
     })
 
     const res = await POST(
       new Request("http://localhost", {
         method: "POST",
         body: JSON.stringify({
-          services: [{ legId: LEG_A, supplierId: SUPPLIER_A, supplierKind: "train_operator" }],
-          tripStartDate: "2026-08-15",
-          tripEndDate: "2026-08-20",
+          services: [{ legId: SERVICE_A, supplierId: SUPPLIER_A, supplierKind: "train_operator" }],
         }),
       }),
       makeParams(),
     )
 
     expect(res.status).toBe(200)
-    expect(built.legDelete).toHaveBeenCalled()
-    expect(built.legRouteDelete).toHaveBeenCalled()
+    expect(built.transportDelete).toHaveBeenCalled()
+    expect(built.serviceDelete).toHaveBeenCalled()
+  })
+})
+
+describe("GET /api/jobs/[id]/build-booking", () => {
+  beforeEach(() => {
+    adapterMocks.loadBookingServicesPackageDetail.mockClear()
+  })
+
+  it("returns a null packageDetail when the booking has no services yet", async () => {
+    mockAuth({})
+    adapterMocks.loadBookingServicesPackageDetail.mockResolvedValueOnce({
+      detail: { id: BOOKING_ID, legs: [] },
+      services: [],
+      units: [],
+    })
+
+    const res = await GET(new Request("http://localhost"), makeParams())
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.packageDetail).toBeNull()
+  })
+
+  it("returns the packageDetail when services exist", async () => {
+    mockAuth({})
+    const detail = { id: BOOKING_ID, legs: [{ id: SERVICE_A }] }
+    adapterMocks.loadBookingServicesPackageDetail.mockResolvedValueOnce({
+      detail,
+      services: [{ id: SERVICE_A }],
+      units: [],
+    })
+
+    const res = await GET(new Request("http://localhost"), makeParams())
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.packageDetail).toEqual(detail)
   })
 })

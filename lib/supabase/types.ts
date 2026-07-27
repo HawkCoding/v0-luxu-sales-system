@@ -582,6 +582,189 @@ export type Database = {
           },
         ]
       }
+      booking_service_units: {
+        Row: {
+          adult_count: number
+          bathroom_type_id: string | null
+          bedroom_layout_id: string | null
+          bedroom_type_id: string | null
+          child_count: number
+          created_at: string
+          id: string
+          infant_count: number
+          origin: Database["public"]["Enums"]["service_origin"]
+          service_id: string
+          sort_order: number
+          suite_type_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          adult_count?: number
+          bathroom_type_id?: string | null
+          bedroom_layout_id?: string | null
+          bedroom_type_id?: string | null
+          child_count?: number
+          created_at?: string
+          id?: string
+          infant_count?: number
+          origin?: Database["public"]["Enums"]["service_origin"]
+          service_id: string
+          sort_order?: number
+          suite_type_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          adult_count?: number
+          bathroom_type_id?: string | null
+          bedroom_layout_id?: string | null
+          bedroom_type_id?: string | null
+          child_count?: number
+          created_at?: string
+          id?: string
+          infant_count?: number
+          origin?: Database["public"]["Enums"]["service_origin"]
+          service_id?: string
+          sort_order?: number
+          suite_type_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "booking_service_units_bathroom_type_id_fkey"
+            columns: ["bathroom_type_id"]
+            isOneToOne: false
+            referencedRelation: "bathroom_types"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_service_units_bedroom_layout_id_fkey"
+            columns: ["bedroom_layout_id"]
+            isOneToOne: false
+            referencedRelation: "bedroom_layouts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_service_units_bedroom_type_id_fkey"
+            columns: ["bedroom_type_id"]
+            isOneToOne: false
+            referencedRelation: "bedroom_types"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_service_units_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "booking_services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_service_units_suite_type_id_fkey"
+            columns: ["suite_type_id"]
+            isOneToOne: false
+            referencedRelation: "suite_types"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      booking_services: {
+        Row: {
+          booking_id: string
+          created_at: string
+          date_anchor: string | null
+          id: string
+          label: string | null
+          nights: number | null
+          notes: string | null
+          origin: Database["public"]["Enums"]["service_origin"]
+          rate_type_id: string | null
+          route_id: string | null
+          route_reversed: boolean
+          selected: boolean
+          service_date: string | null
+          sort_order: number
+          suite_type_id: string | null
+          supplier_id: string
+          supplier_reference: string | null
+          updated_at: string
+        }
+        Insert: {
+          booking_id: string
+          created_at?: string
+          date_anchor?: string | null
+          id?: string
+          label?: string | null
+          nights?: number | null
+          notes?: string | null
+          origin?: Database["public"]["Enums"]["service_origin"]
+          rate_type_id?: string | null
+          route_id?: string | null
+          route_reversed?: boolean
+          selected?: boolean
+          service_date?: string | null
+          sort_order?: number
+          suite_type_id?: string | null
+          supplier_id: string
+          supplier_reference?: string | null
+          updated_at?: string
+        }
+        Update: {
+          booking_id?: string
+          created_at?: string
+          date_anchor?: string | null
+          id?: string
+          label?: string | null
+          nights?: number | null
+          notes?: string | null
+          origin?: Database["public"]["Enums"]["service_origin"]
+          rate_type_id?: string | null
+          route_id?: string | null
+          route_reversed?: boolean
+          selected?: boolean
+          service_date?: string | null
+          sort_order?: number
+          suite_type_id?: string | null
+          supplier_id?: string
+          supplier_reference?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "booking_services_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_services_rate_type_id_fkey"
+            columns: ["rate_type_id"]
+            isOneToOne: false
+            referencedRelation: "rate_types"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_services_route_id_fkey"
+            columns: ["route_id"]
+            isOneToOne: false
+            referencedRelation: "routes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_services_suite_type_id_fkey"
+            columns: ["suite_type_id"]
+            isOneToOne: false
+            referencedRelation: "suite_types"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_services_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       booking_suites: {
         Row: {
           bathroom_type_id: string | null
@@ -756,6 +939,7 @@ export type Database = {
           pickup_point: string
           price_override: number | null
           route_id: string | null
+          service_id: string | null
           service_type: string
           sort_order: number
           suite_type_id: string | null
@@ -777,6 +961,7 @@ export type Database = {
           pickup_point: string
           price_override?: number | null
           route_id?: string | null
+          service_id?: string | null
           service_type: string
           sort_order?: number
           suite_type_id?: string | null
@@ -798,6 +983,7 @@ export type Database = {
           pickup_point?: string
           price_override?: number | null
           route_id?: string | null
+          service_id?: string | null
           service_type?: string
           sort_order?: number
           suite_type_id?: string | null
@@ -825,6 +1011,13 @@ export type Database = {
             columns: ["route_id"]
             isOneToOne: false
             referencedRelation: "routes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_transport_requests_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "booking_services"
             referencedColumns: ["id"]
           },
           {
@@ -937,6 +1130,8 @@ export type Database = {
           reservation_form_received_at: string | null
           route_id: string | null
           route_reversed: boolean
+          services_confirmed_at: string | null
+          services_confirmed_by: string | null
           source: Database["public"]["Enums"]["source_kind"]
           stage: Database["public"]["Enums"]["pipeline_stage"]
           terms_accepted: boolean
@@ -1006,6 +1201,8 @@ export type Database = {
           reservation_form_received_at?: string | null
           route_id?: string | null
           route_reversed?: boolean
+          services_confirmed_at?: string | null
+          services_confirmed_by?: string | null
           source?: Database["public"]["Enums"]["source_kind"]
           stage?: Database["public"]["Enums"]["pipeline_stage"]
           terms_accepted?: boolean
@@ -1075,6 +1272,8 @@ export type Database = {
           reservation_form_received_at?: string | null
           route_id?: string | null
           route_reversed?: boolean
+          services_confirmed_at?: string | null
+          services_confirmed_by?: string | null
           source?: Database["public"]["Enums"]["source_kind"]
           stage?: Database["public"]["Enums"]["pipeline_stage"]
           terms_accepted?: boolean
@@ -2148,7 +2347,6 @@ export type Database = {
       packages: {
         Row: {
           active: boolean
-          booking_id: string | null
           created_at: string
           currency: string
           description: string | null
@@ -2163,7 +2361,6 @@ export type Database = {
         }
         Insert: {
           active?: boolean
-          booking_id?: string | null
           created_at?: string
           currency?: string
           description?: string | null
@@ -2178,7 +2375,6 @@ export type Database = {
         }
         Update: {
           active?: boolean
-          booking_id?: string | null
           created_at?: string
           currency?: string
           description?: string | null
@@ -2191,15 +2387,7 @@ export type Database = {
           slug?: string
           updated_at?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "packages_booking_id_fkey"
-            columns: ["booking_id"]
-            isOneToOne: false
-            referencedRelation: "bookings"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       payment_reminders: {
         Row: {
@@ -3879,6 +4067,7 @@ export type Database = {
         | "superseded"
         | "cancelled"
       route_direction_mode: "one_way" | "round_trip" | "loop"
+      service_origin: "auto" | "consultant"
       source_kind:
         | "web_form"
         | "paste_import"
@@ -4072,6 +4261,7 @@ export const Constants = {
         "cancelled",
       ],
       route_direction_mode: ["one_way", "round_trip", "loop"],
+      service_origin: ["auto", "consultant"],
       source_kind: [
         "web_form",
         "paste_import",

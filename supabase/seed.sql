@@ -1351,8 +1351,8 @@ insert into public.rate_cards (id,route_id,suite_type_id,rate_type_id,price_per_
 on conflict (id) do nothing;
 
 -- PACKAGES, LEGS & LEG ROUTES (from production, excluding per-booking synthetic packages)
-insert into public.packages (id,name,description,active,created_at,updated_at,duration_nights,single_supplement_pct,currency,slug,fixed_price_per_person,markup_pct,booking_id) values
-  ('7af631c8-99ff-4eff-8964-96971736278f','Blue Train Five Night Package',null,true,'2026-07-08T09:10:59.747152+00:00','2026-07-08T09:10:59.747152+00:00',5,50,'ZAR','blue-train-five-night-package',null,0,null)
+insert into public.packages (id,name,description,active,created_at,updated_at,duration_nights,single_supplement_pct,currency,slug,fixed_price_per_person,markup_pct) values
+  ('7af631c8-99ff-4eff-8964-96971736278f','Blue Train Five Night Package',null,true,'2026-07-08T09:10:59.747152+00:00','2026-07-08T09:10:59.747152+00:00',5,50,'ZAR','blue-train-five-night-package',null,0)
 on conflict (id) do nothing;
 
 insert into public.package_legs (id,package_id,supplier_id,label,sort_order,created_at,date_anchor) values

@@ -2,7 +2,6 @@ import { detectCountryInText, loadCountryAliasMap, normalizeCountry } from "@/li
 import { buildEnquiryImportPayload } from "@/lib/import/enquiry-payload"
 import { type ParsedDraft } from "@/lib/import/parseEmailDraft"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
-import { normalizeLookupValue } from "@/lib/normalize-lookup-value"
 import { resolveSuitePhrases, unresolvedSuitePhrase } from "@/lib/suites/resolve-suite-phrase"
 import { loadSupplierSuiteVocabulary } from "@/lib/suites/suite-vocabulary"
 import { SUITE_TYPE_MISSING_FIELD } from "@/lib/suites/missing-fields"
@@ -11,6 +10,10 @@ import { allocateJobNumberForBooking } from "@/lib/job-numbering"
 import { createRawEmailPreview } from "@/lib/inbound-email/html"
 import type { Database, Json } from "@/lib/supabase/types"
 import { COMPLETED_REPEAT_BOOKING_STAGES } from "@/lib/customer-repeat-status"
+import { resolveTrainSupplierId, findHotelSupplierId } from "@/lib/resolvers/supplier-resolver"
+import { findRouteId } from "@/lib/resolvers/route-resolver"
+import { autoBuildBookingServices } from "@/lib/auto-build/build-from-enquiry"
+import { createDraftQuoteForBooking } from "@/lib/quotes/create-draft-quote"
 
 type ServiceClient = ReturnType<typeof createServiceClient>
 type BookingInsert = Database["public"]["Tables"]["bookings"]["Insert"]
@@ -30,137 +33,6 @@ export interface CreatedEmailBooking {
   bookingNumber: string
   duplicateOfBookingId: string | null
   rawPreview: string
-}
-
-async function resolveTrainSupplierId(
-  supabase: ServiceClient,
-  supplierName: unknown,
-): Promise<string | null> {
-  if (typeof supplierName !== "string" || !supplierName.trim()) return null
-
-  const normalizedName = normalizeLookupValue(supplierName)
-  const { data: suppliers } = await supabase
-    .from("suppliers")
-    .select("id, name")
-    .eq("kind", "train_operator")
-    .eq("active", true)
-
-  const match = (suppliers ?? []).find((item) => {
-    const normalized = normalizeLookupValue(item.name)
-    return normalized === normalizedName || normalizedName.includes(normalized) || normalized.includes(normalizedName)
-  })
-
-  return match?.id ?? null
-}
-
-/**
- * Pulls the two endpoint location ids out of free-text direction wording (e.g. "Pretoria to
- * Cape Town") by scanning the known location names — longest first so "Cape Town" wins over a
- * bare token — and ordering them by where they first appear. Returns the first two distinct hits.
- */
-function extractDirectionLocationIds(
-  direction: string,
-  locations: Array<{ id: string; name: string }>,
-): [string, string] | null {
-  const haystack = normalizeLookupValue(direction)
-  if (!haystack) return null
-
-  const hits: Array<{ id: string; index: number }> = []
-  const ordered = [...locations].sort((a, b) => b.name.length - a.name.length)
-  for (const location of ordered) {
-    const needle = normalizeLookupValue(location.name)
-    if (!needle) continue
-    const pattern = new RegExp(`\\b${needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`)
-    const match = pattern.exec(haystack)
-    if (match && !hits.some((hit) => hit.id === location.id)) {
-      hits.push({ id: location.id, index: match.index })
-    }
-  }
-
-  if (hits.length < 2) return null
-  hits.sort((a, b) => a.index - b.index)
-  return [hits[0].id, hits[1].id]
-}
-
-async function findRouteId(
-  supabase: ServiceClient,
-  direction: unknown,
-  supplierId: string | null,
-): Promise<string | null> {
-  if (typeof direction !== "string" || !direction.trim()) return null
-
-  const { data: locations } = await supabase.from("locations").select("id, name")
-  const endpoints = extractDirectionLocationIds(direction, locations ?? [])
-  if (!endpoints) return null
-  const [firstLocId, secondLocId] = endpoints
-
-  let routesQuery = supabase
-    .from("routes")
-    .select("id, origin_location_id, destination_location_id, direction_mode")
-    .eq("active", true)
-  if (supplierId) {
-    routesQuery = routesQuery.eq("supplier_id", supplierId)
-  }
-  const { data: routes } = await routesQuery
-
-  const matches = (routes ?? []).filter((route) => {
-    const origin = route.origin_location_id
-    const destination = route.destination_location_id
-    if (!origin || !destination) return false
-    if (route.direction_mode === "one_way") {
-      return origin === firstLocId && destination === secondLocId
-    }
-    // round_trip: order-independent endpoint pair
-    return (
-      (origin === firstLocId && destination === secondLocId) ||
-      (origin === secondLocId && destination === firstLocId)
-    )
-  })
-
-  // With a resolved supplier there should be at most one match. Without one, only auto-link when
-  // the pair is unambiguous; otherwise leave it for manual selection.
-  if (matches.length === 1) return matches[0].id
-  if (supplierId && matches.length > 0) return matches[0].id
-  return null
-}
-
-async function findPackageId(supabase: ServiceClient, packageOption: unknown): Promise<string | null> {
-  if (typeof packageOption !== "string" || !packageOption.trim()) return null
-
-  const normalizedOption = normalizeLookupValue(packageOption)
-  const { data: packages } = await supabase
-    .from("packages")
-    .select("id, name")
-    .eq("active", true)
-    .is("booking_id", null)
-
-  const match = (packages ?? []).find((item) => {
-    const normalizedName = normalizeLookupValue(item.name)
-    return normalizedName === normalizedOption || normalizedOption.includes(normalizedName) || normalizedName.includes(normalizedOption)
-  })
-
-  return match?.id ?? null
-}
-
-async function findHotelSupplierId(
-  supabase: ServiceClient,
-  hotelOption: unknown,
-): Promise<string | null> {
-  if (typeof hotelOption !== "string" || !hotelOption.trim()) return null
-
-  const normalizedOption = normalizeLookupValue(hotelOption)
-  const { data: suppliers } = await supabase
-    .from("suppliers")
-    .select("id, name")
-    .eq("kind", "hotel_property")
-    .eq("active", true)
-
-  const match = (suppliers ?? []).find((item) => {
-    const normalizedName = normalizeLookupValue(item.name)
-    return normalizedName === normalizedOption || normalizedOption.includes(normalizedName) || normalizedName.includes(normalizedOption)
-  })
-
-  return match?.id ?? null
 }
 
 function fallbackEmail(firstName: string, surname: string): string {
@@ -300,7 +172,6 @@ export async function createEmailBookingFromParsedDraft(
 
   const trainSupplierId = await resolveTrainSupplierId(supabase, parsed.trip.supplier)
   const routeId = await findRouteId(supabase, payload.direction, trainSupplierId)
-  const packageId = await findPackageId(supabase, payload.packageOption)
   const hotelSupplierId = await findHotelSupplierId(supabase, payload.hotelOption)
 
   // Suite resolution needs the supplier's vocabulary, so it can only run once the train operator
@@ -334,7 +205,6 @@ export async function createEmailBookingFromParsedDraft(
     },
     resolvedReferences: {
       routeId,
-      packageId,
       hotelSupplierId,
     },
   } satisfies Json
@@ -357,7 +227,6 @@ export async function createEmailBookingFromParsedDraft(
     stage: "enquiry",
     departure_date: payload.departureDate || null,
     route_id: routeId,
-    package_id: packageId,
     hotel_supplier_id: hotelSupplierId,
     no_of_adults: payload.noOfAdults || 1,
     no_of_children: payload.noOfChildren || 0,
@@ -412,6 +281,37 @@ export async function createEmailBookingFromParsedDraft(
         ) as Json,
       })),
     )
+  }
+
+  // Auto-build the booking's services from what was just resolved -- never a guess of its own
+  // (see lib/auto-build/build-from-enquiry.ts). No human is present on this path, so a failed
+  // build must never fail the import that created the booking in the first place.
+  try {
+    const autoBuildResult = await autoBuildBookingServices(supabase, {
+      bookingId: booking.id,
+      trainSupplierId,
+      hotelSupplierId,
+      routeId,
+      departureDate: payload.departureDate || null,
+    })
+    if (autoBuildResult.servicesCreated > 0 || autoBuildResult.skipped.length > 0) {
+      await supabase.from("audit_logs").insert({
+        actor: "system",
+        entity_type: "Booking",
+        entity_id: booking.id,
+        action: "booking_auto_built",
+        meta_json: autoBuildResult as unknown as Json,
+      })
+    }
+
+    await createDraftQuoteForBooking({
+      supabase,
+      bookingId: booking.id,
+      bookingNumber: booking.booking_number,
+      travelDate: payload.departureDate || null,
+    })
+  } catch (error) {
+    console.error("import-booking:autoBuild", error)
   }
 
   await supabase.from("audit_logs").insert({

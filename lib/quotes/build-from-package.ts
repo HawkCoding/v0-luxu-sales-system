@@ -58,7 +58,10 @@ interface TransportRequestRow {
   service_type: "transfer" | "rental"
   route_id: string | null
   suite_type_id: string | null
+  /** Set for a catalogue-package leg. Booking-scoped services set service_id instead — never both. */
   package_leg_id: string | null
+  /** Set for a Build Booking (booking_services) leg. */
+  service_id: string | null
   pickup_point: string
   dropoff_point: string
   pickup_at: string | null
@@ -112,7 +115,7 @@ export async function buildPackageQuoteLineItems({
 
   const { data: transportRequests } = await supabase
     .from("booking_transport_requests")
-    .select("service_type, route_id, suite_type_id, package_leg_id, pickup_point, dropoff_point, pickup_at, price_override, rental_details:booking_vehicle_rental_details(return_at)")
+    .select("service_type, route_id, suite_type_id, package_leg_id, service_id, pickup_point, dropoff_point, pickup_at, price_override, rental_details:booking_vehicle_rental_details(return_at)")
     .eq("booking_id", jobId)
     .order("sort_order", { ascending: true })
 
@@ -451,8 +454,12 @@ export async function buildPackageQuoteLineItems({
     legId: string,
     serviceType: "transfer" | "rental",
   ): TransportRequestRow[] {
+    // A catalogue-package leg sets package_leg_id; a Build Booking (booking_services) leg sets
+    // service_id instead. A given request only ever has one of the two, so matching either is safe.
     return ((transportRequests ?? []) as TransportRequestRow[]).filter(
-      (request) => request.package_leg_id === legId && request.service_type === serviceType,
+      (request) =>
+        (request.package_leg_id === legId || request.service_id === legId) &&
+        request.service_type === serviceType,
     )
   }
 

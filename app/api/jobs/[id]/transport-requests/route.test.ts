@@ -49,6 +49,15 @@ function buildSupabase() {
           })),
         }
       }
+      // recomputeBookingTripDates also checks Build Booking's booking_services -- these fixtures
+      // have none.
+      if (table === "booking_services") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(async () => ({ data: [], error: null })),
+          })),
+        }
+      }
       throw new Error(`Unexpected table ${table}`)
     }),
   }

@@ -1,6 +1,7 @@
 ﻿"use client"
 
 import { ArrowLeftRight, Plus, Trash2 } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -131,7 +132,18 @@ export function SuiteLegEditor({
     <div className="space-y-3 rounded-md border p-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-[160px] flex-1">
-          <div className="text-sm font-medium">{leg.label ?? leg.supplierName}</div>
+          <div className="flex items-center gap-1.5">
+            <div className="text-sm font-medium">{leg.label ?? leg.supplierName}</div>
+            {value.origin === "auto" && (
+              <Badge
+                variant="secondary"
+                className="text-[10px] h-4"
+                title="Filled automatically from the enquiry — edit any field, or use Confirm services, to accept it"
+              >
+                Auto-filled
+              </Badge>
+            )}
+          </div>
           <div className="text-xs text-muted-foreground">{leg.supplierName}</div>
         </div>
         {isHotel ? null : (

@@ -27,6 +27,15 @@ interface SelectionRow {
   suppliers: { name: string | null; kind: string | null } | { name: string | null; kind: string | null }[] | null
 }
 
+interface BookingServiceRow {
+  id: string
+  label: string | null
+  sort_order: number
+  selected: boolean
+  supplier_reference: string | null
+  suppliers: { name: string | null; kind: string | null } | { name: string | null; kind: string | null }[] | null
+}
+
 interface TransportRequestRow {
   id: string
   package_leg_id: string | null
@@ -49,28 +58,40 @@ export async function loadLegReferenceRows(
   supabase: SupabaseClient<Database>,
   bookingId: string,
 ): Promise<LegReferenceRow[]> {
-  const [{ data: selectionRows, error: selectionsError }, { data: transportRows, error: transportError }] =
-    await Promise.all([
-      supabase
-        .from("booking_package_selections")
-        .select(
-          "id, package_leg_id, selected, supplier_reference, package_legs(label, sort_order), suppliers(name, kind)",
-        )
-        .eq("booking_id", bookingId)
-        .eq("selected", true),
-      supabase
-        .from("booking_transport_requests")
-        .select(
-          "id, package_leg_id, service_type, pickup_point, dropoff_point, sort_order, supplier_reference, suppliers(name)",
-        )
-        .eq("booking_id", bookingId)
-        .order("sort_order", { ascending: true }),
-    ])
+  const [
+    { data: selectionRows, error: selectionsError },
+    { data: serviceRows, error: servicesError },
+    { data: transportRows, error: transportError },
+  ] = await Promise.all([
+    supabase
+      .from("booking_package_selections")
+      .select(
+        "id, package_leg_id, selected, supplier_reference, package_legs(label, sort_order), suppliers(name, kind)",
+      )
+      .eq("booking_id", bookingId)
+      .eq("selected", true),
+    // Build Booking's per-booking equivalent of the above -- a booking uses one or the other,
+    // never both, so merging is safe and lets this reader stay agnostic of which was used.
+    supabase
+      .from("booking_services")
+      .select("id, label, sort_order, selected, supplier_reference, suppliers(name, kind)")
+      .eq("booking_id", bookingId)
+      .eq("selected", true),
+    supabase
+      .from("booking_transport_requests")
+      .select(
+        "id, package_leg_id, service_type, pickup_point, dropoff_point, sort_order, supplier_reference, suppliers(name)",
+      )
+      .eq("booking_id", bookingId)
+      .order("sort_order", { ascending: true }),
+  ])
 
   if (selectionsError) throw selectionsError
+  if (servicesError) throw servicesError
   if (transportError) throw transportError
 
   const selections = (selectionRows ?? []) as unknown as SelectionRow[]
+  const services = (serviceRows ?? []) as unknown as BookingServiceRow[]
   const transportRequests = (transportRows ?? []) as unknown as TransportRequestRow[]
 
   const selectionRowsOut = selections
@@ -96,6 +117,28 @@ export async function loadLegReferenceRows(
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .map((entry) => entry.row)
 
+  const serviceRowsOut = services
+    .filter((row) => {
+      const kind = firstRecord(row.suppliers)?.kind ?? null
+      return !kind || !TRANSPORT_SUPPLIER_KINDS.has(kind)
+    })
+    .map((row) => {
+      const supplier = firstRecord(row.suppliers)
+      return {
+        row: {
+          key: `selection:${row.id}`,
+          kind: "selection" as const,
+          id: row.id,
+          label: row.label?.trim() || supplier?.name || "Leg",
+          supplierName: supplier?.name ?? null,
+          supplierReference: row.supplier_reference,
+        },
+        sortOrder: row.sort_order,
+      }
+    })
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((entry) => entry.row)
+
   const transportRowsOut = transportRequests.map((request) => {
     const supplier = firstRecord(request.suppliers)
     return {
@@ -108,7 +151,7 @@ export async function loadLegReferenceRows(
     }
   })
 
-  return [...selectionRowsOut, ...transportRowsOut]
+  return [...selectionRowsOut, ...serviceRowsOut, ...transportRowsOut]
 }
 
 export function missingLegReferenceLabels(rows: LegReferenceRow[]): string[] {

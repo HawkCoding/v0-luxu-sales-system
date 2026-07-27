@@ -131,6 +131,7 @@ function suiteState(overrides: Partial<SuiteLegState> & { legId: string }): Suit
     notes: null,
     rateTypeId: null,
     units: [],
+    origin: "consultant",
     ...overrides,
   }
 }
@@ -154,6 +155,7 @@ describe("deriveTripDateRangeFromStates", () => {
             rentalDetails: { returnAt: "2026-07-22T09:00:00+00:00" },
           } as TransportLegState["requests"][number],
         ],
+        origin: "consultant",
       },
     ]
 

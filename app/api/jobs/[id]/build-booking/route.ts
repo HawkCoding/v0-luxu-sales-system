@@ -2,10 +2,10 @@ import { z } from "zod"
 import { requireRole, requireUser } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { writeAuditLog } from "@/lib/audit-write"
-import { loadPackageDetail, makeUuid, resolveUniquePackageSlug } from "@/app/api/packages/[slug]/helpers"
+import { loadBookingServicesPackageDetail } from "@/lib/quotes/adapters/from-booking-services"
 import type { SupplierKind } from "@/lib/types"
 import type { Database } from "@/lib/supabase/types"
-import { seedSelectionsForLegs } from "../package/seed"
+import { seedUnitsForServices } from "../package/seed"
 
 export const runtime = "nodejs"
 
@@ -25,17 +25,10 @@ interface RouteParams {
   params: Promise<{ id: string }>
 }
 
-interface NewPackageLeg {
-  id: string
-  package_id: string
-  supplier_id: string
-  label: string | null
-  sort_order: number
-}
-type PackageLegRouteInsert = Database["public"]["Tables"]["package_leg_routes"]["Insert"]
+type BookingServiceInsert = Database["public"]["Tables"]["booking_services"]["Insert"]
 
-/** Returns the booking's hidden package (if one has been built yet) so the Build Booking dialog
- * can pre-fill its service list and configuration when re-opened. */
+/** Returns the booking's services (if any have been built yet) so the Build Booking dialog can
+ * pre-fill its service list and configuration when re-opened. */
 export async function GET(_req: Request, { params }: RouteParams) {
   const auth = await requireUser()
   if (!auth.ok) return auth.response
@@ -43,19 +36,19 @@ export async function GET(_req: Request, { params }: RouteParams) {
   const { id } = await params
   const { supabase } = auth.value
 
-  const { data: pkg, error: pkgError } = await supabase
-    .from("packages")
-    .select("id, slug")
-    .eq("booking_id", id)
+  const { data: booking, error: bookingError } = await supabase
+    .from("bookings")
+    .select("id, booking_number")
+    .eq("id", id)
     .maybeSingle()
 
-  if (pkgError) return safeSupabaseError("build-booking:get-hidden-package", pkgError)
-  if (!pkg) return Response.json({ packageId: null, slug: null, packageDetail: null })
+  if (bookingError) return safeSupabaseError("build-booking:get-booking", bookingError)
+  if (!booking) return jsonError("Booking not found", 404)
 
-  const detail = await loadPackageDetail(supabase, pkg.slug)
-  if ("error" in detail) return detail.error!
+  const { services, detail } = await loadBookingServicesPackageDetail(supabase, id, booking.booking_number)
+  if (services.length === 0) return Response.json({ packageDetail: null })
 
-  return Response.json({ packageId: pkg.id, slug: pkg.slug, packageDetail: detail.detail })
+  return Response.json({ packageDetail: detail })
 }
 
 export async function POST(req: Request, { params }: RouteParams) {
@@ -77,103 +70,50 @@ export async function POST(req: Request, { params }: RouteParams) {
 
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
-    .select("id, booking_number, package_id")
+    .select("id, booking_number")
     .eq("id", id)
     .maybeSingle()
 
   if (bookingError) return safeSupabaseError("build-booking:load-booking", bookingError)
   if (!booking) return jsonError("Booking not found", 404)
 
-  // 1. Find or create the booking's hidden package.
-  const { data: existingPackage, error: existingPackageError } = await supabase
-    .from("packages")
-    .select("id, slug")
-    .eq("booking_id", id)
-    .maybeSingle()
-
-  if (existingPackageError) return safeSupabaseError("build-booking:load-hidden-package", existingPackageError)
-
-  let packageId: string
-  let slug: string
-
-  if (existingPackage) {
-    packageId = existingPackage.id
-    slug = existingPackage.slug
-  } else {
-    try {
-      slug = await resolveUniquePackageSlug(supabase, `Booking ${booking.booking_number}`)
-    } catch {
-      return jsonError("Failed to create booking services", 500)
-    }
-
-    const { data: newPackage, error: insertPackageError } = await supabase
-      .from("packages")
-      .insert({
-        booking_id: id,
-        name: `Booking ${booking.booking_number}`,
-        slug,
-        active: false,
-        currency: "ZAR",
-        single_supplement_pct: 50,
-        duration_nights: null,
-        fixed_price_per_person: null,
-      })
-      .select("id, slug")
-      .single()
-
-    if (insertPackageError || !newPackage) {
-      return safeSupabaseError("build-booking:create-hidden-package", insertPackageError)
-    }
-    packageId = newPackage.id
-    slug = newPackage.slug
-  }
-
-  // 2. Reconcile legs against the requested services (matched by legId; new rows have none).
-  const { data: existingLegs, error: legsError } = await supabase
-    .from("package_legs")
+  // 1. Reconcile existing services against the requested list (matched by legId; new rows have none).
+  const { data: existingServices, error: existingError } = await supabase
+    .from("booking_services")
     .select("id, supplier_id, sort_order")
-    .eq("package_id", packageId)
+    .eq("booking_id", id)
 
-  if (legsError) return safeSupabaseError("build-booking:load-legs", legsError)
+  if (existingError) return safeSupabaseError("build-booking:load-services", existingError)
 
-  const existingLegIds = new Set((existingLegs ?? []).map((leg) => leg.id))
-  const keptLegIds = new Set(
+  const existingServiceIds = new Set((existingServices ?? []).map((service) => service.id))
+  const keptServiceIds = new Set(
     parsed.data.services
       .map((service) => service.legId)
-      .filter((legId): legId is string => Boolean(legId) && existingLegIds.has(legId!)),
+      .filter((legId): legId is string => Boolean(legId) && existingServiceIds.has(legId!)),
   )
-  const removedLegIds = (existingLegs ?? [])
-    .map((leg) => leg.id)
-    .filter((legId) => !keptLegIds.has(legId))
+  const removedServiceIds = (existingServices ?? [])
+    .map((service) => service.id)
+    .filter((serviceId) => !keptServiceIds.has(serviceId))
 
-  if (removedLegIds.length > 0) {
-    // Cascades booking_package_selections/units via FK; clean up the leg's own child rows.
-    const { error: deleteLinksError } = await supabase
-      .from("package_leg_routes")
-      .delete()
-      .in("package_leg_id", removedLegIds)
-    if (deleteLinksError) return safeSupabaseError("build-booking:remove-leg-routes", deleteLinksError)
-
+  if (removedServiceIds.length > 0) {
+    // Cascades booking_service_units via FK; transport requests reference the service directly.
     const { error: deleteTransportError } = await supabase
       .from("booking_transport_requests")
       .delete()
-      .in("package_leg_id", removedLegIds)
+      .in("service_id", removedServiceIds)
     if (deleteTransportError) return safeSupabaseError("build-booking:remove-transport-requests", deleteTransportError)
 
-    const { error: deleteLegsError } = await supabase
-      .from("package_legs")
+    const { error: deleteServicesError } = await supabase
+      .from("booking_services")
       .delete()
-      .in("id", removedLegIds)
-    if (deleteLegsError) return safeSupabaseError("build-booking:remove-legs", deleteLegsError)
+      .in("id", removedServiceIds)
+    if (deleteServicesError) return safeSupabaseError("build-booking:remove-services", deleteServicesError)
   }
 
   const addedServices = parsed.data.services.filter(
-    (service) => !service.legId || !existingLegIds.has(service.legId),
+    (service) => !service.legId || !existingServiceIds.has(service.legId),
   )
 
-  // Look up supplier names for the added legs' labels, and every route for those suppliers so
-  // eligibility (mapPackageLeg) resolves — non-hotel kinds only show routes linked via
-  // package_leg_routes, so every route the supplier has must be linked here.
   const addedSupplierIds = Array.from(new Set(addedServices.map((service) => service.supplierId)))
   const { data: addedSuppliers, error: suppliersError } =
     addedSupplierIds.length > 0
@@ -182,73 +122,49 @@ export async function POST(req: Request, { params }: RouteParams) {
   if (suppliersError) return safeSupabaseError("build-booking:load-suppliers", suppliersError)
   const supplierNameById = new Map((addedSuppliers ?? []).map((row) => [row.id, row.name]))
 
-  const { data: addedRoutes, error: routesError } =
-    addedSupplierIds.length > 0
-      ? await supabase.from("routes").select("id, supplier_id").in("supplier_id", addedSupplierIds)
-      : { data: [], error: null }
-  if (routesError) return safeSupabaseError("build-booking:load-routes", routesError)
-
-  const newLegRows: NewPackageLeg[] = addedServices.map((service, index) => ({
-    id: makeUuid(),
-    package_id: packageId,
+  const newServiceRows: BookingServiceInsert[] = addedServices.map((service, index) => ({
+    id: crypto.randomUUID(),
+    booking_id: id,
     supplier_id: service.supplierId,
     label: supplierNameById.get(service.supplierId) ?? null,
-    sort_order: keptLegIds.size + index,
+    sort_order: keptServiceIds.size + index,
   }))
 
-  if (newLegRows.length > 0) {
-    const { error: insertLegsError } = await supabase.from("package_legs").insert(newLegRows)
-    if (insertLegsError) return safeSupabaseError("build-booking:insert-legs", insertLegsError)
-
-    const routeLinks: PackageLegRouteInsert[] = newLegRows.flatMap((leg) =>
-      (addedRoutes ?? [])
-        .filter((route) => route.supplier_id === leg.supplier_id)
-        .map((route) => ({ package_leg_id: leg.id, route_id: route.id })),
-    )
-    if (routeLinks.length > 0) {
-      const { error: linkError } = await supabase.from("package_leg_routes").insert(routeLinks)
-      if (linkError) return safeSupabaseError("build-booking:link-routes", linkError)
-    }
+  if (newServiceRows.length > 0) {
+    const { error: insertServicesError } = await supabase.from("booking_services").insert(newServiceRows)
+    if (insertServicesError) return safeSupabaseError("build-booking:insert-services", insertServicesError)
   }
 
-  // Reorder kept legs to match the requested order.
+  // Reorder kept services to match the requested order.
   let sortOrder = 0
   for (const service of parsed.data.services) {
-    if (service.legId && keptLegIds.has(service.legId)) {
+    if (service.legId && keptServiceIds.has(service.legId)) {
       const { error: reorderError } = await supabase
-        .from("package_legs")
+        .from("booking_services")
         .update({ sort_order: sortOrder })
         .eq("id", service.legId)
-      if (reorderError) return safeSupabaseError("build-booking:reorder-legs", reorderError)
+      if (reorderError) return safeSupabaseError("build-booking:reorder-services", reorderError)
     }
     sortOrder += 1
   }
 
-  // 3. Assign the hidden package to the booking (mirrors the predefined-package flow). Trip
-  // dates are derived later, once the configure step saves the per-service dates.
-  const { error: updateBookingError } = await supabase
-    .from("bookings")
-    .update({ package_id: packageId })
-    .eq("id", id)
-
-  if (updateBookingError) return safeSupabaseError("build-booking:assign-booking", updateBookingError)
-
-  // 4. Seed selections/units/transport-requests for the newly added legs only.
-  if (newLegRows.length > 0) {
+  // 2. Seed units/transport-requests for the newly added services only.
+  if (newServiceRows.length > 0) {
     const kindBySupplierId = new Map(
       addedServices.map((service) => [service.supplierId, service.supplierKind as SupplierKind]),
     )
-    const seedResult = await seedSelectionsForLegs(
+    const seedResult = await seedUnitsForServices(
       supabase,
       id,
-      newLegRows.map((leg) => ({
-        id: leg.id,
-        supplier_id: leg.supplier_id,
-        kind: kindBySupplierId.get(leg.supplier_id) ?? null,
+      newServiceRows.map((row) => ({
+        id: row.id as string,
+        supplier_id: row.supplier_id,
+        kind: kindBySupplierId.get(row.supplier_id) ?? null,
       })),
       { tripStartDate: null, tripEndDate: null },
+      "consultant",
     )
-    if (seedResult.error) return safeSupabaseError("build-booking:seed-selections", seedResult.error)
+    if (seedResult.error) return safeSupabaseError("build-booking:seed-units", seedResult.error)
   }
 
   await writeAuditLog(supabase, {
@@ -257,15 +173,10 @@ export async function POST(req: Request, { params }: RouteParams) {
     entityType: "Booking",
     entityId: id,
     action: "booking_services_built",
-    meta: { package_id: packageId, service_count: parsed.data.services.length },
+    meta: { service_count: parsed.data.services.length },
   })
 
-  const detail = await loadPackageDetail(supabase, slug)
-  if ("error" in detail) return detail.error!
+  const { detail } = await loadBookingServicesPackageDetail(supabase, id, booking.booking_number)
 
-  return Response.json({
-    packageId,
-    slug,
-    packageDetail: detail.detail,
-  })
+  return Response.json({ packageDetail: detail })
 }

@@ -102,6 +102,17 @@ function buildSupabase(state: MockState = {}) {
           })),
         }
       }
+      if (table === "booking_services") {
+        // These fixtures exercise a catalogue-package booking; a Build Booking (booking_services)
+        // one is covered separately in from-booking-services.test.ts / build-service-blocks.test.ts.
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              eq: vi.fn(async () => ({ data: [], error: null })),
+            })),
+          })),
+        }
+      }
       throw new Error(`Unexpected table ${table}`)
     }),
   }

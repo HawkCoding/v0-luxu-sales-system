@@ -23,6 +23,8 @@ const transportRequestSchema = z.object({
   routeId: nullableUuid,
   suiteTypeId: nullableUuid,
   packageLegId: nullableUuid,
+  /** Set instead of packageLegId for a Build Booking (booking_services) leg. */
+  serviceId: nullableUuid,
   pickupPoint: z.string().trim().min(1, "Pickup point is required").max(500),
   dropoffPoint: z.string().trim().min(1, "Drop-off point is required").max(500),
   pickupAt: nullableDateTime,
@@ -117,6 +119,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     route_id: normalizeNullableUuid(request.routeId),
     suite_type_id: normalizeNullableUuid(request.suiteTypeId),
     package_leg_id: normalizeNullableUuid(request.packageLegId),
+    service_id: normalizeNullableUuid(request.serviceId),
     pickup_point: request.pickupPoint.trim(),
     dropoff_point: request.dropoffPoint.trim(),
     pickup_at: normalizeNullableDateTime(request.pickupAt),

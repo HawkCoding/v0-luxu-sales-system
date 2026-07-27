@@ -191,6 +191,7 @@ export default function JobDetailPage() {
   const [ownerSubmitting, setOwnerSubmitting] = useState(false)
   const [lastJobPayload, setLastJobPayload] = useState<Record<string, unknown> | null>(null)
   const [activeTab, setActiveTab] = useState<JobDetailTab>(() => parseJobDetailTab(searchParams.get("tab")))
+  const [autoOpenBuildBookingQuoteId, setAutoOpenBuildBookingQuoteId] = useState<string | null>(null)
   const [invoiceNumberDraft, setInvoiceNumberDraft] = useState<string>("")
   const [invoiceNumberSaving, setInvoiceNumberSaving] = useState(false)
   const [reassignOpen, setReassignOpen] = useState(false)
@@ -875,9 +876,10 @@ export default function JobDetailPage() {
             itineraries={itineraries}
             stage={job.stage}
             hasDraftQuotes={quotes.some((quote: { status: string }) => quote.status === "draft")}
-            onQuoteStarted={async () => {
+            onQuoteStarted={async (quoteId) => {
               await mutate()
               setActiveTab("quotes")
+              setAutoOpenBuildBookingQuoteId(quoteId)
             }}
             onTransportRequestsChange={mutate}
             onFieldsUpdated={mutate}
@@ -893,6 +895,8 @@ export default function JobDetailPage() {
             customerDefaultRateTypeId={customer?.defaultRateTypeId ?? null}
             emailImportNeedsReview={needsEmailReview}
             mutate={mutate}
+            autoOpenBuildBookingQuoteId={autoOpenBuildBookingQuoteId}
+            onAutoOpenBuildBookingHandled={() => setAutoOpenBuildBookingQuoteId(null)}
           />
         </TabsContent>
         <TabsContent value="reservation">

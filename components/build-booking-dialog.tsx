@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Boxes, ChevronDown, ChevronUp, X } from "lucide-react"
+import { Boxes, ChevronDown, ChevronUp, Percent } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -13,7 +13,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
@@ -30,9 +29,6 @@ import { useRecordPresence } from "@/hooks/use-record-presence"
 import { useVersionedSave } from "@/hooks/use-versioned-save"
 import { CommissionControl, type CommissionControlValue } from "@/components/supplier/commission-control"
 import { CommissionBadge } from "@/components/quotes/commission-badge"
-import { QuoteLineSupplierPicker, type QuoteExtraSelection } from "@/components/quote-line-supplier-picker"
-import { getDestinationLocationIds } from "@/lib/packages/location-filter"
-import { RateTypeSelect } from "@/components/rate-type-select"
 import { SuiteLegEditor } from "@/components/packages/suite-leg-editor"
 import { TransportLegEditor } from "@/components/packages/transport-leg-editor"
 import { TripDateSummary } from "@/components/packages/trip-date-summary"
@@ -91,19 +87,19 @@ interface ServiceRow {
 }
 
 interface BuildBookingResponse {
-  packageId: string
-  slug: string
   packageDetail: PackageDetail
 }
 
 type Step = "services" | "configure" | "confirm"
 
-/** Extras carry their own rate type, like legs do. */
-type ExtraWithRateType = QuoteExtraSelection & { rateTypeId: string | null }
+const EMPTY_COMMISSION: CommissionControlValue = { type: null, value: null }
 
-interface LegCommissionState {
-  value: CommissionControlValue
-  show: boolean
+/** The booking's commission is a required step — one value applied to every service line.
+ * Returns null while it is still unset, which is what blocks the configure step's Next. */
+function resolveCommissionValue(value: CommissionControlValue): ApplyCommissionOverride | null {
+  const { type, value: amount } = value
+  if (type === null || amount === null || !Number.isFinite(amount) || amount < 0) return null
+  return { type, value: amount }
 }
 
 export function BuildBookingDialog({
@@ -130,19 +126,18 @@ export function BuildBookingDialog({
   const [services, setServices] = useState<ServiceRow[]>([])
   const [pickerKind, setPickerKind] = useState<SupplierKind>("train_operator")
   const [pickerSupplierId, setPickerSupplierId] = useState("")
-  const [packageSlug, setPackageSlug] = useState<string | null>(null)
   const [packageDetail, setPackageDetail] = useState<PackageDetail | null>(null)
   const [building, setBuilding] = useState(false)
   const [savedState, setSavedState] = useState<SavedPackageState | null>(null)
   const [existingTransportRequests, setExistingTransportRequests] = useState<BookingTransportRequest[]>([])
   const [legStates, setLegStates] = useState<ApplyLegState[]>([])
   const [totalsBySupplierId, setTotalsBySupplierId] = useState<Record<string, PassengerTotals>>({})
-  const [commissionByLegId, setCommissionByLegId] = useState<Record<string, LegCommissionState>>({})
+  const [commission, setCommission] = useState<CommissionControlValue>(EMPTY_COMMISSION)
   const [previewLineItems, setPreviewLineItems] = useState<QuoteLineItem[]>([])
-  const [extras, setExtras] = useState<ExtraWithRateType[]>([])
   const [validating, setValidating] = useState(false)
   const [buildError, setBuildError] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<string[]>([])
+  const [confirmingServices, setConfirmingServices] = useState(false)
   const { others, setEditing } = useRecordPresence("quote", open ? quoteId : undefined)
   const {
     save: saveQuote,
@@ -170,7 +165,7 @@ export function BuildBookingDialog({
     onAutoOpenHandled?.()
   }, [autoOpen, onAutoOpenHandled])
 
-  // Reconcile per-leg/per-extra rate types once the rate-type list resolves (it may load after
+  // Reconcile per-leg rate types once the rate-type list resolves (it may load after
   // the configure step opens): fill empty ones and replace archived ones with the default.
   useEffect(() => {
     if (step !== "configure" || !defaultRateTypeId) return
@@ -184,16 +179,17 @@ export function BuildBookingDialog({
           )
         : prev,
     )
-    setExtras((prev) =>
-      prev.some((extra) => !extra.rateTypeId || !activeIds.has(extra.rateTypeId))
-        ? prev.map((extra) =>
-            extra.rateTypeId && activeIds.has(extra.rateTypeId)
-              ? extra
-              : { ...extra, rateTypeId: defaultRateTypeId },
-          )
-        : prev,
-    )
   }, [step, defaultRateTypeId, rateTypes])
+
+  // Re-opening the dialog on a priced quote pre-fills the commission from what the existing
+  // lines were built with, so the salesperson doesn't have to remember and retype it.
+  useEffect(() => {
+    if (!open) return
+    const saved = existingLineItems.find((li) => li.pricingSnapshot?.commission)?.pricingSnapshot
+      ?.commission
+    if (!saved || saved.type === null) return
+    setCommission((prev) => (prev.type === null && prev.value === null ? { type: saved.type, value: saved.value } : prev))
+  }, [open, existingLineItems])
 
   // Load the booking's saved services when the dialog opens, so re-opening pre-fills everything
   // the last build persisted.
@@ -202,39 +198,39 @@ export function BuildBookingDialog({
     let cancelled = false
     void (async () => {
       try {
-        const [packageRes, transportRes] = await Promise.all([
-          fetch(`/api/jobs/${jobId}/package`),
+        const [servicesRes, transportRes] = await Promise.all([
+          fetch(`/api/jobs/${jobId}/services`),
           fetch(`/api/jobs/${jobId}/transport-requests`),
         ])
         if (cancelled) return
-        const saved: SavedPackageState | null = packageRes.ok
-          ? ((await packageRes.json()) as SavedPackageState)
+        const saved: SavedPackageState | null = servicesRes.ok
+          ? ((await servicesRes.json()) as SavedPackageState)
           : null
         setSavedState(saved)
         setExistingTransportRequests(
           transportRes.ok ? ((await transportRes.json()) as BookingTransportRequest[]) : [],
         )
 
-        if (saved?.packageId) {
-          const buildRes = await fetch(`/api/jobs/${jobId}/build-booking`)
-          if (!cancelled && buildRes.ok) {
-            const built = (await buildRes.json()) as { slug: string | null; packageDetail: PackageDetail | null }
-            if (built.packageDetail && built.slug) {
-              setPackageDetail(built.packageDetail)
-              setPackageSlug(built.slug)
-              setServices(
-                built.packageDetail.legs
-                  .slice()
-                  .sort((a, b) => a.sortOrder - b.sortOrder)
-                  .map((leg) => ({
-                    key: leg.id,
-                    legId: leg.id,
-                    supplierId: leg.supplierId,
-                    supplierKind: leg.supplierKind,
-                    supplierName: leg.supplierName,
-                  })),
-              )
-            }
+        // The GET here is cheap and returns packageDetail: null when nothing has been built yet,
+        // so there is no need to gate it behind savedState the way a real catalogue package id
+        // once required.
+        const buildRes = await fetch(`/api/jobs/${jobId}/build-booking`)
+        if (!cancelled && buildRes.ok) {
+          const built = (await buildRes.json()) as { packageDetail: PackageDetail | null }
+          if (built.packageDetail) {
+            setPackageDetail(built.packageDetail)
+            setServices(
+              built.packageDetail.legs
+                .slice()
+                .sort((a, b) => a.sortOrder - b.sortOrder)
+                .map((leg) => ({
+                  key: leg.id,
+                  legId: leg.id,
+                  supplierId: leg.supplierId,
+                  supplierKind: leg.supplierKind,
+                  supplierName: leg.supplierName,
+                })),
+            )
           }
         }
       } catch {
@@ -259,20 +255,18 @@ export function BuildBookingDialog({
     setServices([])
     setPickerKind("train_operator")
     setPickerSupplierId("")
-    setPackageSlug(null)
     setPackageDetail(null)
     setLegStates([])
     setTotalsBySupplierId({})
-    setCommissionByLegId({})
+    setCommission(EMPTY_COMMISSION)
     setPreviewLineItems([])
-    setExtras([])
     setBuildError(null)
     setValidationErrors([])
     clearQuoteConflict()
   }
 
-  const destinationLocationIds = packageDetail ? getDestinationLocationIds(packageDetail.legs) : []
-  // Manual/extra lines added previously survive a rebuild; new extras come back in the preview.
+  const resolvedCommission = resolveCommissionValue(commission)
+  // Manual/extra lines added previously survive a rebuild.
   const preservedExtras = existingLineItems.filter((li) => li.pricingSnapshot?.isExtra === true)
   const lineItemsToSave = [...previewLineItems, ...preservedExtras]
 
@@ -326,7 +320,6 @@ export function BuildBookingDialog({
         return
       }
       const built = payload as BuildBookingResponse
-      setPackageSlug(built.slug)
       setPackageDetail(built.packageDetail)
 
       const splitSupplierIds = Array.from(
@@ -356,14 +349,13 @@ export function BuildBookingDialog({
       }
       const savedLegIds = new Set((savedState?.selections ?? []).map((row) => row.package_leg_id))
       const states =
-        savedState && savedState.packageId === built.packageId
+        savedState && savedState.selections.length > 0
           ? hydrateFromSaved(built.packageDetail, savedState, existingTransportRequests, stateOptions)
           : buildDefaultLegStates(built.packageDetail, stateOptions)
       // Every service the salesperson explicitly added should start selected — unlike the
       // predefined-package flow (which defaults optional legs to unselected), a leg the user
       // just picked here has no "optional" concept; only respect an existing saved deselection.
       setLegStates(states.map((state) => (savedLegIds.has(state.legId) ? state : { ...state, selected: true })))
-      setCommissionByLegId({})
       setStep("configure")
     } catch {
       setBuildError("Failed to build booking services. Please try again.")
@@ -375,8 +367,12 @@ export function BuildBookingDialog({
   // Anchored hotel dates are derived, so every edit re-runs them: changing the train's departure
   // date or a hotel's night count immediately re-dates the stays that hang off it.
   function updateLegState(next: ApplyLegState) {
+    // Any edit clears the "Auto-filled" chip immediately -- onChange only ever fires on a genuine
+    // field change, never a re-render, so flipping origin unconditionally here is safe. The PATCH
+    // /api/jobs/[id]/services save persists the same flip server-side.
+    const edited: ApplyLegState = next.origin === "auto" ? { ...next, origin: "consultant" } : next
     setLegStates((prev) => {
-      const merged = prev.map((state) => (state.legId === next.legId ? next : state))
+      const merged = prev.map((state) => (state.legId === edited.legId ? edited : state))
       return packageDetail ? applyAnchoredHotelDates(packageDetail, merged) : merged
     })
   }
@@ -386,14 +382,37 @@ export function BuildBookingDialog({
     return toHotelAnchorContext(packageDetail, legStates, legId)
   }
 
+  const hasAutoFilledServices = legStates.some((state) => state.origin === "auto")
+
+  async function confirmServices() {
+    setConfirmingServices(true)
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/services/confirm`, { method: "POST" })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        toast.error(typeof body?.error === "string" ? body.error : "Failed to confirm services")
+        return
+      }
+      setLegStates((prev) => prev.map((state) => ({ ...state, origin: "consultant" })))
+      toast.success("Services confirmed")
+    } catch {
+      toast.error("Failed to confirm services. Please try again.")
+    } finally {
+      setConfirmingServices(false)
+    }
+  }
+
   async function validateAndPreview() {
-    if (!packageSlug || !packageDetail) return
+    if (!packageDetail) return
 
     const problems = validateConfigureState(packageDetail, legStates, { totalsBySupplierId })
     // Pricing needs at least one dated service (rate cards match on the derived trip start).
     const derivedRange = deriveTripDateRangeFromStates(packageDetail, legStates)
     if (problems.length === 0 && !derivedRange.start) {
       problems.push("Add a date to at least one service — trip dates are worked out from them")
+    }
+    if (!resolvedCommission) {
+      problems.push("Set the commission for this booking — enter 0 if no commission applies")
     }
     setValidationErrors(problems)
     if (problems.length > 0) return
@@ -403,7 +422,7 @@ export function BuildBookingDialog({
 
     try {
       // 1. Persist per-leg selections and suite units (voucher generation reads these).
-      const patchRes = await fetch(`/api/jobs/${jobId}/package-selections`, {
+      const patchRes = await fetch(`/api/jobs/${jobId}/services`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(toPackageSelectionsPatch(legStates)),
@@ -431,17 +450,14 @@ export function BuildBookingDialog({
         | null
       if (savedTransportRows) setExistingTransportRequests(savedTransportRows)
 
-      // 3. Price the quote from the persisted configuration.
+      // 3. Price the quote from the persisted configuration. The booking's single commission
+      // is sent per leg — the pricing engine applies commission at line level.
       const commissionOverrides: Record<string, ApplyCommissionOverride | null> = {}
-      for (const [legId, state] of Object.entries(commissionByLegId)) {
-        const override = state.value
-        commissionOverrides[legId] =
-          override.type !== null && override.value !== null && Number.isFinite(override.value)
-            ? { type: override.type, value: override.value }
-            : null
+      for (const state of legStates) {
+        commissionOverrides[state.legId] = resolvedCommission
       }
 
-      const res = await fetch(`/api/packages/${packageSlug}/apply`, {
+      const res = await fetch(`/api/jobs/${jobId}/services/apply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -449,13 +465,6 @@ export function BuildBookingDialog({
           quoteId,
           travelDate: derivedRange.start,
           selections: toApplySelections(legStates, commissionOverrides),
-          extras: extras.map((extra) => ({
-            supplierId: extra.supplierId,
-            routeId: extra.routeId,
-            suiteTypeId: extra.suiteTypeId,
-            quantity: extra.quantity,
-            rateTypeId: extra.rateTypeId ?? undefined,
-          })),
         }),
       })
       const payload = await res.json()
@@ -611,11 +620,22 @@ export function BuildBookingDialog({
 
             <TripDateSummary detail={packageDetail} states={legStates} />
 
+            {hasAutoFilledServices && (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3">
+                <p className="text-sm">
+                  Some services below were filled in automatically from the enquiry. Review them, then
+                  confirm — or edit any field to accept it individually.
+                </p>
+                <Button type="button" variant="outline" size="sm" onClick={confirmServices} disabled={confirmingServices}>
+                  {confirmingServices ? "Confirming…" : "Confirm services"}
+                </Button>
+              </div>
+            )}
+
             <div className="space-y-4">
               {sortedLegs.map((leg) => {
                 const state = legStates.find((candidate) => candidate.legId === leg.id)
                 if (!state) return null
-                const commission = commissionByLegId[leg.id]
                 return (
                   <div key={leg.id} className="space-y-2">
                     {state.kind === "transport" ? (
@@ -630,99 +650,28 @@ export function BuildBookingDialog({
                         rateTypes={rateTypes}
                       />
                     )}
-                    {state.selected ? (
-                      <div className="pl-3">
-                        {commission?.show ? (
-                          <CommissionControl
-                            value={commission.value}
-                            onChange={(next) =>
-                              setCommissionByLegId((prev) => ({
-                                ...prev,
-                                [leg.id]: { value: next, show: true },
-                              }))
-                            }
-                            isEditing
-                            label="Commission Override"
-                            onClear={() =>
-                              setCommissionByLegId((prev) => ({
-                                ...prev,
-                                [leg.id]: { value: { type: null, value: null }, show: false },
-                              }))
-                            }
-                            clearLabel="Remove"
-                          />
-                        ) : (
-                          <button
-                            type="button"
-                            className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-                            onClick={() =>
-                              setCommissionByLegId((prev) => ({
-                                ...prev,
-                                [leg.id]: { value: prev[leg.id]?.value ?? { type: null, value: null }, show: true },
-                              }))
-                            }
-                          >
-                            + Override commission
-                          </button>
-                        )}
-                      </div>
-                    ) : null}
                   </div>
                 )
               })}
             </div>
 
-            <div className="space-y-3 border-t pt-4">
-              <div>
-                <Label>Extras (optional)</Label>
-                <p className="text-xs text-muted-foreground">
-                  Add anything else the client requested — e.g. an extra hotel, transfer, or rental.
-                </p>
+            <div
+              className={`rounded-lg border-2 p-4 ${
+                resolvedCommission ? "border-primary/40 bg-primary/5" : "border-destructive/50 bg-destructive/5"
+              }`}
+            >
+              <div className="mb-2 flex items-center gap-2">
+                <Percent className="h-4 w-4 text-primary" />
+                <h3 className="text-sm font-semibold">Commission</h3>
+                <Badge variant={resolvedCommission ? "secondary" : "destructive"} className="text-[10px]">
+                  {resolvedCommission ? "Set" : "Required"}
+                </Badge>
               </div>
-              {extras.length > 0 ? (
-                <div className="space-y-1.5">
-                  {extras.map((extra, index) => (
-                    <div
-                      key={index}
-                      className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-xs"
-                    >
-                      <div className="min-w-0">
-                        <span className="font-medium">{extra.supplierName}</span>
-                        <span className="text-muted-foreground">
-                          {" · "}
-                          {extra.routeName} · {extra.suiteTypeName}
-                          {extra.quantity ? ` ×${extra.quantity}` : ""}
-                        </span>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        <RateTypeSelect
-                          rateTypes={rateTypes}
-                          value={extra.rateTypeId}
-                          onChange={(rateTypeId) =>
-                            setExtras((prev) =>
-                              prev.map((item, i) => (i === index ? { ...item, rateTypeId } : item)),
-                            )
-                          }
-                          label={null}
-                          triggerClassName="h-7 w-36 text-xs"
-                        />
-                        <button
-                          type="button"
-                          aria-label="Remove extra"
-                          className="text-muted-foreground hover:text-destructive"
-                          onClick={() => setExtras((prev) => prev.filter((_, i) => i !== index))}
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              <QuoteLineSupplierPicker
-                destinationLocationIds={destinationLocationIds}
-                onAdd={(selection) => setExtras((prev) => [...prev, { ...selection, rateTypeId: defaultRateTypeId }])}
-                addLabel="Add extra"
+              <CommissionControl
+                value={commission}
+                onChange={setCommission}
+                isEditing
+                description="Applied to every service line on this quote. Enter 0 if no commission applies."
               />
             </div>
 
@@ -744,7 +693,7 @@ export function BuildBookingDialog({
               <Button variant="outline" onClick={() => { setStep("services"); setBuildError(null); setValidationErrors([]) }}>
                 Back
               </Button>
-              <Button onClick={validateAndPreview} disabled={validating}>
+              <Button onClick={validateAndPreview} disabled={validating || !resolvedCommission}>
                 {validating ? "Saving & pricing…" : "Next"}
               </Button>
             </DialogFooter>

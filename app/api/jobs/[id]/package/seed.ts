@@ -7,10 +7,13 @@ type BookingPackageSelectionInsert =
   Database["public"]["Tables"]["booking_package_selections"]["Insert"]
 type BookingPackageSelectionUnitInsert =
   Database["public"]["Tables"]["booking_package_selection_units"]["Insert"]
+type BookingServiceUnitInsert =
+  Database["public"]["Tables"]["booking_service_units"]["Insert"]
 type BookingTransportRequestInsert =
   Database["public"]["Tables"]["booking_transport_requests"]["Insert"]
 type BookingVehicleRentalDetailInsert =
   Database["public"]["Tables"]["booking_vehicle_rental_details"]["Insert"]
+type ServiceOrigin = Database["public"]["Enums"]["service_origin"]
 
 export interface SeedLeg {
   id: string
@@ -149,6 +152,92 @@ export async function seedSelectionsForLegs(
       package_leg_id: leg.id,
       supplier_id: leg.supplier_id,
       service_type: leg.kind === "vehicle_rental" ? "rental" : "transfer",
+      pickup_point: "",
+      dropoff_point: "",
+      pickup_at: tripStartDate ? `${tripStartDate}T00:00:00+00:00` : null,
+      sort_order: 0,
+    }))
+
+    const { data: insertedTransportRows, error: transportInsertError } = await supabase
+      .from("booking_transport_requests")
+      .insert(transportRows)
+      .select("id, service_type")
+
+    if (transportInsertError) return { error: transportInsertError.message }
+
+    const rentalDetailRows: BookingVehicleRentalDetailInsert[] = (insertedTransportRows ?? [])
+      .filter((row) => row.service_type === "rental")
+      .map((row) => ({
+        transport_request_id: row.id,
+        return_at: tripEndDate ? `${tripEndDate}T00:00:00+00:00` : null,
+      }))
+
+    if (rentalDetailRows.length > 0) {
+      const { error: rentalInsertError } = await supabase
+        .from("booking_vehicle_rental_details")
+        .insert(rentalDetailRows)
+
+      if (rentalInsertError) return { error: rentalInsertError.message }
+    }
+  }
+
+  return { error: null }
+}
+
+/**
+ * Build Booking's equivalent of seedSelectionsForLegs: seeds booking_service_units (+ blank
+ * booking_transport_requests) for newly-created booking_services rows. Unlike the catalogue-
+ * package path there is no separate "selection" row to create -- a booking_services row already
+ * is the leg and the selection, inserted directly by the caller before this runs.
+ *
+ * `origin` records whether this seeding happened as part of a human building the booking (Build
+ * Booking, 'consultant') or the auto-build engine ('auto') -- see lib/auto-build. It is stamped
+ * onto every unit/transport-request row this call creates.
+ */
+export async function seedUnitsForServices(
+  supabase: SupabaseClient<Database>,
+  bookingId: string,
+  services: SeedLeg[],
+  { tripStartDate, tripEndDate }: SeedOptions,
+  origin: ServiceOrigin = "consultant",
+): Promise<{ error: string } | { error: null }> {
+  if (services.length === 0) return { error: null }
+
+  const unitServices = services.filter((service) => !TRANSPORT_SUPPLIER_KINDS.has(service.kind ?? ""))
+  if (unitServices.length > 0) {
+    const capturedSuitesBySupplier = await loadCapturedSuitesBySupplier(supabase, bookingId)
+
+    const unitRows: BookingServiceUnitInsert[] = unitServices.flatMap((service) => {
+      const captured = capturedSuitesBySupplier.get(service.supplier_id) ?? []
+      if (captured.length === 0) {
+        return [{ service_id: service.id, sort_order: 0, origin }]
+      }
+
+      return captured.map((suite, index) => ({
+        service_id: service.id,
+        suite_type_id: suite.suiteTypeId,
+        bedroom_type_id: suite.bedroomTypeId,
+        bedroom_layout_id: suite.bedroomLayoutId,
+        bathroom_type_id: suite.bathroomTypeId,
+        sort_order: index,
+        origin,
+      }))
+    })
+
+    if (unitRows.length > 0) {
+      const { error: unitInsertError } = await supabase.from("booking_service_units").insert(unitRows)
+      if (unitInsertError) return { error: unitInsertError.message }
+    }
+  }
+
+  const transportServices = services.filter((service) => TRANSPORT_SUPPLIER_KINDS.has(service.kind ?? ""))
+
+  if (transportServices.length > 0) {
+    const transportRows: BookingTransportRequestInsert[] = transportServices.map((service) => ({
+      booking_id: bookingId,
+      service_id: service.id,
+      supplier_id: service.supplier_id,
+      service_type: service.kind === "vehicle_rental" ? "rental" : "transfer",
       pickup_point: "",
       dropoff_point: "",
       pickup_at: tripStartDate ? `${tripStartDate}T00:00:00+00:00` : null,

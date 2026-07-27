@@ -34,6 +34,15 @@ export async function recomputeBookingTripDates(
 
   const spans: ServiceDateSpan[] = []
 
+  interface DatedRow {
+    selected: boolean
+    service_date: string | null
+    nights: number | null
+    route_id: string | null
+    kind: string | null
+  }
+  const datedRows: DatedRow[] = []
+
   if (booking.package_id) {
     const { data: selections, error: selectionsError } = await supabase
       .from("booking_package_selections")
@@ -42,7 +51,38 @@ export async function recomputeBookingTripDates(
 
     if (selectionsError) return { error: selectionsError.message }
 
-    const selectedRows = (selections ?? []).filter((row) => row.selected)
+    for (const row of selections ?? []) {
+      datedRows.push({
+        selected: row.selected,
+        service_date: row.service_date,
+        nights: row.nights,
+        route_id: row.route_id,
+        kind: row.leg?.supplier?.kind ?? null,
+      })
+    }
+  }
+
+  // Build Booking's per-booking equivalent — a booking uses one or the other, never both.
+  const { data: services, error: servicesError } = await supabase
+    .from("booking_services")
+    .select("selected, service_date, nights, route_id, suppliers(kind)")
+    .eq("booking_id", bookingId)
+
+  if (servicesError) return { error: servicesError.message }
+
+  for (const row of services ?? []) {
+    const supplier = Array.isArray(row.suppliers) ? row.suppliers[0] : row.suppliers
+    datedRows.push({
+      selected: row.selected,
+      service_date: row.service_date,
+      nights: row.nights,
+      route_id: row.route_id,
+      kind: supplier?.kind ?? null,
+    })
+  }
+
+  if (datedRows.length > 0) {
+    const selectedRows = datedRows.filter((row) => row.selected)
 
     const routeIds = Array.from(
       new Set(selectedRows.map((row) => row.route_id).filter((v): v is string => Boolean(v))),
@@ -59,7 +99,7 @@ export async function recomputeBookingTripDates(
     }
 
     for (const row of selectedRows) {
-      const kind = row.leg?.supplier?.kind
+      const kind = row.kind
       // Transfer/rental legs are dated by their transport requests below, not by service_date.
       if (!kind || kind === "transfers" || kind === "vehicle_rental") continue
       const span = serviceDateSpan({
@@ -89,9 +129,9 @@ export async function recomputeBookingTripDates(
     spans.push({ start, end })
   }
 
-  // A booking outside the package flow (no package, no dated transport) keeps whatever trip
-  // dates it has — don't clobber them from an unrelated transport edit.
-  if (!booking.package_id && spans.length === 0) return { error: null }
+  // A booking with no services (catalogue or Build Booking) and no dated transport keeps
+  // whatever trip dates it has — don't clobber them from an unrelated transport edit.
+  if (!booking.package_id && datedRows.length === 0 && spans.length === 0) return { error: null }
 
   const range = deriveTripDateRange(spans)
 
