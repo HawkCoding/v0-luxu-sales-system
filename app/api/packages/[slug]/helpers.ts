@@ -252,7 +252,7 @@ export async function loadPackageDetail(supabase: SupabaseClient<Database>, slug
 /** Populates each leg's suite types with the bedroom type / bedroom layout / bathroom type
  * options they're associated with (for the package-apply unit picker's dropdowns) — the base
  * suite_types query doesn't carry this, it's a separate M:N vocabulary layered on afterward. */
-async function attachSuiteVariantVocab(
+export async function attachSuiteVariantVocab(
   supabase: SupabaseClient<Database>,
   detail: ReturnType<typeof mapPackageDetail>,
 ): Promise<void> {

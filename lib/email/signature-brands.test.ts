@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { isEmailSafeAssetUrl, toSignatureBrand, type SignatureBrandRow } from "./signature-brands"
 import type { EmailSignatureSettings } from "@/lib/settings-access"
 
@@ -39,6 +39,33 @@ describe("isEmailSafeAssetUrl", () => {
     expect(isEmailSafeAssetUrl("http://cdn.example.com/a.png")).toBe(false)
     expect(isEmailSafeAssetUrl(null)).toBe(false)
     expect(isEmailSafeAssetUrl(undefined)).toBe(false)
+  })
+
+  describe("local Supabase http exception", () => {
+    const ORIGINAL_URL = process.env.NEXT_PUBLIC_SUPABASE_URL
+
+    beforeEach(() => {
+      process.env.NEXT_PUBLIC_SUPABASE_URL = "http://127.0.0.1:54321"
+    })
+
+    afterEach(() => {
+      process.env.NEXT_PUBLIC_SUPABASE_URL = ORIGINAL_URL
+    })
+
+    it("accepts an http url under the local Supabase storage origin", () => {
+      expect(
+        isEmailSafeAssetUrl("http://127.0.0.1:54321/storage/v1/object/public/voucher-assets/signature/sa-rail/banner-abc.png"),
+      ).toBe(true)
+    })
+
+    it("still rejects an http url from a different origin", () => {
+      expect(isEmailSafeAssetUrl("http://cdn.example.com/a.png")).toBe(false)
+    })
+
+    it("does not activate the exception when the configured Supabase URL is https", () => {
+      process.env.NEXT_PUBLIC_SUPABASE_URL = "https://project.supabase.co"
+      expect(isEmailSafeAssetUrl("http://project.supabase.co/storage/v1/object/public/voucher-assets/x.png")).toBe(false)
+    })
   })
 })
 

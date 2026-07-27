@@ -1,12 +1,6 @@
 import { isOptionalPackageLegKind, SUPPLIER_VOCABULARY } from "@/lib/types"
 import { resolveDirectedRouteName } from "@/lib/routes/route-name"
-import type {
-  CommissionBreakdown,
-  CommissionKind,
-  PackageDetail,
-  QuoteLineItem,
-  ResolvedCommission,
-} from "@/lib/types"
+import type { CommissionKind, PackageDetail, QuoteLineItem } from "@/lib/types"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { fetchDefaultAgeBuckets, resolveAgeBuckets, type AgeBuckets } from "@/lib/pricing/age-buckets"
@@ -267,6 +261,9 @@ export async function buildPackageQuoteLineItems({
   // the quote-level travelDate when the leg has none).
   let activePricingDate: string = travelDate
   const childAges = job.child_ages ?? []
+  // The booking's real headcount — used once, for the single whole-booking commission line,
+  // not per line (a line's own qty may be nights/vehicles/rooms rather than passengers).
+  const travellerCount = job.no_of_adults + job.no_of_children
 
   const defaultBuckets = await fetchDefaultAgeBuckets(supabase)
   const supplierIds = Array.from(
@@ -284,14 +281,6 @@ export async function buildPackageQuoteLineItems({
         childMaxAge: row.child_max_age ?? null,
       })
     }
-  }
-
-  function commissionFor(
-    _leg: PackageDetail["legs"][number],
-    _routeId: string | null,
-    lineOverride?: { type: CommissionKind; value: number } | null,
-  ) {
-    return resolveCommission({ lineOverride: lineOverride ?? null })
   }
 
   function bucketsForLeg(leg: PackageDetail["legs"][number]): AgeBuckets {
@@ -318,7 +307,6 @@ export async function buildPackageQuoteLineItems({
     /** A specific unit's chosen bedroom/layout/bathroom names — overrides the suite type's full
      * list of associated vocab when the unit narrowed its selection to specific values. */
     variantNames?: string[] | null
-    commission?: ResolvedCommission | null
     /** Display-only basis shown next to the quantity (e.g. "per person", "per night"). */
     unit?: string | null
   }
@@ -331,7 +319,6 @@ export async function buildPackageQuoteLineItems({
     suiteTypeId,
     suiteTypeName,
     variantNames,
-    commission,
     unit,
   }: AddLineItemOptions) {
     if (qty <= 0) return
@@ -341,20 +328,7 @@ export async function buildPackageQuoteLineItems({
         ? ` — ${variantNames.join(", ")}`
         : formatVariantSuffix(suiteTypeId ?? null)
     const suiteVariants = suiteTypeId ? variantSnapshotBySuiteTypeId.get(suiteTypeId) : undefined
-    const lineSubtotal = Math.round(unitPrice * qty * 100) / 100
-
-    let commissionBreakdown: CommissionBreakdown | null = null
-    let commissionAmount = 0
-    if (commission && commission.type !== null) {
-      commissionAmount = calculateCommissionAmount({
-        amountAfterMarkup: lineSubtotal,
-        passengerCount: qty,
-        resolved: commission,
-      })
-      commissionBreakdown = buildCommissionBreakdown(commission, commissionAmount)
-    }
-
-    const total = Math.round((lineSubtotal + commissionAmount) * 100) / 100
+    const total = Math.round(unitPrice * qty * 100) / 100
 
     const lineItem: QuoteLineItem = {
       description: `${description}${variantSuffix}`,
@@ -366,7 +340,7 @@ export async function buildPackageQuoteLineItems({
 
     const rateTypeMeta = activeRateCard ? rateTypeMetaById.get(activeRateCard.rateTypeId) : undefined
 
-    if ((suiteVariants && suiteVariants.length > 0) || commissionBreakdown || unit) {
+    if ((suiteVariants && suiteVariants.length > 0) || unit) {
       lineItem.pricingSnapshot = {
         source: "pricing_engine",
         pricingMode: "rate_card",
@@ -398,7 +372,7 @@ export async function buildPackageQuoteLineItems({
               ? "rental"
               : null,
         suiteVariants,
-        commission: commissionBreakdown,
+        commission: null,
         unit: unit ?? null,
       }
     }
@@ -480,8 +454,6 @@ export async function buildPackageQuoteLineItems({
   }
 
   if (packageDetail.fixedPricePerPerson !== null) {
-    const travellerCount = job.no_of_adults + job.no_of_children
-
     for (const leg of packageDetail.legs) {
       const selection = getLegSelection(leg)
       const isOptional = isOptionalPackageLegKind(leg.supplierKind)
@@ -562,7 +534,6 @@ export async function buildPackageQuoteLineItems({
       const legPricingDate = selection.serviceDate ?? travelDate
       activePricingDate = legPricingDate
       const supplierDescription = leg.supplierDescription ?? null
-      const commission = commissionFor(leg, routeId, selection.commissionOverride ?? null)
       const unit = SUPPLIER_VOCABULARY[leg.supplierKind].priceLabel
 
       function resolveUnit(suiteTypeId: string, pricingDate: string = legPricingDate) {
@@ -609,7 +580,6 @@ export async function buildPackageQuoteLineItems({
             suiteTypeId: unitSelection.suiteTypeId,
             suiteTypeName,
             variantNames: specificUnitVariantNames(unitSelection),
-            commission,
             unit,
           })
         }
@@ -647,7 +617,6 @@ export async function buildPackageQuoteLineItems({
             supplierDescription,
             suiteTypeId,
             suiteTypeName,
-            commission,
             unit,
           })
         }
@@ -690,7 +659,6 @@ export async function buildPackageQuoteLineItems({
             suiteTypeId: unitSelection.suiteTypeId,
             suiteTypeName,
             variantNames,
-            commission,
             unit,
           })
           addLineItem({
@@ -701,7 +669,6 @@ export async function buildPackageQuoteLineItems({
             suiteTypeId: unitSelection.suiteTypeId,
             suiteTypeName,
             variantNames,
-            commission,
             unit,
           })
           addLineItem({
@@ -715,7 +682,6 @@ export async function buildPackageQuoteLineItems({
             suiteTypeId: unitSelection.suiteTypeId,
             suiteTypeName,
             variantNames,
-            commission,
             unit,
           })
 
@@ -734,13 +700,61 @@ export async function buildPackageQuoteLineItems({
               suiteTypeId: unitSelection.suiteTypeId,
               suiteTypeName,
               variantNames,
-              commission,
               unit,
             })
           }
         }
       }
     }
+  }
+
+  // Commission is one shared decision for the whole booking (the Build Booking dialog collects
+  // it once), so it's priced once here against the booking's total — never per line. Applying it
+  // per line double- (or triple-, quadruple-...) counts a fixed per-person value across every
+  // room/transfer/supplement line, since each carries its own unrelated qty (nights, vehicles, pax).
+  const commissionOverride = selections.find((s) => s.commissionOverride)?.commissionOverride ?? null
+  const resolvedCommission = resolveCommission({ lineOverride: commissionOverride })
+  if (resolvedCommission.type !== null) {
+    const preCommissionSubtotal = Math.round(
+      lineItems.reduce((sum, item) => sum + item.total, 0) * 100,
+    ) / 100
+    const commissionAmount = calculateCommissionAmount({
+      amountAfterMarkup: preCommissionSubtotal,
+      passengerCount: travellerCount,
+      resolved: resolvedCommission,
+    })
+    const isPerPerson = resolvedCommission.type === "per_person"
+    lineItems.push({
+      description: "Commission",
+      supplierDescription: null,
+      qty: isPerPerson ? Math.max(1, travellerCount) : 1,
+      unitPrice: isPerPerson ? resolvedCommission.value : commissionAmount,
+      total: commissionAmount,
+      pricingSnapshot: {
+        source: "pricing_engine",
+        pricingMode: "rate_card",
+        packageId: packageDetail.id,
+        packageName: packageDetail.name,
+        legId: null,
+        legLabel: null,
+        supplierId: null,
+        supplierName: null,
+        supplierKind: null,
+        routeId: null,
+        routeName: null,
+        suiteTypeId: null,
+        suiteTypeName: null,
+        rateCardId: null,
+        travelDate,
+        passengerKind: "service",
+        baseUnitPrice: isPerPerson ? resolvedCommission.value : commissionAmount,
+        markupPct: 0,
+        singleSupplementPct: null,
+        serviceType: null,
+        commission: buildCommissionBreakdown(resolvedCommission, commissionAmount),
+        unit: isPerPerson ? "per person" : null,
+      },
+    })
   }
 
   return { lineItems }

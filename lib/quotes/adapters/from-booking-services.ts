@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { mapPackageDetail, type PackageLegWithSupplier } from "@/lib/packages"
+import { attachSuiteVariantVocab } from "@/app/api/packages/[slug]/helpers"
 import type { PackageDetail, SupplierKind } from "@/lib/types"
 import type { PackageLegSelection, PackageUnitSelection } from "@/lib/quotes/build-from-package"
 
@@ -147,6 +148,11 @@ export async function loadBookingServicesPackageDetail(
     vehicleRentalDetailsResult.data ?? [],
     locationNameById,
   )
+
+  // Same vocab layering the catalogue package flow does (app/api/packages/[slug]/helpers.ts) --
+  // without it every suite type here would come back with no bedroom/bathroom variant options,
+  // hiding those selectors from the Build Booking suite editor even when the supplier has them.
+  await attachSuiteVariantVocab(supabase, detail)
 
   return { detail, services, units }
 }
