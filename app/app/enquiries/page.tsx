@@ -175,7 +175,7 @@ export default function EnquiriesPage() {
             <NewEnquiryDialog
               open={newEnquiryOpen}
               onOpenChange={setNewEnquiryOpen}
-              onSaved={() => refreshAll()}
+              onSaved={(jobId) => router.push(`/app/bookings/${jobId}?tab=quotes`)}
             />
           </>
         )}

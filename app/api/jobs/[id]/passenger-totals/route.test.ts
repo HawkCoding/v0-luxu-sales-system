@@ -7,6 +7,7 @@ const authMocks = vi.hoisted(() => ({
 
 const totalsMock = vi.hoisted(() => ({
   computeLegPassengerTotals: vi.fn(),
+  resolveSupplierAgeBuckets: vi.fn(),
 }))
 
 vi.mock("@/lib/api/auth", () => ({
@@ -15,6 +16,7 @@ vi.mock("@/lib/api/auth", () => ({
 
 vi.mock("@/lib/packages/passenger-totals", () => ({
   computeLegPassengerTotals: totalsMock.computeLegPassengerTotals,
+  resolveSupplierAgeBuckets: totalsMock.resolveSupplierAgeBuckets,
 }))
 
 import { GET } from "./route"
@@ -57,6 +59,8 @@ describe("GET /api/jobs/[id]/passenger-totals", () => {
   beforeEach(() => {
     authMocks.requireUser.mockReset()
     totalsMock.computeLegPassengerTotals.mockReset()
+    totalsMock.resolveSupplierAgeBuckets.mockReset()
+    totalsMock.resolveSupplierAgeBuckets.mockResolvedValue({ infantMax: 2, childMax: 12 })
   })
 
   it("returns 401 when unauthenticated", async () => {
@@ -105,6 +109,11 @@ describe("GET /api/jobs/[id]/passenger-totals", () => {
       [SUPPLIER_A]: { adultCount: 2, childCount: 1, infantCount: 1 },
       [SUPPLIER_B]: { adultCount: 3, childCount: 1, infantCount: 0 },
     })
+    expect(body.bucketsBySupplierId).toEqual({
+      [SUPPLIER_A]: { infantMax: 2, childMax: 12 },
+      [SUPPLIER_B]: { infantMax: 2, childMax: 12 },
+    })
+    expect(body.booking).toEqual({ noOfAdults: 2, noOfChildren: 2, childAges: [3, 9] })
     expect(totalsMock.computeLegPassengerTotals).toHaveBeenCalledTimes(2)
     expect(totalsMock.computeLegPassengerTotals).toHaveBeenCalledWith(expect.anything(), {
       noOfAdults: 2,

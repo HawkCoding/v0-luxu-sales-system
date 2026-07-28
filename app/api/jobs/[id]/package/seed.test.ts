@@ -4,8 +4,21 @@ import { seedUnitsForServices, type SeedLeg } from "@/app/api/jobs/[id]/package/
 
 const BOOKING_ID = "booking-1"
 
+interface BaseSeedBookingSuite {
+  [key: string]: unknown
+  id: string
+  booking_id: string
+  suite_number: number
+  suite_type_id: string | null
+  bedroom_type_id: string | null
+  bedroom_layout_id: string | null
+  bathroom_type_id: string | null
+  source_phrase: string
+}
+
 function baseSeed() {
   return {
+    bookings: [{ id: BOOKING_ID, no_of_adults: 2, no_of_children: 0, child_ages: null as number[] | null }],
     booking_suites: [
       {
         id: "suite-row-1",
@@ -28,7 +41,7 @@ function baseSeed() {
         bathroom_type_id: null,
         source_phrase: "something we couldn't identify",
       },
-    ],
+    ] as BaseSeedBookingSuite[],
     suite_types: [{ id: "suite-type-train", supplier_id: "supplier-train" }],
   }
 }
@@ -122,6 +135,78 @@ describe("seedUnitsForServices", () => {
     )
 
     expect(store.rows("booking_service_units")[0]).toMatchObject({ origin: "auto" })
+  })
+
+  it("carries the enquiry's headcount onto the seeded unit", async () => {
+    const { supabase, store } = createSupabaseMock(baseSeed())
+    const services: SeedLeg[] = [{ id: "svc-train", supplier_id: "supplier-train", kind: "train_operator" }]
+
+    await seedUnitsForServices(supabase as never, BOOKING_ID, services, {
+      tripStartDate: null,
+      tripEndDate: null,
+    })
+
+    expect(store.rows("booking_service_units")[0]).toMatchObject({
+      adult_count: 2,
+      child_count: 0,
+      infant_count: 0,
+    })
+  })
+
+  it("spreads the headcount evenly across a supplier's captured suites", async () => {
+    const seed = baseSeed()
+    seed.bookings = [{ id: BOOKING_ID, no_of_adults: 3, no_of_children: 0, child_ages: null }]
+    seed.booking_suites[1] = {
+      ...seed.booking_suites[1],
+      suite_type_id: "suite-type-train",
+      bedroom_type_id: null,
+      bathroom_type_id: null,
+    }
+    const { supabase, store } = createSupabaseMock(seed)
+    const services: SeedLeg[] = [{ id: "svc-train", supplier_id: "supplier-train", kind: "train_operator" }]
+
+    await seedUnitsForServices(supabase as never, BOOKING_ID, services, {
+      tripStartDate: null,
+      tripEndDate: null,
+    })
+
+    const units = store.rows("booking_service_units").sort(
+      (a, b) => (a.sort_order as number) - (b.sort_order as number),
+    )
+    expect(units).toHaveLength(2)
+    // Remainder lands on the earlier suite, and the split still sums to the booking total.
+    expect(units.map((unit) => unit.adult_count)).toEqual([2, 1])
+  })
+
+  it("buckets children by age so the split matches what the pricing engine expects", async () => {
+    const seed = baseSeed()
+    seed.bookings = [{ id: BOOKING_ID, no_of_adults: 2, no_of_children: 2, child_ages: [1, 8] }]
+    const { supabase, store } = createSupabaseMock(seed)
+    const services: SeedLeg[] = [{ id: "svc-train", supplier_id: "supplier-train", kind: "train_operator" }]
+
+    await seedUnitsForServices(supabase as never, BOOKING_ID, services, {
+      tripStartDate: null,
+      tripEndDate: null,
+    })
+
+    // Default buckets: infant <= 2, child <= 12 -- so the 1-year-old is an infant, the 8-year-old a child.
+    expect(store.rows("booking_service_units")[0]).toMatchObject({
+      adult_count: 2,
+      child_count: 1,
+      infant_count: 1,
+    })
+  })
+
+  it("gives a placeholder unit the whole headcount so it prices once a suite type is chosen", async () => {
+    const { supabase, store } = createSupabaseMock(baseSeed())
+    const services: SeedLeg[] = [{ id: "svc-hotel", supplier_id: "supplier-hotel", kind: "hotel_property" }]
+
+    await seedUnitsForServices(supabase as never, BOOKING_ID, services, {
+      tripStartDate: null,
+      tripEndDate: null,
+    })
+
+    expect(store.rows("booking_service_units")[0]).toMatchObject({ adult_count: 2 })
   })
 
   it("creates a blank transport request (+ rental details for a rental) for transport-kind services", async () => {

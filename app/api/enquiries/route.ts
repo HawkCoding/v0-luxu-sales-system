@@ -411,6 +411,8 @@ export async function POST(req: Request) {
       hotel_supplier_id: hotelSupplierId,
       no_of_adults: body.noOfAdults ?? 1,
       no_of_children: body.noOfChildren ?? 0,
+      no_of_adults_original: body.noOfAdults ?? 1,
+      no_of_children_original: body.noOfChildren ?? 0,
       no_of_suites: body.noOfSuites ?? 1,
       child_ages: body.childAges || null,
       raw_text: body.rawText || null,

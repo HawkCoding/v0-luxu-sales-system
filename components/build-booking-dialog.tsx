@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Boxes, ChevronDown, ChevronUp, Percent } from "lucide-react"
+import { Boxes, ChevronDown, ChevronUp, Percent, TriangleAlert } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { useActiveSuppliers, useRateTypes } from "@/lib/use-data"
-import type { BookingTransportRequest, PackageDetail, QuoteLineItem, SupplierKind } from "@/lib/types"
+import type { BookingTransportRequest, CommissionKind, PackageDetail, QuoteLineItem, SupplierKind } from "@/lib/types"
 import { SUPPLIER_KIND_LABELS } from "@/lib/types"
 import { PresenceAvatars } from "@/components/presence-avatars"
 import { useRecordPresence } from "@/hooks/use-record-presence"
@@ -32,7 +32,9 @@ import { CommissionBadge } from "@/components/quotes/commission-badge"
 import { SuiteLegEditor } from "@/components/packages/suite-leg-editor"
 import { TransportLegEditor } from "@/components/packages/transport-leg-editor"
 import { TripDateSummary } from "@/components/packages/trip-date-summary"
-import type { PassengerTotals } from "@/lib/packages/passenger-totals"
+import { TravellerCountsEditor, type TravellerCounts } from "@/components/bookings/traveller-counts-editor"
+import { resolveAdultsOnlyDelta, type PassengerTotals } from "@/lib/packages/passenger-totals"
+import type { AgeBuckets } from "@/lib/pricing/age-buckets"
 import { deriveTripDateRangeFromStates } from "@/lib/packages/trip-date-range"
 import {
   applyAnchoredHotelDates,
@@ -132,12 +134,18 @@ export function BuildBookingDialog({
   const [existingTransportRequests, setExistingTransportRequests] = useState<BookingTransportRequest[]>([])
   const [legStates, setLegStates] = useState<ApplyLegState[]>([])
   const [totalsBySupplierId, setTotalsBySupplierId] = useState<Record<string, PassengerTotals>>({})
+  const [bucketsBySupplierId, setBucketsBySupplierId] = useState<Record<string, AgeBuckets>>({})
+  const [bookingCounts, setBookingCounts] = useState<TravellerCounts | null>(null)
   const [commission, setCommission] = useState<CommissionControlValue>(EMPTY_COMMISSION)
   const [previewLineItems, setPreviewLineItems] = useState<QuoteLineItem[]>([])
   const [validating, setValidating] = useState(false)
   const [buildError, setBuildError] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<string[]>([])
   const [confirmingServices, setConfirmingServices] = useState(false)
+  const [syncingTotals, setSyncingTotals] = useState(false)
+  const [editingTravellers, setEditingTravellers] = useState(false)
+  const [travellerDraft, setTravellerDraft] = useState<TravellerCounts | null>(null)
+  const [savingTravellers, setSavingTravellers] = useState(false)
   const { others, setEditing } = useRecordPresence("quote", open ? quoteId : undefined)
   const {
     save: saveQuote,
@@ -190,6 +198,34 @@ export function BuildBookingDialog({
     if (!saved || saved.type === null) return
     setCommission((prev) => (prev.type === null && prev.value === null ? { type: saved.type, value: saved.value } : prev))
   }, [open, existingLineItems])
+
+  // On a quote with nothing to read a commission back off, start from the house default set in
+  // Settings. It stays fully editable -- this only stops an unset required field from blocking
+  // the configure step on every new booking.
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch("/api/settings/commission")
+        if (!res.ok || cancelled) return
+        const { defaultCommission } = (await res.json()) as {
+          defaultCommission: { type: CommissionKind; value: number } | null
+        }
+        if (!defaultCommission || cancelled) return
+        setCommission((prev) =>
+          prev.type === null && prev.value === null
+            ? { type: defaultCommission.type, value: defaultCommission.value }
+            : prev,
+        )
+      } catch {
+        // A missing default is not an error -- the field simply stays empty as before.
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [open])
 
   // Load the booking's saved services when the dialog opens, so re-opening pre-fills everything
   // the last build persisted.
@@ -250,6 +286,31 @@ export function BuildBookingDialog({
     [packageDetail],
   )
 
+  // Surfaced next to the blocking validation error too — hitting Next with a stale booking total
+  // shouldn't be a dead end; the fix is one click away right where the error is shown.
+  const mismatchedSplitLegs = useMemo(() => {
+    const legById = new Map(sortedLegs.map((leg) => [leg.id, leg]))
+    return legStates.flatMap((state) => {
+      if (state.kind !== "suite" || !state.selected) return []
+      const leg = legById.get(state.legId)
+      if (!leg || !PASSENGER_SPLIT_SUPPLIER_KINDS.has(leg.supplierKind)) return []
+      const totals = totalsBySupplierId[leg.supplierId]
+      if (!totals) return []
+      const summed = state.units.reduce(
+        (acc, unit) => ({
+          adultCount: acc.adultCount + unit.adultCount,
+          childCount: acc.childCount + unit.childCount,
+          infantCount: acc.infantCount + unit.infantCount,
+        }),
+        { adultCount: 0, childCount: 0, infantCount: 0 },
+      )
+      if (summed.adultCount === totals.adultCount && summed.childCount === totals.childCount && summed.infantCount === totals.infantCount) {
+        return []
+      }
+      return [{ legId: leg.id, label: leg.label ?? leg.supplierName, supplierId: leg.supplierId, summed }]
+    })
+  }, [sortedLegs, legStates, totalsBySupplierId])
+
   function reset() {
     setStep("services")
     setServices([])
@@ -258,10 +319,14 @@ export function BuildBookingDialog({
     setPackageDetail(null)
     setLegStates([])
     setTotalsBySupplierId({})
+    setBucketsBySupplierId({})
+    setBookingCounts(null)
     setCommission(EMPTY_COMMISSION)
     setPreviewLineItems([])
     setBuildError(null)
     setValidationErrors([])
+    setEditingTravellers(false)
+    setTravellerDraft(null)
     clearQuoteConflict()
   }
 
@@ -322,24 +387,7 @@ export function BuildBookingDialog({
       const built = payload as BuildBookingResponse
       setPackageDetail(built.packageDetail)
 
-      const splitSupplierIds = Array.from(
-        new Set(
-          built.packageDetail.legs
-            .filter((leg) => PASSENGER_SPLIT_SUPPLIER_KINDS.has(leg.supplierKind))
-            .map((leg) => leg.supplierId),
-        ),
-      )
-      let totals: Record<string, PassengerTotals> = {}
-      if (splitSupplierIds.length > 0) {
-        const totalsRes = await fetch(
-          `/api/jobs/${jobId}/passenger-totals?supplierIds=${splitSupplierIds.join(",")}`,
-        )
-        if (totalsRes.ok) {
-          totals = ((await totalsRes.json()) as { totalsBySupplierId: Record<string, PassengerTotals> })
-            .totalsBySupplierId
-        }
-      }
-      setTotalsBySupplierId(totals)
+      const totals = await refreshPassengerTotals(built.packageDetail)
 
       // The job's enquiry travel date seeds default service dates; everything stays editable.
       const stateOptions = {
@@ -399,6 +447,89 @@ export function BuildBookingDialog({
       toast.error("Failed to confirm services. Please try again.")
     } finally {
       setConfirmingServices(false)
+    }
+  }
+
+  async function refreshPassengerTotals(detail: PackageDetail): Promise<Record<string, PassengerTotals>> {
+    const splitSupplierIds = Array.from(
+      new Set(
+        detail.legs
+          .filter((leg) => PASSENGER_SPLIT_SUPPLIER_KINDS.has(leg.supplierKind))
+          .map((leg) => leg.supplierId),
+      ),
+    )
+    if (splitSupplierIds.length === 0) {
+      setTotalsBySupplierId({})
+      setBucketsBySupplierId({})
+      return {}
+    }
+    const totalsRes = await fetch(`/api/jobs/${jobId}/passenger-totals?supplierIds=${splitSupplierIds.join(",")}`)
+    if (!totalsRes.ok) return totalsBySupplierId
+    const data = (await totalsRes.json()) as {
+      totalsBySupplierId: Record<string, PassengerTotals>
+      bucketsBySupplierId: Record<string, AgeBuckets>
+      booking: TravellerCounts
+    }
+    setTotalsBySupplierId(data.totalsBySupplierId)
+    setBucketsBySupplierId(data.bucketsBySupplierId)
+    setBookingCounts(data.booking)
+    return data.totalsBySupplierId
+  }
+
+  // A customer adding/removing travellers after the quote's first draft shouldn't require the
+  // salesperson to leave this dialog and hunt down the enquiry tab. Adults-only is the simple,
+  // always-convergent case: since child_ages (and therefore how many children get promoted to
+  // adults) doesn't change, `noOfAdults + delta` re-projects to exactly what the suites hold —
+  // see resolveAdultsOnlyDelta. Children/infants have no such shortcut; they're only reachable by
+  // editing the age roster below, because that's what the projection actually derives them from.
+  async function setBookingAdults(nextAdults: number) {
+    setSyncingTotals(true)
+    try {
+      const res = await fetch(`/api/jobs/${jobId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parsedFieldEdits: { noOfAdults: nextAdults } }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        toast.error(typeof body?.error === "string" ? body.error : "Failed to update booking total")
+        return
+      }
+      if (packageDetail) await refreshPassengerTotals(packageDetail)
+      toast.success("Booking traveller total updated")
+    } catch {
+      toast.error("Failed to update booking total. Please try again.")
+    } finally {
+      setSyncingTotals(false)
+    }
+  }
+
+  async function saveTravellerCounts(next: TravellerCounts) {
+    setSavingTravellers(true)
+    try {
+      const res = await fetch(`/api/jobs/${jobId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          parsedFieldEdits: {
+            noOfAdults: next.noOfAdults,
+            noOfChildren: next.noOfChildren,
+            childAges: next.childAges.length > 0 ? next.childAges : null,
+          },
+        }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        toast.error(typeof body?.error === "string" ? body.error : "Failed to update travellers")
+        return
+      }
+      if (packageDetail) await refreshPassengerTotals(packageDetail)
+      setEditingTravellers(false)
+      toast.success("Booking travellers updated")
+    } catch {
+      toast.error("Failed to update travellers. Please try again.")
+    } finally {
+      setSavingTravellers(false)
     }
   }
 
@@ -501,7 +632,7 @@ export function BuildBookingDialog({
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">
           <Boxes className="mr-2 h-4 w-4" />
-          Build booking
+          Edit Booking
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-4xl">
@@ -619,6 +750,87 @@ export function BuildBookingDialog({
             </DialogHeader>
 
             <TripDateSummary detail={packageDetail} states={legStates} />
+
+            {mismatchedSplitLegs.length > 0 && bookingCounts && (
+              <div className="space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4">
+                <div className="flex items-center gap-2">
+                  <TriangleAlert className="h-4 w-4 text-amber-600 dark:text-amber-500" />
+                  <h3 className="text-sm font-semibold">Travellers</h3>
+                </div>
+                <div className="space-y-2">
+                  {mismatchedSplitLegs.map(({ legId, label, supplierId, summed }) => {
+                    const totals = totalsBySupplierId[supplierId]
+                    const delta = totals ? resolveAdultsOnlyDelta(totals, summed) : null
+                    const nextAdults = delta !== null ? bookingCounts.noOfAdults + delta : null
+                    return (
+                      <div key={legId} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                        <p>
+                          {label}: suites hold {summed.adultCount} adults, {summed.childCount} children,{" "}
+                          {summed.infantCount} infants — booking is {totals?.adultCount} adults,{" "}
+                          {totals?.childCount} children, {totals?.infantCount} infants.
+                        </p>
+                        {nextAdults !== null && nextAdults >= 0 ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs"
+                            disabled={syncingTotals}
+                            onClick={() => setBookingAdults(nextAdults)}
+                          >
+                            {syncingTotals ? "Updating…" : `Set booking to ${nextAdults} adults`}
+                          </Button>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">
+                            Children/infants differ — edit ages below.
+                          </p>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setTravellerDraft(bookingCounts)
+                    setEditingTravellers((prev) => !prev)
+                  }}
+                >
+                  {editingTravellers ? "Hide traveller editor" : "Edit travellers"}
+                </Button>
+                {editingTravellers && travellerDraft && (
+                  <div className="rounded-md border bg-background p-3">
+                    <TravellerCountsEditor
+                      value={travellerDraft}
+                      onChange={setTravellerDraft}
+                      buckets={bucketsBySupplierId[mismatchedSplitLegs[0].supplierId]}
+                      disabled={savingTravellers}
+                    />
+                    <div className="mt-3 flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setEditingTravellers(false)}
+                        disabled={savingTravellers}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => saveTravellerCounts(travellerDraft)}
+                        disabled={savingTravellers}
+                      >
+                        {savingTravellers ? "Saving…" : "Save"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {hasAutoFilledServices && (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3">

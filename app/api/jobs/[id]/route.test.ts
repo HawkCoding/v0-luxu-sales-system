@@ -25,7 +25,51 @@ function makeRequest(body: unknown = { stage: "quoted" }) {
   })
 }
 
-function createSupabase({ role = "consultant" }: { role?: string | null } = {}) {
+const BASE_BOOKING = {
+  id: BOOKING_ID,
+  stage: "enquiry",
+  booking_number: "BT-2026-0001",
+  customer_id: "00000000-0000-4000-8000-000000000099",
+  consultant: null,
+  assigned_salesperson_id: null,
+  source: "enquiry_form",
+  raw_text: null,
+  email_import_needs_review: false,
+  email_import_review_resolved_at: null,
+  updated_at: "2026-01-01T00:00:00.000Z",
+  departure_date: null,
+  duration_nights: null,
+  deposit_paid: false,
+  invoice_balance: 0,
+  no_of_adults: 2,
+  no_of_children: 0,
+  no_of_suites: 1,
+  child_ages: null as number[] | null,
+  customer_invoice_number: null,
+}
+
+function createSupabase({
+  role = "consultant",
+  booking = BASE_BOOKING,
+  updateMock,
+  insertMock,
+}: {
+  role?: string | null
+  booking?: typeof BASE_BOOKING
+  updateMock?: ReturnType<typeof vi.fn>
+  insertMock?: ReturnType<typeof vi.fn>
+} = {}) {
+  const update =
+    updateMock ??
+    vi.fn((patch: Record<string, unknown>) => ({
+      eq: vi.fn(() => ({
+        select: vi.fn(() => ({
+          single: vi.fn(async () => ({ data: { ...booking, ...patch }, error: null })),
+        })),
+      })),
+    }))
+  const insert = insertMock ?? vi.fn(async () => ({ error: null }))
+
   return {
     auth: {
       getUser: vi.fn(async () => ({ data: { user: { id: USER_ID } }, error: null })),
@@ -35,31 +79,10 @@ function createSupabase({ role = "consultant" }: { role?: string | null } = {}) 
         return {
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
-              single: vi.fn(async () => ({
-                data: {
-                  id: BOOKING_ID,
-                  stage: "enquiry",
-                  booking_number: "BT-2026-0001",
-                  customer_id: "00000000-0000-4000-8000-000000000099",
-                  consultant: null,
-                  assigned_salesperson_id: null,
-                  source: "enquiry_form",
-                  raw_text: null,
-                  email_import_needs_review: false,
-                  email_import_review_resolved_at: null,
-                  updated_at: "2026-01-01T00:00:00.000Z",
-                  departure_date: null,
-                  duration_nights: null,
-                  deposit_paid: false,
-                  invoice_balance: 0,
-                  no_of_adults: 2,
-                  no_of_children: 0,
-                  no_of_suites: 1,
-                },
-                error: null,
-              })),
+              single: vi.fn(async () => ({ data: booking, error: null })),
             })),
           })),
+          update,
         }
       }
 
@@ -74,6 +97,10 @@ function createSupabase({ role = "consultant" }: { role?: string | null } = {}) 
             })),
           })),
         }
+      }
+
+      if (table === "audit_logs") {
+        return { insert }
       }
 
       // Return a no-op for other tables that may be queried
@@ -106,5 +133,92 @@ describe("PATCH /api/jobs/[id]", () => {
 
     const res = await PATCH(makeRequest(), { params: Promise.resolve({ id: BOOKING_ID }) })
     expect(res.status).toBe(403)
+  })
+
+  describe("parsedFieldEdits.childAges", () => {
+    it("writes child_ages alongside noOfChildren when they agree", async () => {
+      const updateMock = vi.fn((patch: Record<string, unknown>) => ({
+        eq: vi.fn(() => ({
+          select: vi.fn(() => ({
+            single: vi.fn(async () => ({ data: { ...BASE_BOOKING, ...patch }, error: null })),
+          })),
+        })),
+      }))
+      supabaseMocks.createSessionClient.mockResolvedValue(createSupabase({ updateMock }))
+
+      const res = await PATCH(
+        makeRequest({
+          parsedFieldEdits: { noOfAdults: 2, noOfChildren: 2, childAges: [3, 9] },
+        }),
+        { params: Promise.resolve({ id: BOOKING_ID }) },
+      )
+
+      expect(res.status).toBe(200)
+      expect(updateMock).toHaveBeenCalledWith(
+        expect.objectContaining({ no_of_children: 2, child_ages: [3, 9] }),
+      )
+    })
+
+    it("rejects a non-empty roster whose length doesn't match noOfChildren", async () => {
+      supabaseMocks.createSessionClient.mockResolvedValue(createSupabase())
+
+      const res = await PATCH(
+        makeRequest({ parsedFieldEdits: { noOfChildren: 1, childAges: [3, 9] } }),
+        { params: Promise.resolve({ id: BOOKING_ID }) },
+      )
+
+      expect(res.status).toBe(400)
+      const body = await res.json()
+      expect(body.error).toMatch(/child ages must match/i)
+    })
+
+    it("rejects a non-empty roster when noOfChildren isn't sent in the same request", async () => {
+      supabaseMocks.createSessionClient.mockResolvedValue(createSupabase())
+
+      const res = await PATCH(makeRequest({ parsedFieldEdits: { childAges: [3, 9] } }), {
+        params: Promise.resolve({ id: BOOKING_ID }),
+      })
+
+      expect(res.status).toBe(400)
+    })
+
+    it("clears the roster with childAges: null and leaves noOfChildren free", async () => {
+      const updateMock = vi.fn((patch: Record<string, unknown>) => ({
+        eq: vi.fn(() => ({
+          select: vi.fn(() => ({
+            single: vi.fn(async () => ({ data: { ...BASE_BOOKING, ...patch }, error: null })),
+          })),
+        })),
+      }))
+      supabaseMocks.createSessionClient.mockResolvedValue(createSupabase({ updateMock }))
+
+      const res = await PATCH(
+        makeRequest({ parsedFieldEdits: { noOfChildren: 3, childAges: null } }),
+        { params: Promise.resolve({ id: BOOKING_ID }) },
+      )
+
+      expect(res.status).toBe(200)
+      expect(updateMock).toHaveBeenCalledWith(
+        expect.objectContaining({ no_of_children: 3, child_ages: null }),
+      )
+    })
+
+    it("audits the before/after childAges alongside the other parsed fields", async () => {
+      const insertMock = vi.fn(async () => ({ error: null }))
+      supabaseMocks.createSessionClient.mockResolvedValue(createSupabase({ insertMock }))
+
+      await PATCH(
+        makeRequest({ parsedFieldEdits: { noOfAdults: 4, noOfChildren: 1, childAges: [6] } }),
+        { params: Promise.resolve({ id: BOOKING_ID }) },
+      )
+
+      expect(insertMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "enquiry_field_updated",
+          before_json: expect.objectContaining({ childAges: null }),
+          after_json: expect.objectContaining({ childAges: [6] }),
+        }),
+      )
+    })
   })
 })

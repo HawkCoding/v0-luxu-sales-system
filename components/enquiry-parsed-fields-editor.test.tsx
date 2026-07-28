@@ -5,6 +5,7 @@ import { EnquiryParsedFieldsEditor, type ParsedFields } from "./enquiry-parsed-f
 const baseFields: ParsedFields = {
   noOfAdults: 2,
   noOfChildren: 1,
+  childAges: [],
   noOfSuites: 1,
   departureDate: "2026-07-15",
   direction: "Cape Town → Pretoria",
@@ -69,6 +70,30 @@ describe("EnquiryParsedFieldsEditor", () => {
       "/api/jobs/b1",
       expect.objectContaining({ method: "PATCH" }),
     )
+  })
+
+  it("shows an original-request warning when current counts differ from the original", () => {
+    render(
+      <EnquiryParsedFieldsEditor
+        bookingId="b1"
+        fields={{ ...baseFields, noOfAdults: 4 }}
+        originalNoOfAdults={2}
+        originalNoOfChildren={1}
+      />,
+    )
+    expect(screen.getByText(/originally requested: 2 adults, 1 child/i)).toBeInTheDocument()
+  })
+
+  it("shows no warning when current counts match the original", () => {
+    render(
+      <EnquiryParsedFieldsEditor
+        bookingId="b1"
+        fields={baseFields}
+        originalNoOfAdults={2}
+        originalNoOfChildren={1}
+      />,
+    )
+    expect(screen.queryByText(/originally requested/i)).not.toBeInTheDocument()
   })
 
   it("shows error toast and stays in edit mode when fetch fails", async () => {

@@ -20,7 +20,7 @@ import type { HotelDateAnchor, PackageLeg, RateType } from "@/lib/types"
 import { getSupplierVocabulary, isOptionalPackageLegKind } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { formatDisplayDate } from "@/lib/date-format"
-import type { PassengerTotals } from "@/lib/packages/passenger-totals"
+import { distributePassengerTotals, type PassengerTotals } from "@/lib/packages/passenger-totals"
 import { resolveHotelStayDates } from "@/lib/packages/hotel-dates"
 import {
   createDraftUnit,
@@ -126,6 +126,19 @@ export function SuiteLegEditor({
 
   function setAnchor(next: HotelDateAnchor) {
     onChange({ ...value, dateAnchor: next })
+  }
+
+  // Re-seeds every unit from the booking's totals, same helper the auto-builder uses to seed a
+  // fresh leg (lib/packages/apply-dialog-state.ts createDraftUnit) — covers a customer removing
+  // travellers, or just not wanting to redistribute a bigger party across suites by hand. Never
+  // runs on its own: it would clobber a split the salesperson just typed.
+  function spreadEvenly() {
+    if (!expectedTotals) return
+    const split = distributePassengerTotals(expectedTotals, value.units.length)
+    onChange({
+      ...value,
+      units: value.units.map((unit, index) => ({ ...unit, ...split[index] })),
+    })
   }
 
   return (
@@ -311,7 +324,7 @@ export function SuiteLegEditor({
             />
           </div>
 
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs font-medium text-muted-foreground">
               {isHotel ? "Rooms" : "Suites"}
               {showPassengerSplit && expectedTotals ? (
@@ -320,6 +333,18 @@ export function SuiteLegEditor({
                   {splitSummed.childCount}/{expectedTotals.childCount} children,{" "}
                   {splitSummed.infantCount}/{expectedTotals.infantCount} infants
                 </span>
+              ) : null}
+              {showPassengerSplit && expectedTotals && !splitMatches ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="link"
+                  className="ml-2 h-auto p-0 text-xs"
+                  onClick={spreadEvenly}
+                  title="Re-split the booking's traveller totals evenly across these suites"
+                >
+                  Spread evenly
+                </Button>
               ) : null}
             </span>
             <Button

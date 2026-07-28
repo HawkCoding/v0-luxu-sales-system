@@ -230,6 +230,8 @@ export async function createEmailBookingFromParsedDraft(
     hotel_supplier_id: hotelSupplierId,
     no_of_adults: payload.noOfAdults || 1,
     no_of_children: payload.noOfChildren || 0,
+    no_of_adults_original: payload.noOfAdults || 1,
+    no_of_children_original: payload.noOfChildren || 0,
     no_of_suites: payload.noOfSuites || 1,
     raw_text: context.rawText,
     extracted_json: extractedJson,

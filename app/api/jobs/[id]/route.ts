@@ -81,6 +81,10 @@ const patchJobSchema = z.object({
       noOfChildren: z.number().int().min(0).optional(),
       noOfSuites: z.number().int().min(1).optional(),
       departureDate: z.string().nullable().optional(),
+      // Empty/null clears the roster and leaves noOfChildren as a free count (the legacy shape —
+      // "2 children, ages unknown"). A non-empty roster must match noOfChildren exactly: it's what
+      // the age-bucket pricing derives infants/child-vs-adult from, so the two can't drift.
+      childAges: z.array(z.number().int().min(0).max(30)).max(50).nullable().optional(),
     })
     .optional(),
 }).passthrough()
@@ -257,6 +261,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     noOfSuites: booking.no_of_suites,
     noOfAdults: booking.no_of_adults,
     noOfChildren: booking.no_of_children,
+    noOfAdultsOriginal: booking.no_of_adults_original,
+    noOfChildrenOriginal: booking.no_of_children_original,
     childAges: booking.child_ages ?? [],
     suiteTypes: suiteTypeNames,
     extendStay: booking.extend_stay ? "Yes" : undefined,
@@ -485,7 +491,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const { data: booking } = await supabase
     .from("bookings")
     .select(
-      "id, stage, booking_number, customer_id, consultant, assigned_salesperson_id, source, raw_text, email_import_needs_review, email_import_review_resolved_at, reservation_form_received_at, updated_at, departure_date, duration_nights, deposit_paid, invoice_balance, no_of_adults, no_of_children, no_of_suites, customer_invoice_number",
+      "id, stage, booking_number, customer_id, consultant, assigned_salesperson_id, source, raw_text, email_import_needs_review, email_import_review_resolved_at, reservation_form_received_at, updated_at, departure_date, duration_nights, deposit_paid, invoice_balance, no_of_adults, no_of_children, no_of_suites, child_ages, customer_invoice_number",
     )
     .eq("id", id)
     .single()
@@ -847,12 +853,27 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   if (body.parsedFieldEdits) {
     const edits = body.parsedFieldEdits
+
+    // A non-empty age roster is what the age-bucket pricing derives infants/child-vs-adult from
+    // (see lib/packages/passenger-totals.ts) — it must always agree with noOfChildren, or pricing
+    // and the traveller-count validation silently disagree with what's on screen.
+    if (edits.childAges && edits.childAges.length > 0) {
+      const expectedChildren = edits.noOfChildren ?? booking.no_of_children
+      if (edits.noOfChildren === undefined || expectedChildren !== edits.childAges.length) {
+        return NextResponse.json(
+          { error: "Child ages must match the number of children" },
+          { status: 400 },
+        )
+      }
+    }
+
     type ParsedFieldMap = [keyof typeof edits, string, unknown]
     const fieldMap: ParsedFieldMap[] = [
       ["noOfAdults", "no_of_adults", booking.no_of_adults],
       ["noOfChildren", "no_of_children", booking.no_of_children],
       ["noOfSuites", "no_of_suites", booking.no_of_suites],
       ["departureDate", "departure_date", booking.departure_date],
+      ["childAges", "child_ages", booking.child_ages],
     ]
 
     const before: Record<string, unknown> = {}
