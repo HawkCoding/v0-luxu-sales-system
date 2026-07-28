@@ -1006,7 +1006,7 @@ export function CustomerDetailView({
         <NewEnquiryDialog
           open={newBookingOpen}
           onOpenChange={setNewBookingOpen}
-          onSaved={(jobId) => router.push(`/app/bookings/${jobId}`)}
+          onSaved={(jobId) => router.push(`/app/bookings/${jobId}?tab=quotes`)}
           presetCustomer={{
             id: customer.id,
             title: customer.title,

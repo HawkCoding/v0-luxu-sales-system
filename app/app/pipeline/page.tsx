@@ -317,7 +317,7 @@ export default function PipelinePage() {
               <NewEnquiryDialog
                 open={newEnquiryOpen}
                 onOpenChange={setNewEnquiryOpen}
-                onSaved={(jobId) => router.push(`/app/bookings/${jobId}`)}
+                onSaved={(jobId) => router.push(`/app/bookings/${jobId}?tab=quotes`)}
               />
             </>
           )}
