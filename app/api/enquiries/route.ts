@@ -21,7 +21,7 @@ import { withSuiteTypeMissingField } from "@/lib/suites/missing-fields"
 import { createServiceClient, createSessionClient } from "@/lib/supabase/server"
 import type { Json } from "@/lib/supabase/types"
 import { COMPLETED_REPEAT_BOOKING_STAGES } from "@/lib/customer-repeat-status"
-import { findHotelSupplierId } from "@/lib/resolvers/supplier-resolver"
+import { findHotelSupplierId, resolveTrainSupplierId } from "@/lib/resolvers/supplier-resolver"
 import { autoBuildBookingServices } from "@/lib/auto-build/build-from-enquiry"
 import { createDraftQuoteForBooking } from "@/lib/quotes/create-draft-quote"
 import { findRouteId } from "@/lib/resolvers/route-resolver"
@@ -356,7 +356,11 @@ export async function POST(req: Request) {
   if (!normalizeNullableText(body.direction)) suiteReviewMissingFields.push("Direction")
 
   const source = body.rawText ? "paste_import" : "web_form"
-  const routeId = await findRouteId(supabase, body.direction, body.supplierId ?? null)
+  // body.supplier is free text (the web form can't know internal supplier UUIDs); resolve it the
+  // same never-guess way findHotelSupplierId already resolves body.hotelOption below, rather than
+  // silently dropping every request that arrives without a client-resolved id.
+  const trainSupplierId = body.supplierId ?? (await resolveTrainSupplierId(supabase, body.supplier))
+  const routeId = await findRouteId(supabase, body.direction, trainSupplierId)
   const hotelSupplierId = await findHotelSupplierId(supabase, body.hotelOption)
   let jobNumberAllocation: JobNumberAllocation
   try {
@@ -386,7 +390,7 @@ export async function POST(req: Request) {
     resolvedReferences: {
       routeId,
       hotelSupplierId,
-      supplierId: normalizeNullableText(body.supplierId),
+      supplierId: trainSupplierId,
     },
   }
 
@@ -430,7 +434,7 @@ export async function POST(req: Request) {
   // that arrived unresolved but carries raw wording is resolved here.
   const { units: resolvedSuiteUnits, vocabulary: suiteVocabulary } = await resolveEnquirySuiteUnits(
     supabase,
-    normalizeNullableText(body.supplierId),
+    trainSupplierId,
     incomingSuiteUnits,
   )
   const unresolvedSuiteCount = resolvedSuiteUnits.filter((unit) => !unit.suiteTypeId).length
@@ -508,7 +512,7 @@ export async function POST(req: Request) {
   try {
     const autoBuildResult = await autoBuildBookingServices(supabase, {
       bookingId: booking.id,
-      trainSupplierId: normalizeNullableText(body.supplierId),
+      trainSupplierId,
       hotelSupplierId,
       routeId,
       departureDate: body.departureDate || null,

@@ -23,7 +23,7 @@ import {
 } from "@/lib/import/suite-selections"
 import { suiteVocabularyFromSupplierDetail, type SuiteAxis } from "@/lib/suites/suite-vocabulary"
 import { useActiveSuppliers, useSupplierDetail } from "@/lib/use-data"
-import { normalizeLookupValue } from "@/lib/normalize-lookup-value"
+import { resolveDraftSupplierId } from "@/lib/import/resolve-draft-supplier"
 import { cn } from "@/lib/utils"
 
 const CONFIG_AXES: ReadonlyArray<{
@@ -116,10 +116,15 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
     if (!draft) return null
 
     const supplierId = draft.trip.supplierId
-    const supplierName = normalizeLookupValue(draft.trip.supplier)
-    return trainSuppliers.find((supplier) => supplier.id === supplierId)
-      ?? trainSuppliers.find((supplier) => normalizeLookupValue(supplier.name) === supplierName)
-      ?? null
+    if (supplierId) {
+      return trainSuppliers.find((supplier) => supplier.id === supplierId) ?? null
+    }
+
+    // The parser only ever produces wording ("Blue Train"), never an id, so fall back to the same
+    // never-guess matcher the server uses. An exact-string comparison here silently failed on every
+    // real-world variant ("The Blue Train"), leaving the required Supplier select empty.
+    const matchedId = resolveDraftSupplierId(draft.trip.supplier, trainSuppliers)
+    return matchedId ? trainSuppliers.find((supplier) => supplier.id === matchedId) ?? null : null
   }, [draft, trainSuppliers])
   const { data: supplierDetailPayload, isLoading: supplierDetailLoading } = useSupplierDetail(selectedSupplier?.slug ?? "")
   const supplierDetail = supplierDetailPayload && !("error" in supplierDetailPayload) ? supplierDetailPayload : null
@@ -166,8 +171,10 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
 
   if (!draft) return null
 
-  const validation = validateDraft(draft)
-  const progress = countRequiredComplete(draft)
+  // The modal holds the supplier vocabulary, so here an unresolved supplier is a genuine blocker --
+  // parsed wording with no id behind it cannot link the booking to anything.
+  const validation = validateDraft(draft, { requireResolvedSupplier: true })
+  const progress = countRequiredComplete(draft, { requireResolvedSupplier: true })
 
   /**
    * The single mutation point for the draft. Every edit records its field path so FieldFlags can
@@ -361,7 +368,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                     {tripExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                     Trip Details
                   </CardTitle>
-                  {!draft.trip.supplier || !draft.trip.departureDate ? (
+                  {!draft.trip.supplierId || !draft.trip.route || !draft.trip.departureDate ? (
                     <Badge variant="destructive" className="text-xs">Incomplete</Badge>
                   ) : (
                     <CheckCircle2 className="w-4 h-4 text-green-600" />
@@ -395,7 +402,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                         })
                       }}
                     >
-                      <SelectTrigger className={!draft.trip.supplier ? 'border-destructive' : ''}>
+                      <SelectTrigger className={!draft.trip.supplierId ? 'border-destructive' : ''}>
                         <SelectValue placeholder="Select supplier" />
                       </SelectTrigger>
                       <SelectContent>
