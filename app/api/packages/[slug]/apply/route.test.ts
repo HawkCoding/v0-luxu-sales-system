@@ -876,7 +876,7 @@ describe("POST /api/packages/[slug]/apply", () => {
     const payload = await response.json()
 
     expect(response.status).toBe(400)
-    expect(payload.error).toMatch(/must sum to the booking's traveller totals/)
+    expect(payload.error).toMatch(/suites hold 1 adults.*but the booking is for 2 adults/)
   })
 
   it("returns 400 when a required train suite type is missing", async () => {

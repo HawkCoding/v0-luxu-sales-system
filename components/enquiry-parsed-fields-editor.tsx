@@ -6,13 +6,15 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { DatePicker } from "@/components/ui/date-picker"
 import { Label } from "@/components/ui/label"
-import { Pencil, Save, X } from "lucide-react"
+import { Pencil, Save, TriangleAlert, X } from "lucide-react"
 import { toast } from "sonner"
 import { formatDisplayDate } from "@/lib/date-format"
+import { TravellerCountsEditor } from "@/components/bookings/traveller-counts-editor"
 
 export interface ParsedFields {
   noOfAdults: number
   noOfChildren: number
+  childAges: number[]
   noOfSuites: number
   departureDate: string | null
   direction: string | null
@@ -21,6 +23,9 @@ export interface ParsedFields {
 interface EnquiryParsedFieldsEditorProps {
   bookingId: string
   fields: ParsedFields
+  /** Traveller counts as first captured from the enquiry, kept for reference once a salesperson edits the current ones. */
+  originalNoOfAdults?: number
+  originalNoOfChildren?: number
   readonly?: boolean
   onSaved?: () => void | Promise<void>
 }
@@ -28,6 +33,8 @@ interface EnquiryParsedFieldsEditorProps {
 export function EnquiryParsedFieldsEditor({
   bookingId,
   fields,
+  originalNoOfAdults,
+  originalNoOfChildren,
   readonly = false,
   onSaved,
 }: EnquiryParsedFieldsEditorProps) {
@@ -45,6 +52,7 @@ export function EnquiryParsedFieldsEditor({
           parsedFieldEdits: {
             noOfAdults: draft.noOfAdults,
             noOfChildren: draft.noOfChildren,
+            childAges: draft.childAges.length > 0 ? draft.childAges : null,
             noOfSuites: draft.noOfSuites,
             departureDate: draft.departureDate ?? null,
           },
@@ -69,11 +77,16 @@ export function EnquiryParsedFieldsEditor({
     setIsEditing(false)
   }
 
+  const adultsChanged = originalNoOfAdults !== undefined && originalNoOfAdults !== fields.noOfAdults
+  const childrenChanged = originalNoOfChildren !== undefined && originalNoOfChildren !== fields.noOfChildren
+  const originalMismatch = adultsChanged || childrenChanged
+
   const readFields = [
     { label: "Direction", value: fields.direction },
     { label: "Departure Date", value: formatDisplayDate(fields.departureDate) },
     { label: "Adults", value: String(fields.noOfAdults) },
     { label: "Children", value: String(fields.noOfChildren) },
+    ...(fields.childAges.length > 0 ? [{ label: "Child ages", value: fields.childAges.join(", ") }] : []),
     { label: "No. of Suites", value: String(fields.noOfSuites) },
   ]
 
@@ -114,53 +127,45 @@ export function EnquiryParsedFieldsEditor({
         </div>
       </CardHeader>
       <CardContent>
+        {originalMismatch && (
+          <div className="mb-4 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
+            <TriangleAlert className="mt-0.5 w-4 h-4 shrink-0" />
+            <p>
+              Originally requested: {originalNoOfAdults} adult{originalNoOfAdults === 1 ? "" : "s"},{" "}
+              {originalNoOfChildren} child{originalNoOfChildren === 1 ? "" : "ren"}. If a quote is already
+              built, the Build Booking dialog will flag any suite split that needs updating to match.
+            </p>
+          </div>
+        )}
         {isEditing ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-            <div className="space-y-1">
-              <Label htmlFor="pfe-adults" className="text-xs text-muted-foreground">
-                Adults
-              </Label>
-              <Input
-                id="pfe-adults"
-                type="number"
-                min={0}
-                value={draft.noOfAdults}
-                onChange={(e) => setDraft((d) => ({ ...d, noOfAdults: Number(e.target.value) }))}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="pfe-children" className="text-xs text-muted-foreground">
-                Children
-              </Label>
-              <Input
-                id="pfe-children"
-                type="number"
-                min={0}
-                value={draft.noOfChildren}
-                onChange={(e) => setDraft((d) => ({ ...d, noOfChildren: Number(e.target.value) }))}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="pfe-suites" className="text-xs text-muted-foreground">
-                No. of Suites
-              </Label>
-              <Input
-                id="pfe-suites"
-                type="number"
-                min={1}
-                value={draft.noOfSuites}
-                onChange={(e) => setDraft((d) => ({ ...d, noOfSuites: Number(e.target.value) }))}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="pfe-departure" className="text-xs text-muted-foreground">
-                Departure Date
-              </Label>
-              <DatePicker
-                id="pfe-departure"
-                value={draft.departureDate ?? ""}
-                onChange={(value) => setDraft((d) => ({ ...d, departureDate: value || null }))}
-              />
+          <div className="space-y-4">
+            <TravellerCountsEditor
+              value={{ noOfAdults: draft.noOfAdults, noOfChildren: draft.noOfChildren, childAges: draft.childAges }}
+              onChange={(next) => setDraft((d) => ({ ...d, ...next }))}
+            />
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              <div className="space-y-1">
+                <Label htmlFor="pfe-suites" className="text-xs text-muted-foreground">
+                  No. of Suites
+                </Label>
+                <Input
+                  id="pfe-suites"
+                  type="number"
+                  min={1}
+                  value={draft.noOfSuites}
+                  onChange={(e) => setDraft((d) => ({ ...d, noOfSuites: Number(e.target.value) }))}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="pfe-departure" className="text-xs text-muted-foreground">
+                  Departure Date
+                </Label>
+                <DatePicker
+                  id="pfe-departure"
+                  value={draft.departureDate ?? ""}
+                  onChange={(value) => setDraft((d) => ({ ...d, departureDate: value || null }))}
+                />
+              </div>
             </div>
           </div>
         ) : (

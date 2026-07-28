@@ -362,9 +362,13 @@ describe("buildPackageQuoteLineItems", () => {
       ],
     })
 
-    // Zero-qty passenger lines are dropped: unit1 adult+child, unit2 adult.
-    expect(lineItems).toHaveLength(3)
-    expect(lineItems.filter((li) => li.description.includes("Adult"))).toHaveLength(2)
+    // Both units are the same suite type, so their adults combine into one line (qty 2)
+    // rather than splitting per room; only the child line stays separate.
+    expect(lineItems).toHaveLength(2)
+    const adultLines = lineItems.filter((li) => li.description.includes("Adult"))
+    expect(adultLines).toHaveLength(1)
+    expect(adultLines[0]?.qty).toBe(2)
+    expect(adultLines[0]?.total).toBe(20000)
     const childLine = lineItems.find((li) => li.description.includes("Child"))
     expect(childLine?.unitPrice).toBe(5000)
 
@@ -389,7 +393,57 @@ describe("buildPackageQuoteLineItems", () => {
           },
         ],
       }),
-    ).rejects.toThrow(/must sum to the booking's traveller totals/)
+    ).rejects.toThrow(/suites hold 1 adults.*but the booking is for 2 adults/)
+  })
+
+  it("combines 3 suites of the same suite type into one adult line even with different bedroom configs", async () => {
+    const trainLeg = leg({
+      id: "leg-train",
+      supplierKind: "train_operator",
+      routes: [route("route-cpt", "supplier-leg-train", "CPT-PTA")],
+      suiteTypes: [suiteType("suite-dlx", "supplier-leg-train", "Deluxe Double")],
+      rateCards: [
+        rateCard({
+          id: "rc-train",
+          routeId: "route-cpt",
+          suiteTypeId: "suite-dlx",
+          pricePerPerson: 10000,
+        }),
+      ],
+    })
+    const sixAdultsBooking = {
+      id: JOB_ID,
+      no_of_adults: 6,
+      no_of_children: 0,
+      no_of_suites: 3,
+      child_ages: [],
+      departure_date: "2026-09-01",
+    }
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({ booking: sixAdultsBooking }),
+      packageDetail: detail([trainLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-train",
+          selected: true,
+          units: [
+            // Same suite type, differing bedroom/bathroom config per room — prices as one line.
+            { suiteTypeId: "suite-dlx", bedroomTypeId: "bed-twin", adultCount: 2, childCount: 0, infantCount: 0 },
+            { suiteTypeId: "suite-dlx", bedroomTypeId: "bed-double", adultCount: 2, childCount: 0, infantCount: 0 },
+            { suiteTypeId: "suite-dlx", bathroomTypeId: "bath-shower", adultCount: 2, childCount: 0, infantCount: 0 },
+          ],
+        },
+      ],
+    })
+
+    const adultLines = lineItems.filter((li) => li.description.includes("Adult"))
+    expect(adultLines).toHaveLength(1)
+    expect(adultLines[0]?.qty).toBe(6)
+    expect(adultLines[0]?.unitPrice).toBe(10000)
+    expect(adultLines[0]?.total).toBe(60000)
   })
 
   it("charges a single supplement for a unit with exactly one adult and no children", async () => {
@@ -425,11 +479,66 @@ describe("buildPackageQuoteLineItems", () => {
       ],
     })
 
-    const supplementLine = lineItems.find((li) => li.description.includes("Single supplement"))
-    expect(supplementLine).toBeDefined()
-    expect(supplementLine?.qty).toBe(1)
-    expect(supplementLine?.unitPrice).toBe(2500)
-    expect(supplementLine?.total).toBe(2500)
+    const adultLine = lineItems.find((li) => li.description.includes("Adult"))
+    expect(adultLine).toBeDefined()
+    expect(adultLine?.description).toContain("(+25% Single)")
+    expect(adultLine?.qty).toBe(1)
+    expect(adultLine?.unitPrice).toBe(12500)
+    expect(adultLine?.total).toBe(12500)
+    expect(lineItems.some((li) => li.description.includes("Single supplement"))).toBe(false)
+  })
+
+  it("charges a single supplement for a unit with a lone child (no accompanying adult)", async () => {
+    const trainLeg = leg({
+      id: "leg-train",
+      supplierKind: "train_operator",
+      routes: [route("route-cpt", "supplier-leg-train", "CPT-PTA")],
+      suiteTypes: [suiteType("suite-dlx", "supplier-leg-train", "Deluxe")],
+      rateCards: [
+        rateCard({
+          id: "rc-train",
+          routeId: "route-cpt",
+          suiteTypeId: "suite-dlx",
+          pricePerPerson: 10000,
+          childPrice: 5000,
+        }),
+      ],
+    })
+    const soloChildBooking = {
+      id: JOB_ID,
+      no_of_adults: 2,
+      no_of_children: 1,
+      no_of_suites: 2,
+      child_ages: [8],
+      departure_date: "2026-09-01",
+    }
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({ booking: soloChildBooking }),
+      packageDetail: { ...detail([trainLeg]), singleSupplementPct: 50 },
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-train",
+          selected: true,
+          units: [
+            { suiteTypeId: "suite-dlx", adultCount: 2, childCount: 0, infantCount: 0 },
+            { suiteTypeId: "suite-dlx", adultCount: 0, childCount: 1, infantCount: 0 },
+          ],
+        },
+      ],
+    })
+
+    const childLine = lineItems.find((li) => li.description.includes("Child"))
+    expect(childLine).toBeDefined()
+    expect(childLine?.description).toContain("(+50% Single)")
+    expect(childLine?.qty).toBe(1)
+    expect(childLine?.unitPrice).toBe(7500)
+    expect(childLine?.total).toBe(7500)
+
+    const adultLine = lineItems.find((li) => li.description.includes("Adult"))
+    expect(adultLine?.description).not.toContain("Single")
   })
 
   it("does not charge a single supplement when a unit has two adults sharing", async () => {
@@ -465,7 +574,9 @@ describe("buildPackageQuoteLineItems", () => {
       ],
     })
 
-    expect(lineItems.some((li) => li.description.includes("Single supplement"))).toBe(false)
+    expect(lineItems.some((li) => li.description.includes("Single"))).toBe(false)
+    const adultLine = lineItems.find((li) => li.description.includes("Adult"))
+    expect(adultLine?.unitPrice).toBe(10000)
   })
 
   it("does not charge a single supplement when a lone adult shares a unit with a child", async () => {
@@ -507,7 +618,7 @@ describe("buildPackageQuoteLineItems", () => {
       ],
     })
 
-    expect(lineItems.some((li) => li.description.includes("Single supplement"))).toBe(false)
+    expect(lineItems.some((li) => li.description.includes("Single"))).toBe(false)
   })
 
   it("renders the flipped travel direction for a reversed two-way route, without changing price", async () => {

@@ -1,7 +1,12 @@
 import { z } from "zod"
 import { requireUser } from "@/lib/api/auth"
 import { jsonError, safeSupabaseError } from "@/lib/api/responses"
-import { computeLegPassengerTotals, type PassengerTotals } from "@/lib/packages/passenger-totals"
+import {
+  computeLegPassengerTotals,
+  resolveSupplierAgeBuckets,
+  type PassengerTotals,
+} from "@/lib/packages/passenger-totals"
+import type { AgeBuckets } from "@/lib/pricing/age-buckets"
 
 export const runtime = "nodejs"
 
@@ -42,6 +47,7 @@ export async function GET(req: Request, { params }: RouteParams) {
   if (!booking) return jsonError("Booking not found", 404)
 
   const totalsBySupplierId: Record<string, PassengerTotals> = {}
+  const bucketsBySupplierId: Record<string, AgeBuckets> = {}
   for (const supplierId of parsed.data.supplierIds) {
     totalsBySupplierId[supplierId] = await computeLegPassengerTotals(supabase, {
       noOfAdults: booking.no_of_adults,
@@ -49,7 +55,18 @@ export async function GET(req: Request, { params }: RouteParams) {
       childAges: booking.child_ages ?? [],
       supplierId,
     })
+    // Buckets are supplier-scoped (infant_max_age/child_max_age overrides), so the client needs
+    // one set per supplier to preview a projection locally without re-deriving the bucketing rule.
+    bucketsBySupplierId[supplierId] = await resolveSupplierAgeBuckets(supabase, supplierId)
   }
 
-  return Response.json({ totalsBySupplierId })
+  return Response.json({
+    totalsBySupplierId,
+    bucketsBySupplierId,
+    booking: {
+      noOfAdults: booking.no_of_adults,
+      noOfChildren: booking.no_of_children,
+      childAges: booking.child_ages ?? [],
+    },
+  })
 }

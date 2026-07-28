@@ -4,6 +4,7 @@ import type { CommissionKind, PackageDetail, QuoteLineItem } from "@/lib/types"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { fetchDefaultAgeBuckets, resolveAgeBuckets, type AgeBuckets } from "@/lib/pricing/age-buckets"
+import { projectPassengerTotals } from "@/lib/packages/passenger-totals"
 import { dateOnly } from "@/lib/packages/trip-date-range"
 import {
   buildCommissionBreakdown,
@@ -290,11 +291,10 @@ export async function buildPackageQuoteLineItems({
 
   const bookingForCounts = job
   function countsForBuckets(buckets: AgeBuckets) {
-    const infantCount = childAges.filter((age) => age <= buckets.infantMax).length
-    const adultPromotedCount = childAges.filter((age) => age > buckets.childMax).length
-    const childCount = Math.max(0, bookingForCounts.no_of_children - infantCount - adultPromotedCount)
-    const adultCount = bookingForCounts.no_of_adults + adultPromotedCount
-    return { adultCount, childCount, infantCount }
+    return projectPassengerTotals(
+      { noOfAdults: bookingForCounts.no_of_adults, noOfChildren: bookingForCounts.no_of_children, childAges },
+      buckets,
+    )
   }
 
   interface AddLineItemOptions {
@@ -309,6 +309,14 @@ export async function buildPackageQuoteLineItems({
     variantNames?: string[] | null
     /** Display-only basis shown next to the quantity (e.g. "per person", "per night"). */
     unit?: string | null
+    /** When set, this occupant is the sole traveller in the unit: the rate is bumped by this
+     * percentage and the bump is called out on the same line instead of its own line item. */
+    singleSupplementPct?: number | null
+  }
+
+  function formatSingleSupplementSuffix(pct: number): string {
+    const trimmed = Number.isInteger(pct) ? pct.toString() : pct.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")
+    return ` (+${trimmed}% Single)`
   }
 
   function addLineItem({
@@ -320,6 +328,7 @@ export async function buildPackageQuoteLineItems({
     suiteTypeName,
     variantNames,
     unit,
+    singleSupplementPct,
   }: AddLineItemOptions) {
     if (qty <= 0) return
 
@@ -328,13 +337,17 @@ export async function buildPackageQuoteLineItems({
         ? ` — ${variantNames.join(", ")}`
         : formatVariantSuffix(suiteTypeId ?? null)
     const suiteVariants = suiteTypeId ? variantSnapshotBySuiteTypeId.get(suiteTypeId) : undefined
-    const total = Math.round(unitPrice * qty * 100) / 100
+    const effectiveUnitPrice = singleSupplementPct
+      ? Math.round(unitPrice * (1 + singleSupplementPct / 100) * 100) / 100
+      : unitPrice
+    const total = Math.round(effectiveUnitPrice * qty * 100) / 100
+    const supplementSuffix = singleSupplementPct ? formatSingleSupplementSuffix(singleSupplementPct) : ""
 
     const lineItem: QuoteLineItem = {
-      description: `${description}${variantSuffix}`,
+      description: `${description}${variantSuffix}${supplementSuffix}`,
       supplierDescription: supplierDescription ?? null,
       qty,
-      unitPrice,
+      unitPrice: effectiveUnitPrice,
       total,
     }
 
@@ -364,7 +377,7 @@ export async function buildPackageQuoteLineItems({
         passengerKind: "adult",
         baseUnitPrice: unitPrice,
         markupPct: 0,
-        singleSupplementPct: null,
+        singleSupplementPct: singleSupplementPct ?? null,
         serviceType:
           activeLeg?.supplierKind === "transfers"
             ? "transfer"
@@ -641,66 +654,90 @@ export async function buildPackageQuoteLineItems({
           summed.infantCount !== totals.infantCount
         ) {
           throw new Error(
-            `Per-unit passenger counts for leg "${legLabel}" must sum to the booking's traveller totals ` +
-              `(expected ${totals.adultCount} adult, ${totals.childCount} child, ${totals.infantCount} infant).`,
+            `${legLabel}: suites hold ${summed.adultCount} adults, ${summed.childCount} children, ` +
+              `${summed.infantCount} infants but the booking is for ${totals.adultCount} adults, ` +
+              `${totals.childCount} children, ${totals.infantCount} infants. Update the booking's ` +
+              `travellers, or adjust the suite split.`,
           )
         }
 
+        // Price against the suite type, not each room's own configuration: multiple units booked
+        // under the same suite type (e.g. 3 rooms of "Deluxe Double") combine into one line per
+        // passenger type instead of splitting per room, even if their bed/bathroom setup differs.
+        const unitsBySuiteType = new Map<string, PackageUnitSelection[]>()
         for (const unitSelection of units) {
-          const { validRateCard, description, suiteTypeName } = resolveUnit(unitSelection.suiteTypeId)
+          const group = unitsBySuiteType.get(unitSelection.suiteTypeId) ?? []
+          group.push(unitSelection)
+          unitsBySuiteType.set(unitSelection.suiteTypeId, group)
+        }
+
+        for (const [suiteTypeId, groupUnits] of unitsBySuiteType) {
+          const { validRateCard, description, suiteTypeName } = resolveUnit(suiteTypeId)
           activeRateCard = validRateCard
-          const variantNames = specificUnitVariantNames(unitSelection)
+          // A suite type booked as a single room keeps its own specific bedroom/layout/bathroom
+          // naming; multiple rooms of the same suite type collapse to the suite type's generic
+          // variant list, since they price identically regardless of each room's own config.
+          const groupVariantNames =
+            groupUnits.length === 1 ? specificUnitVariantNames(groupUnits[0]) : null
 
-          addLineItem({
-            description: `${description} - Adult`,
-            qty: unitSelection.adultCount ?? 0,
-            unitPrice: validRateCard.pricePerPerson,
-            supplierDescription,
-            suiteTypeId: unitSelection.suiteTypeId,
-            suiteTypeName,
-            variantNames,
-            unit,
-          })
-          addLineItem({
-            description: `${description} - Child`,
-            qty: unitSelection.childCount ?? 0,
-            unitPrice: validRateCard.childPrice ?? validRateCard.pricePerPerson,
-            supplierDescription,
-            suiteTypeId: unitSelection.suiteTypeId,
-            suiteTypeName,
-            variantNames,
-            unit,
-          })
-          addLineItem({
-            description: `${description} - Infant`,
-            qty: unitSelection.infantCount ?? 0,
-            unitPrice:
-              validRateCard.infantPrice ??
-              validRateCard.childPrice ??
-              validRateCard.pricePerPerson,
-            supplierDescription,
-            suiteTypeId: unitSelection.suiteTypeId,
-            suiteTypeName,
-            variantNames,
-            unit,
-          })
+          const passengerKinds: {
+            key: "adultCount" | "childCount" | "infantCount"
+            label: string
+            unitPrice: number
+          }[] = [
+            { key: "adultCount", label: "Adult", unitPrice: validRateCard.pricePerPerson },
+            { key: "childCount", label: "Child", unitPrice: validRateCard.childPrice ?? validRateCard.pricePerPerson },
+            {
+              key: "infantCount",
+              label: "Infant",
+              unitPrice: validRateCard.infantPrice ?? validRateCard.childPrice ?? validRateCard.pricePerPerson,
+            },
+          ]
 
-          if (
-            SUPPLIER_VOCABULARY[leg.supplierKind].showSingleSupplement &&
-            packageDetail.singleSupplementPct > 0 &&
-            (unitSelection.adultCount ?? 0) === 1 &&
-            (unitSelection.childCount ?? 0) === 0 &&
-            (unitSelection.infantCount ?? 0) === 0
-          ) {
+          for (const { key, label, unitPrice } of passengerKinds) {
+            // A unit occupied by exactly one traveller (of any age) pays the single supplement —
+            // it's a solo room, not specifically a solo adult. Solo-room travellers can't merge
+            // into the shared qty since they don't share its unit price, so they're tallied and
+            // priced on their own line.
+            let sharedQty = 0
+            let soloQty = 0
+            for (const unitSelection of groupUnits) {
+              const count = unitSelection[key] ?? 0
+              if (count === 0) continue
+              const adultCount = unitSelection.adultCount ?? 0
+              const childCount = unitSelection.childCount ?? 0
+              const infantCount = unitSelection.infantCount ?? 0
+              const isSoloRoom =
+                SUPPLIER_VOCABULARY[leg.supplierKind].showSingleSupplement &&
+                packageDetail.singleSupplementPct > 0 &&
+                adultCount + childCount + infantCount === 1
+              if (isSoloRoom && count === 1) {
+                soloQty += 1
+              } else {
+                sharedQty += count
+              }
+            }
+
             addLineItem({
-              description: `${description} - Single supplement`,
-              qty: 1,
-              unitPrice: validRateCard.pricePerPerson * (packageDetail.singleSupplementPct / 100),
+              description: `${description} - ${label}`,
+              qty: sharedQty,
+              unitPrice,
               supplierDescription,
-              suiteTypeId: unitSelection.suiteTypeId,
+              suiteTypeId,
               suiteTypeName,
-              variantNames,
+              variantNames: groupVariantNames,
               unit,
+            })
+            addLineItem({
+              description: `${description} - ${label}`,
+              qty: soloQty,
+              unitPrice,
+              supplierDescription,
+              suiteTypeId,
+              suiteTypeName,
+              variantNames: groupVariantNames,
+              unit,
+              singleSupplementPct: soloQty > 0 ? packageDetail.singleSupplementPct : null,
             })
           }
         }

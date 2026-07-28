@@ -611,7 +611,7 @@ describe("validateConfigureState", () => {
     expect(errors.some((e) => e.includes("needs a type"))).toBe(true)
     expect(errors.some((e) => e.includes("pickup point"))).toBe(true)
     expect(errors.some((e) => e.includes("vehicle category"))).toBe(true)
-    expect(errors.some((e) => e.includes("must sum"))).toBe(true) // split defaulted to 0s
+    expect(errors.some((e) => e.includes("suites hold") && e.includes("but the booking is for"))).toBe(true) // split defaulted to 0s
   })
 
   it("does not require routes on transport legs but still flags missing vehicle categories", () => {

@@ -898,6 +898,8 @@ export interface Enquiry {
   noOfSuites: number
   noOfAdults: number
   noOfChildren: number
+  noOfAdultsOriginal?: number
+  noOfChildrenOriginal?: number
   childAges?: number[]
   suiteTypes: string[]
   travellers?: Traveller[]

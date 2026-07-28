@@ -706,7 +706,10 @@ export function validateConfigureState(
           summed.infantCount !== totals.infantCount
         ) {
           errors.push(
-            `${legLabel}: passenger split (${summed.adultCount} adults, ${summed.childCount} children, ${summed.infantCount} infants) must sum to the booking's totals (${totals.adultCount} adults, ${totals.childCount} children, ${totals.infantCount} infants)`,
+            `${legLabel}: suites hold ${summed.adultCount} adults, ${summed.childCount} children, ` +
+              `${summed.infantCount} infants but the booking is for ${totals.adultCount} adults, ` +
+              `${totals.childCount} children, ${totals.infantCount} infants. Update the booking's ` +
+              `travellers above, or adjust the suite split.`,
           )
         }
       }

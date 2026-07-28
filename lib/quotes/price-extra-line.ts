@@ -9,6 +9,7 @@ import type {
   SupplierKind,
 } from "@/lib/types"
 import { fetchDefaultAgeBuckets, resolveAgeBuckets } from "@/lib/pricing/age-buckets"
+import { projectPassengerTotals } from "@/lib/packages/passenger-totals"
 import { isRateCardValidOn } from "@/lib/rate-cards/resolve"
 import {
   buildCommissionBreakdown,
@@ -158,10 +159,10 @@ export async function priceExtraLineItems(
     childMaxAge: supplier.child_max_age ?? null,
   })
   const childAges: number[] = job.child_ages ?? []
-  const infantCount = childAges.filter((age) => age <= buckets.infantMax).length
-  const adultPromoted = childAges.filter((age) => age > buckets.childMax).length
-  const childCount = Math.max(0, job.no_of_children - infantCount - adultPromoted)
-  const adultCount = job.no_of_adults + adultPromoted
+  const { adultCount, childCount, infantCount } = projectPassengerTotals(
+    { noOfAdults: job.no_of_adults, noOfChildren: job.no_of_children, childAges },
+    buckets,
+  )
 
   // Re-bind to non-null locals so the addLine closure keeps the narrowing.
   const supplierRow = supplier

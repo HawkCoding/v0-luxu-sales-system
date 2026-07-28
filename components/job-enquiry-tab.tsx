@@ -563,17 +563,19 @@ export function JobEnquiryTab({
         </Card>
       )}
 
-      {/* Journey Details — editable for enquiry stage */}
+      {/* Journey Details — editable at any stage; customer requests can change after the quote goes out */}
       <EnquiryParsedFieldsEditor
         bookingId={enquiry.jobId}
         fields={{
           noOfAdults: enquiry.noOfAdults,
           noOfChildren: enquiry.noOfChildren,
+          childAges: enquiry.childAges ?? [],
           noOfSuites: enquiry.noOfSuites,
           departureDate: enquiry.departureDate ?? null,
           direction: enquiry.direction ?? null,
         }}
-        readonly={stage !== "enquiry"}
+        originalNoOfAdults={enquiry.noOfAdultsOriginal}
+        originalNoOfChildren={enquiry.noOfChildrenOriginal}
         onSaved={onFieldsUpdated}
       />
       {/* Purpose and Suite Types are not editable — shown separately */}

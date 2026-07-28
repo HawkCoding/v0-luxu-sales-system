@@ -1109,7 +1109,9 @@ export type Database = {
           invoice_balance: number | null
           is_repeat_client_at_creation: boolean
           no_of_adults: number
+          no_of_adults_original: number
           no_of_children: number
+          no_of_children_original: number
           no_of_suites: number
           outcome: string
           outcome_notes: string | null
@@ -1180,7 +1182,9 @@ export type Database = {
           invoice_balance?: number | null
           is_repeat_client_at_creation?: boolean
           no_of_adults?: number
+          no_of_adults_original?: number
           no_of_children?: number
+          no_of_children_original?: number
           no_of_suites?: number
           outcome?: string
           outcome_notes?: string | null
@@ -1251,7 +1255,9 @@ export type Database = {
           invoice_balance?: number | null
           is_repeat_client_at_creation?: boolean
           no_of_adults?: number
+          no_of_adults_original?: number
           no_of_children?: number
+          no_of_children_original?: number
           no_of_suites?: number
           outcome?: string
           outcome_notes?: string | null
