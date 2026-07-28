@@ -2706,7 +2706,6 @@ export type Database = {
           id: string
           itinerary_id: string | null
           last_sent_at: string | null
-          no_package_match: boolean
           outstanding_amount: number | null
           override_pin: string | null
           override_reason: string | null
@@ -2728,7 +2727,6 @@ export type Database = {
           id?: string
           itinerary_id?: string | null
           last_sent_at?: string | null
-          no_package_match?: boolean
           outstanding_amount?: number | null
           override_pin?: string | null
           override_reason?: string | null
@@ -2750,7 +2748,6 @@ export type Database = {
           id?: string
           itinerary_id?: string | null
           last_sent_at?: string | null
-          no_package_match?: boolean
           outstanding_amount?: number | null
           override_pin?: string | null
           override_reason?: string | null

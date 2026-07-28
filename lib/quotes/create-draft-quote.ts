@@ -68,7 +68,6 @@ export async function createDraftQuoteForBooking({
       validity_until: getDefaultQuoteValidityDate(),
       subtotal: totals.subtotal,
       total: totals.total,
-      no_package_match: noServicesBuilt,
       quote_number: buildQuoteNumber(bookingNumber, []),
     })
     .select("id")

@@ -971,7 +971,6 @@ export interface Quote {
   lastSentAtDisplay?: string
   overridePin?: string
   overrideReason?: string
-  noPackageMatch?: boolean
   title?: string | null
   amountReceived?: number | null
   outstandingAmount?: number | null

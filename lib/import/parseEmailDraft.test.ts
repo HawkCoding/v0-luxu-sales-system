@@ -328,6 +328,7 @@ John Smith
       "Country",
       "Email or Phone (Customer)",
       "Supplier",
+      "Route / Direction",
       "Departure date",
       "Adults",
       "Suites",
@@ -402,18 +403,61 @@ Regards,
 John Smith
 `)
 
-    expect(countRequiredComplete(draft)).toEqual({ completed: 8, total: 8 })
+    expect(countRequiredComplete(draft)).toEqual({ completed: 9, total: 9 })
   })
 
   it("returns zero for an empty draft", () => {
-    expect(countRequiredComplete(parseEmailDraft(""))).toEqual({ completed: 0, total: 8 })
+    expect(countRequiredComplete(parseEmailDraft(""))).toEqual({ completed: 0, total: 9 })
   })
 
   it("counts only the fields that are present", () => {
     const draft = parseEmailDraft("Blue Train 2026-05-15 2 adults")
 
-    // Supplier + departure date + adults. The suite count is no longer invented, so it does not
-    // count toward completion until someone states it.
-    expect(countRequiredComplete(draft)).toEqual({ completed: 3, total: 8 })
+    // Supplier + departure date + adults. No "X to Y" phrasing, so route isn't parsed, and the
+    // suite count is no longer invented -- neither counts toward completion until someone states it.
+    expect(countRequiredComplete(draft)).toEqual({ completed: 3, total: 9 })
+  })
+
+  it("does not require a resolved supplier id by default", () => {
+    // Automated inbound imports (lib/inbound-email/review.ts) call this without options and must
+    // keep gating on the parsed wording alone -- see ValidateDraftOptions.
+    const draft = parseEmailDraft(`
+Rovos Rail
+Pretoria to Cape Town
+2026-05-15
+2 adults
+1 suite
+john@example.com
+Country: South Africa
+Regards,
+John Smith
+`)
+
+    expect(draft.trip.supplierId).toBeUndefined()
+    expect(validateDraft(draft).missingRequired).not.toContain("Supplier")
+    expect(countRequiredComplete(draft)).toEqual({ completed: 9, total: 9 })
+  })
+
+  it("requires a resolved supplier id when requireResolvedSupplier is set", () => {
+    const draft = parseEmailDraft(`
+Rovos Rail
+Pretoria to Cape Town
+2026-05-15
+2 adults
+1 suite
+john@example.com
+Country: South Africa
+Regards,
+John Smith
+`)
+
+    const unresolved = validateDraft(draft, { requireResolvedSupplier: true })
+    expect(unresolved.isValid).toBe(false)
+    expect(unresolved.missingRequired).toContain("Supplier")
+    expect(countRequiredComplete(draft, { requireResolvedSupplier: true }).completed).toBe(8)
+
+    const resolved: ParsedDraft = { ...draft, trip: { ...draft.trip, supplierId: "sup-1" } }
+    expect(validateDraft(resolved, { requireResolvedSupplier: true }).missingRequired).not.toContain("Supplier")
+    expect(countRequiredComplete(resolved, { requireResolvedSupplier: true }).completed).toBe(9)
   })
 })

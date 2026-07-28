@@ -59,12 +59,24 @@ export interface ValidationResult {
   warnings: string[]
 }
 
+export interface ValidateDraftOptions {
+  /**
+   * Review-modal only. The modal has the supplier vocabulary loaded, so a supplier that never
+   * resolved to an id is a real blocker there -- the parsed wording alone is not enough to link
+   * the booking. The automated importer resolves supplier ids later (lib/inbound-email/
+   * import-booking.ts) and must keep gating on parsed text, or every inbound email would flip to
+   * needs-review on a supplier it is perfectly capable of resolving.
+   */
+  requireResolvedSupplier?: boolean
+}
+
 const REQUIRED_FIELDS = [
   'customer.firstName',
   'customer.surname',
   'customer.email',
   'customer.country',
   'trip.supplier',
+  'trip.route',
   'trip.departureDate',
   'guests.adults',
   'guests.suites'
@@ -460,10 +472,19 @@ export function parseEmailDraft(text: string): ParsedDraft {
   }
 }
 
-export function validateDraft(draft: ParsedDraft): ValidationResult {
+/**
+ * A supplier counts as present only when the caller's evidence bar is met: the review modal can
+ * demand the resolved foreign key, everyone else settles for the parsed wording. See
+ * ValidateDraftOptions for why this is per-caller rather than global.
+ */
+function hasSupplier(draft: ParsedDraft, options?: ValidateDraftOptions): boolean {
+  return options?.requireResolvedSupplier ? Boolean(draft.trip.supplierId) : Boolean(draft.trip.supplier)
+}
+
+export function validateDraft(draft: ParsedDraft, options?: ValidateDraftOptions): ValidationResult {
   const missingRequired: string[] = []
   const warnings: string[] = []
-  
+
   // Check required fields
   if (!draft.customer.firstName) missingRequired.push('First name (Customer)')
   if (!draft.customer.surname) missingRequired.push('Surname (Customer)')
@@ -471,7 +492,8 @@ export function validateDraft(draft: ParsedDraft): ValidationResult {
   if (!draft.customer.email && !draft.customer.phone) {
     missingRequired.push('Email or Phone (Customer)')
   }
-  if (!draft.trip.supplier) missingRequired.push('Supplier')
+  if (!hasSupplier(draft, options)) missingRequired.push('Supplier')
+  if (!draft.trip.route) missingRequired.push('Route / Direction')
   if (!draft.trip.departureDate) missingRequired.push('Departure date')
   if (!draft.guests.adults || draft.guests.adults < 1) missingRequired.push('Adults')
   if (!draft.guests.suites || draft.guests.suites < 1) missingRequired.push('Suites')
@@ -503,15 +525,19 @@ export function validateDraft(draft: ParsedDraft): ValidationResult {
   }
 }
 
-export function countRequiredComplete(draft: ParsedDraft): { completed: number; total: number } {
+export function countRequiredComplete(
+  draft: ParsedDraft,
+  options?: ValidateDraftOptions,
+): { completed: number; total: number } {
   let completed = 0
   const total = REQUIRED_FIELDS.length
-  
+
   if (draft.customer.firstName) completed++
   if (draft.customer.surname) completed++
   if (draft.customer.email || draft.customer.phone) completed++
   if (draft.customer.country) completed++
-  if (draft.trip.supplier) completed++
+  if (hasSupplier(draft, options)) completed++
+  if (draft.trip.route) completed++
   if (draft.trip.departureDate) completed++
   if (draft.guests.adults > 0) completed++
   if (draft.guests.suites > 0) completed++
