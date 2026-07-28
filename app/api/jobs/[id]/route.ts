@@ -314,7 +314,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     lastSentAtDisplay: formatDisplayDateTime(q.last_sent_at),
     overridePin: q.override_pin ?? undefined,
     overrideReason: q.override_reason ?? undefined,
-    noPackageMatch: q.no_package_match,
     lineItems: (quoteLineItemsData ?? [])
       .filter((li) => li.quote_id === q.id)
       .map((li) => ({

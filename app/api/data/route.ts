@@ -351,7 +351,6 @@ export async function GET(req: Request) {
       lastSentAtDisplay: formatDisplayDateTime(q.last_sent_at),
       overridePin: q.override_pin,
       overrideReason: q.override_reason,
-      noPackageMatch: q.no_package_match,
       createdAt: q.created_at,
       updatedAt: q.updated_at,
       createdAtDisplay: formatDisplayDateTime(q.created_at),

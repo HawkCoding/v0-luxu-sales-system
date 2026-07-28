@@ -129,7 +129,6 @@ export async function POST(_req: Request, { params }: RouteParams) {
       validity_until: quote.validity_until,
       subtotal: quote.subtotal,
       total: quote.total,
-      no_package_match: quote.no_package_match,
       quote_number: quoteNumber,
       parent_quote_id: quote.id,
     })

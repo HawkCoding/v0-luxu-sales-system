@@ -29,7 +29,7 @@ describe("createDraftQuoteForBooking", () => {
     buildMocks.buildPackageQuoteLineItems.mockReset()
   })
 
-  it("flags no_package_match and warns when nothing was auto-built", async () => {
+  it("warns when nothing was auto-built", async () => {
     adapterMocks.loadBookingServicesPackageDetail.mockResolvedValue({
       detail: { id: BOOKING_ID, legs: [] },
       services: [],
@@ -46,7 +46,7 @@ describe("createDraftQuoteForBooking", () => {
 
     expect(result.warning).toMatch(/No services were auto-built/)
     expect(result.quoteId).toBeTruthy()
-    expect(store.rows("quotes")[0]).toMatchObject({ no_package_match: true, status: "pricing_incomplete" })
+    expect(store.rows("quotes")[0]).toMatchObject({ status: "pricing_incomplete" })
     expect(buildMocks.buildPackageQuoteLineItems).not.toHaveBeenCalled()
   })
 
@@ -69,7 +69,7 @@ describe("createDraftQuoteForBooking", () => {
     })
 
     expect(result.warning).toBeNull()
-    expect(store.rows("quotes")[0]).toMatchObject({ no_package_match: false, status: "draft", total: 2000 })
+    expect(store.rows("quotes")[0]).toMatchObject({ status: "draft", total: 2000 })
     expect(store.rows("quote_line_items")).toHaveLength(1)
   })
 
@@ -91,6 +91,6 @@ describe("createDraftQuoteForBooking", () => {
 
     expect(result.warning).toBe("No suite type selected for leg: Blue Train")
     expect(result.quoteId).toBeTruthy()
-    expect(store.rows("quotes")[0]).toMatchObject({ status: "pricing_incomplete", no_package_match: false })
+    expect(store.rows("quotes")[0]).toMatchObject({ status: "pricing_incomplete" })
   })
 })
