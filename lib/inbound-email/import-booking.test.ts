@@ -103,6 +103,15 @@ function createState(overrides: Partial<MockState> = {}): MockState {
 
 function createFilterableListQuery<T>(rows: T[]) {
   const filters: Record<string, unknown> = {}
+  const matching = () =>
+    rows.filter((row) =>
+      Object.entries(filters).every(([key, value]) => {
+        const cell = (row as Record<string, unknown>)[key]
+        // `.is(col, null)` also matches an absent key, mirroring SQL IS NULL.
+        if (value === null) return cell === null || cell === undefined
+        return cell === value
+      }),
+    )
   const query = {
     eq: vi.fn((column: string, value: unknown) => {
       filters[column] = value
@@ -114,17 +123,8 @@ function createFilterableListQuery<T>(rows: T[]) {
     }),
     in: vi.fn(() => query),
     order: vi.fn(() => query),
-    ...createThenable(() => ({
-      data: rows.filter((row) =>
-        Object.entries(filters).every(([key, value]) => {
-          const cell = (row as Record<string, unknown>)[key]
-          // `.is(col, null)` also matches an absent key, mirroring SQL IS NULL.
-          if (value === null) return cell === null || cell === undefined
-          return cell === value
-        }),
-      ),
-      error: null,
-    })),
+    maybeSingle: vi.fn(async () => ({ data: matching()[0] ?? null, error: null })),
+    ...createThenable(() => ({ data: matching(), error: null })),
   }
   return query
 }
@@ -335,9 +335,11 @@ function createSupabase(state: MockState) {
           in: vi.fn(() => createFilterableListQuery([])),
         }
       }
-      if (table === "rate_types") {
+      // app_settings backs the default age buckets and the default commission the auto-drafted
+      // quote prices with -- empty here, so both fall back to their built-in defaults.
+      if (table === "rate_types" || table === "app_settings") {
         return {
-          select: vi.fn(() => ({ is: vi.fn(async () => ({ data: [], error: null })) })),
+          select: vi.fn(() => createFilterableListQuery([])),
         }
       }
       if (table === "quotes") {

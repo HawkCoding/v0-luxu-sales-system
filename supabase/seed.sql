@@ -1405,6 +1405,8 @@ on conflict (key) do update set subject=excluded.subject,
 insert into public.app_settings (key,value,updated_at) values
   ('business_name','Luxus Travel and Tours','2026-05-12T13:43:55.008671+00:00'),
   ('default_deposit_percentage','25','2026-05-12T13:43:55.008671+00:00'),
+  ('default_commission_type','percent','2026-07-28T00:00:00+00:00'),
+  ('default_commission_value','0','2026-07-28T00:00:00+00:00'),
   ('session_timeout_minutes','400','2026-05-20T09:28:48.138+00:00'),
   ('deposit_due_rule','after_quote_acceptance','2026-05-26T10:48:44.602608+00:00'),
   ('deposit_due_days','7','2026-05-26T10:48:44.602608+00:00'),

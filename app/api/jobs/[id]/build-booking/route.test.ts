@@ -104,6 +104,10 @@ function buildSupabase(state: MockState) {
               ],
               error: null,
             })),
+            // Age-bucket overrides looked up per leg when seeding unit passenger counts.
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+            })),
           })),
         }
       }
@@ -129,15 +133,21 @@ function buildSupabase(state: MockState) {
         }
       }
 
-      // seedUnitsForServices carries the enquiry's captured suite configuration forward
-      // (app/api/jobs/[id]/package/seed.ts) -- covered separately in seed.test.ts.
-      if (table === "booking_suites" || table === "suite_types") {
+      // seedUnitsForServices carries the enquiry's captured suite configuration and headcount
+      // forward (app/api/jobs/[id]/package/seed.ts) -- covered separately in seed.test.ts.
+      if (
+        table === "booking_suites" ||
+        table === "suite_types" ||
+        table === "bookings" ||
+        table === "app_settings"
+      ) {
         return {
           select: vi.fn(() => {
             const query: Record<string, unknown> = {}
             query.eq = vi.fn(() => query)
             query.in = vi.fn(() => query)
             query.order = vi.fn(async () => ({ data: [], error: null }))
+            query.maybeSingle = vi.fn(async () => ({ data: null, error: null }))
             query.then = (resolve: (value: unknown) => unknown) =>
               Promise.resolve({ data: [], error: null }).then(resolve)
             return query

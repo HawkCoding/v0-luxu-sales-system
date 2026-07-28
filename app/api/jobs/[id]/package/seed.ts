@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
+import { computeLegPassengerTotals, distributePassengerTotals } from "@/lib/packages/passenger-totals"
 
 export const TRANSPORT_SUPPLIER_KINDS = new Set(["transfers", "vehicle_rental"])
 
@@ -79,6 +80,27 @@ async function loadCapturedSuitesBySupplier(
   }
 
   return grouped
+}
+
+/**
+ * The booking-level headcount a leg's units have to add up to. Read once per seeding run and
+ * re-bucketed per supplier, because the adult/child/infant boundary is supplier-scoped.
+ */
+async function loadBookingPassengerInputs(
+  supabase: SupabaseClient<Database>,
+  bookingId: string,
+): Promise<{ noOfAdults: number; noOfChildren: number; childAges: number[] }> {
+  const { data } = await supabase
+    .from("bookings")
+    .select("no_of_adults, no_of_children, child_ages")
+    .eq("id", bookingId)
+    .maybeSingle()
+
+  return {
+    noOfAdults: data?.no_of_adults ?? 0,
+    noOfChildren: data?.no_of_children ?? 0,
+    childAges: data?.child_ages ?? [],
+  }
 }
 
 /** Fan out a package's legs into booking_package_selections (+ units seeded from the enquiry) and
@@ -206,23 +228,49 @@ export async function seedUnitsForServices(
   const unitServices = services.filter((service) => !TRANSPORT_SUPPLIER_KINDS.has(service.kind ?? ""))
   if (unitServices.length > 0) {
     const capturedSuitesBySupplier = await loadCapturedSuitesBySupplier(supabase, bookingId)
+    // Carry the enquiry's headcount onto the units it just created. Without this every unit is
+    // seeded 0/0/0 and the pricing engine rejects the leg ("per-unit passenger counts must sum
+    // to the booking's traveller totals"), which is what left auto-built bookings unpriced.
+    const passengerInputs = await loadBookingPassengerInputs(supabase, bookingId)
 
-    const unitRows: BookingServiceUnitInsert[] = unitServices.flatMap((service) => {
+    const unitRows: BookingServiceUnitInsert[] = []
+    for (const service of unitServices) {
       const captured = capturedSuitesBySupplier.get(service.supplier_id) ?? []
+      const totals = await computeLegPassengerTotals(supabase, {
+        ...passengerInputs,
+        supplierId: service.supplier_id,
+      })
+      // A supplier with no captured suites still gets its single bare unit -- give it the whole
+      // headcount so it prices correctly the moment a suite type is chosen.
+      const splits = distributePassengerTotals(totals, Math.max(1, captured.length))
+
       if (captured.length === 0) {
-        return [{ service_id: service.id, sort_order: 0, origin }]
+        unitRows.push({
+          service_id: service.id,
+          sort_order: 0,
+          adult_count: splits[0].adultCount,
+          child_count: splits[0].childCount,
+          infant_count: splits[0].infantCount,
+          origin,
+        })
+        continue
       }
 
-      return captured.map((suite, index) => ({
-        service_id: service.id,
-        suite_type_id: suite.suiteTypeId,
-        bedroom_type_id: suite.bedroomTypeId,
-        bedroom_layout_id: suite.bedroomLayoutId,
-        bathroom_type_id: suite.bathroomTypeId,
-        sort_order: index,
-        origin,
-      }))
-    })
+      captured.forEach((suite, index) => {
+        unitRows.push({
+          service_id: service.id,
+          suite_type_id: suite.suiteTypeId,
+          bedroom_type_id: suite.bedroomTypeId,
+          bedroom_layout_id: suite.bedroomLayoutId,
+          bathroom_type_id: suite.bathroomTypeId,
+          sort_order: index,
+          adult_count: splits[index].adultCount,
+          child_count: splits[index].childCount,
+          infant_count: splits[index].infantCount,
+          origin,
+        })
+      })
+    }
 
     if (unitRows.length > 0) {
       const { error: unitInsertError } = await supabase.from("booking_service_units").insert(unitRows)

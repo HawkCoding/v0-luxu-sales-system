@@ -3,8 +3,28 @@ import type { Database } from "@/lib/supabase/types"
 import { buildPackageQuoteLineItems, calculateQuoteTotals } from "@/lib/quotes/build-from-package"
 import { buildQuoteNumber } from "@/lib/quotes/quote-number"
 import { bookingServicesToLegSelections, loadBookingServicesPackageDetail } from "@/lib/quotes/adapters/from-booking-services"
+import { getDefaultCommission } from "@/lib/pricing/default-commission"
 
 type ServiceClient = SupabaseClient<Database>
+
+/**
+ * The rate types the auto-quote prices against: the booking customer's own default where they
+ * have one, falling back to the system default -- the same precedence the Build Booking dialog
+ * applies, so an auto-priced quote and a hand-built one agree.
+ */
+async function resolveRateTypes(supabase: ServiceClient, bookingId: string) {
+  const [{ data: rateTypeRows }, { data: booking }] = await Promise.all([
+    supabase.from("rate_types").select("id, code, name, is_default"),
+    supabase.from("bookings").select("customers(default_rate_type_id)").eq("id", bookingId).maybeSingle(),
+  ])
+
+  const rateTypes = (rateTypeRows ?? []).map(({ id, code, name }) => ({ id, code, name }))
+  const fallbackRateTypeId = (rateTypeRows ?? []).find((rt) => rt.is_default)?.id ?? null
+  const customer = Array.isArray(booking?.customers) ? booking?.customers[0] : booking?.customers
+  const rateTypeId = customer?.default_rate_type_id ?? fallbackRateTypeId
+
+  return { rateTypes, fallbackRateTypeId, rateTypeId }
+}
 
 function addDaysToDateString(value: string, days: number): string {
   const [year = "1970", month = "1", day = "1"] = value.split("-")
@@ -45,12 +65,25 @@ export async function createDraftQuoteForBooking({
     warning = "No services were auto-built from the enquiry."
   } else {
     try {
+      const selections = bookingServicesToLegSelections(services, units)
+      // The house commission stands in for the value Build Booking would otherwise stop and ask
+      // a human for, so the waiting quote shows a real total. A zero default means "not
+      // configured" -- leave the commission line off entirely rather than write a R0.00 line.
+      const defaultCommission = await getDefaultCommission(supabase)
+      if (defaultCommission.value > 0 && selections.length > 0) {
+        selections[0] = { ...selections[0], commissionOverride: defaultCommission }
+      }
+      const { rateTypes, fallbackRateTypeId, rateTypeId } = await resolveRateTypes(supabase, bookingId)
+
       const built = await buildPackageQuoteLineItems({
         supabase,
         packageDetail: detail,
         jobId: bookingId,
         travelDate: travelDate ?? new Date().toISOString().slice(0, 10),
-        selections: bookingServicesToLegSelections(services, units),
+        selections,
+        rateTypeId,
+        fallbackRateTypeId,
+        rateTypes,
       })
       lineItems = built.lineItems
       status = lineItems.length > 0 ? "draft" : "pricing_incomplete"
@@ -82,10 +115,14 @@ export async function createDraftQuoteForBooking({
       lineItems.map((lineItem, index) => ({
         quote_id: quote.id,
         description: lineItem.description,
+        supplier_description: lineItem.supplierDescription ?? null,
         qty: lineItem.qty,
         unit_price: lineItem.unitPrice,
         total: lineItem.total,
         sort_order: index,
+        // Persisted so an auto-priced quote carries the same audit trail a hand-built one does --
+        // and so re-opening Build Booking can read the commission back off these lines.
+        pricing_snapshot: (lineItem.pricingSnapshot ?? null) as Database["public"]["Tables"]["quote_line_items"]["Insert"]["pricing_snapshot"],
       })),
     )
 

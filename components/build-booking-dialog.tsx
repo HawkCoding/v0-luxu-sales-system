@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { useActiveSuppliers, useRateTypes } from "@/lib/use-data"
-import type { BookingTransportRequest, PackageDetail, QuoteLineItem, SupplierKind } from "@/lib/types"
+import type { BookingTransportRequest, CommissionKind, PackageDetail, QuoteLineItem, SupplierKind } from "@/lib/types"
 import { SUPPLIER_KIND_LABELS } from "@/lib/types"
 import { PresenceAvatars } from "@/components/presence-avatars"
 import { useRecordPresence } from "@/hooks/use-record-presence"
@@ -190,6 +190,34 @@ export function BuildBookingDialog({
     if (!saved || saved.type === null) return
     setCommission((prev) => (prev.type === null && prev.value === null ? { type: saved.type, value: saved.value } : prev))
   }, [open, existingLineItems])
+
+  // On a quote with nothing to read a commission back off, start from the house default set in
+  // Settings. It stays fully editable -- this only stops an unset required field from blocking
+  // the configure step on every new booking.
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch("/api/settings/commission")
+        if (!res.ok || cancelled) return
+        const { defaultCommission } = (await res.json()) as {
+          defaultCommission: { type: CommissionKind; value: number } | null
+        }
+        if (!defaultCommission || cancelled) return
+        setCommission((prev) =>
+          prev.type === null && prev.value === null
+            ? { type: defaultCommission.type, value: defaultCommission.value }
+            : prev,
+        )
+      } catch {
+        // A missing default is not an error -- the field simply stays empty as before.
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [open])
 
   // Load the booking's saved services when the dialog opens, so re-opening pre-fills everything
   // the last build persisted.
@@ -501,7 +529,7 @@ export function BuildBookingDialog({
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">
           <Boxes className="mr-2 h-4 w-4" />
-          Build booking
+          Edit Booking
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-4xl">

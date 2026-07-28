@@ -42,3 +42,35 @@ export async function computeLegPassengerTotals(
 
   return { adultCount, childCount, infantCount }
 }
+
+function splitEvenly(total: number, buckets: number): number[] {
+  const base = Math.floor(total / buckets)
+  const remainder = total % buckets
+  return Array.from({ length: buckets }, (_, index) => base + (index < remainder ? 1 : 0))
+}
+
+/**
+ * Spreads a leg's booking-level passenger totals across its units as evenly as possible, with any
+ * remainder landing on the earlier units (3 adults over 2 suites -> 2 + 1). The pricing engine
+ * requires the per-unit splits to sum exactly to the booking totals, so this is what lets a
+ * freshly auto-built booking price itself without a human redistributing passengers by hand.
+ *
+ * Each bucket is split independently — adults spread across suites has nothing to do with how
+ * many children there are.
+ */
+export function distributePassengerTotals(
+  totals: PassengerTotals,
+  unitCount: number,
+): PassengerTotals[] {
+  if (unitCount <= 0) return []
+
+  const adults = splitEvenly(totals.adultCount, unitCount)
+  const children = splitEvenly(totals.childCount, unitCount)
+  const infants = splitEvenly(totals.infantCount, unitCount)
+
+  return Array.from({ length: unitCount }, (_, index) => ({
+    adultCount: adults[index],
+    childCount: children[index],
+    infantCount: infants[index],
+  }))
+}
