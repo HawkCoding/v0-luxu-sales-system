@@ -6,16 +6,18 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { createSessionClient } from "@/lib/supabase/server"
 import { mapPackageListItem, type PackageLegWithSupplier } from "@/lib/packages"
 import { SUPPLIER_KIND_LABELS } from "@/lib/types"
+import { formatCurrency } from "@/lib/utils"
 
 function formatPrice(amount: number, currency: string) {
   try {
     return new Intl.NumberFormat("en-ZA", {
       style: "currency",
       currency,
-      maximumFractionDigits: 0,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
     }).format(amount)
   } catch {
-    return `${currency} ${Math.round(amount).toLocaleString()}`
+    return `${currency} ${formatCurrency(amount)}`
   }
 }
 

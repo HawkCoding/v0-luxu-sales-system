@@ -10,6 +10,7 @@ import Link from "next/link"
 import { useState } from "react"
 import { formatDisplayDate } from "@/lib/date-format"
 import { QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
+import { formatCurrency } from "@/lib/utils"
 
 const STATUS_BADGE: Record<string, { variant: "default" | "secondary" | "outline" | "destructive"; label: string }> = {
   draft: { variant: "secondary", label: "Draft" },
@@ -86,7 +87,7 @@ export default function QuotesPage() {
                       </p>
                     </div>
                     <div className="text-right flex-shrink-0">
-                      <p className="text-sm font-semibold text-foreground">R {q.total.toLocaleString()}</p>
+                      <p className="text-sm font-semibold text-foreground">R {formatCurrency(q.total)}</p>
                       {QUOTE_VALIDITY_ENABLED && q.validityUntil && (
                         <p className="text-xs text-muted-foreground">Valid: {formatDisplayDate(q.validityUntil)}</p>
                       )}

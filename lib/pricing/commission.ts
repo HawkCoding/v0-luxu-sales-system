@@ -53,6 +53,7 @@ export function calculateCommissionAmount({
 export function buildCommissionBreakdown(
   resolved: ResolvedCommission,
   amount: number,
+  passengerCount?: number,
 ): CommissionBreakdown | null {
   if (resolved.type === null) return null
   return {
@@ -60,5 +61,6 @@ export function buildCommissionBreakdown(
     value: resolved.value,
     amount: roundMoney(amount),
     source: resolved.source,
+    ...(passengerCount === undefined ? {} : { passengerCount }),
   }
 }

@@ -12,6 +12,7 @@ import {
   resolveCommission,
 } from "@/lib/pricing/commission"
 import { findRateCardCandidates, hasAnyRateCardFor, selectRateCard } from "@/lib/rate-cards/resolve"
+import { applyCommissionBonus } from "@/lib/quotes/apply-commission-bonus"
 
 /** One independent suite/room booked on a hotel or train/tour/airline leg — its own suite type,
  * bedroom/bathroom configuration, and (train/tour/airline only) its own passenger split. */
@@ -82,6 +83,9 @@ interface BuildPackageQuoteLineItemsInput {
   fallbackRateTypeId?: string | null
   /** Optional rate-type metadata for stamping code/name into the pricing snapshot. */
   rateTypes?: RateTypeMeta[]
+  /** Flat manual top-up (quotes.commission_bonus) re-folded into the rebuilt Commission line,
+   * so re-pricing an existing quote doesn't silently drop it. */
+  commissionBonus?: number
 }
 
 interface BuildPackageQuoteLineItemsResult {
@@ -97,6 +101,7 @@ export async function buildPackageQuoteLineItems({
   rateTypeId: quoteRateTypeId = null,
   fallbackRateTypeId = null,
   rateTypes = [],
+  commissionBonus = 0,
 }: BuildPackageQuoteLineItemsInput): Promise<BuildPackageQuoteLineItemsResult> {
   const { data: job, error: jobError } = await supabase
     .from("bookings")
@@ -197,7 +202,7 @@ export async function buildPackageQuoteLineItems({
     const groups = variantSnapshotBySuiteTypeId.get(suiteTypeId)
     if (!groups || groups.length === 0) return ""
     const flatValues = groups.flatMap((group) => group.values)
-    return flatValues.length > 0 ? ` — ${flatValues.join(", ")}` : ""
+    return flatValues.join(", ")
   }
 
   // Load display names for the SPECIFIC bedroom/layout/bathroom a unit selected (as opposed to
@@ -243,6 +248,25 @@ export async function buildPackageQuoteLineItems({
       if (name) names.push(name)
     }
     return names
+  }
+
+  /** Same chosen names as specificUnitVariantNames, grouped by label so email tokens can tell
+   * "what was picked" apart from suiteVariants' "everything the suite type offers" list. */
+  function specificUnitVariantGroups(unitSelection: PackageUnitSelection): { label: string; values: string[] }[] {
+    const groups: { label: string; values: string[] }[] = []
+    if (unitSelection.bedroomTypeId) {
+      const name = bedroomTypeNameById.get(unitSelection.bedroomTypeId)
+      if (name) groups.push({ label: "Bedroom Type", values: [name] })
+    }
+    if (unitSelection.bedroomLayoutId) {
+      const name = bedroomLayoutNameById.get(unitSelection.bedroomLayoutId)
+      if (name) groups.push({ label: "Bedroom Layout", values: [name] })
+    }
+    if (unitSelection.bathroomTypeId) {
+      const name = bathroomTypeNameById.get(unitSelection.bathroomTypeId)
+      if (name) groups.push({ label: "Bathroom Type", values: [name] })
+    }
+    return groups
   }
 
   const selectionMap = new Map(selections.map((entry) => [entry.legId, entry]))
@@ -307,11 +331,17 @@ export async function buildPackageQuoteLineItems({
     /** A specific unit's chosen bedroom/layout/bathroom names — overrides the suite type's full
      * list of associated vocab when the unit narrowed its selection to specific values. */
     variantNames?: string[] | null
+    /** Same chosen values as variantNames, grouped by label for pricingSnapshot.selectedVariants —
+     * lets email tokens read "what was picked" instead of falling back to suiteVariants' full list. */
+    selectedVariantGroups?: { label: string; values: string[] }[] | null
     /** Display-only basis shown next to the quantity (e.g. "per person", "per night"). */
     unit?: string | null
     /** When set, this occupant is the sole traveller in the unit: the rate is bumped by this
      * percentage and the bump is called out on the same line instead of its own line item. */
     singleSupplementPct?: number | null
+    /** Passenger type ("Adult"/"Child"/"Infant") — rendered at the very end of the line, after
+     * the suite variant suffix, e.g. "... — Deluxe Twin, Shower - Adult". */
+    passengerLabel?: string | null
   }
 
   function formatSingleSupplementSuffix(pct: number): string {
@@ -327,24 +357,27 @@ export async function buildPackageQuoteLineItems({
     suiteTypeId,
     suiteTypeName,
     variantNames,
+    selectedVariantGroups,
     unit,
     singleSupplementPct,
+    passengerLabel,
   }: AddLineItemOptions) {
     if (qty <= 0) return
 
-    const variantSuffix =
-      variantNames && variantNames.length > 0
-        ? ` — ${variantNames.join(", ")}`
-        : formatVariantSuffix(suiteTypeId ?? null)
+    const variantValues =
+      variantNames && variantNames.length > 0 ? variantNames.join(", ") : formatVariantSuffix(suiteTypeId ?? null)
+    const variantSuffixBody = [suiteTypeName, variantValues].filter((part) => part && part.length > 0).join(" ")
+    const variantSuffix = variantSuffixBody ? ` — ${variantSuffixBody}` : ""
     const suiteVariants = suiteTypeId ? variantSnapshotBySuiteTypeId.get(suiteTypeId) : undefined
     const effectiveUnitPrice = singleSupplementPct
       ? Math.round(unitPrice * (1 + singleSupplementPct / 100) * 100) / 100
       : unitPrice
     const total = Math.round(effectiveUnitPrice * qty * 100) / 100
     const supplementSuffix = singleSupplementPct ? formatSingleSupplementSuffix(singleSupplementPct) : ""
+    const passengerSuffix = passengerLabel ? ` - ${passengerLabel}` : ""
 
     const lineItem: QuoteLineItem = {
-      description: `${description}${variantSuffix}${supplementSuffix}`,
+      description: `${description}${variantSuffix}${supplementSuffix}${passengerSuffix}`,
       supplierDescription: supplierDescription ?? null,
       qty,
       unitPrice: effectiveUnitPrice,
@@ -385,6 +418,7 @@ export async function buildPackageQuoteLineItems({
               ? "rental"
               : null,
         suiteVariants,
+        selectedVariants: selectedVariantGroups && selectedVariantGroups.length > 0 ? selectedVariantGroups : undefined,
         commission: null,
         unit: unit ?? null,
       }
@@ -567,7 +601,7 @@ export async function buildPackageQuoteLineItems({
               : `No rate card for ${where}. Add one under Suppliers → ${leg.supplierName} → rate cards.`,
           )
         }
-        const description = [legLabel, suiteTypeName, routeName].filter(Boolean).join(" - ")
+        const description = [legLabel, routeName].filter(Boolean).join(" - ")
         return { validRateCard, description, suiteTypeName }
       }
 
@@ -593,6 +627,7 @@ export async function buildPackageQuoteLineItems({
             suiteTypeId: unitSelection.suiteTypeId,
             suiteTypeName,
             variantNames: specificUnitVariantNames(unitSelection),
+            selectedVariantGroups: specificUnitVariantGroups(unitSelection),
             unit,
           })
         }
@@ -674,11 +709,6 @@ export async function buildPackageQuoteLineItems({
         for (const [suiteTypeId, groupUnits] of unitsBySuiteType) {
           const { validRateCard, description, suiteTypeName } = resolveUnit(suiteTypeId)
           activeRateCard = validRateCard
-          // A suite type booked as a single room keeps its own specific bedroom/layout/bathroom
-          // naming; multiple rooms of the same suite type collapse to the suite type's generic
-          // variant list, since they price identically regardless of each room's own config.
-          const groupVariantNames =
-            groupUnits.length === 1 ? specificUnitVariantNames(groupUnits[0]) : null
 
           const passengerKinds: {
             key: "adultCount" | "childCount" | "infantCount"
@@ -701,9 +731,11 @@ export async function buildPackageQuoteLineItems({
             // priced on their own line.
             let sharedQty = 0
             let soloQty = 0
+            const contributingUnits: PackageUnitSelection[] = []
             for (const unitSelection of groupUnits) {
               const count = unitSelection[key] ?? 0
               if (count === 0) continue
+              contributingUnits.push(unitSelection)
               const adultCount = unitSelection.adultCount ?? 0
               const childCount = unitSelection.childCount ?? 0
               const infantCount = unitSelection.infantCount ?? 0
@@ -717,25 +749,36 @@ export async function buildPackageQuoteLineItems({
                 sharedQty += count
               }
             }
+            // This passenger kind's whole qty came from one room, so its exact bedroom/bathroom
+            // config is known; travellers of the same kind spread across multiple rooms have no
+            // single config to name, so the suite type's generic option list is shown instead.
+            const kindVariantNames =
+              contributingUnits.length === 1 ? specificUnitVariantNames(contributingUnits[0]) : null
+            const kindSelectedVariantGroups =
+              contributingUnits.length === 1 ? specificUnitVariantGroups(contributingUnits[0]) : null
 
             addLineItem({
-              description: `${description} - ${label}`,
+              description,
+              passengerLabel: label,
               qty: sharedQty,
               unitPrice,
               supplierDescription,
               suiteTypeId,
               suiteTypeName,
-              variantNames: groupVariantNames,
+              variantNames: kindVariantNames,
+              selectedVariantGroups: kindSelectedVariantGroups,
               unit,
             })
             addLineItem({
-              description: `${description} - ${label}`,
+              description,
+              passengerLabel: label,
               qty: soloQty,
               unitPrice,
               supplierDescription,
               suiteTypeId,
               suiteTypeName,
-              variantNames: groupVariantNames,
+              variantNames: kindVariantNames,
+              selectedVariantGroups: kindSelectedVariantGroups,
               unit,
               singleSupplementPct: soloQty > 0 ? packageDetail.singleSupplementPct : null,
             })
@@ -788,13 +831,15 @@ export async function buildPackageQuoteLineItems({
         markupPct: 0,
         singleSupplementPct: null,
         serviceType: null,
-        commission: buildCommissionBreakdown(resolvedCommission, commissionAmount),
+        commission: buildCommissionBreakdown(resolvedCommission, commissionAmount, travellerCount),
         unit: isPerPerson ? "per person" : null,
       },
     })
   }
 
-  return { lineItems }
+  // Re-fold the quote's manual top-up into the freshly rebuilt Commission line. Without this,
+  // any Build Booking re-price would drop it, since every line item is regenerated from scratch.
+  return { lineItems: applyCommissionBonus(lineItems, commissionBonus) }
 }
 
 export function calculateQuoteTotals(lineItems: QuoteLineItem[]) {

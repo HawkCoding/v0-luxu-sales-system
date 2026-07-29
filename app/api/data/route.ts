@@ -347,6 +347,7 @@ export async function GET(req: Request) {
       validityUntilDisplay: formatDisplayDate(q.validity_until),
       subtotal: q.subtotal,
       total: q.total,
+      commissionBonus: Number(q.commission_bonus ?? 0),
       lastSentAt: q.last_sent_at,
       lastSentAtDisplay: formatDisplayDateTime(q.last_sent_at),
       overridePin: q.override_pin,

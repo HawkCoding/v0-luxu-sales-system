@@ -25,6 +25,7 @@ import { useActiveSuppliers, useRateTypes } from "@/lib/use-data"
 import type { BookingTransportRequest, CommissionKind, PackageDetail, QuoteLineItem, SupplierKind } from "@/lib/types"
 import { SUPPLIER_KIND_LABELS } from "@/lib/types"
 import { PresenceAvatars } from "@/components/presence-avatars"
+import { formatCurrency } from "@/lib/utils"
 import { useRecordPresence } from "@/hooks/use-record-presence"
 import { useVersionedSave } from "@/hooks/use-versioned-save"
 import { CommissionControl, type CommissionControlValue } from "@/components/supplier/commission-control"
@@ -632,7 +633,7 @@ export function BuildBookingDialog({
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">
           <Boxes className="mr-2 h-4 w-4" />
-          Edit Booking
+          Edit Quote
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-4xl">
@@ -976,8 +977,8 @@ export function BuildBookingDialog({
                           <div className="text-[11px] text-muted-foreground">{li.pricingSnapshot.unit}</div>
                         ) : null}
                       </td>
-                      <td className="px-3 py-2 text-right text-xs whitespace-nowrap">R {li.unitPrice.toLocaleString()}</td>
-                      <td className="px-3 py-2 text-right text-xs font-medium whitespace-nowrap">R {li.total.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right text-xs whitespace-nowrap">R {formatCurrency(li.unitPrice)}</td>
+                      <td className="px-3 py-2 text-right text-xs font-medium whitespace-nowrap">R {formatCurrency(li.total)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -16,6 +16,7 @@ import { useState } from "react"
 import { toast } from "sonner"
 import { useAuth } from "@/lib/auth-context"
 import { formatDisplayDate } from "@/lib/date-format"
+import { formatCurrency } from "@/lib/utils"
 import { getPipelineStageLabel } from "@/lib/types"
 
 export default function PaymentsPage() {
@@ -158,7 +159,7 @@ export default function PaymentsPage() {
         <div>
           <h1 className="text-3xl font-semibold text-foreground tracking-tight">Payments Received</h1>
           <p className="text-base text-muted-foreground mt-2">
-            {filtered.length} transactions • Net: <span className={total >= 0 ? "text-payment-green" : "text-payment-red"}>R {total.toLocaleString()}</span>
+            {filtered.length} transactions • Net: <span className={total >= 0 ? "text-payment-green" : "text-payment-red"}>R {formatCurrency(total)}</span>
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -266,7 +267,7 @@ export default function PaymentsPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 mb-1">
                         <span className={`text-lg font-bold ${p.amount >= 0 ? "text-payment-green" : "text-payment-red"}`}>
-                          {p.amount >= 0 ? "+" : ""}R {Math.abs(p.amount).toLocaleString()}
+                          {p.amount >= 0 ? "+" : ""}R {formatCurrency(Math.abs(p.amount))}
                         </span>
                         <Badge variant="secondary" className="text-xs">{p.method}</Badge>
                         <Badge variant="outline" className="text-xs">Ref: {p.reference}</Badge>
@@ -284,7 +285,7 @@ export default function PaymentsPage() {
                           </Link>
                           <div className="flex items-center gap-3 text-xs text-muted-foreground">
                             {p.totalQuote > 0 && (
-                              <span>Total Due: R {p.totalQuote.toLocaleString()}</span>
+                              <span>Total Due: R {formatCurrency(p.totalQuote)}</span>
                             )}
                             {p.customerEmail && (
                               <span>• {p.customerEmail}</span>
@@ -344,7 +345,7 @@ export default function PaymentsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium">Payment Amount</p>
-                  <p className="text-2xl font-bold text-payment-green">R {allocatingPayment.amount.toLocaleString()}</p>
+                  <p className="text-2xl font-bold text-payment-green">R {formatCurrency(allocatingPayment.amount)}</p>
                 </div>
                 <div className="text-right">
                   <p className="text-xs text-muted-foreground">Reference</p>
@@ -392,7 +393,7 @@ export default function PaymentsPage() {
                     {j.totalQuote > 0 && (
                       <div className="text-right">
                         <p className="text-xs text-muted-foreground">Total Quote</p>
-                        <p className="text-sm font-semibold text-foreground">R {j.totalQuote.toLocaleString()}</p>
+                        <p className="text-sm font-semibold text-foreground">R {formatCurrency(j.totalQuote)}</p>
                       </div>
                     )}
                   </div>

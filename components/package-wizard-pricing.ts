@@ -16,7 +16,7 @@ export function getSelectedRateCards(
 
 export function formatMoneyAmount(value: number): string {
   return value.toLocaleString(undefined, {
-    minimumFractionDigits: value % 1 === 0 ? 0 : 2,
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })
 }

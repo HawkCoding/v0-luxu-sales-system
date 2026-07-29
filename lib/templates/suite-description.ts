@@ -101,11 +101,16 @@ export function buildSuiteTokens(selections: SuiteSelection[]): SuiteTokens {
 }
 
 /**
- * A variant group only tells us what was *chosen* when it holds exactly one
- * value. The fallback path in build-from-package.ts lists every option the
- * suite type offers, which would otherwise render "Twin, Double bedded …".
+ * selectedVariants holds exactly what was chosen for the unit, so it's read first.
+ * Older quotes built before that field existed only have suiteVariants — the suite
+ * type's full list of offered options — where a group only tells us what was
+ * *chosen* when it happens to hold exactly one value; anything else would render
+ * "Twin, Double bedded …" and is treated as unknown instead.
  */
 function chosenVariant(snapshot: PricingSnapshot, label: string): string | null {
+  const selected = snapshot.selectedVariants?.find((variant) => variant.label === label)
+  if (selected) return clean(selected.values[0]) || null
+
   const group = snapshot.suiteVariants?.find((variant) => variant.label === label)
   if (!group || group.values.length !== 1) return null
   return clean(group.values[0]) || null

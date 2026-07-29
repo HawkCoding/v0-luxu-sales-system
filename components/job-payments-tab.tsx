@@ -16,6 +16,7 @@ import { useRole } from "@/lib/role-context"
 import { useState } from "react"
 import { Plus } from "lucide-react"
 import { formatDisplayDate } from "@/lib/date-format"
+import { formatCurrency } from "@/lib/utils"
 import { toast } from "sonner"
 
 const PAYMENT_ENABLED_STAGES: ReadonlySet<PipelineStage> = new Set([
@@ -89,7 +90,7 @@ export function JobPaymentsTab({ payments, jobId, mutate, stage }: JobPaymentsTa
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-medium text-foreground">
-            Total Received: <span className={totalPaid >= 0 ? "text-payment-green" : "text-payment-red"}>R {totalPaid.toLocaleString()}</span>
+            Total Received: <span className={totalPaid >= 0 ? "text-payment-green" : "text-payment-red"}>R {formatCurrency(totalPaid)}</span>
           </p>
         </div>
         {canRecordPayment && (
@@ -165,7 +166,7 @@ export function JobPaymentsTab({ payments, jobId, mutate, stage }: JobPaymentsTa
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className={`text-sm font-semibold ${p.amount >= 0 ? "text-payment-green" : "text-payment-red"}`}>
-                      {p.amount >= 0 ? "+" : ""}R {p.amount.toLocaleString()}
+                      {p.amount >= 0 ? "+" : ""}R {formatCurrency(p.amount)}
                     </span>
                     <Badge variant="secondary" className="text-[10px]">{p.method}</Badge>
                   </div>
