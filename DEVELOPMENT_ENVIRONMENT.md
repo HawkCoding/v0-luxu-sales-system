@@ -162,6 +162,18 @@ pnpm db:remote:push:prod
 
 Add `-IncludeSeed` only when you intentionally want Supabase CLI to apply `supabase/seed.sql` as part of the push. Do not use this helper to overwrite production business data; it is for schema migrations and intentional seed data only.
 
+## CI Drift Detection & Automated Production Push
+
+`.github/workflows/db-migrations.yml` closes the gap that manual pushing leaves open — dev/prod repeatedly drifted because pushing migrations after a merge relied on someone remembering to run the commands above.
+
+- **Any PR into `dev` or `main`**: a `pr-drift-check` job runs `scripts/check-migration-drift.ps1` against the base branch's current hosted DB (dev or prod respectively) and fails the PR if that branch is already behind. It checks out the PR's base commit, not the PR branch, so it never flags the PR's own not-yet-pushed migrations — only pre-existing drift.
+- **Push to `main`**: a `migrate-prod` job runs `pnpm db:remote:push:prod` automatically (non-interactively) — this only fires from a merged `dev → main` promotion PR, since the pre-push git hook blocks direct pushes to `main`.
+- **Push to `dev` or `main`**: a `push-drift-check` job re-runs the check post-merge (after `migrate-prod` for `main`) as the authoritative confirmation the branch and its hosted DB match.
+- Dev is still pushed manually (`pnpm db:remote:push:dev`) — only prod is automated. Run `pnpm db:check-drift:dev` / `pnpm db:check-drift:prod` locally to reproduce what CI checks.
+- Requires `SUPABASE_DEV_DB_URL` and `SUPABASE_PROD_DB_URL` (or the `_PROJECT_REF`/`_DB_PASSWORD` pair) set as GitHub Actions repo secrets, mirroring `.env.sync.local`.
+
+**Known limitation:** Vercel's production deploy triggers independently off the same `push to main` event, so there's no guarantee the DB push finishes before the new code deploys.
+
 ---
 
 This project uses a development-first workflow:

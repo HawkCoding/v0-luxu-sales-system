@@ -221,11 +221,12 @@ export default function JobDetailPage() {
   })
 
   useEffect(() => {
-    if (!hasLoadError) {
+    const status = (error as { status?: number } | undefined)?.status
+    if (status !== 404) {
       return
     }
     router.replace("/app/bookings")
-  }, [hasLoadError, router])
+  }, [error, router])
 
   useEffect(() => {
     setEditing(
@@ -256,6 +257,25 @@ export default function JobDetailPage() {
     const next = (data?.job as { customerInvoiceNumber?: string | null } | undefined)?.customerInvoiceNumber ?? ""
     setInvoiceNumberDraft(next)
   }, [data?.job])
+
+  if (hasLoadError && (error as { status?: number } | undefined)?.status !== 404) {
+    return (
+      <div className="p-6">
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Could not load booking</AlertTitle>
+          <AlertDescription>
+            {error instanceof Error ? error.message : "Something went wrong loading this booking."} Refresh the page
+            or{" "}
+            <Link href="/app/bookings" className="underline">
+              return to bookings
+            </Link>
+            .
+          </AlertDescription>
+        </Alert>
+      </div>
+    )
+  }
 
   if (isLoading || !data || hasLoadError) {
     return <JobDetailSkeleton />

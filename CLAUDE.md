@@ -105,7 +105,9 @@ Reference files: `lib/supabase/server.ts`, `app/app/layout.tsx`
 - Always check the Supabase `error` field before using `data`
 - Auth in server code: `const { data: { user } } = await supabase.auth.getUser()`
 - Migrations: apply locally with `pnpm db:reset`, regenerate types with `pnpm run db:types`
-- Never apply migrations to remote/hosted Supabase unless explicitly asked
+- Never manually apply migrations to remote/hosted Supabase unless explicitly asked — the one sanctioned exception is the automated `migrate-prod` CI job, which pushes pending migrations to production on every merge to `main` (see `.github/workflows/db-migrations.yml`)
+- Dev stays manual: after merging to `dev`, run `pnpm db:remote:push:dev` yourself
+- CI (`db-migrations.yml`) fails a PR into `dev`/`main` if that branch's existing migrations aren't already applied to its hosted DB — don't stack more migrations on top of a branch CI is flagging as drifted; run `pnpm db:check-drift:dev` / `:prod` locally to reproduce
 - Keep migrations idempotent: use `IF NOT EXISTS` / `DROP IF EXISTS`
 
 Reference files: `lib/supabase/client.ts`, `lib/supabase/server.ts`, `lib/supabase/types.ts`

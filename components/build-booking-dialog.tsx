@@ -751,6 +751,75 @@ export function BuildBookingDialog({
 
             <TripDateSummary detail={packageDetail} states={legStates} />
 
+            {hasAutoFilledServices && (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3">
+                <p className="text-sm">
+                  Some services below were filled in automatically from the enquiry. Review them, then
+                  confirm — or edit any field to accept it individually.
+                </p>
+                <Button type="button" variant="outline" size="sm" onClick={confirmServices} disabled={confirmingServices}>
+                  {confirmingServices ? "Confirming…" : "Confirm services"}
+                </Button>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              {sortedLegs.map((leg) => {
+                const state = legStates.find((candidate) => candidate.legId === leg.id)
+                if (!state) return null
+                return (
+                  <div key={leg.id} className="space-y-2">
+                    {state.kind === "transport" ? (
+                      <TransportLegEditor leg={leg} value={state} onChange={updateLegState} rateTypes={rateTypes} />
+                    ) : (
+                      <SuiteLegEditor
+                        leg={leg}
+                        value={state}
+                        onChange={updateLegState}
+                        expectedTotals={totalsBySupplierId[leg.supplierId] ?? null}
+                        anchorContext={hotelAnchorContext(leg.id)}
+                        rateTypes={rateTypes}
+                      />
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            <div
+              className={`rounded-lg border-2 p-4 ${
+                resolvedCommission ? "border-primary/40 bg-primary/5" : "border-destructive/50 bg-destructive/5"
+              }`}
+            >
+              <div className="mb-2 flex items-center gap-2">
+                <Percent className="h-4 w-4 text-primary" />
+                <h3 className="text-sm font-semibold">Commission</h3>
+                <Badge variant={resolvedCommission ? "secondary" : "destructive"} className="text-[10px]">
+                  {resolvedCommission ? "Set" : "Required"}
+                </Badge>
+              </div>
+              <CommissionControl
+                value={commission}
+                onChange={setCommission}
+                isEditing
+                description="Applied once to the booking's total. Enter 0 if no commission applies."
+              />
+            </div>
+
+            {validationErrors.length > 0 && (
+              <ul className="space-y-1 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {validationErrors.map((error) => (
+                  <li key={error}>{error}</li>
+                ))}
+              </ul>
+            )}
+
+            {buildError && (
+              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {buildError}
+              </p>
+            )}
+
             {mismatchedSplitLegs.length > 0 && bookingCounts && (
               <div className="space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4">
                 <div className="flex items-center gap-2">
@@ -830,75 +899,6 @@ export function BuildBookingDialog({
                   </div>
                 )}
               </div>
-            )}
-
-            {hasAutoFilledServices && (
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3">
-                <p className="text-sm">
-                  Some services below were filled in automatically from the enquiry. Review them, then
-                  confirm — or edit any field to accept it individually.
-                </p>
-                <Button type="button" variant="outline" size="sm" onClick={confirmServices} disabled={confirmingServices}>
-                  {confirmingServices ? "Confirming…" : "Confirm services"}
-                </Button>
-              </div>
-            )}
-
-            <div className="space-y-4">
-              {sortedLegs.map((leg) => {
-                const state = legStates.find((candidate) => candidate.legId === leg.id)
-                if (!state) return null
-                return (
-                  <div key={leg.id} className="space-y-2">
-                    {state.kind === "transport" ? (
-                      <TransportLegEditor leg={leg} value={state} onChange={updateLegState} rateTypes={rateTypes} />
-                    ) : (
-                      <SuiteLegEditor
-                        leg={leg}
-                        value={state}
-                        onChange={updateLegState}
-                        expectedTotals={totalsBySupplierId[leg.supplierId] ?? null}
-                        anchorContext={hotelAnchorContext(leg.id)}
-                        rateTypes={rateTypes}
-                      />
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-
-            <div
-              className={`rounded-lg border-2 p-4 ${
-                resolvedCommission ? "border-primary/40 bg-primary/5" : "border-destructive/50 bg-destructive/5"
-              }`}
-            >
-              <div className="mb-2 flex items-center gap-2">
-                <Percent className="h-4 w-4 text-primary" />
-                <h3 className="text-sm font-semibold">Commission</h3>
-                <Badge variant={resolvedCommission ? "secondary" : "destructive"} className="text-[10px]">
-                  {resolvedCommission ? "Set" : "Required"}
-                </Badge>
-              </div>
-              <CommissionControl
-                value={commission}
-                onChange={setCommission}
-                isEditing
-                description="Applied once to the booking's total. Enter 0 if no commission applies."
-              />
-            </div>
-
-            {validationErrors.length > 0 && (
-              <ul className="space-y-1 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                {validationErrors.map((error) => (
-                  <li key={error}>{error}</li>
-                ))}
-              </ul>
-            )}
-
-            {buildError && (
-              <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                {buildError}
-              </p>
             )}
 
             <DialogFooter>

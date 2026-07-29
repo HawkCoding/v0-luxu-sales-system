@@ -1,0 +1,89 @@
+name: DB Migrations
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
+
+concurrency:
+  group: db-migrations-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # PRs into dev/main: check that the BASE branch (as it stood before this PR)
+  # is already in sync with its hosted DB. Intentionally does not look at the
+  # PR's own new migrations - those are expected to be missing from the
+  # target until someone runs the push step (manual for dev, automatic for
+  # prod via migrate-prod below).
+  pr-drift-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Check migration drift against ${{ github.base_ref }}
+        shell: pwsh
+        env:
+          SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
+          SUPABASE_PROD_DB_URL: ${{ secrets.SUPABASE_PROD_DB_URL }}
+        run: |
+          $target = if ("${{ github.base_ref }}" -eq "main") { "production" } else { "development" }
+          ./scripts/check-migration-drift.ps1 -Target $target
+
+  # push to main: auto-apply any pending migrations to production. Only
+  # fires from a merged dev->main promotion PR, since the pre-push hook
+  # already blocks direct pushes to main.
+  migrate-prod:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Push pending migrations to production
+        shell: pwsh
+        env:
+          SUPABASE_PROD_DB_URL: ${{ secrets.SUPABASE_PROD_DB_URL }}
+          ALLOW_PRODUCTION_DB_PUSH: I_UNDERSTAND_THIS_WRITES_TO_PRODUCTION
+        run: |
+          ./scripts/sync-remote-databases.ps1 -Mode push -Target production -ConfirmProduction
+
+  # push to dev/main (post-merge): authoritative confirmation that the
+  # branch and its hosted DB actually match. Waits on migrate-prod so a
+  # main push reports the post-auto-push state, not the pre-push gap.
+  push-drift-check:
+    if: |
+      github.event_name == 'push' &&
+      always() &&
+      (needs.migrate-prod.result == 'success' || needs.migrate-prod.result == 'skipped')
+    needs: [migrate-prod]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Check migration drift against ${{ github.ref_name }}
+        shell: pwsh
+        env:
+          SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
+          SUPABASE_PROD_DB_URL: ${{ secrets.SUPABASE_PROD_DB_URL }}
+        run: |
+          $target = if ("${{ github.ref_name }}" -eq "main") { "production" } else { "development" }
+          ./scripts/check-migration-drift.ps1 -Target $target
