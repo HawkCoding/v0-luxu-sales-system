@@ -2707,6 +2707,7 @@ export type Database = {
         Row: {
           amount_received: number | null
           booking_id: string
+          commission_bonus: number
           created_at: string
           follow_ups_disabled: boolean
           id: string
@@ -2728,6 +2729,7 @@ export type Database = {
         Insert: {
           amount_received?: number | null
           booking_id: string
+          commission_bonus?: number
           created_at?: string
           follow_ups_disabled?: boolean
           id?: string
@@ -2749,6 +2751,7 @@ export type Database = {
         Update: {
           amount_received?: number | null
           booking_id?: string
+          commission_bonus?: number
           created_at?: string
           follow_ups_disabled?: boolean
           id?: string

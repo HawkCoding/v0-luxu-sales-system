@@ -137,12 +137,12 @@ describe("getPackageCurrencyRanges", () => {
 
 describe("formatRange", () => {
   it("collapses equal min and max to one amount", () => {
-    expect(formatRange({ currency: "ZAR", min: 100, max: 100 })).toBe("ZAR 100")
+    expect(formatRange({ currency: "ZAR", min: 100, max: 100 })).toMatch(/^ZAR 100[,.]00$/)
   })
 
   it("renders both amounts when min is less than max", () => {
     expect(formatRange({ currency: "ZAR", min: 100, max: 125.5 })).toMatch(
-      /^ZAR 100 - ZAR 125[,.]50$/,
+      /^ZAR 100[,.]00 - ZAR 125[,.]50$/,
     )
   })
 })

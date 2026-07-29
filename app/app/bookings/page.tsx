@@ -14,6 +14,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar"
 import { formatDisplayDate } from "@/lib/date-format"
 import { isVisibleInBookings } from "@/lib/booking-visibility"
+import { formatCurrency } from "@/lib/utils"
 
 export default function BookingsPage() {
   const { data, isLoading, error, mutate } = useData(["bookings", "customers", "payments", "quotes"])
@@ -394,10 +395,10 @@ export default function BookingsPage() {
                   </div>
                   <div className="flex flex-col items-end gap-1 flex-shrink-0">
                     <p className="text-sm font-semibold text-foreground">
-                      R {booking.totalPaid.toLocaleString()}
+                      R {formatCurrency(booking.totalPaid)}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      of R {booking.totalQuote.toLocaleString()}
+                      of R {formatCurrency(booking.totalQuote)}
                     </p>
                     <p className="text-xs text-muted-foreground mt-1">
                       Created {formatDisplayDate(booking.createdAt)}

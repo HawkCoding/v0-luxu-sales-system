@@ -330,6 +330,16 @@ function createSupabaseMock(
         }
       }
 
+      if (table === "quotes") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn(async () => ({ data: { commission_bonus: 0 }, error: null })),
+            })),
+          })),
+        }
+      }
+
       if (table !== "bookings") throw new Error(`Unexpected table ${table}`)
       return {
         select: vi.fn(() => ({
@@ -427,8 +437,8 @@ describe("POST /api/packages/[slug]/apply", () => {
     expect(response.status).toBe(200)
     expect(payload.lineItems).toHaveLength(2)
     expect(payload.lineItems.map((item: { description: string }) => item.description)).toEqual([
-      "Blue Train - Deluxe Suite - Cape Town to Pretoria - Adult",
-      "Blue Train - Deluxe Suite - Cape Town to Pretoria - Child",
+      "Blue Train - Cape Town to Pretoria — Deluxe Suite - Adult",
+      "Blue Train - Cape Town to Pretoria — Deluxe Suite - Child",
     ])
   })
 
@@ -448,7 +458,7 @@ describe("POST /api/packages/[slug]/apply", () => {
     expect(response.status).toBe(200)
     expect(payload.lineItems).toContainEqual(
       expect.objectContaining({
-        description: "Harbour Hotel - Sea View Room - Full Board — 1 night",
+        description: "Harbour Hotel - Full Board — 1 night — Sea View Room",
         qty: 1,
         unitPrice: 500,
         total: 500,
@@ -484,7 +494,7 @@ describe("POST /api/packages/[slug]/apply", () => {
     for (const line of hotelLines) {
       expect(line).toEqual(
         expect.objectContaining({
-          description: "Harbour Hotel - Sea View Room - Full Board — 7 nights",
+          description: "Harbour Hotel - Full Board — 7 nights — Sea View Room",
           qty: 7,
           unitPrice: 500,
           total: 3500,
@@ -528,14 +538,14 @@ describe("POST /api/packages/[slug]/apply", () => {
     expect(response.status).toBe(200)
     expect(payload.lineItems).toEqual([
       expect.objectContaining({
-        description: "Blue Train - Deluxe Suite - Cape Town to Pretoria - Adult",
+        description: "Blue Train - Cape Town to Pretoria — Deluxe Suite - Adult",
         supplierDescription: null,
         qty: 2,
         unitPrice: 1000,
         total: 2000,
       }),
       expect.objectContaining({
-        description: "Harbour Hotel - Sea View Room - Full Board — 1 night",
+        description: "Harbour Hotel - Full Board — 1 night — Sea View Room",
         supplierDescription: null,
         qty: 1,
         unitPrice: 500,
@@ -689,7 +699,7 @@ describe("POST /api/packages/[slug]/apply", () => {
     expect(response.status).toBe(200)
     expect(payload.lineItems).toContainEqual(
       expect.objectContaining({
-        description: "Airport Transfers - Sedan - Airport to Hotel",
+        description: "Airport Transfers - Airport to Hotel — Sedan",
         supplierDescription: null,
         qty: 1,
         unitPrice: 300,
@@ -739,7 +749,7 @@ describe("POST /api/packages/[slug]/apply", () => {
     expect(response.status).toBe(200)
     expect(payload.lineItems).toContainEqual(
       expect.objectContaining({
-        description: "Vehicle Rentals - Sedan - Three day vehicle rental - Cape Town Airport -> Cape Town Airport",
+        description: "Vehicle Rentals - Three day vehicle rental - Cape Town Airport -> Cape Town Airport — Sedan",
         supplierDescription: null,
         qty: 2,
         unitPrice: 1200,
@@ -853,7 +863,7 @@ describe("POST /api/packages/[slug]/apply", () => {
     expect(response.status).toBe(200)
     expect(payload.lineItems).toContainEqual(
       expect.objectContaining({
-        description: "Blue Train - Deluxe Suite - Cape Town to Pretoria - Adult — Twin, Ensuite shower",
+        description: "Blue Train - Cape Town to Pretoria — Deluxe Suite Twin, Ensuite shower - Adult",
       }),
     )
   })

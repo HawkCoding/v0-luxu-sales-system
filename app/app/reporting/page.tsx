@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Button } from "@/components/ui/button"
 import { Download } from "lucide-react"
+import { formatCurrency } from "@/lib/utils"
 import type { SalesPerSalespersonRow } from "@/lib/reports/sales-per-salesperson"
 import type { ConversionRateResult } from "@/lib/reports/conversion-rate"
 import type { RevenuePerProductRow } from "@/lib/reports/revenue-per-product"
@@ -54,7 +55,7 @@ const jsonFetcher = (url: string) => fetch(url).then((r) => r.json())
 
 // Whole-rand formatting for management reporting (avoids stray half-cents like "R 590,817.5").
 function formatRand(amount: number): string {
-  return `R ${Math.round(amount).toLocaleString("en-ZA")}`
+  return `R ${formatCurrency(amount)}`
 }
 
 export default function ReportingPage() {

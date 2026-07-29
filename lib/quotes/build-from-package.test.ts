@@ -10,6 +10,9 @@ const JOB_ID = "00000000-0000-4000-8000-00000000aaaa"
 interface MockTables {
   booking?: unknown
   transportRequests?: unknown[]
+  bedroomTypes?: { id: string; name: string }[]
+  bedroomLayouts?: { id: string; name: string }[]
+  bathroomTypes?: { id: string; name: string }[]
 }
 
 /** Minimal chainable supabase mock covering the tables build-from-package touches. */
@@ -41,6 +44,9 @@ function buildSupabase(tables: MockTables = {}) {
       if (table === "booking_transport_requests") {
         return chain({ data: tables.transportRequests ?? [], error: null })
       }
+      if (table === "bedroom_types") return chain({ data: tables.bedroomTypes ?? [], error: null })
+      if (table === "bedroom_layouts") return chain({ data: tables.bedroomLayouts ?? [], error: null })
+      if (table === "bathroom_types") return chain({ data: tables.bathroomTypes ?? [], error: null })
       return chain(emptyResult)
     },
   } as unknown as SupabaseClient<Database>
@@ -444,6 +450,55 @@ describe("buildPackageQuoteLineItems", () => {
     expect(adultLines[0]?.qty).toBe(6)
     expect(adultLines[0]?.unitPrice).toBe(10000)
     expect(adultLines[0]?.total).toBe(60000)
+  })
+
+  it("names each passenger kind's own room config when only one room supplies that kind", async () => {
+    const trainLeg = leg({
+      id: "leg-train",
+      supplierKind: "train_operator",
+      routes: [route("route-cpt", "supplier-leg-train", "CPT-PTA")],
+      suiteTypes: [suiteType("suite-dlx", "supplier-leg-train", "Deluxe")],
+      rateCards: [
+        rateCard({
+          id: "rc-train",
+          routeId: "route-cpt",
+          suiteTypeId: "suite-dlx",
+          pricePerPerson: 10000,
+          childPrice: 5000,
+        }),
+      ],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({
+        bathroomTypes: [
+          { id: "bath-shower", name: "Shower" },
+          { id: "bath-3-4", name: "3/4 bath" },
+        ],
+      }),
+      packageDetail: detail([trainLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-train",
+          selected: true,
+          units: [
+            // Adults are only in the shower suite; the child is only in the 3/4-bath suite.
+            { suiteTypeId: "suite-dlx", bathroomTypeId: "bath-shower", adultCount: 2, childCount: 0, infantCount: 0 },
+            { suiteTypeId: "suite-dlx", bathroomTypeId: "bath-3-4", adultCount: 0, childCount: 1, infantCount: 0 },
+          ],
+        },
+      ],
+    })
+
+    const adultLine = lineItems.find((li) => li.description.includes("Adult"))
+    const childLine = lineItems.find((li) => li.description.includes("Child"))
+    // Each line should name only its own room's bathroom — not both merged together.
+    expect(adultLine?.description).toContain("Shower")
+    expect(adultLine?.description).not.toContain("3/4 bath")
+    expect(childLine?.description).toContain("3/4 bath")
+    expect(childLine?.description).not.toContain("Shower")
   })
 
   it("charges a single supplement for a unit with exactly one adult and no children", async () => {
