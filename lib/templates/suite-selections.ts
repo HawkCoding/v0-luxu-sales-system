@@ -7,17 +7,24 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 
 import type { Database } from "@/lib/supabase/types"
 import type { SuiteSelection } from "@/lib/templates/suite-description"
+import type { SupplierKind } from "@/lib/types"
 
+// The supplier kind rides along on the suite type so buildSuiteTokens can keep
+// the train leg and drop the flight/transfer "suite types" sitting beside it.
 const SELECT =
   "id, units:booking_package_selection_units(sort_order, " +
-  "suite_type:suite_types(name), bedroom_type:bedroom_types(name), " +
+  "suite_type:suite_types(name, supplier:suppliers(kind)), bedroom_type:bedroom_types(name), " +
   "bedroom_layout:bedroom_layouts(name), bathroom_type:bathroom_types(name))"
 
 type NamedRow = { name: string | null } | { name: string | null }[] | null
+type SupplierRow = { kind: SupplierKind | null } | { kind: SupplierKind | null }[] | null
+type SuiteTypeRow =
+  | ({ name: string | null; supplier: SupplierRow } | { name: string | null; supplier: SupplierRow }[])
+  | null
 
 interface UnitJoinRow {
   sort_order: number | null
-  suite_type: NamedRow
+  suite_type: SuiteTypeRow
   bedroom_type: NamedRow
   bedroom_layout: NamedRow
   bathroom_type: NamedRow
@@ -28,9 +35,16 @@ interface SelectionJoinRow {
   units: UnitJoinRow[] | null
 }
 
-function nameOf(value: NamedRow): string | null {
-  const row = Array.isArray(value) ? value[0] : value
-  return row?.name ?? null
+function firstOf<T>(value: T | T[] | null): T | null {
+  return (Array.isArray(value) ? value[0] : value) ?? null
+}
+
+function nameOf(value: NamedRow | SuiteTypeRow): string | null {
+  return firstOf(value)?.name ?? null
+}
+
+function supplierKindOf(value: SuiteTypeRow): SupplierKind | null {
+  return firstOf(firstOf(value)?.supplier ?? null)?.kind ?? null
 }
 
 /**
@@ -62,6 +76,7 @@ export async function loadSuiteSelections(
       bedroomType: nameOf(unit.bedroom_type),
       bedroomLayout: nameOf(unit.bedroom_layout),
       bathroomType: nameOf(unit.bathroom_type),
+      supplierKind: supplierKindOf(unit.suite_type),
     }))
     .filter((selection) => selection.suiteTypeName.length > 0)
 }
