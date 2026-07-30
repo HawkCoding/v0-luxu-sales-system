@@ -2175,7 +2175,7 @@ const RouteEditorRow = memo(function RouteEditorRow({
             <BufferedInput
               value={route.pickupPoint ?? ""}
               onValueChange={(value) => onUpdateRoute(packageIndex, routeIndex, "pickupPoint", value)}
-              placeholder="Airport, hotel, address..."
+              placeholder=""
             />
           </div>
           <div className="min-w-0 space-y-2">
@@ -2183,7 +2183,7 @@ const RouteEditorRow = memo(function RouteEditorRow({
             <BufferedInput
               value={route.dropoffPoint ?? ""}
               onValueChange={(value) => onUpdateRoute(packageIndex, routeIndex, "dropoffPoint", value)}
-              placeholder="Airport, hotel, address..."
+              placeholder=""
             />
           </div>
           {isRental ? (

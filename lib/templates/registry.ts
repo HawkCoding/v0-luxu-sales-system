@@ -79,19 +79,20 @@ const suiteType: TemplateTokenSpec = {
   name: "suiteType",
   description: "Selected suite type, without configuration options",
   kind: "scalar",
-  sample: "Deluxe Suite",
+  sample: "Deluxe Suite and Luxury Suite",
 }
 const suiteConfiguration: TemplateTokenSpec = {
   name: "suiteConfiguration",
-  description: "Selected suite configuration options only (bedding, bathroom, layout)",
+  description:
+    "Configuration options only (bedding, bathroom, layout). Pairs with the wrong suite once a booking has more than one — prefer suiteDescription",
   kind: "scalar",
   sample: "Twin bedded, with a shower",
 }
 const suiteDescription: TemplateTokenSpec = {
   name: "suiteDescription",
-  description: "Selected suite with its configuration options as one line",
+  description: "Every selected suite with its own configuration, as one sentence. Includes the article",
   kind: "scalar",
-  sample: "Twin bedded Deluxe Suite with a shower",
+  sample: "a Twin bedded Deluxe Suite with a shower and a Double bedded Luxury Suite with a full bath",
 }
 const supplierName: TemplateTokenSpec = {
   name: "supplierName",

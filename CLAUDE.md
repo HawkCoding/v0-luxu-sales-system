@@ -56,6 +56,7 @@ Reference files: `package.json`, `app/app/layout.tsx`, `lib/use-data.ts`
 - Claude Code also has discovery shims under `.claude/skills/<skill-name>/SKILL.md`; keep the shared `skills/<skill-name>/SKILL.md` files as the source of truth.
 - Use `skills/grill-me/SKILL.md` when the user asks to stress-test a plan or design, asks to be grilled, or says "grill me".
 - When using `grill-me`, ask exactly one question at a time, provide a recommended answer with each question, and inspect the codebase instead of asking when the answer can be discovered locally.
+- Use `skills/db-sync/SKILL.md` when the user asks whether local, dev, and production databases are in sync, mentions drift or schema differences, or invokes `/db-sync`.
 - Use `skills/ubiquitous-language/SKILL.md` when the user wants to define domain terms, build a glossary, harden terminology, create a ubiquitous language, or mentions "domain model" or "DDD".
 - When using `ubiquitous-language`, extract domain terms from the current conversation, update `UBIQUITOUS_LANGUAGE.md`, flag ambiguities, and propose canonical terms.
 
@@ -107,7 +108,8 @@ Reference files: `lib/supabase/server.ts`, `app/app/layout.tsx`
 - Migrations: apply locally with `pnpm db:reset`, regenerate types with `pnpm run db:types`
 - Never manually apply migrations to remote/hosted Supabase unless explicitly asked — the one sanctioned exception is the automated `migrate-prod` CI job, which pushes pending migrations to production on every merge to `main` (see `.github/workflows/db-migrations.yml`)
 - Dev stays manual: after merging to `dev`, run `pnpm db:remote:push:dev` yourself
-- Drift checking is local before a PR, CI only after a merge: run `pnpm db:check-drift:dev` / `:prod` yourself and don't stack more migrations on a drifted branch; `db-migrations.yml` re-checks on push to `dev`/`main` only, never on `pull_request`
+- Drift checking is local before a PR, CI only after a merge: run `pnpm db:status` (both targets, migration history) or `pnpm db:status:deep` (also a real schema diff, needs local Supabase up) and don't stack more migrations on a drifted branch; `db-migrations.yml` re-checks on push to `dev`/`main` only, never on `pull_request`
+- `pnpm db:status` supersedes the single-target `pnpm db:check-drift:dev` / `:prod`, which still work
 - Keep migrations idempotent: use `IF NOT EXISTS` / `DROP IF EXISTS`
 
 Reference files: `lib/supabase/client.ts`, `lib/supabase/server.ts`, `lib/supabase/types.ts`

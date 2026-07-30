@@ -55,7 +55,7 @@ function bonusOnlySnapshot(bonus: number): PricingSnapshot {
  * Returns a new array; the input is not mutated.
  */
 export function applyCommissionBonus(lineItems: QuoteLineItem[], bonus: number): QuoteLineItem[] {
-  const normalizedBonus = Number.isFinite(bonus) && bonus > 0 ? roundMoney(bonus) : 0
+  const normalizedBonus = Number.isFinite(bonus) ? roundMoney(bonus) : 0
   const index = findCommissionLineIndex(lineItems)
 
   if (index === -1) {
@@ -87,7 +87,7 @@ export function applyCommissionBonus(lineItems: QuoteLineItem[], bonus: number):
     (commission.value > 0 ? Math.round(baseAmount / commission.value) : 1)
 
   const next: QuoteLineItem =
-    normalizedBonus > 0
+    normalizedBonus !== 0
       ? {
           ...line,
           qty: 1,

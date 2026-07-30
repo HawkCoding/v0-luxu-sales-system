@@ -163,7 +163,7 @@ export function TransportLegEditor({ leg, value, onChange, rateTypes = [] }: Tra
                 <Input
                   value={request.pickupPoint}
                   onChange={(event) => updateRequest(request.id, { pickupPoint: event.target.value })}
-                  placeholder="Airport, hotel, address..."
+                  placeholder=""
                 />
               </div>
               <div className="space-y-1.5">
@@ -171,7 +171,7 @@ export function TransportLegEditor({ leg, value, onChange, rateTypes = [] }: Tra
                 <Input
                   value={request.dropoffPoint}
                   onChange={(event) => updateRequest(request.id, { dropoffPoint: event.target.value })}
-                  placeholder="Airport, hotel, address..."
+                  placeholder=""
                 />
               </div>
               <div className="space-y-1.5">

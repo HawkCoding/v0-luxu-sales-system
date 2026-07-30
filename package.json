@@ -45,6 +45,8 @@
     "db:remote:compare": "powershell -ExecutionPolicy Bypass -File ./scripts/sync-remote-databases.ps1 -Mode compare",
     "db:remote:push:dev": "powershell -ExecutionPolicy Bypass -File ./scripts/sync-remote-databases.ps1 -Mode push -Target development",
     "db:remote:push:prod": "powershell -ExecutionPolicy Bypass -File ./scripts/sync-remote-databases.ps1 -Mode push -Target production -ConfirmProduction",
+    "db:status": "powershell -ExecutionPolicy Bypass -File ./scripts/db-status.ps1",
+    "db:status:deep": "powershell -ExecutionPolicy Bypass -File ./scripts/db-status.ps1 -Deep",
     "db:check-drift:dev": "powershell -ExecutionPolicy Bypass -File ./scripts/check-migration-drift.ps1 -Target development",
     "db:check-drift:prod": "powershell -ExecutionPolicy Bypass -File ./scripts/check-migration-drift.ps1 -Target production",
     "db:types": "npx supabase gen types typescript --local > lib/supabase/types.ts",

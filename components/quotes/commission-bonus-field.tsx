@@ -20,29 +20,29 @@ function parseAmount(raw: string): number | null {
   const trimmed = raw.trim()
   if (trimmed === "") return 0
   const parsed = Number(trimmed.replace(/\s/g, "").replace(",", "."))
-  if (!Number.isFinite(parsed) || parsed < 0) return null
+  if (!Number.isFinite(parsed)) return null
   return Math.round(parsed * 100) / 100
 }
 
 /**
- * A flat rand amount the salesperson adds on top of the calculated commission. It is folded
- * into the quote's existing Commission line rather than added as a new one, so the client
- * never sees the split.
+ * A flat rand amount (positive or negative) the salesperson adjusts on top of the calculated
+ * commission. It is folded into the quote's existing Commission line rather than added as a
+ * new one, so the client never sees the split.
  */
 export function CommissionBonusField({ quote, editable, onSaved }: CommissionBonusFieldProps) {
   const saved = quote.commissionBonus ?? 0
-  const [value, setValue] = useState(saved > 0 ? String(saved) : "")
+  const [value, setValue] = useState(saved !== 0 ? String(saved) : "")
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    setValue(saved > 0 ? String(saved) : "")
+    setValue(saved !== 0 ? String(saved) : "")
   }, [saved])
 
   if (!editable) {
-    if (saved <= 0) return null
+    if (saved === 0) return null
     return (
       <div className="flex justify-end gap-8 text-xs">
-        <span className="text-muted-foreground">Additional commission</span>
+        <span className="text-muted-foreground">Rounding</span>
         <span className="text-foreground font-medium w-24 text-right">R {formatCurrency(saved)}</span>
       </div>
     )
@@ -64,11 +64,11 @@ export function CommissionBonusField({ quote, editable, onSaved }: CommissionBon
         body: JSON.stringify({ bonus: parsed, expectedUpdatedAt: quote.updatedAt }),
       })
       const payload = (await response.json().catch(() => ({}))) as { error?: string }
-      if (!response.ok) throw new Error(payload.error ?? "Failed to save additional commission")
+      if (!response.ok) throw new Error(payload.error ?? "Failed to save rounding")
       onSaved()
-      toast.success(parsed > 0 ? "Additional commission added to the commission line." : "Additional commission removed.")
+      toast.success(parsed !== 0 ? "Rounding added to the commission line." : "Rounding removed.")
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to save additional commission")
+      toast.error(error instanceof Error ? error.message : "Failed to save rounding")
     } finally {
       setSaving(false)
     }
@@ -79,7 +79,7 @@ export function CommissionBonusField({ quote, editable, onSaved }: CommissionBon
   return (
     <div className="flex items-center justify-end gap-3 flex-wrap">
       <Label htmlFor={inputId} className="text-xs text-muted-foreground font-normal">
-        Additional commission
+        Rounding
       </Label>
       <div className="flex items-center gap-1.5">
         <span className="text-xs text-muted-foreground">R</span>
