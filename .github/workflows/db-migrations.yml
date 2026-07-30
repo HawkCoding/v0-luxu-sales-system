@@ -21,9 +21,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # Scripts must come from the PR (they may not exist on the base branch
+      # yet), but the migrations compared against the hosted DB must be the
+      # base branch's. So: check out the PR, then rewind only the migrations
+      # directory to the base commit.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+
+      - name: Rewind migrations to ${{ github.base_ref }}
+        run: git checkout ${{ github.event.pull_request.base.sha }} -- supabase/migrations
 
       - uses: supabase/setup-cli@v1
         with:
