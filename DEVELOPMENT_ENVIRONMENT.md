@@ -166,10 +166,10 @@ Add `-IncludeSeed` only when you intentionally want Supabase CLI to apply `supab
 
 `.github/workflows/db-migrations.yml` closes the gap that manual pushing leaves open — dev/prod repeatedly drifted because pushing migrations after a merge relied on someone remembering to run the commands above.
 
-- **Any PR into `dev` or `main`**: a `pr-drift-check` job runs `scripts/check-migration-drift.ps1` against the base branch's current hosted DB (dev or prod respectively) and fails the PR if that branch is already behind. It checks out the PR's base commit, not the PR branch, so it never flags the PR's own not-yet-pushed migrations — only pre-existing drift.
+- **Before opening a PR (local, not CI)**: run `pnpm db:check-drift:dev` / `pnpm db:check-drift:prod` yourself. Pre-merge drift checking is deliberately local — the workflow does not run on `pull_request`, so a drifted base branch never blocks a PR in GitHub.
 - **Push to `main`**: a `migrate-prod` job runs `pnpm db:remote:push:prod` automatically (non-interactively) — this only fires from a merged `dev → main` promotion PR, since the pre-push git hook blocks direct pushes to `main`.
-- **Push to `dev` or `main`**: a `push-drift-check` job re-runs the check post-merge (after `migrate-prod` for `main`) as the authoritative confirmation the branch and its hosted DB match.
-- Dev is still pushed manually (`pnpm db:remote:push:dev`) — only prod is automated. Run `pnpm db:check-drift:dev` / `pnpm db:check-drift:prod` locally to reproduce what CI checks.
+- **Push to `dev` or `main`**: a `push-drift-check` job runs `scripts/check-migration-drift.ps1` post-merge (after `migrate-prod` for `main`) as the authoritative confirmation the branch and its hosted DB match.
+- Dev is still pushed manually (`pnpm db:remote:push:dev`) — only prod is automated.
 - Requires `SUPABASE_DEV_DB_URL` and `SUPABASE_PROD_DB_URL` (or the `_PROJECT_REF`/`_DB_PASSWORD` pair) set as GitHub Actions repo secrets, mirroring `.env.sync.local`.
 
 **Known limitation:** Vercel's production deploy triggers independently off the same `push to main` event, so there's no guarantee the DB push finishes before the new code deploys.

@@ -1,8 +1,6 @@
 name: DB Migrations
 
 on:
-  pull_request:
-    branches: [dev, main]
   push:
     branches: [dev, main]
 
@@ -11,40 +9,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # PRs into dev/main: check that the BASE branch (as it stood before this PR)
-  # is already in sync with its hosted DB. Intentionally does not look at the
-  # PR's own new migrations - those are expected to be missing from the
-  # target until someone runs the push step (manual for dev, automatic for
-  # prod via migrate-prod below).
-  pr-drift-check:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      # Scripts must come from the PR (they may not exist on the base branch
-      # yet), but the migrations compared against the hosted DB must be the
-      # base branch's. So: check out the PR, then rewind only the migrations
-      # directory to the base commit.
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Rewind migrations to ${{ github.base_ref }}
-        run: git checkout ${{ github.event.pull_request.base.sha }} -- supabase/migrations
-
-      - uses: supabase/setup-cli@v1
-        with:
-          version: latest
-
-      - name: Check migration drift against ${{ github.base_ref }}
-        shell: pwsh
-        env:
-          SUPABASE_DEV_DB_URL: ${{ secrets.SUPABASE_DEV_DB_URL }}
-          SUPABASE_PROD_DB_URL: ${{ secrets.SUPABASE_PROD_DB_URL }}
-        run: |
-          $target = if ("${{ github.base_ref }}" -eq "main") { "production" } else { "development" }
-          ./scripts/check-migration-drift.ps1 -Target $target
-
+  # Pre-merge drift checking is deliberately local-only (`pnpm db:check-drift:dev`
+  # / `:prod`) - CI only reacts to merges. See DEVELOPMENT_ENVIRONMENT.md.
+  #
   # push to main: auto-apply any pending migrations to production. Only
   # fires from a merged dev->main promotion PR, since the pre-push hook
   # already blocks direct pushes to main.
