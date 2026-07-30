@@ -483,8 +483,14 @@ export interface ResolvedCommission {
 export interface CommissionBreakdown {
   type: CommissionKind
   value: number
+  /** The calculated commission, always excluding `bonus`, so re-applying a bonus never compounds. */
   amount: number
   source: CommissionSource
+  /** Flat manual top-up folded into the same Commission line (quotes.commission_bonus). */
+  bonus?: number
+  /** Booking headcount used for a per_person calculation, kept so the canonical
+   *  qty/unitPrice shape can be restored when the bonus is cleared. */
+  passengerCount?: number
 }
 
 export interface SupplierRoute {
@@ -622,6 +628,10 @@ export interface PricingSnapshot {
   singleSupplementPct: number | null
   serviceType: "transfer" | "rental" | null
   suiteVariants?: { label: string; values: string[] }[]
+  /** The specific bedroom/layout/bathroom actually chosen for this unit (as opposed to
+   *  suiteVariants, which lists every option the suite type offers). Absent when the
+   *  line covers multiple rooms whose configs weren't confirmed identical. */
+  selectedVariants?: { label: string; values: string[] }[]
   markupAmount?: number | null
   commission?: CommissionBreakdown | null
   /** True when this line was added as an ad-hoc extra (not part of an applied package). */
@@ -969,6 +979,8 @@ export interface Quote {
   lineItems: QuoteLineItem[]
   subtotal: number
   total: number
+  /** Flat manual amount folded into the Commission line. Already included in subtotal/total. */
+  commissionBonus?: number
   lastSentAt?: string
   lastSentAtDisplay?: string
   overridePin?: string

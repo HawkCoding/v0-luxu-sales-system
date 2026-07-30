@@ -129,6 +129,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
       validity_until: quote.validity_until,
       subtotal: quote.subtotal,
       total: quote.total,
+      commission_bonus: quote.commission_bonus,
       quote_number: quoteNumber,
       parent_quote_id: quote.id,
     })

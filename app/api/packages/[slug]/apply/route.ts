@@ -89,6 +89,13 @@ export async function POST(req: Request, { params }: RouteParams) {
   const rateTypes = (rateTypeRows ?? []).map((rt) => ({ id: rt.id, code: rt.code, name: rt.name }))
   const fallbackRateTypeId = (rateTypeRows ?? []).find((rt) => rt.is_default)?.id ?? null
 
+  // Carried through so re-pricing keeps the manual commission top-up the salesperson added.
+  const { data: quoteRow } = await supabase
+    .from("quotes")
+    .select("commission_bonus")
+    .eq("id", parsed.quoteId)
+    .maybeSingle()
+
   try {
     const { lineItems } = await buildPackageQuoteLineItems({
       supabase,
@@ -99,6 +106,7 @@ export async function POST(req: Request, { params }: RouteParams) {
       rateTypeId: parsed.rateTypeId ?? null,
       fallbackRateTypeId,
       rateTypes,
+      commissionBonus: Number(quoteRow?.commission_bonus ?? 0),
     })
 
     const extraLineItems = (

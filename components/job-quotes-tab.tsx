@@ -10,11 +10,14 @@ import type { Quote } from "@/lib/types"
 import { isMissingPricing } from "@/lib/quotes/pricing-engine"
 import { useRole } from "@/lib/role-context"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
+import { formatCurrency } from "@/lib/utils"
 import { QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 import { BuildBookingDialog } from "@/components/build-booking-dialog"
 import { CreateQuoteDialog } from "@/components/create-quote-dialog"
 import { QuotePreviewSendDialog } from "@/components/quote-preview-send-dialog"
 import { ReviseQuoteDialog } from "@/components/revise-quote-dialog"
+import { CommissionBonusField } from "@/components/quotes/commission-bonus-field"
+import { getCommissionBonus } from "@/lib/quotes/apply-commission-bonus"
 import { FileDown, Link2, Loader2, Send, Trash2, X } from "lucide-react"
 
 const EDITABLE_QUOTE_STATUSES = ["draft", "pricing_incomplete", "ready"]
@@ -309,12 +312,20 @@ export function JobQuotesTab({
                   <tbody>
                     {q.lineItems.map((li, i) => {
                       const isExtra = li.pricingSnapshot?.isExtra === true
+                      const lineBonus = getCommissionBonus(li)
                       return (
                       <tr key={i} className="border-b border-border/50 last:border-0">
                         <td className="py-2 text-xs text-foreground break-words">
                           {li.description}
                           {isExtra ? (
                             <Badge variant="outline" className="ml-1.5 text-[9px] align-middle">Extra</Badge>
+                          ) : null}
+                          {lineBonus > 0 ? (
+                            // Internal-only split. The stored description stays plain "Commission"
+                            // so the client-facing invoice line doesn't expose the top-up.
+                            <div className="text-[10px] text-muted-foreground">
+                              R {formatCurrency(li.total - lineBonus)} calculated + R {formatCurrency(lineBonus)} added
+                            </div>
                           ) : null}
                         </td>
                         <td className="py-2 pl-4 text-xs text-right text-muted-foreground">
@@ -328,9 +339,9 @@ export function JobQuotesTab({
                             ? isMissingPricing(li)
                               ? "TBD"
                               : "Included"
-                            : `R ${li.unitPrice.toLocaleString()}`}
+                            : `R ${formatCurrency(li.unitPrice)}`}
                         </td>
-                        <td className="py-2 pl-6 text-xs text-right text-foreground font-medium">R {li.total.toLocaleString()}</td>
+                        <td className="py-2 pl-6 text-xs text-right text-foreground font-medium">R {formatCurrency(li.total)}</td>
                         {canEditLines && (
                           <td className="py-2 text-right">
                             <button
@@ -354,15 +365,20 @@ export function JobQuotesTab({
                   </tbody>
                 </table>
               </div>
+              {(canEditLines || (q.commissionBonus ?? 0) > 0) && (
+                <div className="mt-3">
+                  <CommissionBonusField quote={q} editable={canEditLines} onSaved={mutate} />
+                </div>
+              )}
               <Separator className="my-3" />
               <div className="space-y-1 text-right">
                 <div className="flex justify-end gap-8 text-xs">
                   <span className="text-muted-foreground">Subtotal</span>
-                  <span className="text-foreground font-medium w-24">R {q.subtotal.toLocaleString()}</span>
+                  <span className="text-foreground font-medium w-24">R {formatCurrency(q.subtotal)}</span>
                 </div>
                 <div className="flex justify-end gap-8 text-sm font-semibold">
                   <span className="text-foreground">Total</span>
-                  <span className="text-foreground w-24">R {q.total.toLocaleString()}</span>
+                  <span className="text-foreground w-24">R {formatCurrency(q.total)}</span>
                 </div>
               </div>
               {q.overrideReason && (

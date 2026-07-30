@@ -146,6 +146,15 @@ function createSupabaseMock(bookingExists = true) {
           })),
         }
       }
+      if (table === "quotes") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn(async () => ({ data: { commission_bonus: 0 }, error: null })),
+            })),
+          })),
+        }
+      }
       throw new Error(`Unexpected table ${table}`)
     }),
   }
@@ -222,7 +231,7 @@ describe("POST /api/jobs/[id]/services/apply", () => {
     expect(response.status).toBe(200)
     expect(payload.lineItems).toContainEqual(
       expect.objectContaining({
-        description: "Blue Train - Deluxe Suite - Cape Town to Pretoria - Adult",
+        description: "Blue Train - Cape Town to Pretoria — Deluxe Suite - Adult",
         qty: 2,
         unitPrice: 1000,
         total: 2000,

@@ -25,6 +25,7 @@ import { useActiveSuppliers, useRateTypes } from "@/lib/use-data"
 import type { BookingTransportRequest, CommissionKind, PackageDetail, QuoteLineItem, SupplierKind } from "@/lib/types"
 import { SUPPLIER_KIND_LABELS } from "@/lib/types"
 import { PresenceAvatars } from "@/components/presence-avatars"
+import { formatCurrency } from "@/lib/utils"
 import { useRecordPresence } from "@/hooks/use-record-presence"
 import { useVersionedSave } from "@/hooks/use-versioned-save"
 import { CommissionControl, type CommissionControlValue } from "@/components/supplier/commission-control"
@@ -632,7 +633,7 @@ export function BuildBookingDialog({
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">
           <Boxes className="mr-2 h-4 w-4" />
-          Edit Booking
+          Edit Quote
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-4xl">
@@ -750,6 +751,87 @@ export function BuildBookingDialog({
             </DialogHeader>
 
             <TripDateSummary detail={packageDetail} states={legStates} />
+
+            {mismatchedSplitLegs.length > 0 && bookingCounts && (
+              <div className="space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-4">
+                <div className="flex items-center gap-2">
+                  <TriangleAlert className="h-4 w-4 text-amber-600 dark:text-amber-500" />
+                  <h3 className="text-sm font-semibold">Travellers</h3>
+                </div>
+                <div className="space-y-2">
+                  {mismatchedSplitLegs.map(({ legId, label, supplierId, summed }) => {
+                    const totals = totalsBySupplierId[supplierId]
+                    const delta = totals ? resolveAdultsOnlyDelta(totals, summed) : null
+                    const nextAdults = delta !== null ? bookingCounts.noOfAdults + delta : null
+                    return (
+                      <div key={legId} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                        <p>
+                          {label}: suites hold {summed.adultCount} adults, {summed.childCount} children,{" "}
+                          {summed.infantCount} infants — booking is {totals?.adultCount} adults,{" "}
+                          {totals?.childCount} children, {totals?.infantCount} infants.
+                        </p>
+                        {nextAdults !== null && nextAdults >= 0 ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs"
+                            disabled={syncingTotals}
+                            onClick={() => setBookingAdults(nextAdults)}
+                          >
+                            {syncingTotals ? "Updating…" : `Set booking to ${nextAdults} adults`}
+                          </Button>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">
+                            Children/infants differ — edit ages below.
+                          </p>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setTravellerDraft(bookingCounts)
+                    setEditingTravellers((prev) => !prev)
+                  }}
+                >
+                  {editingTravellers ? "Hide traveller editor" : "Edit travellers"}
+                </Button>
+                {editingTravellers && travellerDraft && (
+                  <div className="rounded-md border bg-background p-3">
+                    <TravellerCountsEditor
+                      value={travellerDraft}
+                      onChange={setTravellerDraft}
+                      buckets={bucketsBySupplierId[mismatchedSplitLegs[0].supplierId]}
+                      disabled={savingTravellers}
+                    />
+                    <div className="mt-3 flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setEditingTravellers(false)}
+                        disabled={savingTravellers}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => saveTravellerCounts(travellerDraft)}
+                        disabled={savingTravellers}
+                      >
+                        {savingTravellers ? "Saving…" : "Save"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {hasAutoFilledServices && (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3">
@@ -976,8 +1058,8 @@ export function BuildBookingDialog({
                           <div className="text-[11px] text-muted-foreground">{li.pricingSnapshot.unit}</div>
                         ) : null}
                       </td>
-                      <td className="px-3 py-2 text-right text-xs whitespace-nowrap">R {li.unitPrice.toLocaleString()}</td>
-                      <td className="px-3 py-2 text-right text-xs font-medium whitespace-nowrap">R {li.total.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right text-xs whitespace-nowrap">R {formatCurrency(li.unitPrice)}</td>
+                      <td className="px-3 py-2 text-right text-xs font-medium whitespace-nowrap">R {formatCurrency(li.total)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -314,6 +314,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     validityUntilDisplay: formatDisplayDate(q.validity_until),
     subtotal: q.subtotal,
     total: q.total,
+    commissionBonus: Number(q.commission_bonus ?? 0),
     updatedAt: q.updated_at,
     updatedAtDisplay: formatDisplayDateTime(q.updated_at),
     lastSentAt: q.last_sent_at ?? undefined,
