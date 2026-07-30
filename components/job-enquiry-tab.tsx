@@ -700,7 +700,7 @@ export function JobEnquiryTab({
                         onChange={(event) =>
                           updateTransportRequest(request.id, "pickupPoint", event.target.value)
                         }
-                        placeholder="Airport, hotel, address..."
+                        placeholder=""
                       />
                     </div>
                     <div className="space-y-1.5">
@@ -710,7 +710,7 @@ export function JobEnquiryTab({
                         onChange={(event) =>
                           updateTransportRequest(request.id, "dropoffPoint", event.target.value)
                         }
-                        placeholder="Airport, hotel, address..."
+                        placeholder=""
                       />
                     </div>
                     <div className="space-y-1.5">
@@ -1202,7 +1202,7 @@ function SupplierScheduleSection({
                     <Input
                       value={schedule.paidWith ?? ""}
                       onChange={(event) => onUpdate(schedule.id, "paidWith", event.target.value || null)}
-                      placeholder="EFT, Card, ..."
+                      placeholder=""
                     />
                   </div>
                   <div className="space-y-1.5">

@@ -160,4 +160,21 @@ describe("applyCommissionBonus", () => {
 
     expect(result[1].total).toBe(10_400.01)
   })
+
+  it("subtracts a negative rounding amount from a percent commission line", () => {
+    const result = applyCommissionBonus([travelLine, percentCommissionLine()], -50)
+
+    expect(result[1].qty).toBe(1)
+    expect(result[1].unitPrice).toBe(9_950)
+    expect(result[1].total).toBe(9_950)
+    expect(getCommissionBonus(result[1])).toBe(-50)
+  })
+
+  it("restores the calculated commission when a negative rounding is cleared", () => {
+    const withRounding = applyCommissionBonus([travelLine, percentCommissionLine()], -50)
+    const cleared = applyCommissionBonus(withRounding, 0)
+
+    expect(cleared[1].total).toBe(10_000)
+    expect(getCommissionBonus(cleared[1])).toBe(0)
+  })
 })

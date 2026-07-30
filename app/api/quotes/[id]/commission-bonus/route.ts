@@ -14,7 +14,7 @@ const EDITABLE_QUOTE_STATUSES = ["draft", "pricing_incomplete", "ready"]
 const MAX_COMMISSION_BONUS = 1_000_000
 
 const patchSchema = z.object({
-  bonus: z.number().nonnegative().max(MAX_COMMISSION_BONUS),
+  bonus: z.number().min(-MAX_COMMISSION_BONUS).max(MAX_COMMISSION_BONUS),
   expectedUpdatedAt: z.string().datetime({ offset: true }).optional(),
 })
 
@@ -55,7 +55,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   if (!EDITABLE_QUOTE_STATUSES.includes(quote.status)) {
     return NextResponse.json(
-      { error: "Additional commission can only be changed on a provisional quote" },
+      { error: "Rounding can only be changed on a provisional quote" },
       { status: 409 },
     )
   }
@@ -114,7 +114,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     .eq("id", id)
 
   if (bonusUpdateError) {
-    return NextResponse.json({ error: "Failed to save additional commission" }, { status: 500 })
+    return NextResponse.json({ error: "Failed to save rounding" }, { status: 500 })
   }
 
   const { error: auditError } = await supabase.from("audit_logs").insert({
