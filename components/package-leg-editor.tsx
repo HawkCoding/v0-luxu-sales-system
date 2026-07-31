@@ -258,7 +258,7 @@ export function PackageLegEditor({
                         <Label>{vocab.originLabel}</Label>
                       </div>
                       <Select
-                        value={route.originLocationId || undefined}
+                        value={route.originLocationId || ""}
                         onValueChange={(value) => updateRoute(route.id, "originLocationId", value)}
                         disabled={route.existing}
                       >
@@ -282,7 +282,7 @@ export function PackageLegEditor({
                         <Label>{vocab.destinationLabel}</Label>
                       </div>
                       <Select
-                        value={route.destinationLocationId || undefined}
+                        value={route.destinationLocationId || ""}
                         onValueChange={(value) =>
                           updateRoute(route.id, "destinationLocationId", value)
                         }
@@ -375,7 +375,7 @@ export function PackageLegEditor({
                     ) : null}
                   </div>
                   <Select
-                    value={rateCard.suiteTypeId || undefined}
+                    value={rateCard.suiteTypeId || ""}
                     onValueChange={(value) => updateRateCard(rateCard.id, "suiteTypeId", value)}
                     disabled={rateCard.existing}
                   >
@@ -399,7 +399,7 @@ export function PackageLegEditor({
                     <Label>{routeLabel}</Label>
                   </div>
                   <Select
-                    value={rateCard.routeId || undefined}
+                    value={rateCard.routeId || ""}
                     onValueChange={(value) => updateRateCard(rateCard.id, "routeId", value)}
                     disabled={rateCard.existing}
                   >

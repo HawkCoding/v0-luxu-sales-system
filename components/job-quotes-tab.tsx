@@ -18,7 +18,7 @@ import { QuotePreviewSendDialog } from "@/components/quote-preview-send-dialog"
 import { ReviseQuoteDialog } from "@/components/revise-quote-dialog"
 import { CommissionBonusField } from "@/components/quotes/commission-bonus-field"
 import { getCommissionBonus } from "@/lib/quotes/apply-commission-bonus"
-import { FileDown, Link2, Loader2, Send, Trash2, X } from "lucide-react"
+import { FileDown, Link2, Loader2, Mail, Trash2, X } from "lucide-react"
 
 const EDITABLE_QUOTE_STATUSES = ["draft", "pricing_incomplete", "ready"]
 
@@ -184,8 +184,8 @@ export function JobQuotesTab({
             title={latestSendableQuote ? undefined : "Create a quote first"}
             onClick={() => setPreviewSendOpen(true)}
           >
-            <Send className="w-3.5 h-3.5 mr-1.5" />
-            Send Quote
+            <Mail className="w-3.5 h-3.5 mr-1.5" />
+            Preview & Send
           </Button>
         </div>
       )}
@@ -220,13 +220,6 @@ export function JobQuotesTab({
                   )}
                   {can("edit:quotes") && (
                     <>
-                      <QuotePreviewSendDialog
-                        quote={q}
-                        bookingNumber={bookingNumber}
-                        customerName={customerName}
-                        emailImportNeedsReview={emailImportNeedsReview}
-                        onSent={mutate}
-                      />
                       {(q.status === "sent" || q.status === "accepted" || q.status === "expired") && (
                         <ReviseQuoteDialog
                           quoteId={q.id}

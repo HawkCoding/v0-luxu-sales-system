@@ -2236,7 +2236,7 @@ const RouteEditorRow = memo(function RouteEditorRow({
           <div className="min-w-0 space-y-1.5">
             <Label>{vocabulary.originLabel}</Label>
             <Select
-              value={route.originLocationId || undefined}
+              value={route.originLocationId || ""}
               onValueChange={(value) =>
                 onUpdateRoute(packageIndex, routeIndex, "originLocationId", value)
               }
@@ -2256,7 +2256,7 @@ const RouteEditorRow = memo(function RouteEditorRow({
           <div className="min-w-0 space-y-1.5">
             <Label>{vocabulary.destinationLabel}</Label>
             <Select
-              value={route.destinationLocationId || undefined}
+              value={route.destinationLocationId || ""}
               onValueChange={(value) =>
                 onUpdateRoute(packageIndex, routeIndex, "destinationLocationId", value)
               }

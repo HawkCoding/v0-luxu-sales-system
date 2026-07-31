@@ -7,7 +7,7 @@ import { loadPackageDetail } from "../helpers"
 
 const commissionOverrideSchema = z
   .object({
-    type: z.enum(["percent", "per_person"]),
+    type: z.enum(["percent", "per_person", "fixed"]),
     value: z.number().finite().nonnegative(),
   })
   .nullable()

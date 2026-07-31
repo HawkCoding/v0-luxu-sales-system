@@ -59,8 +59,8 @@ async function sendViaMailpit(
   params: SmtpSendParams,
   fromAddress: string,
 ): Promise<SmtpSendResult> {
-  const host = process.env.MAILPIT_SMTP_HOST ?? "127.0.0.1"
-  const port = Number(process.env.MAILPIT_SMTP_PORT ?? 1025)
+  const host = process.env.MAILPIT_SMTP_HOST?.trim() || "127.0.0.1"
+  const port = Number(process.env.MAILPIT_SMTP_PORT?.trim() || 1025)
 
   const transporter = nodemailer.createTransport({ host, port, secure: false })
 

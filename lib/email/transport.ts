@@ -27,6 +27,31 @@ export interface MailpitSmtpConfig {
   port: number
 }
 
+function isProductionRuntime(): boolean {
+  return process.env.NODE_ENV === "production"
+}
+
+/** True when an explicit Mailpit/SMTP catcher host was configured, rather than the dev default. */
+function hasExplicitMailpitTarget(): boolean {
+  return Boolean(process.env.MAILPIT_SMTP_URL?.trim() || process.env.MAILPIT_SMTP_HOST?.trim())
+}
+
+/**
+ * True when a send that has no salesperson SMTP credential cannot go anywhere:
+ * production, no Resend key, and no explicitly configured mail catcher. Callers
+ * use this to fail fast with an actionable message before doing expensive work.
+ */
+export function isFallbackSendingUnavailable(): boolean {
+  return (
+    isProductionRuntime() &&
+    !hasExplicitMailpitTarget() &&
+    !process.env.RESEND_API_KEY?.trim()
+  )
+}
+
+export const EMAIL_NOT_CONFIGURED_ERROR =
+  "Email is not configured for this environment: no salesperson SMTP credential resolved and RESEND_API_KEY is not set."
+
 export function resolveMailpitSmtpConfig(): MailpitSmtpConfig {
   const explicitUrl = process.env.MAILPIT_SMTP_URL?.trim()
   if (explicitUrl) {
@@ -194,6 +219,19 @@ export async function sendEmail(options: SendEmailOptions): Promise<SendEmailRes
 
   const apiKey = process.env.RESEND_API_KEY?.trim()
   if (apiKey) return sendWithResend({ ...options, to: recipients }, apiKey)
+
+  // The Mailpit fallback exists for local development only. In production it
+  // would silently dial 127.0.0.1:1025 and surface as ECONNREFUSED, hiding the
+  // real problem (no sending mailbox configured).
+  if (isProductionRuntime() && !hasExplicitMailpitTarget()) {
+    console.error("[email] refusing to send:", EMAIL_NOT_CONFIGURED_ERROR)
+    return {
+      success: false,
+      provider: "mailpit",
+      providerMessageId: null,
+      error: EMAIL_NOT_CONFIGURED_ERROR,
+    }
+  }
 
   return sendWithMailpit({ ...options, to: recipients })
 }

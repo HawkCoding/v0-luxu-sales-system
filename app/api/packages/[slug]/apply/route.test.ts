@@ -458,7 +458,7 @@ describe("POST /api/packages/[slug]/apply", () => {
     expect(response.status).toBe(200)
     expect(payload.lineItems).toContainEqual(
       expect.objectContaining({
-        description: "Harbour Hotel - Full Board — 1 night — Sea View Room",
+        description: "Harbour Hotel - Full Board — Sea View Room",
         qty: 1,
         unitPrice: 500,
         total: 500,
@@ -494,7 +494,7 @@ describe("POST /api/packages/[slug]/apply", () => {
     for (const line of hotelLines) {
       expect(line).toEqual(
         expect.objectContaining({
-          description: "Harbour Hotel - Full Board — 7 nights — Sea View Room",
+          description: "Harbour Hotel - Full Board — Sea View Room",
           qty: 7,
           unitPrice: 500,
           total: 3500,
@@ -545,7 +545,7 @@ describe("POST /api/packages/[slug]/apply", () => {
         total: 2000,
       }),
       expect.objectContaining({
-        description: "Harbour Hotel - Full Board — 1 night — Sea View Room",
+        description: "Harbour Hotel - Full Board — Sea View Room",
         supplierDescription: null,
         qty: 1,
         unitPrice: 500,
@@ -699,7 +699,7 @@ describe("POST /api/packages/[slug]/apply", () => {
     expect(response.status).toBe(200)
     expect(payload.lineItems).toContainEqual(
       expect.objectContaining({
-        description: "Airport Transfers - Airport to Hotel — Sedan",
+        description: "Airport Transfers - Airport to Hotel",
         supplierDescription: null,
         qty: 1,
         unitPrice: 300,

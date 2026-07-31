@@ -49,6 +49,17 @@ function percentCommissionLine(amount = 10_000): QuoteLineItem {
   }
 }
 
+function fixedCommissionLine(amount = 5_000): QuoteLineItem {
+  return {
+    description: "Commission",
+    supplierDescription: null,
+    qty: 1,
+    unitPrice: amount,
+    total: amount,
+    pricingSnapshot: snapshot({ type: "fixed", value: amount, amount, source: "line" }),
+  }
+}
+
 function perPersonCommissionLine(value = 1_000, pax = 4): QuoteLineItem {
   return {
     description: "Commission",
@@ -103,6 +114,24 @@ describe("applyCommissionBonus", () => {
     expect(cleared[1].unitPrice).toBe(10_000)
     expect(cleared[1].total).toBe(10_000)
     expect(getCommissionBonus(cleared[1])).toBe(0)
+  })
+
+  it("adds a flat bonus to a fixed commission line, staying qty 1", () => {
+    const result = applyCommissionBonus([travelLine, fixedCommissionLine()], 400)
+
+    expect(result[1].qty).toBe(1)
+    expect(result[1].unitPrice).toBe(5_400)
+    expect(result[1].total).toBe(5_400)
+  })
+
+  it("restores the flat fixed commission when the bonus is cleared", () => {
+    const withBonus = applyCommissionBonus([travelLine, fixedCommissionLine()], 400)
+    const cleared = applyCommissionBonus(withBonus, 0)
+
+    expect(cleared[1].qty).toBe(1)
+    expect(cleared[1].unitPrice).toBe(5_000)
+    expect(cleared[1].total).toBe(5_000)
+    expect(cleared[1].pricingSnapshot?.unit).toBeNull()
   })
 
   it("restores per-person qty and unit label when the bonus is cleared", () => {

@@ -245,7 +245,7 @@ export function NewSupplierQuickDialog({
           {!needsLocations ? (
             <div className="space-y-1.5">
               <Label>Location (optional)</Label>
-              <Select value={locationId || undefined} onValueChange={setLocationId}>
+              <Select value={locationId || ""} onValueChange={setLocationId}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select location" />
                 </SelectTrigger>
@@ -284,7 +284,7 @@ export function NewSupplierQuickDialog({
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1.5">
                 <Label>Origin</Label>
-                <Select value={originLocationId || undefined} onValueChange={setOriginLocationId}>
+                <Select value={originLocationId || ""} onValueChange={setOriginLocationId}>
                   <SelectTrigger>
                     <SelectValue placeholder="Origin" />
                   </SelectTrigger>
@@ -299,7 +299,7 @@ export function NewSupplierQuickDialog({
               </div>
               <div className="space-y-1.5">
                 <Label>Destination</Label>
-                <Select value={destinationLocationId || undefined} onValueChange={setDestinationLocationId}>
+                <Select value={destinationLocationId || ""} onValueChange={setDestinationLocationId}>
                   <SelectTrigger>
                     <SelectValue placeholder="Destination" />
                   </SelectTrigger>

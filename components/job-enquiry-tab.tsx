@@ -297,13 +297,6 @@ export function JobEnquiryTab({
   }
 
   const saveTransportRequests = async () => {
-    const incompleteRequest = transportRequests.find(
-      (request) => !request.pickupPoint.trim() || !request.dropoffPoint.trim(),
-    )
-    if (incompleteRequest) {
-      toast.error("Complete pickup and drop-off points before saving transport requests.")
-      return
-    }
     const incompleteRental = transportRequests.find(
       (request) => request.serviceType === "rental" && !request.rentalDetails?.returnAt,
     )
@@ -988,9 +981,11 @@ function TransportRequestSummary({ request, index, onEdit, onRemove }: Transport
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="secondary">{serviceLabel}</Badge>
-            <p className="text-sm font-medium">
-              {request.pickupPoint} to {request.dropoffPoint}
-            </p>
+            {request.pickupPoint.trim() && request.dropoffPoint.trim() ? (
+              <p className="text-sm font-medium">
+                {request.pickupPoint} to {request.dropoffPoint}
+              </p>
+            ) : null}
           </div>
           <div className="grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
             <Field label={pickupLabel} value={request.pickupPoint} />

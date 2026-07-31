@@ -55,7 +55,7 @@ import {
   MAX_SESSION_TIMEOUT_MINUTES,
   MIN_SESSION_TIMEOUT_MINUTES,
 } from "@/lib/session-timeout"
-import type { Role } from "@/lib/types"
+import type { CommissionKind, Role } from "@/lib/types"
 import { APP_VERSION } from "@/lib/version"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
@@ -1210,7 +1210,7 @@ function DepositSettingsCard({ canEdit }: { canEdit: boolean }) {
 }
 
 function DefaultCommissionSettingsCard({ canEdit }: { canEdit: boolean }) {
-  const [commissionType, setCommissionType] = useState<"percent" | "per_person">("percent")
+  const [commissionType, setCommissionType] = useState<CommissionKind>("percent")
   const [commissionValue, setCommissionValue] = useState("0")
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -1220,7 +1220,7 @@ function DefaultCommissionSettingsCard({ canEdit }: { canEdit: boolean }) {
 
     fetch("/api/settings/commission")
       .then((response) => response.json())
-      .then((data: { defaultCommission?: { type: "percent" | "per_person"; value: number } }) => {
+      .then((data: { defaultCommission?: { type: CommissionKind; value: number } }) => {
         if (cancelled || !data.defaultCommission) return
         setCommissionType(data.defaultCommission.type)
         setCommissionValue(String(data.defaultCommission.value))
@@ -1257,7 +1257,7 @@ function DefaultCommissionSettingsCard({ canEdit }: { canEdit: boolean }) {
       })
       if (!res.ok) throw new Error()
 
-      const data = (await res.json()) as { defaultCommission: { type: "percent" | "per_person"; value: number } }
+      const data = (await res.json()) as { defaultCommission: { type: CommissionKind; value: number } }
       setCommissionType(data.defaultCommission.type)
       setCommissionValue(String(data.defaultCommission.value))
       toast.success("Default commission saved")
@@ -1285,7 +1285,7 @@ function DefaultCommissionSettingsCard({ canEdit }: { canEdit: boolean }) {
           <div className="flex gap-2">
             <Select
               value={commissionType}
-              onValueChange={(value) => setCommissionType(value as "percent" | "per_person")}
+              onValueChange={(value) => setCommissionType(value as CommissionKind)}
               disabled={loading || !canEdit}
             >
               <SelectTrigger id="default-commission-type" className="w-40" aria-label="Commission type">
@@ -1294,6 +1294,7 @@ function DefaultCommissionSettingsCard({ canEdit }: { canEdit: boolean }) {
               <SelectContent>
                 <SelectItem value="percent">% Markup</SelectItem>
                 <SelectItem value="per_person">Per Person</SelectItem>
+                <SelectItem value="fixed">Fixed Total</SelectItem>
               </SelectContent>
             </Select>
             <div className="relative flex-1">
@@ -1302,7 +1303,7 @@ function DefaultCommissionSettingsCard({ canEdit }: { canEdit: boolean }) {
                 type="number"
                 min={0}
                 max={maxValue}
-                step={commissionType === "percent" ? 0.01 : 1}
+                step={commissionType === "per_person" ? 1 : 0.01}
                 inputMode="decimal"
                 value={commissionValue}
                 onChange={(event) => setCommissionValue(event.target.value)}
@@ -1312,7 +1313,7 @@ function DefaultCommissionSettingsCard({ canEdit }: { canEdit: boolean }) {
                 className="pr-14"
               />
               <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-muted-foreground">
-                {commissionType === "percent" ? "%" : "/ pax"}
+                {commissionType === "percent" ? "%" : commissionType === "fixed" ? "total" : "/ pax"}
               </span>
             </div>
             {canEdit && (

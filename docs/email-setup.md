@@ -1,6 +1,28 @@
 # Email Setup
 
-Luxus Sales System sends customer-facing correspondence through Resend in production. Before enabling live sending, verify the customer's sending domain and configure the production environment variables.
+Luxus Sales System sends customer-facing correspondence from the assigned salesperson's own mailbox over cPanel SMTP. Resend is an optional alternative provider.
+
+## Provider Selection
+
+`sendEmail` (`lib/email/transport.ts`) picks a transport in this order:
+
+1. **Per-salesperson SMTP** — the booking's `assigned_salesperson_id` has a row in `salesperson_credentials`. This is the production path.
+2. **Resend** — used when `RESEND_API_KEY` is set and no salesperson credential resolved.
+3. **Mailpit** — local development only.
+
+There is **no office-wide SMTP fallback**. In production, when neither (1) nor (2) applies, the send is refused with a clear error rather than dialling the local Mailpit default — previously this surfaced as `connect ECONNREFUSED 127.0.0.1:1025`. `/api/correspondence` catches this before rendering any PDF and returns `503` naming the gap (no salesperson assigned, or no credentials for that salesperson).
+
+Settings → System info reports the resolved provider (`Per-salesperson SMTP` / `Resend` / `Mailpit (local SMTP)` / `Not configured`) — check it first when production mail stops.
+
+Production checklist for the SMTP path:
+
+- a `salesperson_credentials` row per sending salesperson (`smtp_host`, `smtp_port`, `smtp_encryption`, encrypted password)
+- `EMAIL_CREDENTIAL_ENCRYPTION_KEY` set in the production environment
+- every booking that sends correspondence has `assigned_salesperson_id` populated
+
+## Resend (optional)
+
+Before enabling live sending through Resend, verify the customer's sending domain and configure the production environment variables.
 
 ## Domain Verification Checklist
 
@@ -12,7 +34,7 @@ Luxus Sales System sends customer-facing correspondence through Resend in produc
 
 ## Local Development
 
-When `RESEND_API_KEY` is not set, the app delivers mail to a local [Mailpit](https://github.com/axllent/mailpit) instance over SMTP. Use Mailpit to inspect correspondence without sending live email.
+Outside production, when no salesperson credential and no `RESEND_API_KEY` are available, the app delivers mail to a local [Mailpit](https://github.com/axllent/mailpit) instance over SMTP. Use Mailpit to inspect correspondence without sending live email. Setting `MAILPIT_SMTP_HOST`/`MAILPIT_SMTP_URL` explicitly also re-enables this path in production, for staging environments that want a catcher.
 
 Mailpit exposes two endpoints, and they are configured separately:
 

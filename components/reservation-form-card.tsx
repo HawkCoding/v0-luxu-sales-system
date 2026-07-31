@@ -13,7 +13,7 @@ import type { PipelineStage } from "@/lib/types"
 interface ReservationFormCardProps {
   jobId: string
   reservationFormReceivedAt: string | null
-  mutate: () => void
+  mutate: () => void | Promise<unknown>
   onMarkedReceived?: () => void
   stage: PipelineStage
 }
@@ -96,7 +96,11 @@ export function ReservationFormCard({
   const handleConfirmedReceived = async () => {
     try {
       await persistReceived(true)
-      mutate()
+      // Await the revalidation before opening the follow-up prompt: this runs
+      // from the optimistic-send timer, and mounting a modal while the job page
+      // re-renders (the stage just moved to "accepted") can leave the dialog
+      // with pointer-events: none — a visible but unclickable popup.
+      await mutate()
       onMarkedReceived?.()
     } catch {
       toast.error("Could not update the reservation form status")

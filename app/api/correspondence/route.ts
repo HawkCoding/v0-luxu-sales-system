@@ -4,8 +4,8 @@ import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDateLong, formatDisplayDateTime } from "@/lib/date-format"
 import { getEmailFromAddress } from "@/lib/email/from"
-import { resolveSalespersonSender } from "@/lib/email/resolve-sender"
-import { sendEmail } from "@/lib/email/transport"
+import { resolveSalespersonSender, type ResolvedSenderReason } from "@/lib/email/resolve-sender"
+import { isFallbackSendingUnavailable, sendEmail } from "@/lib/email/transport"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { applyTransition } from "@/lib/pipeline/apply-transition"
 import { loadLibraryAttachments } from "@/lib/attachments/email-attachment-library"
@@ -88,6 +88,17 @@ function correspondenceSentAuditAction(kind: string | null | undefined, moveStag
   return null
 }
 
+function unconfiguredSenderMessage(reason: ResolvedSenderReason): string {
+  switch (reason) {
+    case "no-salesperson":
+      return "This booking has no assigned salesperson, so there is no mailbox to send from. Assign a salesperson, then resend."
+    case "lookup-failed":
+      return "The sending mailbox could not be resolved. Contact an administrator."
+    default:
+      return "No email account is configured for this booking's salesperson. Add their SMTP credentials in Settings, then resend."
+  }
+}
+
 function isVoucherSend(kind: string | null | undefined, moveStage: PipelineStage | undefined): boolean {
   return kind?.toLowerCase() === "voucher" || moveStage === "voucher_sent"
 }
@@ -166,6 +177,13 @@ export async function POST(req: Request) {
   // Send through the assigned salesperson's mailbox when configured;
   // fall back to the office-wide From address.
   const sender = await resolveSalespersonSender(supabase, booking.assigned_salesperson_id)
+
+  // Nothing can deliver this email — say why now, before rendering a PDF and
+  // failing on a socket error deep inside the transport.
+  if (!sender.salespersonCredentialId && isFallbackSendingUnavailable()) {
+    return jsonError(unconfiguredSenderMessage(sender.reason), 503)
+  }
+
   const from = sender.fromAddress ?? (await getEmailFromAddress(supabase))
   const subject = parsed.data.subject.trim()
   const bodyHtml = parsed.data.bodyHtml?.trim() || null

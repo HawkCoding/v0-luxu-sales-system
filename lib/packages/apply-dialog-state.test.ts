@@ -599,17 +599,17 @@ describe("validateConfigureState", () => {
     expect(validateConfigureState(pkg, states, { totalsBySupplierId: totals })).toEqual([])
   })
 
-  it("flags missing route, unit type, transport fields, and passenger sum mismatches", () => {
+  it("flags missing route, unit type, and passenger sum mismatches, but pickup/drop-off is optional", () => {
     const states = buildDefaultLegStates(pkg, { tripStartDate: null })
     suiteState(states, "leg-hotel").selected = true
     const transfer = transportState(states, "leg-transfer")
     transfer.selected = true
-    // Route quick-fill seeds pickup/drop-off; blank them to test the missing-field validation itself.
+    // Route quick-fill seeds pickup/drop-off; blank them to confirm they're no longer required.
     transfer.requests[0] = { ...transfer.requests[0], pickupPoint: "", dropoffPoint: "" }
     const errors = validateConfigureState(pkg, states, { totalsBySupplierId: totals })
     expect(errors.some((e) => e.includes("meal plan"))).toBe(true) // hotel has 2 routes, none chosen
     expect(errors.some((e) => e.includes("needs a type"))).toBe(true)
-    expect(errors.some((e) => e.includes("pickup point"))).toBe(true)
+    expect(errors.some((e) => e.includes("pickup point"))).toBe(false)
     expect(errors.some((e) => e.includes("vehicle category"))).toBe(true)
     expect(errors.some((e) => e.includes("suites hold") && e.includes("but the booking is for"))).toBe(true) // split defaulted to 0s
   })

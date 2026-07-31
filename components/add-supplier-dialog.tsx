@@ -239,7 +239,7 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
               Category <span className="text-destructive">*</span>
             </Label>
             <Select
-              value={form.kind || undefined}
+              value={form.kind || ""}
               onValueChange={(value: SupplierKind) =>
                 setForm((current) => ({ ...current, kind: value }))
               }

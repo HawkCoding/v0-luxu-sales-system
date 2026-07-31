@@ -16,6 +16,10 @@ describe("normalizeCommissionValue", () => {
     expect(normalizeCommissionValue("per_person", 2500)).toBe(2500)
   })
 
+  it("allows a fixed value above 100", () => {
+    expect(normalizeCommissionValue("fixed", 5000)).toBe(5000)
+  })
+
   it("floors negatives at zero and rounds to cents", () => {
     expect(normalizeCommissionValue("percent", -5)).toBe(0)
     expect(normalizeCommissionValue("percent", 12.345)).toBe(12.35)
@@ -29,6 +33,10 @@ describe("normalizeCommissionValue", () => {
 describe("parseDefaultCommission", () => {
   it("reads a stored pair", () => {
     expect(parseDefaultCommission("per_person", "750")).toEqual({ type: "per_person", value: 750 })
+  })
+
+  it("reads a stored fixed pair", () => {
+    expect(parseDefaultCommission("fixed", "5000")).toEqual({ type: "fixed", value: 5000 })
   })
 
   it("treats an unknown type as percent", () => {

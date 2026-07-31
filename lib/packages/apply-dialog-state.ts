@@ -1,5 +1,6 @@
 import type {
   BookingTransportRequest,
+  CommissionKind,
   HotelDateAnchor,
   PackageDetail,
   PackageLeg,
@@ -511,7 +512,7 @@ export function toTransportRequestsPut(
 }
 
 export interface ApplyCommissionOverride {
-  type: "percent" | "per_person"
+  type: CommissionKind
   value: number
 }
 
@@ -638,8 +639,6 @@ export function validateConfigureState(
       }
       state.requests.forEach((request, index) => {
         const label = state.requests.length > 1 ? `${legLabel} #${index + 1}` : legLabel
-        if (!request.pickupPoint.trim()) errors.push(`${label}: pickup point is required`)
-        if (!request.dropoffPoint.trim()) errors.push(`${label}: drop-off point is required`)
         if (request.serviceType === "rental" && !request.rentalDetails?.returnAt) {
           errors.push(`${label}: return date/time is required`)
         }

@@ -342,11 +342,17 @@ export async function buildPackageQuoteLineItems({
     /** Passenger type ("Adult"/"Child"/"Infant") — rendered at the very end of the line, after
      * the suite variant suffix, e.g. "... — Deluxe Twin, Shower - Adult". */
     passengerLabel?: string | null
+    /** Transfers/rentals only: drop the suite/vehicle-type suffix entirely — the client-facing
+     * description is just the leg's own label, not the internal vehicle category. */
+    hideVariantSuffix?: boolean
+    /** Hotels only: show the suite type name alone, never the selected/possible bedroom, layout,
+     * or bathroom config — those stay internal (pricingSnapshot) rather than client-facing. */
+    hideRoomConfig?: boolean
   }
 
   function formatSingleSupplementSuffix(pct: number): string {
     const trimmed = Number.isInteger(pct) ? pct.toString() : pct.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")
-    return ` (+${trimmed}% Single)`
+    return ` (${trimmed}% single supplement included)`
   }
 
   function addLineItem({
@@ -361,12 +367,19 @@ export async function buildPackageQuoteLineItems({
     unit,
     singleSupplementPct,
     passengerLabel,
+    hideVariantSuffix,
+    hideRoomConfig,
   }: AddLineItemOptions) {
     if (qty <= 0) return
 
-    const variantValues =
-      variantNames && variantNames.length > 0 ? variantNames.join(", ") : formatVariantSuffix(suiteTypeId ?? null)
-    const variantSuffixBody = [suiteTypeName, variantValues].filter((part) => part && part.length > 0).join(" ")
+    const variantValues = hideRoomConfig
+      ? ""
+      : variantNames && variantNames.length > 0
+        ? variantNames.join(", ")
+        : formatVariantSuffix(suiteTypeId ?? null)
+    const variantSuffixBody = hideVariantSuffix
+      ? ""
+      : [suiteTypeName, variantValues].filter((part) => part && part.length > 0).join(" ")
     const variantSuffix = variantSuffixBody ? ` — ${variantSuffixBody}` : ""
     const suiteVariants = suiteTypeId ? variantSnapshotBySuiteTypeId.get(suiteTypeId) : undefined
     const effectiveUnitPrice = singleSupplementPct
@@ -614,13 +627,12 @@ export async function buildPackageQuoteLineItems({
         // implicitly units.length — each unit is an independent room, its own suite/bed/layout/
         // bathroom, priced qty = nights so qty × unitPrice = total stays correct per room.
         const nights = Math.max(1, selection.nights ?? 1)
-        const nightsLabel = `${nights} night${nights === 1 ? "" : "s"}`
 
         for (const unitSelection of units) {
           const { validRateCard, description, suiteTypeName } = resolveUnit(unitSelection.suiteTypeId)
           activeRateCard = validRateCard
           addLineItem({
-            description: `${description} — ${nightsLabel}`,
+            description,
             qty: nights,
             unitPrice: validRateCard.pricePerPerson,
             supplierDescription,
@@ -629,6 +641,7 @@ export async function buildPackageQuoteLineItems({
             variantNames: specificUnitVariantNames(unitSelection),
             selectedVariantGroups: specificUnitVariantGroups(unitSelection),
             unit,
+            hideRoomConfig: true,
           })
         }
       } else if (isTransfer || isVehicleRental) {
@@ -652,10 +665,14 @@ export async function buildPackageQuoteLineItems({
           activeRateCard = validRateCard
 
           const pointLabel =
-            transportRequest
+            transportRequest?.pickup_point.trim() && transportRequest?.dropoff_point.trim()
               ? `${transportRequest.pickup_point} -> ${transportRequest.dropoff_point}`
               : null
-          const transportDescription = [description, pointLabel].filter(Boolean).join(" - ")
+          // Transfers show supplier label + route leg (e.g. "Ulysses Tours & Transfers - CPT
+          // Station → Hotel"); suiteTypeName (vehicle category) stays internal pricing metadata.
+          const transportDescription = isTransfer
+            ? description
+            : [description, pointLabel].filter(Boolean).join(" - ")
 
           addLineItem({
             description: transportDescription,
@@ -666,6 +683,7 @@ export async function buildPackageQuoteLineItems({
             suiteTypeId,
             suiteTypeName,
             unit,
+            hideVariantSuffix: isTransfer,
           })
         }
       } else {
@@ -731,11 +749,11 @@ export async function buildPackageQuoteLineItems({
             // priced on their own line.
             let sharedQty = 0
             let soloQty = 0
-            const contributingUnits: PackageUnitSelection[] = []
+            const sharedContributingUnits: PackageUnitSelection[] = []
+            const soloContributingUnits: PackageUnitSelection[] = []
             for (const unitSelection of groupUnits) {
               const count = unitSelection[key] ?? 0
               if (count === 0) continue
-              contributingUnits.push(unitSelection)
               const adultCount = unitSelection.adultCount ?? 0
               const childCount = unitSelection.childCount ?? 0
               const infantCount = unitSelection.infantCount ?? 0
@@ -745,17 +763,25 @@ export async function buildPackageQuoteLineItems({
                 adultCount + childCount + infantCount === 1
               if (isSoloRoom && count === 1) {
                 soloQty += 1
+                soloContributingUnits.push(unitSelection)
               } else {
                 sharedQty += count
+                sharedContributingUnits.push(unitSelection)
               }
             }
-            // This passenger kind's whole qty came from one room, so its exact bedroom/bathroom
-            // config is known; travellers of the same kind spread across multiple rooms have no
-            // single config to name, so the suite type's generic option list is shown instead.
-            const kindVariantNames =
-              contributingUnits.length === 1 ? specificUnitVariantNames(contributingUnits[0]) : null
-            const kindSelectedVariantGroups =
-              contributingUnits.length === 1 ? specificUnitVariantGroups(contributingUnits[0]) : null
+            // Each output line (shared vs. solo) names its own config independently — a solo
+            // traveller's line must never inherit the shared units' config in this suite-type
+            // group, and vice versa. Only when exactly one unit feeds a given line is its exact
+            // config known; multiple units feeding the same line have no single config to name,
+            // so the suite type's generic option list is shown instead.
+            const sharedVariantNames =
+              sharedContributingUnits.length === 1 ? specificUnitVariantNames(sharedContributingUnits[0]) : null
+            const sharedSelectedVariantGroups =
+              sharedContributingUnits.length === 1 ? specificUnitVariantGroups(sharedContributingUnits[0]) : null
+            const soloVariantNames =
+              soloContributingUnits.length === 1 ? specificUnitVariantNames(soloContributingUnits[0]) : null
+            const soloSelectedVariantGroups =
+              soloContributingUnits.length === 1 ? specificUnitVariantGroups(soloContributingUnits[0]) : null
 
             addLineItem({
               description,
@@ -765,8 +791,8 @@ export async function buildPackageQuoteLineItems({
               supplierDescription,
               suiteTypeId,
               suiteTypeName,
-              variantNames: kindVariantNames,
-              selectedVariantGroups: kindSelectedVariantGroups,
+              variantNames: sharedVariantNames,
+              selectedVariantGroups: sharedSelectedVariantGroups,
               unit,
             })
             addLineItem({
@@ -777,8 +803,8 @@ export async function buildPackageQuoteLineItems({
               supplierDescription,
               suiteTypeId,
               suiteTypeName,
-              variantNames: kindVariantNames,
-              selectedVariantGroups: kindSelectedVariantGroups,
+              variantNames: soloVariantNames,
+              selectedVariantGroups: soloSelectedVariantGroups,
               unit,
               singleSupplementPct: soloQty > 0 ? packageDetail.singleSupplementPct : null,
             })

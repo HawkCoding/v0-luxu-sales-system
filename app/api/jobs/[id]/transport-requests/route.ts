@@ -25,8 +25,8 @@ const transportRequestSchema = z.object({
   packageLegId: nullableUuid,
   /** Set instead of packageLegId for a Build Booking (booking_services) leg. */
   serviceId: nullableUuid,
-  pickupPoint: z.string().trim().min(1, "Pickup point is required").max(500),
-  dropoffPoint: z.string().trim().min(1, "Drop-off point is required").max(500),
+  pickupPoint: z.string().trim().max(500),
+  dropoffPoint: z.string().trim().max(500),
   pickupAt: nullableDateTime,
   rentalDetails: rentalDetailsSchema,
   passengerCount: z.number().int().nonnegative().nullable().optional(),

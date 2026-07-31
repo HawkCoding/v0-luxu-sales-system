@@ -465,7 +465,7 @@ export interface Location {
 
 export type RouteDirectionMode = "one_way" | "round_trip"
 
-export type CommissionKind = "percent" | "per_person"
+export type CommissionKind = "percent" | "per_person" | "fixed"
 
 export interface CommissionConfig {
   type: CommissionKind

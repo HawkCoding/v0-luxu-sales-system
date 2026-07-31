@@ -2,13 +2,15 @@
  * POST /api/users/[userId]/password
  *
  * Admin-only: set or reset another user's password.
- * Sends a notification email to the target user (if RESEND_API_KEY is set).
+ * Sends a notification email to the target user, from the acting admin's own
+ * mailbox when they have SMTP credentials, otherwise via the configured provider.
  * Logs the action to audit_logs.
  */
 
 import { NextResponse } from "next/server"
 import { createServiceClient, createSessionClient } from "@/lib/supabase/server"
 import { getEmailFromAddress } from "@/lib/email/from"
+import { resolveSalespersonSender } from "@/lib/email/resolve-sender"
 import { sendEmail } from "@/lib/email/transport"
 
 export const runtime = "nodejs"
@@ -106,16 +108,26 @@ export async function POST(
     // non-fatal
   }
 
-  // Notification email (optional)
+  // Notification email (optional) — routed through the acting admin's mailbox
+  // when they have one, since there is no office-wide SMTP fallback.
   try {
-    await sendEmail({
-      from: await getEmailFromAddress(service),
+    const sender = await resolveSalespersonSender(service, adminUserId)
+    const result = await sendEmail({
+      from: sender.fromAddress ?? (await getEmailFromAddress(service)),
       to: targetEmail,
       subject: "Your password was reset – Luxus Sales",
       text: `Your password for Luxus Sales was reset by ${adminName} at ${new Date().toISOString()}.\n\nIf you did not request this, contact your administrator.`,
+      salespersonCredentialId: sender.salespersonCredentialId,
     })
-  } catch {
-    // Ignore send errors for now; password was already updated.
+    if (!result.success) {
+      console.warn("[password-reset] notification email not sent:", result.error)
+    }
+  } catch (err) {
+    // Non-fatal; the password was already updated.
+    console.warn(
+      "[password-reset] notification email threw:",
+      err instanceof Error ? err.message : err,
+    )
   }
 
   return NextResponse.json({ ok: true })

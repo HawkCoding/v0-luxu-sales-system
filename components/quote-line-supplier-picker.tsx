@@ -205,7 +205,7 @@ export function QuoteLineSupplierPicker({
         </div>
         <div className="space-y-1.5 min-w-0">
           <Label>Supplier</Label>
-          <Select value={supplierId || undefined} onValueChange={setSupplierId}>
+          <Select value={supplierId || ""} onValueChange={setSupplierId}>
             <SelectTrigger
               className={compactSelectTriggerClass}
               title={kindSuppliers.find((supplier) => supplier.id === supplierId)?.name}
@@ -269,7 +269,7 @@ export function QuoteLineSupplierPicker({
         <div className="grid gap-3 md:grid-cols-2">
           <div className="space-y-1.5 min-w-0">
             <Label>{routeLabelFor(kind)}</Label>
-            <Select value={routeId || undefined} onValueChange={setRouteId} disabled={loadingDetail}>
+            <Select value={routeId || ""} onValueChange={setRouteId} disabled={loadingDetail}>
               <SelectTrigger
                 className={compactSelectTriggerClass}
                 title={routes.find((route) => route.id === routeId)?.name}
@@ -295,7 +295,7 @@ export function QuoteLineSupplierPicker({
           </div>
           <div className="space-y-1.5 min-w-0">
             <Label>{suiteLabelFor(kind)}</Label>
-            <Select value={suiteTypeId || undefined} onValueChange={setSuiteTypeId} disabled={loadingDetail}>
+            <Select value={suiteTypeId || ""} onValueChange={setSuiteTypeId} disabled={loadingDetail}>
               <SelectTrigger
                 className={compactSelectTriggerClass}
                 title={suiteTypes.find((suiteType) => suiteType.id === suiteTypeId)?.name}

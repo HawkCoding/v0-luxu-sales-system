@@ -17,16 +17,16 @@ export interface DefaultCommission {
  * commission line entirely rather than writing a R0.00 line onto every quote. */
 export const DEFAULT_COMMISSION: DefaultCommission = { type: "percent", value: 0 }
 
-const MAX_PER_PERSON_COMMISSION = 1_000_000
+const MAX_FLAT_COMMISSION = 1_000_000
 
 export function normalizeCommissionValue(type: CommissionKind, value: number): number {
   if (!Number.isFinite(value)) return 0
-  const max = type === "percent" ? 100 : MAX_PER_PERSON_COMMISSION
+  const max = type === "percent" ? 100 : MAX_FLAT_COMMISSION
   return Math.min(max, Math.max(0, Math.round(value * 100) / 100))
 }
 
 function parseCommissionType(value: string | null | undefined): CommissionKind {
-  return value === "per_person" ? "per_person" : "percent"
+  return value === "per_person" || value === "fixed" ? value : "percent"
 }
 
 export function parseDefaultCommission(

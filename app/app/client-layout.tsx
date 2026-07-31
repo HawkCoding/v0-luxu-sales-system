@@ -21,6 +21,7 @@ import { ConnectionErrorBanner } from "@/components/connection-error-banner"
 import { SessionTimeoutGuard } from "@/components/session-timeout-guard"
 import { useEnquiryCount } from "@/lib/use-data"
 import { useRealtimeSync } from "@/hooks/use-realtime-sync"
+import { useClientErrorReporter, usePointerEventsGuard } from "@/hooks/use-pointer-events-guard"
 import { APP_VERSION } from "@/lib/version"
 import type { User } from "@/lib/auth-context"
 import { AppLogo } from "@/components/app-logo"
@@ -48,6 +49,8 @@ const navItems = [
 
 function AppShell({ children }: { children: ReactNode }) {
   useRealtimeSync()
+  usePointerEventsGuard()
+  useClientErrorReporter()
 
   const pathname = usePathname()
   const router = useRouter()

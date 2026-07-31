@@ -129,7 +129,7 @@ export function TransportLegEditor({ leg, value, onChange, rateTypes = [] }: Tra
           <Label>{isRental ? "Rental route template" : "Transfer route template"}</Label>
           <Select value={value.routeId ?? ""} onValueChange={applyRouteTemplate}>
             <SelectTrigger>
-              <SelectValue placeholder="Quick-fill from a route (optional)" />
+              <SelectValue placeholder="Quick-fill from a route" />
             </SelectTrigger>
             <SelectContent>
               {leg.routes.map((route) => (
