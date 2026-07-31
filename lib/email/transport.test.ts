@@ -1,5 +1,18 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { resolveMailpitSmtpConfig } from "@/lib/email/transport"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import {
+  EMAIL_NOT_CONFIGURED_ERROR,
+  isFallbackSendingUnavailable,
+  resolveMailpitSmtpConfig,
+  sendEmail,
+} from "@/lib/email/transport"
+
+const sendMail = vi.fn()
+
+vi.mock("nodemailer", () => ({
+  default: {
+    createTransport: () => ({ sendMail, close: vi.fn() }),
+  },
+}))
 
 const ORIGINAL_URL = process.env.MAILPIT_SMTP_URL
 const ORIGINAL_HOST = process.env.MAILPIT_SMTP_HOST
@@ -69,5 +82,79 @@ describe("resolveMailpitSmtpConfig", () => {
     } finally {
       delete process.env.MAILPIT_URL
     }
+  })
+})
+
+describe("sendEmail production fallback guard", () => {
+  const message = { from: "office@example.com", to: "customer@example.com", subject: "Hi", text: "Hi" }
+
+  beforeEach(() => {
+    sendMail.mockReset()
+    sendMail.mockResolvedValue({ messageId: "local-1" })
+    vi.stubEnv("RESEND_API_KEY", "")
+    vi.stubEnv("MAILPIT_SMTP_URL", "")
+    vi.stubEnv("MAILPIT_SMTP_HOST", "")
+    vi.stubEnv("MAILPIT_SMTP_PORT", "")
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it("refuses to send in production when nothing is configured", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+
+    const result = await sendEmail(message)
+
+    expect(result).toMatchObject({ success: false, error: EMAIL_NOT_CONFIGURED_ERROR })
+    expect(sendMail).not.toHaveBeenCalled()
+  })
+
+  it("still delivers to the local catcher outside production", async () => {
+    vi.stubEnv("NODE_ENV", "development")
+
+    const result = await sendEmail(message)
+
+    expect(result).toMatchObject({ success: true, provider: "mailpit" })
+    expect(sendMail).toHaveBeenCalledOnce()
+  })
+
+  it("uses an explicitly configured catcher even in production", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("MAILPIT_SMTP_HOST", "smtp.internal")
+
+    const result = await sendEmail(message)
+
+    expect(result).toMatchObject({ success: true, provider: "mailpit" })
+    expect(sendMail).toHaveBeenCalledOnce()
+  })
+})
+
+describe("isFallbackSendingUnavailable", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  it("is true in production with no Resend key and no catcher", () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("RESEND_API_KEY", "")
+    vi.stubEnv("MAILPIT_SMTP_URL", "")
+    vi.stubEnv("MAILPIT_SMTP_HOST", "")
+
+    expect(isFallbackSendingUnavailable()).toBe(true)
+  })
+
+  it("is false when Resend is configured", () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("RESEND_API_KEY", "re_test")
+
+    expect(isFallbackSendingUnavailable()).toBe(false)
+  })
+
+  it("is false outside production", () => {
+    vi.stubEnv("NODE_ENV", "development")
+    vi.stubEnv("RESEND_API_KEY", "")
+
+    expect(isFallbackSendingUnavailable()).toBe(false)
   })
 })

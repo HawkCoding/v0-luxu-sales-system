@@ -453,7 +453,7 @@ export function PackageWizard() {
                       ))}
                     </SelectContent>
                   </Select>
-                  <Select value={selectedSupplierId || undefined} onValueChange={setSelectedSupplierId}>
+                  <Select value={selectedSupplierId || ""} onValueChange={setSelectedSupplierId}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select supplier" />
                     </SelectTrigger>

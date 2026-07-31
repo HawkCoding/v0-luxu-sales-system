@@ -28,6 +28,7 @@ function formatCommission(
 ): string {
   if (type === null || value === null || !Number.isFinite(value)) return "No commission"
   if (type === "percent") return `${value.toFixed(2)}%`
+  if (type === "fixed") return `R ${value.toFixed(2)} total`
   return `R ${value.toFixed(2)} / pax`
 }
 
@@ -81,6 +82,7 @@ export function CommissionControl({
               [
                 { key: "percent" as const, label: "% Markup" },
                 { key: "per_person" as const, label: "Per Person" },
+                { key: "fixed" as const, label: "Fixed Total" },
               ]
             ).map((option) => {
               const selected = activeType === option.key
@@ -108,7 +110,7 @@ export function CommissionControl({
             <Label className="text-xs font-medium text-muted-foreground">Value</Label>
             <NumericInput
               min="0"
-              step={activeType === "percent" ? "0.01" : "1"}
+              step={activeType === "per_person" ? "1" : "0.01"}
               nullable
               value={value.value}
               placeholder={placeholder ?? (showInherited ? "inherited" : "0")}
@@ -118,7 +120,7 @@ export function CommissionControl({
             />
           </div>
           <span className="text-sm text-muted-foreground pb-2">
-            {activeType === "percent" ? "%" : "/ pax"}
+            {activeType === "percent" ? "%" : activeType === "fixed" ? "total" : "/ pax"}
           </span>
         </div>
       ) : null}

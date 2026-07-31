@@ -7,6 +7,7 @@ const authMocks = vi.hoisted(() => ({
 const emailMocks = vi.hoisted(() => ({
   sendEmail: vi.fn(),
   getEmailFromAddress: vi.fn(),
+  isFallbackSendingUnavailable: vi.fn(),
 }))
 const transitionMocks = vi.hoisted(() => ({
   applyTransition: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock("@/lib/api/auth", () => ({
 
 vi.mock("@/lib/email/transport", () => ({
   sendEmail: emailMocks.sendEmail,
+  isFallbackSendingUnavailable: emailMocks.isFallbackSendingUnavailable,
 }))
 
 vi.mock("@/lib/email/from", () => ({
@@ -268,10 +270,13 @@ describe("POST /api/correspondence", () => {
     emailMocks.getEmailFromAddress.mockReset()
     transitionMocks.applyTransition.mockReset()
     emailMocks.getEmailFromAddress.mockResolvedValue("noreply@example.com")
+    emailMocks.isFallbackSendingUnavailable.mockReset()
+    emailMocks.isFallbackSendingUnavailable.mockReturnValue(false)
     senderMocks.resolveSalespersonSender.mockReset()
     senderMocks.resolveSalespersonSender.mockResolvedValue({
       fromAddress: null,
       salespersonCredentialId: null,
+      reason: "profile-email",
     })
     quotePdfMocks.ensureQuotePdf.mockReset()
     quotePdfMocks.ensureQuotePdf.mockResolvedValue({
@@ -646,6 +651,43 @@ describe("POST /api/correspondence", () => {
         from: "jane@luxustravel.co.za",
         salespersonCredentialId: "cred-1",
       }),
+    )
+  })
+
+  it("returns 503 before rendering the quote PDF when no mailbox is configured", async () => {
+    emailMocks.isFallbackSendingUnavailable.mockReturnValue(true)
+    senderMocks.resolveSalespersonSender.mockResolvedValue({
+      fromAddress: null,
+      salespersonCredentialId: null,
+      reason: "no-salesperson",
+    })
+    const mocks = buildAuth()
+
+    const res = await POST(
+      postJson({ bookingId: BOOKING_ID, subject: "Your quote", kind: "quote", quoteId: QUOTE_ID }),
+    )
+
+    expect(res.status).toBe(503)
+    expect((await res.json()).error).toMatch(/no assigned salesperson/i)
+    expect(quotePdfMocks.ensureQuotePdf).not.toHaveBeenCalled()
+    expect(emailMocks.sendEmail).not.toHaveBeenCalled()
+    expect(mocks.correspondenceInsertChain).not.toHaveBeenCalled()
+  })
+
+  it("still sends when a salesperson credential exists and no fallback is available", async () => {
+    emailMocks.isFallbackSendingUnavailable.mockReturnValue(true)
+    senderMocks.resolveSalespersonSender.mockResolvedValue({
+      fromAddress: "jane@luxustravel.co.za",
+      salespersonCredentialId: "cred-1",
+      reason: "credential",
+    })
+    buildAuth()
+
+    const res = await POST(postJson({ bookingId: BOOKING_ID, subject: "Hello" }))
+
+    expect(res.status).toBe(200)
+    expect(emailMocks.sendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ salespersonCredentialId: "cred-1" }),
     )
   })
 

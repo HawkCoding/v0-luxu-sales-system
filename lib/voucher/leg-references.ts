@@ -49,7 +49,9 @@ interface TransportRequestRow {
 
 function transportLabel(request: TransportRequestRow): string {
   const verb = request.service_type === "rental" ? "Vehicle rental" : "Transfer"
-  return `${verb}: ${request.pickup_point} → ${request.dropoff_point}`
+  const pickup = request.pickup_point.trim()
+  const dropoff = request.dropoff_point.trim()
+  return pickup && dropoff ? `${verb}: ${pickup} → ${dropoff}` : verb
 }
 
 /** Every leg/trip that will render as its own block on the voucher, in one flat list: selected

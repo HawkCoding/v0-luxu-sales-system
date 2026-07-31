@@ -151,9 +151,10 @@ describe("buildPackageQuoteLineItems", () => {
     })
 
     expect(lineItems).toHaveLength(2)
-    expect(lineItems[0].description).toContain("Van")
+    // Transfer descriptions show only the leg's own label — never the resolved vehicle category.
+    expect(lineItems[0].description).not.toContain("Van")
     expect(lineItems[0].unitPrice).toBe(900)
-    expect(lineItems[1].description).toContain("Sedan")
+    expect(lineItems[1].description).not.toContain("Sedan")
     expect(lineItems[1].unitPrice).toBe(500)
   })
 
@@ -501,6 +502,62 @@ describe("buildPackageQuoteLineItems", () => {
     expect(childLine?.description).not.toContain("Shower")
   })
 
+  it("does not cross-contaminate the shared line's config with the solo line's config when both contribute the same passenger kind", async () => {
+    const trainLeg = leg({
+      id: "leg-train",
+      supplierKind: "train_operator",
+      routes: [route("route-cpt", "supplier-leg-train", "CPT-PTA")],
+      suiteTypes: [suiteType("suite-dlx", "supplier-leg-train", "Deluxe")],
+      rateCards: [
+        rateCard({ id: "rc-train", routeId: "route-cpt", suiteTypeId: "suite-dlx", pricePerPerson: 10000 }),
+      ],
+    })
+    const threeAdultsBooking = {
+      id: JOB_ID,
+      no_of_adults: 3,
+      no_of_children: 0,
+      no_of_suites: 2,
+      child_ages: [],
+      departure_date: "2026-09-01",
+    }
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({
+        booking: threeAdultsBooking,
+        bathroomTypes: [
+          { id: "bath-shower", name: "Shower" },
+          { id: "bath-3-4", name: "3/4 bath" },
+        ],
+      }),
+      packageDetail: { ...detail([trainLeg]), singleSupplementPct: 25 },
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-train",
+          selected: true,
+          units: [
+            // Same suite type: one shared 2-adult room, one solo 1-adult room. Both contribute
+            // to the "Adult" passenger kind, so each line must name only its own room's config.
+            { suiteTypeId: "suite-dlx", bathroomTypeId: "bath-shower", adultCount: 2, childCount: 0, infantCount: 0 },
+            { suiteTypeId: "suite-dlx", bathroomTypeId: "bath-3-4", adultCount: 1, childCount: 0, infantCount: 0 },
+          ],
+        },
+      ],
+    })
+
+    const adultLines = lineItems.filter((li) => li.description.includes("Adult"))
+    expect(adultLines).toHaveLength(2)
+
+    const sharedLine = adultLines.find((li) => li.qty === 2)
+    const soloLine = adultLines.find((li) => li.qty === 1)
+    expect(sharedLine?.description).toContain("Shower")
+    expect(sharedLine?.description).not.toContain("3/4 bath")
+    expect(soloLine?.description).toContain("3/4 bath")
+    expect(soloLine?.description).not.toContain("Shower")
+    expect(soloLine?.description).toContain("(25% single supplement included)")
+  })
+
   it("charges a single supplement for a unit with exactly one adult and no children", async () => {
     const trainLeg = leg({
       id: "leg-train",
@@ -536,7 +593,7 @@ describe("buildPackageQuoteLineItems", () => {
 
     const adultLine = lineItems.find((li) => li.description.includes("Adult"))
     expect(adultLine).toBeDefined()
-    expect(adultLine?.description).toContain("(+25% Single)")
+    expect(adultLine?.description).toContain("(25% single supplement included)")
     expect(adultLine?.qty).toBe(1)
     expect(adultLine?.unitPrice).toBe(12500)
     expect(adultLine?.total).toBe(12500)
@@ -587,7 +644,7 @@ describe("buildPackageQuoteLineItems", () => {
 
     const childLine = lineItems.find((li) => li.description.includes("Child"))
     expect(childLine).toBeDefined()
-    expect(childLine?.description).toContain("(+50% Single)")
+    expect(childLine?.description).toContain("(50% single supplement included)")
     expect(childLine?.qty).toBe(1)
     expect(childLine?.unitPrice).toBe(7500)
     expect(childLine?.total).toBe(7500)

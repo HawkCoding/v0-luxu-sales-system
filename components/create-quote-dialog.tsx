@@ -86,7 +86,7 @@ function CreateQuoteButton({ jobId, onCreated }: CreateQuoteDialogProps) {
       ) : (
         <PlusCircle className="h-4 w-4 mr-1.5" />
       )}
-      {saving ? "Creating…" : "Create Quote"}
+      {saving ? "Creating…" : "Create New Quote"}
     </Button>
   )
 }
@@ -136,7 +136,7 @@ function CreateQuoteWithValidityDialog({ jobId, onCreated }: CreateQuoteDialogPr
         disabled={saving}
       >
         <PlusCircle className="h-4 w-4 mr-1.5" />
-        {saving ? "Creating…" : "Create Quote"}
+        {saving ? "Creating…" : "Create New Quote"}
       </Button>
     )
   }
@@ -146,7 +146,7 @@ function CreateQuoteWithValidityDialog({ jobId, onCreated }: CreateQuoteDialogPr
       <DialogTrigger asChild>
         <Button variant="outline" size="sm" data-testid="create-quote-button">
           <PlusCircle className="h-4 w-4 mr-1.5" />
-          Create Quote
+          Create New Quote
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-sm">
@@ -177,7 +177,7 @@ function CreateQuoteWithValidityDialog({ jobId, onCreated }: CreateQuoteDialogPr
             Cancel
           </Button>
           <Button onClick={handleSubmit} disabled={saving}>
-            {saving ? "Creating…" : "Create Quote"}
+            {saving ? "Creating…" : "Create New Quote"}
           </Button>
         </DialogFooter>
       </DialogContent>

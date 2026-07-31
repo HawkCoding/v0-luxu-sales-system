@@ -13,7 +13,7 @@ import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 const allowedRoles = new Set(["admin", "manager"])
 
 const patchSchema = z.object({
-  type: z.enum(["percent", "per_person"]),
+  type: z.enum(["percent", "per_person", "fixed"]),
   value: z.number().min(0).max(1_000_000),
 })
 

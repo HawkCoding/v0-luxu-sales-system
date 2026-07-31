@@ -54,6 +54,15 @@ describe("calculateCommissionAmount", () => {
     expect(amount).toBe(3000)
   })
 
+  it("applies a fixed commission regardless of pax or booking total", () => {
+    const amount = calculateCommissionAmount({
+      amountAfterMarkup: 50000,
+      passengerCount: 10,
+      resolved: { type: "fixed", value: 5000, source: "line" },
+    })
+    expect(amount).toBe(5000)
+  })
+
   it("returns 0 when no commission is configured", () => {
     expect(
       calculateCommissionAmount({

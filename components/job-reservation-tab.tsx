@@ -11,15 +11,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { AlertCircle, Plus, RotateCcw, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { ReservationFormCard } from "@/components/reservation-form-card"
@@ -29,7 +28,7 @@ import type { Customer, PipelineStage } from "@/lib/types"
 interface JobReservationTabProps {
   bookingId: string
   reservationFormReceivedAt: string | null
-  mutateJob: () => void
+  mutateJob: () => void | Promise<unknown>
   additionalServicesDetails?: string
   customer: Customer | null
   stage: PipelineStage
@@ -379,20 +378,26 @@ export function JobReservationTab({
         stage={stage}
       />
 
-      <AlertDialog open={showReceivedPrompt} onOpenChange={setShowReceivedPrompt}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Reservation form received</AlertDialogTitle>
-            <AlertDialogDescription>
+      {/* Optional prompt, not a destructive confirmation: use Dialog rather than
+          AlertDialog so Escape, the close button and an outside click all dismiss
+          it. AlertDialog blocks outside interaction by design, which left users
+          stranded when the dialog mounted into a locked layer. */}
+      <Dialog open={showReceivedPrompt} onOpenChange={setShowReceivedPrompt}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reservation form received</DialogTitle>
+            <DialogDescription>
               Fill in the guest and reservation details returned on the form now?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Later</AlertDialogCancel>
-            <AlertDialogAction onClick={goToGuestDetails}>Fill in now</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline">Later</Button>
+            </DialogClose>
+            <Button onClick={goToGuestDetails}>Fill in now</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {!reservationFormReceivedAt ? (
         <p className="text-xs text-muted-foreground">

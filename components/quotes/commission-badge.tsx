@@ -8,6 +8,7 @@ interface CommissionBadgeProps {
 
 function formatValue(commission: CommissionBreakdown, currency: string): string {
   if (commission.type === "percent") return `${commission.value.toFixed(2)}%`
+  if (commission.type === "fixed") return `${currency} ${commission.value.toFixed(2)} total`
   return `${currency} ${commission.value.toFixed(2)} / pax`
 }
 

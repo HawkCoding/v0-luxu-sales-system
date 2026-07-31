@@ -511,7 +511,7 @@ export function PackageDetailView({ packageDetail }: PackageDetailViewProps) {
                   ))}
                 </SelectContent>
               </Select>
-              <Select value={addLegSupplierId || undefined} onValueChange={setAddLegSupplierId}>
+              <Select value={addLegSupplierId || ""} onValueChange={setAddLegSupplierId}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select supplier" />
                 </SelectTrigger>

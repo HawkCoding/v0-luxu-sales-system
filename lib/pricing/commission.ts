@@ -47,6 +47,9 @@ export function calculateCommissionAmount({
   if (resolved.type === "percent") {
     return roundMoney(amountAfterMarkup * (resolved.value / 100))
   }
+  if (resolved.type === "fixed") {
+    return roundMoney(resolved.value)
+  }
   return roundMoney(resolved.value * Math.max(0, passengerCount))
 }
 
