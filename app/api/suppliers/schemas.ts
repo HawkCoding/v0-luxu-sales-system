@@ -56,6 +56,10 @@ const supplierKindSchema = z.enum([
   "airline",
 ])
 
+/** 'manual' suppliers (airlines, by default) skip rate cards entirely -- their price is typed
+ *  per unit at quote-build time instead. */
+const supplierPricingModeSchema = z.enum(["rate_card", "manual"])
+
 const vehicleRentalRouteDetailsSchema = z.object({
   includedKmPerDay: z.number().finite().nonnegative().nullable().optional(),
   extraKmPrice: z.number().finite().nonnegative().nullable().optional(),
@@ -119,6 +123,7 @@ export const draftSupplierEmailSchema = z.object({
 export const supplierSaveSchema = z.object({
   name: z.string().trim().min(2, "Supplier name must be at least 2 characters").max(200),
   kind: supplierKindSchema,
+  pricingMode: supplierPricingModeSchema.default("rate_card"),
   email: z
     .string()
     .trim()
@@ -271,6 +276,7 @@ export const draftRouteSchema = z.object({
 export const supplierDraftSaveSchema = z.object({
   name: z.string().trim().max(200).default(""),
   kind: supplierKindSchema,
+  pricingMode: supplierPricingModeSchema.default("rate_card"),
   email: z
     .string()
     .trim()

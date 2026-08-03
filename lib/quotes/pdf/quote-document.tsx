@@ -9,6 +9,7 @@ import {
   buildQuoteItineraryLines,
   collectQuoteExclusions,
   derivePerPersonRate,
+  formatFlightCapLine,
   formatJourneyRange,
   formatPaxLabel,
   formatTotalLabel,
@@ -36,6 +37,8 @@ export interface QuotePdfData {
   packageExcludesHeading?: string
   /** Standing exclusion appended after the suppliers' own; empty omits it. */
   packageExcludesDefault?: string
+  /** Highest priced adult flight fare on the quote; null/absent omits the capped-fare bullet. */
+  flightCapPerPerson?: number | null
   /** SARAIL brand block copy + logo. Omitted falls back to the plain wordmark. */
   brand?: DocumentBrand
   brandPosition?: BrandBlockPosition
@@ -226,6 +229,7 @@ export function QuoteDocument({
   packageIncludesHeading = DEFAULT_INCLUDES_HEADING,
   packageExcludesHeading = DEFAULT_EXCLUDES_HEADING,
   packageExcludesDefault,
+  flightCapPerPerson,
   brand,
   brandPosition = "bottom",
   brandLogo = null,
@@ -239,7 +243,9 @@ export function QuoteDocument({
   const journeyRange = formatJourneyRange(journeyStart, journeyEnd)
   const perPersonRate = derivePerPersonRate(total, pax)
   const sortedBlocks = sortItineraryBlocksChronologically(itineraryBlocks)
-  const itineraryLines = buildQuoteItineraryLines(sortedBlocks)
+  const flightCapBullet =
+    flightCapPerPerson != null ? formatFlightCapLine((amount) => formatMoney(amount, currency), flightCapPerPerson) : null
+  const itineraryLines = buildQuoteItineraryLines(sortedBlocks, flightCapBullet)
   const exclusions = collectQuoteExclusions(sortedBlocks, packageExcludesDefault)
 
   return (

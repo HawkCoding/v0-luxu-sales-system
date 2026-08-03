@@ -603,7 +603,7 @@ export interface SupplierKindDefaultRateType {
 
 export interface PricingSnapshot {
   source: "pricing_engine"
-  pricingMode: "rate_card" | "fixed_package"
+  pricingMode: "rate_card" | "fixed_package" | "manual"
   packageId: string
   packageName: string
   legId: string | null
@@ -668,6 +668,9 @@ export interface PackageLeg {
   supplierName: string
   supplierDescription: string | null
   supplierKind: SupplierKind
+  /** 'manual' suppliers (airlines, by default) skip rate cards entirely -- their price is typed
+   *  per unit at quote-build time instead of resolved from a route/suite/date match. */
+  pricingMode: "rate_card" | "manual"
   label: string | null
   sortOrder: number
   /** Hotel legs only: pre-stay (night(s) before departure) or post-stay (from train arrival). */
@@ -726,6 +729,9 @@ export interface Supplier {
   slug: string
   kind: SupplierKind
   status: SupplierStatus
+  /** 'manual' suppliers (airlines, by default) skip rate cards -- their price is typed per unit
+   *  at quote-build time instead. See PackageLeg.pricingMode. */
+  pricingMode: "rate_card" | "manual"
   name: string
   email: string | null
   phone: string | null

@@ -25,6 +25,11 @@ export interface PackageUnitSelection {
   adultCount?: number
   childCount?: number
   infantCount?: number
+  /** Manual-pricing legs only (see PackageLeg.pricingMode): the typed fare for this unit's cabin.
+   *  childPrice/infantPrice default up to adultPrice, mirroring the rate-card fallback below. */
+  manualAdultPrice?: number | null
+  manualChildPrice?: number | null
+  manualInfantPrice?: number | null
 }
 
 export interface PackageLegSelection {
@@ -348,6 +353,8 @@ export async function buildPackageQuoteLineItems({
     /** Hotels only: show the suite type name alone, never the selected/possible bedroom, layout,
      * or bathroom config — those stay internal (pricingSnapshot) rather than client-facing. */
     hideRoomConfig?: boolean
+    /** 'manual' for a line priced off a typed fare rather than a rate card (see PackageLeg.pricingMode). */
+    pricingMode?: "rate_card" | "manual"
   }
 
   function formatSingleSupplementSuffix(pct: number): string {
@@ -369,6 +376,7 @@ export async function buildPackageQuoteLineItems({
     passengerLabel,
     hideVariantSuffix,
     hideRoomConfig,
+    pricingMode: linePricingMode = "rate_card",
   }: AddLineItemOptions) {
     if (qty <= 0) return
 
@@ -402,7 +410,7 @@ export async function buildPackageQuoteLineItems({
     if ((suiteVariants && suiteVariants.length > 0) || unit) {
       lineItem.pricingSnapshot = {
         source: "pricing_engine",
-        pricingMode: "rate_card",
+        pricingMode: linePricingMode,
         packageId: packageDetail.id,
         packageName: packageDetail.name,
         legId: activeLeg?.id ?? null,
@@ -618,6 +626,19 @@ export async function buildPackageQuoteLineItems({
         return { validRateCard, description, suiteTypeName }
       }
 
+      // Manual-pricing legs (see PackageLeg.pricingMode) never touch rate_cards -- the fare is
+      // typed per unit at quote-build time instead, so there is nothing here to validate against
+      // a validity window or throw "no rate card" for.
+      function resolveManualUnit(suiteTypeId: string) {
+        const suiteBelongsToLeg = leg.suiteTypes.some((suiteType) => suiteType.id === suiteTypeId)
+        if (!suiteBelongsToLeg) {
+          throw new Error(`Selected type is not available for leg: ${legLabel}`)
+        }
+        const suiteTypeName = getSuiteTypeName(leg, suiteTypeId)
+        const description = [legLabel, routeName].filter(Boolean).join(" - ")
+        return { description, suiteTypeName }
+      }
+
       if (isHotel) {
         const units = selection.units ?? []
         if (units.length === 0) {
@@ -714,33 +735,71 @@ export async function buildPackageQuoteLineItems({
           )
         }
 
+        const isManualPricing = leg.pricingMode === "manual"
+
         // Price against the suite type, not each room's own configuration: multiple units booked
         // under the same suite type (e.g. 3 rooms of "Deluxe Double") combine into one line per
         // passenger type instead of splitting per room, even if their bed/bathroom setup differs.
+        // Manual-pricing legs group by suite type *and* typed fare too -- two cabins of the same
+        // class quoted at different fares (e.g. two separately-ticketed Business seats) must not
+        // silently merge into one averaged line.
         const unitsBySuiteType = new Map<string, PackageUnitSelection[]>()
         for (const unitSelection of units) {
-          const group = unitsBySuiteType.get(unitSelection.suiteTypeId) ?? []
+          const groupKey = isManualPricing
+            ? [
+                unitSelection.suiteTypeId,
+                unitSelection.manualAdultPrice ?? "",
+                unitSelection.manualChildPrice ?? "",
+                unitSelection.manualInfantPrice ?? "",
+              ].join("::")
+            : unitSelection.suiteTypeId
+          const group = unitsBySuiteType.get(groupKey) ?? []
           group.push(unitSelection)
-          unitsBySuiteType.set(unitSelection.suiteTypeId, group)
+          unitsBySuiteType.set(groupKey, group)
         }
 
-        for (const [suiteTypeId, groupUnits] of unitsBySuiteType) {
-          const { validRateCard, description, suiteTypeName } = resolveUnit(suiteTypeId)
-          activeRateCard = validRateCard
+        for (const groupUnits of unitsBySuiteType.values()) {
+          const suiteTypeId = groupUnits[0].suiteTypeId
 
-          const passengerKinds: {
+          let description: string
+          let suiteTypeName: string | null
+          let passengerKinds: {
             key: "adultCount" | "childCount" | "infantCount"
             label: string
             unitPrice: number
-          }[] = [
-            { key: "adultCount", label: "Adult", unitPrice: validRateCard.pricePerPerson },
-            { key: "childCount", label: "Child", unitPrice: validRateCard.childPrice ?? validRateCard.pricePerPerson },
-            {
-              key: "infantCount",
-              label: "Infant",
-              unitPrice: validRateCard.infantPrice ?? validRateCard.childPrice ?? validRateCard.pricePerPerson,
-            },
-          ]
+          }[]
+
+          if (isManualPricing) {
+            const resolved = resolveManualUnit(suiteTypeId)
+            description = resolved.description
+            suiteTypeName = resolved.suiteTypeName
+            activeRateCard = null
+            // A group's units share an identical typed-price triple by construction (see the
+            // grouping key above), so the first unit's prices speak for the whole group.
+            const adultPrice = groupUnits[0].manualAdultPrice ?? 0
+            const childPrice = groupUnits[0].manualChildPrice ?? adultPrice
+            const infantPrice = groupUnits[0].manualInfantPrice ?? childPrice
+            passengerKinds = [
+              { key: "adultCount", label: "Adult", unitPrice: adultPrice },
+              { key: "childCount", label: "Child", unitPrice: childPrice },
+              { key: "infantCount", label: "Infant", unitPrice: infantPrice },
+            ]
+          } else {
+            const resolved = resolveUnit(suiteTypeId)
+            description = resolved.description
+            suiteTypeName = resolved.suiteTypeName
+            activeRateCard = resolved.validRateCard
+            const validRateCard = resolved.validRateCard
+            passengerKinds = [
+              { key: "adultCount", label: "Adult", unitPrice: validRateCard.pricePerPerson },
+              { key: "childCount", label: "Child", unitPrice: validRateCard.childPrice ?? validRateCard.pricePerPerson },
+              {
+                key: "infantCount",
+                label: "Infant",
+                unitPrice: validRateCard.infantPrice ?? validRateCard.childPrice ?? validRateCard.pricePerPerson,
+              },
+            ]
+          }
 
           for (const { key, label, unitPrice } of passengerKinds) {
             // A unit occupied by exactly one traveller (of any age) pays the single supplement —
@@ -757,7 +816,10 @@ export async function buildPackageQuoteLineItems({
               const adultCount = unitSelection.adultCount ?? 0
               const childCount = unitSelection.childCount ?? 0
               const infantCount = unitSelection.infantCount ?? 0
+              // Manual-pricing legs never carry a single supplement -- the typed fare is already
+              // the per-seat price a passenger pays, with no notion of a solo room to bump.
               const isSoloRoom =
+                !isManualPricing &&
                 SUPPLIER_VOCABULARY[leg.supplierKind].showSingleSupplement &&
                 packageDetail.singleSupplementPct > 0 &&
                 adultCount + childCount + infantCount === 1
@@ -794,6 +856,7 @@ export async function buildPackageQuoteLineItems({
               variantNames: sharedVariantNames,
               selectedVariantGroups: sharedSelectedVariantGroups,
               unit,
+              pricingMode: isManualPricing ? "manual" : "rate_card",
             })
             addLineItem({
               description,

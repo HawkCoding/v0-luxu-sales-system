@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
 import { staleVersionResponse } from "@/lib/concurrency"
-import { calculateQuoteTotals, isPricingEngineLineItem, roundMoney } from "@/lib/quotes/pricing-engine"
+import { calculateQuoteTotals, isMissingPricing, isPricingEngineLineItem, roundMoney } from "@/lib/quotes/pricing-engine"
 import { syncBookingRoute } from "@/lib/quotes/resolve-primary-route"
 import type { Json } from "@/lib/supabase/types"
 import type { QuoteLineItem } from "@/lib/types"
@@ -42,7 +42,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
-    .select("id, booking_id, subtotal, total, updated_at, override_reason")
+    .select("id, booking_id, subtotal, total, status, updated_at, override_reason")
     .eq("id", id)
     .single()
 
@@ -139,6 +139,18 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
     if (quoteOverrideError) {
       return NextResponse.json({ error: "Failed to update quote override reason" }, { status: 500 })
+    }
+  }
+
+  // A line with no price yet (e.g. a flight leg whose fare hasn't been typed in) keeps the quote
+  // out of "draft" until it's resolved. Only toggles between these two statuses -- a quote already
+  // sent/accepted/etc. isn't silently reverted by re-saving its lines.
+  const hasIncompletePricing = normalizedLineItems.some(isMissingPricing)
+  const nextStatus = hasIncompletePricing ? "pricing_incomplete" : "draft"
+  if ((quote.status === "draft" || quote.status === "pricing_incomplete") && quote.status !== nextStatus) {
+    const { error: statusError } = await supabase.from("quotes").update({ status: nextStatus }).eq("id", id)
+    if (statusError) {
+      return NextResponse.json({ error: "Failed to update quote status" }, { status: 500 })
     }
   }
 

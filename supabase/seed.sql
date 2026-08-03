@@ -1441,7 +1441,7 @@ insert into public.app_settings (key,value,updated_at) values
   ('invoice_status_options','[{"role":"provisional","label":"Provisional"},{"role":"confirmed","label":"Confirmed"},{"role":"paid","label":"Paid in Full"},{"role":"cancelled","label":"Cancelled"}]','2026-07-21T11:11:33.288351+00:00'),
   ('brand_block_heading','A division of Luxus Travel & Tours','2026-07-21T11:11:33.661601+00:00'),
   ('brand_block_subheading','BLUE TRAIN | ROVOS RAIL | KRUGER SHALATI','2026-07-21T11:11:33.661601+00:00'),
-  ('brand_block_position_quote','bottom','2026-07-21T11:11:33.661601+00:00'),
+  ('brand_block_position_quote','top','2026-07-21T11:11:33.661601+00:00'),
   ('brand_block_position_invoice','top','2026-07-21T11:11:33.661601+00:00'),
   ('deposit_refundable','false','2026-07-21T11:25:40.93795+00:00'),
   ('quote_follow_up_cadence','[3,7]','2026-07-21T11:25:40.93795+00:00'),

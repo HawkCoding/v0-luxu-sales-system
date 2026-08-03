@@ -6,7 +6,7 @@ import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { buildSuiteTokens, suiteSelectionsFromSnapshots } from "@/lib/templates/suite-description"
 import { buildQuoteSummaryBlock, formatMoney } from "@/lib/quotes/quote-summary-block"
-import { deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
+import { deriveFlightCapPerPerson, deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
 import { resolvePrimaryRoute, resolvePrimarySupplierId } from "@/lib/quotes/resolve-primary-route"
 import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
@@ -148,6 +148,12 @@ export async function POST(req: Request, { params }: RouteParams) {
     packageIncludesHeading: documentText.quote_doc_includes_heading,
     packageExcludesHeading: documentText.quote_doc_excludes_heading,
     packageExcludesDefault: documentText.quote_doc_excludes_default,
+    flightCapPerPerson: deriveFlightCapPerPerson(
+      lineItems.map((li) => ({
+        unitPrice: Number(li.unit_price),
+        pricingSnapshot: li.pricing_snapshot as PricingSnapshot | null,
+      })),
+    ),
   })
 
   const shared = await resolveSharedEmailTokens(supabase, quote.booking_id)

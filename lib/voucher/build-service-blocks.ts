@@ -10,7 +10,7 @@ import { addDays, trainArrivalDate } from "@/lib/packages/hotel-dates"
 import { getHotelDefaultTimes, type HotelDefaultTimes } from "@/lib/suppliers/hotel-default-times"
 import type { Database } from "@/lib/supabase/types"
 import type { SupplierKind } from "@/lib/types"
-import { resolveDirectedRouteName } from "@/lib/routes/route-name"
+import { resolveDirectedArrivalName, resolveDirectedRouteName } from "@/lib/routes/route-name"
 import { firstRecord } from "@/lib/utils"
 
 export function mapSupplierKindToServiceType(kind: SupplierKind | string | null): VoucherServiceType {
@@ -251,6 +251,17 @@ function resolveVoucherRouteName(route: RouteJoin | null | undefined, reversed: 
   return resolveDirectedRouteName(origin, destination, reversed)
 }
 
+/** The station a train leg arrives at, honoring `route_reversed` — null when the route's
+ * endpoints aren't resolvable (falls back to no station shown, never the supplier's static
+ * location). */
+function resolveVoucherArrivalStation(route: RouteJoin | null | undefined, reversed: boolean): string | null {
+  if (!route) return null
+  const origin = firstRecord(route.origin)?.name
+  const destination = firstRecord(route.destination)?.name
+  if (!origin || !destination) return null
+  return resolveDirectedArrivalName(origin, destination, reversed)
+}
+
 interface TransportBlockContext {
   title: string
   displayOrder: number
@@ -433,10 +444,13 @@ export async function buildVoucherServiceBlocks(
 
     // A hotel leg's "route" is its meal plan (see lib/packages/apply-dialog-state.ts).
     const directedRouteName = resolveVoucherRouteName(route, row.route_reversed ?? false)
+    const arrivalStation =
+      serviceType === "train" ? resolveVoucherArrivalStation(route, row.route_reversed ?? false) : null
     const { names: suiteNames, unitCount } = resolveLegSuiteNames(row, serviceType === "train")
     const suiteName = suiteNames.length > 0 ? suiteNames.join(", ") : null
     const serviceData: VoucherServiceBlockData = {
       route: isHotel ? null : directedRouteName,
+      arrivalStation,
       mealPlan: isHotel ? route?.name ?? null : null,
       suiteType: suiteName,
       numberOfSuites: unitCount > 0 ? unitCount : null,

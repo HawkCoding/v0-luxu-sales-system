@@ -111,6 +111,7 @@ export function mapSupplier(row: SupplierRow): Supplier {
     slug: row.slug,
     kind: row.kind,
     status: normalizeSupplierStatus(row.status),
+    pricingMode: row.pricing_mode ?? "rate_card",
     name: row.name,
     email: row.email,
     phone: row.phone,

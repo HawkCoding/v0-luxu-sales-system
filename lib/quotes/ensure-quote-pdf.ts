@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { renderQuotePdf } from "@/lib/quotes/render-quote-pdf"
-import { deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
+import { deriveFlightCapPerPerson, deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { loadBrandLogo } from "@/lib/pdf/brand-logo"
@@ -169,6 +169,12 @@ export async function ensureQuotePdf(
       children: booking?.no_of_children ?? 0,
       total: quote.total,
       itineraryBlocks,
+      flightCapPerPerson: deriveFlightCapPerPerson(
+        (lineItems ?? []).map((li) => ({
+          unitPrice: Number(li.unit_price),
+          pricingSnapshot: li.pricing_snapshot as PricingSnapshot | null,
+        })),
+      ),
       brand,
       brandPosition: position.quote,
       brandLogo,

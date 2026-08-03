@@ -26,6 +26,7 @@ import type { BookingTransportRequest, CommissionKind, PackageDetail, QuoteLineI
 import { SUPPLIER_KIND_LABELS } from "@/lib/types"
 import { PresenceAvatars } from "@/components/presence-avatars"
 import { formatCurrency } from "@/lib/utils"
+import { isMissingPricing } from "@/lib/quotes/pricing-engine"
 import { useRecordPresence } from "@/hooks/use-record-presence"
 import { useVersionedSave } from "@/hooks/use-versioned-save"
 import { CommissionControl, type CommissionControlValue } from "@/components/supplier/commission-control"
@@ -949,6 +950,11 @@ export function BuildBookingDialog({
                           {li.description}
                           {li.pricingSnapshot?.isExtra ? (
                             <Badge variant="outline" className="ml-1.5 align-middle text-[9px]">Extra</Badge>
+                          ) : null}
+                          {li.pricingSnapshot?.pricingMode === "manual" && isMissingPricing(li) ? (
+                            <Badge variant="destructive" className="ml-1.5 align-middle text-[9px]">
+                              Fare required
+                            </Badge>
                           ) : null}
                         </div>
                         {li.pricingSnapshot?.rateTypeName && (

@@ -92,7 +92,7 @@ describe("GET /api/settings/document-brand", () => {
     expect(body.brand_block_heading).toBe("OLD HEADING")
     expect(body.brand_block_subheading).toBeTruthy()
     expect(body.brand_block_logo_url).toBe("")
-    expect(body.brand_block_position_quote).toBe("bottom")
+    expect(body.brand_block_position_quote).toBe("top")
     expect(body.brand_block_position_invoice).toBe("top")
     expect(body.brand_block_position_email).toBe("top")
   })

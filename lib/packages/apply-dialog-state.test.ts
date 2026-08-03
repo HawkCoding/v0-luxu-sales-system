@@ -19,6 +19,7 @@ function leg(partial: Partial<PackageLeg> & { id: string; supplierKind: Supplier
     supplierId: `supplier-${partial.id}`,
     supplierName: `Supplier ${partial.id}`,
     supplierDescription: null,
+    pricingMode: "rate_card",
     label: null,
     sortOrder: 0,
     dateAnchor: null,
@@ -487,6 +488,9 @@ describe("toApplySelections", () => {
         adultCount: 2,
         childCount: 1,
         infantCount: 0,
+        manualAdultPrice: null,
+        manualChildPrice: null,
+        manualInfantPrice: null,
       },
     ])
     expect(trainSel?.commissionOverride).toEqual({ type: "percent", value: 10 })

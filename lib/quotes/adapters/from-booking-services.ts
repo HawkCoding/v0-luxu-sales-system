@@ -11,8 +11,15 @@ type PackageRow = Database["public"]["Tables"]["packages"]["Row"]
 type PackageLegRouteRow = Database["public"]["Tables"]["package_leg_routes"]["Row"]
 type RouteRow = Database["public"]["Tables"]["routes"]["Row"]
 
+interface SupplierJoin {
+  name: string
+  description: string | null
+  kind: string
+  pricing_mode: "rate_card" | "manual"
+}
+
 interface BookingServiceWithSupplier extends BookingServiceRow {
-  suppliers: { name: string; description: string | null; kind: string } | { name: string; description: string | null; kind: string }[] | null
+  suppliers: SupplierJoin | SupplierJoin[] | null
 }
 
 function firstRecord<T>(value: T | T[] | null): T | null {
@@ -43,7 +50,7 @@ export async function loadBookingServicesPackageDetail(
 ): Promise<BookingServicesData> {
   const { data: serviceRows } = await supabase
     .from("booking_services")
-    .select("*, suppliers(name, description, kind)")
+    .select("*, suppliers(name, description, kind, pricing_mode)")
     .eq("booking_id", bookingId)
     .order("sort_order", { ascending: true })
 
@@ -118,6 +125,7 @@ export async function loadBookingServicesPackageDetail(
       supplierName: supplier?.name ?? "Unknown supplier",
       supplierDescription: supplier?.description ?? null,
       supplierKind: (supplier?.kind as SupplierKind) ?? "train_operator",
+      supplierPricingMode: supplier?.pricing_mode ?? "rate_card",
     }
   })
 
@@ -188,6 +196,9 @@ export function bookingServicesToLegSelections(
         adultCount: unit.adult_count,
         childCount: unit.child_count,
         infantCount: unit.infant_count,
+        manualAdultPrice: unit.manual_adult_price,
+        manualChildPrice: unit.manual_child_price,
+        manualInfantPrice: unit.manual_infant_price,
       }))
 
     const selection: PackageLegSelection = {

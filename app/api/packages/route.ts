@@ -30,7 +30,7 @@ export async function GET() {
       .order("name", { ascending: true }),
     supabase
       .from("package_legs")
-      .select("*, suppliers(name, description, kind)")
+      .select("*, suppliers(name, description, kind, pricing_mode)")
       .order("sort_order", { ascending: true }),
     supabase.from("package_leg_routes").select("package_leg_id, route_id"),
     supabase.from("routes").select("id, supplier_id, name"),
@@ -42,8 +42,13 @@ export async function GET() {
   }
 
   const legs = ((legRows ?? []) as Array<
-    Omit<PackageLegWithSupplier, "supplierName" | "supplierDescription" | "supplierKind"> & {
-      suppliers: { name: string; description: string | null; kind: PackageLegWithSupplier["supplierKind"] } | null
+    Omit<PackageLegWithSupplier, "supplierName" | "supplierDescription" | "supplierKind" | "supplierPricingMode"> & {
+      suppliers: {
+        name: string
+        description: string | null
+        kind: PackageLegWithSupplier["supplierKind"]
+        pricing_mode: PackageLegWithSupplier["supplierPricingMode"]
+      } | null
     }
   >).map((leg) => ({
     id: leg.id,
@@ -56,6 +61,7 @@ export async function GET() {
     supplierName: leg.suppliers?.name ?? "Unknown supplier",
     supplierDescription: leg.suppliers?.description ?? null,
     supplierKind: leg.suppliers?.kind ?? "train_operator",
+    supplierPricingMode: leg.suppliers?.pricing_mode ?? "rate_card",
   }))
 
   const routes = routeRows ?? []

@@ -268,6 +268,11 @@ export async function PATCH(
     return existingDetail.error!
   }
 
+  // Manual suppliers (see supplier_pricing_mode) don't manage rate_cards through this route at
+  // all -- whatever exists stays exactly as-is, and nothing submitted for them is written or
+  // diffed against. This is what lets a supplier flip to manual without losing its rate history.
+  const isManualPricingSupplier = parsed.pricingMode === "manual"
+
   const supplierId = existingDetail.supplier.id
   const expectedUpdatedAt = parsed.expectedUpdatedAt
   if (typeof expectedUpdatedAt === "string" && expectedUpdatedAt !== existingDetail.supplier.updated_at) {
@@ -443,42 +448,47 @@ export async function PATCH(
       throw new Error(`Duplicate route name "${duplicateRouteName}". Rename one and try again.`)
     }
 
-    normalizedRateCards = parsed.routes.flatMap((route) => {
-      const routeId = route.id ?? normalizedRoutes.find((candidate) => candidate.name === route.name.trim())?.id
-      if (!routeId || !routeIds.has(routeId)) {
-        return []
-      }
-
-      return route.rateCards
-        .map((rateCard) => {
-          const requestedRateTypeId =
-            "rateTypeId" in rateCard && typeof rateCard.rateTypeId === "string" && rateCard.rateTypeId.length > 0
-              ? rateCard.rateTypeId
-              : null
-          const resolvedRateTypeId = requestedRateTypeId ?? defaultRateTypeId ?? ""
-          return {
-            id: rateCard.id ?? makeUuid(),
-            route_id: routeId,
-            suite_type_id: rateCard.suiteTypeId,
-            rate_type_id: resolvedRateTypeId,
-            price_per_person: rateCard.pricePerPerson,
-            child_price: isTransport ? null : rateCard.childPrice,
-            infant_price: isTransport ? null : rateCard.infantPrice,
-            currency: rateCard.currency.trim().toUpperCase() || "ZAR",
-            valid_from: rateCard.validFrom,
-            valid_to: normalizeNullableDate(rateCard.validTo),
-            created_at: now,
+    // Manual suppliers never touch rate_cards through this route -- see isManualPricingSupplier
+    // above. Whatever the client sent for route.rateCards is ignored outright, existing rows
+    // included, rather than diffed/validated against.
+    normalizedRateCards = isManualPricingSupplier
+      ? []
+      : parsed.routes.flatMap((route) => {
+          const routeId = route.id ?? normalizedRoutes.find((candidate) => candidate.name === route.name.trim())?.id
+          if (!routeId || !routeIds.has(routeId)) {
+            return []
           }
+
+          return route.rateCards
+            .map((rateCard) => {
+              const requestedRateTypeId =
+                "rateTypeId" in rateCard && typeof rateCard.rateTypeId === "string" && rateCard.rateTypeId.length > 0
+                  ? rateCard.rateTypeId
+                  : null
+              const resolvedRateTypeId = requestedRateTypeId ?? defaultRateTypeId ?? ""
+              return {
+                id: rateCard.id ?? makeUuid(),
+                route_id: routeId,
+                suite_type_id: rateCard.suiteTypeId,
+                rate_type_id: resolvedRateTypeId,
+                price_per_person: rateCard.pricePerPerson,
+                child_price: isTransport ? null : rateCard.childPrice,
+                infant_price: isTransport ? null : rateCard.infantPrice,
+                currency: rateCard.currency.trim().toUpperCase() || "ZAR",
+                valid_from: rateCard.validFrom,
+                valid_to: normalizeNullableDate(rateCard.validTo),
+                created_at: now,
+              }
+            })
+            .filter((rateCard) => {
+              if (!isDraftSave) return true
+              return (
+                routeIds.has(rateCard.route_id) &&
+                suiteTypeIds.has(rateCard.suite_type_id) &&
+                rateCard.valid_from.length > 0
+              )
+            })
         })
-        .filter((rateCard) => {
-          if (!isDraftSave) return true
-          return (
-            routeIds.has(rateCard.route_id) &&
-            suiteTypeIds.has(rateCard.suite_type_id) &&
-            rateCard.valid_from.length > 0
-          )
-        })
-    })
 
     normalizedRateCards = normalizedRateCards.map((rateCard) => {
       if (!routeIds.has(rateCard.route_id)) {
@@ -547,16 +557,23 @@ export async function PATCH(
     .map((route) => route.id)
     .filter((routeId) => !incomingRouteIds.has(routeId))
   const routeIdsToDeleteSet = new Set(routeIdsToDelete)
-  const rateCardIdsToDelete = Array.from(
-    new Set(
-      existingDetail.rateCards
-        .filter(
-          (rateCard) =>
-            !incomingRateCardIds.has(rateCard.id) || routeIdsToDeleteSet.has(rateCard.route_id),
-        )
-        .map((rateCard) => rateCard.id),
-    ),
-  )
+  // Manual suppliers keep their untouched rate_cards rows regardless of what the diff would
+  // otherwise flag as "no longer incoming" -- the only exception is a route actually being
+  // deleted, whose rate cards must go too (rate_cards.route_id has no ON DELETE CASCADE).
+  const rateCardIdsToDelete = isManualPricingSupplier
+    ? existingDetail.rateCards
+        .filter((rateCard) => routeIdsToDeleteSet.has(rateCard.route_id))
+        .map((rateCard) => rateCard.id)
+    : Array.from(
+        new Set(
+          existingDetail.rateCards
+            .filter(
+              (rateCard) =>
+                !incomingRateCardIds.has(rateCard.id) || routeIdsToDeleteSet.has(rateCard.route_id),
+            )
+            .map((rateCard) => rateCard.id),
+        ),
+      )
   const suiteTypeIdsToDelete = existingDetail.suiteTypes
     .map((suiteType) => suiteType.id)
     .filter((suiteTypeId) => !incomingSuiteTypeIds.has(suiteTypeId))
@@ -625,6 +642,7 @@ export async function PATCH(
   const supplierUpdatePayload = {
     name: parsed.name.trim(),
     kind: parsed.kind,
+    pricing_mode: parsed.pricingMode,
     email: normalizedEmails[0]?.email ?? null,
     phone: parsed.phone || null,
     website: parsed.website || null,

@@ -179,6 +179,8 @@ interface EditablePackage {
 interface SupplierFormState {
   name: string
   kind: SupplierKind
+  /** 'manual' skips rate cards entirely -- the fare is typed per unit at quote-build time. */
+  pricingMode: "rate_card" | "manual"
   emails: EditableSupplierEmail[]
   phone: string
   website: string
@@ -357,6 +359,7 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
   return {
     name: supplier.name,
     kind: supplier.kind,
+    pricingMode: supplier.pricingMode,
     emails: detailEmails,
     phone: supplier.phone ?? "",
     website: supplier.website ?? "",
@@ -3476,6 +3479,7 @@ export function SupplierDetailView({
         body: JSON.stringify({
           name: form.name.trim(),
           kind: form.kind,
+          pricingMode: form.pricingMode,
           email: "",
           emails: cleanedEmails,
           phone: form.phone.trim(),
@@ -4243,7 +4247,51 @@ export function SupplierDetailView({
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              {activeVocabulary.showSingleSupplement ? (
+              <div className="rounded-lg border p-4">
+                {isEditing ? (
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <Label htmlFor="supplier-pricing-mode" className="text-sm font-semibold text-foreground">
+                        Manual pricing
+                      </Label>
+                      <p className="text-sm text-muted-foreground">
+                        {form.pricingMode === "manual"
+                          ? "Rate cards are hidden. Prices are typed per unit when a quote is built."
+                          : "Prices come from rate cards below, as usual."}
+                        {supplier.rateCards.length > 0 ? (
+                          <span className="block text-xs">
+                            Existing rate cards are kept either way — switching only changes whether they're used.
+                          </span>
+                        ) : null}
+                      </p>
+                    </div>
+                    <Switch
+                      id="supplier-pricing-mode"
+                      checked={form.pricingMode === "manual"}
+                      onCheckedChange={(checked) =>
+                        updateField("pricingMode", checked ? "manual" : "rate_card")
+                      }
+                    />
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">Pricing</p>
+                      <p className="text-sm text-muted-foreground">
+                        {supplier.pricingMode === "manual"
+                          ? "Manual — typed per unit at quote-build time."
+                          : "Rate cards."}
+                      </p>
+                    </div>
+                    <Badge variant="outline">
+                      {supplier.pricingMode === "manual" ? "Manual" : "Rate cards"}
+                    </Badge>
+                  </div>
+                )}
+              </div>
+
+              {activeVocabulary.showSingleSupplement &&
+              (isEditing ? form.pricingMode : supplier.pricingMode) !== "manual" ? (
                 <div className="rounded-lg border p-4">
                   {isEditing ? (
                     <div className="grid gap-3 sm:grid-cols-[minmax(0,16rem)_1fr] sm:items-end">
@@ -4343,13 +4391,15 @@ export function SupplierDetailView({
                 onChangeChildMaxAge={(value) => updateField("childMaxAge", value)}
               />
 
-              <ApplicableRatesCard
-                isEditing={isEditing}
-                rateTypes={supplier.rateTypes ?? []}
-                defaultRateTypeId={supplier.defaultRateTypeId ?? null}
-                adjustments={isEditing ? form.rateAdjustments : supplier.rateAdjustments ?? []}
-                onChange={(next) => updateField("rateAdjustments", next)}
-              />
+              {(isEditing ? form.pricingMode : supplier.pricingMode) !== "manual" ? (
+                <ApplicableRatesCard
+                  isEditing={isEditing}
+                  rateTypes={supplier.rateTypes ?? []}
+                  defaultRateTypeId={supplier.defaultRateTypeId ?? null}
+                  adjustments={isEditing ? form.rateAdjustments : supplier.rateAdjustments ?? []}
+                  onChange={(next) => updateField("rateAdjustments", next)}
+                />
+              ) : null}
 
               <div className="rounded-lg border p-4 space-y-3">
                 <div className="flex items-center justify-between gap-3">
@@ -4472,7 +4522,15 @@ export function SupplierDetailView({
 
               <Separator />
 
-              {isEditing ? (
+              {(isEditing ? form.pricingMode : supplier.pricingMode) === "manual" ? (
+                <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                  Manually priced — rate cards are hidden. The fare is typed per unit when a quote
+                  is built.
+                  {supplier.rateCards.length > 0
+                    ? " Existing rate cards aren't shown here but haven't been removed."
+                    : ""}
+                </div>
+              ) : isEditing ? (
                 <RateCardMatrixEditor
                   routes={routeRateGroup.routes}
                   rateCards={routeRateGroup.rateCards}

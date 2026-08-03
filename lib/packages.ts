@@ -24,6 +24,7 @@ export interface PackageLegWithSupplier extends PackageLegRow {
   supplierName: string
   supplierDescription: string | null
   supplierKind: SupplierKind
+  supplierPricingMode: "rate_card" | "manual"
 }
 
 export function buildPackageSlugBase(name: string): string {
@@ -178,6 +179,7 @@ export function mapPackageLeg(
     supplierName: row.supplierName,
     supplierDescription: row.supplierDescription,
     supplierKind: row.supplierKind,
+    pricingMode: row.supplierPricingMode,
     label: row.label,
     sortOrder: row.sort_order,
     dateAnchor: normalizeLegDateAnchor(row.date_anchor),

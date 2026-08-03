@@ -37,6 +37,10 @@ const unitSelectionSchema = z.object({
   adultCount: z.number().int().nonnegative().default(0),
   childCount: z.number().int().nonnegative().default(0),
   infantCount: z.number().int().nonnegative().default(0),
+  /** Manual-pricing legs only (e.g. airlines): the typed fare for this unit's cabin. */
+  manualAdultPrice: z.number().nonnegative().nullable().optional(),
+  manualChildPrice: z.number().nonnegative().nullable().optional(),
+  manualInfantPrice: z.number().nonnegative().nullable().optional(),
 })
 
 const applyServicesSchema = z.object({

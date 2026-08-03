@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { buildPackageQuoteLineItems, calculateQuoteTotals } from "@/lib/quotes/build-from-package"
+import { isMissingPricing } from "@/lib/quotes/pricing-engine"
 import { buildQuoteNumber } from "@/lib/quotes/quote-number"
 import { bookingServicesToLegSelections, loadBookingServicesPackageDetail } from "@/lib/quotes/adapters/from-booking-services"
 import { getDefaultCommission } from "@/lib/pricing/default-commission"
@@ -86,7 +87,10 @@ export async function createDraftQuoteForBooking({
         rateTypes,
       })
       lineItems = built.lineItems
-      status = lineItems.length > 0 ? "draft" : "pricing_incomplete"
+      // A flight leg with no fare typed in yet still counts as "not fully priced" -- same bar as
+      // having zero lines at all.
+      status =
+        lineItems.length > 0 && !lineItems.some(isMissingPricing) ? "draft" : "pricing_incomplete"
     } catch (error) {
       warning = error instanceof Error ? error.message : "Services were built, but pricing could not be pre-filled."
     }

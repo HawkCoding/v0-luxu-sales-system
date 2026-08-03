@@ -20,6 +20,7 @@ interface SupplierJoin {
   name: string
   description: string | null
   kind: SupplierKind
+  pricing_mode: "rate_card" | "manual"
 }
 
 interface PackageLegJoinRow extends PackageLegRow {
@@ -90,6 +91,7 @@ function normalizeLegRows(
     supplierName: row.suppliers?.name ?? "Unknown supplier",
     supplierDescription: row.suppliers?.description ?? null,
     supplierKind: row.suppliers?.kind ?? "train_operator",
+    supplierPricingMode: row.suppliers?.pricing_mode ?? "rate_card",
   }))
 }
 
@@ -114,7 +116,7 @@ export async function loadPackageDetail(supabase: SupabaseClient<Database>, slug
 
   const { data: legRows, error: legsError } = await supabase
     .from("package_legs")
-    .select("*, suppliers(name, description, kind)")
+    .select("*, suppliers(name, description, kind, pricing_mode)")
     .eq("package_id", pkg.id)
     .order("sort_order", { ascending: true })
 

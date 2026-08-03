@@ -387,7 +387,8 @@ export function SuiteLegEditor({
                       ))}
                     </SelectContent>
                   </Select>
-                  {unit.suiteTypeId &&
+                  {leg.pricingMode !== "manual" &&
+                  unit.suiteTypeId &&
                   value.routeId &&
                   !hasAnyRateCardFor(leg.rateCards, value.routeId, unit.suiteTypeId) ? (
                     <p className="text-xs text-amber-600 dark:text-amber-500">
@@ -494,6 +495,52 @@ export function SuiteLegEditor({
                         onValueChange={(next) => updateUnit(unit.id, { infantCount: next ?? 0 })}
                       />
                     </div>
+                  </div>
+                ) : null}
+
+                {leg.pricingMode === "manual" ? (
+                  <div className="flex flex-wrap items-end gap-3 md:col-span-2 xl:col-span-3">
+                    <div className="space-y-1.5">
+                      <Label>Adult fare</Label>
+                      <NumericInput
+                        min="0"
+                        step="0.01"
+                        className="h-8 w-24"
+                        nullable
+                        nullDisplayValue="0"
+                        value={unit.manualAdultPrice}
+                        onValueChange={(next) => updateUnit(unit.id, { manualAdultPrice: next })}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Child fare</Label>
+                      <NumericInput
+                        min="0"
+                        step="0.01"
+                        className="h-8 w-24"
+                        nullable
+                        placeholder="Same as adult"
+                        value={unit.manualChildPrice}
+                        onValueChange={(next) => updateUnit(unit.id, { manualChildPrice: next })}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Infant fare</Label>
+                      <NumericInput
+                        min="0"
+                        step="0.01"
+                        className="h-8 w-24"
+                        nullable
+                        placeholder="Same as child"
+                        value={unit.manualInfantPrice}
+                        onValueChange={(next) => updateUnit(unit.id, { manualInfantPrice: next })}
+                      />
+                    </div>
+                    {!unit.manualAdultPrice ? (
+                      <p className="text-xs text-amber-600 dark:text-amber-500">
+                        Fare required — the quote will flag this line until it's priced.
+                      </p>
+                    ) : null}
                   </div>
                 ) : null}
 

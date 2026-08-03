@@ -1,4 +1,4 @@
-export type Json =
+﻿export type Json =
   | string
   | number
   | boolean
@@ -592,6 +592,9 @@ export type Database = {
           created_at: string
           id: string
           infant_count: number
+          manual_adult_price: number | null
+          manual_child_price: number | null
+          manual_infant_price: number | null
           origin: Database["public"]["Enums"]["service_origin"]
           service_id: string
           sort_order: number
@@ -607,6 +610,9 @@ export type Database = {
           created_at?: string
           id?: string
           infant_count?: number
+          manual_adult_price?: number | null
+          manual_child_price?: number | null
+          manual_infant_price?: number | null
           origin?: Database["public"]["Enums"]["service_origin"]
           service_id: string
           sort_order?: number
@@ -622,6 +628,9 @@ export type Database = {
           created_at?: string
           id?: string
           infant_count?: number
+          manual_adult_price?: number | null
+          manual_child_price?: number | null
+          manual_infant_price?: number | null
           origin?: Database["public"]["Enums"]["service_origin"]
           service_id?: string
           sort_order?: number
@@ -3631,6 +3640,7 @@ export type Database = {
           name: string
           notes: string | null
           phone: string | null
+          pricing_mode: Database["public"]["Enums"]["supplier_pricing_mode"]
           single_supplement_pct: number
           slug: string
           status: string
@@ -3657,6 +3667,7 @@ export type Database = {
           name: string
           notes?: string | null
           phone?: string | null
+          pricing_mode?: Database["public"]["Enums"]["supplier_pricing_mode"]
           single_supplement_pct?: number
           slug: string
           status?: string
@@ -3683,6 +3694,7 @@ export type Database = {
           name?: string
           notes?: string | null
           phone?: string | null
+          pricing_mode?: Database["public"]["Enums"]["supplier_pricing_mode"]
           single_supplement_pct?: number
           slug?: string
           status?: string
@@ -4097,6 +4109,7 @@ export type Database = {
         | "tour_operator"
         | "airline"
         | "vehicle_rental"
+      supplier_pricing_mode: "rate_card" | "manual"
       user_role: "admin" | "manager" | "consultant" | "readonly"
     }
     CompositeTypes: {
@@ -4294,6 +4307,7 @@ export const Constants = {
         "airline",
         "vehicle_rental",
       ],
+      supplier_pricing_mode: ["rate_card", "manual"],
       user_role: ["admin", "manager", "consultant", "readonly"],
     },
   },
