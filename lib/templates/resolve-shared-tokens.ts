@@ -22,7 +22,7 @@ import { buildGuestInfoBlock } from "@/lib/templates/guest-info-block"
 import { buildSuiteTokens } from "@/lib/templates/suite-description"
 import { loadSuiteSelections } from "@/lib/templates/suite-selections"
 import { buildQuoteSummaryBlock, formatMoney } from "@/lib/quotes/quote-summary-block"
-import { deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
+import { deriveFlightCapPerPerson, deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 import { getBankingSettings, getDocumentTextSettings } from "@/lib/settings-access"
 
@@ -223,7 +223,7 @@ export async function resolveSharedEmailTokens(
     try {
       const { data: lineItems } = await supabase
         .from("quote_line_items")
-        .select("pricing_snapshot")
+        .select("unit_price, pricing_snapshot")
         .eq("quote_id", latestQuote.id)
 
       const legIds = new Set(
@@ -254,6 +254,12 @@ export async function resolveSharedEmailTokens(
         packageIncludesHeading: documentText.quote_doc_includes_heading,
         packageExcludesHeading: documentText.quote_doc_excludes_heading,
         packageExcludesDefault: documentText.quote_doc_excludes_default,
+        flightCapPerPerson: deriveFlightCapPerPerson(
+          (lineItems ?? []).map((li) => ({
+            unitPrice: Number(li.unit_price),
+            pricingSnapshot: li.pricing_snapshot as PricingSnapshot | null,
+          })),
+        ),
       })
     } catch {
       quoteSummaryTable = PLACEHOLDER

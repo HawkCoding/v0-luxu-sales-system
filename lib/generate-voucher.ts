@@ -21,6 +21,10 @@ export interface VoucherServiceBlockContact {
 
 export interface VoucherServiceBlockData {
   route?: string | null
+  /** The station a train leg actually arrives at — the route's destination, or its origin when
+   * `route_reversed` swaps the booked direction. Never derive this from the supplier's own
+   * static `location` field, which has no notion of leg direction. */
+  arrivalStation?: string | null
   departureDate?: string | null
   arrivalDate?: string | null
   /** HH:MM the service starts — train departure, hotel check-in, transfer pickup. */

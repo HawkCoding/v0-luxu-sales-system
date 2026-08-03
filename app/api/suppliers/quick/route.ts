@@ -176,6 +176,12 @@ export async function POST(req: Request) {
     .from("suppliers")
     .insert({
       kind: parsed.kind,
+      // Matches the default POST /api/suppliers applies -- airfare can't be maintained as a
+      // standing rate list, so a quick-added airline still starts manually-priced. The quick-add
+      // form itself still collects a one-off rate card below; see the price/validFrom fields
+      // further down, which apply regardless of pricing_mode (pre-existing quick-add behaviour,
+      // unchanged here).
+      pricing_mode: parsed.kind === "airline" ? "manual" : "rate_card",
       name: parsed.name.trim(),
       slug,
       email: parsed.email || null,
@@ -190,7 +196,7 @@ export async function POST(req: Request) {
       active: false,
       status: "temporary",
     })
-    .select("id, slug, kind, status, name, email, phone, website, location, location_detail, location_id, location_area_id, description, notes, active, single_supplement_pct, infant_max_age, child_max_age, default_time_start, default_time_end, inclusions, exclusions, created_at, updated_at")
+    .select("id, slug, kind, pricing_mode, status, name, email, phone, website, location, location_detail, location_id, location_area_id, description, notes, active, single_supplement_pct, infant_max_age, child_max_age, default_time_start, default_time_end, inclusions, exclusions, created_at, updated_at")
     .single()
 
   if (supplierError || !supplier) {

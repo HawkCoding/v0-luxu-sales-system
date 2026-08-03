@@ -156,6 +156,9 @@ export async function POST(req: Request) {
     .from("suppliers")
     .insert({
       kind: parsed.kind,
+      // Airfare can't be maintained as a standing rate list -- new airline suppliers start
+      // manually-priced by default, same as the backfill for existing ones.
+      pricing_mode: parsed.kind === "airline" ? "manual" : "rate_card",
       name: supplierName,
       slug,
       email: normalizedEmails[0]?.email ?? null,

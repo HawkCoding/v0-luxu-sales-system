@@ -12,6 +12,7 @@ const leg: PackageLeg = {
   supplierName: "The Blue Train",
   supplierDescription: null,
   supplierKind: "train_operator",
+  pricingMode: "rate_card",
   label: "The Blue Train",
   sortOrder: 0,
   dateAnchor: null,
@@ -48,6 +49,9 @@ const mismatchedUnits: SuiteLegState["units"] = [
     adultCount: 7,
     childCount: 1,
     infantCount: 0,
+    manualAdultPrice: null,
+    manualChildPrice: null,
+    manualInfantPrice: null,
   },
 ]
 

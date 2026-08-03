@@ -4,6 +4,7 @@
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { voucherServiceTypeLabel } from "@/lib/generate-voucher"
 import { LONG_MONTH_NAMES, formatDayOfMonth, formatDisplayDateLong } from "@/lib/date-format"
+import type { QuoteLineItem } from "@/lib/types"
 
 export interface QuotePax {
   adults: number
@@ -74,6 +75,32 @@ export function formatTotalLabel(pax: QuotePax): string {
  * editor's token preview can never drift apart.
  */
 export const VAT_INCLUSIVE_SUFFIX = "(incl.VAT)"
+
+/**
+ * The reassurance line shown under the flight itinerary bullet: "flights won't cost the client
+ * more than this." One combined line for the whole quote, at the highest adult flight fare —
+ * unambiguous when a booking has more than one flight leg or cabin, and never understates.
+ * Suppressed (null) when no flight has been priced yet, so a R0 placeholder is never shown as a cap.
+ */
+export function deriveFlightCapPerPerson(
+  lineItems: readonly Pick<QuoteLineItem, "unitPrice" | "pricingSnapshot">[],
+): number | null {
+  const adultFlightFares = lineItems
+    .filter(
+      (item) =>
+        item.pricingSnapshot?.supplierKind === "airline" &&
+        item.pricingSnapshot?.passengerKind === "adult" &&
+        item.unitPrice > 0,
+    )
+    .map((item) => item.unitPrice)
+
+  return adultFlightFares.length > 0 ? Math.max(...adultFlightFares) : null
+}
+
+/** "Flights are capped at R2 000 pp — incl. baggage & fees" */
+export function formatFlightCapLine(amountFormatter: (amount: number) => string, capPerPerson: number): string {
+  return `Flights are capped at ${amountFormatter(capPerPerson)} pp — incl. baggage & fees`
+}
 
 /**
  * Journey window derived from the legs actually priced into the quote, not the
@@ -232,7 +259,7 @@ function describeEndLine(block: VoucherServiceBlock): QuoteItineraryLine | null 
     }
   }
   if (block.serviceType === "train") {
-    const where = block.contactDetails.location?.trim()
+    const where = d.arrivalStation?.trim()
     return {
       dateISO: d.arrivalDate,
       text: end
@@ -247,14 +274,26 @@ function describeEndLine(block: VoucherServiceBlock): QuoteItineraryLine | null 
 /**
  * The client-facing itinerary. One block can produce two lines — a hotel stay is a check-in line
  * and a separate check-out line on a later date — so lines are re-sorted by date afterwards.
+ *
+ * `flightCapBullet` (already formatted, e.g. "Flights are capped at R2 000 pp — incl. baggage &
+ * fees" via {@link formatFlightCapLine}) is attached under the *first* flight block only, one
+ * combined line for the whole quote rather than repeated per flight.
  */
-export function buildQuoteItineraryLines(blocks: VoucherServiceBlock[]): QuoteItineraryLine[] {
+export function buildQuoteItineraryLines(
+  blocks: VoucherServiceBlock[],
+  flightCapBullet?: string | null,
+): QuoteItineraryLine[] {
   const lines: QuoteItineraryLine[] = []
+  let flightCapAttached = false
 
   blocks.forEach((block) => {
     const d = block.serviceData
     const bullets = [...(d.inclusions ?? [])]
     if (d.notes?.trim()) bullets.push(d.notes.trim())
+    if (flightCapBullet && !flightCapAttached && block.serviceType === "airline") {
+      bullets.push(flightCapBullet)
+      flightCapAttached = true
+    }
 
     lines.push({ dateISO: d.departureDate ?? null, text: describeBlock(block), bullets })
 

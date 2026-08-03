@@ -14,6 +14,7 @@ import {
   buildQuoteItineraryLines,
   collectQuoteExclusions,
   derivePerPersonRate,
+  formatFlightCapLine,
   formatJourneyRange,
   formatPaxLabel,
   formatTotalLabel,
@@ -38,6 +39,8 @@ export interface QuoteSummaryInput {
   packageExcludesHeading?: string
   /** Standing exclusion appended after the suppliers' own; empty omits it. */
   packageExcludesDefault?: string
+  /** Highest priced adult flight fare on the quote; null/absent omits the capped-fare bullet. */
+  flightCapPerPerson?: number | null
 }
 
 export function formatMoney(amount: number): string {
@@ -112,7 +115,9 @@ export function buildQuoteSummaryBlock(input: QuoteSummaryInput): string {
   const sortedBlocks = sortItineraryBlocksChronologically(input.itineraryBlocks)
 
   let itinerary = ""
-  const itineraryLines = buildQuoteItineraryLines(sortedBlocks)
+  const flightCapBullet =
+    input.flightCapPerPerson != null ? formatFlightCapLine(formatMoney, input.flightCapPerPerson) : null
+  const itineraryLines = buildQuoteItineraryLines(sortedBlocks, flightCapBullet)
   if (itineraryLines.length > 0) {
     const heading = input.packageIncludesHeading || DEFAULT_INCLUDES_HEADING
     const items = itineraryLines

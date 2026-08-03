@@ -43,3 +43,16 @@ export function resolveDirectedRouteName(
     ? buildRouteName(destinationName, originName, "one_way")
     : buildRouteName(originName, destinationName, "one_way")
 }
+
+/**
+ * The station a leg actually arrives at, given the booked direction — the same swap
+ * `resolveDirectedRouteName` applies to the route label, so the arrival station on client
+ * documents always agrees with the route sentence next to it.
+ */
+export function resolveDirectedArrivalName(
+  originName: string,
+  destinationName: string,
+  reversed: boolean,
+): string {
+  return reversed ? originName : destinationName
+}

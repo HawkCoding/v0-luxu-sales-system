@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
+import type { QuoteLineItem } from "@/lib/types"
 import {
   buildQuoteItineraryLines,
   collectQuoteExclusions,
+  deriveFlightCapPerPerson,
   deriveJourneyFromBlocks,
   derivePerPersonRate,
+  formatFlightCapLine,
   formatJourneyRange,
   formatPaxLabel,
   formatTimeOfDay,
@@ -147,6 +150,7 @@ const trainBlock: VoucherServiceBlock = {
     startTime: "12:00",
     endTime: "18:00",
     route: "Pretoria → Cape Town",
+    arrivalStation: "Cape Town",
     suiteType: "Deluxe Suite",
     durationDays: 3,
     inclusions: ["High Tea", "Wi-Fi"],
@@ -209,6 +213,91 @@ describe("buildQuoteItineraryLines", () => {
       { ...hotelBlock, serviceData: { ...hotelBlock.serviceData, arrivalDate: null } },
     ])
     expect(lines).toHaveLength(1)
+  })
+})
+
+const flightBlock: VoucherServiceBlock = {
+  serviceType: "airline",
+  title: "Flight",
+  contactDetails: { name: "SA Airways" },
+  serviceData: {
+    departureDate: "2026-07-17",
+    startTime: "08:00",
+    flightNumber: "SA123",
+    route: "Johannesburg → Cape Town",
+    cabin: "Economy",
+  },
+  displayOrder: 0,
+}
+
+describe("buildQuoteItineraryLines — flight cap bullet", () => {
+  it("attaches the cap bullet under the first flight block only", () => {
+    const lines = buildQuoteItineraryLines(
+      [flightBlock, trainBlock, { ...flightBlock, displayOrder: 3 }],
+      "Flights are capped at R2 000 pp — incl. baggage & fees",
+    )
+    const flightLines = lines.filter((line) => line.text.startsWith("Flight"))
+    expect(flightLines[0].bullets).toContain("Flights are capped at R2 000 pp — incl. baggage & fees")
+    expect(flightLines[1].bullets).not.toContain("Flights are capped at R2 000 pp — incl. baggage & fees")
+  })
+
+  it("adds no bullet when the cap is null", () => {
+    const lines = buildQuoteItineraryLines([flightBlock], null)
+    expect(lines[0].bullets).toEqual([])
+  })
+})
+
+describe("deriveFlightCapPerPerson", () => {
+  function flightLine(unitPrice: number, passengerKind: "adult" | "child" = "adult"): QuoteLineItem {
+    return {
+      description: "Flight",
+      qty: 1,
+      unitPrice,
+      total: unitPrice,
+      pricingSnapshot: {
+        source: "pricing_engine",
+        pricingMode: "manual",
+        packageId: "pkg-1",
+        packageName: "Test",
+        legId: "leg-1",
+        legLabel: null,
+        supplierId: "supplier-1",
+        supplierName: "SA Airways",
+        supplierKind: "airline",
+        routeId: null,
+        routeName: null,
+        suiteTypeId: null,
+        suiteTypeName: null,
+        rateCardId: null,
+        travelDate: "2026-07-17",
+        passengerKind,
+        baseUnitPrice: unitPrice,
+        markupPct: 0,
+        singleSupplementPct: null,
+        serviceType: null,
+        unit: null,
+      },
+    }
+  }
+
+  it("returns the highest adult flight fare across multiple flight lines", () => {
+    expect(deriveFlightCapPerPerson([flightLine(2000), flightLine(5000)])).toBe(5000)
+  })
+
+  it("ignores non-adult flight lines and non-flight lines", () => {
+    const hotelLine: QuoteLineItem = { description: "Hotel", qty: 1, unitPrice: 9000, total: 9000 }
+    expect(deriveFlightCapPerPerson([flightLine(2000, "child"), hotelLine])).toBeNull()
+  })
+
+  it("returns null when no flight has been priced yet", () => {
+    expect(deriveFlightCapPerPerson([flightLine(0)])).toBeNull()
+    expect(deriveFlightCapPerPerson([])).toBeNull()
+  })
+})
+
+describe("formatFlightCapLine", () => {
+  it("interpolates the formatted amount", () => {
+    expect(formatFlightCapLine((n) => `R${n}`, 2000)).toBe("Flights are capped at R2000 pp — incl. baggage & fees")
   })
 })
 

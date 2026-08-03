@@ -476,6 +476,44 @@ describe("buildVoucherServiceBlocks", () => {
     expect(blocks[0].serviceData.roomType).toBeNull()
   })
 
+  it("swaps the arrival station to the route's origin on a reversed round-trip leg, regardless of the supplier's own static location", async () => {
+    const returnLeg = {
+      id: "svc-blue-train-return",
+      label: "The Blue Train (return)",
+      sort_order: 1,
+      selected: true,
+      supplier_id: "supplier-blue-train",
+      route_id: "route-blue-train",
+      route_reversed: true,
+      suite_type_id: null,
+      service_date: "2026-08-05",
+      nights: null,
+      notes: null,
+      supplier_reference: null,
+      // Supplier's static `location` is the outbound destination — must never be read for the
+      // arrival station, only the route's actual endpoints + route_reversed matter.
+      suppliers: supplier({ kind: "train_operator", name: "Blue Train", location: "Cape Town" }),
+      routes: {
+        name: "Pretoria ↔ Cape Town",
+        duration_days: 1,
+        direction_mode: "round_trip",
+        origin: { name: "Pretoria" },
+        destination: { name: "Cape Town" },
+      },
+      suite_types: { name: "Royal Suite" },
+      units: null,
+    }
+
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({ services: [returnLeg] }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].serviceData.route).toBe("Cape Town → Pretoria")
+    expect(blocks[0].serviceData.arrivalStation).toBe("Pretoria")
+  })
+
   it("matches a transport request keyed by service_id to its booking_services leg, and never double-counts it as a manual request", async () => {
     const transferService = {
       id: "svc-transfer",

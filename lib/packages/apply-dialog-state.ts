@@ -42,6 +42,11 @@ export interface SuiteUnitState {
   adultCount: number
   childCount: number
   infantCount: number
+  /** Manual-pricing legs only (leg.pricingMode === "manual", e.g. airlines): the typed fare for
+   *  this unit's cabin. Ignored on rate-card legs. null child/infant falls back to adult. */
+  manualAdultPrice: number | null
+  manualChildPrice: number | null
+  manualInfantPrice: number | null
 }
 
 export interface SuiteLegState {
@@ -91,6 +96,9 @@ export interface SavedSelectionUnitRow {
   child_count: number
   infant_count: number
   sort_order: number
+  manual_adult_price?: number | null
+  manual_child_price?: number | null
+  manual_infant_price?: number | null
 }
 
 export interface SavedSelectionRow {
@@ -133,6 +141,9 @@ export function createDraftUnit(totals?: PassengerTotals): SuiteUnitState {
     adultCount: totals?.adultCount ?? 0,
     childCount: totals?.childCount ?? 0,
     infantCount: totals?.infantCount ?? 0,
+    manualAdultPrice: null,
+    manualChildPrice: null,
+    manualInfantPrice: null,
   }
 }
 
@@ -357,6 +368,9 @@ export function hydrateFromSaved(
         adultCount: unit.adult_count,
         childCount: unit.child_count,
         infantCount: unit.infant_count,
+        manualAdultPrice: unit.manual_adult_price ?? null,
+        manualChildPrice: unit.manual_child_price ?? null,
+        manualInfantPrice: unit.manual_infant_price ?? null,
       }))
 
     const isHotel = fallback.supplierKind === "hotel_property"
@@ -405,6 +419,9 @@ export interface PackageSelectionsPatchBody {
       childCount: number
       infantCount: number
       sortOrder: number
+      manualAdultPrice: number | null
+      manualChildPrice: number | null
+      manualInfantPrice: number | null
     }>
   }>
 }
@@ -440,6 +457,9 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
           childCount: unit.childCount,
           infantCount: unit.infantCount,
           sortOrder: index,
+          manualAdultPrice: unit.manualAdultPrice,
+          manualChildPrice: unit.manualChildPrice,
+          manualInfantPrice: unit.manualInfantPrice,
         })),
       }
     }),
@@ -533,6 +553,9 @@ export interface ApplyLegSelectionPayload {
     adultCount: number
     childCount: number
     infantCount: number
+    manualAdultPrice: number | null
+    manualChildPrice: number | null
+    manualInfantPrice: number | null
   }>
   nights?: number
   /** Per-leg rate type override; omitted falls back to the system default. */
@@ -577,6 +600,9 @@ export function toApplySelections(
           adultCount: unit.adultCount,
           childCount: unit.childCount,
           infantCount: unit.infantCount,
+          manualAdultPrice: unit.manualAdultPrice,
+          manualChildPrice: unit.manualChildPrice,
+          manualInfantPrice: unit.manualInfantPrice,
         })),
       nights:
         state.supplierKind === "hotel_property" ? Math.max(1, state.nights ?? 1) : undefined,
@@ -669,7 +695,10 @@ export function validateConfigureState(
         errors.push(
           `${legLabel}: ${leg.supplierKind === "hotel_property" ? "room" : "suite"} ${index + 1} needs a type`,
         )
-      } else if (state.routeId && state.serviceDate) {
+      } else if (leg.pricingMode !== "manual" && state.routeId && state.serviceDate) {
+        // Manual-pricing legs (e.g. airlines) have no rate card to check -- the fare is typed
+        // in, and a blank one is allowed here (flagged as pricing_incomplete on the quote
+        // instead of blocking the itinerary from being built).
         const pricingError = describeMissingRateCard(leg, state.routeId, unit.suiteTypeId, state.serviceDate)
         if (pricingError) errors.push(`${legLabel}: ${pricingError}`)
       }

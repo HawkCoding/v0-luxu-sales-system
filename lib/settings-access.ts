@@ -324,9 +324,9 @@ const DOCUMENT_BRAND_DEFAULTS: DocumentBrandSettings = {
   // committed asset. A non-empty default would make that state unreachable,
   // because getDocumentBrandSettings treats a blank row as unset (see below).
   brand_block_logo_url: "",
-  // Preserve the placement each document had before the block became
-  // configurable: the quote carried it in the footer, the invoice at the top.
-  brand_block_position_quote: "bottom",
+  // The PDF position dropdown edits quote and invoice together (see
+  // brand-block-settings-editor.tsx), so both default to the same placement.
+  brand_block_position_quote: "top",
   brand_block_position_invoice: "top",
   // Emails no longer render a separate logo/wordmark header, so the brand
   // block is the masthead by default.

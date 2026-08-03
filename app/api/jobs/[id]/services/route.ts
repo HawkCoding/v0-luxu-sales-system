@@ -36,6 +36,10 @@ const selectionUnitSchema = z.object({
   childCount: z.number().int().nonnegative().default(0),
   infantCount: z.number().int().nonnegative().default(0),
   sortOrder: z.number().int().nonnegative().optional(),
+  /** Manual-pricing legs only (e.g. airlines): the typed fare for this unit's cabin. */
+  manualAdultPrice: z.number().nonnegative().nullable().optional(),
+  manualChildPrice: z.number().nonnegative().nullable().optional(),
+  manualInfantPrice: z.number().nonnegative().nullable().optional(),
 })
 
 const updateServiceSchema = z.object({
@@ -69,7 +73,7 @@ type BookingServiceUnitInsert = Database["public"]["Tables"]["booking_service_un
 
 const SERVICES_WITH_UNITS_SELECT =
   "id, booking_id, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, date_anchor, rate_type_id, notes, selected, origin, " +
-  "units:booking_service_units(id, suite_type_id, bedroom_type_id, bedroom_layout_id, bathroom_type_id, adult_count, child_count, infant_count, sort_order)"
+  "units:booking_service_units(id, suite_type_id, bedroom_type_id, bedroom_layout_id, bathroom_type_id, adult_count, child_count, infant_count, sort_order, manual_adult_price, manual_child_price, manual_infant_price)"
 
 interface ServiceUnitRow {
   id: string
@@ -81,6 +85,9 @@ interface ServiceUnitRow {
   child_count: number
   infant_count: number
   sort_order: number
+  manual_adult_price: number | null
+  manual_child_price: number | null
+  manual_infant_price: number | null
 }
 
 interface ServiceWithUnitsRow {
@@ -285,6 +292,9 @@ export async function PATCH(req: Request, { params }: RouteParams) {
       child_count: unit.childCount,
       infant_count: unit.infantCount,
       sort_order: unit.sortOrder ?? index,
+      manual_adult_price: unit.manualAdultPrice ?? null,
+      manual_child_price: unit.manualChildPrice ?? null,
+      manual_infant_price: unit.manualInfantPrice ?? null,
       origin: "consultant",
     }))
 

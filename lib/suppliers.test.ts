@@ -21,6 +21,7 @@ const supplierRow: SupplierRow = {
   id: "00000000-0000-4000-8000-000000000001",
   slug: "blue-train",
   kind: "train_operator",
+  pricing_mode: "rate_card",
   status: "draft",
   name: "Blue Train",
   description: null,

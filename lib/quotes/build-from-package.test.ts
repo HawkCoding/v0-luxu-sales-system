@@ -71,6 +71,7 @@ function leg(partial: Partial<PackageLeg> & { id: string; supplierKind: Supplier
     supplierId: `supplier-${partial.id}`,
     supplierName: `Supplier ${partial.id}`,
     supplierDescription: null,
+    pricingMode: "rate_card",
     label: null,
     sortOrder: 0,
     dateAnchor: null,
@@ -791,5 +792,214 @@ describe("buildPackageQuoteLineItems", () => {
     expect(reversedAdult?.pricingSnapshot?.routeName).toBe("Pretoria → Cape Town")
     expect(reversedAdult?.pricingSnapshot?.routeReversed).toBe(true)
     expect(reversedAdult?.total).toBe(forwardAdult?.total)
+  })
+
+  describe("manual pricing (e.g. airlines)", () => {
+    const manualLeg = leg({
+      id: "leg-flight",
+      supplierKind: "airline",
+      pricingMode: "manual",
+      routes: [route("route-jnb-cpt", "supplier-leg-flight", "JNB-CPT")],
+      suiteTypes: [suiteType("cabin-economy", "supplier-leg-flight", "Economy")],
+      // No rate cards at all -- a manual leg must never need one.
+      rateCards: [],
+    })
+
+    it("prices a manual leg straight off the typed fare, never touching rate cards", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase(),
+        packageDetail: detail([manualLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-flight",
+            selected: true,
+            routeId: "route-jnb-cpt",
+            units: [
+              {
+                suiteTypeId: "cabin-economy",
+                adultCount: 2,
+                childCount: 1,
+                infantCount: 0,
+                manualAdultPrice: 2000,
+                manualChildPrice: 1500,
+                manualInfantPrice: null,
+              },
+            ],
+          },
+        ],
+      })
+
+      const adultLine = lineItems.find((li) => li.description.includes("Adult"))
+      const childLine = lineItems.find((li) => li.description.includes("Child"))
+      expect(adultLine?.unitPrice).toBe(2000)
+      expect(adultLine?.qty).toBe(2)
+      expect(adultLine?.total).toBe(4000)
+      expect(adultLine?.pricingSnapshot?.pricingMode).toBe("manual")
+      expect(adultLine?.pricingSnapshot?.rateCardId).toBeNull()
+      expect(childLine?.unitPrice).toBe(1500)
+    })
+
+    it("falls a blank child/infant fare back up to the adult fare", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase(),
+        packageDetail: detail([manualLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-flight",
+            selected: true,
+            routeId: "route-jnb-cpt",
+            units: [
+              {
+                suiteTypeId: "cabin-economy",
+                adultCount: 2,
+                childCount: 1,
+                infantCount: 0,
+                manualAdultPrice: 2000,
+                manualChildPrice: null,
+                manualInfantPrice: null,
+              },
+            ],
+          },
+        ],
+      })
+
+      const childLine = lineItems.find((li) => li.description.includes("Child"))
+      expect(childLine?.unitPrice).toBe(2000)
+    })
+
+    it("emits a zero-priced, flagged line when no fare has been typed yet, instead of throwing", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({
+          booking: {
+            id: JOB_ID,
+            no_of_adults: 1,
+            no_of_children: 0,
+            no_of_suites: 1,
+            child_ages: [],
+            departure_date: "2026-09-01",
+          },
+        }),
+        packageDetail: detail([manualLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-flight",
+            selected: true,
+            routeId: "route-jnb-cpt",
+            units: [
+              {
+                suiteTypeId: "cabin-economy",
+                adultCount: 1,
+                childCount: 0,
+                infantCount: 0,
+                manualAdultPrice: null,
+                manualChildPrice: null,
+                manualInfantPrice: null,
+              },
+            ],
+          },
+        ],
+      })
+
+      const adultLine = lineItems.find((li) => li.description.includes("Adult"))
+      expect(adultLine?.unitPrice).toBe(0)
+      expect(isMissingPricing(adultLine!)).toBe(true)
+    })
+
+    it("keeps two cabins at different fares on separate lines instead of averaging them", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({
+          booking: {
+            id: JOB_ID,
+            no_of_adults: 2,
+            no_of_children: 0,
+            no_of_suites: 2,
+            child_ages: [],
+            departure_date: "2026-09-01",
+          },
+        }),
+        packageDetail: detail([manualLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-flight",
+            selected: true,
+            routeId: "route-jnb-cpt",
+            units: [
+              {
+                suiteTypeId: "cabin-economy",
+                adultCount: 1,
+                childCount: 0,
+                infantCount: 0,
+                manualAdultPrice: 2000,
+                manualChildPrice: null,
+                manualInfantPrice: null,
+              },
+              {
+                suiteTypeId: "cabin-economy",
+                adultCount: 1,
+                childCount: 0,
+                infantCount: 0,
+                manualAdultPrice: 5000,
+                manualChildPrice: null,
+                manualInfantPrice: null,
+              },
+            ],
+          },
+        ],
+      })
+
+      const adultLines = lineItems.filter((li) => li.description.includes("Adult"))
+      expect(adultLines).toHaveLength(2)
+      expect(adultLines.map((li) => li.unitPrice).sort()).toEqual([2000, 5000])
+      expect(adultLines.every((li) => li.qty === 1)).toBe(true)
+    })
+
+    it("never applies a single supplement to a manual leg, even for a solo traveller", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({
+          booking: {
+            id: JOB_ID,
+            no_of_adults: 1,
+            no_of_children: 0,
+            no_of_suites: 1,
+            child_ages: [],
+            departure_date: "2026-09-01",
+          },
+        }),
+        packageDetail: { ...detail([manualLeg]), singleSupplementPct: 25 },
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-flight",
+            selected: true,
+            routeId: "route-jnb-cpt",
+            units: [
+              {
+                suiteTypeId: "cabin-economy",
+                adultCount: 1,
+                childCount: 0,
+                infantCount: 0,
+                manualAdultPrice: 2000,
+                manualChildPrice: null,
+                manualInfantPrice: null,
+              },
+            ],
+          },
+        ],
+      })
+
+      const adultLine = lineItems.find((li) => li.description.includes("Adult"))
+      expect(adultLine?.unitPrice).toBe(2000)
+      expect(adultLine?.description).not.toContain("single supplement")
+      expect(lineItems.some((li) => li.description.includes("Single supplement"))).toBe(false)
+    })
   })
 })
