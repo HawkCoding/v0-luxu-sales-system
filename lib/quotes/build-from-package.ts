@@ -806,8 +806,6 @@ export async function buildPackageQuoteLineItems({
             // it's a solo room, not specifically a solo adult. Solo-room travellers can't merge
             // into the shared qty since they don't share its unit price, so they're tallied and
             // priced on their own line.
-            let sharedQty = 0
-            let soloQty = 0
             const sharedContributingUnits: PackageUnitSelection[] = []
             const soloContributingUnits: PackageUnitSelection[] = []
             for (const unitSelection of groupUnits) {
@@ -824,53 +822,49 @@ export async function buildPackageQuoteLineItems({
                 packageDetail.singleSupplementPct > 0 &&
                 adultCount + childCount + infantCount === 1
               if (isSoloRoom && count === 1) {
-                soloQty += 1
                 soloContributingUnits.push(unitSelection)
               } else {
-                sharedQty += count
                 sharedContributingUnits.push(unitSelection)
               }
             }
-            // Each output line (shared vs. solo) names its own config independently — a solo
-            // traveller's line must never inherit the shared units' config in this suite-type
-            // group, and vice versa. Only when exactly one unit feeds a given line is its exact
-            // config known; multiple units feeding the same line have no single config to name,
-            // so the suite type's generic option list is shown instead.
-            const sharedVariantNames =
-              sharedContributingUnits.length === 1 ? specificUnitVariantNames(sharedContributingUnits[0]) : null
-            const sharedSelectedVariantGroups =
-              sharedContributingUnits.length === 1 ? specificUnitVariantGroups(sharedContributingUnits[0]) : null
-            const soloVariantNames =
-              soloContributingUnits.length === 1 ? specificUnitVariantNames(soloContributingUnits[0]) : null
-            const soloSelectedVariantGroups =
-              soloContributingUnits.length === 1 ? specificUnitVariantGroups(soloContributingUnits[0]) : null
-
-            addLineItem({
-              description,
-              passengerLabel: label,
-              qty: sharedQty,
-              unitPrice,
-              supplierDescription,
-              suiteTypeId,
-              suiteTypeName,
-              variantNames: sharedVariantNames,
-              selectedVariantGroups: sharedSelectedVariantGroups,
-              unit,
-              pricingMode: isManualPricing ? "manual" : "rate_card",
-            })
-            addLineItem({
-              description,
-              passengerLabel: label,
-              qty: soloQty,
-              unitPrice,
-              supplierDescription,
-              suiteTypeId,
-              suiteTypeName,
-              variantNames: soloVariantNames,
-              selectedVariantGroups: soloSelectedVariantGroups,
-              unit,
-              singleSupplementPct: soloQty > 0 ? packageDetail.singleSupplementPct : null,
-            })
+            // Units sharing a suite type can still differ in bedroom/layout/bathroom config (e.g.
+            // two "Deluxe Suite" rooms, one Twin/Crosswise, one Double/L-Shape). Naming a merged
+            // line by "exactly one unit" collapsed onto the suite type's whole catalogue whenever
+            // >1 unit fed it, so instead split each of shared/solo into one line per distinct
+            // config actually picked in the builder, summing that config's own qty.
+            for (const [contributingUnits, isSolo] of [
+              [sharedContributingUnits, false],
+              [soloContributingUnits, true],
+            ] as const) {
+              const unitsByVariant = new Map<string, PackageUnitSelection[]>()
+              for (const unitSelection of contributingUnits) {
+                const variantKey = [
+                  unitSelection.bedroomTypeId ?? "",
+                  unitSelection.bedroomLayoutId ?? "",
+                  unitSelection.bathroomTypeId ?? "",
+                ].join("::")
+                const list = unitsByVariant.get(variantKey) ?? []
+                list.push(unitSelection)
+                unitsByVariant.set(variantKey, list)
+              }
+              for (const variantUnits of unitsByVariant.values()) {
+                const qty = variantUnits.reduce((sum, unitSelection) => sum + (unitSelection[key] ?? 0), 0)
+                addLineItem({
+                  description,
+                  passengerLabel: label,
+                  qty,
+                  unitPrice,
+                  supplierDescription,
+                  suiteTypeId,
+                  suiteTypeName,
+                  variantNames: specificUnitVariantNames(variantUnits[0]),
+                  selectedVariantGroups: specificUnitVariantGroups(variantUnits[0]),
+                  unit,
+                  pricingMode: isManualPricing ? "manual" : "rate_card",
+                  singleSupplementPct: isSolo ? packageDetail.singleSupplementPct : null,
+                })
+              }
+            }
           }
         }
       }

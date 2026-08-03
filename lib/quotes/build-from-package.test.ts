@@ -404,7 +404,7 @@ describe("buildPackageQuoteLineItems", () => {
     ).rejects.toThrow(/suites hold 1 adults.*but the booking is for 2 adults/)
   })
 
-  it("combines 3 suites of the same suite type into one adult line even with different bedroom configs", async () => {
+  it("splits 3 suites of the same suite type into separate adult lines per distinct room config", async () => {
     const trainLeg = leg({
       id: "leg-train",
       supplierKind: "train_operator",
@@ -438,7 +438,8 @@ describe("buildPackageQuoteLineItems", () => {
           legId: "leg-train",
           selected: true,
           units: [
-            // Same suite type, differing bedroom/bathroom config per room — prices as one line.
+            // Same suite type, differing bedroom/bathroom config per room — prices as one suite
+            // type (one rate card lookup), but each room's own config gets its own line.
             { suiteTypeId: "suite-dlx", bedroomTypeId: "bed-twin", adultCount: 2, childCount: 0, infantCount: 0 },
             { suiteTypeId: "suite-dlx", bedroomTypeId: "bed-double", adultCount: 2, childCount: 0, infantCount: 0 },
             { suiteTypeId: "suite-dlx", bathroomTypeId: "bath-shower", adultCount: 2, childCount: 0, infantCount: 0 },
@@ -448,10 +449,91 @@ describe("buildPackageQuoteLineItems", () => {
     })
 
     const adultLines = lineItems.filter((li) => li.description.includes("Adult"))
-    expect(adultLines).toHaveLength(1)
-    expect(adultLines[0]?.qty).toBe(6)
-    expect(adultLines[0]?.unitPrice).toBe(10000)
-    expect(adultLines[0]?.total).toBe(60000)
+    expect(adultLines).toHaveLength(3)
+    for (const line of adultLines) {
+      expect(line.qty).toBe(2)
+      expect(line.unitPrice).toBe(10000)
+      expect(line.total).toBe(20000)
+    }
+    expect(adultLines.reduce((sum, li) => sum + li.qty, 0)).toBe(6)
+  })
+
+  it("names each room's own bed/bathroom config when 2+ rooms share a suite type (Rovos-style multi-config booking)", async () => {
+    const trainLeg = leg({
+      id: "leg-train",
+      supplierKind: "train_operator",
+      routes: [route("route-pta", "supplier-leg-train", "PTA-VFA")],
+      suiteTypes: [suiteType("suite-dlx", "supplier-leg-train", "Deluxe Suite")],
+      rateCards: [
+        rateCard({ id: "rc-train", routeId: "route-pta", suiteTypeId: "suite-dlx", pricePerPerson: 10000 }),
+      ],
+    })
+    const fourAdultsBooking = {
+      id: JOB_ID,
+      no_of_adults: 4,
+      no_of_children: 0,
+      no_of_suites: 2,
+      child_ages: [],
+      departure_date: "2026-09-01",
+    }
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({
+        booking: fourAdultsBooking,
+        bedroomTypes: [
+          { id: "bed-twin", name: "Twin" },
+          { id: "bed-double", name: "Double" },
+        ],
+        bedroomLayouts: [
+          { id: "layout-crosswise", name: "Crosswise" },
+          { id: "layout-lshape", name: "L-Shape" },
+        ],
+        bathroomTypes: [{ id: "bath-shower", name: "Shower" }],
+      }),
+      packageDetail: detail([trainLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-train",
+          selected: true,
+          units: [
+            {
+              suiteTypeId: "suite-dlx",
+              bedroomTypeId: "bed-twin",
+              bedroomLayoutId: "layout-crosswise",
+              bathroomTypeId: "bath-shower",
+              adultCount: 2,
+              childCount: 0,
+              infantCount: 0,
+            },
+            {
+              suiteTypeId: "suite-dlx",
+              bedroomTypeId: "bed-double",
+              bedroomLayoutId: "layout-lshape",
+              bathroomTypeId: "bath-shower",
+              adultCount: 2,
+              childCount: 0,
+              infantCount: 0,
+            },
+          ],
+        },
+      ],
+    })
+
+    const adultLines = lineItems.filter((li) => li.description.includes("Adult"))
+    expect(adultLines).toHaveLength(2)
+
+    const twinLine = adultLines.find((li) => li.description.includes("Twin"))
+    const doubleLine = adultLines.find((li) => li.description.includes("Double"))
+    expect(twinLine?.description).toContain("Crosswise")
+    expect(twinLine?.description).not.toContain("Double")
+    expect(twinLine?.description).not.toContain("L-Shape")
+    expect(doubleLine?.description).toContain("L-Shape")
+    expect(doubleLine?.description).not.toContain("Twin")
+    expect(doubleLine?.description).not.toContain("Crosswise")
+    expect(twinLine?.qty).toBe(2)
+    expect(doubleLine?.qty).toBe(2)
   })
 
   it("names each passenger kind's own room config when only one room supplies that kind", async () => {

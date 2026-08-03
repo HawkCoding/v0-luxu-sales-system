@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   Dialog,
@@ -490,18 +491,28 @@ export function JobReservationTab({
                       />
                       <Label htmlFor={`primary-${traveller.key}`} className="text-xs">Primary guest</Label>
                     </div>
-                    <Input
-                      placeholder="Residence"
-                      value={traveller.residence}
-                      onChange={(e) => updateTraveller(traveller.key, { residence: e.target.value })}
-                      className="sm:col-span-2"
-                    />
-                    <Input
-                      placeholder="Date of birth"
-                      value={traveller.dateOfBirth}
-                      onChange={(e) => updateTraveller(traveller.key, { dateOfBirth: e.target.value })}
-                      className="sm:col-span-2"
-                    />
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Input
+                          placeholder="Residence"
+                          value={traveller.residence}
+                          onChange={(e) => updateTraveller(traveller.key, { residence: e.target.value })}
+                          className="sm:col-span-2"
+                        />
+                      </TooltipTrigger>
+                      <TooltipContent>Country of residence</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Input
+                          placeholder="Date of birth"
+                          value={traveller.dateOfBirth}
+                          onChange={(e) => updateTraveller(traveller.key, { dateOfBirth: e.target.value })}
+                          className="sm:col-span-2"
+                        />
+                      </TooltipTrigger>
+                      <TooltipContent>Format: YYYY-MM-DD (e.g. 1990-02-14)</TooltipContent>
+                    </Tooltip>
                     <Input
                       placeholder="ID / Passport number *"
                       value={traveller.idPassport}
@@ -509,18 +520,28 @@ export function JobReservationTab({
                       className="sm:col-span-2"
                       required
                     />
-                    <Input
-                      placeholder="Room with"
-                      value={traveller.roomWith}
-                      onChange={(e) => updateTraveller(traveller.key, { roomWith: e.target.value })}
-                      className="sm:col-span-2"
-                    />
-                    <Input
-                      placeholder="Room type"
-                      value={traveller.roomType}
-                      onChange={(e) => updateTraveller(traveller.key, { roomType: e.target.value })}
-                      className="sm:col-span-2"
-                    />
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Input
+                          placeholder="Room with"
+                          value={traveller.roomWith}
+                          onChange={(e) => updateTraveller(traveller.key, { roomWith: e.target.value })}
+                          className="sm:col-span-2"
+                        />
+                      </TooltipTrigger>
+                      <TooltipContent>Shown on the Worksheet PDF</TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Input
+                          placeholder="Room type"
+                          value={traveller.roomType}
+                          onChange={(e) => updateTraveller(traveller.key, { roomType: e.target.value })}
+                          className="sm:col-span-2"
+                        />
+                      </TooltipTrigger>
+                      <TooltipContent>Shown on the Worksheet PDF</TooltipContent>
+                    </Tooltip>
                     <Button
                       type="button"
                       variant="ghost"

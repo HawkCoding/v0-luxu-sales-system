@@ -18,7 +18,7 @@ import { QuotePreviewSendDialog } from "@/components/quote-preview-send-dialog"
 import { ReviseQuoteDialog } from "@/components/revise-quote-dialog"
 import { CommissionBonusField } from "@/components/quotes/commission-bonus-field"
 import { getCommissionBonus } from "@/lib/quotes/apply-commission-bonus"
-import { FileDown, Link2, Loader2, Mail, Trash2, X } from "lucide-react"
+import { FileDown, Loader2, Mail, Trash2, X } from "lucide-react"
 
 const EDITABLE_QUOTE_STATUSES = ["draft", "pricing_incomplete", "ready"]
 
@@ -61,7 +61,6 @@ export function JobQuotesTab({
   const { can } = useRole()
   const [previewSendOpen, setPreviewSendOpen] = useState(false)
   const [cancellingQuoteId, setCancellingQuoteId] = useState<string | null>(null)
-  const [generatingLinkForId, setGeneratingLinkForId] = useState<string | null>(null)
   const [generatingPdfForId, setGeneratingPdfForId] = useState<string | null>(null)
   const [removingLineKey, setRemovingLineKey] = useState<string | null>(null)
   const [autoOpenBuildBookingQuoteId, setAutoOpenBuildBookingQuoteId] = useState<string | null>(null)
@@ -112,23 +111,6 @@ export function JobQuotesTab({
       toast.error(error instanceof Error ? error.message : "Failed to cancel quote")
     } finally {
       setCancellingQuoteId(null)
-    }
-  }
-
-  async function generateAcceptanceLink(quoteId: string) {
-    setGeneratingLinkForId(quoteId)
-    try {
-      const response = await fetch(`/api/quotes/${quoteId}/acceptance-link`, { method: "POST" })
-      const payload = (await response.json().catch(() => ({}))) as { url?: string; error?: string }
-      if (!response.ok) throw new Error(payload.error ?? "Failed to generate link")
-      if (payload.url) {
-        await navigator.clipboard.writeText(payload.url)
-        toast.success("Acceptance link copied to clipboard.")
-      }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to generate acceptance link")
-    } finally {
-      setGeneratingLinkForId(null)
     }
   }
 
@@ -226,21 +208,6 @@ export function JobQuotesTab({
                           quoteNumber={q.quoteNumber || "quote"}
                           onRevised={mutate}
                         />
-                      )}
-                      {q.status === "sent" && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={generatingLinkForId === q.id}
-                          onClick={() => void generateAcceptanceLink(q.id)}
-                        >
-                          {generatingLinkForId === q.id ? (
-                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <Link2 className="mr-1.5 h-3.5 w-3.5" />
-                          )}
-                          Acceptance Link
-                        </Button>
                       )}
                       {["draft", "pricing_incomplete", "ready", "sent"].includes(q.status) && (
                         <Button

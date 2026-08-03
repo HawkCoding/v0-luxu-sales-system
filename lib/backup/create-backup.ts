@@ -151,7 +151,6 @@ const TABLES_TO_SNAPSHOT = [
   "pipeline_history",
   // Quotes
   "quotes",
-  "quote_acceptance_tokens",
   "quote_line_items",
   "quote_follow_ups",
   // Invoices & payments

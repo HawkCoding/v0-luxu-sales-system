@@ -11,6 +11,8 @@ interface NumericInputProps
   onValueChange: (value: number | null) => void
   nullable?: boolean
   nullDisplayValue?: string
+  /** Reject decimal input, e.g. for passenger/unit counts where fractional values make no sense. */
+  integer?: boolean
 }
 
 export function NumericInput({
@@ -18,6 +20,7 @@ export function NumericInput({
   onValueChange,
   nullable = false,
   nullDisplayValue = "",
+  integer = false,
   onFocus,
   onBlur,
   onWheel,
@@ -47,7 +50,9 @@ export function NumericInput({
         onFocus?.(event)
       }}
       onChange={(event) => {
-        const nextDisplayValue = event.target.value
+        const nextDisplayValue = integer
+          ? event.target.value.replace(/[^0-9]/g, "")
+          : event.target.value
         setDisplayValue(nextDisplayValue)
 
         if (nextDisplayValue === "") {
