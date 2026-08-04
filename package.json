@@ -53,6 +53,7 @@
     "production:restore:bootstrap": "powershell -ExecutionPolicy Bypass -File ./scripts/restore-production-bootstrap.ps1",
     "production:restore:bootstrap:api": "node scripts/restore-production-bootstrap.mjs",
     "production:restore:users": "node scripts/restore-production-users.mjs",
+    "db:wipe-clients": "node scripts/wipe-production-clients.mjs",
     "lint": "eslint . --ext .js,.mjs,.cjs --no-error-on-unmatched-pattern --no-eslintrc --env es2022 --env node --parser-options=ecmaVersion:latest --parser-options=sourceType:module",
     "typecheck": "tsc --noEmit",
     "test": "vitest",

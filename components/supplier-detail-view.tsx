@@ -2304,7 +2304,6 @@ const RouteEditorRow = memo(function RouteEditorRow({
             min="1"
             step="1"
             nullable
-            placeholder="2"
             className="w-16 text-center"
             value={route.durationDays}
             onValueChange={(value) => onUpdateRoute(packageIndex, routeIndex, "durationDays", value)}

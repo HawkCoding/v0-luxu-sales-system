@@ -470,6 +470,7 @@ export function SuiteLegEditor({
                       <NumericInput
                         min="0"
                         step="1"
+                        integer
                         className="h-8 w-14 text-center"
                         value={unit.adultCount}
                         onValueChange={(next) => updateUnit(unit.id, { adultCount: next ?? 0 })}
@@ -480,6 +481,7 @@ export function SuiteLegEditor({
                       <NumericInput
                         min="0"
                         step="1"
+                        integer
                         className="h-8 w-14 text-center"
                         value={unit.childCount}
                         onValueChange={(next) => updateUnit(unit.id, { childCount: next ?? 0 })}
@@ -490,6 +492,7 @@ export function SuiteLegEditor({
                       <NumericInput
                         min="0"
                         step="1"
+                        integer
                         className="h-8 w-14 text-center"
                         value={unit.infantCount}
                         onValueChange={(next) => updateUnit(unit.id, { infantCount: next ?? 0 })}

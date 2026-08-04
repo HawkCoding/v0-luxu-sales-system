@@ -2580,47 +2580,6 @@ export type Database = {
         }
         Relationships: []
       }
-      quote_acceptance_tokens: {
-        Row: {
-          created_at: string
-          created_by: string | null
-          expires_at: string
-          id: string
-          quote_id: string
-          token: string
-          used_at: string | null
-          used_by_ip: string | null
-        }
-        Insert: {
-          created_at?: string
-          created_by?: string | null
-          expires_at: string
-          id?: string
-          quote_id: string
-          token?: string
-          used_at?: string | null
-          used_by_ip?: string | null
-        }
-        Update: {
-          created_at?: string
-          created_by?: string | null
-          expires_at?: string
-          id?: string
-          quote_id?: string
-          token?: string
-          used_at?: string | null
-          used_by_ip?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "quote_acceptance_tokens_quote_id_fkey"
-            columns: ["quote_id"]
-            isOneToOne: false
-            referencedRelation: "quotes"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       quote_follow_ups: {
         Row: {
           created_at: string
