@@ -19,7 +19,6 @@ describe("buildGuestInfoBlock", () => {
     expect(html).toContain("Mr John Smith ID: 8001015800083")
     expect(html).toContain("Mrs Jane Smith ID: 8203125800084")
     expect(html).not.toContain("<strong>Guests:</strong>")
-    expect(html).toContain('data-label="Guest Information"')
   })
 
   it("flags a guest with no ID number on file instead of omitting them", () => {

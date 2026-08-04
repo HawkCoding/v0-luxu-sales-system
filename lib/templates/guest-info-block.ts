@@ -53,10 +53,5 @@ export function buildGuestInfoBlock(input: GuestInfoInput): string {
     }
   }
 
-  return (
-    `<div style="margin:18px 0;padding:14px 16px;background-color:#fbf8f3;border:1px solid #e8dfd2;" data-label="Guest Information">` +
-    `<p style="margin:0 0 6px;color:#172018;font-size:13px;font-weight:700;">Please confirm your booking details, including ID numbers, are correct</p>` +
-    lines.join("") +
-    `</div>`
-  )
+  return lines.join("")
 }
