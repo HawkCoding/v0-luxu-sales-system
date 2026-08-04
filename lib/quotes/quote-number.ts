@@ -24,3 +24,9 @@ export function reviseQuoteNumber(quoteNumber: string | null, bookingNumber: str
 
   return quoteNumber.replace(/-Q\d+$/, `-Q${version + 1}`)
 }
+
+/** Customer-facing label — "Quote 1" instead of the internal booking reference. */
+export function formatQuoteDisplayLabel(quoteNumber: string | null | undefined): string {
+  const version = getQuoteVersion(quoteNumber ?? null)
+  return `Quote ${version || 1}`
+}

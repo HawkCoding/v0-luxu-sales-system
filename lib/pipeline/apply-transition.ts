@@ -198,9 +198,8 @@ export async function applyTransition(
     }
 
     // Only the "create the invoice for me" confirmation schedules a deposit
-    // email draft. The createInvoiceCorrespondence confirmation means the
-    // invoice was already sent outside the system, so drafting another email
-    // would be misleading.
+    // email draft — the invoice-sent gate itself is a hard block now, cleared
+    // by actually sending (or a manager override), never by drafting here.
     const shouldScheduleDepositCorrespondence =
       (hasInvoiceDocument || createdInvoiceDocument) &&
       !hasCorrespondence(input.correspondences ?? [], "invoice", ["invoice", "deposit request"]) &&
@@ -237,7 +236,10 @@ export async function applyTransition(
           depositPercentage: String(defaultDepositPercentage),
           dueDate: formatDisplayDateLong(dueDate),
         },
-        blocks: { ...shared.blocks, bankingDetails: buildBankingDetailsBlock(banking) },
+        blocks: {
+          ...shared.blocks,
+          bankingDetails: buildBankingDetailsBlock(banking, `${input.booking.booking_number}-DEP1`),
+        },
         senderProfileId: input.booking.assigned_salesperson_id ?? input.actorUserId,
       })
 

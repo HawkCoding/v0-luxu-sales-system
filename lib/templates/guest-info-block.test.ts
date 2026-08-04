@@ -14,11 +14,11 @@ describe("buildGuestInfoBlock", () => {
       children: 0,
     })
 
-    expect(html).toContain("Mr Smith")
-    expect(html).toContain("smith@example.test")
-    expect(html).toContain("Mr John Smith — ID: 8001015800083")
-    expect(html).toContain("Mrs Jane Smith — ID: 8203125800084")
-    expect(html).toContain('data-label="Guest Information"')
+    expect(html).not.toContain("Booking contact")
+    expect(html).not.toContain("smith@example.test")
+    expect(html).toContain("Mr John Smith ID: 8001015800083")
+    expect(html).toContain("Mrs Jane Smith ID: 8203125800084")
+    expect(html).not.toContain("<strong>Guests:</strong>")
   })
 
   it("flags a guest with no ID number on file instead of omitting them", () => {
@@ -33,8 +33,8 @@ describe("buildGuestInfoBlock", () => {
       children: 1,
     })
 
-    expect(html).toContain("Mr John Smith — ID: 8001015800083")
-    expect(html).toContain("Miss Amy Smith — ID not yet on file")
+    expect(html).toContain("Mr John Smith ID: 8001015800083")
+    expect(html).toContain("Miss Amy Smith ID not yet on file")
   })
 
   it("falls back to adult/child counts when no travellers are captured yet", () => {
@@ -59,9 +59,8 @@ describe("buildGuestInfoBlock", () => {
       children: 0,
     })
 
-    expect(html).not.toContain("<script>")
     expect(html).not.toContain("<b>Evil</b>")
     expect(html).not.toContain("<img src=x>")
-    expect(html).toContain("&lt;script&gt;")
+    expect(html).toContain("&lt;b&gt;Evil&lt;/b&gt;")
   })
 })

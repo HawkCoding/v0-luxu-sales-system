@@ -27,22 +27,22 @@ export const DEFAULT_TEMPLATES: Record<SystemTemplateKey, { subject: string; bod
       "<p>Dear {{customerName}},</p><p>Thank you for your reservation form well received.</p><p>Confirmation invoice with payment instructions to follow shortly.</p><p>In the meantime, I have secured your suite for you.</p><p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
   },
   payment_received: {
-    subject: "Payment received — {{jobNumber}}",
+    subject: "Payment received — {{invoiceNumber}}",
     bodyHtml:
       "<p>Dear {{customerName}},</p><p>Thank you very much for your payment well received.</p><p>Please find attached your amended confirmation invoice.</p><p><strong>PAYMENT SCHEDULE</strong></p><p>Amount received: <strong>{{receivedAmount}}</strong> – Received, thank you</p><p>Final amount due {{finalDueDate}}: <strong>{{outstandingAmount}}</strong></p><p>Hope you have a wonderful day.</p><p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
   },
   deposit_request: {
-    subject: "Deposit Invoice — {{jobNumber}}",
+    subject: "Deposit Invoice {{invoiceNumber}}",
     bodyHtml:
       "<p>Dear {{customerName}},</p><p>Thank you for confirming your reservation. A deposit of <strong>{{depositAmount}}</strong> ({{depositPercentage}}%) is required to secure your booking, due by <strong>{{dueDate}}</strong>. Invoice <strong>{{invoiceNumber}}</strong> is attached.</p>{{guestInfo}}{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
   },
   full_payment_request: {
-    subject: "Confirmation Invoice {{invoiceNumber}} — {{jobNumber}}",
+    subject: "Invoice {{invoiceNumber}}",
     bodyHtml:
       "<p>Dear {{customerName}},</p><p>As this reservation falls within 60 days of departure, full payment of <strong>{{amountDue}}</strong> is required to secure your booking, due by <strong>{{dueDate}}</strong>. Invoice <strong>{{invoiceNumber}}</strong> is attached.</p>{{guestInfo}}{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
   },
   final_invoice: {
-    subject: "Final Invoice — {{jobNumber}}",
+    subject: "Final Invoice {{invoiceNumber}}",
     bodyHtml:
       "<p>Dear {{customerName}},</p><p>Please find attached your final invoice <strong>{{invoiceNumber}}</strong> for <strong>{{amountDue}}</strong>, due by <strong>{{dueDate}}</strong>.</p>{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
   },

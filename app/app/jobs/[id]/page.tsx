@@ -48,6 +48,7 @@ import { BookingStageStepper } from "@/components/booking-stage-stepper"
 import { CancelBookingDialog } from "@/components/cancel-booking-dialog"
 import { StageTransitionModal } from "@/components/stage-transition-modal"
 import { GenerateDepositInvoiceDialog } from "@/components/generate-deposit-invoice-dialog"
+import { QuoteRevisionBanner } from "@/components/quote-revision-banner"
 import { SendPaymentConfirmationButton } from "@/components/send-payment-confirmation-button"
 import { SendPaymentReminderButton } from "@/components/send-payment-reminder-button"
 import { GenerateVoucherDialog } from "@/components/generate-voucher-dialog"
@@ -324,6 +325,38 @@ export default function JobDetailPage() {
       (invoice: { kind: string; status: string }) =>
         (invoice.kind === "deposit" || invoice.kind === "full") && invoice.status === "draft",
     ) as Invoice | undefined) ?? null
+  // A live invoice still priced off a superseded quote has to be re-issued at
+  // the revised total — without this the strip below stays hidden on
+  // `hasSentDepositInvoice` and the amended invoice can never be sent.
+  const quoteRows = quotes as Array<{ id: string; status: string; parentQuoteId?: string | null }>
+  const invoiceNeedsAmendment = invoices.some(
+    (invoice: { kind: string; status: string; quoteId?: string | null }) =>
+      (invoice.kind === "deposit" || invoice.kind === "full") &&
+      invoice.status !== "void" &&
+      quoteRows.find((quote) => quote.id === invoice.quoteId)?.status === "superseded",
+  )
+  // A revision rewinds the booking, so the invoice actions drop away until the
+  // journey is re-walked. Clears itself once the amended invoice is issued.
+  const revisionInProgress =
+    quoteRows.some((quote) => quote.status === "superseded") &&
+    (currentStageIdx < PIPELINE_STAGES.findIndex((s) => s.key === "deposit_requested") ||
+      invoiceNeedsAmendment)
+  const revisedQuoteSent = quoteRows.some(
+    (quote) => quote.parentQuoteId && (quote.status === "sent" || quote.status === "accepted"),
+  )
+  const revisionSteps = [
+    { label: "Send the revised quote to the customer", done: revisedQuoteSent,
+      action: { label: "Go to Quotes", onClick: () => setActiveTab("quotes") } },
+    { label: "Move the booking to Quote Accepted", done: depositInvoiceStageReached,
+      action: {
+        label: "Move to Quote Accepted",
+        onClick: () => { void moveStageTo("accepted") },
+        disabled: transitionSubmitting,
+      } },
+    { label: "Issue the amended invoice (deposit or full payment)",
+      done: hasSentDepositInvoice && !invoiceNeedsAmendment,
+      action: { label: "Generate invoice", onClick: () => setDepositInvoiceOpen(true) } },
+  ]
 
   const canEditInvoiceNumber = can("edit:jobs")
   const currentInvoiceNumber = (job as { customerInvoiceNumber?: string | null } | undefined)?.customerInvoiceNumber ?? ""
@@ -792,6 +825,8 @@ export default function JobDetailPage() {
       {/* Stage Progress */}
       <BookingStageStepper currentStage={job.stage as PipelineStage} />
 
+      {revisionInProgress && can("edit:pipeline") && <QuoteRevisionBanner steps={revisionSteps} />}
+
       {/* Customer Info */}
       <Card>
         <CardContent className="p-4">
@@ -896,7 +931,15 @@ export default function JobDetailPage() {
             <SendPaymentConfirmationButton
               jobId={id}
               hasPayments={payments.length > 0}
-              mutate={mutate}
+              mutate={async () => {
+                if (currentStage === "deposit_requested") {
+                  await moveStageTo("deposit_paid")
+                } else if (currentStage === "deposit_paid") {
+                  await moveStageTo("final_paid")
+                } else {
+                  await mutate()
+                }
+              }}
             />
           </div>
           <JobPaymentsTab
@@ -987,23 +1030,28 @@ export default function JobDetailPage() {
           </div>
         )}
 
-      {can("send:correspondence") && !hasSentDepositInvoice && depositInvoiceStageReached && (
+      {can("send:correspondence") &&
+        (!hasSentDepositInvoice || invoiceNeedsAmendment) &&
+        depositInvoiceStageReached && (
         <div className="flex justify-end gap-2">
-          {!hasSentDepositInvoice ? (
           <GenerateDepositInvoiceDialog
             jobId={id}
             bookingNumber={job.jobNumber}
+            invoiceNumber={currentInvoiceNumber || undefined}
             customerName={`${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()}
             quotes={quotes}
             defaultDepositPercentage={settings?.defaultDepositPercentage ?? 25}
             departureDate={enquiry?.departureDate ?? null}
             draftInvoice={draftDepositInvoice}
+            amending={invoiceNeedsAmendment}
             onSent={async () => {
               await mutate()
               resetPendingTransition()
             }}
+            onDraftDiscarded={async () => {
+              await mutate()
+            }}
           />
-          ) : null}
         </div>
       )}
       </div>
@@ -1055,10 +1103,14 @@ export default function JobDetailPage() {
         defaultDepositPercentage={settings?.defaultDepositPercentage ?? 25}
         departureDate={enquiry?.departureDate ?? null}
         draftInvoice={draftDepositInvoice}
+        amending={invoiceNeedsAmendment}
         onSent={async () => {
           setDepositInvoiceOpen(false)
           await mutate()
           resetPendingTransition()
+        }}
+        onDraftDiscarded={async () => {
+          await mutate()
         }}
       />
 
@@ -1070,8 +1122,12 @@ export default function JobDetailPage() {
         hasPayments={payments.length > 0}
         mutate={async () => {
           setPaymentConfirmationOpen(false)
-          await mutate()
-          resetPendingTransition()
+          if (pendingStage) {
+            await moveStageTo(pendingStage)
+          } else {
+            await mutate()
+            resetPendingTransition()
+          }
         }}
       />
 
@@ -1093,6 +1149,7 @@ export default function JobDetailPage() {
         trigger={false}
         jobId={id}
         bookingNumber={job.jobNumber}
+        invoiceNumber={currentInvoiceNumber || undefined}
         onGenerated={async () => {
           await mutate()
         }}

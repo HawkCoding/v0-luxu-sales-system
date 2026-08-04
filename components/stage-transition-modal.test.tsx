@@ -93,4 +93,18 @@ describe("StageTransitionModal", () => {
     expect(screen.queryByRole("button", { name: /Confirm and move/i })).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: /Cancel move/i })).toBeInTheDocument()
   })
+
+  it("blocks the unsent-deposit-invoice gate with no self-attest checkbox or Confirm and move", () => {
+    renderModal([
+      {
+        gateId: "invoice_correspondence",
+        message: "The deposit invoice has been generated but not sent to the customer.",
+        fixHint: "Send the deposit invoice to the customer, or have a manager force the move with a reason.",
+        severity: "block",
+      },
+    ])
+    expect(screen.getByText("Stage move needs attention")).toBeInTheDocument()
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Confirm and move/i })).not.toBeInTheDocument()
+  })
 })

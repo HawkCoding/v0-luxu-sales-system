@@ -60,7 +60,6 @@ export interface TransitionCorrespondence {
 
 export interface ManualConfirmations {
   createDepositInvoice?: boolean
-  createInvoiceCorrespondence?: boolean
   finalPaymentReceived?: boolean
 }
 
@@ -321,14 +320,13 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
     } else if (
       (hasDepositInvoice || hasInvoiceDocument) &&
       !hasSentDepositInvoice &&
-      !hasSentCorrespondence(correspondences, "invoice", ["invoice", "deposit request"]) &&
-      !manualConfirmations.createInvoiceCorrespondence
+      !hasSentCorrespondence(correspondences, "invoice", ["invoice", "deposit request"])
     ) {
       failures.push({
         gateId: "invoice_correspondence",
         message: "The deposit invoice has been generated but not sent to the customer.",
-        fixHint: "Preview and send the deposit invoice, or confirm it was already sent outside the system.",
-        severity: "confirm",
+        fixHint: "Send the deposit invoice to the customer, or have a manager force the move with a reason.",
+        severity: "block",
       })
     }
   }

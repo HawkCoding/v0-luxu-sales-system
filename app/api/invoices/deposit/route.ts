@@ -27,7 +27,8 @@ const depositInvoiceSchema = z.object({
 
 const updateDepositInvoiceSchema = z.object({
   invoiceId: z.string().uuid(),
-  status: z.enum(["sent"]),
+  /** `void` discards an unsent draft so the amount can be decided again. */
+  status: z.enum(["sent", "void"]),
 })
 
 function formatMoney(amount: number, currency = "ZAR"): string {
@@ -94,15 +95,21 @@ export async function POST(req: Request) {
     )
   }
 
-  const { data: existingInvoice, error: existingInvoiceError } = await supabase
+  // The booking carries one live invoice across both kinds. Matching on
+  // `deposit` alone used to let a mode switch insert a second row sharing the
+  // same invoice number, whose PDF then overwrote the first.
+  const { data: existingInvoices, error: existingInvoiceError } = await supabase
     .from("invoices")
     .select("*")
     .eq("booking_id", parsed.data.jobId)
-    .eq("kind", invoiceKind)
-    .in("status", ["draft", "sent"])
-    .maybeSingle()
+    .in("kind", ["deposit", "full"])
+    .neq("status", "void")
+    .order("created_at", { ascending: false })
+    .limit(1)
 
   if (existingInvoiceError) return safeSupabaseError("deposit-invoice:existing", existingInvoiceError)
+
+  const existingInvoice = existingInvoices?.[0] ?? null
 
   let balance
   try {
@@ -127,7 +134,47 @@ export async function POST(req: Request) {
   // the salesperson-entered number, falling back to the internal one.
   const displayInvoiceNumber = clientInvoiceNumber(booking)
 
-  const invoice = existingInvoice ?? await (async () => {
+  if (!booking.customer_invoice_number?.trim()) {
+    return jsonError("Enter the invoice number on the job before generating this invoice.", 400)
+  }
+
+  // A live invoice priced off a superseded quote must be re-issued at the new
+  // total rather than reused — that is the amendment path after a quote
+  // revision. A mode switch (deposit ⇄ full) instead voids and starts over,
+  // because the kind is baked into the row and the email template.
+  const kindMismatch = existingInvoice !== null && existingInvoice.kind !== invoiceKind
+  const stalePricing = existingInvoice !== null && existingInvoice.quote_id !== quote.id
+
+  const invoice = await (async () => {
+    if (existingInvoice && !kindMismatch && !stalePricing) return existingInvoice
+
+    if (existingInvoice && !kindMismatch) {
+      const { data, error } = await supabase
+        .from("invoices")
+        .update({
+          quote_id: quote.id,
+          deposit_percentage: isFullPayment ? null : depositPercentage,
+          amount,
+          due_date: dueDate,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existingInvoice.id)
+        .select()
+        .single()
+
+      if (error || !data) throw error ?? new Error("Invoice amend did not return a row")
+      return data
+    }
+
+    if (existingInvoice) {
+      const { error: voidError } = await supabase
+        .from("invoices")
+        .update({ status: "void", updated_at: new Date().toISOString() })
+        .eq("id", existingInvoice.id)
+
+      if (voidError) throw voidError
+    }
+
     const { data, error } = await supabase
       .from("invoices")
       .insert({
@@ -223,7 +270,7 @@ export async function POST(req: Request) {
         },
         blocks: {
           ...shared.blocks,
-          bankingDetails: buildBankingDetailsBlock(banking),
+          bankingDetails: buildBankingDetailsBlock(banking, displayInvoiceNumber),
           guestInfo: buildGuestInfoBlock({
             customerName: customerName || "Valued Guest",
             customerEmail: customer?.email ?? null,
@@ -248,7 +295,7 @@ export async function POST(req: Request) {
         },
         blocks: {
           ...shared.blocks,
-          bankingDetails: buildBankingDetailsBlock(banking),
+          bankingDetails: buildBankingDetailsBlock(banking, displayInvoiceNumber),
           guestInfo: buildGuestInfoBlock({
             customerName: customerName || "Valued Guest",
             customerEmail: customer?.email ?? null,
@@ -310,11 +357,32 @@ export async function PATCH(req: Request) {
   if (!parsed.success) return jsonZodError(parsed.error)
 
   const now = new Date().toISOString()
-  const { data: invoice, error } = await auth.value.supabase
+  const { supabase } = auth.value
+
+  if (parsed.data.status === "void") {
+    // Only an unsent draft can be discarded — a sent or paid invoice is a
+    // record the customer already has, and is superseded via a quote revision.
+    const { data: current, error: currentError } = await supabase
+      .from("invoices")
+      .select("id, kind, status")
+      .eq("id", parsed.data.invoiceId)
+      .maybeSingle()
+
+    if (currentError) return safeSupabaseError("deposit-invoice:void-lookup", currentError)
+    if (!current) return jsonError("Invoice not found", 404)
+    if (current.kind !== "deposit" && current.kind !== "full") {
+      return jsonError("Only deposit or full-payment invoices can be discarded", 409)
+    }
+    if (current.status !== "draft") {
+      return jsonError("Only an invoice that has not been sent can be discarded", 409)
+    }
+  }
+
+  const { data: invoice, error } = await supabase
     .from("invoices")
     .update({
       status: parsed.data.status,
-      sent_at: now,
+      ...(parsed.data.status === "sent" ? { sent_at: now } : {}),
       updated_at: now,
     })
     .eq("id", parsed.data.invoiceId)

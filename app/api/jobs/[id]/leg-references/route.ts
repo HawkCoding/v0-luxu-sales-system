@@ -28,13 +28,19 @@ const updateSchema = z.object({
   updates: z
     .array(
       z.object({
-        kind: z.enum(["selection", "transport_request"]),
+        kind: z.enum(["selection", "service", "transport_request"]),
         id: z.string().uuid(),
         supplierReference: z.string().trim().max(200).nullable(),
       }),
     )
     .min(1, "At least one update is required"),
 })
+
+const TABLE_BY_KIND = {
+  selection: { table: "booking_package_selections", matchColumn: "package_leg_id" },
+  service: { table: "booking_services", matchColumn: "id" },
+  transport_request: { table: "booking_transport_requests", matchColumn: "id" },
+} as const
 
 export async function PATCH(req: Request, { params }: RouteParams) {
   const auth = await requireRole(["admin", "manager", "consultant"])
@@ -55,8 +61,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   const { supabase, user, profile } = auth.value
 
   for (const update of parsed.data.updates) {
-    const table = update.kind === "selection" ? "booking_package_selections" : "booking_transport_requests"
-    const matchColumn = update.kind === "selection" ? "package_leg_id" : "id"
+    const { table, matchColumn } = TABLE_BY_KIND[update.kind]
     const supplierReference = update.supplierReference?.trim() || null
 
     const { error } = await supabase

@@ -9,7 +9,7 @@ export function sampleVoucherData(): VoucherData {
     consultantName: "Carmen de Jongh",
     supplierName: "Rovos Rail",
     supplierDescription: "Luxury rail journeys through Southern Africa since 1989.",
-    route: "Cape Town to Pretoria",
+    route: "Cape Town → Pretoria",
     departure: "10 March 2026 at 11h00",
     arrival: "13 March 2026 at 16h00",
     suiteType: "Double Deluxe Suite",
@@ -50,7 +50,7 @@ export function sampleVoucherServiceBlocks(): VoucherServiceBlock[] {
       displayOrder: 0,
       contactDetails: { name: "Rovos Rail", phone: "+27 12 315 8242", email: "reservations@rovos.co.za" },
       serviceData: {
-        route: "Cape Town to Pretoria",
+        route: "Cape Town → Pretoria",
         departureDate: "10 March 2026 at 11h00",
         arrivalDate: "13 March 2026 at 16h00",
         suiteType: "Double Deluxe Suite",

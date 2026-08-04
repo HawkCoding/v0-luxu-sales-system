@@ -1,4 +1,5 @@
 import { safeSupabaseError } from "@/lib/api/responses"
+import { getOrCreateVoucherTemplateId } from "@/lib/api/voucher-template"
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
@@ -59,20 +60,16 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: "Invalid input", details: parsed.error.flatten() }, { status: 400 })
   }
 
-  const { data: existing } = await supabase
-    .from("voucher_template")
-    .select("id")
-    .limit(1)
-    .single()
+  const templateId = await getOrCreateVoucherTemplateId(supabase)
 
-  if (!existing) {
+  if (!templateId) {
     return NextResponse.json({ error: "Template record not found" }, { status: 404 })
   }
 
   const { error } = await supabase
     .from("voucher_template")
     .update({ ...parsed.data, updated_at: new Date().toISOString() })
-    .eq("id", existing.id)
+    .eq("id", templateId)
 
   if (error) {
     return safeSupabaseError("voucher-template", error)

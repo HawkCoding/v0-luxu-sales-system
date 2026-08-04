@@ -1,7 +1,15 @@
+// @vitest-environment node
+// pdf-parse pulls in pdf.js, which needs the node environment (jsdom trips the
+// "No PDFJS.workerSrc specified" path).
+import { createRequire } from "node:module"
 import { describe, expect, it } from "vitest"
 import type { InvoiceTotals } from "./pdf/invoice-document"
 import { makeBankingSettings } from "@/lib/settings-access.fixtures"
 import { renderInvoicePdf } from "./render-invoice-pdf"
+
+const require = createRequire(import.meta.url)
+// pdf-parse ships CJS with no usable type surface for text extraction.
+const pdfParse = require("pdf-parse") as (buffer: Buffer) => Promise<{ text: string }>
 
 const banking = makeBankingSettings({
   bank_name: "Example Bank",
@@ -9,7 +17,6 @@ const banking = makeBankingSettings({
   bank_account_number: "1234567890",
   bank_branch_code: "250655",
   bank_swift_code: "EXAMZAJJ",
-  payment_reference_hint: "LTT-2026-0001-INV",
   company_address: "1 Rail Road, Pretoria",
   company_reg_number: "2020/000000/07",
   company_vat_number: "4000000000",
@@ -37,7 +44,7 @@ const departure = {
   adults: "2",
   children: "0",
   outbound: {
-    route: "Pretoria to Cape Town",
+    route: "Pretoria → Cape Town",
     departureDate: "2026-07-20",
     departureTime: "13h00",
     arrivalDate: "2026-07-22",
@@ -70,6 +77,14 @@ describe("renderInvoicePdf smoke", () => {
 
     expect(buffer.length).toBeGreaterThan(1000)
     expect(buffer.subarray(0, 5).toString("utf8")).toBe("%PDF-")
+
+    const { text } = await pdfParse(buffer)
+    expect(text).toContain("Pretoria → Cape Town")
+    expect(text).not.toContain("Pretoria ’ Cape Town")
+    expect(text).toContain("PLEASE USE REFERENCE")
+    expect(text).toContain("LTT-2026-0001-INV")
+    expect(text).not.toContain("Payable by")
+    expect(text).not.toContain("Commission")
   })
 
   it("renders custom notes and footer text", async () => {

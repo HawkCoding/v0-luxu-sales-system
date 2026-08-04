@@ -22,6 +22,7 @@ interface GenerateVoucherDialogProps {
   trigger?: boolean
   jobId: string
   bookingNumber: string
+  invoiceNumber?: string | null
   disabled?: boolean
   onSent: () => Promise<void> | void
   onGenerated?: () => Promise<void> | void
@@ -53,10 +54,12 @@ export function GenerateVoucherDialog({
   trigger = true,
   jobId,
   bookingNumber,
+  invoiceNumber,
   disabled,
   onSent,
   onGenerated,
 }: GenerateVoucherDialogProps) {
+  const displayNumber = invoiceNumber || bookingNumber
   const [internalOpen, setInternalOpen] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [generated, setGenerated] = useState<GenerateVoucherResponse | null>(null)
@@ -103,7 +106,7 @@ export function GenerateVoucherDialog({
         <DialogHeader>
           <DialogTitle>Generate travel voucher</DialogTitle>
           <DialogDescription>
-            The voucher email for {bookingNumber} carries both the travel voucher and the client
+            The voucher email for {displayNumber} carries both the travel voucher and the client
             itinerary — the itinerary is generated automatically if it doesn't exist yet.
           </DialogDescription>
         </DialogHeader>
@@ -132,6 +135,7 @@ export function GenerateVoucherDialog({
           <SendVoucherButton
             voucherId={generated?.voucherRecord?.id ?? null}
             bookingNumber={bookingNumber}
+            invoiceNumber={invoiceNumber}
             disabled={generating}
             onSent={async () => {
               setDialogOpen(false)

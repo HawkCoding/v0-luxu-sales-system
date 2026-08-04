@@ -110,10 +110,10 @@ const bankingDetails: TemplateTokenSpec = {
 }
 const guestInfo: TemplateTokenSpec = {
   name: "guestInfo",
-  description: "Booking contact and each named guest with their ID/passport number, for the customer to confirm (falls back to guest counts if names aren't captured yet)",
+  description: "Each named guest with their ID/passport number, for the customer to confirm (falls back to guest counts if names aren't captured yet)",
   kind: "block",
   sample:
-    '<div data-label="Guest Information"><p><strong>Booking contact:</strong> Mr Smith (mr.smith@example.com)</p><p><strong>Guests:</strong></p><p>Mr John Smith — ID: 8001015800083</p><p>Mrs Jane Smith — ID: 8203125800084</p></div>',
+    "<p>Mr John Smith ID: 8001015800083</p><p>Mrs Jane Smith ID: 8203125800084</p>",
 }
 
 // Every token below is resolvable in every template type (lib/templates/resolve-shared-tokens.ts

@@ -7,7 +7,8 @@ import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { getDocumentBrandSettings, getDocumentTextSettings, resolveDocumentBrand } from "@/lib/settings-access"
 import { resolveDirectedRouteName } from "@/lib/routes/route-name"
 import { buildDefaultTripTitle } from "@/lib/itinerary/default-trip-title"
-import { CONSULTANTS, VOUCHER_TEMPLATE_DEFAULTS, type ConsultantAbbreviation, type VoucherTemplate } from "@/lib/types"
+import { resolveConsultant } from "@/lib/consultant/resolve-consultant"
+import { VOUCHER_TEMPLATE_DEFAULTS, type VoucherTemplate } from "@/lib/types"
 import { firstRecord } from "@/lib/utils"
 
 export const ITINERARY_BUCKET = "vouchers"
@@ -31,6 +32,7 @@ type BookingRecord = {
   id: string
   booking_number: string
   consultant: string | null
+  assigned_salesperson_id: string | null
   departure_date: string | null
   no_of_adults: number
   no_of_children: number
@@ -43,10 +45,6 @@ type VoucherTemplateRow = VoucherTemplate & { id?: string }
 
 function sanitizePathPart(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "itinerary"
-}
-
-function resolveConsultant(value: string | null): { key: ConsultantAbbreviation; name: string } {
-  return CONSULTANTS.find((c) => c.key === value) ?? { key: "LB", name: "Leonie" }
 }
 
 function buildGuestNames(
@@ -133,7 +131,7 @@ export async function ensureItineraryPdf(
     supabase
       .from("bookings")
       .select(
-        `id, booking_number, consultant, departure_date, no_of_adults, no_of_children, route_reversed,
+        `id, booking_number, consultant, assigned_salesperson_id, departure_date, no_of_adults, no_of_children, route_reversed,
          customer:customers(first_name, last_name, email, phone, title),
          route:routes(name, direction_mode, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name))`,
       )
@@ -156,7 +154,10 @@ export async function ensureItineraryPdf(
   const customer = firstRecord(booking.customer)
   const route = firstRecord(booking.route)
 
-  const consultant = resolveConsultant(booking.consultant)
+  const consultant = await resolveConsultant(supabase, {
+    consultant: booking.consultant,
+    assigned_salesperson_id: booking.assigned_salesperson_id,
+  })
   const guestNames = buildGuestNames(customer, booking.no_of_adults, booking.no_of_children)
   const departure = formatDisplayDateLong(booking.departure_date)
   const template = normalizeTemplate(templateRaw as VoucherTemplateRow | null)
@@ -173,7 +174,7 @@ export async function ensureItineraryPdf(
     tripNotes,
     guestNames,
     departure,
-    consultantName: consultant.name,
+    consultantName: consultant?.name ?? "",
   })
 
   let pdfBuffer: Buffer

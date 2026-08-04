@@ -78,7 +78,6 @@ export function gateIdToTabLabel(gateId: string): string {
 
 export function confirmationKeyForFailure(failure: GateFailure): keyof ManualConfirmations | null {
   if (failure.autoFixable === "create_invoice_25pct") return "createDepositInvoice"
-  if (failure.gateId === "invoice_correspondence") return "createInvoiceCorrespondence"
   if (failure.gateId === "final_payment_confirmation") return "finalPaymentReceived"
   return null
 }

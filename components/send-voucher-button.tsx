@@ -15,6 +15,7 @@ interface SendVoucherButtonProps {
    */
   resolveVoucherId?: () => Promise<string | null>
   bookingNumber: string
+  invoiceNumber?: string | null
   disabled?: boolean
   onSent?: () => Promise<void> | void
 }
@@ -42,9 +43,11 @@ export function SendVoucherButton({
   voucherId,
   resolveVoucherId,
   bookingNumber,
+  invoiceNumber,
   disabled,
   onSent,
 }: SendVoucherButtonProps) {
+  const displayNumber = invoiceNumber || bookingNumber
   const [loading, setLoading] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [prepared, setPrepared] = useState<PreparedVoucherSend | null>(null)
@@ -93,7 +96,7 @@ export function SendVoucherButton({
           open={previewOpen}
           onOpenChange={setPreviewOpen}
           title="Send travel voucher"
-          description={`Voucher and itinerary for ${bookingNumber} — review before sending.`}
+          description={`Voucher and itinerary for ${displayNumber} — review before sending.`}
           bookingId={prepared.voucher.jobId}
           initialSubject={prepared.email.subject}
           bodyHtml={prepared.email.bodyHtml}

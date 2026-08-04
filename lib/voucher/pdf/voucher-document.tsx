@@ -4,7 +4,7 @@ import { sortedVoucherServiceBlocks } from "@/lib/generate-voucher"
 import type { DocumentBrand } from "@/lib/settings-access"
 import type { VoucherSectionKey, VoucherTemplate } from "@/lib/types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
-import { registerVoucherFonts, resolveVoucherFontPairing } from "./fonts"
+import { registerDocumentFonts, resolveDocumentFontPairing } from "@/lib/pdf/document-fonts"
 import { voucherStyles } from "./styles"
 import { HeaderBanner } from "./sections/header-banner"
 import { GuestInfo } from "./sections/guest-info"
@@ -42,13 +42,13 @@ function sectionFor(key: VoucherSectionKey, data: VoucherData, template: Voucher
 }
 
 export function VoucherDocument({ data, template, docTitle = "TRAVEL VOUCHERS", brand }: VoucherDocumentProps) {
-  registerVoucherFonts()
+  registerDocumentFonts()
 
   const t = normalizeTemplate(template)
   const styles = voucherStyles({
     accentColour: t.accent_colour,
     sectionBg: t.section_bg,
-    fonts: resolveVoucherFontPairing(t.font_family),
+    fonts: resolveDocumentFontPairing(t.font_family),
   })
   const sectionOrder = t.section_order.length > 0 ? t.section_order : VOUCHER_TEMPLATE_DEFAULTS.section_order
   const hiddenSections = new Set(t.hidden_sections)

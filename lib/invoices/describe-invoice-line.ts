@@ -16,9 +16,7 @@ export function describeInvoiceLine(
   const isGenericService = snapshot?.serviceType === "transfer" || snapshot?.serviceType === "rental"
   const supplier = isGenericService ? null : snapshot?.supplierName?.trim() || snapshot?.legLabel?.trim() || null
 
-  // Invoice PDF renders with the core Helvetica font (WinAnsi-only, no arrow glyph),
-  // so routeName's "→"/"↔" must be swapped for a word here or it renders as garbage.
-  const detail = snapshot?.routeName?.trim().replace(/\s*[→↔]\s*/g, " to ") || null
+  const detail = snapshot?.routeName?.trim() || null
 
   let base: string
   if (supplier) {

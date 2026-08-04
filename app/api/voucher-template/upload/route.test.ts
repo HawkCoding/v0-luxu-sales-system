@@ -49,22 +49,25 @@ function makeFile(name: string, type: string, content = name): TestUploadFile {
 function createSupabase({
   user = { id: USER_ID },
   role = "admin",
-  templateLookupError = null,
   templateUpdateError = null,
   templateMissing = false,
+  templateInsertError = null,
 }: {
   user?: { id: string } | null
   role?: string
-  templateLookupError?: { message: string } | null
   templateUpdateError?: { message: string } | null
   templateMissing?: boolean
+  templateInsertError?: { message: string } | null
 } = {}) {
   const uploads: UploadedFile[] = []
   const updates: Array<Record<string, unknown>> = []
+  const inserts: Array<Record<string, unknown>> = []
+  let templateId = templateMissing ? null : "template-1"
 
   const supabase = {
     uploads,
     updates,
+    inserts,
     auth: {
       getUser: vi.fn(async () => ({
         data: { user },
@@ -99,11 +102,19 @@ function createSupabase({
       if (table === "voucher_template") {
         return {
           select: () => ({
-            limit: () => ({
-              single: async () => ({
-                data: templateMissing ? null : { id: "template-1" },
-                error: templateLookupError,
-              }),
+            maybeSingle: async () => ({
+              data: templateId ? { id: templateId } : null,
+              error: null,
+            }),
+          }),
+          insert: (row: Record<string, unknown>) => ({
+            select: () => ({
+              single: async () => {
+                if (templateInsertError) return { data: null, error: templateInsertError }
+                inserts.push(row)
+                templateId = "template-created"
+                return { data: { id: templateId }, error: null }
+              },
             }),
           }),
           update: (payload: Record<string, unknown>) => ({
@@ -199,6 +210,42 @@ describe("POST /api/voucher-template/upload", () => {
     expect(supabase.updates[0]).toMatchObject({
       banner_url: expect.stringContaining("/voucher-assets/banner.webp?t="),
     })
+  })
+
+  it("self-heals by creating the singleton row when missing, then persists the URL", async () => {
+    const supabase = createSupabase({ templateMissing: true })
+    createSessionClientMock.mockResolvedValue(supabase)
+
+    const response = await POST(
+      createUploadRequest({
+        kind: "banner",
+        file: makeFile("voucher-banner.webp", "image/webp", "banner"),
+      }),
+    )
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(payload.url).toContain("/voucher-assets/banner.webp?t=")
+    expect(supabase.inserts).toHaveLength(1)
+    expect(supabase.updates[0]).toMatchObject({
+      banner_url: expect.stringContaining("/voucher-assets/banner.webp?t="),
+    })
+  })
+
+  it("returns 500 when the singleton row cannot be created", async () => {
+    const supabase = createSupabase({ templateMissing: true, templateInsertError: { message: "insert failed" } })
+    createSessionClientMock.mockResolvedValue(supabase)
+
+    const response = await POST(
+      createUploadRequest({
+        kind: "banner",
+        file: makeFile("voucher-banner.webp", "image/webp", "banner"),
+      }),
+    )
+    const payload = await response.json()
+
+    expect(response.status).toBe(500)
+    expect(payload.error).toBe("Template record not found")
   })
 
   it("returns 500 when the uploaded URL cannot be saved", async () => {

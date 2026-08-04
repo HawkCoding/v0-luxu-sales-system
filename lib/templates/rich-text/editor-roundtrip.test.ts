@@ -72,22 +72,24 @@ describe("editor round-trip", () => {
   })
 
   it("preserves a real banking details block spliced between paragraphs", () => {
-    const block = buildBankingDetailsBlock({
-      bank_name: "Example Bank",
-      bank_account_name: "Luxus Travel & Tours",
-      bank_account_number: "000000000",
-      bank_branch_code: "250655",
-      bank_swift_code: "EXMPZAJJ",
-      payment_reference_hint: "Booking number",
-      company_address: "1 Example Street, Cape Town",
-      company_reg_number: "2020/123456/07",
-      company_vat_number: "4123456789",
-      company_tel: "",
-      company_cell: "",
-      company_fax: "",
-      company_email: "",
-      company_website: "",
-    })
+    const block = buildBankingDetailsBlock(
+      {
+        bank_name: "Example Bank",
+        bank_account_name: "Luxus Travel & Tours",
+        bank_account_number: "000000000",
+        bank_branch_code: "250655",
+        bank_swift_code: "EXMPZAJJ",
+        company_address: "1 Example Street, Cape Town",
+        company_reg_number: "2020/123456/07",
+        company_vat_number: "4123456789",
+        company_tel: "",
+        company_cell: "",
+        company_fax: "",
+        company_email: "",
+        company_website: "",
+      },
+      "BT-2026-0001-INV",
+    )
     const source = `<p>Dear Sofia,</p>${block}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>`
     const result = roundTripThroughEditor(source, BLOCK_TOKENS)
     expect(normalizeForCompare(result)).toBe(normalizeForCompare(source))

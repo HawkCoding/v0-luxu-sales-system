@@ -332,7 +332,7 @@ export async function resolveSharedEmailTokens(
   }
 
   const blocks: Record<string, string> = {
-    bankingDetails: orPlaceholder(buildBankingDetailsBlock(bankingSettings)),
+    bankingDetails: orPlaceholder(buildBankingDetailsBlock(bankingSettings, tokens.invoiceNumber)),
     guestInfo,
     quoteSummaryTable,
   }

@@ -39,17 +39,12 @@ export function buildGuestInfoBlock(input: GuestInfoInput): string {
   const lineStyle = "margin:0 0 6px;color:#312b24;font-size:13px;line-height:19px;"
   const rowStyle = "margin:0 0 4px;color:#312b24;font-size:13px;line-height:19px;"
 
-  const lines = [
-    `<p style="${lineStyle}"><strong>Booking contact:</strong> ${escapeHtml(input.customerName)}${
-      input.customerEmail ? ` (${escapeHtml(input.customerEmail)})` : ""
-    }</p>`,
-  ]
+  const lines: string[] = []
 
   if (input.guests.length > 0) {
-    lines.push(`<p style="${lineStyle}"><strong>Guests:</strong></p>`)
     for (const guest of input.guests) {
       const idText = guest.idNumber ? `ID: ${escapeHtml(guest.idNumber)}` : "ID not yet on file"
-      lines.push(`<p style="${rowStyle}">${escapeHtml(guest.name)} — ${idText}</p>`)
+      lines.push(`<p style="${rowStyle}">${escapeHtml(guest.name)} ${idText}</p>`)
     }
   } else {
     const paxCount = formatPaxCount(input.adults, input.children)
@@ -58,10 +53,5 @@ export function buildGuestInfoBlock(input: GuestInfoInput): string {
     }
   }
 
-  return (
-    `<div style="margin:18px 0;padding:14px 16px;background-color:#fbf8f3;border:1px solid #e8dfd2;" data-label="Guest Information">` +
-    `<p style="margin:0 0 6px;color:#172018;font-size:13px;font-weight:700;">Please confirm your booking details, including ID numbers, are correct</p>` +
-    lines.join("") +
-    `</div>`
-  )
+  return lines.join("")
 }

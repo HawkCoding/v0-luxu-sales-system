@@ -8,6 +8,7 @@ import { resolveSalespersonSender, type ResolvedSenderReason } from "@/lib/email
 import { isFallbackSendingUnavailable, sendEmail } from "@/lib/email/transport"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { applyTransition } from "@/lib/pipeline/apply-transition"
+import { validateTransition } from "@/lib/pipeline/validate-transition"
 import { loadLibraryAttachments } from "@/lib/attachments/email-attachment-library"
 import { ensureQuotePdf, QUOTE_BUCKET } from "@/lib/quotes/ensure-quote-pdf"
 import { composeEmail } from "@/lib/templates/compose-email"
@@ -103,6 +104,21 @@ function isVoucherSend(kind: string | null | undefined, moveStage: PipelineStage
   return kind?.toLowerCase() === "voucher" || moveStage === "voucher_sent"
 }
 
+// These three "send & move stage" buttons (deposit invoice, reservation-form
+// acknowledgement, voucher) call applyTransition directly instead of the
+// gated PATCH /api/jobs/[id] route, so validateTransition's gates never ran
+// for them — a booking could be moved forward with no invoice number, an
+// incomplete customer record, or an unresolved email-import flag. quote_sent
+// is deliberately excluded: it's the first outbound touch, before customer
+// details are necessarily complete.
+const PRE_SEND_GATED_STAGES = new Set<PipelineStage>(["accepted", "deposit_requested", "voucher_sent"])
+
+// Only these gates are (re-)enforced pre-send: they depend solely on data
+// that exists before this request, never on the send/transition this
+// request itself performs — unlike e.g. "reservation form received" or
+// "voucher correspondence sent", which these very sends are what satisfy.
+const PRE_SEND_GATE_IDS = new Set(["customer_complete", "email_import_review", "invoice_number_required"])
+
 export async function POST(req: Request) {
   const auth = await requireRole(["admin", "manager", "consultant"])
   if (!auth.ok) return auth.response
@@ -123,7 +139,7 @@ export async function POST(req: Request) {
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
     .select(
-      "id, booking_number, stage, source, raw_text, updated_at, customer_id, consultant, departure_date, duration_nights, invoice_balance, assigned_salesperson_id, customer:customers(email, title, first_name, last_name)",
+      "id, booking_number, stage, source, raw_text, updated_at, customer_id, consultant, departure_date, duration_nights, invoice_balance, assigned_salesperson_id, customer_invoice_number, email_import_needs_review, email_import_review_resolved_at, customer:customers(email, title, first_name, last_name, phone, country)",
     )
     .eq("id", bookingId)
     .single()
@@ -133,6 +149,30 @@ export async function POST(req: Request) {
   }
 
   const customerRecord = Array.isArray(booking.customer) ? booking.customer[0] : booking.customer
+
+  if (
+    parsed.data.moveStage &&
+    booking.stage !== parsed.data.moveStage &&
+    PRE_SEND_GATED_STAGES.has(parsed.data.moveStage)
+  ) {
+    const gateFailures = validateTransition({
+      booking: {
+        id: booking.id,
+        stage: booking.stage as PipelineStage,
+        source: booking.source,
+        email_import_needs_review: booking.email_import_needs_review,
+        email_import_review_resolved_at: booking.email_import_review_resolved_at,
+        customer_invoice_number: booking.customer_invoice_number,
+      },
+      customer: customerRecord ?? null,
+      targetStage: parsed.data.moveStage,
+    }).filter((failure) => PRE_SEND_GATE_IDS.has(failure.gateId))
+
+    if (gateFailures.length > 0) {
+      return jsonError("Stage transition blocked", 400, { failures: gateFailures })
+    }
+  }
+
   if (isVoucherSend(parsed.data.kind, parsed.data.moveStage)) {
     let legReferenceRows: Awaited<ReturnType<typeof loadLegReferenceRows>> = []
     try {

@@ -11,7 +11,9 @@ interface GuestInfoProps {
 }
 
 export function GuestInfo({ data, styles }: GuestInfoProps) {
-  const childText = data.enquiry.noOfChildren ? `, ${data.enquiry.noOfChildren} children` : ""
+  const childText = data.enquiry.noOfChildren
+    ? `, ${data.enquiry.noOfChildren} ${data.enquiry.noOfChildren === 1 ? "child" : "children"}`
+    : ""
 
   return (
     <View style={styles.section} wrap={false}>
@@ -24,7 +26,11 @@ export function GuestInfo({ data, styles }: GuestInfoProps) {
       />
       <InfoRow label="Contact Email" value={data.customerEmail} styles={styles} />
       <InfoRow label="Contact Phone" value={data.customerPhone} styles={styles} />
-      <InfoRow label="Consultant" value={`${data.consultant} - ${data.consultantName}`} styles={styles} />
+      <InfoRow
+        label="Consultant"
+        value={data.consultant && data.consultantName ? `${data.consultant} - ${data.consultantName}` : ""}
+        styles={styles}
+      />
       {data.specialRequests ? (
         <InfoRow label="Special Requests" value={data.specialRequests} styles={styles} />
       ) : null}

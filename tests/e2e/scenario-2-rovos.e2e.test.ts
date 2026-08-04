@@ -54,7 +54,6 @@ vi.mock("@/lib/settings-access", async (importOriginal) => {
       bank_account_number: "",
       bank_branch_code: "",
       bank_swift_code: "",
-      payment_reference_hint: "",
       company_address: "",
       company_reg_number: "",
       company_vat_number: "",
@@ -164,6 +163,9 @@ async function moveStage(mock: SupabaseMock, targetStage: PipelineStage, manualC
   const documents = mock.store.rows("documents")
     .filter((d) => d.booking_id === BOOKING_ID)
     .map((d) => ({ id: d.id as string, kind: d.kind as string, status: d.status as string }))
+  const invoices = mock.store.rows("invoices")
+    .filter((inv) => inv.booking_id === BOOKING_ID)
+    .map((inv) => ({ id: inv.id as string, kind: inv.kind as string, status: inv.status as string }))
   const correspondences = mock.store.rows("correspondences")
     .filter((c) => c.booking_id === BOOKING_ID)
     .map((c) => ({ id: c.id as string, kind: c.kind as string, subject: c.subject as string, status: c.status as string }))
@@ -185,6 +187,7 @@ async function moveStage(mock: SupabaseMock, targetStage: PipelineStage, manualC
     targetStage,
     quotes,
     documents,
+    invoices,
     correspondences,
     payments,
     manualConfirmations,
@@ -272,7 +275,7 @@ describe("E2E Scenario 2: Rovos Rail enquiry → voucher", () => {
     }))
     expect(store.rows("bookings")[0]).toMatchObject({ deposit_paid: true, invoice_balance: 60000 })
 
-    await moveStage(mock, "deposit_paid", { createInvoiceCorrespondence: true })
+    await moveStage(mock, "deposit_paid")
     expect(store.rows("bookings")[0].stage).toBe("deposit_paid")
 
     // 6. Final invoice + final payment → balance to zero.

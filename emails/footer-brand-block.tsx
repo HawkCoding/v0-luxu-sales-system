@@ -16,8 +16,8 @@ interface FooterBrandBlockProps {
  * class — the sender's font settings scale their message body, not the mark.
  */
 export function FooterBrandBlock({ brand }: FooterBrandBlockProps) {
-  const heading = brand?.heading ?? FOOTER_BRAND_DIVISION_LINE
-  const subheading = brand?.subheading ?? FOOTER_BRAND_PRODUCT_LINE
+  const heading = brand?.heading ?? FOOTER_BRAND_PRODUCT_LINE
+  const subheading = brand?.subheading ?? FOOTER_BRAND_DIVISION_LINE
   const logoUrl = brand?.logoUrl ?? null
 
   return (
@@ -61,7 +61,7 @@ const seal = {
 
 const textCell = {
   verticalAlign: "middle" as const,
-  textAlign: "left" as const,
+  textAlign: "center" as const,
 }
 
 const divisionLine = {

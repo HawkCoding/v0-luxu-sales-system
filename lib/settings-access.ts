@@ -318,8 +318,8 @@ export type DocumentBrandSettings = Record<
 >
 
 const DOCUMENT_BRAND_DEFAULTS: DocumentBrandSettings = {
-  brand_block_heading: FOOTER_BRAND_DIVISION_LINE,
-  brand_block_subheading: FOOTER_BRAND_PRODUCT_LINE,
+  brand_block_heading: FOOTER_BRAND_PRODUCT_LINE,
+  brand_block_subheading: FOOTER_BRAND_DIVISION_LINE,
   // Empty means "no uploaded logo" — the renderers then fall back to the
   // committed asset. A non-empty default would make that state unreachable,
   // because getDocumentBrandSettings treats a blank row as unset (see below).
@@ -407,8 +407,8 @@ export async function getDocumentBrandForEmail(): Promise<EmailBrand> {
   } catch {
     return {
       brand: {
-        heading: FOOTER_BRAND_DIVISION_LINE,
-        subheading: FOOTER_BRAND_PRODUCT_LINE,
+        heading: FOOTER_BRAND_PRODUCT_LINE,
+        subheading: FOOTER_BRAND_DIVISION_LINE,
         logoUrl: getFooterBrandLogoUrl(),
       },
       position: "bottom",
@@ -441,7 +441,6 @@ export const BANKING_SETTING_KEYS = [
   "bank_account_number",
   "bank_branch_code",
   "bank_swift_code",
-  "payment_reference_hint",
   "company_address",
   "company_reg_number",
   "company_vat_number",

@@ -58,14 +58,20 @@ function stageIndex(stage: PipelineStage): number {
  *
  * A revision starts life as a `draft` quote, so the booking normally returns to
  * Enquiry and the salesperson re-walks send → accept → deposit. Once money has
- * been received the reset stops at Deposit Invoice Sent: the payments and the
+ * been received the reset stops at Quote Accepted: the payments and the
  * `deposit_paid` flag stay, and the salesperson re-issues an amended invoice at
  * the new total.
+ *
+ * Both floors sit at or below Quote Accepted on purpose. Crossing `accepted` is
+ * the only thing that flips the revised quote from `draft` to `accepted` (see
+ * `applyTransition`), and `calculateInvoiceBalance` refuses to price an invoice
+ * without an accepted quote — so a floor above `accepted` would strand the
+ * booking with a revised quote that can never be billed.
  */
 export function planRevisionReset(input: RevisionResetInput): RevisionResetPlan {
   const currentStage = getCanonicalPipelineStage(input.stage)
   const keepsDeposit = input.depositPaid || input.totalPaid > 0
-  const floorStage: PipelineStage = keepsDeposit ? "deposit_requested" : "enquiry"
+  const floorStage: PipelineStage = keepsDeposit ? "accepted" : "enquiry"
 
   const currentIndex = stageIndex(currentStage)
   const floorIndex = stageIndex(floorStage)
@@ -78,7 +84,11 @@ export function planRevisionReset(input: RevisionResetInput): RevisionResetPlan 
   if (changesStage) {
     for (const stage of FORWARD_STAGES.slice(floorIndex + 1, currentIndex + 1)) {
       const column = STAGE_TIMESTAMP_COLUMN[stage]
-      if (column) clearedFields.push(column)
+      if (!column) continue
+      // Money received stays on the record: clearing `deposit_paid_at` while
+      // `deposit_paid` remains true would contradict itself.
+      if (keepsDeposit && column === "deposit_paid_at") continue
+      clearedFields.push(column)
     }
     if (!keepsDeposit) {
       clearedFields.push("deposit_paid", "deposit_confirmed_manually", "invoice_balance")
@@ -98,6 +108,7 @@ export function planRevisionReset(input: RevisionResetInput): RevisionResetPlan 
   }
   summary.push("Unpaid deposit and final invoices are voided so a new one can be issued at the revised total.")
   summary.push("The quote being revised is marked Superseded.")
+  summary.push("Guest details, reservation details and supplier references are kept as they are.")
   if (keepsDeposit) {
     summary.push("Payments already received are kept — the deposit stays marked as paid.")
   }
@@ -105,6 +116,12 @@ export function planRevisionReset(input: RevisionResetInput): RevisionResetPlan 
     summary.push(
       `This booking already reached ${PIPELINE_STAGE_LABELS[currentStage]} — any paid invoice is reopened ` +
         "so the new balance can be billed once this revision is accepted.",
+    )
+  }
+  if (changesStage) {
+    summary.push(
+      "You then re-walk three steps: send the revised quote, move the booking to Quote Accepted, " +
+        "and issue the amended invoice (you can switch between deposit and full payment again).",
     )
   }
 

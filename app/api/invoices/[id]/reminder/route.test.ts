@@ -8,8 +8,8 @@ const authMocks = vi.hoisted(() => ({
 const pdfMocks = vi.hoisted(() => ({
   ensureInvoicePdf: vi.fn(async () => ({
     documentId: "doc-1",
-    storagePath: "invoices/BT-2026-0001-DEP1/invoice-BT-2026-0001-DEP1.pdf",
-    filename: "invoice-BT-2026-0001-DEP1.pdf",
+    storagePath: "invoices/INV-CUSTOM-99/invoice-INV-CUSTOM-99.pdf",
+    filename: "invoice-INV-CUSTOM-99.pdf",
     contentBase64: Buffer.from("pdf").toString("base64"),
   })),
 }))
@@ -43,7 +43,6 @@ vi.mock("@/lib/settings-access", () => ({
     bank_account_number: "",
     bank_branch_code: "",
     bank_swift_code: "",
-    payment_reference_hint: "",
     company_address: "",
     company_reg_number: "",
     company_vat_number: "",
@@ -135,9 +134,9 @@ describe("POST /api/invoices/[id]/reminder", () => {
     expect(res.status).toBe(200)
     expect(body.email.subject).toContain("Payment Reminder")
     expect(body.email.to).toBe("ada@example.test")
-    // Filename stays on the internal invoice number; the customer-facing number
-    // (salesperson-entered) is what appears in the email + response.
-    expect(body.attachment.filename).toBe("invoice-BT-2026-0001-DEP1.pdf")
+    // Filename, email, and response all use the customer-facing (salesperson-
+    // entered) invoice number, not the internal invoices.invoice_number.
+    expect(body.attachment.filename).toBe("invoice-INV-CUSTOM-99.pdf")
     expect(body.invoice.invoiceNumber).toBe("INV-CUSTOM-99")
     expect(body.invoice.daysOverdue).toBe(3)
     expect(composeMocks.composeEmail).toHaveBeenCalledWith(
@@ -150,6 +149,33 @@ describe("POST /api/invoices/[id]/reminder", () => {
         }),
       }),
     )
+  })
+
+  it("returns 400 when no invoice number has been entered on the job", async () => {
+    const { supabase } = createSupabaseMock({
+      invoices: [
+        {
+          id: INVOICE_ID,
+          booking_id: BOOKING_ID,
+          kind: "deposit",
+          status: "sent",
+          invoice_number: "BT-2026-0001-DEP1",
+          amount: 250,
+          currency: "ZAR",
+          due_date: daysAgo(3),
+          created_at: "2026-07-01T00:00:00.000Z",
+        },
+      ],
+      bookings: [{ id: BOOKING_ID, booking_number: "BT-2026-0001", customer_id: "customer-1" }],
+      customers: [{ id: "customer-1", first_name: "Ada", last_name: "Lovelace", email: "ada@example.test" }],
+      payment_reminders: [],
+    })
+    mockAuthOk(supabase)
+
+    const res = await POST(new Request("http://localhost"), routeParams())
+
+    expect(res.status).toBe(400)
+    expect(pdfMocks.ensureInvoicePdf).not.toHaveBeenCalled()
   })
 
   it("rejects reminders for paid invoices", async () => {

@@ -19,19 +19,16 @@ const BANKING_ROWS: Array<{ key: keyof BankingSettings; label: string }> = [
   { key: "bank_account_number", label: "Account number" },
   { key: "bank_branch_code", label: "Branch code" },
   { key: "bank_swift_code", label: "SWIFT/BIC" },
-  { key: "payment_reference_hint", label: "Payment reference" },
 ]
 
-export function buildBankingDetailsBlock(settings: BankingSettings): string {
+export function buildBankingDetailsBlock(settings: BankingSettings, invoiceNumber: string): string {
   const rows = BANKING_ROWS.filter(({ key }) => settings[key])
   if (rows.length === 0) return ""
 
-  const lines = rows
-    .map(
-      ({ key, label }) =>
-        `<strong>${label}:</strong> ${escapeHtml(settings[key])}`,
-    )
-    .join("<br/>")
+  const lines = [
+    ...rows.map(({ key, label }) => `<strong>${label}:</strong> ${escapeHtml(settings[key])}`),
+    ...(invoiceNumber ? [`<strong>Payment reference:</strong> ${escapeHtml(invoiceNumber)}`] : []),
+  ].join("<br/>")
 
   // data-label names the locked placeholder card in the send-dialog editor.
   return (

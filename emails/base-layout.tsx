@@ -58,6 +58,9 @@ export function BaseLayout({
 .${CONTENT_CLASS_NAME} p {
   margin: 0 0 8px;
 }
+.${CONTENT_CLASS_NAME} p:last-child {
+  margin-bottom: 0;
+}
 .${CONTENT_CLASS_NAME} ul, .${CONTENT_CLASS_NAME} ol {
   margin: 0 0 8px;
   padding-left: 20px;
@@ -110,7 +113,7 @@ const container = {
 }
 
 const content = {
-  padding: "20px 24px",
+  padding: "20px 24px 0",
 }
 
 const footer = {

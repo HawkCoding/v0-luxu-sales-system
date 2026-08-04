@@ -152,6 +152,7 @@ export function JobDocumentsTab({
           onOpenChange={setVoucherOpen}
           jobId={job.id}
           bookingNumber={job.jobNumber}
+          invoiceNumber={job.customerInvoiceNumber}
           onGenerated={onChange}
           onSent={async () => {
             await onChange?.()
