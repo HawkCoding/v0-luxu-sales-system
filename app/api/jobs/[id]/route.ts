@@ -56,7 +56,6 @@ const patchJobSchema = z.object({
   manualConfirmations: z
     .object({
       createDepositInvoice: z.boolean().optional(),
-      createInvoiceCorrespondence: z.boolean().optional(),
       finalPaymentReceived: z.boolean().optional(),
     })
     .optional(),

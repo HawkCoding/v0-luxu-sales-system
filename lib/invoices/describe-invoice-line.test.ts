@@ -61,17 +61,17 @@ describe("describeInvoiceLine", () => {
     )
   })
 
-  it("swaps the one-way route arrow for 'to' (Helvetica core font has no arrow glyph)", () => {
+  it("keeps the one-way route arrow (invoice PDF now embeds Montserrat, which has the glyph)", () => {
     const snapshot = makeSnapshot({ routeName: "Pretoria → Cape Town" })
     expect(describeInvoiceLine("Rovos Rail - Deluxe Suite - Pretoria → Cape Town - Adult", snapshot)).toBe(
-      "Rovos Rail — Pretoria to Cape Town",
+      "Rovos Rail — Pretoria → Cape Town",
     )
   })
 
-  it("swaps the round-trip route arrow for 'to'", () => {
+  it("keeps the round-trip route arrow", () => {
     const snapshot = makeSnapshot({ routeName: "Pretoria ↔ Cape Town" })
     expect(describeInvoiceLine("Rovos Rail - Deluxe Suite - Pretoria ↔ Cape Town - Adult", snapshot)).toBe(
-      "Rovos Rail — Pretoria to Cape Town",
+      "Rovos Rail — Pretoria ↔ Cape Town",
     )
   })
 

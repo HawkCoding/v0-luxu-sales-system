@@ -21,6 +21,7 @@ import { GET, PUT } from "./route"
 
 const BOOKING_ID = "00000000-0000-4000-8000-00000000d001"
 const TRAVELLER_ID = "00000000-0000-4000-8000-00000000d002"
+const CUSTOMER_ID = "00000000-0000-4000-8000-00000000d003"
 
 function buildAuthValue(supabase = buildSupabase()) {
   return {
@@ -36,9 +37,16 @@ function buildAuthValue(supabase = buildSupabase()) {
   }
 }
 
-function buildSupabase(opts: { bookingExists?: boolean } = {}) {
+function buildSupabase(
+  opts: {
+    bookingExists?: boolean
+    customerId?: string | null
+    customer?: { id: string; date_of_birth: string | null; id_passport: string | null } | null
+  } = {},
+) {
   const insertCalls: unknown[] = []
   const deleteCalls: string[] = []
+  const customerUpdates: unknown[] = []
 
   const travellerRow = {
     id: TRAVELLER_ID,
@@ -53,9 +61,14 @@ function buildSupabase(opts: { bookingExists?: boolean } = {}) {
     sort_order: 0,
   }
 
+  const customerId = opts.customerId === undefined ? CUSTOMER_ID : opts.customerId
+  const customerRow =
+    opts.customer === undefined ? { id: CUSTOMER_ID, date_of_birth: null, id_passport: null } : opts.customer
+
   return {
     insertCalls,
     deleteCalls,
+    customerUpdates,
     from: vi.fn((table: string) => {
       if (table === "travellers") {
         return {
@@ -81,10 +94,25 @@ function buildSupabase(opts: { bookingExists?: boolean } = {}) {
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
               maybeSingle: vi.fn(async () => ({
-                data: opts.bookingExists === false ? null : { id: BOOKING_ID },
+                data: opts.bookingExists === false ? null : { id: BOOKING_ID, customer_id: customerId },
                 error: null,
               })),
             })),
+          })),
+        }
+      }
+      if (table === "customers") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              maybeSingle: vi.fn(async () => ({ data: customerRow, error: null })),
+            })),
+          })),
+          update: vi.fn((values: unknown) => ({
+            eq: vi.fn(async () => {
+              customerUpdates.push(values)
+              return { error: null }
+            }),
           })),
         }
       }
@@ -237,5 +265,69 @@ describe("PUT /api/jobs/[id]/travellers", () => {
       supabase,
       expect.objectContaining({ action: "travellers_updated", entityId: BOOKING_ID }),
     )
+  })
+
+  async function putPrimary(supabase: ReturnType<typeof buildSupabase>, traveller: Record<string, unknown>) {
+    authMocks.requireRole.mockResolvedValue({ ok: true, value: buildAuthValue(supabase) })
+    const req = new Request("http://localhost", {
+      method: "PUT",
+      body: JSON.stringify({ travellers: [traveller] }),
+      headers: { "Content-Type": "application/json" },
+    })
+    return PUT(req, { params })
+  }
+
+  it("copies the primary guest's ID and date of birth onto the customer record", async () => {
+    const supabase = buildSupabase()
+    const res = await putPrimary(supabase, {
+      firstName: "Jane",
+      lastName: "Doe",
+      idPassport: "B7654321",
+      dateOfBirth: "1990-05-05",
+      isPrimary: true,
+    })
+    expect(res.status).toBe(200)
+    expect(supabase.customerUpdates).toEqual([{ id_passport: "B7654321", date_of_birth: "1990-05-05" }])
+  })
+
+  it("skips a non-ISO date of birth so the customers DATE column is never given junk", async () => {
+    const supabase = buildSupabase()
+    const res = await putPrimary(supabase, {
+      firstName: "Jane",
+      lastName: "Doe",
+      idPassport: "B7654321",
+      dateOfBirth: "05/05/1990",
+      isPrimary: true,
+    })
+    expect(res.status).toBe(200)
+    expect(supabase.customerUpdates).toEqual([{ id_passport: "B7654321" }])
+  })
+
+  it("does not touch the customer when nothing differs", async () => {
+    const supabase = buildSupabase({
+      customer: { id: CUSTOMER_ID, date_of_birth: "1990-05-05", id_passport: "B7654321" },
+    })
+    const res = await putPrimary(supabase, {
+      firstName: "Jane",
+      lastName: "Doe",
+      idPassport: "B7654321",
+      dateOfBirth: "1990-05-05",
+      isPrimary: true,
+    })
+    expect(res.status).toBe(200)
+    expect(supabase.customerUpdates).toEqual([])
+  })
+
+  it("does not sync a non-primary guest", async () => {
+    const supabase = buildSupabase()
+    const res = await putPrimary(supabase, {
+      firstName: "Jane",
+      lastName: "Doe",
+      idPassport: "B7654321",
+      dateOfBirth: "1990-05-05",
+      isPrimary: false,
+    })
+    expect(res.status).toBe(200)
+    expect(supabase.customerUpdates).toEqual([])
   })
 })

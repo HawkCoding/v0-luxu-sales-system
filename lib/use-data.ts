@@ -220,7 +220,7 @@ export function useJobReservationDetails(bookingId: string | null | undefined) {
 
 export interface JobLegReferenceRow {
   key: string
-  kind: "selection" | "transport_request"
+  kind: "selection" | "service" | "transport_request"
   id: string
   label: string
   supplierName: string | null

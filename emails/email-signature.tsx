@@ -25,7 +25,12 @@ export function EmailSignature({ signature }: EmailSignatureProps) {
     <Section style={block}>
       <Text style={nameLine}>
         <strong>{fullName}</strong>
-        {jobTitle ? <span style={jobTitleStyle}> | {jobTitle}</span> : null}
+        {jobTitle ? (
+          <>
+            {" | "}
+            <span style={jobTitleStyle}>{jobTitle}</span>
+          </>
+        ) : null}
       </Text>
       {contactLine ? <Text style={contactLineStyle}>{contactLine}</Text> : null}
       {(email || website) && (
@@ -99,11 +104,11 @@ export function EmailSignature({ signature }: EmailSignatureProps) {
 }
 
 const block = {
-  padding: "4px 24px 0",
+  padding: "0 24px 0",
 }
 
 const nameLine = {
-  margin: "0 0 4px",
+  margin: "0 0 2px",
   color: "#2f2a24",
   fontSize: "13px",
 }
@@ -114,7 +119,7 @@ const jobTitleStyle = {
 }
 
 const contactLineStyle = {
-  margin: "0 0 4px",
+  margin: "0 0 2px",
   color: "#3d3831",
   fontSize: "12px",
 }

@@ -13,6 +13,7 @@ type Row = MockRow
 
 type Filter =
   | { kind: "eq"; column: string; value: unknown }
+  | { kind: "neq"; column: string; value: unknown }
   | { kind: "in"; column: string; values: unknown[] }
   | { kind: "gte"; column: string; value: unknown }
   | { kind: "lte"; column: string; value: unknown }
@@ -115,6 +116,11 @@ export class MockQueryBuilder implements PromiseLike<{ data: unknown; error: unk
     return this
   }
 
+  neq(column: string, value: unknown): this {
+    this.filters.push({ kind: "neq", column, value })
+    return this
+  }
+
   in(column: string, values: unknown[]): this {
     this.filters.push({ kind: "in", column, values })
     return this
@@ -192,6 +198,8 @@ export class MockQueryBuilder implements PromiseLike<{ data: unknown; error: unk
       switch (filter.kind) {
         case "eq":
           return value === filter.value
+        case "neq":
+          return value !== filter.value
         case "in":
           return filter.values.includes(value)
         case "gte":

@@ -84,8 +84,12 @@ export function HtmlBodyEditor({
   useEffect(() => {
     if (!editor || mode !== "rich") return
     if (value === lastEmitted.current) return
-    editor.commands.setContent(toEditorHtml(value, blockTokens).html, { emitUpdate: false })
-    lastEmitted.current = value
+    // Deferred to a microtask: Tiptap's internal flushSync can't run while
+    // React is still mid-commit from the state update that triggered this effect.
+    queueMicrotask(() => {
+      editor.commands.setContent(toEditorHtml(value, blockTokens).html, { emitUpdate: false })
+      lastEmitted.current = value
+    })
   }, [value, editor, mode, blockTokens])
 
   function switchToSource() {

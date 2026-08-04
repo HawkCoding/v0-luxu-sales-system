@@ -17,11 +17,15 @@ const nextConfig = {
       },
     ]
   },
-  // Voucher/itinerary PDF fonts are read from disk at render time; make sure
-  // every serverless route that renders a voucher-family PDF bundles them.
+  // Document PDF fonts are read from disk at render time; make sure every
+  // serverless route that renders a voucher/itinerary/invoice PDF bundles them.
   outputFileTracingIncludes: {
     "/api/voucher/generate": ["./assets/fonts/**"],
     "/api/vouchers/[id]/prepare-send": ["./assets/fonts/**"],
+    "/api/invoices/deposit": ["./assets/fonts/**"],
+    "/api/invoices/[id]/reminder": ["./assets/fonts/**"],
+    "/api/jobs/[id]/payment-received": ["./assets/fonts/**"],
+    "/api/pdf-preview/[type]": ["./assets/fonts/**"],
   },
 }
 

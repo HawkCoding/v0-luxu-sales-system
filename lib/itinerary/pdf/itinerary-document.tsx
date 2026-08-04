@@ -4,7 +4,7 @@ import type { ItineraryData } from "@/lib/itinerary/build-itinerary"
 import type { DocumentBrand } from "@/lib/settings-access"
 import type { VoucherTemplate } from "@/lib/types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
-import { registerVoucherFonts, resolveVoucherFontPairing } from "@/lib/voucher/pdf/fonts"
+import { registerDocumentFonts, resolveDocumentFontPairing } from "@/lib/pdf/document-fonts"
 import { voucherStyles } from "@/lib/voucher/pdf/styles"
 import { HeaderBanner } from "@/lib/voucher/pdf/sections/header-banner"
 import { VoucherFooter } from "@/lib/voucher/pdf/sections/footer"
@@ -31,13 +31,13 @@ export function ItineraryDocument({
   introText,
   brand,
 }: ItineraryDocumentProps) {
-  registerVoucherFonts()
+  registerDocumentFonts()
 
   const t = normalizeTemplate(template)
   const styles = voucherStyles({
     accentColour: t.accent_colour,
     sectionBg: t.section_bg,
-    fonts: resolveVoucherFontPairing(t.font_family),
+    fonts: resolveDocumentFontPairing(t.font_family),
   })
 
   const extra = StyleSheet.create({

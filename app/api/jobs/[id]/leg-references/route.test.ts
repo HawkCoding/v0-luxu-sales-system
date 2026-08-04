@@ -24,6 +24,7 @@ import { GET, PATCH } from "./route"
 const BOOKING_ID = "00000000-0000-4000-8000-000000000001"
 const LEG_A = "00000000-0000-4000-8000-0000000000a1"
 const TRANSPORT_ID = "00000000-0000-4000-8000-0000000000b1"
+const SERVICE_ID = "00000000-0000-4000-8000-0000000000c1"
 
 function makeParams(id = BOOKING_ID) {
   return { params: Promise.resolve({ id }) }
@@ -31,11 +32,13 @@ function makeParams(id = BOOKING_ID) {
 
 interface MockState {
   selectionRows?: unknown[]
+  serviceRows?: unknown[]
   transportRows?: unknown[]
 }
 
 function buildSupabase(state: MockState = {}) {
   const selectionUpdateCalls: Array<{ legId: string; payload: Record<string, unknown> }> = []
+  const serviceUpdateCalls: Array<{ serviceId: string; payload: Record<string, unknown> }> = []
   const transportUpdateCalls: Array<{ requestId: string; payload: Record<string, unknown> }> = []
 
   const selectionRows =
@@ -50,6 +53,8 @@ function buildSupabase(state: MockState = {}) {
         suppliers: { name: "Rovos Rail", kind: "train_operator" },
       },
     ]
+
+  const serviceRows = state.serviceRows ?? []
 
   const transportRows =
     state.transportRows ??
@@ -103,12 +108,18 @@ function buildSupabase(state: MockState = {}) {
         }
       }
       if (table === "booking_services") {
-        // These fixtures exercise a catalogue-package booking; a Build Booking (booking_services)
-        // one is covered separately in from-booking-services.test.ts / build-service-blocks.test.ts.
         return {
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
-              eq: vi.fn(async () => ({ data: [], error: null })),
+              eq: vi.fn(async () => ({ data: serviceRows, error: null })),
+            })),
+          })),
+          update: vi.fn((payload: Record<string, unknown>) => ({
+            eq: vi.fn(() => ({
+              eq: vi.fn(async (_col: string, serviceId: string) => {
+                serviceUpdateCalls.push({ serviceId, payload })
+                return { error: null }
+              }),
             })),
           })),
         }
@@ -117,7 +128,7 @@ function buildSupabase(state: MockState = {}) {
     }),
   }
 
-  return { supabase, selectionUpdateCalls, transportUpdateCalls }
+  return { supabase, selectionUpdateCalls, serviceUpdateCalls, transportUpdateCalls }
 }
 
 function mockAuthUser(state: MockState = {}) {
@@ -188,6 +199,36 @@ describe("GET /api/jobs/[id]/leg-references", () => {
     ])
   })
 
+  it("returns booking_services rows (Build Booking) as service-kind reference rows", async () => {
+    mockAuthUser({
+      selectionRows: [],
+      serviceRows: [
+        {
+          id: SERVICE_ID,
+          label: "Rovos Rail",
+          sort_order: 0,
+          selected: true,
+          supplier_reference: null,
+          suppliers: { name: "Rovos Rail", kind: "train_operator" },
+        },
+      ],
+      transportRows: [],
+    })
+    const res = await GET(new Request("http://localhost"), makeParams())
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.rows).toEqual([
+      {
+        key: `service:${SERVICE_ID}`,
+        kind: "service",
+        id: SERVICE_ID,
+        label: "Rovos Rail",
+        supplierName: "Rovos Rail",
+        supplierReference: null,
+      },
+    ])
+  })
+
   it("excludes selected legs whose supplier kind is transfers/vehicle_rental", async () => {
     mockAuthUser({
       selectionRows: [
@@ -253,6 +294,20 @@ describe("PATCH /api/jobs/[id]/leg-references", () => {
       expect.anything(),
       expect.objectContaining({ action: "leg_supplier_reference_updated" }),
     )
+  })
+
+  it("updates supplier_reference on booking_services for a service row (Build Booking)", async () => {
+    const { serviceUpdateCalls, selectionUpdateCalls } = mockAuthRole()
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({ updates: [{ kind: "service", id: SERVICE_ID, supplierReference: "REF-999" }] }),
+      }),
+      makeParams(),
+    )
+    expect(res.status).toBe(200)
+    expect(serviceUpdateCalls).toEqual([{ serviceId: SERVICE_ID, payload: { supplier_reference: "REF-999" } }])
+    expect(selectionUpdateCalls).toEqual([])
   })
 
   it("updates supplier_reference on booking_transport_requests for a transport_request row", async () => {

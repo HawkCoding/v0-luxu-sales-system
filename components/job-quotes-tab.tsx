@@ -18,6 +18,7 @@ import { QuotePreviewSendDialog } from "@/components/quote-preview-send-dialog"
 import { ReviseQuoteDialog } from "@/components/revise-quote-dialog"
 import { CommissionBonusField } from "@/components/quotes/commission-bonus-field"
 import { getCommissionBonus } from "@/lib/quotes/apply-commission-bonus"
+import { formatQuoteDisplayLabel } from "@/lib/quotes/quote-number"
 import { FileDown, Loader2, Mail, Trash2, X } from "lucide-react"
 
 const EDITABLE_QUOTE_STATUSES = ["draft", "pricing_incomplete", "ready"]
@@ -192,7 +193,9 @@ export function JobQuotesTab({
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div className="flex items-center gap-2">
-                  <CardTitle className="text-sm font-medium">{q.quoteNumber || "Quote"}</CardTitle>
+                  <CardTitle className="text-sm font-medium" title={q.quoteNumber || undefined}>
+                    {formatQuoteDisplayLabel(q.quoteNumber)}
+                  </CardTitle>
                   <Badge variant={badge.variant} className={`text-[10px] ${badge.className ?? ""}`}>{badge.label}</Badge>
                   {hasIncomplete && <Badge variant="destructive" className="text-[10px]">Missing pricing</Badge>}
                 </div>

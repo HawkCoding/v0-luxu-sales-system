@@ -242,49 +242,6 @@ export function JobReservationTab({
     })
   }
 
-  const [syncingCustomer, setSyncingCustomer] = useState(false)
-
-  const syncGuestToCustomer = async (traveller: TravellerDraft) => {
-    if (!customer) return
-    setSyncingCustomer(true)
-    try {
-      const response = await fetch(`/api/customers/${customer.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          notes: customer.notes ?? "",
-          email: customer.email,
-          phone: customer.phone ?? null,
-          fax: customer.fax ?? null,
-          province: customer.province ?? null,
-          company_name: customer.companyName ?? null,
-          address_line1: customer.addressLine1 ?? null,
-          address_line2: customer.addressLine2 ?? null,
-          city: customer.city ?? null,
-          postal_code: customer.postalCode ?? null,
-          vat_number: customer.vatNumber ?? null,
-          date_of_birth: traveller.dateOfBirth || null,
-          id_passport: traveller.idPassport || null,
-          vip_status: customer.vipStatus ?? false,
-          preferences: customer.preferences ?? null,
-          communication_preferences: customer.communicationPreferences ?? null,
-          default_rate_type_id: customer.defaultRateTypeId ?? null,
-          expectedUpdatedAt: customer.updatedAt,
-        }),
-      })
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null)
-        throw new Error(typeof payload?.error === "string" ? payload.error : "Could not update customer")
-      }
-      await mutateJob()
-      toast.success("Customer record updated")
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not update customer")
-    } finally {
-      setSyncingCustomer(false)
-    }
-  }
-
   const saveTravellers = async () => {
     const invalid = travellers.some((t) => !t.firstName.trim() || !t.lastName.trim() || !t.idPassport.trim())
     if (invalid) {
@@ -563,24 +520,6 @@ export function JobReservationTab({
                         onClick={() => revertTraveller(traveller.key)}
                       >
                         <RotateCcw className="w-3 h-3 mr-1" /> Revert to enquiry
-                      </Button>
-                    </div>
-                  ) : null}
-                  {traveller.isPrimary &&
-                  customer &&
-                  (traveller.dateOfBirth !== (customer.dateOfBirth ?? "") ||
-                    traveller.idPassport !== (customer.idPassport ?? "")) ? (
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <span>Customer record has different ID/date of birth</span>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 px-2"
-                        disabled={syncingCustomer}
-                        onClick={() => syncGuestToCustomer(traveller)}
-                      >
-                        Update customer record
                       </Button>
                     </div>
                   ) : null}

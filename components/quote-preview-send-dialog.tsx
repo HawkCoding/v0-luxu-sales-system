@@ -32,6 +32,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { replaceContentSlot } from "@/lib/templates/content-slot"
 import { replaceSignatureSlot } from "@/lib/templates/signature-slot"
+import { formatQuoteDisplayLabel } from "@/lib/quotes/quote-number"
 
 const HtmlBodyEditor = dynamic(
   () => import("@/components/ui/html-body-editor").then((m) => m.HtmlBodyEditor),
@@ -170,7 +171,7 @@ export function QuotePreviewSendDialog({
     setSending(false)
 
     const result = await optimisticSend({
-      pendingLabel: `Sending quote ${quote.quoteNumber || bookingNumber}...`,
+      pendingLabel: `Sending ${formatQuoteDisplayLabel(quote.quoteNumber)}...`,
       successLabel: "Quote sent",
       cancelledLabel: "Send cancelled",
       perform: async () => {
@@ -215,8 +216,8 @@ export function QuotePreviewSendDialog({
         <DialogHeader>
           <DialogTitle>Preview & Send Quote</DialogTitle>
           <DialogDescription>
-            Review the customer email before sending {quote.quoteNumber || bookingNumber}. The quote
-            PDF is attached automatically.
+            Review the customer email before sending {formatQuoteDisplayLabel(quote.quoteNumber)}. The
+            quote PDF is attached automatically.
           </DialogDescription>
         </DialogHeader>
 

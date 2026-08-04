@@ -68,17 +68,27 @@ const QUOTE_ID = "00000000-0000-4000-8000-00000000bbbb"
 interface AuthOptions {
   bookingStage?: string
   customerEmail?: string | null
+  customerFirstName?: string | null
   departureDate?: string | null
   invoiceBalance?: number | null
   quotePdfStoragePath?: string | null
+  customerInvoiceNumber?: string | null
+  emailImportNeedsReview?: boolean
 }
 
 function buildAuth(options: AuthOptions = {}) {
   const bookingStage = options.bookingStage ?? "enquiry"
   const customerEmail = options.customerEmail === undefined ? "c@example.com" : options.customerEmail
+  // Complete by default so the pre-send customer_complete gate stays out of
+  // the way of tests exercising other behavior — override to test that gate.
+  const customerFirstName =
+    options.customerFirstName === undefined ? "Jane" : options.customerFirstName
   const departureDate = options.departureDate === undefined ? "2026-06-01" : options.departureDate
   const invoiceBalance = options.invoiceBalance === undefined ? 0 : options.invoiceBalance
   const quotePdfStoragePath = options.quotePdfStoragePath ?? null
+  const customerInvoiceNumber =
+    options.customerInvoiceNumber === undefined ? "INV-0001" : options.customerInvoiceNumber
+  const emailImportNeedsReview = options.emailImportNeedsReview ?? false
 
   const correspondenceInsertResult = vi.fn(async () => ({
     data: {
@@ -166,7 +176,16 @@ function buildAuth(options: AuthOptions = {}) {
                   departure_date: departureDate,
                   duration_nights: 3,
                   invoice_balance: invoiceBalance,
-                  customer: { email: customerEmail },
+                  customer_invoice_number: customerInvoiceNumber,
+                  email_import_needs_review: emailImportNeedsReview,
+                  email_import_review_resolved_at: null,
+                  customer: {
+                    email: customerEmail,
+                    first_name: customerFirstName,
+                    last_name: "Doe",
+                    phone: "+27821234567",
+                    country: "South Africa",
+                  },
                 },
                 error: null,
               })),
@@ -546,7 +565,10 @@ describe("POST /api/correspondence", () => {
   })
 
   it("blocks voucher email before send when required readiness fields are missing", async () => {
-    const mocks = buildAuth({ bookingStage: "final_paid", departureDate: null, customerEmail: null })
+    // customerEmail stays present here (the pre-send customer_complete gate
+    // below covers that case) so this isolates checkVoucherReadiness's own
+    // departure-date check.
+    const mocks = buildAuth({ bookingStage: "final_paid", departureDate: null })
     const res = await POST(
       postJson({
         bookingId: BOOKING_ID,
@@ -560,15 +582,98 @@ describe("POST /api/correspondence", () => {
     expect(body).toMatchObject({
       error: "Voucher cannot be sent",
       details: {
-        failures: [
-          expect.objectContaining({ code: "departure_date_missing" }),
-          expect.objectContaining({ code: "customer_email_missing" }),
-        ],
+        failures: [expect.objectContaining({ code: "departure_date_missing" })],
       },
     })
     expect(emailMocks.sendEmail).not.toHaveBeenCalled()
     expect(mocks.correspondenceInsertChain).not.toHaveBeenCalled()
     expect(transitionMocks.applyTransition).not.toHaveBeenCalled()
+  })
+
+  it("blocks voucher send before checking readiness when the customer record is incomplete", async () => {
+    // Previously this stage-advancing send bypassed validate-transition's
+    // customer_complete gate entirely — a booking missing phone/country
+    // could still get its voucher sent and stage moved.
+    const mocks = buildAuth({ bookingStage: "final_paid", customerFirstName: null })
+    const res = await POST(
+      postJson({
+        bookingId: BOOKING_ID,
+        subject: "Travel voucher BT-2026-0001",
+        moveStage: "voucher_sent",
+      }),
+    )
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toMatchObject({
+      error: "Stage transition blocked",
+      details: {
+        failures: [expect.objectContaining({ gateId: "customer_complete" })],
+      },
+    })
+    expect(emailMocks.sendEmail).not.toHaveBeenCalled()
+    expect(mocks.correspondenceInsertChain).not.toHaveBeenCalled()
+    expect(transitionMocks.applyTransition).not.toHaveBeenCalled()
+  })
+
+  it("blocks a deposit-invoice send before it reaches the customer when no invoice number is set", async () => {
+    // The exact bug this pre-send gate closes: Generate Invoice → Send could
+    // move the booking to Deposit Invoice Sent with no customer_invoice_number,
+    // something the Next button on the job page always blocked.
+    const mocks = buildAuth({ bookingStage: "accepted", customerInvoiceNumber: null })
+    const res = await POST(
+      postJson({
+        bookingId: BOOKING_ID,
+        subject: "Your deposit invoice",
+        kind: "invoice",
+        moveStage: "deposit_requested",
+      }),
+    )
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toMatchObject({
+      error: "Stage transition blocked",
+      details: {
+        failures: [expect.objectContaining({ gateId: "invoice_number_required" })],
+      },
+    })
+    expect(emailMocks.sendEmail).not.toHaveBeenCalled()
+    expect(mocks.correspondenceInsertChain).not.toHaveBeenCalled()
+    expect(transitionMocks.applyTransition).not.toHaveBeenCalled()
+  })
+
+  it("allows a deposit-invoice send once the invoice number is set", async () => {
+    buildAuth({ bookingStage: "accepted", customerInvoiceNumber: "INV-0042" })
+    const res = await POST(
+      postJson({
+        bookingId: BOOKING_ID,
+        subject: "Your deposit invoice",
+        kind: "invoice",
+        moveStage: "deposit_requested",
+      }),
+    )
+
+    expect(res.status).toBe(200)
+    expect(emailMocks.sendEmail).toHaveBeenCalled()
+    expect(transitionMocks.applyTransition).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ targetStage: "deposit_requested" }),
+    )
+  })
+
+  it("does not gate quote_sent on customer completeness (first outbound touch)", async () => {
+    buildAuth({ customerFirstName: null })
+    const res = await POST(
+      postJson({
+        bookingId: BOOKING_ID,
+        subject: "Quote",
+        quoteId: QUOTE_ID,
+        moveStage: "quote_sent",
+        kind: "quote",
+      }),
+    )
+
+    expect(res.status).toBe(200)
+    expect(emailMocks.sendEmail).toHaveBeenCalled()
   })
 
   it("stores recipients in the correspondence record when email is sent", async () => {

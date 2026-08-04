@@ -18,7 +18,6 @@ const FIELDS: Array<{ key: string; label: string }> = [
   { key: "bank_account_number", label: "Account number" },
   { key: "bank_branch_code", label: "Branch code" },
   { key: "bank_swift_code", label: "SWIFT/BIC" },
-  { key: "payment_reference_hint", label: "Payment reference (e.g. booking number)" },
   { key: "company_address", label: "Company address" },
   { key: "company_reg_number", label: "Company registration number" },
   { key: "company_vat_number", label: "VAT number" },

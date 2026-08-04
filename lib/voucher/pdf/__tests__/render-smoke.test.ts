@@ -2,6 +2,7 @@
 // jsdom breaks @react-pdf font subsetting (corrupt embedded TTF subsets);
 // production renders run in the Node runtime, so the test must too.
 import { mkdirSync, readFileSync, writeFileSync } from "fs"
+import { createRequire } from "node:module"
 import path from "path"
 import { describe, expect, it } from "vitest"
 
@@ -10,6 +11,10 @@ import type { VoucherTemplate } from "@/lib/types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
 import { sampleVoucherData, sampleVoucherServiceBlocks } from "../sample-data"
 import { renderVoucherPdf } from "../../render-pdf"
+
+const require = createRequire(import.meta.url)
+// pdf-parse ships CJS with no usable type surface for text extraction.
+const pdfParse = require("pdf-parse") as (buffer: Buffer) => Promise<{ text: string }>
 
 const WRITE_PDF = Boolean(process.env.WRITE_PDF)
 
@@ -31,6 +36,12 @@ async function renderAndAssert(name: string, data: VoucherData, template?: Vouch
 describe("renderVoucherPdf smoke", () => {
   it("renders with the default template", async () => {
     await renderAndAssert("default", sampleData())
+  })
+
+  it("renders the route arrow correctly, not mangled by a missing font glyph", async () => {
+    const buffer = await renderAndAssert("route-arrow", sampleData())
+    const { text } = await pdfParse(buffer)
+    expect(text).toContain("Cape Town → Pretoria")
   })
 
   it("renders multiple service blocks across pages", async () => {

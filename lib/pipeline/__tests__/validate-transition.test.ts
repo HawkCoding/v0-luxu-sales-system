@@ -242,7 +242,7 @@ describe("validateTransition", () => {
     expect(failures).toEqual([
       expect.objectContaining({
         gateId: "invoice_correspondence",
-        severity: "confirm",
+        severity: "block",
       }),
     ])
     expect(failures[0]?.autoFixable).toBeUndefined()
@@ -259,7 +259,7 @@ describe("validateTransition", () => {
     })
 
     expect(failures).toEqual([
-      expect.objectContaining({ gateId: "invoice_correspondence", severity: "confirm" }),
+      expect.objectContaining({ gateId: "invoice_correspondence", severity: "block" }),
     ])
   })
 
@@ -289,7 +289,7 @@ describe("validateTransition", () => {
     expect(failures).toEqual([])
   })
 
-  it("allows confirming the invoice was sent outside the system", () => {
+  it("still blocks an unsent invoice even with an unrelated manual confirmation set", () => {
     const failures = validateTransition({
       ...baseInput,
       booking: { ...baseInput.booking, stage: "accepted" },
@@ -297,10 +297,12 @@ describe("validateTransition", () => {
       quotes: [{ status: "accepted", total: 1000 }],
       documents: [{ kind: "invoice_pdf", status: "generated" }],
       correspondences: [],
-      manualConfirmations: { createInvoiceCorrespondence: true },
+      manualConfirmations: { createDepositInvoice: true },
     })
 
-    expect(failures).toEqual([])
+    expect(failures).toEqual([
+      expect.objectContaining({ gateId: "invoice_correspondence", severity: "block" }),
+    ])
   })
 
   it("requires a recorded payment before deposit paid", () => {

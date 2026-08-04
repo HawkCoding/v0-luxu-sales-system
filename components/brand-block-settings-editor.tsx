@@ -31,12 +31,12 @@ const TEXT_FIELDS: { key: TextKey; label: string; placeholder: string }[] = [
   {
     key: "brand_block_heading",
     label: "Heading",
-    placeholder: "A division of Luxus Travel & Tours",
+    placeholder: "BLUE TRAIN | ROVOS RAIL | KRUGER SHALATI",
   },
   {
     key: "brand_block_subheading",
     label: "Sub-heading",
-    placeholder: "BLUE TRAIN | ROVOS RAIL | KRUGER SHALATI",
+    placeholder: "A division of Luxus Travel & Tours",
   },
 ]
 

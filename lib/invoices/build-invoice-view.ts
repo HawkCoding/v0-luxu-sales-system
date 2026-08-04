@@ -6,8 +6,11 @@ import type {
   InvoiceDepartureLeg,
   InvoiceItem,
 } from "@/lib/invoices/pdf/invoice-document"
+import { resolveConsultant } from "@/lib/consultant/resolve-consultant"
 import { describeInvoiceLine } from "@/lib/invoices/describe-invoice-line"
+import { foldCommissionLines } from "@/lib/invoices/fold-commission-line"
 import { logError } from "@/lib/error-log"
+import { nightsBetween } from "@/lib/packages/trip-date-range"
 import type { Database } from "@/lib/supabase/types"
 import type { PricingSnapshot } from "@/lib/types"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
@@ -90,6 +93,28 @@ export function buildDaysLabel(durationNights: number | null): string | null {
 }
 
 /**
+ * The invoice's "Days" figure. `bookings.duration_nights` is never written by the app (only
+ * `packages.duration_nights` is), so it can't be trusted as the primary source — prefer the
+ * trip's actual date span, which `recompute-trip-dates.ts` keeps current across every dated
+ * service (train, hotel, transfers), then the train route's own duration, then the legacy column.
+ */
+export function resolveDurationNights(
+  booking: { trip_start_date?: string | null; trip_end_date?: string | null; duration_nights?: number | null } | null | undefined,
+  blocks: VoucherServiceBlock[],
+): number | null {
+  const fromTripRange = nightsBetween(booking?.trip_start_date ?? null, booking?.trip_end_date ?? null)
+  if (fromTripRange !== null && fromTripRange > 0) return fromTripRange
+
+  const outboundTrain = blocks
+    .filter((block) => block.serviceType === "train")
+    .sort((a, b) => a.displayOrder - b.displayOrder)[0]
+  const routeDurationDays = outboundTrain?.serviceData.durationDays ?? null
+  if (routeDurationDays !== null && routeDurationDays > 1) return routeDurationDays - 1
+
+  return booking?.duration_nights ?? null
+}
+
+/**
  * The journey shown on the invoice is the train travel. A second train block
  * means a return leg, rendered as its own journey block.
  */
@@ -130,7 +155,9 @@ export function buildInvoiceItems(
     >
   >,
 ): InvoiceItem[] {
-  return lineItems.map((item) => ({
+  // Commission is an internal figure, never a client-facing line. Fold it into the largest
+  // travel line rather than dropping it, so the printed items still sum to the subtotal.
+  return foldCommissionLines(lineItems).map((item) => ({
     pax: Number(item.qty ?? 0),
     description: describeInvoiceLine(
       item.description,
@@ -168,7 +195,7 @@ export async function buildInvoiceView(
     supabase
       .from("bookings")
       .select(
-        "id, consultant, no_of_adults, no_of_children, no_of_suites, duration_nights, customer:customers(company_name, address_line1, address_line2, city, province, country, postal_code, phone, email, vat_number), package:packages!bookings_package_id_fkey(name), route:routes(name, supplier:suppliers(name))",
+        "id, consultant, assigned_salesperson_id, no_of_adults, no_of_children, no_of_suites, duration_nights, trip_start_date, trip_end_date, customer:customers(company_name, address_line1, address_line2, city, province, country, postal_code, phone, email, vat_number), package:packages!bookings_package_id_fkey(name), route:routes(name, supplier:suppliers(name))",
       )
       .eq("id", bookingId)
       .maybeSingle(),
@@ -213,7 +240,7 @@ export async function buildInvoiceView(
     departure = buildDeparture(blocks, journeyHeading, {
       trainName: routeSupplier?.name ?? null,
       tourName: bookingPackage?.name ?? null,
-      durationNights: booking?.duration_nights ?? null,
+      durationNights: resolveDurationNights(booking, blocks),
       suites: booking?.no_of_suites ?? 0,
       adults: booking?.no_of_adults ?? 0,
       children: booking?.no_of_children ?? 0,
@@ -233,8 +260,15 @@ export async function buildInvoiceView(
     )
     .filter(Boolean)
 
+  const resolvedConsultant = booking
+    ? await resolveConsultant(supabase, {
+        consultant: booking.consultant,
+        assigned_salesperson_id: booking.assigned_salesperson_id,
+      })
+    : null
+
   return {
-    consultant: booking?.consultant ?? null,
+    consultant: resolvedConsultant?.key ?? null,
     guestNames,
     billing: buildBillingParty(customer),
     departure,

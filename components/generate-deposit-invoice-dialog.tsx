@@ -25,6 +25,7 @@ interface GenerateDepositInvoiceDialogProps {
   trigger?: boolean
   jobId: string
   bookingNumber: string
+  invoiceNumber?: string | null
   customerName: string
   quotes: Quote[]
   defaultDepositPercentage: number
@@ -37,7 +38,14 @@ interface GenerateDepositInvoiceDialogProps {
    * step for it.
    */
   draftInvoice?: Invoice | null
+  /**
+   * True when the booking's live invoice was priced off a quote that has since
+   * been superseded — the action re-issues that same invoice at the new total.
+   */
+  amending?: boolean
   onSent: () => Promise<void> | void
+  /** Called after "Change amount" voids the draft, so the caller can refetch. */
+  onDraftDiscarded?: () => Promise<void> | void
 }
 
 interface GenerateDepositInvoiceResponse {
@@ -100,19 +108,27 @@ export function GenerateDepositInvoiceDialog({
   trigger = true,
   jobId,
   bookingNumber,
+  invoiceNumber,
   customerName,
   quotes,
   defaultDepositPercentage,
   departureDate = null,
   draftInvoice = null,
+  amending = false,
   onSent,
+  onDraftDiscarded,
 }: GenerateDepositInvoiceDialogProps) {
+  const displayNumber = invoiceNumber || bookingNumber
   const [internalOpen, setInternalOpen] = useState(false)
   const [percentage, setPercentage] = useState(String(defaultDepositPercentage))
   const insideSixtyDays = useMemo(() => isInsideSixtyDays(departureDate), [departureDate])
   const [payInFull, setPayInFull] = useState(insideSixtyDays)
   const [fullDueDate, setFullDueDate] = useState(() => addDays(new Date(), 2))
   const [generating, setGenerating] = useState(false)
+  const [discarding, setDiscarding] = useState(false)
+  // Set by "Change amount": the draft has been voided, so the dialog leaves
+  // resume mode and shows the mode/percentage form again.
+  const [draftDiscarded, setDraftDiscarded] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [generated, setGenerated] = useState<GenerateDepositInvoiceResponse | null>(null)
   const dialogOpen = open ?? internalOpen
@@ -123,9 +139,35 @@ export function GenerateDepositInvoiceDialog({
     ? Math.min(100, Math.max(0, numericPercentage))
     : defaultDepositPercentage
   const amountPreview = quote ? quote.total * (validPercentage / 100) : 0
-  const resumingDraft = draftInvoice !== null
+  const resumingDraft = draftInvoice !== null && !draftDiscarded
   const resumingFull = resumingDraft && draftInvoice?.kind === "full"
   const isFullMode = resumingDraft ? resumingFull : payInFull
+
+  async function discardDraft() {
+    if (!draftInvoice) return
+
+    setDiscarding(true)
+    try {
+      const response = await fetch("/api/invoices/deposit", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ invoiceId: draftInvoice.id, status: "void" }),
+      })
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string }
+        throw new Error(payload.error ?? "Draft invoice could not be discarded")
+      }
+
+      setPercentage(String(draftInvoice.depositPercentage ?? defaultDepositPercentage))
+      setPayInFull(draftInvoice.kind === "full")
+      setDraftDiscarded(true)
+      await onDraftDiscarded?.()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Draft invoice could not be discarded")
+    } finally {
+      setDiscarding(false)
+    }
+  }
 
   async function generateInvoice() {
     if (!quote) {
@@ -194,19 +236,29 @@ export function GenerateDepositInvoiceDialog({
                 ? resumingFull
                   ? "Preview & Send Invoice"
                   : "Preview & Send Deposit Invoice"
-                : "Generate Invoice"}
+                : amending
+                  ? "Amend & Resend Invoice"
+                  : "Generate Invoice"}
             </Button>
           </DialogTrigger>
         ) : null}
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {resumingDraft ? (resumingFull ? "Send invoice" : "Send deposit invoice") : "Generate invoice"}
+              {resumingDraft
+                ? resumingFull
+                  ? "Send invoice"
+                  : "Send deposit invoice"
+                : amending
+                  ? "Amend and resend invoice"
+                  : "Generate invoice"}
             </DialogTitle>
             <DialogDescription>
               {resumingDraft
                 ? `${draftInvoice?.invoiceNumber} was generated but has not been sent. Preview and send it to the customer.`
-                : `Create a draft invoice for ${bookingNumber}, then preview and send it.`}
+                : amending
+                  ? `The quote for ${displayNumber} has been revised. Re-issue the same invoice at the new total — any payment already received stays on record and is shown on the PDF.`
+                  : `Create a draft invoice for ${displayNumber}, then preview and send it.`}
             </DialogDescription>
           </DialogHeader>
 
@@ -287,17 +339,24 @@ export function GenerateDepositInvoiceDialog({
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={generating}>
+            <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={generating || discarding}>
               Cancel
             </Button>
-            <Button onClick={generateInvoice} disabled={generating || !quote}>
+            {resumingDraft ? (
+              <Button variant="outline" onClick={discardDraft} disabled={generating || discarding}>
+                {discarding ? "Discarding..." : "Change amount"}
+              </Button>
+            ) : null}
+            <Button onClick={generateInvoice} disabled={generating || discarding || !quote}>
               {generating
                 ? resumingDraft
                   ? "Preparing..."
                   : "Generating..."
                 : resumingDraft
                   ? "Preview & Send"
-                  : "Generate"}
+                  : amending
+                    ? "Amend & Preview"
+                    : "Generate"}
             </Button>
           </DialogFooter>
         </DialogContent>

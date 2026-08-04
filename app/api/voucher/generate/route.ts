@@ -15,7 +15,8 @@ import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { renderVoucherPdf } from "@/lib/voucher/render-pdf"
 import { getDocumentBrandSettings, getDocumentTextSettings, resolveDocumentBrand } from "@/lib/settings-access"
 import { buildSpecialRequestsText } from "@/lib/reservation-details/format-special-requests"
-import { CONSULTANTS, VOUCHER_TEMPLATE_DEFAULTS, type ConsultantAbbreviation, type VoucherTemplate } from "@/lib/types"
+import { resolveConsultant } from "@/lib/consultant/resolve-consultant"
+import { VOUCHER_TEMPLATE_DEFAULTS, type VoucherTemplate } from "@/lib/types"
 import type { Database, Json } from "@/lib/supabase/types"
 
 export const runtime = "nodejs"
@@ -64,11 +65,6 @@ function firstRecord<T>(value: T | T[] | null | undefined): T | null {
 
 function sanitizePathPart(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "voucher"
-}
-
-function resolveConsultant(value: string | null): { key: ConsultantAbbreviation; name: string } {
-  const consultant = CONSULTANTS.find((item) => item.key === value)
-  return consultant ?? { key: "LB", name: "Leonie" }
 }
 
 function buildGuestNames(customer: CustomerRecord | null, travellers: { prefix: string | null; first_name: string; last_name: string }[]): string {
@@ -171,13 +167,19 @@ export async function POST(req: Request) {
     return jsonError("Customer data is missing from booking", 422)
   }
 
-  const consultant = resolveConsultant(booking.consultant)
+  const consultant = await resolveConsultant(supabase, {
+    consultant: booking.consultant,
+    assigned_salesperson_id: booking.assigned_salesperson_id,
+  })
   const route = booking.route?.name ?? ""
   const supplierRecord = firstRecord(booking.route?.supplier)
   const supplier = supplierRecord?.name ?? "Service provider"
   const supplierDescription = supplierRecord?.description ?? null
   const suiteType = suites?.map((suite) => suite.suite_type_name).filter(Boolean).join(", ") || "Suite"
-  const adultTravellers = (travellers ?? []).filter((traveller) => !traveller.is_child)
+  // Names include every traveller, adult and child alike — the adjacent "Number of Guests"
+  // row already counts both, and previously filtering to adults-only silently dropped
+  // children from the printed guest list while still counting them.
+  const allTravellers = travellers ?? []
   const template = normalizeTemplate(templateRaw as VoucherTemplateRow | null)
 
   let serviceBlocks: Awaited<ReturnType<typeof buildVoucherServiceBlocks>>["blocks"] = []
@@ -194,8 +196,8 @@ export async function POST(req: Request) {
 
   const voucherData: VoucherData = {
     voucherNumber: booking.booking_number,
-    guestNames: buildGuestNames(customer, adultTravellers),
-    consultantName: consultant.name,
+    guestNames: buildGuestNames(customer, allTravellers),
+    consultantName: consultant?.name ?? "",
     supplierName: supplier,
     supplierDescription,
     route,
@@ -232,7 +234,7 @@ export async function POST(req: Request) {
       termsAccepted: true,
       createdAt: new Date().toISOString(),
     },
-    consultant: consultant.key,
+    consultant: consultant?.key ?? "",
     serviceBlocks,
   }
 
@@ -387,7 +389,7 @@ export async function POST(req: Request) {
       direction: route,
       voucherNumber: booking.booking_number,
       departureDate: voucherData.departure,
-      consultantName: consultant.name,
+      consultantName: consultant?.name ?? "",
       ...buildSuiteTokens(await loadSuiteSelections(supabase, booking.id)),
     },
     blocks: shared.blocks,

@@ -6,6 +6,7 @@ import {
 import { formatDisplayDate } from "@/lib/date-format"
 import { BrandBlock } from "@/lib/pdf/brand-block"
 import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
+import { registerDocumentFonts } from "@/lib/pdf/document-fonts"
 import type { BankingSettings, BrandBlockPosition, DocumentBrand } from "@/lib/settings-access"
 
 /** The invoice recipient. A full tax invoice must name and address them. */
@@ -139,7 +140,7 @@ function depositRowLabel(totals: InvoiceTotals): string {
 
 const styles = StyleSheet.create({
   page: {
-    fontFamily: "Helvetica",
+    fontFamily: "Montserrat",
     fontSize: 9,
     paddingTop: 32,
     paddingBottom: 36,
@@ -169,7 +170,8 @@ const styles = StyleSheet.create({
   },
   headerDivision: {
     fontSize: 13,
-    fontFamily: "Helvetica-Bold",
+    fontFamily: "Montserrat",
+    fontWeight: 700,
     color: "#172018",
   },
   headerProduct: {
@@ -188,7 +190,8 @@ const styles = StyleSheet.create({
   },
   headerMetaLabel: {
     fontSize: 8,
-    fontFamily: "Helvetica-Bold",
+    fontFamily: "Montserrat",
+    fontWeight: 700,
     color: "#6f675d",
     textAlign: "right",
     marginRight: 8,
@@ -213,7 +216,8 @@ const styles = StyleSheet.create({
   },
   guestLabel: {
     fontSize: 10,
-    fontFamily: "Helvetica-Bold",
+    fontFamily: "Montserrat",
+    fontWeight: 700,
     color: "#172018",
     width: 62,
   },
@@ -249,7 +253,8 @@ const styles = StyleSheet.create({
   // the sales team's layout (Train | Days, Departure | Time, …).
   sectionHeading: {
     fontSize: 10.5,
-    fontFamily: "Helvetica-Bold",
+    fontFamily: "Montserrat",
+    fontWeight: 700,
     color: "#172018",
     textTransform: "uppercase",
     letterSpacing: 0.5,
@@ -262,7 +267,8 @@ const styles = StyleSheet.create({
   },
   departureLabel: {
     fontSize: 8.5,
-    fontFamily: "Helvetica-Bold",
+    fontFamily: "Montserrat",
+    fontWeight: 700,
     color: "#6f675d",
     width: 88,
     textAlign: "right",
@@ -294,7 +300,8 @@ const styles = StyleSheet.create({
   colDesc: { flex: 1, fontSize: 8.5, paddingRight: 8 },
   headText: {
     fontSize: 8.5,
-    fontFamily: "Helvetica-Bold",
+    fontFamily: "Montserrat",
+    fontWeight: 700,
     color: "#172018",
   },
 
@@ -312,7 +319,8 @@ const styles = StyleSheet.create({
   },
   bankingTitle: {
     fontSize: 9,
-    fontFamily: "Helvetica-Bold",
+    fontFamily: "Montserrat",
+    fontWeight: 700,
     color: "#172018",
     textTransform: "uppercase",
     letterSpacing: 0.4,
@@ -334,7 +342,8 @@ const styles = StyleSheet.create({
   },
   referenceLine: {
     fontSize: 9,
-    fontFamily: "Helvetica-Bold",
+    fontFamily: "Montserrat",
+    fontWeight: 700,
     color: "#172018",
     textAlign: "left",
     marginTop: 8,
@@ -376,7 +385,8 @@ const styles = StyleSheet.create({
   },
   outstandingLabel: {
     fontSize: 9,
-    fontFamily: "Helvetica-Bold",
+    fontFamily: "Montserrat",
+    fontWeight: 700,
     color: "#f6f2ea",
     textTransform: "uppercase",
     letterSpacing: 0.4,
@@ -386,7 +396,8 @@ const styles = StyleSheet.create({
   },
   outstandingValue: {
     fontSize: 11,
-    fontFamily: "Helvetica-Bold",
+    fontFamily: "Montserrat",
+    fontWeight: 700,
     color: "#ffffff",
     width: 84,
     textAlign: "right",
@@ -402,7 +413,8 @@ const styles = StyleSheet.create({
   paymentNote: {
     marginTop: 16,
     fontSize: 9,
-    fontFamily: "Helvetica-Bold",
+    fontFamily: "Montserrat",
+    fontWeight: 700,
     color: "#172018",
     textAlign: "center",
     lineHeight: 1.4,
@@ -511,7 +523,6 @@ export function InvoiceDocument({
   invoiceNumber,
   customerName,
   issueDate,
-  dueDate,
   consultant,
   guestNames,
   billing,
@@ -528,16 +539,18 @@ export function InvoiceDocument({
   brandPosition = "top",
   brandLogo = null,
 }: InvoicePdfData) {
+  registerDocumentFonts()
+
   const resolvedBrand: DocumentBrand = brand ?? {
-    heading: FOOTER_BRAND_DIVISION_LINE,
-    subheading: FOOTER_BRAND_PRODUCT_LINE,
+    heading: FOOTER_BRAND_PRODUCT_LINE,
+    subheading: FOOTER_BRAND_DIVISION_LINE,
     logoUrl: null,
   }
   const showBrandTop = brandPosition === "top"
   const showBrandBottom = brandPosition === "bottom"
 
   const bankingRows = BANKING_ROWS.filter(({ key }) => banking[key])
-  const reference = banking.payment_reference_hint || invoiceNumber
+  const reference = invoiceNumber
   const guests = (guestNames ?? []).map((name) => name.trim()).filter(Boolean)
   const guest1 = guests[0] ?? customerName ?? "Valued Guest"
   const guest2 = guests[1] ?? null
@@ -693,10 +706,10 @@ export function InvoiceDocument({
           <View style={styles.totalsBox}>
             {/* VAT-inclusive amounts only — the sales team's invoices never break out VAT. */}
             <View style={styles.totalsRow}>
-              <Text style={[styles.totalsLabel, { fontFamily: "Helvetica-Bold" }]}>
+              <Text style={[styles.totalsLabel, { fontFamily: "Montserrat", fontWeight: 700 }]}>
                 Subtotal incl. VAT
               </Text>
-              <Text style={[styles.totalsValue, { fontFamily: "Helvetica-Bold" }]}>
+              <Text style={[styles.totalsValue, { fontFamily: "Montserrat", fontWeight: 700 }]}>
                 {formatMoney(totals.subtotalInclVat, currency)}
               </Text>
             </View>
@@ -758,7 +771,6 @@ export function InvoiceDocument({
           {footerLines.map((line, index) => (
             <Text key={index}>{line}</Text>
           ))}
-          <Text>Payable by {formatDate(dueDate)}</Text>
         </View>
 
         {showBrandBottom ? (

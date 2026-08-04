@@ -56,7 +56,6 @@ vi.mock("@/lib/settings-access", async (importOriginal) => {
       bank_account_number: "",
       bank_branch_code: "",
       bank_swift_code: "",
-      payment_reference_hint: "",
       company_address: "",
       company_reg_number: "",
       company_vat_number: "",
@@ -152,6 +151,9 @@ async function movePipeline(
     .rows("quotes")
     .map((q) => ({ id: q.id as string, status: q.status as string, total: q.total as number, created_at: q.created_at as string }))
   const documents = mock.store.rows("documents").map((d) => ({ id: d.id as string, kind: d.kind as string, status: d.status as string }))
+  const invoices = mock.store
+    .rows("invoices")
+    .map((inv) => ({ id: inv.id as string, kind: inv.kind as string, status: inv.status as string }))
   const correspondences = mock.store
     .rows("correspondences")
     .map((c) => ({ id: c.id as string, kind: c.kind as string, subject: c.subject as string, status: c.status as string }))
@@ -174,6 +176,7 @@ async function movePipeline(
     targetStage,
     quotes,
     documents,
+    invoices,
     correspondences,
     payments,
     manualConfirmations,
@@ -260,7 +263,7 @@ describe("booking lifecycle (route-level E2E)", () => {
     expect(store.rows("invoices")[0]).toMatchObject({ status: "paid" })
 
     // Pipeline: accepted -> deposit_paid
-    await movePipeline(mock, "deposit_paid", { createInvoiceCorrespondence: true })
+    await movePipeline(mock, "deposit_paid")
     expect(store.rows("bookings")[0]).toMatchObject({ stage: "deposit_paid" })
 
     // 6. Record the final payment -> balance reaches zero

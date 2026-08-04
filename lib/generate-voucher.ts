@@ -1,4 +1,4 @@
-import type { Enquiry, ConsultantAbbreviation, VoucherTemplate } from "./types"
+import type { Enquiry, VoucherTemplate } from "./types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "./types"
 import { formatDisplayDateLong } from "./date-format"
 import { tintWithWhite } from "./voucher/pdf/design-tokens"
@@ -74,7 +74,7 @@ export interface VoucherData {
   customerEmail: string
   customerPhone: string
   enquiry: Enquiry
-  consultant: ConsultantAbbreviation
+  consultant: string
   serviceBlocks?: VoucherServiceBlock[]
 }
 
@@ -184,7 +184,7 @@ function buildGuestInfoSection(data: VoucherData): string {
       <div class="info-value">${escapeHtml(data.guestNames)}</div>
 
       <div class="info-label">Number of Guests</div>
-      <div class="info-value">${escapeHtml(data.numberOfGuests)} (${escapeHtml(data.enquiry.noOfAdults)} adults${data.enquiry.noOfChildren ? `, ${escapeHtml(data.enquiry.noOfChildren)} children` : ""})</div>
+      <div class="info-value">${escapeHtml(data.numberOfGuests)} (${escapeHtml(data.enquiry.noOfAdults)} adults${data.enquiry.noOfChildren ? `, ${escapeHtml(data.enquiry.noOfChildren)} ${data.enquiry.noOfChildren === 1 ? "child" : "children"}` : ""})</div>
 
       <div class="info-label">Contact Email</div>
       <div class="info-value">${escapeHtml(data.customerEmail)}</div>
@@ -193,7 +193,7 @@ function buildGuestInfoSection(data: VoucherData): string {
       <div class="info-value">${escapeHtml(data.customerPhone)}</div>
 
       <div class="info-label">Consultant</div>
-      <div class="info-value">${escapeHtml(data.consultant)} – ${escapeHtml(data.consultantName)}</div>
+      <div class="info-value">${data.consultant && data.consultantName ? `${escapeHtml(data.consultant)} – ${escapeHtml(data.consultantName)}` : ""}</div>
 ${specialRequestsHtml}
     </div>
   </div>`

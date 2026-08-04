@@ -49,6 +49,11 @@ describe("renderSignatureFragment", () => {
     expect(html).not.toContain("Fax:")
   })
 
+  it("italicizes only the job title, not the '|' separator before it", async () => {
+    const html = await renderSignatureFragment(BASE)
+    expect(html).toMatch(/<strong>Leonie Burke<\/strong>\s*\|\s*<span[^>]*font-style:italic[^>]*>Tour Operating Consultant<\/span>/)
+  })
+
   it("drops the leading '|' when registrationLine is null", async () => {
     const html = await renderSignatureFragment({
       ...BASE,

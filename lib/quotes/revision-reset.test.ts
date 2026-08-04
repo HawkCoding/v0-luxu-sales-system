@@ -32,7 +32,7 @@ describe("planRevisionReset", () => {
     expect(plan.clearedFields).not.toContain("accepted_at")
   })
 
-  it("floors the reset at deposit_requested once the deposit is paid", () => {
+  it("floors the reset at accepted once the deposit is paid", () => {
     const plan = planRevisionReset({
       ...base,
       stage: "voucher_sent",
@@ -40,11 +40,15 @@ describe("planRevisionReset", () => {
       totalPaid: 25000,
     })
 
-    expect(plan.targetStage).toBe("deposit_requested")
+    // Crossing `accepted` again is what flips the revised quote out of `draft`;
+    // a higher floor would leave the booking with a quote that cannot be billed.
+    expect(plan.targetStage).toBe("accepted")
     expect(plan.keepsDeposit).toBe(true)
     expect(plan.clearedFields).toEqual(
-      expect.arrayContaining(["deposit_paid_at", "final_paid_at", "voucher_sent_at"]),
+      expect.arrayContaining(["deposit_requested_at", "final_paid_at", "voucher_sent_at"]),
     )
+    // Money received stays on the record.
+    expect(plan.clearedFields).not.toContain("deposit_paid_at")
     expect(plan.clearedFields).not.toContain("deposit_paid")
     expect(plan.clearedFields).not.toContain("invoice_balance")
     expect(plan.summary.join(" ")).toContain("Payments already received are kept")
@@ -71,8 +75,18 @@ describe("planRevisionReset", () => {
   it("treats any recorded payment as a deposit floor even when the flag is false", () => {
     const plan = planRevisionReset({ ...base, stage: "deposit_paid", totalPaid: 100 })
 
-    expect(plan.targetStage).toBe("deposit_requested")
+    expect(plan.targetStage).toBe("accepted")
     expect(plan.keepsDeposit).toBe(true)
+    expect(plan.clearedFields).not.toContain("deposit_paid_at")
+  })
+
+  it("lists the steps that have to be re-walked", () => {
+    const plan = planRevisionReset({ ...base, stage: "deposit_requested" })
+
+    const summary = plan.summary.join(" ")
+    expect(summary).toContain("send the revised quote")
+    expect(summary).toContain("Quote Accepted")
+    expect(summary).toContain("Guest details, reservation details and supplier references are kept")
   })
 
   it("clears an auto-set Won outcome", () => {

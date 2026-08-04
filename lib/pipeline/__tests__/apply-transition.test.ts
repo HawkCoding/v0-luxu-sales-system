@@ -8,7 +8,6 @@ const EMPTY_BANKING = {
   bank_account_number: "",
   bank_branch_code: "",
   bank_swift_code: "",
-  payment_reference_hint: "",
   company_address: "",
   company_reg_number: "",
   company_vat_number: "",
@@ -412,9 +411,6 @@ describe("applyTransition", () => {
       targetStage: "deposit_requested",
       actorName: "Douwlien",
       actorUserId: "user-1",
-      manualConfirmations: {
-        createInvoiceCorrespondence: true,
-      },
       quotes: [{ id: "quote-3", status: "accepted", total: 1234.56, created_at: "2026-05-01T08:00:00.000Z" }],
       documents: [{ id: "document-3", kind: "invoice_pdf", status: "generated" }],
       correspondences: [],

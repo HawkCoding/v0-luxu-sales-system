@@ -3,10 +3,13 @@ import { Font } from "@react-pdf/renderer"
 
 // Server-only module: font files are read from disk at render time.
 // TTFs must be static instances — react-pdf/fontkit does not support variable fonts.
+// Shared by every @react-pdf/renderer document (voucher, itinerary, invoice) so none
+// of them fall back to the base-14 Helvetica font, whose WinAnsi encoding has no slot
+// for → / ↔ and mangles them into stray punctuation.
 
 let registered = false
 
-export interface VoucherFontPairing {
+export interface DocumentFontPairing {
   display: string
   sans: string
   body: string
@@ -23,7 +26,7 @@ function fontPath(file: string): string {
   return path.join(process.cwd(), "assets", "fonts", file)
 }
 
-export function registerVoucherFonts(): void {
+export function registerDocumentFonts(): void {
   if (registered) return
 
   Font.register({
@@ -46,7 +49,7 @@ export function registerVoucherFonts(): void {
   registered = true
 }
 
-export function resolveVoucherFontPairing(fontFamily: string | null | undefined): VoucherFontPairing {
+export function resolveDocumentFontPairing(fontFamily: string | null | undefined): DocumentFontPairing {
   const body = SANS_BODY_STACKS.has(fontFamily ?? "") ? SANS_FAMILY : DISPLAY_FAMILY
   return { display: DISPLAY_FAMILY, sans: SANS_FAMILY, body }
 }

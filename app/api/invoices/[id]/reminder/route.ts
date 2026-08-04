@@ -116,6 +116,10 @@ export async function POST(_req: Request, { params }: RouteParams) {
 
   const displayInvoiceNumber = clientInvoiceNumber(booking)
 
+  if (!booking.customer_invoice_number?.trim()) {
+    return jsonError("Enter the invoice number on the job before generating this invoice.", 400)
+  }
+
   let pdf
   try {
     pdf = await ensureInvoicePdf(supabase, {
@@ -155,7 +159,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
       dueDate: formatDisplayDateLong(invoice.due_date),
       daysOverdue: overdue > 0 ? String(overdue) : "—",
     },
-    blocks: { ...shared.blocks, bankingDetails: buildBankingDetailsBlock(banking) },
+    blocks: { ...shared.blocks, bankingDetails: buildBankingDetailsBlock(banking, displayInvoiceNumber) },
     senderProfileId: booking.assigned_salesperson_id ?? auth.value.user.id,
   })
 

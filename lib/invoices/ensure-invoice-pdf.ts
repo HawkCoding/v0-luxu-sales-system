@@ -32,10 +32,11 @@ export interface EnsureInvoicePdfInput {
   }
   bookingNumber: string
   /**
-   * The number printed on the PDF as "Invoice No." and reused as the bank
-   * payment reference — the salesperson-entered `customer_invoice_number`,
-   * resolved via `clientInvoiceNumber` (falls back to `invoice.invoice_number`).
-   * Storage path/filename stay on the internal `invoice.invoice_number`.
+   * The number printed on the PDF as "Invoice No.", reused as the bank
+   * payment reference, and used for the storage path/filename — the
+   * salesperson-entered `customer_invoice_number`, resolved via
+   * `clientInvoiceNumber` (falls back to `invoice.invoice_number` for
+   * legacy bookings that predate the required-invoice-number stage gate).
    */
   displayInvoiceNumber: string
   customerName: string
@@ -114,7 +115,7 @@ export async function ensureInvoicePdf(
     throw new Error("Invoice PDF could not be rendered")
   }
 
-  const safeNumber = sanitizePath(invoice.invoice_number)
+  const safeNumber = sanitizePath(displayInvoiceNumber)
   const filename = `invoice-${safeNumber}.pdf`
   const objectPath = `${safeNumber}/${filename}`
 

@@ -32,8 +32,8 @@ export function HeaderBanner({ template, styles, brand }: HeaderBannerProps) {
         <View style={styles.headerBannerSide}>
           <Image src={template.banner_url ?? ""} style={styles.headerBanner} />
           <View style={styles.headerTextOverlay}>
-            <Text style={styles.overlayProductLine}>{subheading}</Text>
-            <Text style={styles.overlaySubtitle}>{heading}</Text>
+            <Text style={styles.overlayProductLine}>{heading}</Text>
+            <Text style={styles.overlaySubtitle}>{subheading}</Text>
           </View>
         </View>
       </View>
@@ -44,8 +44,8 @@ export function HeaderBanner({ template, styles, brand }: HeaderBannerProps) {
     return (
       <View style={[styles.header, styles.headerLogoOnly]}>
         <Image src={template.logo_url ?? ""} style={styles.headerLogoCenter} />
-        <Text style={styles.productLine}>{subheading}</Text>
-        <Text style={styles.headerSubtitle}>{heading}</Text>
+        <Text style={styles.productLine}>{heading}</Text>
+        <Text style={styles.headerSubtitle}>{subheading}</Text>
       </View>
     )
   }
@@ -55,8 +55,8 @@ export function HeaderBanner({ template, styles, brand }: HeaderBannerProps) {
       <View style={[styles.header, styles.headerBannerOnly]}>
         <Image src={template.banner_url ?? ""} style={styles.headerBannerFull} />
         <View style={styles.headerTextBelow}>
-          <Text style={styles.productLine}>{subheading}</Text>
-          <Text style={styles.headerSubtitle}>{heading}</Text>
+          <Text style={styles.productLine}>{heading}</Text>
+          <Text style={styles.headerSubtitle}>{subheading}</Text>
         </View>
       </View>
     )
@@ -64,8 +64,8 @@ export function HeaderBanner({ template, styles, brand }: HeaderBannerProps) {
 
   return (
     <View style={[styles.header, styles.headerTextOnly]}>
-      <Text style={styles.productLine}>{subheading}</Text>
-      <Text style={styles.headerSubtitle}>{heading}</Text>
+      <Text style={styles.productLine}>{heading}</Text>
+      <Text style={styles.headerSubtitle}>{subheading}</Text>
     </View>
   )
 }

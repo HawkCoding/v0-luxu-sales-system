@@ -1,4 +1,5 @@
 import { safeSupabaseError } from "@/lib/api/responses"
+import { getOrCreateVoucherTemplateId } from "@/lib/api/voucher-template"
 import { NextResponse } from "next/server"
 import { createSessionClient } from "@/lib/supabase/server"
 import { MAX_IMAGE_BYTES, MAX_IMAGE_MB } from "@/lib/upload-limits"
@@ -86,20 +87,16 @@ export async function POST(req: Request) {
 
   // Persist URL back to voucher_template row
   const column = kind === "logo" ? "logo_url" : "banner_url"
-  const { data: existing, error: templateLookupError } = await supabase
-    .from("voucher_template")
-    .select("id")
-    .limit(1)
-    .single()
+  const templateId = await getOrCreateVoucherTemplateId(supabase)
 
-  if (templateLookupError || !existing) {
+  if (!templateId) {
     return NextResponse.json({ error: "Template record not found" }, { status: 500 })
   }
 
   const { error: templateUpdateError } = await supabase
     .from("voucher_template")
     .update({ [column]: url, updated_at: new Date().toISOString() })
-    .eq("id", existing.id)
+    .eq("id", templateId)
 
   if (templateUpdateError) {
     return safeSupabaseError("voucher-template/upload", templateUpdateError)

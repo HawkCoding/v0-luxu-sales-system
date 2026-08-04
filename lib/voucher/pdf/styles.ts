@@ -1,6 +1,6 @@
 import { StyleSheet } from "@react-pdf/renderer"
 import { voucherTokens } from "./design-tokens"
-import type { VoucherFontPairing } from "./fonts"
+import type { DocumentFontPairing as VoucherFontPairing } from "@/lib/pdf/document-fonts"
 
 export function voucherStyles({
   accentColour,
@@ -76,6 +76,7 @@ export function voucherStyles({
       width: "100%",
     },
     headerTextOverlay: {
+      alignItems: "center",
       backgroundColor: "rgba(0, 0, 0, 0.35)",
       bottom: 0,
       left: 0,

@@ -6,7 +6,7 @@ import { firstRecord } from "@/lib/utils"
  * rows they seed are the actual bookings a supplier confirmation belongs to. */
 const TRANSPORT_SUPPLIER_KINDS = new Set(["transfers", "vehicle_rental"])
 
-export type LegReferenceKind = "selection" | "transport_request"
+export type LegReferenceKind = "selection" | "service" | "transport_request"
 
 export interface LegReferenceRow {
   key: string
@@ -128,8 +128,8 @@ export async function loadLegReferenceRows(
       const supplier = firstRecord(row.suppliers)
       return {
         row: {
-          key: `selection:${row.id}`,
-          kind: "selection" as const,
+          key: `service:${row.id}`,
+          kind: "service" as const,
           id: row.id,
           label: row.label?.trim() || supplier?.name || "Leg",
           supplierName: supplier?.name ?? null,

@@ -878,6 +878,7 @@ export interface Job {
   updatedAtDisplay?: string
   depositPaid?: boolean | null
   invoiceBalance?: number | null
+  customerInvoiceNumber?: string | null
   cancelReason?: string | null
   cancelledAt?: string | null
   cancelledAtDisplay?: string
