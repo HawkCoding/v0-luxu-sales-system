@@ -523,7 +523,13 @@ describe("createEmailBookingFromParsedDraft duplicate detection", () => {
 
     expect(result.duplicateOfBookingId).toBe("booking-prior")
     expect(state.bookingInsertRows[0]).toEqual(
-      expect.objectContaining({ email_import_duplicate_of_booking_id: "booking-prior" }),
+      expect.objectContaining({
+        email_import_duplicate_of_booking_id: "booking-prior",
+        // A possible duplicate forces review on its own, even when every field parsed cleanly --
+        // otherwise a second enquiry from the same customer would auto-create a second booking
+        // with nobody ever looking at it.
+        email_import_needs_review: true,
+      }),
     )
     expect(state.auditRows).toContainEqual(
       expect.objectContaining({
@@ -549,6 +555,44 @@ describe("createEmailBookingFromParsedDraft duplicate detection", () => {
     expect(
       state.auditRows.some((row) => row.action === "possible_duplicate_email_import"),
     ).toBe(false)
+  })
+})
+
+describe("createEmailBookingFromParsedDraft resolution-failure review gate", () => {
+  beforeEach(() => {
+    importBookingMocks.createServiceClient.mockReset()
+    importBookingMocks.bookingSequence = 0
+  })
+
+  it("flags review when the customer named a supplier that doesn't match any active supplier, even though every other field parsed cleanly", async () => {
+    // The parser recognised "Blue Train" (so validateDraft's raw-text check passes and this
+    // wouldn't have been caught pre-resolution), but no such supplier exists in this state --
+    // auto-build would otherwise silently no-op on this booking with nobody the wiser.
+    const state = createState({ trainSuppliers: [] })
+
+    await importFixture(state, "jane@example.com")
+
+    expect(state.bookingInsertRows[0]).toEqual(
+      expect.objectContaining({
+        email_import_needs_review: true,
+        email_import_missing_fields: expect.arrayContaining([
+          "Train operator not matched to an active supplier",
+        ]),
+      }),
+    )
+  })
+
+  it("does not add a resolution-failure reason when the supplier resolves normally", async () => {
+    const state = createState()
+
+    await importFixture(state, "jane@example.com")
+
+    // The fixture's suite type doesn't resolve against this state's (empty) suite vocabulary, so
+    // needs_review is still true overall -- what this asserts is that the *supplier* resolution
+    // gate specifically doesn't fire when the supplier resolved fine.
+    expect(state.bookingInsertRows[0]?.email_import_missing_fields).not.toContain(
+      "Train operator not matched to an active supplier",
+    )
   })
 })
 

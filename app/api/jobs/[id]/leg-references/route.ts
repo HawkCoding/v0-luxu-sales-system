@@ -31,6 +31,9 @@ const updateSchema = z.object({
         kind: z.enum(["selection", "service", "transport_request"]),
         id: z.string().uuid(),
         supplierReference: z.string().trim().max(200).nullable(),
+        supplierContactName: z.string().trim().max(200).nullable().optional(),
+        voucherFootnote: z.string().trim().max(500).nullable().optional(),
+        excursions: z.array(z.string().trim().max(300)).max(20).optional(),
       }),
     )
     .min(1, "At least one update is required"),
@@ -62,11 +65,25 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   for (const update of parsed.data.updates) {
     const { table, matchColumn } = TABLE_BY_KIND[update.kind]
-    const supplierReference = update.supplierReference?.trim() || null
+
+    const payload: Record<string, unknown> = {
+      supplier_reference: update.supplierReference?.trim() || null,
+    }
+    if (update.supplierContactName !== undefined) {
+      payload.supplier_contact_name = update.supplierContactName?.trim() || null
+    }
+    if (update.voucherFootnote !== undefined) {
+      payload.voucher_footnote = update.voucherFootnote?.trim() || null
+    }
+    // Excursions only exist on the leg tables -- a transport_request (transfer/rental/flight)
+    // has no column for them.
+    if (update.excursions !== undefined && update.kind !== "transport_request") {
+      payload.excursions = update.excursions.map((value) => value.trim()).filter(Boolean)
+    }
 
     const { error } = await supabase
       .from(table)
-      .update({ supplier_reference: supplierReference })
+      .update(payload)
       .eq("booking_id", id)
       .eq(matchColumn, update.id)
 

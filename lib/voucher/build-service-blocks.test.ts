@@ -557,4 +557,311 @@ describe("buildVoucherServiceBlocks", () => {
     expect(blocks).toHaveLength(1)
     expect(blocks[0].serviceData.pickup).toBe("Cape Town International Airport")
   })
+
+  it("sums adult/child/infant counts across a train leg's units into guestBreakdown", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "sel-train-guests",
+            package_leg_id: "leg-train",
+            selected: true,
+            supplier_id: "supplier-train",
+            route_id: "route-train",
+            suite_type_id: "suite-deluxe",
+            service_date: "2026-09-01",
+            nights: null,
+            notes: null,
+            package_legs: { sort_order: 0, label: "The Blue Train" },
+            suppliers: supplier({ kind: "train_operator", name: "Blue Train" }),
+            routes: { name: "Pretoria ↔ Cape Town", duration_days: 3 },
+            suite_types: null,
+            units: [
+              { suite_type_id: "s1", sort_order: 0, adult_count: 2, child_count: 0, infant_count: 0, suite_types: { name: "Deluxe" } },
+              { suite_type_id: "s2", sort_order: 1, adult_count: 1, child_count: 1, infant_count: 0, suite_types: { name: "Deluxe" } },
+            ],
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceData.guestBreakdown).toEqual({ adults: 3, children: 1, infants: 0 })
+  })
+
+  it("omits guestBreakdown when a leg has no unit rows (legacy pre-cutover selection)", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "sel-train-legacy",
+            package_leg_id: "leg-train",
+            selected: true,
+            supplier_id: "supplier-train",
+            route_id: "route-train",
+            suite_type_id: "suite-royal",
+            service_date: "2026-09-01",
+            nights: null,
+            notes: null,
+            package_legs: { sort_order: 0, label: "The Blue Train" },
+            suppliers: supplier({ kind: "train_operator", name: "Blue Train" }),
+            routes: { name: "Pretoria ↔ Cape Town", duration_days: 3 },
+            suite_types: { name: "Royal Suite" },
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceData.guestBreakdown).toBeNull()
+  })
+
+  it("carries the supplier description onto contactDetails for train and manual-transfer blocks", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "sel-train-desc",
+            package_leg_id: "leg-train",
+            selected: true,
+            supplier_id: "supplier-train",
+            route_id: "route-train",
+            suite_type_id: "suite-royal",
+            service_date: "2026-09-01",
+            nights: null,
+            notes: null,
+            package_legs: { sort_order: 0, label: "The Blue Train" },
+            suppliers: supplier({ kind: "train_operator", name: "Blue Train", description: "Luxury rail since 1989." }),
+            routes: { name: "Pretoria ↔ Cape Town", duration_days: 3 },
+            suite_types: { name: "Royal Suite" },
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].contactDetails.description).toBe("Luxury rail since 1989.")
+  })
+
+  it("carries passenger_count onto a transfer block's passengerCount", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [transferSelection()],
+        transportRequests: [
+          {
+            id: "req-pax",
+            package_leg_id: "leg-transfer",
+            service_type: "transfer",
+            pickup_point: "Airport",
+            dropoff_point: "Hotel",
+            pickup_at: null,
+            flight_number: null,
+            passenger_count: 3,
+            notes: null,
+            sort_order: 0,
+            suppliers: supplier(),
+            suite_types: null,
+            rental_details: null,
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceData.passengerCount).toBe(3)
+  })
+
+  it("repeats the reservation form's meal-seating/smoking/occasion on train and hotel blocks", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "sel-train-req",
+            package_leg_id: "leg-train",
+            selected: true,
+            supplier_id: "supplier-train",
+            route_id: "route-train",
+            suite_type_id: "suite-royal",
+            service_date: "2026-09-01",
+            nights: null,
+            notes: null,
+            package_legs: { sort_order: 0, label: "The Blue Train" },
+            suppliers: supplier({ kind: "train_operator", name: "Blue Train" }),
+            routes: { name: "Pretoria ↔ Cape Town", duration_days: 3 },
+            suite_types: { name: "Royal Suite" },
+          },
+          transferSelection(),
+        ],
+      }),
+      {
+        bookingId: BOOKING_ID,
+        reservationDetails: { occasion: "Birthday Celebration", mealSeating: "first", smokingPreference: "non_smoking" },
+      },
+    )
+
+    const train = blocks.find((b) => b.serviceType === "train")
+    const transfer = blocks.find((b) => b.serviceType === "transfer")
+    expect(train?.serviceData.requestsLine).toBe("1st seating meals; Nonsmoking")
+    expect(train?.serviceData.occasion).toBe("Birthday Celebration")
+    // Not a train/hotel type — the party's preferences aren't printed on a transfer block.
+    expect(transfer?.serviceData.requestsLine).toBeNull()
+  })
+
+  it("stands a tour block's itinerary in from the route name when nothing else is captured", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "sel-tour",
+            package_leg_id: "leg-tour",
+            selected: true,
+            supplier_id: "supplier-tour",
+            route_id: "route-tour",
+            suite_type_id: null,
+            service_date: "2026-09-08",
+            nights: null,
+            notes: null,
+            package_legs: { sort_order: 0, label: "Kimberley Excursion" },
+            suppliers: supplier({ kind: "tour_operator", name: "Kimberley Tours" }),
+            routes: { name: "Kimberley Day Tour", duration_days: 1 },
+            suite_types: null,
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceType).toBe("tour")
+    expect(blocks[0].serviceData.itinerary).toBe("Kimberley Day Tour")
+  })
+
+  it("builds an airline block from a service_type='flight' transport request", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        transportRequests: [
+          {
+            id: "req-flight",
+            package_leg_id: null,
+            service_id: null,
+            service_type: "flight",
+            pickup_point: "CPT",
+            dropoff_point: "JNB",
+            pickup_at: "2026-09-11T16:20:00",
+            flight_number: "FA-120",
+            passenger_count: 2,
+            notes: null,
+            sort_order: 0,
+            supplier_reference: "FZBP2Z",
+            supplier_contact_name: null,
+            voucher_footnote: "Check in 1h30 min prior to departure",
+            suppliers: supplier({ name: "FlySafair", kind: "airline" }),
+            suite_types: null,
+            rental_details: null,
+            flight_details: {
+              cabin: "Economy",
+              departure_airport_code: "CPT",
+              arrival_airport_code: "JNB",
+              arrival_at: "2026-09-11T18:25:00",
+              hand_luggage_kg: 7,
+              checked_luggage_kg: 20,
+              priority_boarding: true,
+            },
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks).toHaveLength(1)
+    const flight = blocks[0]
+    expect(flight.serviceType).toBe("airline")
+    expect(flight.supplierReference).toBe("FZBP2Z")
+    expect(flight.serviceData.departureAirportCode).toBe("CPT")
+    expect(flight.serviceData.arrivalAirportCode).toBe("JNB")
+    expect(flight.serviceData.route).toBe("CPT → JNB")
+    expect(flight.serviceData.departureDate).toBe("2026-09-11")
+    expect(flight.serviceData.startTime).toBe("16:20")
+    expect(flight.serviceData.arrivalDate).toBe("2026-09-11")
+    expect(flight.serviceData.endTime).toBe("18:25")
+    expect(flight.serviceData.cabin).toBe("Economy")
+    expect(flight.serviceData.handLuggageKg).toBe(7)
+    expect(flight.serviceData.checkedLuggageKg).toBe(20)
+    expect(flight.serviceData.priorityBoarding).toBe(true)
+    expect(flight.serviceData.footnote).toBe("Check in 1h30 min prior to departure")
+  })
+
+  it("carries a leg's own contact name, footnote and excursions onto its block", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "sel-train-details",
+            package_leg_id: "leg-train",
+            selected: true,
+            supplier_id: "supplier-train",
+            route_id: "route-train",
+            suite_type_id: "suite-royal",
+            service_date: "2026-09-07",
+            nights: null,
+            notes: null,
+            supplier_contact_name: "Carla",
+            voucher_footnote: "Check in IRENE COUNTRY LODGE 2h prior to departure",
+            excursions: ["Kimberley **Weather & Time Permitted"],
+            package_legs: { sort_order: 0, label: "The Blue Train" },
+            suppliers: supplier({ kind: "train_operator", name: "Blue Train" }),
+            routes: { name: "Pretoria ↔ Cape Town", duration_days: 3, default_excursions: ["Route default"] },
+            suite_types: { name: "Royal Suite" },
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].supplierContactName).toBe("Carla")
+    expect(blocks[0].serviceData.footnote).toBe("Check in IRENE COUNTRY LODGE 2h prior to departure")
+    expect(blocks[0].serviceData.excursions).toEqual(["Kimberley **Weather & Time Permitted"])
+  })
+
+  it("falls back to the route's default_excursions when the leg has none of its own", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "sel-train-route-excursions",
+            package_leg_id: "leg-train",
+            selected: true,
+            supplier_id: "supplier-train",
+            route_id: "route-train",
+            suite_type_id: "suite-royal",
+            service_date: "2026-09-07",
+            nights: null,
+            notes: null,
+            excursions: null,
+            package_legs: { sort_order: 0, label: "The Blue Train" },
+            suppliers: supplier({ kind: "train_operator", name: "Blue Train" }),
+            routes: { name: "Pretoria ↔ Cape Town", duration_days: 3, default_excursions: ["Kimberley day trip"] },
+            suite_types: { name: "Royal Suite" },
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceData.excursions).toEqual(["Kimberley day trip"])
+  })
+
+  it("uses the supplier's default_contact_name when the leg doesn't override it", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          transferSelection({
+            suppliers: supplier({ default_contact_name: "Pierre" }),
+          }),
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].supplierContactName).toBe("Pierre")
+  })
 })

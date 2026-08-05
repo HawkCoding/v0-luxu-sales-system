@@ -55,6 +55,7 @@ function buildSupabase(options: BuildOptions = {}) {
     booking: {
       id: BOOKING_ID,
       booking_number: "BT-2026-0001",
+      customer_invoice_number: "INV-2026-0042",
       stage,
       invoice_balance: invoiceBalance,
       departure_date: "2026-09-14",
@@ -194,8 +195,8 @@ describe("POST /api/vouchers/[id]/prepare-send", () => {
     expect(body.email.subject).toContain("Travel Voucher")
     expect(body.email.to).toBe("guest@example.test")
     expect(body.attachments).toHaveLength(2)
-    expect(body.attachments[0].filename).toBe("voucher-BT-2026-0001.pdf")
-    expect(body.attachments[1].filename).toBe("itinerary-BT-2026-0001.pdf")
+    expect(body.attachments[0].filename).toBe("voucher-INV-2026-0042.pdf")
+    expect(body.attachments[1].filename).toBe("itinerary-INV-2026-0042.pdf")
     expect(download).toHaveBeenCalledTimes(2)
     expect(composeMocks.composeEmail).toHaveBeenCalledWith(
       expect.anything(),

@@ -28,12 +28,20 @@ function sectionFor(key: VoucherSectionKey, data: VoucherData, template: Voucher
   if (key === "guest_info") return <GuestInfo key={key} data={data} styles={styles} />
   if (key === "service_provider") {
     const blocks = data.serviceBlocks ?? []
-    if (blocks.length === 0) return <ServiceProvider key={key} data={data} styles={styles} />
+    if (blocks.length === 0) {
+      return (
+        <View key={key}>
+          <ServiceProvider data={data} styles={styles} />
+          <Text style={styles.endOfServices}>End of Services</Text>
+        </View>
+      )
+    }
     return (
       <View key={key}>
         {sortedVoucherServiceBlocks(blocks).map((block, idx) => (
           <ServiceBlock key={`${block.serviceType}-${idx}`} block={block} styles={styles} />
         ))}
+        <Text style={styles.endOfServices}>End of Services</Text>
       </View>
     )
   }

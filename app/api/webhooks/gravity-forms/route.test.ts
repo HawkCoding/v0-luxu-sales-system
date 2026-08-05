@@ -51,6 +51,15 @@ describe("POST /api/webhooks/gravity-forms", () => {
     supabaseMocks.createServiceClient.mockReset()
     errorLogMocks.logError.mockReset()
     vi.stubEnv("GRAVITY_FORMS_WEBHOOK_SECRET", SECRET)
+    // The route is parked (disabled by default) until field-to-column mapping is built -- these
+    // tests cover the logic that runs once it's turned back on.
+    vi.stubEnv("GRAVITY_FORMS_WEBHOOK_ENABLED", "true")
+  })
+
+  it("returns 404 when GRAVITY_FORMS_WEBHOOK_ENABLED is not set to true", async () => {
+    vi.stubEnv("GRAVITY_FORMS_WEBHOOK_ENABLED", "")
+    const res = await POST(makeRequest({ secret: SECRET }))
+    expect(res.status).toBe(404)
   })
 
   it("returns 401 when the secret header is missing", async () => {

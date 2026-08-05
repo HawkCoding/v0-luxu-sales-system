@@ -226,6 +226,7 @@ const enquiryBodySchema = z.object({
   direction: z.string().trim().max(255).nullish(),
   packageOption: z.string().trim().max(255).nullish(),
   hotelOption: z.string().trim().max(255).nullish(),
+  hotelPhase: z.enum(["pre", "post", "none"]).nullish().catch(null),
   supplierId: lenientUuid,
   supplier: z.string().trim().max(255).nullish(),
   purpose: z.enum(["quote", "availability", "reservation"]).nullish().catch(null),
@@ -335,6 +336,7 @@ export async function POST(req: Request) {
     lastName: normalizedCustomerLastName,
     phone: body.contactNumber || null,
     country: normalizedCountry,
+    province: body.province || null,
     title: body.title || null,
     nowIso: new Date().toISOString(),
     existingCustomerId: linkedCustomerId,
@@ -418,6 +420,7 @@ export async function POST(req: Request) {
       raw_text: body.rawText || null,
       extracted_json: extractedJson as Json,
       terms_accepted: body.termsAccepted ?? false,
+      hotel_phase: body.hotelPhase || "none",
       extend_stay: body.extendStay === "yes" || body.extendStay === true || false,
       extra_nights: body.extraNights ? Number(body.extraNights) : null,
       additional_services: !!(body.additionalServices),
@@ -518,6 +521,7 @@ export async function POST(req: Request) {
       hotelSupplierId,
       routeId,
       departureDate: body.departureDate || null,
+      hotelPhase: body.hotelPhase ?? null,
     })
     if (autoBuildResult.servicesCreated > 0 || autoBuildResult.skipped.length > 0) {
       await supabase.from("audit_logs").insert({
@@ -668,6 +672,7 @@ interface ResolveEnquiryCustomerInput {
   phone: string | null
   country: string | null
   title: string | null
+  province: string | null
   nowIso: string
   existingCustomerId?: string | null
 }
@@ -721,6 +726,7 @@ export async function resolveEnquiryCustomer(
         last_name: input.lastName ?? undefined,
         phone: input.phone,
         country: input.country,
+        province: input.province,
         title: input.title,
         updated_at: input.nowIso,
       })
@@ -737,6 +743,7 @@ export async function resolveEnquiryCustomer(
       email: input.normalizedEmail ?? "",
       phone: input.phone,
       country: input.country,
+      province: input.province,
       title: input.title,
     })
     .select("id")

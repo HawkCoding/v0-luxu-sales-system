@@ -18,6 +18,10 @@ export interface ParsedDraft {
     purpose: 'quote' | 'availability' | 'reservation'
     packageOption: string
     hotelOption: string
+    /** Pre-departure, post-departure, or no hotel stay. '' when the email didn't say. */
+    hotelPhase: 'pre' | 'post' | 'none' | ''
+    /** Whether the customer asked to extend their stay. null when the email didn't say. */
+    extendStay: boolean | null
     flightBooking: string
     flightDepartureDate: string
   }
@@ -36,6 +40,11 @@ export interface ParsedDraft {
     /** Resolved units. Populated by the resolver step, never by the parser. */
     suiteUnits?: DraftSuiteUnit[]
   }
+  additionalServices: {
+    requested: boolean
+    /** Free text describing what was asked for, e.g. "My mom's birthday". */
+    details: string
+  }
   notes: string
   formFields: {
     title: string
@@ -45,6 +54,18 @@ export interface ParsedDraft {
     hotelOption: string
     flightBooking: string
     flightDepartureDate: string
+    /**
+     * Raw wording preserved alongside the fields above so the UI can show what the customer
+     * actually wrote even when the resolver couldn't match it to a database row (route, supplier,
+     * suite). Never a substitute for the resolved id -- only a fallback for display.
+     */
+    direction: string
+    supplier: string
+    departureDateRaw: string
+    suitePhrases: string[]
+    hotelPhase: 'pre' | 'post' | 'none' | ''
+    extendStay: boolean | null
+    additionalServicesDetails: string
   }
   confidence: {
     [key: string]: 'high' | 'low'
@@ -99,8 +120,12 @@ const FORM_FIELD_LABEL_PATTERNS = [
   /^(?:no\.?|number)\s*of\s*adults?$/i,
   /^(?:no\.?|number)\s*of\s*suites?$/i,
   /^suite\s*type(?:\s*\d+)?$/i,
-  /^package\s*options$/i,
+  /^package\s*options?$/i,
+  /^package$/i,
+  /^hotel$/i,
   /^hotel\s*options$/i,
+  /^extend\s+your\s+stay$/i,
+  /^would\s+you\s+like\s+to\s+add\s+additional\s+travel\s+services/i,
   /^flight\s*booking$/i,
   /^flight\s*departure\s*date$/i,
   /^acceptance$/i,
@@ -110,12 +135,27 @@ const FORM_FIELD_LABEL_PATTERNS = [
   /^additional\s+pre\s+and\s+post\s+train\s+travel\s+services$/i,
 ]
 
+// Some Gravity Forms notification templates wrap labels in markdown-style emphasis
+// (`*Title*`, `*Email*`) instead of a plain trailing colon. Strip wrapper punctuation from
+// BOTH ends -- stripping only the trailing end (the old behaviour) left `*Title*` as `*Title`,
+// which matched no label pattern and silently blanked every labelled field on those emails.
 function normalizeLabel(line: string): string {
-  return line.replace(/[:|*]+$/g, '').trim()
+  return line.replace(/^[\s*_|:]+/, '').replace(/[\s*_|:]+$/, '').trim()
+}
+
+/**
+ * Some templates glue a section header directly onto the next label with no line break
+ * (e.g. "Personal Contact InformationTitle"). Strips a recognised "... Information" prefix
+ * so the trailing label is still matchable. Returns the input unchanged when no such prefix
+ * is present.
+ */
+function stripGluedSectionHeader(label: string): string {
+  const match = label.match(/^.+?\s+Information(.+)$/i)
+  return match ? match[1] : label
 }
 
 function isFormFieldLabel(line: string): boolean {
-  const label = normalizeLabel(line)
+  const label = stripGluedSectionHeader(normalizeLabel(line))
   return FORM_FIELD_LABEL_PATTERNS.some((pattern) => pattern.test(label))
 }
 
@@ -126,7 +166,7 @@ function getLabeledFieldValue(text: string, labelPatterns: RegExp[]): string {
     const sameLineMatch = rawLine.trim().match(/^(.+?)\s*[:|]\s*(.+)$/)
     if (!sameLineMatch) continue
 
-    const label = normalizeLabel(sameLineMatch[1])
+    const label = stripGluedSectionHeader(normalizeLabel(sameLineMatch[1]))
     const value = sameLineMatch[2].trim()
     if (value && labelPatterns.some((pattern) => pattern.test(label))) {
       return value
@@ -134,7 +174,7 @@ function getLabeledFieldValue(text: string, labelPatterns: RegExp[]): string {
   }
 
   for (let index = 0; index < lines.length; index += 1) {
-    const label = normalizeLabel(lines[index])
+    const label = stripGluedSectionHeader(normalizeLabel(lines[index]))
     if (!labelPatterns.some((pattern) => pattern.test(label))) continue
 
     const value = lines.slice(index + 1).map((line) => line.trim()).find((line) => line.length > 0)
@@ -188,13 +228,13 @@ function extractSuitePhrases(text: string): string[] {
   const lines = text.split(/\r?\n/)
   for (let index = 0; index < lines.length; index += 1) {
     const sameLineMatch = lines[index].trim().match(/^(.+?)\s*[:|]\s*(.+)$/)
-    if (sameLineMatch && /^suite\s*type(?:\s*\d+)?$/i.test(normalizeLabel(sameLineMatch[1]))) {
+    if (sameLineMatch && /^suite\s*type(?:\s*\d+)?$/i.test(stripGluedSectionHeader(normalizeLabel(sameLineMatch[1])))) {
       const cleaned = cleanSuitePhrase(sameLineMatch[2])
       if (cleaned) phrases.push(cleaned)
       continue
     }
 
-    if (!/^suite\s*type(?:\s*\d+)?$/i.test(normalizeLabel(lines[index]))) continue
+    if (!/^suite\s*type(?:\s*\d+)?$/i.test(stripGluedSectionHeader(normalizeLabel(lines[index])))) continue
 
     const value = lines.slice(index + 1).map((line) => line.trim()).find((line) => line.length > 0)
     if (value && !isFormFieldLabel(value)) {
@@ -227,16 +267,96 @@ function extractSuitePhrases(text: string): string[] {
   return []
 }
 
+const MONTH_ABBREVIATIONS: { [key: string]: string } = {
+  jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+  jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
+}
+
+/** Parses the first recognisable date out of `text` (ISO, "15 Mar 2026", or "15/03/2026"). */
+function extractDateString(text: string): string {
+  const isoMatch = text.match(/\b(202[4-9]|203[0-9])-([0-1][0-9])-([0-3][0-9])\b/)
+  if (isoMatch) return isoMatch[0]
+
+  const dateMatch = text.match(/\b([0-3]?[0-9])\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s,]+?(202[4-9]|203[0-9])\b/i)
+  if (dateMatch) {
+    const day = dateMatch[1].padStart(2, '0')
+    const month = MONTH_ABBREVIATIONS[dateMatch[2].toLowerCase().slice(0, 3)]
+    const year = dateMatch[3]
+    if (month) return `${year}-${month}-${day}`
+  }
+
+  const slashMatch = text.match(/\b([0-3]?[0-9])\/([0-1]?[0-9])\/([0-9]{4})\b/)
+  if (slashMatch) {
+    // Assume day/month/year for international.
+    const day = slashMatch[1].padStart(2, '0')
+    const month = slashMatch[2].padStart(2, '0')
+    const year = slashMatch[3]
+    return `${year}-${month}-${day}`
+  }
+
+  return ''
+}
+
+/**
+ * Same date parse as `extractDateString`, but for scanning the whole message body rather than a
+ * labelled field's value -- an unambiguous ISO date found anywhere is high confidence, but a date
+ * inferred from prose ("Mar 15, 2026", "15/03/2026") is not.
+ */
+function extractDateWithConfidence(text: string): { value: string; confidence: 'high' | 'low' } {
+  const isoMatch = text.match(/\b(202[4-9]|203[0-9])-([0-1][0-9])-([0-3][0-9])\b/)
+  if (isoMatch) return { value: isoMatch[0], confidence: 'high' }
+
+  return { value: extractDateString(text), confidence: 'low' }
+}
+
 export function parseEmailDraft(text: string): ParsedDraft {
   const confidence: { [key: string]: 'high' | 'low' } = {}
   const title = getLabeledFieldValue(text, [/^title$/i])
   const country = getLabeledFieldValue(text, [/^country$/i])
   const province = getLabeledFieldValue(text, [/^province$/i, /^region$/i])
   const purposeValue = getLabeledFieldValue(text, [/^please\s+indicate\s+the\s+purpose\s+of\s+your\s+request$/i])
-  const packageOption = getLabeledFieldValue(text, [/^package\s*options$/i])
+  // When the customer declines a package, some templates omit the label entirely and emit only
+  // a bare bullet line ("I do not require a package") -- fall back to that literal phrase so the
+  // choice isn't lost. The Rovos template also labels this field just "Package" rather than
+  // "Package Options".
+  const packageOption =
+    getLabeledFieldValue(text, [/^package\s*options?$/i, /^package$/i]) ||
+    (/\bI do not require a package\b/i.test(text) ? 'I do not require a package' : '')
   const hotelOption = getLabeledFieldValue(text, [/^hotel\s*options?$/i])
   const flightBooking = getLabeledFieldValue(text, [/^flight\s*booking$/i])
   const flightDepartureDateValue = getLabeledFieldValue(text, [/^flight\s*departure\s*date$/i])
+
+  // "Hotel" states whether a stay is pre- or post-departure (or none) -- distinct from
+  // "Hotel Options", which names the property. Needed so the auto-built hotel leg gets the
+  // right service date instead of defaulting to the rail departure date.
+  const hotelPhaseValue = getLabeledFieldValue(text, [/^hotel$/i])
+  let hotelPhase: 'pre' | 'post' | 'none' | '' = ''
+  if (/pre/i.test(hotelPhaseValue)) {
+    hotelPhase = 'pre'
+    confidence['trip.hotelPhase'] = 'high'
+  } else if (/post/i.test(hotelPhaseValue)) {
+    hotelPhase = 'post'
+    confidence['trip.hotelPhase'] = 'high'
+  } else if (/^none$|^no$/i.test(hotelPhaseValue)) {
+    hotelPhase = 'none'
+    confidence['trip.hotelPhase'] = 'high'
+  }
+
+  const extendStayValue = getLabeledFieldValue(text, [/^extend\s+your\s+stay$/i])
+  let extendStay: boolean | null = null
+  if (/^yes$/i.test(extendStayValue)) {
+    extendStay = true
+    confidence['trip.extendStay'] = 'high'
+  } else if (/^no$/i.test(extendStayValue)) {
+    extendStay = false
+    confidence['trip.extendStay'] = 'high'
+  }
+
+  const additionalServicesDetails = getLabeledFieldValue(text, [
+    /^would\s+you\s+like\s+to\s+add\s+additional\s+travel\s+services/i,
+  ])
+  const additionalServicesRequested = Boolean(additionalServicesDetails)
+  if (additionalServicesDetails) confidence['additionalServices.requested'] = 'high'
 
   if (title) confidence['customer.title'] = 'high'
   if (country) confidence['customer.country'] = 'high'
@@ -256,7 +376,11 @@ export function parseEmailDraft(text: string): ParsedDraft {
   const firstNameLabelValue = getLabeledFieldValue(text, [/^first\s*name$/i, /^forename$/i])
   const nameLabelValue = getLabeledFieldValue(text, [/^name$/i])
   const surnameLabelValue = getLabeledFieldValue(text, [/^surname$/i, /^last\s*name$/i, /^family\s*name$/i])
-  const fullNameLabelMatch = !firstNameLabelValue && nameLabelValue
+  // A separate Surname label already answers "what's the surname" -- the Name field is the
+  // customer's full given name as-is (which may include a middle name, e.g. "Phyllis Cecilia")
+  // and must not be split. Splitting only applies when Surname is unlabelled and Name has to
+  // carry both parts.
+  const fullNameLabelMatch = !firstNameLabelValue && !surnameLabelValue && nameLabelValue
     ? nameLabelValue.match(/^([A-Za-z][A-Za-z'-]*)\s+([A-Za-z][A-Za-z'-]*)$/)
     : null
   const singleNameLabelMatch = !firstNameLabelValue && !fullNameLabelMatch && nameLabelValue
@@ -266,9 +390,15 @@ export function parseEmailDraft(text: string): ParsedDraft {
     ? text.match(/(?:regards|sincerely|cheers|thanks|best),?\s*\n?\s*([A-Z][a-z]+)\s+([A-Z][a-z]+)/i)
     : null
 
-  const firstName = firstNameLabelValue || fullNameLabelMatch?.[1] || singleNameLabelMatch?.[1] || signatureNameMatch?.[1] || ''
+  const firstName =
+    firstNameLabelValue ||
+    (surnameLabelValue && nameLabelValue ? nameLabelValue : '') ||
+    fullNameLabelMatch?.[1] ||
+    singleNameLabelMatch?.[1] ||
+    signatureNameMatch?.[1] ||
+    ''
   const surname = surnameLabelValue || fullNameLabelMatch?.[2] || signatureNameMatch?.[2] || ''
-  if (firstNameLabelValue || fullNameLabelMatch || singleNameLabelMatch) {
+  if (firstNameLabelValue || (surnameLabelValue && nameLabelValue) || fullNameLabelMatch || singleNameLabelMatch) {
     confidence['customer.firstName'] = 'high'
   } else if (signatureNameMatch) {
     confidence['customer.firstName'] = 'low'
@@ -327,39 +457,20 @@ export function parseEmailDraft(text: string): ParsedDraft {
     }
   }
   
-  // Extract departure date (various formats)
+  // Extract departure date (various formats). A value read from the labelled "Departure Date"
+  // field is trustworthy regardless of which format it's written in -- low confidence is reserved
+  // for dates inferred from free-form prose, not for a form field the customer filled in directly.
+  const departureDateLabelValue = getLabeledFieldValue(text, [/^departure\s*date$/i])
+  const departureDateFromLabel = departureDateLabelValue ? extractDateString(departureDateLabelValue) : ''
   let departureDate = ''
-  // ISO format: 2026-05-15
-  const isoMatch = text.match(/\b(202[4-9]|203[0-9])-([0-1][0-9])-([0-3][0-9])\b/)
-  if (isoMatch) {
-    departureDate = isoMatch[0]
+  if (departureDateFromLabel) {
+    departureDate = departureDateFromLabel
     confidence['trip.departureDate'] = 'high'
   } else {
-    // "15 Mar 2026" or "Mar 15, 2026"
-    const dateMatch = text.match(/\b([0-3]?[0-9])\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s,]+?(202[4-9]|203[0-9])\b/i)
-    if (dateMatch) {
-      const day = dateMatch[1].padStart(2, '0')
-      const monthMap: { [key: string]: string } = {
-        'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04', 'may': '05', 'jun': '06',
-        'jul': '07', 'aug': '08', 'sep': '09', 'oct': '10', 'nov': '11', 'dec': '12'
-      }
-      const month = monthMap[dateMatch[2].toLowerCase().slice(0, 3)]
-      const year = dateMatch[3]
-    if (month) {
-      departureDate = `${year}-${month}-${day}`
-      confidence['trip.departureDate'] = 'low'
-    }
-    } else {
-      // "15/03/2026" or "03/15/2026"
-      const slashMatch = text.match(/\b([0-3]?[0-9])\/([0-1]?[0-9])\/([0-9]{4})\b/)
-      if (slashMatch) {
-        // Assume day/month/year for international
-        const day = slashMatch[1].padStart(2, '0')
-        const month = slashMatch[2].padStart(2, '0')
-        const year = slashMatch[3]
-        departureDate = `${year}-${month}-${day}`
-        confidence['trip.departureDate'] = 'low'
-      }
+    const departureDateFromText = extractDateWithConfidence(text)
+    if (departureDateFromText.value) {
+      departureDate = departureDateFromText.value
+      confidence['trip.departureDate'] = departureDateFromText.confidence
     }
   }
   
@@ -447,6 +558,8 @@ export function parseEmailDraft(text: string): ParsedDraft {
       purpose,
       packageOption,
       hotelOption,
+      hotelPhase,
+      extendStay,
       flightBooking,
       flightDepartureDate: flightDepartureDateValue
     },
@@ -457,6 +570,10 @@ export function parseEmailDraft(text: string): ParsedDraft {
       suitePhrases,
       suiteType: suitePhrases[0] ?? ''
     },
+    additionalServices: {
+      requested: additionalServicesRequested,
+      details: additionalServicesDetails
+    },
     notes,
     formFields: {
       title,
@@ -465,7 +582,14 @@ export function parseEmailDraft(text: string): ParsedDraft {
       packageOption,
       hotelOption,
       flightBooking,
-      flightDepartureDate: flightDepartureDateValue
+      flightDepartureDate: flightDepartureDateValue,
+      direction: route,
+      supplier,
+      departureDateRaw: departureDate,
+      suitePhrases,
+      hotelPhase,
+      extendStay,
+      additionalServicesDetails
     },
     confidence,
     rawText: text

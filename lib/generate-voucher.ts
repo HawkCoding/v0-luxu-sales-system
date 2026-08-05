@@ -1,7 +1,7 @@
 import type { Enquiry, VoucherTemplate } from "./types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "./types"
-import { formatDisplayDateLong } from "./date-format"
 import { tintWithWhite } from "./voucher/pdf/design-tokens"
+import { voucherProviderContactLine, voucherRowsForBlock } from "./voucher/service-block-rows"
 
 export type VoucherServiceType =
   | "train"
@@ -17,6 +17,18 @@ export interface VoucherServiceBlockContact {
   email?: string | null
   website?: string | null
   location?: string | null
+  /** Client-facing supplier blurb, printed under the provider name — mirrors
+   * `VoucherData.supplierDescription` on the single-provider fallback layout. */
+  description?: string | null
+  streetAddress?: string | null
+  emergencyPhone?: string | null
+}
+
+/** Per-block guest breakdown, summed from the leg's captured suite/room units. */
+export interface VoucherServiceBlockGuestBreakdown {
+  adults: number
+  children: number
+  infants: number
 }
 
 export interface VoucherServiceBlockData {
@@ -48,12 +60,38 @@ export interface VoucherServiceBlockData {
   inclusions?: string[]
   /** Client-facing exclusions for this supplier; pooled into the quote's excludes section. */
   exclusions?: string[]
+  /** Adults/children/infants captured for this specific leg's suite/room units — train & hotel
+   * only; transfers use `passengerCount` since a transport request only captures a total. */
+  guestBreakdown?: VoucherServiceBlockGuestBreakdown | null
+  /** Total passengers on a transfer trip, from the captured transport request. */
+  passengerCount?: number | null
+  /** "1st seating meals; Nonsmoking" — composed from the booking's reservation-details form,
+   * repeated on every train/hotel block since the preference applies to the whole party. */
+  requestsLine?: string | null
+  /** The booking's occasion (e.g. "Birthday Celebration"), repeated per train/hotel block. */
+  occasion?: string | null
+  /** Excursion lines for a train leg, e.g. "Kimberley **Weather & Time Permitted" — the leg's own
+   * override when set, else the route's `default_excursions`. */
+  excursions?: string[]
+  /** A one-off operational caveat printed under this leg, e.g. "Check in IRENE COUNTRY LODGE 2h
+   * prior to departure" or "The driver will meet you at the lounge with a whiteboard". */
+  footnote?: string | null
+  /** Flight-only: IATA/ICAO codes for the departure/arrival airports. */
+  departureAirportCode?: string | null
+  arrivalAirportCode?: string | null
+  handLuggageKg?: number | null
+  checkedLuggageKg?: number | null
+  priorityBoarding?: boolean | null
 }
 
 export interface VoucherServiceBlock {
   serviceType: VoucherServiceType
   title: string
+  supplierId?: string | null
   supplierReference?: string | null
+  /** Named contact next to the reference, e.g. "38562 – Carla" — from the leg's own capture,
+   * falling back to the supplier's default_contact_name. */
+  supplierContactName?: string | null
   contactDetails: VoucherServiceBlockContact
   serviceData: VoucherServiceBlockData
   displayOrder: number
@@ -168,101 +206,61 @@ function buildHeaderHtml(t: VoucherTemplate): string {
   </div>`
 }
 
-function buildGuestInfoSection(data: VoucherData): string {
-  const specialRequestsHtml = data.specialRequests
-    ? `
+function infoRow(label: string, value: string | number, opts: { shaded?: boolean; dotted?: boolean } = {}): string {
+  const classes = ["info-row", opts.shaded ? "info-row-shaded" : "", opts.dotted ? "info-row-dotted" : ""]
+    .filter(Boolean)
+    .join(" ")
+  return `
+      <div class="${classes}">
+        <div class="info-label">${escapeHtml(label)}</div>
+        <div class="info-value">${escapeHtml(value)}</div>
+      </div>`
+}
 
-      <div class="info-label">Special Requests</div>
-      <div class="info-value">${escapeHtml(data.specialRequests)}</div>`
+function cellRow(cells: Array<{ label: string; value: string | number }>, opts: { dotted?: boolean } = {}): string {
+  const classes = ["cell-row", opts.dotted ? "info-row-dotted" : ""].filter(Boolean).join(" ")
+  const cellsHtml = cells
+    .map(
+      (cell) => `
+        <div class="cell">
+          <div class="cell-label">${escapeHtml(cell.label)}</div>
+          <div class="cell-value">${escapeHtml(cell.value)}</div>
+        </div>`,
+    )
+    .join("")
+  return `
+      <div class="${classes}">${cellsHtml}
+      </div>`
+}
+
+function buildGuestInfoSection(data: VoucherData): string {
+  const childText = data.enquiry.noOfChildren
+    ? `, ${data.enquiry.noOfChildren} ${data.enquiry.noOfChildren === 1 ? "child" : "children"}`
     : ""
+
+  const rows = [
+    infoRow("Guest Names", data.guestNames, { shaded: true }),
+    infoRow("Number of Guests", `${data.numberOfGuests} (${data.enquiry.noOfAdults} adults${childText})`),
+    infoRow("Contact Email", data.customerEmail, { shaded: true }),
+    infoRow("Contact Phone", data.customerPhone),
+    infoRow(
+      "Consultant",
+      data.consultant && data.consultantName ? `${data.consultant} – ${data.consultantName}` : "",
+      { shaded: true },
+    ),
+  ]
+  if (data.specialRequests) rows.push(infoRow("Special Requests", data.specialRequests))
 
   return `
   <div class="section">
     <div class="section-title">Guest Information</div>
-    <div class="info-grid">
-      <div class="info-label">Guest Names</div>
-      <div class="info-value">${escapeHtml(data.guestNames)}</div>
-
-      <div class="info-label">Number of Guests</div>
-      <div class="info-value">${escapeHtml(data.numberOfGuests)} (${escapeHtml(data.enquiry.noOfAdults)} adults${data.enquiry.noOfChildren ? `, ${escapeHtml(data.enquiry.noOfChildren)} ${data.enquiry.noOfChildren === 1 ? "child" : "children"}` : ""})</div>
-
-      <div class="info-label">Contact Email</div>
-      <div class="info-value">${escapeHtml(data.customerEmail)}</div>
-
-      <div class="info-label">Contact Phone</div>
-      <div class="info-value">${escapeHtml(data.customerPhone)}</div>
-
-      <div class="info-label">Consultant</div>
-      <div class="info-value">${data.consultant && data.consultantName ? `${escapeHtml(data.consultant)} – ${escapeHtml(data.consultantName)}` : ""}</div>
-${specialRequestsHtml}
-    </div>
+${rows.join("\n")}
   </div>`
 }
 
-// Only ISO date-ish values are reformatted; anything else is already display text
-// and must be passed through untouched (re-parsing "04/07/2026" would flip d/m).
-function formatServiceDate(value: string | null | undefined): string | null {
-  if (!value) return null
-  if (!/^\d{4}-\d{2}-\d{2}/.test(value)) return value
-  return formatDisplayDateLong(value) || value
-}
-
 function buildServiceBlockBodyRows(block: VoucherServiceBlock): string {
-  const rows: Array<[string, string | number | null | undefined]> = []
-  const d = block.serviceData
-  const departureDate = formatServiceDate(d.departureDate)
-  const arrivalDate = formatServiceDate(d.arrivalDate)
-  rows.push(["Your Reference", block.supplierReference ?? "—"])
-
-  if (block.serviceType === "train") {
-    rows.push(["Route", d.route ?? "—"])
-    rows.push(["Departure Date", departureDate ?? "—"])
-    rows.push(["Arrival Date", arrivalDate ?? "TBC"])
-    rows.push(["Suite Type", d.suiteType ?? "—"])
-    if (d.numberOfSuites != null) rows.push(["Number of Suites", d.numberOfSuites])
-    if (d.mealPlan) rows.push(["Meal Basis", d.mealPlan])
-  } else if (block.serviceType === "hotel") {
-    if (d.roomType) rows.push(["Room Type", d.roomType])
-    if (d.nights != null) rows.push(["Nights", d.nights])
-    if (d.mealPlan) rows.push(["Meal Plan", d.mealPlan])
-    if (departureDate) rows.push(["Check-In", departureDate])
-    if (arrivalDate) rows.push(["Check-Out", arrivalDate])
-  } else if (block.serviceType === "transfer") {
-    if (d.vehicleType) rows.push(["Vehicle", d.vehicleType])
-    if (d.pickup) rows.push(["Pickup", d.pickup])
-    if (d.dropoff) rows.push(["Drop-off", d.dropoff])
-    if (departureDate) rows.push(["Date", departureDate])
-    if (d.startTime) rows.push(["Pickup Time", d.startTime])
-    if (d.flightNumber) rows.push(["Flight", d.flightNumber])
-    if (arrivalDate) rows.push(["Return", d.endTime ? `${arrivalDate} ${d.endTime}` : arrivalDate])
-  } else if (block.serviceType === "tour") {
-    if (d.itinerary) rows.push(["Itinerary", d.itinerary])
-    if (departureDate) rows.push(["Start Date", departureDate])
-    if (arrivalDate) rows.push(["End Date", arrivalDate])
-  } else if (block.serviceType === "airline") {
-    if (d.route) rows.push(["Route", d.route])
-    if (d.cabin) rows.push(["Cabin", d.cabin])
-    if (d.flightNumber) rows.push(["Flight", d.flightNumber])
-    if (departureDate) rows.push(["Departure", departureDate])
-    if (arrivalDate) rows.push(["Arrival", arrivalDate])
-  }
-
-  if (d.notes) rows.push(["Notes", d.notes])
-
-  const contactParts: string[] = []
-  if (block.contactDetails.phone) contactParts.push(`Phone: ${block.contactDetails.phone}`)
-  if (block.contactDetails.email) contactParts.push(`Email: ${block.contactDetails.email}`)
-  if (block.contactDetails.location) contactParts.push(`Location: ${block.contactDetails.location}`)
-  if (contactParts.length > 0) {
-    rows.push(["Contact", contactParts.join(" • ")])
-  }
-
-  return rows
-    .map(
-      ([label, value]) => `
-        <div class="info-label">${escapeHtml(label)}</div>
-        <div class="info-value">${escapeHtml(value)}</div>`,
-    )
+  return voucherRowsForBlock(block)
+    .map((row) => (row.cells ? cellRow(row.cells, { dotted: true }) : infoRow(row.label, row.value ?? "", { dotted: true })))
     .join("\n")
 }
 
@@ -270,19 +268,24 @@ function buildServiceBlocksSection(data: VoucherData): string {
   const blocks = data.serviceBlocks ?? []
   if (blocks.length === 0) return buildServiceProviderSection(data)
 
-  return sortedVoucherServiceBlocks(blocks)
-    .map(
-      (block) => `
+  const blocksHtml = sortedVoucherServiceBlocks(blocks)
+    .map((block) => {
+      const contactLine = voucherProviderContactLine(block.contactDetails)
+      return `
   <div class="section">
     <div class="section-title">${escapeHtml(block.title || voucherServiceTypeLabel(block.serviceType))}</div>
     <div class="provider-box">
       <div class="provider-name">${escapeHtml(block.contactDetails.name ?? "")}</div>
-      <div class="info-grid">${buildServiceBlockBodyRows(block)}
-      </div>
+${contactLine ? `      <div class="provider-contact">${escapeHtml(contactLine)}</div>` : ""}
+${block.contactDetails.description ? `      <div class="provider-description">${escapeHtml(block.contactDetails.description)}</div>` : ""}
+${buildServiceBlockBodyRows(block)}
     </div>
-  </div>`,
-    )
+  </div>`
+    })
     .join("\n")
+
+  return `${blocksHtml}
+  <div class="end-of-services">End of Services</div>`
 }
 
 function buildServiceProviderSection(data: VoucherData): string {
@@ -290,36 +293,26 @@ function buildServiceProviderSection(data: VoucherData): string {
     ? `<div class="provider-description">${escapeHtml(data.supplierDescription)}</div>`
     : ""
 
+  const rows = [
+    infoRow("Your Reference", data.voucherNumber, { dotted: true }),
+    infoRow("Route", data.route, { dotted: true }),
+    infoRow("Departure Date", data.departure, { dotted: true }),
+    infoRow("Arrival Date", data.arrival || "TBC", { dotted: true }),
+    infoRow("Suite Type", data.suiteType, { dotted: true }),
+    infoRow("Number of Suites", data.enquiry.noOfSuites, { dotted: true }),
+    infoRow("Meal Basis", "Full Board (All meals included)", { dotted: true }),
+  ]
+
   return `
   <div class="section">
     <div class="section-title">Service Provider</div>
     <div class="provider-box">
       <div class="provider-name">${escapeHtml(data.supplierName)}</div>
 ${descriptionHtml}
-      <div class="info-grid">
-        <div class="info-label">Your Reference</div>
-        <div class="info-value">${escapeHtml(data.voucherNumber)}</div>
-
-        <div class="info-label">Route</div>
-        <div class="info-value">${escapeHtml(data.route)}</div>
-
-        <div class="info-label">Departure Date</div>
-        <div class="info-value">${escapeHtml(data.departure)}</div>
-
-        <div class="info-label">Arrival Date</div>
-        <div class="info-value">${escapeHtml(data.arrival || "TBC")}</div>
-
-        <div class="info-label">Suite Type</div>
-        <div class="info-value">${escapeHtml(data.suiteType)}</div>
-
-        <div class="info-label">Number of Suites</div>
-        <div class="info-value">${escapeHtml(data.enquiry.noOfSuites)}</div>
-
-        <div class="info-label">Meal Basis</div>
-        <div class="info-value">Full Board (All meals included)</div>
-      </div>
+${rows.join("\n")}
     </div>
-  </div>`
+  </div>
+  <div class="end-of-services">End of Services</div>`
 }
 
 function buildFooterSection(t: VoucherTemplate): string {
@@ -478,11 +471,15 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
       padding-bottom: 6pt;
       margin-bottom: 12pt;
     }
-    .info-grid {
-      display: grid;
-      grid-template-columns: 140pt 1fr;
-      gap: 8pt 12pt;
+    .info-row {
+      display: flex;
+      gap: 12pt;
+      padding: 3pt 0;
     }
+    /* Legacy tables ruled every provider-box row with a dotted line; Guest Information bands
+       alternating rows instead (info-row-shaded) — same distinction the legacy voucher made. */
+    .info-row-dotted { border-bottom: 0.5pt dotted ${ruleFaint}; padding-bottom: 5pt; }
+    .info-row-shaded { background: #F4F4F4; margin: 0 -6pt; padding: 3pt 6pt; }
     .info-label {
       font-family: 'Montserrat', Arial, sans-serif;
       font-size: 8.5pt;
@@ -491,8 +488,23 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
       text-transform: uppercase;
       color: #6B6B6B;
       padding-top: 1pt;
+      width: 140pt;
+      min-width: 140pt;
+      flex-shrink: 0;
     }
-    .info-value { color: #2B2B2B; font-size: 10pt; }
+    .info-value { color: #2B2B2B; font-size: 10pt; flex: 1; }
+
+    .cell-row { display: flex; gap: 24pt; padding: 3pt 0; }
+    .cell-label {
+      font-family: 'Montserrat', Arial, sans-serif;
+      font-size: 7.5pt;
+      font-weight: 600;
+      letter-spacing: 1pt;
+      text-transform: uppercase;
+      color: #6B6B6B;
+      margin-bottom: 2pt;
+    }
+    .cell-value { color: #2B2B2B; font-size: 10pt; }
 
     .provider-box {
       border: 0.75pt solid ${ruleFaint};
@@ -503,7 +515,13 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
       font-size: 13pt;
       font-weight: 700;
       color: ${t.accent_colour};
-      margin-bottom: 12pt;
+      margin-bottom: 4pt;
+    }
+    .provider-contact {
+      font-family: 'Montserrat', Arial, sans-serif;
+      font-size: 8pt;
+      color: #6B6B6B;
+      margin-bottom: 10pt;
     }
     .provider-description {
       font-family: 'Playfair Display', Georgia, serif;
@@ -511,6 +529,16 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
       color: #6B6B6B;
       font-style: italic;
       margin-bottom: 12pt;
+    }
+
+    .end-of-services {
+      font-family: 'Montserrat', Arial, sans-serif;
+      font-size: 8pt;
+      letter-spacing: 1.5pt;
+      text-transform: uppercase;
+      color: #9A9A9A;
+      text-align: center;
+      margin: 4pt 0 18pt;
     }
 
     .footer-section { margin-top: 8pt; text-align: center; }

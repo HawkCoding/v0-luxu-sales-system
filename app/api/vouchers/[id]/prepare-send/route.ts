@@ -10,6 +10,7 @@ import { buildSuiteTokens } from "@/lib/templates/suite-description"
 import { loadSuiteSelections } from "@/lib/templates/suite-selections"
 import { resolveDirectedRouteName } from "@/lib/routes/route-name"
 import { ensureItineraryPdf } from "@/lib/itinerary/ensure-itinerary-pdf"
+import { clientInvoiceNumber } from "@/lib/invoices/invoice-status"
 
 export const runtime = "nodejs"
 
@@ -37,6 +38,7 @@ type VoucherRow = {
   booking: {
     id: string
     booking_number: string
+    customer_invoice_number: string | null
     stage: string | null
     invoice_balance: number | null
     departure_date: string | null
@@ -64,6 +66,10 @@ function resolveBookingRouteName(route: RouteJoin | null, routeReversed: boolean
   const destination = firstRecord(route.destination)?.name
   if (route.direction_mode !== "round_trip" || !origin || !destination) return route.name
   return resolveDirectedRouteName(origin, destination, routeReversed ?? false)
+}
+
+function sanitizeFilenamePart(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_\-]/g, "_")
 }
 
 function parseStoragePath(combined: string | null): { bucket: string; path: string } | null {
@@ -95,7 +101,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
     .from("vouchers")
     .select(
       `id, voucher_number, booking_id,
-       booking:bookings(id, booking_number, stage, invoice_balance, departure_date, consultant, route_reversed, assigned_salesperson_id,
+       booking:bookings(id, booking_number, customer_invoice_number, stage, invoice_balance, departure_date, consultant, route_reversed, assigned_salesperson_id,
          customer:customers(title, first_name, last_name, email),
          route:routes(name, direction_mode, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name))),
        document:documents!pdf_document_id(storage_path)`,
@@ -200,6 +206,8 @@ export async function POST(_req: Request, { params }: RouteParams) {
   const voucherBase64 = Buffer.from(await voucherDownload.data.arrayBuffer()).toString("base64")
   const itineraryBase64 = Buffer.from(await itineraryDownload.data.arrayBuffer()).toString("base64")
 
+  const filenameNumber = sanitizeFilenamePart(clientInvoiceNumber(booking))
+
   return Response.json({
     voucher: {
       id: voucher.id,
@@ -217,12 +225,12 @@ export async function POST(_req: Request, { params }: RouteParams) {
     },
     attachments: [
       {
-        filename: `voucher-${booking.booking_number}.pdf`,
+        filename: `voucher-${filenameNumber}.pdf`,
         contentBase64: voucherBase64,
         contentType: "application/pdf",
       },
       {
-        filename: `itinerary-${booking.booking_number}.pdf`,
+        filename: `itinerary-${filenameNumber}.pdf`,
         contentBase64: itineraryBase64,
         contentType: "application/pdf",
       },

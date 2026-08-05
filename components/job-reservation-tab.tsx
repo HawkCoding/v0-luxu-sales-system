@@ -20,9 +20,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { AlertCircle, Plus, RotateCcw, Trash2 } from "lucide-react"
+import { AlertCircle, Plus, RotateCcw, Trash2, UserCheck } from "lucide-react"
 import { toast } from "sonner"
 import { ReservationFormCard } from "@/components/reservation-form-card"
+import { normalizeDateOfBirth } from "@/lib/date-format"
+import {
+  describePrefilled,
+  fillBlanksFromCustomer,
+  PREFILL_FIELDS,
+  type PrefillField,
+} from "@/lib/traveller-prefill"
 import { useJobReservationDetails, useJobTravellers, type JobTraveller } from "@/lib/use-data"
 import type { Customer, PipelineStage } from "@/lib/types"
 
@@ -158,6 +165,7 @@ export function JobReservationTab({
 
   const [travellers, setTravellers] = useState<TravellerDraft[]>([])
   const [travellerSeeds, setTravellerSeeds] = useState<Map<string, TravellerDraft>>(new Map())
+  const [prefilledFields, setPrefilledFields] = useState<Map<string, Set<PrefillField>>>(new Map())
   const [savingTravellers, setSavingTravellers] = useState(false)
   const travellersHydrated = useRef(false)
   const guestsCardRef = useRef<HTMLDivElement | null>(null)
@@ -165,21 +173,25 @@ export function JobReservationTab({
 
   const goToGuestDetails = () => {
     setShowReceivedPrompt(false)
-    if (travellers.length === 0 && customer) {
-      setTravellers([travellerFromCustomer(customer)])
-    }
     guestsCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
   }
 
   // Seed is captured once per tab session (not on every SWR revalidation) so an
-  // "Enquiry: ..." comparison survives after the salesperson saves an edit.
+  // "Enquiry: ..." comparison survives after the salesperson saves an edit. The
+  // seed is the stored row, so "revert to enquiry" undoes a prefill too.
   useEffect(() => {
     if (!travellersData || travellersHydrated.current) return
     travellersHydrated.current = true
     const drafts = travellersData.travellers.map(toDraft)
-    setTravellers(drafts)
     setTravellerSeeds(new Map(drafts.map((d) => [d.key, d])))
-  }, [travellersData])
+    if (!customer) {
+      setTravellers(drafts)
+      return
+    }
+    const { rows, prefilled } = fillBlanksFromCustomer(drafts, customer, travellerFromCustomer)
+    setTravellers(rows)
+    setPrefilledFields(prefilled)
+  }, [travellersData, customer])
 
   const agencySeed = useMemo(
     () => ({ name: customer?.companyName ?? "", address: formatCustomerAddress(customer) }),
@@ -208,37 +220,61 @@ export function JobReservationTab({
     setAgencyAddress(detailsData.agencyAddress || agencySeed.address)
   }, [detailsData, agencySeed])
 
+  // Once the salesperson edits a field themselves it is no longer "from the
+  // customer profile", so drop the hint for it.
+  const clearPrefillMarks = (key: string, fields: string[]) => {
+    setPrefilledFields((current) => {
+      const marked = current.get(key)
+      if (!marked) return current
+      const remaining = new Set(marked)
+      for (const field of fields) remaining.delete(field as PrefillField)
+      if (remaining.size === marked.size) return current
+      const next = new Map(current)
+      if (remaining.size === 0) next.delete(key)
+      else next.set(key, remaining)
+      return next
+    })
+  }
+
   const updateTraveller = (key: string, patch: Partial<TravellerDraft>) => {
     setTravellers((rows) => rows.map((row) => (row.key === key ? { ...row, ...patch } : row)))
+    clearPrefillMarks(key, Object.keys(patch))
   }
 
   const removeTraveller = (key: string) => {
     setTravellers((rows) => rows.filter((row) => row.key !== key))
+    clearPrefillMarks(key, [...PREFILL_FIELDS])
   }
 
   const revertTraveller = (key: string) => {
     const seed = travellerSeeds.get(key)
     if (!seed) return
     setTravellers((rows) => rows.map((row) => (row.key === key ? { ...seed } : row)))
+    clearPrefillMarks(key, [...PREFILL_FIELDS])
   }
 
   const setPrimaryTraveller = (key: string) => {
     setTravellers((rows) => rows.map((row) => ({ ...row, isPrimary: row.key === key })))
   }
 
-  const addOrSyncCustomerAsGuest = () => {
+  /**
+   * Manual re-run of the prefill. Fills blanks only — it never overwrites guest
+   * details already on the row, so a mis-click can't wipe typed-in data.
+   */
+  const fillFromCustomer = () => {
     if (!customer) return
-    setTravellers((rows) => {
-      const existingPrimary = rows.find((row) => row.isPrimary)
-      const seeded = travellerFromCustomer(customer)
-      if (existingPrimary) {
-        return rows.map((row) =>
-          row.key === existingPrimary.key
-            ? { ...seeded, key: row.key, id: row.id, residence: row.residence || seeded.residence }
-            : row,
-        )
+    const { rows, prefilled, changed } = fillBlanksFromCustomer(travellers, customer, travellerFromCustomer)
+    if (!changed) {
+      toast.info("Nothing to fill — the customer's guest details are already complete")
+      return
+    }
+    setTravellers(rows)
+    setPrefilledFields((current) => {
+      const next = new Map(current)
+      for (const [key, fields] of prefilled) {
+        next.set(key, new Set([...(next.get(key) ?? []), ...fields]))
       }
-      return [seeded, ...rows]
+      return next
     })
   }
 
@@ -275,6 +311,9 @@ export function JobReservationTab({
       }
       await mutateTravellers()
       await mutateJob()
+      // Prefilled values are now stored guest details, so drop the "check, then
+      // save" hint.
+      setPrefilledFields(new Map())
       toast.success("Guests saved")
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not save guests")
@@ -389,10 +428,10 @@ export function JobReservationTab({
               type="button"
               variant="outline"
               size="sm"
-              onClick={addOrSyncCustomerAsGuest}
+              onClick={fillFromCustomer}
               disabled={!customer}
             >
-              <Plus className="w-3.5 h-3.5 mr-1" /> Add customer as guest
+              <UserCheck className="w-3.5 h-3.5 mr-1" /> Fill from customer profile
             </Button>
           </div>
         </CardHeader>
@@ -408,6 +447,9 @@ export function JobReservationTab({
             travellers.map((traveller) => {
               const seed = travellerSeeds.get(traveller.key)
               const differs = seed ? travellerRowDiffers(traveller, seed) : false
+              const prefilled = prefilledFields.get(traveller.key)
+              const unreadableDob =
+                traveller.dateOfBirth.trim().length > 0 && normalizeDateOfBirth(traveller.dateOfBirth) === null
               return (
                 <div key={traveller.key} className="rounded-md border p-3 space-y-2">
                   <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
@@ -465,10 +507,18 @@ export function JobReservationTab({
                           placeholder="Date of birth"
                           value={traveller.dateOfBirth}
                           onChange={(e) => updateTraveller(traveller.key, { dateOfBirth: e.target.value })}
+                          onBlur={(e) => {
+                            const normalized = normalizeDateOfBirth(e.target.value)
+                            if (normalized && normalized !== e.target.value) {
+                              updateTraveller(traveller.key, { dateOfBirth: normalized })
+                            }
+                          }}
+                          aria-invalid={unreadableDob}
+                          aria-describedby={unreadableDob ? `dob-hint-${traveller.key}` : undefined}
                           className="sm:col-span-2"
                         />
                       </TooltipTrigger>
-                      <TooltipContent>Format: YYYY-MM-DD (e.g. 1990-02-14)</TooltipContent>
+                      <TooltipContent>Day first — 12/05/1980 or 1980-05-12</TooltipContent>
                     </Tooltip>
                     <Input
                       placeholder="ID / Passport number *"
@@ -509,6 +559,18 @@ export function JobReservationTab({
                       <Trash2 className="w-3.5 h-3.5" />
                     </Button>
                   </div>
+                  {prefilled && prefilled.size > 0 ? (
+                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <UserCheck className="w-3 h-3 shrink-0" aria-hidden="true" />
+                      Prefilled from customer profile: {describePrefilled(prefilled)}. Check, then save.
+                    </p>
+                  ) : null}
+                  {unreadableDob ? (
+                    <p id={`dob-hint-${traveller.key}`} className="text-xs text-amber-600 dark:text-amber-500">
+                      Date of birth isn&apos;t in a format we can read — use 12/05/1980 or 1980-05-12. It will be
+                      saved as typed, but won&apos;t be remembered on the customer profile.
+                    </p>
+                  ) : null}
                   {differs && seed ? (
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <span>Enquiry: {describeTraveller(seed) || "—"}</span>

@@ -875,7 +875,7 @@ export default function JobDetailPage() {
           <TabsTrigger value="enquiry" className="text-xs">Enquiry</TabsTrigger>
           <TabsTrigger value="quotes" className="text-xs">Quotes ({quotes.length})</TabsTrigger>
           <TabsTrigger value="reservation" className="text-xs">Reservation</TabsTrigger>
-          <TabsTrigger value="references" className="text-xs">Voucher References</TabsTrigger>
+          <TabsTrigger value="references" className="text-xs">Voucher Details</TabsTrigger>
           <TabsTrigger value="payments" className="text-xs">Payments ({payments.length})</TabsTrigger>
           <TabsTrigger value="correspondence" className="text-xs">Emails Sent ({correspondence.length})</TabsTrigger>
           <TabsTrigger value="documents" className="text-xs">Documents ({documents.length})</TabsTrigger>

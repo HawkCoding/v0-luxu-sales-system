@@ -47,6 +47,7 @@ describe("voucherTokens", () => {
       ink: "#2B2B2B",
       inkMuted: "#6B6B6B",
       inkFaint: "#9A9A9A",
+      rowShade: "#F4F4F4",
     })
   })
 })

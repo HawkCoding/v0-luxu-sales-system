@@ -187,6 +187,9 @@ describe("GET /api/jobs/[id]/leg-references", () => {
         label: "Rovos Rail",
         supplierName: "Rovos Rail",
         supplierReference: null,
+        supplierContactName: null,
+        voucherFootnote: null,
+        excursions: [],
       },
       {
         key: `transport_request:${TRANSPORT_ID}`,
@@ -195,6 +198,9 @@ describe("GET /api/jobs/[id]/leg-references", () => {
         label: "Transfer: Airport → Hotel",
         supplierName: "ABC Transfers",
         supplierReference: "REF-123",
+        supplierContactName: null,
+        voucherFootnote: null,
+        excursions: [],
       },
     ])
   })
@@ -225,6 +231,9 @@ describe("GET /api/jobs/[id]/leg-references", () => {
         label: "Rovos Rail",
         supplierName: "Rovos Rail",
         supplierReference: null,
+        supplierContactName: null,
+        voucherFootnote: null,
+        excursions: [],
       },
     ])
   })
@@ -336,5 +345,61 @@ describe("PATCH /api/jobs/[id]/leg-references", () => {
     )
     expect(res.status).toBe(200)
     expect(selectionUpdateCalls).toEqual([{ legId: LEG_A, payload: { supplier_reference: null } }])
+  })
+
+  it("saves contact name, footnote and excursions on a selection row", async () => {
+    const { selectionUpdateCalls } = mockAuthRole()
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          updates: [
+            {
+              kind: "selection",
+              id: LEG_A,
+              supplierReference: "38562",
+              supplierContactName: "Carla",
+              voucherFootnote: "Check in IRENE COUNTRY LODGE 2h prior to departure",
+              excursions: ["Kimberley **Weather & Time Permitted", "  "],
+            },
+          ],
+        }),
+      }),
+      makeParams(),
+    )
+    expect(res.status).toBe(200)
+    expect(selectionUpdateCalls).toEqual([
+      {
+        legId: LEG_A,
+        payload: {
+          supplier_reference: "38562",
+          supplier_contact_name: "Carla",
+          voucher_footnote: "Check in IRENE COUNTRY LODGE 2h prior to departure",
+          excursions: ["Kimberley **Weather & Time Permitted"],
+        },
+      },
+    ])
+  })
+
+  it("does not write excursions for a transport_request row (the table has no such column)", async () => {
+    const { transportUpdateCalls } = mockAuthRole()
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          updates: [
+            {
+              kind: "transport_request",
+              id: TRANSPORT_ID,
+              supplierReference: "FZBP2Z",
+              excursions: ["Should be dropped"],
+            },
+          ],
+        }),
+      }),
+      makeParams(),
+    )
+    expect(res.status).toBe(200)
+    expect(transportUpdateCalls).toEqual([{ requestId: TRANSPORT_ID, payload: { supplier_reference: "FZBP2Z" } }])
   })
 })

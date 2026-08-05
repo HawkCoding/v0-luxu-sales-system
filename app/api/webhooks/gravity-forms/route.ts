@@ -14,7 +14,18 @@ function extractFormId(payload: Json): string | null {
 
 // Raw intake only — field-to-column mapping into customers/bookings is a
 // follow-up once the web dev confirms each form's field-ID layout.
+//
+// Parked as of 2026-08: the primary inbound channel is the Gravity Forms *email* notification,
+// parsed by lib/import/parseEmailDraft.ts and imported by lib/inbound-email/sync.ts. This webhook
+// receives the exact same submission over HTTP instead of email, but nothing maps its stored rows
+// into customers/bookings yet (see gravity_forms_submissions migration), so it's disabled by
+// default to keep it from having any effect on the system. Revisit within the next month or two;
+// until then it 404s unless GRAVITY_FORMS_WEBHOOK_ENABLED=true is explicitly set.
 export async function POST(request: Request): Promise<Response> {
+  if (process.env.GRAVITY_FORMS_WEBHOOK_ENABLED !== "true") {
+    return NextResponse.json({ error: "Not found" }, { status: 404 })
+  }
+
   if (!isAuthorizedWebhookRequest(request, process.env.GRAVITY_FORMS_WEBHOOK_SECRET)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }

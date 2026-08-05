@@ -49,6 +49,7 @@ interface CustomerPatchPayload {
   postal_code: string | null
   vat_number: string | null
   date_of_birth: string | null
+  id_passport: string | null
   vip_status: boolean
   preferences: string | null
   communication_preferences: string | null
@@ -101,6 +102,7 @@ export function CustomerDetailView({
   const [postalCodeDraft, setPostalCodeDraft] = useState("")
   const [vatNumberDraft, setVatNumberDraft] = useState("")
   const [dateOfBirthDraft, setDateOfBirthDraft] = useState("")
+  const [idPassportDraft, setIdPassportDraft] = useState("")
   const [vipStatusDraft, setVipStatusDraft] = useState(false)
   const [preferencesDraft, setPreferencesDraft] = useState("")
   const [communicationPreferencesDraft, setCommunicationPreferencesDraft] = useState("")
@@ -156,6 +158,7 @@ export function CustomerDetailView({
         setPostalCodeDraft(data.customer.postalCode ?? "")
         setVatNumberDraft(data.customer.vatNumber ?? "")
         setDateOfBirthDraft(data.customer.dateOfBirth ?? "")
+        setIdPassportDraft(data.customer.idPassport ?? "")
         setVipStatusDraft(data.customer.vipStatus ?? false)
         setPreferencesDraft(data.customer.preferences ?? "")
         setCommunicationPreferencesDraft(data.customer.communicationPreferences ?? "")
@@ -237,6 +240,7 @@ export function CustomerDetailView({
     postalCodeDraft !== (customer.postalCode ?? "") ||
     vatNumberDraft !== (customer.vatNumber ?? "") ||
     dateOfBirthDraft !== (customer.dateOfBirth ?? "") ||
+    idPassportDraft !== (customer.idPassport ?? "") ||
     vipStatusDraft !== (customer.vipStatus ?? false) ||
     preferencesDraft !== (customer.preferences ?? "") ||
     communicationPreferencesDraft !== (customer.communicationPreferences ?? "") ||
@@ -256,6 +260,7 @@ export function CustomerDetailView({
       postal_code: postalCodeDraft || null,
       vat_number: vatNumberDraft || null,
       date_of_birth: dateOfBirthDraft || null,
+      id_passport: idPassportDraft.trim() || null,
       vip_status: vipStatusDraft,
       preferences: preferencesDraft || null,
       communication_preferences: communicationPreferencesDraft || null,
@@ -469,6 +474,7 @@ export function CustomerDetailView({
                       setPostalCodeDraft(customer.postalCode ?? "")
                       setVatNumberDraft(customer.vatNumber ?? "")
                       setDateOfBirthDraft(customer.dateOfBirth ?? "")
+                      setIdPassportDraft(customer.idPassport ?? "")
                       setVipStatusDraft(customer.vipStatus ?? false)
                       setPreferencesDraft(customer.preferences ?? "")
                       setCommunicationPreferencesDraft(customer.communicationPreferences ?? "")
@@ -604,6 +610,25 @@ export function CustomerDetailView({
                 readOnly={!canEditCustomers || !isEditing}
                 disabled={isSaving}
               />
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="customer-id-passport">ID / Passport number</Label>
+              <Input
+                id="customer-id-passport"
+                value={isEditing ? idPassportDraft : idPassportDraft || "Not provided"}
+                onChange={(event) => setIdPassportDraft(event.target.value)}
+                readOnly={!canEditCustomers || !isEditing}
+                disabled={isSaving}
+                placeholder={isEditing ? "ID or passport number" : "Not provided"}
+                aria-describedby="customer-id-passport-hint"
+              />
+              <p id="customer-id-passport-hint" className="text-xs text-muted-foreground">
+                Used to prefill this customer&apos;s guest row on new reservation forms. Kept in step with the
+                primary guest whenever guest details are saved on a job.
+              </p>
             </div>
           </div>
 

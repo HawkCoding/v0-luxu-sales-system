@@ -6,7 +6,7 @@ import {
   AUDIT_LOG_COLUMNS,
   BOOKING_SUITE_COLUMNS,
   BOOKING_TRANSPORT_REQUEST_COLUMNS,
-  BOOKING_WITH_ROUTE_COLUMNS,
+  BOOKING_WITH_SUPPLIER_COLUMNS,
   CORRESPONDENCE_COLUMNS,
   CUSTOMER_COLUMNS,
   DOCUMENT_COLUMNS,
@@ -88,6 +88,20 @@ const patchJobSchema = z.object({
     .optional(),
 }).passthrough()
 
+/**
+ * Reads back the raw wording an intake path preserved in `extracted_json.formFields` (see
+ * lib/import/parseEmailDraft.ts and lib/import/enquiry-payload.ts) so the enquiry tab can fall
+ * back to what the customer actually wrote when the resolver couldn't match it to a route,
+ * supplier, or hotel property. Never a substitute for the resolved value -- only a display fallback.
+ */
+function readFormField(extractedJson: unknown, field: string): string {
+  if (!extractedJson || typeof extractedJson !== "object") return ""
+  const formFields = (extractedJson as Record<string, unknown>).formFields
+  if (!formFields || typeof formFields !== "object") return ""
+  const value = (formFields as Record<string, unknown>)[field]
+  return typeof value === "string" ? value : ""
+}
+
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const auth = await requireUser()
@@ -97,7 +111,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   const { data: booking } = await supabase
     .from("bookings")
-    .select(BOOKING_WITH_ROUTE_COLUMNS)
+    .select(BOOKING_WITH_SUPPLIER_COLUMNS)
     .eq("id", id)
     .single()
 
@@ -232,6 +246,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const childTravellers = (travellers ?? []).filter((t) => t.is_child)
   const suiteTypeNames = (bookingSuites ?? []).map((s) => s.suite_type_name ?? "").filter(Boolean)
 
+  // Resolved values win when present; otherwise fall back to the raw wording the intake path
+  // preserved, so a resolver miss shows what the customer wrote instead of an empty field.
+  const route = booking.route as { name?: string; supplier?: { name?: string } | null } | null
+  const hotelSupplier = booking.hotel_supplier as { name?: string } | null
+  const resolvedDirection = route?.name ?? null
+  const resolvedSupplier = route?.supplier?.name ?? null
+  const resolvedHotelOption = hotelSupplier?.name ?? null
+
   const enquiry = {
     id: booking.id,
     jobId: booking.id,
@@ -254,7 +276,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     contactNumber: customer?.phone ?? "",
     email: customer?.email ?? "",
     country: customer?.country ?? "",
-    direction: (booking.route as { name?: string } | null)?.name ?? "",
+    direction: resolvedDirection ?? readFormField(booking.extracted_json, "direction"),
+    directionResolved: Boolean(resolvedDirection),
+    supplier: resolvedSupplier ?? (readFormField(booking.extracted_json, "supplier") || undefined),
+    supplierResolved: Boolean(resolvedSupplier),
     departureDate: booking.departure_date ?? "",
     departureDateDisplay: formatDisplayDate(booking.departure_date),
     noOfSuites: booking.no_of_suites,
@@ -264,6 +289,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     noOfChildrenOriginal: booking.no_of_children_original,
     childAges: booking.child_ages ?? [],
     suiteTypes: suiteTypeNames,
+    hotelOption: resolvedHotelOption ?? (readFormField(booking.extracted_json, "hotelOption") || undefined),
+    hotelOptionResolved: Boolean(resolvedHotelOption),
+    hotelPhase: booking.hotel_phase !== "none" ? booking.hotel_phase : undefined,
+    packageOption: readFormField(booking.extracted_json, "packageOption") || undefined,
     extendStay: booking.extend_stay ? "Yes" : undefined,
     extraNights: booking.extra_nights ?? undefined,
     additionalServices: booking.additional_services ? "Yes" : undefined,

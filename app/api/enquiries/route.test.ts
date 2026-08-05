@@ -106,6 +106,7 @@ function enquiryCustomerInput(overrides: Partial<Parameters<typeof resolveEnquir
     lastName: "Doe",
     phone: "+27 82 000 0000",
     country: "South Africa",
+    province: null,
     title: "Ms",
     nowIso: "2026-05-14T10:00:00.000Z",
     ...overrides,

@@ -290,7 +290,7 @@ describe("PUT /api/jobs/[id]/travellers", () => {
     expect(supabase.customerUpdates).toEqual([{ id_passport: "B7654321", date_of_birth: "1990-05-05" }])
   })
 
-  it("skips a non-ISO date of birth so the customers DATE column is never given junk", async () => {
+  it("normalises a day-first date of birth before syncing it to the customer", async () => {
     const supabase = buildSupabase()
     const res = await putPrimary(supabase, {
       firstName: "Jane",
@@ -300,7 +300,37 @@ describe("PUT /api/jobs/[id]/travellers", () => {
       isPrimary: true,
     })
     expect(res.status).toBe(200)
+    expect(supabase.customerUpdates).toEqual([{ id_passport: "B7654321", date_of_birth: "1990-05-05" }])
+  })
+
+  it("stores the normalised date of birth on the traveller row too", async () => {
+    const supabase = buildSupabase()
+    const res = await putPrimary(supabase, {
+      firstName: "Jane",
+      lastName: "Doe",
+      idPassport: "B7654321",
+      dateOfBirth: "14 Feb 1990",
+      isPrimary: true,
+    })
+    expect(res.status).toBe(200)
+    expect(supabase.insertCalls[0]).toEqual([expect.objectContaining({ date_of_birth: "1990-02-14" })])
+  })
+
+  it("skips an unreadable date of birth so the customers DATE column is never given junk", async () => {
+    const supabase = buildSupabase()
+    const res = await putPrimary(supabase, {
+      firstName: "Jane",
+      lastName: "Doe",
+      idPassport: "B7654321",
+      dateOfBirth: "sometime in 1990",
+      isPrimary: true,
+    })
+    expect(res.status).toBe(200)
     expect(supabase.customerUpdates).toEqual([{ id_passport: "B7654321" }])
+    // ...but the traveller row keeps what the salesperson typed.
+    expect(supabase.insertCalls[0]).toEqual([
+      expect.objectContaining({ date_of_birth: "sometime in 1990" }),
+    ])
   })
 
   it("does not touch the customer when nothing differs", async () => {

@@ -11,6 +11,9 @@ export interface VoucherTokens {
   ink: string
   inkMuted: string
   inkFaint: string
+  /** Alternating-row background for the Guest Information table — neutral grey, deliberately not
+   * derived from the brand colours, matching the legacy voucher's plain banded table. */
+  rowShade: string
 }
 
 // Solid hex blended over white instead of rgba: react-pdf renders
@@ -52,5 +55,6 @@ export function voucherTokens({
     ink: "#2B2B2B",
     inkMuted: "#6B6B6B",
     inkFaint: "#9A9A9A",
+    rowShade: "#F4F4F4",
   }
 }

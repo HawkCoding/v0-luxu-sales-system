@@ -33,6 +33,16 @@ export interface CreatedEmailBooking {
   bookingNumber: string
   duplicateOfBookingId: string | null
   rawPreview: string
+  /**
+   * The final review decision, computed after DB resolution -- richer than the pre-resolution
+   * `EmailImportContext.missingFields`/`warnings` the caller passed in, since it also accounts for
+   * an unresolved supplier/route and a possible duplicate. Callers filing the message into an IMAP
+   * folder or recording its sync status should use these, not the pre-resolution values, so a
+   * booking flagged Needs Review here is filed and logged as Needs Review everywhere else too.
+   */
+  needsReview: boolean
+  missingFields: string[]
+  warnings: string[]
 }
 
 function fallbackEmail(firstName: string, surname: string): string {
@@ -145,6 +155,7 @@ export async function createEmailBookingFromParsedDraft(
         last_name: normalizedLastName,
         phone: payload.contactNumber || null,
         country: normalizedCountry,
+        province: payload.province || null,
         title: payload.title || null,
         updated_at: new Date().toISOString(),
       })
@@ -158,6 +169,7 @@ export async function createEmailBookingFromParsedDraft(
         email: normalizedEmail,
         phone: payload.contactNumber || null,
         country: normalizedCountry,
+        province: payload.province || null,
         title: payload.title || null,
       })
       .select("id")
@@ -216,6 +228,23 @@ export async function createEmailBookingFromParsedDraft(
       ? [...context.missingFields, SUITE_TYPE_MISSING_FIELD]
       : context.missingFields
 
+  // The customer's wording was recognised (so validateDraft's raw-text check already passed) but
+  // didn't match any active supplier or route row -- a distinct failure from "the email never
+  // mentioned a supplier at all", and one auto-build silently no-ops on, so it must surface here
+  // even though it's caught too late to have been part of the pre-resolution review metadata.
+  const resolutionFailureReasons: string[] = []
+  if (parsed.trip.supplier && !trainSupplierId) {
+    resolutionFailureReasons.push("Train operator not matched to an active supplier")
+  }
+  if (payload.direction && !routeId) {
+    resolutionFailureReasons.push("Route not matched to an active route")
+  }
+  const missingFieldsWithResolutionGaps = [
+    ...missingFieldsWithSuites,
+    ...resolutionFailureReasons.filter((reason) => !missingFieldsWithSuites.includes(reason)),
+  ]
+  const needsReview = missingFieldsWithResolutionGaps.length > 0 || Boolean(duplicateOfBookingId)
+
   const { bookingNumber: allocatedBookingNumber } = await allocateJobNumberForBooking(supabase)
 
   const bookingInsert: BookingInsert = {
@@ -236,9 +265,15 @@ export async function createEmailBookingFromParsedDraft(
     raw_text: context.rawText,
     extracted_json: extractedJson,
     terms_accepted: true,
-    email_import_needs_review:
-      missingFieldsWithSuites.length > 0 || context.warnings.length > 0,
-    email_import_missing_fields: missingFieldsWithSuites,
+    hotel_phase: payload.hotelPhase || "none",
+    extend_stay: payload.extendStay ?? false,
+    additional_services: payload.additionalServices,
+    additional_services_details: payload.additionalServicesDetails || null,
+    // Low confidence alone no longer forces a review -- it's still shown as a warning, but a
+    // consultant glancing over a correctly-parsed enquiry shouldn't be blocked by a date format
+    // guess. Review is reserved for things actually missing, unresolved, or a possible duplicate.
+    email_import_needs_review: needsReview,
+    email_import_missing_fields: missingFieldsWithResolutionGaps,
     email_import_warnings: context.warnings,
     email_import_duplicate_of_booking_id: duplicateOfBookingId,
     email_import_subject: context.subject,
@@ -295,6 +330,7 @@ export async function createEmailBookingFromParsedDraft(
       hotelSupplierId,
       routeId,
       departureDate: payload.departureDate || null,
+      hotelPhase: payload.hotelPhase ?? null,
     })
     if (autoBuildResult.servicesCreated > 0 || autoBuildResult.skipped.length > 0) {
       await supabase.from("audit_logs").insert({
@@ -343,5 +379,8 @@ export async function createEmailBookingFromParsedDraft(
     bookingNumber: booking.booking_number,
     duplicateOfBookingId,
     rawPreview,
+    needsReview,
+    missingFields: missingFieldsWithResolutionGaps,
+    warnings: context.warnings,
   }
 }

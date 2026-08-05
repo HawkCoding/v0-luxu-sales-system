@@ -2,6 +2,7 @@ import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { writeAuditLog } from "@/lib/audit-write"
+import { normalizeDateOfBirth } from "@/lib/date-format"
 import { TRAVELLER_COLUMNS } from "@/lib/supabase/columns"
 import type { createSessionClient } from "@/lib/supabase/server"
 import type { Database } from "@/lib/supabase/types"
@@ -48,8 +49,6 @@ type TravellerRow = {
   sort_order: number
 }
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
-
 /**
  * Copies the primary guest's ID/passport and date of birth onto the linked
  * customer record so the CRM profile can prefill future bookings. Guest data
@@ -64,7 +63,7 @@ async function syncPrimaryGuestToCustomer(
   if (!customerId || !primary) return
 
   const idPassport = primary.idPassport.trim()
-  const dateOfBirth = primary.dateOfBirth?.trim() ?? ""
+  const dateOfBirth = normalizeDateOfBirth(primary.dateOfBirth)
 
   const { data: customer, error } = await supabase
     .from("customers")
@@ -79,8 +78,9 @@ async function syncPrimaryGuestToCustomer(
     updates.id_passport = idPassport
   }
   // customers.date_of_birth is a DATE column while travellers.date_of_birth is
-  // free text, so only sync values Postgres will accept.
-  if (ISO_DATE.test(dateOfBirth) && dateOfBirth !== (customer.date_of_birth ?? "")) {
+  // free text, so only sync values Postgres will accept. normalizeDateOfBirth
+  // returns null for anything it can't read confidently.
+  if (dateOfBirth && dateOfBirth !== (customer.date_of_birth ?? "")) {
     updates.date_of_birth = dateOfBirth
   }
 
@@ -158,7 +158,9 @@ export async function PUT(req: Request, { params }: RouteParams) {
     first_name: traveller.firstName.trim(),
     last_name: traveller.lastName.trim(),
     id_passport: traveller.idPassport?.trim() || null,
-    date_of_birth: traveller.dateOfBirth?.trim() || null,
+    // Store ISO where we can read the input, so the value round-trips to the
+    // customer profile. Unreadable input is kept verbatim rather than dropped.
+    date_of_birth: normalizeDateOfBirth(traveller.dateOfBirth) ?? (traveller.dateOfBirth?.trim() || null),
     residence: traveller.residence?.trim() || null,
     room_with: traveller.roomWith?.trim() || null,
     room_type: traveller.roomType?.trim() || null,

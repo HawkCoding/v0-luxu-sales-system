@@ -1,0 +1,42 @@
+name: Email Sync (15-min)
+
+# Vercel's cron in vercel.json stays at its daily schedule -- the Hobby plan only allows one
+# cron run per day, and upgrading isn't required for this. This workflow calls the exact same
+# authenticated endpoint (app/api/cron/email-sync/route.ts) on a tighter schedule instead, so
+# enquiries land within ~15 minutes rather than up to 24 hours. GitHub Actions schedules are
+# best-effort and can run a few minutes late under load -- acceptable for enquiry intake.
+#
+# Requires two repository secrets (Settings > Secrets and variables > Actions):
+#   PROD_APP_URL  - the deployed app's base URL, e.g. https://app.luxustravel.co.za
+#   CRON_SECRET   - must match the CRON_SECRET environment variable set in Vercel
+# Until both are set, this workflow will fail closed (the endpoint requires the exact secret).
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: email-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Trigger inbound email sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Call /api/cron/email-sync
+        run: |
+          if [ -z "${{ secrets.PROD_APP_URL }}" ] || [ -z "${{ secrets.CRON_SECRET }}" ]; then
+            echo "PROD_APP_URL and/or CRON_SECRET repository secrets are not set -- skipping." >&2
+            exit 1
+          fi
+          status=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.PROD_APP_URL }}/api/cron/email-sync")
+          cat /tmp/response.json
+          if [ "$status" -ge 300 ]; then
+            echo "email-sync endpoint returned HTTP $status" >&2
+            exit 1
+          fi
