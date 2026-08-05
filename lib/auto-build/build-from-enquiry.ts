@@ -13,6 +13,14 @@ export interface AutoBuildInput {
   hotelSupplierId: string | null
   routeId: string | null
   departureDate: string | null
+  /**
+   * Whether the hotel stay is before or after the rail journey. A post-departure hotel must not
+   * inherit the rail departure date -- that night happens after the trip ends, on a date this
+   * engine has no way to compute (trip length isn't known at intake). Left null for pre-departure
+   * or when the email didn't say either way, in which case the rail departure date is still the
+   * closest available estimate.
+   */
+  hotelPhase?: 'pre' | 'post' | 'none' | null
 }
 
 export interface AutoBuildResult {
@@ -100,7 +108,10 @@ export async function autoBuildBookingServices(
     // Route is set only for the rail leg -- the one entity a resolved routeId was ever computed
     // for at intake; a hotel leg has no route/meal-plan signal to fill from an enquiry.
     route_id: service.supplierId === input.trainSupplierId ? input.routeId : null,
-    service_date: input.departureDate,
+    service_date:
+      service.supplierId === input.hotelSupplierId && input.hotelPhase === 'post'
+        ? null
+        : input.departureDate,
     // Mirrors buildDefaultPackageSelections: only the rail leg starts selected, every optional
     // kind (hotel, transfer, ...) stays opt-in until a consultant turns it on.
     selected: !isOptionalPackageLegKind(service.kind as SupplierKind),

@@ -26,6 +26,8 @@ interface EnquiryParsedFieldsEditorProps {
   /** Traveller counts as first captured from the enquiry, kept for reference once a salesperson edits the current ones. */
   originalNoOfAdults?: number
   originalNoOfChildren?: number
+  /** False when `fields.direction` is the customer's raw wording, not a route the system resolved. */
+  directionResolved?: boolean
   readonly?: boolean
   onSaved?: () => void | Promise<void>
 }
@@ -35,6 +37,7 @@ export function EnquiryParsedFieldsEditor({
   fields,
   originalNoOfAdults,
   originalNoOfChildren,
+  directionResolved = true,
   readonly = false,
   onSaved,
 }: EnquiryParsedFieldsEditorProps) {
@@ -82,7 +85,7 @@ export function EnquiryParsedFieldsEditor({
   const originalMismatch = adultsChanged || childrenChanged
 
   const readFields = [
-    { label: "Direction", value: fields.direction },
+    { label: "Direction", value: fields.direction, unresolved: Boolean(fields.direction) && !directionResolved },
     { label: "Departure Date", value: formatDisplayDate(fields.departureDate) },
     { label: "Adults", value: String(fields.noOfAdults) },
     { label: "Children", value: String(fields.noOfChildren) },
@@ -170,10 +173,21 @@ export function EnquiryParsedFieldsEditor({
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-            {readFields.map(({ label, value }) => (
+            {readFields.map(({ label, value, unresolved }) => (
               <div key={label} className="space-y-1">
                 <p className="text-xs text-muted-foreground">{label}</p>
-                <p className="text-sm font-medium">{value || "—"}</p>
+                <p className="text-sm font-medium flex items-center gap-1.5">
+                  {value || "—"}
+                  {unresolved && (
+                    <span
+                      className="inline-flex items-center text-amber-600 dark:text-amber-500"
+                      title="Not matched to a database route -- shown as the customer wrote it"
+                    >
+                      <TriangleAlert className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span className="sr-only">Unresolved</span>
+                    </span>
+                  )}
+                </p>
               </div>
             ))}
           </div>

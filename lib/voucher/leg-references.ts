@@ -16,6 +16,13 @@ export interface LegReferenceRow {
   label: string
   supplierName: string | null
   supplierReference: string | null
+  /** Named contact next to the reference, e.g. "Carla" — falls back to the supplier's own
+   * default_contact_name when the leg hasn't set its own. */
+  supplierContactName: string | null
+  /** One-off operational caveat, e.g. "Check in IRENE COUNTRY LODGE 2h prior to departure". */
+  voucherFootnote: string | null
+  /** Only meaningful for "selection" rows on a train leg — excursions are otherwise always []. */
+  excursions: string[]
 }
 
 interface SelectionRow {
@@ -23,8 +30,14 @@ interface SelectionRow {
   package_leg_id: string
   selected: boolean
   supplier_reference: string | null
+  supplier_contact_name: string | null
+  voucher_footnote: string | null
+  excursions: string[] | null
   package_legs: { label: string | null; sort_order: number } | { label: string | null; sort_order: number }[] | null
-  suppliers: { name: string | null; kind: string | null } | { name: string | null; kind: string | null }[] | null
+  suppliers:
+    | { name: string | null; kind: string | null; default_contact_name: string | null }
+    | { name: string | null; kind: string | null; default_contact_name: string | null }[]
+    | null
 }
 
 interface BookingServiceRow {
@@ -33,7 +46,13 @@ interface BookingServiceRow {
   sort_order: number
   selected: boolean
   supplier_reference: string | null
-  suppliers: { name: string | null; kind: string | null } | { name: string | null; kind: string | null }[] | null
+  supplier_contact_name: string | null
+  voucher_footnote: string | null
+  excursions: string[] | null
+  suppliers:
+    | { name: string | null; kind: string | null; default_contact_name: string | null }
+    | { name: string | null; kind: string | null; default_contact_name: string | null }[]
+    | null
 }
 
 interface TransportRequestRow {
@@ -44,11 +63,17 @@ interface TransportRequestRow {
   dropoff_point: string
   sort_order: number
   supplier_reference: string | null
-  suppliers: { name: string | null } | { name: string | null }[] | null
+  supplier_contact_name: string | null
+  voucher_footnote: string | null
+  suppliers:
+    | { name: string | null; default_contact_name: string | null }
+    | { name: string | null; default_contact_name: string | null }[]
+    | null
 }
 
 function transportLabel(request: TransportRequestRow): string {
-  const verb = request.service_type === "rental" ? "Vehicle rental" : "Transfer"
+  const verb =
+    request.service_type === "rental" ? "Vehicle rental" : request.service_type === "flight" ? "Flight" : "Transfer"
   const pickup = request.pickup_point.trim()
   const dropoff = request.dropoff_point.trim()
   return pickup && dropoff ? `${verb}: ${pickup} → ${dropoff}` : verb
@@ -68,7 +93,7 @@ export async function loadLegReferenceRows(
     supabase
       .from("booking_package_selections")
       .select(
-        "id, package_leg_id, selected, supplier_reference, package_legs(label, sort_order), suppliers(name, kind)",
+        "id, package_leg_id, selected, supplier_reference, supplier_contact_name, voucher_footnote, excursions, package_legs(label, sort_order), suppliers(name, kind, default_contact_name)",
       )
       .eq("booking_id", bookingId)
       .eq("selected", true),
@@ -76,13 +101,15 @@ export async function loadLegReferenceRows(
     // never both, so merging is safe and lets this reader stay agnostic of which was used.
     supabase
       .from("booking_services")
-      .select("id, label, sort_order, selected, supplier_reference, suppliers(name, kind)")
+      .select(
+        "id, label, sort_order, selected, supplier_reference, supplier_contact_name, voucher_footnote, excursions, suppliers(name, kind, default_contact_name)",
+      )
       .eq("booking_id", bookingId)
       .eq("selected", true),
     supabase
       .from("booking_transport_requests")
       .select(
-        "id, package_leg_id, service_type, pickup_point, dropoff_point, sort_order, supplier_reference, suppliers(name)",
+        "id, package_leg_id, service_type, pickup_point, dropoff_point, sort_order, supplier_reference, supplier_contact_name, voucher_footnote, suppliers(name, default_contact_name)",
       )
       .eq("booking_id", bookingId)
       .order("sort_order", { ascending: true }),
@@ -112,6 +139,9 @@ export async function loadLegReferenceRows(
           label: leg?.label?.trim() || supplier?.name || "Leg",
           supplierName: supplier?.name ?? null,
           supplierReference: row.supplier_reference,
+          supplierContactName: row.supplier_contact_name ?? supplier?.default_contact_name ?? null,
+          voucherFootnote: row.voucher_footnote ?? null,
+          excursions: row.excursions ?? [],
         },
         sortOrder: leg?.sort_order ?? 0,
       }
@@ -134,6 +164,9 @@ export async function loadLegReferenceRows(
           label: row.label?.trim() || supplier?.name || "Leg",
           supplierName: supplier?.name ?? null,
           supplierReference: row.supplier_reference,
+          supplierContactName: row.supplier_contact_name ?? supplier?.default_contact_name ?? null,
+          voucherFootnote: row.voucher_footnote ?? null,
+          excursions: row.excursions ?? [],
         },
         sortOrder: row.sort_order,
       }
@@ -150,6 +183,9 @@ export async function loadLegReferenceRows(
       label: transportLabel(request),
       supplierName: supplier?.name ?? null,
       supplierReference: request.supplier_reference,
+      supplierContactName: request.supplier_contact_name ?? supplier?.default_contact_name ?? null,
+      voucherFootnote: request.voucher_footnote ?? null,
+      excursions: [],
     }
   })
 

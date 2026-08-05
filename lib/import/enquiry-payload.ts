@@ -32,6 +32,10 @@ export interface EnquiryImportPayload {
   suiteUnits: EnquirySuiteUnitPayload[]
   packageOption?: string
   hotelOption?: string
+  hotelPhase?: 'pre' | 'post' | 'none'
+  extendStay?: boolean
+  additionalServices: boolean
+  additionalServicesDetails?: string
   flightBooking?: string
   flightDepartureDate?: string
   province?: string
@@ -101,6 +105,10 @@ export function buildEnquiryImportPayload(draft: ParsedDraft): EnquiryImportPayl
     suiteUnits,
     packageOption: draft.trip.packageOption || undefined,
     hotelOption: draft.trip.hotelOption || undefined,
+    hotelPhase: draft.trip.hotelPhase || undefined,
+    extendStay: draft.trip.extendStay ?? undefined,
+    additionalServices: draft.additionalServices.requested,
+    additionalServicesDetails: draft.additionalServices.details || undefined,
     flightBooking: draft.trip.flightBooking || undefined,
     flightDepartureDate: draft.trip.flightDepartureDate || undefined,
     province: draft.customer.province || undefined,

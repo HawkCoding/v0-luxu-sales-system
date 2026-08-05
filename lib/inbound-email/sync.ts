@@ -63,7 +63,7 @@ async function ensureMailbox(client: ImapFlow, folder: string): Promise<void> {
   }
 }
 
-function getMessageBody(text: string | false | undefined, html: string | false | undefined): string {
+export function getMessageBody(text: string | false | undefined, html: string | false | undefined): string {
   if (typeof text === "string" && text.trim()) return text
   if (typeof html === "string" && html.trim()) return htmlToPlainText(html)
   return ""
@@ -215,6 +215,26 @@ export async function syncInboundEmailAccount(account: AccountRow): Promise<Emai
       const matchingRule = findMatchingInboundSubjectRule(subject, rules)
 
       if (!matchingRule) {
+        // No active rule claimed this subject. Previously this just skipped the message with no
+        // record at all -- and by the time anyone noticed, the sync cursor had already advanced
+        // past its UID, making it permanently unrecoverable. Recording a row keeps it visible and
+        // makes it count toward the dedupe check like every other message.
+        await supabase.from("inbound_email_messages").insert({
+          email_account_id: account.id,
+          sync_run_id: run.id,
+          booking_id: null,
+          uidvalidity,
+          uid,
+          message_id: parsedMail.messageId ?? null,
+          subject,
+          from_address: parsedMail.from?.text ?? null,
+          received_at: parsedMail.date?.toISOString() ?? null,
+          status: "skipped_no_rule",
+          filing_status: "not_applicable",
+          missing_fields: [],
+          warnings: [],
+          raw_preview: null,
+        })
         continue
       }
 
@@ -234,6 +254,10 @@ export async function syncInboundEmailAccount(account: AccountRow): Promise<Emai
           warnings: review.warnings,
         })
 
+        // created.needsReview is the final, post-resolution decision (also covers an unresolved
+        // supplier/route and a possible duplicate) -- using the pre-resolution `review` here would
+        // let a booking that the enquiry tab flags as Needs Review get filed into the processed
+        // folder and logged as imported_complete.
         const { data: messageRow, error: messageError } = await supabase
           .from("inbound_email_messages")
           .insert({
@@ -246,10 +270,10 @@ export async function syncInboundEmailAccount(account: AccountRow): Promise<Emai
             subject,
             from_address: parsedMail.from?.text ?? null,
             received_at: receivedAt,
-            status: review.needsReview ? "imported_needs_review" : "imported_complete",
+            status: created.needsReview ? "imported_needs_review" : "imported_complete",
             filing_status: "filed",
-            missing_fields: review.missingFields,
-            warnings: review.warnings,
+            missing_fields: created.missingFields,
+            warnings: created.warnings,
             raw_preview: created.rawPreview,
           })
           .select("id")
@@ -264,7 +288,7 @@ export async function syncInboundEmailAccount(account: AccountRow): Promise<Emai
           .update({ email_import_source_message_id: messageRow.id })
           .eq("id", created.id)
 
-        const targetFolder = review.needsReview
+        const targetFolder = created.needsReview
           ? account.needs_review_folder
           : account.processed_folder
 
@@ -285,7 +309,7 @@ export async function syncInboundEmailAccount(account: AccountRow): Promise<Emai
         }
 
         summary.importedCount += 1
-        if (review.needsReview) summary.needsReviewCount += 1
+        if (created.needsReview) summary.needsReviewCount += 1
       } catch (error) {
         summary.errors.push(error instanceof Error ? error.message : `Import failed for UID ${uid}`)
       }

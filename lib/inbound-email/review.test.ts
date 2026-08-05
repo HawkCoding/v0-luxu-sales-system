@@ -56,4 +56,28 @@ No. of Suites: 1
     expect(review.needsReview).toBe(false)
     expect(review.missingFields).not.toContain("Supplier")
   })
+
+  it("does not flag review for a complete draft that only has a low-confidence field", () => {
+    // A departure date read from prose ("15 Mar 2026" rather than a labelled form field) parses
+    // at low confidence, but it's still a real, usable date -- on its own that must not force
+    // every otherwise-complete enquiry into the Needs Review queue.
+    const draft = parseEmailDraft(`
+Title: Ms
+First name: Jane
+Surname: Smith
+Email: jane@example.com
+Country: South Africa
+Rovos Rail
+Pretoria to Cape Town
+Please quote for travel on 15 Mar 2026.
+No. of Adults: 2
+No. of Suites: 1
+`)
+    expect(draft.confidence["trip.departureDate"]).toBe("low")
+
+    const review = getEmailImportReviewMetadata(draft)
+
+    expect(review.needsReview).toBe(false)
+    expect(review.warnings).toContain("DepartureDate parsed with low confidence")
+  })
 })

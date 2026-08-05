@@ -1,73 +1,11 @@
 import { Text, View } from "@react-pdf/renderer"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { voucherServiceTypeLabel } from "@/lib/generate-voucher"
-import { formatDisplayDateLong } from "@/lib/date-format"
+import { voucherProviderContactLine, voucherRowsForBlock, type VoucherRow } from "@/lib/voucher/service-block-rows"
 import type { voucherStyles } from "../styles"
-import { InfoRow } from "./info-row"
+import { CellRow, InfoRow } from "./info-row"
 
 type Styles = ReturnType<typeof voucherStyles>
-
-// Only ISO date-ish values are reformatted; anything else is already display text
-// and must be passed through untouched (re-parsing "04/07/2026" would flip d/m).
-function fmt(value: string | null | undefined): string | null {
-  if (!value) return null
-  if (!/^\d{4}-\d{2}-\d{2}/.test(value)) return value
-  return formatDisplayDateLong(value) || value
-}
-
-function rowsForBlock(block: VoucherServiceBlock): Array<[string, string | number]> {
-  const rows: Array<[string, string | number]> = []
-  const d = block.serviceData
-  const departureDate = fmt(d.departureDate)
-  const arrivalDate = fmt(d.arrivalDate)
-  rows.push(["Your Reference", block.supplierReference ?? "—"])
-
-  if (block.serviceType === "train") {
-    rows.push(["Route", d.route ?? "—"])
-    if (d.durationDays != null) {
-      rows.push(["Duration", `${d.durationDays} ${d.durationDays === 1 ? "day" : "days"}`])
-    }
-    rows.push(["Departure Date", departureDate ?? "—"])
-    rows.push(["Arrival Date", arrivalDate ?? "TBC"])
-    rows.push(["Suite Type", d.suiteType ?? "—"])
-    if (d.numberOfSuites != null) rows.push(["Number of Suites", d.numberOfSuites])
-    if (d.mealPlan) rows.push(["Meal Basis", d.mealPlan])
-  } else if (block.serviceType === "hotel") {
-    if (d.roomType) rows.push(["Room Type", d.roomType])
-    if (d.nights != null) rows.push(["Nights", d.nights])
-    if (d.mealPlan) rows.push(["Meal Plan", d.mealPlan])
-    if (departureDate) rows.push(["Check-In", departureDate])
-    if (arrivalDate) rows.push(["Check-Out", arrivalDate])
-  } else if (block.serviceType === "transfer") {
-    if (d.vehicleType) rows.push(["Vehicle", d.vehicleType])
-    if (d.pickup) rows.push(["Pickup", d.pickup])
-    if (d.dropoff) rows.push(["Drop-off", d.dropoff])
-    if (departureDate) rows.push(["Date", departureDate])
-    if (d.startTime) rows.push(["Pickup Time", d.startTime])
-    if (d.flightNumber) rows.push(["Flight", d.flightNumber])
-    if (arrivalDate) rows.push(["Return", d.endTime ? `${arrivalDate} ${d.endTime}` : arrivalDate])
-  } else if (block.serviceType === "tour") {
-    if (d.itinerary) rows.push(["Itinerary", d.itinerary])
-    if (departureDate) rows.push(["Start Date", departureDate])
-    if (arrivalDate) rows.push(["End Date", arrivalDate])
-  } else if (block.serviceType === "airline") {
-    if (d.route) rows.push(["Route", d.route])
-    if (d.cabin) rows.push(["Cabin", d.cabin])
-    if (d.flightNumber) rows.push(["Flight", d.flightNumber])
-    if (departureDate) rows.push(["Departure", departureDate])
-    if (arrivalDate) rows.push(["Arrival", arrivalDate])
-  }
-
-  if (d.notes) rows.push(["Notes", d.notes])
-
-  const contactParts: string[] = []
-  if (block.contactDetails.phone) contactParts.push(`Phone: ${block.contactDetails.phone}`)
-  if (block.contactDetails.email) contactParts.push(`Email: ${block.contactDetails.email}`)
-  if (block.contactDetails.location) contactParts.push(`Location: ${block.contactDetails.location}`)
-  if (contactParts.length > 0) rows.push(["Contact", contactParts.join(" • ")])
-
-  return rows
-}
 
 interface ServiceBlockProps {
   block: VoucherServiceBlock
@@ -79,26 +17,46 @@ interface ServiceBlockProps {
 // for a full A4 content column at these type sizes.
 const SINGLE_PAGE_CHAR_BUDGET = 1800
 
-function fitsOnOnePage(rows: Array<[string, string | number]>, extra: string): boolean {
-  const chars = rows.reduce((sum, [label, value]) => sum + label.length + String(value).length, extra.length)
+function rowChars(row: VoucherRow): number {
+  if (row.cells) return row.cells.reduce((sum, cell) => sum + cell.label.length + String(cell.value).length, 0)
+  return row.label.length + String(row.value ?? "").length
+}
+
+function fitsOnOnePage(rows: VoucherRow[], extra: string): boolean {
+  const chars = rows.reduce((sum, row) => sum + rowChars(row), extra.length)
   return chars <= SINGLE_PAGE_CHAR_BUDGET
 }
 
 export function ServiceBlock({ block, styles }: ServiceBlockProps) {
   const title = block.title || voucherServiceTypeLabel(block.serviceType)
-  const rows = rowsForBlock(block)
+  const rows = voucherRowsForBlock(block)
   const name = block.contactDetails.name ?? ""
+  const contactLine = voucherProviderContactLine(block.contactDetails)
 
   return (
-    <View style={styles.section} wrap={!fitsOnOnePage(rows, `${title}${name}`)}>
+    <View style={styles.section} wrap={!fitsOnOnePage(rows, `${title}${name}${contactLine ?? ""}`)}>
       <Text style={styles.sectionTitle} minPresenceAhead={60}>
         {title}
       </Text>
       <View style={styles.providerBox}>
         {name ? <Text style={styles.providerName}>{name}</Text> : null}
-        {rows.map(([label, value], idx) => (
-          <InfoRow key={`${block.serviceType}-${idx}`} label={label} value={value} styles={styles} />
-        ))}
+        {contactLine ? <Text style={styles.providerContact}>{contactLine}</Text> : null}
+        {block.contactDetails.description ? (
+          <Text style={styles.providerDescription}>{block.contactDetails.description}</Text>
+        ) : null}
+        {rows.map((row, idx) =>
+          row.cells ? (
+            <CellRow key={`${block.serviceType}-${idx}`} cells={row.cells} styles={styles} dotted />
+          ) : (
+            <InfoRow
+              key={`${block.serviceType}-${idx}`}
+              label={row.label}
+              value={row.value ?? ""}
+              styles={styles}
+              dotted
+            />
+          ),
+        )}
       </View>
     </View>
   )

@@ -108,4 +108,96 @@ describe("checkVoucherReadiness", () => {
       fixHint: expect.stringContaining("Move"),
     })
   })
+
+  it("returns no warnings when serviceBlocks is omitted", () => {
+    const result = checkVoucherReadiness(readyInput)
+    expect(result.warnings).toEqual([])
+  })
+
+  it("warns, but stays ready, when a train block has no contact name, address, times or guest counts", () => {
+    const result = checkVoucherReadiness({
+      ...readyInput,
+      serviceBlocks: [
+        {
+          title: "The Blue Train",
+          serviceType: "train",
+          supplierContactName: null,
+          streetAddress: null,
+          startTime: null,
+          endTime: null,
+          hasGuestBreakdown: false,
+        },
+      ],
+    })
+    expect(result.ready).toBe(true)
+    expect(result.warnings.map((w) => w.code)).toEqual([
+      "supplier_contact_missing",
+      "supplier_address_missing",
+      "service_times_missing",
+      "guest_counts_missing",
+    ])
+    expect(result.warnings[0].message).toContain("The Blue Train")
+  })
+
+  it("does not warn about times/guests for a transfer block (neither concept applies)", () => {
+    const result = checkVoucherReadiness({
+      ...readyInput,
+      serviceBlocks: [
+        {
+          title: "Airport Transfer",
+          serviceType: "transfer",
+          supplierContactName: "Pierre",
+          streetAddress: "5 Johannes Drive",
+          startTime: null,
+          endTime: null,
+          hasGuestBreakdown: false,
+        },
+      ],
+    })
+    expect(result.warnings).toEqual([])
+  })
+
+  it("flags an airline block missing cabin, airport codes or baggage allowance", () => {
+    const result = checkVoucherReadiness({
+      ...readyInput,
+      serviceBlocks: [
+        {
+          title: "FlySafair FA-120",
+          serviceType: "airline",
+          supplierContactName: "Reservations",
+          streetAddress: "Airport Rd",
+          startTime: "16:20",
+          endTime: "18:25",
+          hasGuestBreakdown: false,
+          cabin: null,
+          departureAirportCode: "CPT",
+          arrivalAirportCode: "JNB",
+          handLuggageKg: 7,
+          checkedLuggageKg: null,
+        },
+      ],
+    })
+    expect(result.warnings).toContainEqual(
+      expect.objectContaining({ code: "flight_details_incomplete", message: expect.stringContaining("FlySafair FA-120") }),
+    )
+  })
+
+  it("does not fail generation when warnings are present", () => {
+    const result = checkVoucherReadiness({
+      ...readyInput,
+      serviceBlocks: [
+        {
+          title: "The Blue Train",
+          serviceType: "train",
+          supplierContactName: null,
+          streetAddress: null,
+          startTime: null,
+          endTime: null,
+          hasGuestBreakdown: false,
+        },
+      ],
+    })
+    expect(result.ready).toBe(true)
+    expect(result.failures).toHaveLength(0)
+  })
 })

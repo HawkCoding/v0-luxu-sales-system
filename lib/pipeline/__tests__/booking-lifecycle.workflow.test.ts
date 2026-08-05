@@ -328,7 +328,7 @@ describe("booking lifecycle workflow regression", () => {
         customerEmail: "ada@example.test",
       missingLegReferenceLabels: [],
       }),
-    ).toEqual({ ready: true, failures: [] })
+    ).toEqual({ ready: true, failures: [], warnings: [] })
   })
 
   it("applies voucher sent and closed side effects", async () => {

@@ -214,6 +214,23 @@ export function voucherStyles({
       flexDirection: "row",
       marginBottom: 6,
     },
+    // Legacy tables ruled every row with a dotted line — applied inside providerBox only;
+    // Guest Information uses alternating bands (infoRowShaded) instead, since that's how the
+    // legacy voucher distinguished its guest table.
+    // NOTE: borderBottomStyle "dotted" corrupts rendering in this react-pdf version (rows after
+    // it silently drop their text) — a plain thin solid rule reads close enough to "dotted" at
+    // this size and renders reliably.
+    infoRowDotted: {
+      borderBottomColor: t.ruleFaint,
+      borderBottomWidth: 0.5,
+      paddingBottom: 5,
+    },
+    infoRowShaded: {
+      backgroundColor: t.rowShade,
+      marginHorizontal: -6,
+      paddingHorizontal: 6,
+      paddingVertical: 3,
+    },
     infoLabel: {
       color: t.inkMuted,
       fontFamily: fonts.sans,
@@ -231,6 +248,27 @@ export function voucherStyles({
       fontSize: 10,
       lineHeight: 1.4,
     },
+    cellRow: {
+      flexDirection: "row",
+      marginBottom: 6,
+    },
+    cell: {
+      marginRight: 24,
+    },
+    cellLabel: {
+      color: t.inkMuted,
+      fontFamily: fonts.sans,
+      fontSize: 7.5,
+      fontWeight: 600,
+      letterSpacing: 1,
+      marginBottom: 2,
+      textTransform: "uppercase",
+    },
+    cellValue: {
+      color: t.ink,
+      fontSize: 10,
+      lineHeight: 1.4,
+    },
     providerBox: {
       borderColor: t.ruleFaint,
       borderWidth: 0.75,
@@ -241,6 +279,12 @@ export function voucherStyles({
       fontFamily: fonts.display,
       fontSize: 13,
       fontWeight: 700,
+      marginBottom: 4,
+    },
+    providerContact: {
+      color: t.inkMuted,
+      fontFamily: fonts.sans,
+      fontSize: 8,
       marginBottom: 10,
     },
     providerDescription: {
@@ -249,6 +293,16 @@ export function voucherStyles({
       fontSize: 9.5,
       fontStyle: "italic",
       marginBottom: 10,
+    },
+    endOfServices: {
+      color: t.inkFaint,
+      fontFamily: fonts.sans,
+      fontSize: 8,
+      letterSpacing: 1.5,
+      marginTop: 4,
+      marginBottom: 18,
+      textAlign: "center",
+      textTransform: "uppercase",
     },
     footerSection: {
       alignItems: "center",

@@ -33,7 +33,6 @@ export function mapSupplierKindToServiceType(kind: SupplierKind | string | null)
 
 interface BuildContext {
   bookingId: string
-  supplierReferenceFallback?: string | null
   additionalServicesDetails?: string | null
   /** Fallback check-in/check-out times when a hotel has no default times of its own. */
   hotelDefaultTimes?: HotelDefaultTimes
@@ -42,6 +41,14 @@ interface BuildContext {
    * it, instead of whatever is currently selected live on the job. Manually-added transport
    * requests (no package leg) are never priced this way and stay unfiltered. */
   legIds?: Set<string>
+  /** The booking's reservation-details form — folded into every train/hotel block as a
+   * "Requests" and "Occasion" row, mirroring how the legacy voucher repeated the party's meal
+   * seating, smoking preference and occasion on each service block. */
+  reservationDetails?: {
+    occasion: string | null
+    mealSeating: "first" | "second" | null
+    smokingPreference: "smoking" | "non_smoking" | null
+  } | null
 }
 
 interface SupplierJoin {
@@ -50,6 +57,10 @@ interface SupplierJoin {
   email: string | null
   website: string | null
   location: string | null
+  description: string | null
+  street_address: string | null
+  emergency_phone: string | null
+  default_contact_name: string | null
   kind: SupplierKind | string | null
   default_time_start: string | null
   default_time_end: string | null
@@ -61,8 +72,19 @@ interface RouteJoin {
   name: string | null
   duration_days: number | null
   direction_mode: string | null
+  default_excursions: string[] | null
   origin: { name: string | null } | { name: string | null }[] | null
   destination: { name: string | null } | { name: string | null }[] | null
+}
+
+interface FlightDetailsJoin {
+  cabin: string | null
+  departure_airport_code: string | null
+  arrival_airport_code: string | null
+  arrival_at: string | null
+  hand_luggage_kg: number | null
+  checked_luggage_kg: number | null
+  priority_boarding: boolean | null
 }
 
 interface TransportRequestJoinRow {
@@ -70,25 +92,33 @@ interface TransportRequestJoinRow {
   package_leg_id: string | null
   /** Set instead of package_leg_id for a Build Booking (booking_services) leg. */
   service_id: string | null
+  supplier_id: string | null
   service_type: string
   pickup_point: string
   dropoff_point: string
   pickup_at: string | null
   flight_number: string | null
+  passenger_count: number | null
   notes: string | null
   sort_order: number
   supplier_reference: string | null
+  supplier_contact_name: string | null
+  voucher_footnote: string | null
   suppliers: SupplierJoin | SupplierJoin[] | null
   suite_types: { name: string | null } | { name: string | null }[] | null
   rental_details:
     | { return_at: string | null }
     | { return_at: string | null }[]
     | null
+  flight_details: FlightDetailsJoin | FlightDetailsJoin[] | null
 }
 
 interface SelectionUnitJoinRow {
   suite_type_id: string | null
   sort_order: number
+  adult_count: number | null
+  child_count: number | null
+  infant_count: number | null
   suite_types: { name: string | null } | { name: string | null }[] | null
   bedroom_types: { name: string | null } | { name: string | null }[] | null
   bedroom_layouts: { name: string | null } | { name: string | null }[] | null
@@ -107,6 +137,9 @@ interface SelectionJoinRow {
   nights: number | null
   notes: string | null
   supplier_reference: string | null
+  supplier_contact_name: string | null
+  voucher_footnote: string | null
+  excursions: string[] | null
   package_legs: { sort_order: number; label: string | null } | { sort_order: number; label: string | null }[] | null
   suppliers: SupplierJoin | SupplierJoin[] | null
   routes: RouteJoin | RouteJoin[] | null
@@ -129,6 +162,9 @@ interface BookingServiceJoinRow {
   nights: number | null
   notes: string | null
   supplier_reference: string | null
+  supplier_contact_name: string | null
+  voucher_footnote: string | null
+  excursions: string[] | null
   suppliers: SupplierJoin | SupplierJoin[] | null
   routes: RouteJoin | RouteJoin[] | null
   suite_types: { name: string | null } | { name: string | null }[] | null
@@ -154,6 +190,9 @@ function serviceRowToSelectionRow(row: BookingServiceJoinRow): SelectionJoinRow 
     nights: row.nights,
     notes: row.notes,
     supplier_reference: row.supplier_reference,
+    supplier_contact_name: row.supplier_contact_name,
+    voucher_footnote: row.voucher_footnote,
+    excursions: row.excursions,
     package_legs: { sort_order: row.sort_order, label: row.label },
     suppliers: row.suppliers,
     routes: row.routes,
@@ -241,6 +280,36 @@ function resolveLegSuiteNames(
   return { names: legacyName ? [legacyName] : [], unitCount: legacyName ? 1 : 0 }
 }
 
+/** Adults/children/infants captured across a leg's suite/room units — null when the leg has no
+ * units (legacy pre-cutover rows), so the voucher omits the row rather than printing zeroes. */
+function sumUnitGuestBreakdown(
+  units: SelectionUnitJoinRow[] | null,
+): { adults: number; children: number; infants: number } | null {
+  if (!units || units.length === 0) return null
+  return units.reduce(
+    (total, unit) => ({
+      adults: total.adults + (unit.adult_count ?? 0),
+      children: total.children + (unit.child_count ?? 0),
+      infants: total.infants + (unit.infant_count ?? 0),
+    }),
+    { adults: 0, children: 0, infants: 0 },
+  )
+}
+
+/** "1st seating meals; Nonsmoking" — the reservation form's meal-seating and smoking preference
+ * folded into one line, the way the legacy voucher printed them on the train block. */
+function buildRequestsLine(details: BuildContext["reservationDetails"]): string | null {
+  if (!details) return null
+  const parts: string[] = []
+  if (details.mealSeating) {
+    parts.push(details.mealSeating === "first" ? "1st seating meals" : "2nd seating meals")
+  }
+  if (details.smokingPreference) {
+    parts.push(details.smokingPreference === "smoking" ? "Smoking" : "Nonsmoking")
+  }
+  return parts.length > 0 ? parts.join("; ") : null
+}
+
 /** The route name as it should read on client documents: the canonical name, unless it's a
  * two-way route with resolvable endpoint names, in which case it renders the booked direction. */
 function resolveVoucherRouteName(route: RouteJoin | null | undefined, reversed: boolean): string | null {
@@ -272,8 +341,11 @@ interface TransportBlockContext {
   supplierReference: string | null
 }
 
-/** One captured transfer/rental trip → one client-facing block: the typed pickup/drop-off and
- * pickup time are authoritative; rentals also carry their return date/time. */
+/** One captured transfer/rental/flight trip → one client-facing block. Flights reuse this same
+ * request row (pickup/dropoff double as departure/arrival airports, pickup_at as the departure
+ * time, supplier_reference as the PNR) so a flight gets its own "airline" block instead of a
+ * "transfer" one; everything else here is the typed pickup/drop-off and pickup time being
+ * authoritative, with rentals additionally carrying their return date/time. */
 function transportRequestBlock(
   request: TransportRequestJoinRow,
   blockContext: TransportBlockContext,
@@ -281,12 +353,55 @@ function transportRequestBlock(
   const requestSuite = firstRecord(request.suite_types)
   const rental = firstRecord(request.rental_details)
   const isRental = request.service_type === "rental"
+  const isFlight = request.service_type === "flight"
+  const flight = isFlight ? firstRecord(request.flight_details) : null
+
+  const contactDetails: VoucherServiceBlockContact = {
+    ...blockContext.contactDetails,
+    streetAddress: blockContext.supplier?.street_address ?? blockContext.contactDetails.streetAddress ?? null,
+    emergencyPhone: blockContext.supplier?.emergency_phone ?? blockContext.contactDetails.emergencyPhone ?? null,
+  }
+  const supplierContactName = request.supplier_contact_name ?? blockContext.supplier?.default_contact_name ?? null
+
+  if (isFlight) {
+    return {
+      serviceType: "airline",
+      title: blockContext.title,
+      supplierId: request.supplier_id,
+      supplierReference: blockContext.supplierReference,
+      supplierContactName,
+      contactDetails,
+      serviceData: {
+        route:
+          request.pickup_point.trim() && request.dropoff_point.trim()
+            ? `${request.pickup_point.trim()} → ${request.dropoff_point.trim()}`
+            : null,
+        departureAirportCode: request.pickup_point.trim() || null,
+        arrivalAirportCode: request.dropoff_point.trim() || null,
+        departureDate: timestampDate(request.pickup_at),
+        startTime: timestampTime(request.pickup_at),
+        arrivalDate: timestampDate(flight?.arrival_at),
+        endTime: timestampTime(flight?.arrival_at),
+        cabin: flight?.cabin ?? null,
+        flightNumber: request.flight_number,
+        passengerCount: request.passenger_count,
+        handLuggageKg: flight?.hand_luggage_kg ?? null,
+        checkedLuggageKg: flight?.checked_luggage_kg ?? null,
+        priorityBoarding: flight?.priority_boarding ?? null,
+        notes: request.notes,
+        footnote: request.voucher_footnote,
+      },
+      displayOrder: blockContext.displayOrder,
+    }
+  }
 
   return {
     serviceType: "transfer",
     title: blockContext.title,
+    supplierId: request.supplier_id,
     supplierReference: blockContext.supplierReference,
-    contactDetails: blockContext.contactDetails,
+    supplierContactName,
+    contactDetails,
     serviceData: {
       pickup: request.pickup_point.trim() || null,
       dropoff: request.dropoff_point.trim() || null,
@@ -298,7 +413,9 @@ function transportRequestBlock(
       vehicleType: requestSuite?.name ?? blockContext.fallbackVehicle,
       suiteType: requestSuite?.name ?? blockContext.fallbackVehicle,
       flightNumber: request.flight_number,
+      passengerCount: request.passenger_count,
       notes: request.notes,
+      footnote: request.voucher_footnote,
       inclusions: cleanList(blockContext.supplier?.inclusions),
       exclusions: cleanList(blockContext.supplier?.exclusions),
     },
@@ -323,12 +440,12 @@ export async function buildVoucherServiceBlocks(
   const { data: rows, error } = await supabase
     .from("booking_package_selections")
     .select(
-      `id, package_leg_id, selected, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, notes, supplier_reference,
+      `id, package_leg_id, selected, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, notes, supplier_reference, supplier_contact_name, voucher_footnote, excursions,
        package_legs(sort_order, label),
-       suppliers(name, phone, email, website, location, kind, default_time_start, default_time_end, inclusions, exclusions),
-       routes(name, duration_days, direction_mode, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name)),
+       suppliers(name, phone, email, website, location, description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions),
+       routes(name, duration_days, direction_mode, default_excursions, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name)),
        suite_types(name),
-       units:booking_package_selection_units(suite_type_id, sort_order, suite_types(name), bedroom_types(name), bedroom_layouts(name), bathroom_types(name))`,
+       units:booking_package_selection_units(suite_type_id, sort_order, adult_count, child_count, infant_count, suite_types(name), bedroom_types(name), bedroom_layouts(name), bathroom_types(name))`,
     )
     .eq("booking_id", context.bookingId)
 
@@ -340,11 +457,11 @@ export async function buildVoucherServiceBlocks(
   const { data: serviceRows, error: servicesError } = await supabase
     .from("booking_services")
     .select(
-      `id, label, sort_order, selected, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, notes, supplier_reference,
-       suppliers(name, phone, email, website, location, kind, default_time_start, default_time_end, inclusions, exclusions),
-       routes(name, duration_days, direction_mode, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name)),
+      `id, label, sort_order, selected, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, notes, supplier_reference, supplier_contact_name, voucher_footnote, excursions,
+       suppliers(name, phone, email, website, location, description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions),
+       routes(name, duration_days, direction_mode, default_excursions, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name)),
        suite_types(name),
-       units:booking_service_units(suite_type_id, sort_order, suite_types(name), bedroom_types(name), bedroom_layouts(name), bathroom_types(name))`,
+       units:booking_service_units(suite_type_id, sort_order, adult_count, child_count, infant_count, suite_types(name), bedroom_types(name), bedroom_layouts(name), bathroom_types(name))`,
     )
     .eq("booking_id", context.bookingId)
 
@@ -355,10 +472,11 @@ export async function buildVoucherServiceBlocks(
   const { data: transportRows, error: transportError } = await supabase
     .from("booking_transport_requests")
     .select(
-      `id, package_leg_id, service_id, service_type, pickup_point, dropoff_point, pickup_at, flight_number, notes, sort_order, supplier_reference,
-       suppliers(name, phone, email, website, location, kind, default_time_start, default_time_end, inclusions, exclusions),
+      `id, package_leg_id, service_id, supplier_id, service_type, pickup_point, dropoff_point, pickup_at, flight_number, passenger_count, notes, sort_order, supplier_reference, supplier_contact_name, voucher_footnote,
+       suppliers(name, phone, email, website, location, description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions),
        suite_types(name),
-       rental_details:booking_vehicle_rental_details(return_at)`,
+       rental_details:booking_vehicle_rental_details(return_at),
+       flight_details:booking_flight_details(cabin, departure_airport_code, arrival_airport_code, arrival_at, hand_luggage_kg, checked_luggage_kg, priority_boarding)`,
     )
     .eq("booking_id", context.bookingId)
     .order("sort_order", { ascending: true })
@@ -380,6 +498,9 @@ export async function buildVoucherServiceBlocks(
       ? await getHotelDefaultTimes(supabase)
       : null)
 
+  const requestsLine = buildRequestsLine(context.reservationDetails)
+  const occasion = context.reservationDetails?.occasion?.trim() || null
+
   const blocks: VoucherServiceBlock[] = selections.flatMap((row, idx) => {
     const supplier = firstRecord(row.suppliers)
     const route = firstRecord(row.routes)
@@ -388,6 +509,7 @@ export async function buildVoucherServiceBlocks(
 
     const serviceType = mapSupplierKindToServiceType(supplier?.kind ?? null)
     const isHotel = serviceType === "hotel"
+    const isTrain = serviceType === "train"
 
     const contactDetails: VoucherServiceBlockContact = {
       name: supplier?.name ?? null,
@@ -395,7 +517,11 @@ export async function buildVoucherServiceBlocks(
       email: supplier?.email ?? null,
       website: supplier?.website ?? null,
       location: supplier?.location ?? null,
+      description: supplier?.description ?? null,
+      streetAddress: supplier?.street_address ?? null,
+      emergencyPhone: supplier?.emergency_phone ?? null,
     }
+    const supplierContactName = row.supplier_contact_name ?? supplier?.default_contact_name ?? null
 
     const title = leg?.label?.trim() || voucherServiceTypeLabel(serviceType)
     const displayOrder = leg?.sort_order ?? idx
@@ -418,7 +544,7 @@ export async function buildVoucherServiceBlocks(
             contactDetails,
             supplier,
             fallbackVehicle: suite?.name ?? null,
-            supplierReference: request.supplier_reference ?? context.supplierReferenceFallback ?? null,
+            supplierReference: request.supplier_reference ?? null,
           }),
         )
       }
@@ -463,15 +589,26 @@ export async function buildVoucherServiceBlocks(
       nights,
       durationDays,
       notes: row.notes ?? null,
+      footnote: row.voucher_footnote ?? null,
       inclusions: cleanList(supplier?.inclusions),
       exclusions: cleanList(supplier?.exclusions),
+      // The party's meal-seating/smoking/occasion preferences apply to the whole trip, so they're
+      // repeated on every train/hotel block rather than tied to one leg.
+      guestBreakdown: isTrain || isHotel ? sumUnitGuestBreakdown(row.units) : null,
+      requestsLine: isTrain || isHotel ? requestsLine : null,
+      occasion: isTrain || isHotel ? occasion : null,
+      // A leg's own excursions override the route's defaults; only trains carry the concept today.
+      excursions: isTrain ? (row.excursions?.length ? cleanList(row.excursions) : cleanList(route?.default_excursions)) : undefined,
+      itinerary: serviceType === "tour" ? directedRouteName || row.notes || null : null,
     }
 
     return [
       {
         serviceType,
         title,
-        supplierReference: row.supplier_reference ?? context.supplierReferenceFallback ?? null,
+        supplierId: row.supplier_id,
+        supplierReference: row.supplier_reference ?? null,
+        supplierContactName,
         contactDetails,
         serviceData,
         displayOrder,
@@ -496,10 +633,13 @@ export async function buildVoucherServiceBlocks(
             email: supplier?.email ?? null,
             website: supplier?.website ?? null,
             location: supplier?.location ?? null,
+            description: supplier?.description ?? null,
+            streetAddress: supplier?.street_address ?? null,
+            emergencyPhone: supplier?.emergency_phone ?? null,
           },
           supplier,
           fallbackVehicle: null,
-          supplierReference: request.supplier_reference ?? context.supplierReferenceFallback ?? null,
+          supplierReference: request.supplier_reference ?? null,
         }),
       )
     })
@@ -509,7 +649,7 @@ export async function buildVoucherServiceBlocks(
     blocks.push({
       serviceType: "additional_service",
       title: "Additional Services",
-      supplierReference: context.supplierReferenceFallback ?? null,
+      supplierReference: null,
       contactDetails: {},
       serviceData: { notes: context.additionalServicesDetails.trim() },
       displayOrder: blocks.length,

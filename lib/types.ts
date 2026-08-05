@@ -752,6 +752,12 @@ export interface Supplier {
   inclusions: string[]
   /** Client-facing exclusions pooled into the quote's "Your Package Excludes" section. */
   exclusions: string[]
+  /** Printed under this supplier's heading on the voucher, alongside phone/location. */
+  streetAddress: string | null
+  emergencyPhone: string | null
+  /** Default named contact for this supplier's vouchers (e.g. "Carla") -- prefills a leg's own
+   * supplierContactName at capture time, which can then be overridden per booking. */
+  defaultContactName: string | null
   createdAt: string
   createdAtDisplay?: string
   updatedAt: string
@@ -910,6 +916,11 @@ export interface Enquiry {
   confirmEmail?: string
   country: string
   direction: string
+  /** False when `direction` is the customer's raw wording, not a route the system could resolve. */
+  directionResolved?: boolean
+  /** Train operator name, resolved if possible, otherwise the raw wording the customer used. */
+  supplier?: string
+  supplierResolved?: boolean
   departureDate: string
   departureDateDisplay?: string
   noOfSuites: number
@@ -923,6 +934,9 @@ export interface Enquiry {
   childTravellers?: Traveller[]
   hotelBooking?: string
   hotelOption?: string
+  hotelOptionResolved?: boolean
+  hotelPhase?: "pre" | "post" | "none"
+  packageOption?: string
   extendStay?: string
   extraNights?: number
   additionalServices?: string

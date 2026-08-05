@@ -152,12 +152,47 @@ export async function POST(req: Request) {
     return safeSupabaseError("voucher:load-leg-references", error)
   }
 
+  // Built before the readiness check so it can double as the source for the warnings pass below
+  // -- a voucher's per-block data is exactly what a consultant needs to see is missing, and
+  // re-querying it separately would just be the same joins run twice.
+  let serviceBlocks: Awaited<ReturnType<typeof buildVoucherServiceBlocks>>["blocks"] = []
+  try {
+    const built = await buildVoucherServiceBlocks(supabase, {
+      bookingId: booking.id,
+      additionalServicesDetails: booking.additional_services_details ?? null,
+      reservationDetails: reservationDetails
+        ? {
+            occasion: reservationDetails.occasion,
+            mealSeating: reservationDetails.meal_seating as "first" | "second" | null,
+            smokingPreference: reservationDetails.smoking_preference as "smoking" | "non_smoking" | null,
+          }
+        : null,
+    })
+    serviceBlocks = built.blocks
+  } catch (error) {
+    return safeSupabaseError("voucher:build-service-blocks", error)
+  }
+
   const readiness = checkVoucherReadiness({
     stage: booking.stage,
     invoiceBalance: booking.invoice_balance,
     departureDate: booking.departure_date,
     customerEmail: customer?.email ?? null,
     missingLegReferenceLabels: missingLegReferenceLabels(legReferenceRows),
+    serviceBlocks: serviceBlocks.map((block) => ({
+      title: block.title,
+      serviceType: block.serviceType,
+      supplierContactName: block.supplierContactName,
+      streetAddress: block.contactDetails.streetAddress,
+      startTime: block.serviceData.startTime,
+      endTime: block.serviceData.endTime,
+      hasGuestBreakdown: Boolean(block.serviceData.guestBreakdown),
+      cabin: block.serviceData.cabin,
+      handLuggageKg: block.serviceData.handLuggageKg,
+      checkedLuggageKg: block.serviceData.checkedLuggageKg,
+      departureAirportCode: block.serviceData.departureAirportCode,
+      arrivalAirportCode: block.serviceData.arrivalAirportCode,
+    })),
   })
   if (!readiness.ready) {
     return jsonError(readiness.failures[0]?.message ?? "Booking is not ready for voucher generation", 422)
@@ -181,18 +216,6 @@ export async function POST(req: Request) {
   // children from the printed guest list while still counting them.
   const allTravellers = travellers ?? []
   const template = normalizeTemplate(templateRaw as VoucherTemplateRow | null)
-
-  let serviceBlocks: Awaited<ReturnType<typeof buildVoucherServiceBlocks>>["blocks"] = []
-  try {
-    const built = await buildVoucherServiceBlocks(supabase, {
-      bookingId: booking.id,
-      supplierReferenceFallback: booking.booking_number,
-      additionalServicesDetails: booking.additional_services_details ?? null,
-    })
-    serviceBlocks = built.blocks
-  } catch (error) {
-    return safeSupabaseError("voucher:build-service-blocks", error)
-  }
 
   const voucherData: VoucherData = {
     voucherNumber: booking.booking_number,
@@ -349,7 +372,7 @@ export async function POST(req: Request) {
       (block) => ({
         voucher_id: voucherId,
         service_type: block.serviceType,
-        supplier_id: null,
+        supplier_id: block.supplierId ?? null,
         title: block.title,
         supplier_reference: block.supplierReference ?? null,
         contact_details: block.contactDetails as unknown as Json,
@@ -413,6 +436,7 @@ export async function POST(req: Request) {
       sentAt: voucherWrite.data.sent_at,
       serviceBlockCount: serviceBlocks.length,
     },
+    readinessWarnings: readiness.warnings,
     voucher: {
       filename,
       contentType: "application/pdf",

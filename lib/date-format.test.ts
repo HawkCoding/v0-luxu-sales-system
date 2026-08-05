@@ -6,6 +6,7 @@ import {
   formatDisplayDateLong,
   formatDisplayDateShort,
   formatDisplayDateTime,
+  normalizeDateOfBirth,
 } from "./date-format"
 
 describe("formatDisplayDate", () => {
@@ -63,6 +64,54 @@ describe("formatDisplayDateShort", () => {
 
   it("leaves a two-digit day alone", () => {
     expect(formatDisplayDateShort("2026-07-18")).toBe("18 Jul 2026")
+  })
+})
+
+describe("normalizeDateOfBirth", () => {
+  it("passes an already-ISO date through", () => {
+    expect(normalizeDateOfBirth("1980-05-12")).toBe("1980-05-12")
+  })
+
+  it("reads a slashed numeric date as day/month/year", () => {
+    expect(normalizeDateOfBirth("12/05/1980")).toBe("1980-05-12")
+  })
+
+  it("accepts dot and dash separators", () => {
+    expect(normalizeDateOfBirth("12-05-1980")).toBe("1980-05-12")
+    expect(normalizeDateOfBirth("12.05.1980")).toBe("1980-05-12")
+  })
+
+  it("zero-pads single-digit day and month", () => {
+    expect(normalizeDateOfBirth("2/5/1980")).toBe("1980-05-02")
+  })
+
+  it("accepts abbreviated and full month names", () => {
+    expect(normalizeDateOfBirth("14 Feb 1990")).toBe("1990-02-14")
+    expect(normalizeDateOfBirth("14 February 1990")).toBe("1990-02-14")
+    expect(normalizeDateOfBirth("14-feb-1990")).toBe("1990-02-14")
+  })
+
+  it("trims surrounding whitespace", () => {
+    expect(normalizeDateOfBirth("  1980-05-12  ")).toBe("1980-05-12")
+  })
+
+  it("rejects impossible calendar dates", () => {
+    expect(normalizeDateOfBirth("31/02/1980")).toBeNull()
+    expect(normalizeDateOfBirth("1980-13-01")).toBeNull()
+    expect(normalizeDateOfBirth("00/05/1980")).toBeNull()
+  })
+
+  it("rejects unparseable input rather than guessing", () => {
+    expect(normalizeDateOfBirth("sometime in 1980")).toBeNull()
+    expect(normalizeDateOfBirth("12/05/80")).toBeNull()
+    expect(normalizeDateOfBirth("14 Smarch 1990")).toBeNull()
+  })
+
+  it("returns null for blank or missing input", () => {
+    expect(normalizeDateOfBirth("")).toBeNull()
+    expect(normalizeDateOfBirth("   ")).toBeNull()
+    expect(normalizeDateOfBirth(null)).toBeNull()
+    expect(normalizeDateOfBirth(undefined)).toBeNull()
   })
 
   it("returns an empty string for null input", () => {

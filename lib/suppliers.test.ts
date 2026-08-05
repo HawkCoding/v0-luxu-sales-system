@@ -39,6 +39,9 @@ const supplierRow: SupplierRow = {
   default_time_end: null,
   inclusions: ["High Tea", "Wi-Fi"],
   exclusions: ["Gratuities"],
+  street_address: null,
+  emergency_phone: null,
+  default_contact_name: null,
   infant_max_age: null,
   child_max_age: null,
   created_at: "2026-01-01T10:00:00.000Z",
@@ -61,6 +64,7 @@ const routeRow: RouteRow = {
   extra_km_price: null,
   one_way_fee: null,
   security_deposit: null,
+  default_excursions: [],
   created_at: "2026-01-01T10:00:00.000Z",
   updated_at: "2026-01-02T10:00:00.000Z",
 }

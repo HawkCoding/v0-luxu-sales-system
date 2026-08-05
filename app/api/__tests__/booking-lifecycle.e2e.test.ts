@@ -301,7 +301,7 @@ describe("booking lifecycle (route-level E2E)", () => {
         customerEmail: customer.email as string,
       missingLegReferenceLabels: [],
       }),
-    ).toEqual({ ready: true, failures: [] })
+    ).toEqual({ ready: true, failures: [], warnings: [] })
 
     // Simulate voucher generation + send producing a document and correspondence (covered by their own route tests)
     await mock.supabase.from("documents").insert({ booking_id: BOOKING_ID, kind: "voucher_pdf", status: "generated" })

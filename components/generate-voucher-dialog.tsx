@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { FileOutput } from "lucide-react"
+import { FileOutput, TriangleAlert } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -13,8 +13,15 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import type { DocRecord } from "@/lib/types"
 import { SendVoucherButton } from "@/components/send-voucher-button"
+
+interface VoucherReadinessWarning {
+  code: string
+  message: string
+  fixHint: string
+}
 
 interface GenerateVoucherDialogProps {
   open?: boolean
@@ -45,6 +52,7 @@ interface GenerateVoucherResponse {
     contentBase64: string
     dataUrl: string
   }
+  readinessWarnings?: VoucherReadinessWarning[]
   error?: string
 }
 
@@ -110,6 +118,22 @@ export function GenerateVoucherDialog({
             itinerary — the itinerary is generated automatically if it doesn't exist yet.
           </DialogDescription>
         </DialogHeader>
+
+        {generated?.readinessWarnings && generated.readinessWarnings.length > 0 ? (
+          <Alert className="border-amber-200 bg-amber-50 text-amber-900 [&>svg]:text-amber-600">
+            <TriangleAlert className="size-4" />
+            <AlertTitle>This voucher is missing some details</AlertTitle>
+            <AlertDescription className="text-amber-800">
+              <ul className="list-disc space-y-1 pl-4">
+                {generated.readinessWarnings.map((warning) => (
+                  <li key={warning.code}>
+                    {warning.message} <span className="text-amber-700/80">{warning.fixHint}</span>
+                  </li>
+                ))}
+              </ul>
+            </AlertDescription>
+          </Alert>
+        ) : null}
 
         <div className="min-h-[420px] overflow-hidden rounded-md border bg-muted">
           {generated ? (

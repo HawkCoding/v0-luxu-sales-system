@@ -307,7 +307,7 @@ describe("E2E Scenario 2: Rovos Rail enquiry → voucher", () => {
         customerEmail: customer.email as string,
       missingLegReferenceLabels: [],
       }),
-    ).toEqual({ ready: true, failures: [] })
+    ).toEqual({ ready: true, failures: [], warnings: [] })
 
     // 8. Voucher generation + send: modular voucher block + PDF + correspondence.
     //    (The voucher-send route itself is covered by app/api/vouchers/[id]/send/route.test.ts.

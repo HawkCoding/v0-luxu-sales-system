@@ -291,6 +291,53 @@ export type Database = {
           },
         ]
       }
+      booking_flight_details: {
+        Row: {
+          arrival_airport_code: string | null
+          arrival_at: string | null
+          cabin: string | null
+          checked_luggage_kg: number | null
+          created_at: string
+          departure_airport_code: string | null
+          hand_luggage_kg: number | null
+          priority_boarding: boolean
+          transport_request_id: string
+          updated_at: string
+        }
+        Insert: {
+          arrival_airport_code?: string | null
+          arrival_at?: string | null
+          cabin?: string | null
+          checked_luggage_kg?: number | null
+          created_at?: string
+          departure_airport_code?: string | null
+          hand_luggage_kg?: number | null
+          priority_boarding?: boolean
+          transport_request_id: string
+          updated_at?: string
+        }
+        Update: {
+          arrival_airport_code?: string | null
+          arrival_at?: string | null
+          cabin?: string | null
+          checked_luggage_kg?: number | null
+          created_at?: string
+          departure_airport_code?: string | null
+          hand_luggage_kg?: number | null
+          priority_boarding?: boolean
+          transport_request_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "booking_flight_details_transport_request_id_fkey"
+            columns: ["transport_request_id"]
+            isOneToOne: true
+            referencedRelation: "booking_transport_requests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       booking_notes: {
         Row: {
           author_id: string | null
@@ -437,6 +484,7 @@ export type Database = {
           booking_id: string
           created_at: string
           date_anchor: string | null
+          excursions: string[] | null
           id: string
           nights: number | null
           notes: string | null
@@ -447,14 +495,17 @@ export type Database = {
           selected: boolean
           service_date: string | null
           suite_type_id: string | null
+          supplier_contact_name: string | null
           supplier_id: string | null
           supplier_reference: string | null
           updated_at: string
+          voucher_footnote: string | null
         }
         Insert: {
           booking_id: string
           created_at?: string
           date_anchor?: string | null
+          excursions?: string[] | null
           id?: string
           nights?: number | null
           notes?: string | null
@@ -465,14 +516,17 @@ export type Database = {
           selected?: boolean
           service_date?: string | null
           suite_type_id?: string | null
+          supplier_contact_name?: string | null
           supplier_id?: string | null
           supplier_reference?: string | null
           updated_at?: string
+          voucher_footnote?: string | null
         }
         Update: {
           booking_id?: string
           created_at?: string
           date_anchor?: string | null
+          excursions?: string[] | null
           id?: string
           nights?: number | null
           notes?: string | null
@@ -483,9 +537,11 @@ export type Database = {
           selected?: boolean
           service_date?: string | null
           suite_type_id?: string | null
+          supplier_contact_name?: string | null
           supplier_id?: string | null
           supplier_reference?: string | null
           updated_at?: string
+          voucher_footnote?: string | null
         }
         Relationships: [
           {
@@ -680,6 +736,7 @@ export type Database = {
           booking_id: string
           created_at: string
           date_anchor: string | null
+          excursions: string[] | null
           id: string
           label: string | null
           nights: number | null
@@ -692,14 +749,17 @@ export type Database = {
           service_date: string | null
           sort_order: number
           suite_type_id: string | null
+          supplier_contact_name: string | null
           supplier_id: string
           supplier_reference: string | null
           updated_at: string
+          voucher_footnote: string | null
         }
         Insert: {
           booking_id: string
           created_at?: string
           date_anchor?: string | null
+          excursions?: string[] | null
           id?: string
           label?: string | null
           nights?: number | null
@@ -712,14 +772,17 @@ export type Database = {
           service_date?: string | null
           sort_order?: number
           suite_type_id?: string | null
+          supplier_contact_name?: string | null
           supplier_id: string
           supplier_reference?: string | null
           updated_at?: string
+          voucher_footnote?: string | null
         }
         Update: {
           booking_id?: string
           created_at?: string
           date_anchor?: string | null
+          excursions?: string[] | null
           id?: string
           label?: string | null
           nights?: number | null
@@ -732,9 +795,11 @@ export type Database = {
           service_date?: string | null
           sort_order?: number
           suite_type_id?: string | null
+          supplier_contact_name?: string | null
           supplier_id?: string
           supplier_reference?: string | null
           updated_at?: string
+          voucher_footnote?: string | null
         }
         Relationships: [
           {
@@ -952,9 +1017,11 @@ export type Database = {
           service_type: string
           sort_order: number
           suite_type_id: string | null
+          supplier_contact_name: string | null
           supplier_id: string | null
           supplier_reference: string | null
           updated_at: string
+          voucher_footnote: string | null
         }
         Insert: {
           booking_id: string
@@ -974,9 +1041,11 @@ export type Database = {
           service_type: string
           sort_order?: number
           suite_type_id?: string | null
+          supplier_contact_name?: string | null
           supplier_id?: string | null
           supplier_reference?: string | null
           updated_at?: string
+          voucher_footnote?: string | null
         }
         Update: {
           booking_id?: string
@@ -996,9 +1065,11 @@ export type Database = {
           service_type?: string
           sort_order?: number
           suite_type_id?: string | null
+          supplier_contact_name?: string | null
           supplier_id?: string | null
           supplier_reference?: string | null
           updated_at?: string
+          voucher_footnote?: string | null
         }
         Relationships: [
           {
@@ -2897,6 +2968,7 @@ export type Database = {
         Row: {
           active: boolean
           created_at: string
+          default_excursions: string[]
           destination_location_id: string | null
           direction_mode: Database["public"]["Enums"]["route_direction_mode"]
           dropoff_point: string | null
@@ -2916,6 +2988,7 @@ export type Database = {
         Insert: {
           active?: boolean
           created_at?: string
+          default_excursions?: string[]
           destination_location_id?: string | null
           direction_mode?: Database["public"]["Enums"]["route_direction_mode"]
           dropoff_point?: string | null
@@ -2935,6 +3008,7 @@ export type Database = {
         Update: {
           active?: boolean
           created_at?: string
+          default_excursions?: string[]
           destination_location_id?: string | null
           direction_mode?: Database["public"]["Enums"]["route_direction_mode"]
           dropoff_point?: string | null
@@ -3583,10 +3657,12 @@ export type Database = {
           active: boolean
           child_max_age: number | null
           created_at: string
+          default_contact_name: string | null
           default_time_end: string | null
           default_time_start: string | null
           description: string | null
           email: string | null
+          emergency_phone: string | null
           exclusions: string[]
           id: string
           inclusions: string[]
@@ -3603,6 +3679,7 @@ export type Database = {
           single_supplement_pct: number
           slug: string
           status: string
+          street_address: string | null
           updated_at: string
           website: string | null
         }
@@ -3610,10 +3687,12 @@ export type Database = {
           active?: boolean
           child_max_age?: number | null
           created_at?: string
+          default_contact_name?: string | null
           default_time_end?: string | null
           default_time_start?: string | null
           description?: string | null
           email?: string | null
+          emergency_phone?: string | null
           exclusions?: string[]
           id?: string
           inclusions?: string[]
@@ -3630,6 +3709,7 @@ export type Database = {
           single_supplement_pct?: number
           slug: string
           status?: string
+          street_address?: string | null
           updated_at?: string
           website?: string | null
         }
@@ -3637,10 +3717,12 @@ export type Database = {
           active?: boolean
           child_max_age?: number | null
           created_at?: string
+          default_contact_name?: string | null
           default_time_end?: string | null
           default_time_start?: string | null
           description?: string | null
           email?: string | null
+          emergency_phone?: string | null
           exclusions?: string[]
           id?: string
           inclusions?: string[]
@@ -3657,6 +3739,7 @@ export type Database = {
           single_supplement_pct?: number
           slug?: string
           status?: string
+          street_address?: string | null
           updated_at?: string
           website?: string | null
         }
@@ -3878,6 +3961,7 @@ export type Database = {
           footer_company: string
           footer_email: string
           footer_phone: string
+          guidance_lead_text: string
           guidance_text: string
           header_text: string
           hidden_sections: string[]
@@ -3895,6 +3979,7 @@ export type Database = {
           footer_company?: string
           footer_email?: string
           footer_phone?: string
+          guidance_lead_text?: string
           guidance_text?: string
           header_text?: string
           hidden_sections?: string[]
@@ -3912,6 +3997,7 @@ export type Database = {
           footer_company?: string
           footer_email?: string
           footer_phone?: string
+          guidance_lead_text?: string
           guidance_text?: string
           header_text?: string
           hidden_sections?: string[]

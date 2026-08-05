@@ -44,7 +44,7 @@ import type {
 } from "@/lib/types"
 import type { GateFailure } from "@/lib/pipeline/validate-transition"
 import { formatDisplayDate } from "@/lib/date-format"
-import { Check, Pencil, Plus, Save, Trash2 } from "lucide-react"
+import { Check, Pencil, Plus, Save, Trash2, TriangleAlert } from "lucide-react"
 import { EnquiryParsedFieldsEditor } from "@/components/enquiry-parsed-fields-editor"
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
@@ -567,6 +567,7 @@ export function JobEnquiryTab({
           departureDate: enquiry.departureDate ?? null,
           direction: enquiry.direction ?? null,
         }}
+        directionResolved={enquiry.directionResolved}
         originalNoOfAdults={enquiry.noOfAdultsOriginal}
         originalNoOfChildren={enquiry.noOfChildrenOriginal}
         onSaved={onFieldsUpdated}
@@ -579,6 +580,9 @@ export function JobEnquiryTab({
         <CardContent>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             <Field label="Purpose" value={enquiry.purpose} />
+            {enquiry.supplier && (
+              <Field label="Supplier" value={enquiry.supplier} unresolved={!enquiry.supplierResolved} />
+            )}
             <Field label="Suite Types" value={enquiry.suiteTypes.join(", ")} />
             {enquiry.childAges && enquiry.childAges.length > 0 && (
               <Field label="Child Ages" value={enquiry.childAges.join(", ")} />
@@ -588,15 +592,21 @@ export function JobEnquiryTab({
       </Card>
 
       {/* Hotel & Extras */}
-      {(enquiry.hotelBooking || enquiry.additionalServices) && (
+      {(enquiry.hotelBooking || enquiry.hotelOption || enquiry.packageOption || enquiry.additionalServices) && (
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">Hotel & Additional Services</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+              {enquiry.packageOption && <Field label="Package" value={enquiry.packageOption} />}
               {enquiry.hotelBooking && <Field label="Hotel Booking" value={enquiry.hotelBooking} />}
-              {enquiry.hotelOption && <Field label="Hotel" value={enquiry.hotelOption} />}
+              {enquiry.hotelOption && (
+                <Field label="Hotel" value={enquiry.hotelOption} unresolved={!enquiry.hotelOptionResolved} />
+              )}
+              {enquiry.hotelPhase && (
+                <Field label="Hotel Timing" value={enquiry.hotelPhase === "pre" ? "Pre-departure" : "Post-departure"} />
+              )}
               {enquiry.extendStay && <Field label="Extend Stay" value={enquiry.extendStay} />}
               {enquiry.extraNights !== undefined && enquiry.extraNights > 0 && <Field label="Extra Nights" value={String(enquiry.extraNights)} />}
               {enquiry.additionalServices && <Field label="Additional Services" value={enquiry.additionalServices} />}
@@ -1320,11 +1330,33 @@ function SupplierScheduleSummary({
   )
 }
 
-function Field({ label, value }: { label: string; value: string }) {
+function Field({
+  label,
+  value,
+  unresolved,
+}: {
+  label: string
+  value: string
+  /** When true, `value` is the customer's raw wording that couldn't be matched to a database
+   * record (route, supplier, hotel) -- shown with a warning icon rather than as a plain value,
+   * per CLAUDE.md's "never rely on color alone to convey state". */
+  unresolved?: boolean
+}) {
   return (
     <div>
       <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider" style={{ fontFamily: "var(--font-inter)" }}>{label}</p>
-      <p className="text-sm text-foreground mt-0.5">{value}</p>
+      <p className="text-sm text-foreground mt-0.5 flex items-center gap-1.5">
+        {value}
+        {unresolved && (
+          <span
+            className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-500"
+            title="Not matched to a database record -- shown as the customer wrote it"
+          >
+            <TriangleAlert className="w-3.5 h-3.5" aria-hidden="true" />
+            <span className="sr-only">Unresolved</span>
+          </span>
+        )}
+      </p>
     </div>
   )
 }

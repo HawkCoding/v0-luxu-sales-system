@@ -48,6 +48,7 @@ interface FormState {
   notes: string
   province: string
   dateOfBirth: string
+  idPassport: string
   vipStatus: boolean
   preferences: string
   communicationPreferences: string
@@ -59,6 +60,7 @@ type FormField = keyof Omit<
   | "notes"
   | "province"
   | "dateOfBirth"
+  | "idPassport"
   | "vipStatus"
   | "preferences"
   | "communicationPreferences"
@@ -80,6 +82,7 @@ function getInitialForm(): FormState {
     notes: "",
     province: "",
     dateOfBirth: "",
+    idPassport: "",
     vipStatus: false,
     preferences: "",
     communicationPreferences: "",
@@ -165,6 +168,7 @@ export function CreateCustomerDialog({ open, onOpenChange, onSuccess }: CreateCu
           notes: form.notes || null,
           province: form.province.trim() ? form.province.trim() : null,
           date_of_birth: form.dateOfBirth || null,
+          id_passport: form.idPassport.trim() || null,
           vip_status: form.vipStatus,
           preferences: form.preferences.trim() ? form.preferences.trim() : null,
           communication_preferences: form.communicationPreferences.trim()
@@ -376,6 +380,21 @@ export function CreateCustomerDialog({ open, onOpenChange, onSuccess }: CreateCu
                       fromYear={1920}
                       toYear={new Date().getFullYear()}
                     />
+                  </div>
+
+                  {/* ID / Passport — prefills the guest row on future reservation forms */}
+                  <div className="col-span-2 space-y-1.5">
+                    <Label htmlFor="idPassport">ID / Passport number</Label>
+                    <Input
+                      id="idPassport"
+                      value={form.idPassport}
+                      onChange={(e) => setField("idPassport", e.target.value)}
+                      placeholder="ID or passport number"
+                      aria-describedby="idPassport-hint"
+                    />
+                    <p id="idPassport-hint" className="text-xs text-muted-foreground">
+                      Prefills this customer&apos;s guest row on reservation forms.
+                    </p>
                   </div>
 
                   {/* VIP Status */}
