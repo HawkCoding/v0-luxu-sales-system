@@ -742,10 +742,85 @@ Deluxe Twin with shower
     expect(state.serviceInsertRows[0]).toMatchObject({
       supplier_id: "sup-blue",
       route_id: "route-blue-pta-cpt",
+      route_reversed: false,
       selected: true,
       origin: "auto",
     })
     expect(state.auditRows.some((row) => row.action === "booking_auto_built")).toBe(true)
+  })
+
+  it("carries children/infants/ages, terms acceptance and a reversed direction onto the booking and rail leg", async () => {
+    const state = createState()
+    importBookingMocks.createServiceClient.mockReturnValue(createSupabase(state))
+    const parsed = parseEmailDraft(`Please indicate the purpose of your request
+  	Quote
+Contact Information
+Title
+  	Mr
+Name
+  	Gert
+Surname
+  	Nell
+Contact Number
+  	0724370842
+Email
+  	gert_nell@yahoo.com
+Country
+  	South Africa
+Province
+  	Western Cape
+Blue Train Information
+Direction
+  	Cape Town to Pretoria
+Departure Date
+  	06 August 2026
+No. of Adults
+  	2
+No of Infants
+  	1
+Infant 1: Age
+  	5
+No of Children
+  	1
+Child 1: Age
+  	6
+No of Suites
+  	1
+Suite Type 1
+  	Deluxe Twin with shower
+
+
+    I do not require a package
+
+Additional Pre and Post Train Travel Services
+Acceptance
+
+
+    I have read and accept the Terms and Conditions*
+`)
+
+    await createEmailBookingFromParsedDraft(parsed, {
+      emailAccountId: "account-1",
+      mailboxEmail: "bookings@example.com",
+      subject: "Train enquiry",
+      receivedAt: "2026-08-05T10:00:00.000Z",
+      rawText: parsed.rawText,
+      missingFields: [],
+      warnings: [],
+    })
+
+    expect(state.bookingInsertRows[0]).toMatchObject({
+      no_of_children: 2,
+      child_ages: [5, 6],
+      terms_accepted: true,
+      route_id: "route-blue-pta-cpt",
+    })
+    expect(state.serviceInsertRows).toHaveLength(1)
+    expect(state.serviceInsertRows[0]).toMatchObject({
+      supplier_id: "sup-blue",
+      route_id: "route-blue-pta-cpt",
+      route_reversed: true,
+    })
   })
 
   it("builds nothing when no train supplier resolves, and never fails the import", async () => {

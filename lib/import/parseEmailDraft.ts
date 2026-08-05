@@ -27,7 +27,13 @@ export interface ParsedDraft {
   }
   guests: {
     adults: number
+    /** Total minors: the form's "No of Children" + "No of Infants" combined. Age buckets --
+     *  not the customer's own child/infant labelling -- decide which are infants downstream;
+     *  see lib/packages/passenger-totals.ts. */
     children: number
+    /** Every minor's age (Child N: Age / Infant N: Age), ascending. Shorter than `children`
+     *  when the form omitted some ages. */
+    childAges: number[]
     suites: number
     /**
      * The customer's own suite wording, verbatim, one entry per requested suite. NOT a DB name --
@@ -45,6 +51,9 @@ export interface ParsedDraft {
     /** Free text describing what was asked for, e.g. "My mom's birthday". */
     details: string
   }
+  /** False only when an Acceptance/Terms block is present and does not say accept. True when
+   *  no such block exists at all (e.g. the public web form, which gates acceptance itself). */
+  termsAccepted: boolean
   notes: string
   formFields: {
     title: string
@@ -63,6 +72,7 @@ export interface ParsedDraft {
     supplier: string
     departureDateRaw: string
     suitePhrases: string[]
+    childAges: number[]
     hotelPhase: 'pre' | 'post' | 'none' | ''
     extendStay: boolean | null
     additionalServicesDetails: string
@@ -111,13 +121,16 @@ const FORM_FIELD_LABEL_PATTERNS = [
   /^surname$/i,
   /^last\s*name$/i,
   /^family\s*name$/i,
-  /^contact\s*number$/i,
   /^email$/i,
   /^country$/i,
   /^province$/i,
   /^direction$/i,
   /^departure\s*date$/i,
   /^(?:no\.?|number)\s*of\s*adults?$/i,
+  /^(?:no\.?|number)\s*of\s*(?:children|child|kids?)$/i,
+  /^(?:no\.?|number)\s*of\s*infants?$/i,
+  /^(?:child|infant)s?\s*\d*\s*:?\s*age$/i,
+  /^(?:contact\s*number|phone|telephone|mobile|cell(?:phone)?)$/i,
   /^(?:no\.?|number)\s*of\s*suites?$/i,
   /^suite\s*type(?:\s*\d+)?$/i,
   /^package\s*options?$/i,
@@ -184,6 +197,36 @@ function getLabeledFieldValue(text: string, labelPatterns: RegExp[]): string {
   }
 
   return ''
+}
+
+/**
+ * Reads Gravity Forms' indexed age rows ("Child 1: Age" / "Infant 2: Age"), whether the number
+ * sits on the same line (after the internal colon that `getLabeledFieldValue`'s same-line
+ * splitter would otherwise mistake for the label/value separator) or on the next line. The
+ * child/infant wording itself is discarded -- which bucket an age falls into is decided later,
+ * by age bucket (lib/packages/passenger-totals.ts), not by how the customer labelled it.
+ */
+function extractMinorAges(text: string): number[] {
+  const lines = text.split(/\r?\n/)
+  const ages: number[] = []
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const label = normalizeLabel(lines[index])
+    const match = label.match(/^(?:child|infant)s?\s*\d*\s*:?\s*age\s*[:|]?\s*(.*)$/i)
+    if (!match) continue
+
+    const sameLineValue = match[1].trim()
+    const value = sameLineValue
+      ? sameLineValue
+      : lines.slice(index + 1).map((line) => line.trim()).find((line) => line.length > 0) ?? ''
+
+    if (/^\d+$/.test(value)) {
+      const age = parseInt(value, 10)
+      if (age >= 0 && age <= 30) ages.push(age)
+    }
+  }
+
+  return ages.sort((a, b) => a - b)
 }
 
 /**
@@ -367,10 +410,26 @@ export function parseEmailDraft(text: string): ParsedDraft {
   const email = emailMatch?.[0].replace(/[.,;:!?]+$/, "") || ''
   if (emailMatch) confidence['customer.email'] = 'high'
   
-  // Extract phone (high confidence for SA patterns)
+  // Extract phone: a labelled "Contact Number" (or Phone/Telephone/Mobile/Cell) field is
+  // trustworthy on its own -- only fall back to scanning the whole body for a bare number
+  // when no such label answered it, so an unrelated 10+ digit string elsewhere in the email
+  // (a reference number, a date run together) can't win instead.
+  const phoneLabelValue = getLabeledFieldValue(text, [
+    /^contact\s*number$/i,
+    /^phone$/i,
+    /^telephone$/i,
+    /^mobile$/i,
+    /^cell(?:phone)?$/i,
+  ])
   const phoneMatch = text.match(/\+?27[\s-]?[0-9]{2}[\s-]?[0-9]{3}[\s-]?[0-9]{4}|\+?[0-9]{10,15}/)
-  const phone = phoneMatch?.[0] || ''
-  if (phoneMatch) confidence['customer.phone'] = 'high'
+  let phone = ''
+  if (phoneLabelValue.replace(/\D/g, '').length >= 9) {
+    phone = phoneLabelValue
+    confidence['customer.phone'] = 'high'
+  } else if (phoneMatch) {
+    phone = phoneMatch[0]
+    confidence['customer.phone'] = 'high'
+  }
   
   // Extract name: structured form labels first, signature fallback second.
   const firstNameLabelValue = getLabeledFieldValue(text, [/^first\s*name$/i, /^forename$/i])
@@ -506,14 +565,37 @@ export function parseEmailDraft(text: string): ParsedDraft {
     }
   }
   
-  // Extract children
+  // Extract children + infants. Both count as minors on the booking -- "no_of_children" is the
+  // *total*, and which of them turn out to be infants is decided downstream by age bucket
+  // (lib/packages/passenger-totals.ts), not by how the customer happened to label them. Labelled
+  // fields win when present; the old bare "(\d+) child/kid" scan is kept only as a fallback for
+  // prose enquiries that never had a structured "No of Children" line, and can't misfire on a
+  // "Child 1: Age" row since that has no digit immediately before the word.
   let children = 0
-  const childrenMatch = text.match(/(\d+)\s*(child|kid)/i)
-  if (childrenMatch) {
-    children = parseInt(childrenMatch[1])
+  const childrenLabelValue = getLabeledFieldValue(text, [
+    /^(?:no\.?|number)\s*of\s*(?:children|child|kids?)$/i,
+    /^children$/i,
+  ])
+  const infantsLabelValue = getLabeledFieldValue(text, [
+    /^(?:no\.?|number)\s*of\s*infants?$/i,
+    /^infants?$/i,
+  ])
+  const hasChildrenLabel = /^\d+$/.test(childrenLabelValue)
+  const hasInfantsLabel = /^\d+$/.test(infantsLabelValue)
+  if (hasChildrenLabel || hasInfantsLabel) {
+    children = (hasChildrenLabel ? parseInt(childrenLabelValue) : 0) + (hasInfantsLabel ? parseInt(infantsLabelValue) : 0)
     confidence['guests.children'] = 'high'
+  } else {
+    const childrenMatch = text.match(/(\d+)\s*(child|kid)/i)
+    if (childrenMatch) {
+      children = parseInt(childrenMatch[1])
+      confidence['guests.children'] = 'high'
+    }
   }
-  
+
+  const childAges = extractMinorAges(text)
+  if (childAges.length > 0) confidence['guests.childAges'] = 'high'
+
   // Extract suites. Deliberately NOT defaulted to 1 when unstated: an invented suite count
   // silently manufactures a room nobody asked for. Unstated stays 0 and is reported as a
   // missing field instead.
@@ -538,9 +620,19 @@ export function parseEmailDraft(text: string): ParsedDraft {
   const suitePhrases = extractSuitePhrases(text)
   if (suitePhrases.length > 0) confidence['guests.suiteType'] = 'high'
 
+  // Terms acceptance: only treated as declined when an Acceptance/Terms block exists and its
+  // value doesn't say accept. No such block at all (the public web form gates this itself, and
+  // some templates omit the section entirely) stays accepted rather than blocking the import.
+  const acceptanceValue = getLabeledFieldValue(text, [
+    /^acceptance$/i,
+    /^terms\s*(?:and|&)\s*conditions$/i,
+  ])
+  const termsAccepted = acceptanceValue ? /accept/i.test(acceptanceValue) : true
+  if (acceptanceValue) confidence['termsAccepted'] = 'high'
+
   // Notes: everything not explicitly extracted
   const notes = text
-  
+
   return {
     customer: {
       title,
@@ -566,6 +658,7 @@ export function parseEmailDraft(text: string): ParsedDraft {
     guests: {
       adults,
       children,
+      childAges,
       suites,
       suitePhrases,
       suiteType: suitePhrases[0] ?? ''
@@ -574,6 +667,7 @@ export function parseEmailDraft(text: string): ParsedDraft {
       requested: additionalServicesRequested,
       details: additionalServicesDetails
     },
+    termsAccepted,
     notes,
     formFields: {
       title,
@@ -587,6 +681,7 @@ export function parseEmailDraft(text: string): ParsedDraft {
       supplier,
       departureDateRaw: departureDate,
       suitePhrases,
+      childAges,
       hotelPhase,
       extendStay,
       additionalServicesDetails

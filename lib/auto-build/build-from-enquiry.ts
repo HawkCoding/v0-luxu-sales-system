@@ -12,6 +12,9 @@ export interface AutoBuildInput {
   trainSupplierId: string | null
   hotelSupplierId: string | null
   routeId: string | null
+  /** Whether the rail leg is travelled opposite to the route's filed origin/destination — see
+   *  lib/resolvers/route-resolver.ts's findRouteMatch. Ignored for the hotel leg. */
+  routeReversed?: boolean
   departureDate: string | null
   /**
    * Whether the hotel stay is before or after the rail journey. A post-departure hotel must not
@@ -108,6 +111,7 @@ export async function autoBuildBookingServices(
     // Route is set only for the rail leg -- the one entity a resolved routeId was ever computed
     // for at intake; a hotel leg has no route/meal-plan signal to fill from an enquiry.
     route_id: service.supplierId === input.trainSupplierId ? input.routeId : null,
+    route_reversed: service.supplierId === input.trainSupplierId ? (input.routeReversed ?? false) : false,
     service_date:
       service.supplierId === input.hotelSupplierId && input.hotelPhase === 'post'
         ? null

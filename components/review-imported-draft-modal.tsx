@@ -508,15 +508,37 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label className="text-sm">Children</Label>
+                      <Label className="text-sm">Children &amp; infants</Label>
                       <Input
                         type="number"
                         min="0"
                         value={draft.guests.children || ''}
                         onChange={(e) => updateDraft('guests.children', parseInt(e.target.value) || 0)}
-                        placeholder="Number of children"
+                        placeholder="Total minors"
                       />
                     </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-sm flex items-center gap-1.5">
+                      Child ages
+                      <FieldFlags confidence={draft.confidence['guests.childAges']} dirty={dirtyFields.has('guests.childAges')} />
+                    </Label>
+                    <Input
+                      value={draft.guests.childAges.join(', ')}
+                      onChange={(e) =>
+                        updateDraft(
+                          'guests.childAges',
+                          e.target.value
+                            .split(',')
+                            .map((part) => parseInt(part.trim(), 10))
+                            .filter((age) => Number.isInteger(age) && age >= 0 && age <= 30),
+                        )
+                      }
+                      placeholder="e.g. 5, 6"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Which of these are infants is decided by age, not by how the customer labelled them.
+                    </p>
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-sm flex items-center gap-1.5">

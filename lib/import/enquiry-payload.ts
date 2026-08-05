@@ -29,6 +29,7 @@ export interface EnquiryImportPayload {
   noOfSuites: number
   noOfAdults: number
   noOfChildren: number
+  childAges: number[]
   suiteUnits: EnquirySuiteUnitPayload[]
   packageOption?: string
   hotelOption?: string
@@ -46,7 +47,7 @@ export interface EnquiryImportPayload {
     requestedSuite: string | null
     purpose: ParsedDraft["trip"]["purpose"]
   }
-  termsAccepted: true
+  termsAccepted: boolean
 }
 
 export function buildEnquiryImportPayload(draft: ParsedDraft): EnquiryImportPayload {
@@ -100,6 +101,7 @@ export function buildEnquiryImportPayload(draft: ParsedDraft): EnquiryImportPayl
     noOfSuites: draft.guests.suites,
     noOfAdults: draft.guests.adults,
     noOfChildren: draft.guests.children,
+    childAges: draft.guests.childAges,
     // Likewise no placeholder suite type: unresolved units travel with null ids and the raw
     // wording, so the consultant sees what the customer asked for and picks it themselves.
     suiteUnits,
@@ -119,6 +121,6 @@ export function buildEnquiryImportPayload(draft: ParsedDraft): EnquiryImportPayl
       requestedSuite: draft.guests.suitePhrases[0] ?? null,
       purpose: draft.trip.purpose,
     },
-    termsAccepted: true,
+    termsAccepted: draft.termsAccepted,
   }
 }

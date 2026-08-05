@@ -36,6 +36,7 @@ John Smith
     expect(draft.guests).toEqual({
       adults: 2,
       children: 1,
+      childAges: [],
       suites: 1,
       suitePhrases: ["Royal double suite"],
       suiteType: "Royal double suite",
@@ -255,10 +256,12 @@ I have read and accept the Terms and Conditions*
     expect(draft.guests).toEqual({
       adults: 2,
       children: 0,
+      childAges: [],
       suites: 1,
       suitePhrases: ["Deluxe Twin with shower"],
       suiteType: "Deluxe Twin with shower",
     })
+    expect(draft.termsAccepted).toBe(true)
     expect(draft.confidence).toMatchObject({
       "customer.firstName": "high",
       "customer.surname": "high",
@@ -290,11 +293,13 @@ I have read and accept the Terms and Conditions*
     expect(draft.guests).toEqual({
       adults: 0,
       children: 0,
+      childAges: [],
       suites: 0,
       suitePhrases: [],
       suiteType: "",
     })
     expect(draft.confidence).toEqual({})
+    expect(draft.termsAccepted).toBe(true)
   })
 })
 
@@ -360,8 +365,9 @@ John Smith
         flightBooking: "",
         flightDepartureDate: "",
       },
-      guests: { adults: 2, children: 0, suites: 1, suitePhrases: ["Royal Double Suite"], suiteType: "Royal Double Suite" },
+      guests: { adults: 2, children: 0, childAges: [], suites: 1, suitePhrases: ["Royal Double Suite"], suiteType: "Royal Double Suite" },
       additionalServices: { requested: false, details: "" },
+      termsAccepted: true,
       notes: "",
       formFields: {
         title: "",
@@ -375,6 +381,7 @@ John Smith
         supplier: "Rovos Rail",
         departureDateRaw: "2026-05-15",
         suitePhrases: ["Royal Double Suite"],
+        childAges: [],
         hotelPhase: "",
         extendStay: null,
         additionalServicesDetails: "",
@@ -471,5 +478,147 @@ John Smith
     const resolved: ParsedDraft = { ...draft, trip: { ...draft.trip, supplierId: "sup-1" } }
     expect(validateDraft(resolved, { requireResolvedSupplier: true }).missingRequired).not.toContain("Supplier")
     expect(countRequiredComplete(resolved, { requireResolvedSupplier: true }).completed).toBe(9)
+  })
+
+  it("parses the Gravity Forms Blue Train enquiry with children, infants and ages", () => {
+    const text = `Please indicate the purpose of your request
+  	Quote
+Contact Information
+Title
+  	Mr
+Name
+  	Gert
+Surname
+  	Nell
+Contact Number
+  	0724370842
+Email
+  	gert_nell@yahoo.com
+Country
+  	South Africa
+Province
+  	Western Cape
+Blue Train Information
+Direction
+  	Cape Town to Pretoria
+Departure Date
+  	06 August 2026
+No. of Adults
+  	2
+No of Infants
+  	1
+Infant 1: Age
+  	5
+No of Children
+  	1
+Child 1: Age
+  	6
+No of Suites
+  	1
+Suite Type 1
+  	Deluxe Twin with shower
+
+
+    I do not require a package
+
+Additional Pre and Post Train Travel Services
+Acceptance
+
+
+    I have read and accept the Terms and Conditions*
+`
+
+    const draft = parseEmailDraft(text)
+
+    expect(draft.customer).toMatchObject({
+      title: "Mr",
+      firstName: "Gert",
+      surname: "Nell",
+      email: "gert_nell@yahoo.com",
+      phone: "0724370842",
+      country: "South Africa",
+      province: "Western Cape",
+    })
+    expect(draft.trip.supplier).toBe("Blue Train")
+    expect(draft.trip.route).toBe("Cape Town To Pretoria")
+    expect(draft.trip.departureDate).toBe("2026-08-06")
+    // Total minors is the form's children + infants combined -- which of them are actually
+    // infants is decided later by age bucket, not by this label.
+    expect(draft.guests.adults).toBe(2)
+    expect(draft.guests.children).toBe(2)
+    expect(draft.guests.childAges).toEqual([5, 6])
+    expect(draft.guests.suites).toBe(1)
+    expect(draft.guests.suitePhrases).toEqual(["Deluxe Twin with shower"])
+    expect(draft.termsAccepted).toBe(true)
+  })
+
+  it("reads Contact Number by label over a stray digit run elsewhere in the body", () => {
+    const draft = parseEmailDraft(`
+Contact Number
+0821234567
+Reference: 9998887776655
+Country: South Africa
+`)
+
+    expect(draft.customer.phone).toBe("0821234567")
+  })
+
+  it("falls back to a bare digit scan when no phone label is present", () => {
+    const draft = parseEmailDraft("Call me on 0821234567 about Rovos Rail.")
+
+    expect(draft.customer.phone).toBe("0821234567")
+  })
+
+  it("counts children from a labelled 'No of Children' field", () => {
+    const draft = parseEmailDraft(`
+No of Children
+2
+`)
+
+    expect(draft.guests.children).toBe(2)
+    expect(draft.confidence["guests.children"]).toBe("high")
+  })
+
+  it("counts infants from a labelled 'No of Infants' field with no children present", () => {
+    const draft = parseEmailDraft(`
+No of Infants
+1
+Infant 1: Age
+1
+`)
+
+    expect(draft.guests.children).toBe(1)
+    expect(draft.guests.childAges).toEqual([1])
+  })
+
+  it("leaves childAges empty when counts are given without age lines", () => {
+    const draft = parseEmailDraft(`
+No of Children
+2
+`)
+
+    expect(draft.guests.children).toBe(2)
+    expect(draft.guests.childAges).toEqual([])
+  })
+
+  it("reads a same-line indexed age", () => {
+    const draft = parseEmailDraft("Child 1: Age: 6")
+
+    expect(draft.guests.childAges).toEqual([6])
+  })
+
+  it("marks terms not accepted when the Acceptance block doesn't say accept", () => {
+    const draft = parseEmailDraft(`
+Acceptance
+I decline the Terms and Conditions
+`)
+
+    expect(draft.termsAccepted).toBe(false)
+  })
+
+  it("defaults terms accepted when no Acceptance block is present at all", () => {
+    const draft = parseEmailDraft("Rovos Rail, Pretoria to Cape Town, 2 adults")
+
+    expect(draft.termsAccepted).toBe(true)
   })
 })

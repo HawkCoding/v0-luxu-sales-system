@@ -42,10 +42,11 @@ function emptyDraft(): ParsedDraft {
   return {
     customer: { title: "", firstName: "", surname: "", email: "", phone: "", country: "", province: "" },
     trip: { supplier: "", route: "", departureDate: "", purpose: "quote", packageOption: "", hotelOption: "", hotelPhase: "", extendStay: null, flightBooking: "", flightDepartureDate: "" },
-    guests: { adults: 0, children: 0, suites: 0, suitePhrases: [], suiteType: "" },
+    guests: { adults: 0, children: 0, childAges: [], suites: 0, suitePhrases: [], suiteType: "" },
     additionalServices: { requested: false, details: "" },
+    termsAccepted: true,
     notes: "",
-    formFields: { title: "", country: "", province: "", packageOption: "", hotelOption: "", flightBooking: "", flightDepartureDate: "", direction: "", supplier: "", departureDateRaw: "", suitePhrases: [], hotelPhase: "", extendStay: null, additionalServicesDetails: "" },
+    formFields: { title: "", country: "", province: "", packageOption: "", hotelOption: "", flightBooking: "", flightDepartureDate: "", direction: "", supplier: "", departureDateRaw: "", suitePhrases: [], childAges: [], hotelPhase: "", extendStay: null, additionalServicesDetails: "" },
     confidence: {},
     rawText: "",
   }

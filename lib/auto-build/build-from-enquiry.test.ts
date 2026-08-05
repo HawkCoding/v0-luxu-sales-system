@@ -70,8 +70,22 @@ describe("autoBuildBookingServices", () => {
 
     const rail = services.find((s) => s.supplier_id === TRAIN_SUPPLIER_ID)
     const hotel = services.find((s) => s.supplier_id === HOTEL_SUPPLIER_ID)
-    expect(rail).toMatchObject({ selected: true, route_id: ROUTE_ID, origin: "auto", service_date: "2026-09-01" })
-    expect(hotel).toMatchObject({ selected: false, route_id: null, origin: "auto" })
+    expect(rail).toMatchObject({ selected: true, route_id: ROUTE_ID, route_reversed: false, origin: "auto", service_date: "2026-09-01" })
+    expect(hotel).toMatchObject({ selected: false, route_id: null, route_reversed: false, origin: "auto" })
+  })
+
+  it("sets route_reversed on the rail leg only, never the hotel leg", async () => {
+    const { supabase, store } = createSupabaseMock(baseSeed())
+    await autoBuildBookingServices(
+      supabase as never,
+      baseInput({ hotelSupplierId: HOTEL_SUPPLIER_ID, routeId: ROUTE_ID, routeReversed: true }),
+    )
+
+    const services = store.rows("booking_services")
+    const rail = services.find((s) => s.supplier_id === TRAIN_SUPPLIER_ID)
+    const hotel = services.find((s) => s.supplier_id === HOTEL_SUPPLIER_ID)
+    expect(rail).toMatchObject({ route_reversed: true })
+    expect(hotel).toMatchObject({ route_reversed: false })
   })
 
   it("leaves a post-departure hotel's service_date unset rather than defaulting it to the rail departure date", async () => {
