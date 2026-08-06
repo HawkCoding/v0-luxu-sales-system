@@ -83,7 +83,9 @@ describe("voucher page breaks", () => {
 
     for (let i = 1; i <= 9; i++) {
       if (i === OVERSIZED_BLOCK) continue // taller than a page: must stay wrappable
-      const titlePage = pages.findIndex((page) => new RegExp(`SEGMENT-${i}(?!\\d)`).test(page))
+      // The voucher hides the eyebrow (`block.title`) and heads the box with the provider name
+      // instead — `Provider ${i}` is the box heading text actually printed.
+      const titlePage = pages.findIndex((page) => new RegExp(`Provider${i}(?!\\d)`).test(page))
       const rowPage = pages.findIndex((page) => new RegExp(`REF-${i}(?!\\d)`).test(page))
       expect(titlePage).toBeGreaterThanOrEqual(0)
       expect(`segment-${i} rows on page ${rowPage}`).toBe(`segment-${i} rows on page ${titlePage}`)
@@ -92,7 +94,7 @@ describe("voucher page breaks", () => {
 
   it("still wraps a block too tall to fit on one page", async () => {
     const pages = await pageTexts(await renderVoucherPdf({ data: voucherData }))
-    const titlePage = pages.findIndex((page) => new RegExp(`SEGMENT-${OVERSIZED_BLOCK}(?!\\d)`).test(page))
+    const titlePage = pages.findIndex((page) => new RegExp(`Provider${OVERSIZED_BLOCK}(?!\\d)`).test(page))
 
     expect(titlePage).toBeGreaterThanOrEqual(0)
     // its notes continue onto the following page rather than being clipped

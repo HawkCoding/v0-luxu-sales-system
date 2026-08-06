@@ -324,8 +324,8 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
     ) {
       failures.push({
         gateId: "invoice_correspondence",
-        message: "The deposit invoice has been generated but not sent to the customer.",
-        fixHint: "Send the deposit invoice to the customer, or have a manager force the move with a reason.",
+        message: "The deposit invoice is ready but hasn't been sent yet.",
+        fixHint: "Send it to the customer to continue. A manager can also move this booking on with a reason.",
         severity: "block",
       })
     }
@@ -364,8 +364,8 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
     ) {
       failures.push({
         gateId: "final_invoice_correspondence",
-        message: "The payment-received confirmation must be sent before the booking is paid in full.",
-        fixHint: "Send the payment confirmation email from the booking before moving to Paid in Full.",
+        message: "The payment confirmation hasn't gone out yet.",
+        fixHint: "Send the payment confirmation email to continue. A manager can also move this booking on with a reason.",
         severity: "block",
       })
     }
@@ -394,8 +394,8 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
     if (!hasCorrespondence(correspondences, "voucher", ["voucher", "travel document"])) {
       failures.push({
         gateId: "voucher_correspondence",
-        message: "Voucher correspondence must exist before moving to Voucher Sent.",
-        fixHint: "Create or send the voucher email from the booking correspondence tab.",
+        message: "The voucher email hasn't been created yet.",
+        fixHint: "Create or send the voucher email from the booking's Emails tab to continue.",
         severity: "block",
       })
     }

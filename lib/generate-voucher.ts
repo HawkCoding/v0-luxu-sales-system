@@ -82,6 +82,9 @@ export interface VoucherServiceBlockData {
   handLuggageKg?: number | null
   checkedLuggageKg?: number | null
   priorityBoarding?: boolean | null
+  /** Flight-only: traveller names on the booking, printed "1.1 Name  1.2 Name" the way the legacy
+   * voucher tabled FlySafair passengers. */
+  passengerNames?: string[]
 }
 
 export interface VoucherServiceBlock {
@@ -271,14 +274,15 @@ function buildServiceBlocksSection(data: VoucherData): string {
   const blocksHtml = sortedVoucherServiceBlocks(blocks)
     .map((block) => {
       const contactLine = voucherProviderContactLine(block.contactDetails)
+      const heading = block.contactDetails.name || block.title || voucherServiceTypeLabel(block.serviceType)
+      const footnote = block.serviceData.footnote
       return `
   <div class="section">
-    <div class="section-title">${escapeHtml(block.title || voucherServiceTypeLabel(block.serviceType))}</div>
     <div class="provider-box">
-      <div class="provider-name">${escapeHtml(block.contactDetails.name ?? "")}</div>
+      <div class="provider-name">${escapeHtml(heading)}</div>
 ${contactLine ? `      <div class="provider-contact">${escapeHtml(contactLine)}</div>` : ""}
-${block.contactDetails.description ? `      <div class="provider-description">${escapeHtml(block.contactDetails.description)}</div>` : ""}
 ${buildServiceBlockBodyRows(block)}
+${footnote ? `      <div class="provider-footnote">${escapeHtml(footnote)}</div>` : ""}
     </div>
   </div>`
     })
@@ -344,8 +348,9 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
     })
     .join("\n")
 
-  // Preview mirrors lib/voucher/pdf/styles.ts pt-for-pt; the PDF is the
-  // source of truth — update both when the design changes.
+  // Preview mirrors lib/voucher/pdf/styles.ts pt-for-pt at the "compact" density (the only
+  // density the voucher ever renders at); the PDF is the source of truth — update both when the
+  // design changes. See lib/voucher/pdf/density.ts for the numbers being mirrored.
   const rule = tintWithWhite(t.accent_colour, 0.45)
   const ruleFaint = tintWithWhite(t.section_bg, 0.3)
   const frameOuter = tintWithWhite(t.accent_colour, 0.9)
@@ -360,36 +365,36 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
   <style>
-    @page { size: A4; margin: 20mm; }
+    @page { size: A4; margin: 14mm; }
     body {
       font-family: ${previewBodyFontStack(t.font_family)};
-      font-size: 10pt;
-      line-height: 1.5;
+      font-size: 9pt;
+      line-height: 1.4;
       color: #2B2B2B;
       margin: 0;
-      padding: 52pt 60pt 72pt;
+      padding: 34pt 40pt 40pt;
       position: relative;
     }
     .frame-outer, .frame-inner { position: absolute; pointer-events: none; }
-    .frame-outer { inset: 20pt; border: 0.75pt solid ${frameOuter}; }
-    .frame-inner { inset: 24pt; border: 0.5pt solid ${frameInner}; }
+    .frame-outer { inset: 14pt; border: 0.75pt solid ${frameOuter}; }
+    .frame-inner { inset: 17pt; border: 0.5pt solid ${frameInner}; }
 
     /* Header variants */
-    .header { margin-bottom: 24pt; }
+    .header { margin-bottom: 10pt; }
     .header-split { display: flex; align-items: stretch; border-bottom: 0.5pt solid ${rule}; padding-bottom: 12pt; }
-    .header-logo-side { width: 120px; min-width: 120px; display: flex; align-items: center; justify-content: center; padding: 8px; background: #fff; }
-    .header-logo { max-width: 100px; max-height: 80px; object-fit: contain; }
+    .header-logo-side { width: 90px; min-width: 90px; display: flex; align-items: center; justify-content: center; padding: 8px; background: #fff; }
+    .header-logo { max-width: 76px; max-height: 60px; object-fit: contain; }
     .header-banner-side { flex: 1; position: relative; overflow: hidden; }
-    .header-banner { width: 100%; height: 100px; object-fit: cover; display: block; }
+    .header-banner { width: 100%; height: 72px; object-fit: cover; display: block; }
     .header-text-overlay { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.35); padding: 8px 16px; }
     .header-text-overlay .product-line { color: #fff; margin: 0; }
     .header-text-overlay .header-subtitle { color: rgba(255,255,255,0.85); margin: 2pt 0 0; }
 
     .header-logo-only { text-align: center; padding-bottom: 12pt; border-bottom: 0.5pt solid ${rule}; }
-    .header-logo-center { max-height: 70px; object-fit: contain; margin-bottom: 6px; }
+    .header-logo-center { max-height: 52px; object-fit: contain; margin-bottom: 6px; }
 
     .header-banner-only { border-bottom: 0.5pt solid ${rule}; padding-bottom: 8pt; }
-    .header-banner-only .header-banner-full { width: 100%; max-height: 110px; object-fit: cover; display: block; }
+    .header-banner-only .header-banner-full { width: 100%; max-height: 80px; object-fit: cover; display: block; }
     .header-text-below { text-align: center; padding: 8pt 0; }
 
     .header-text-only { text-align: center; padding-bottom: 12pt; border-bottom: 0.5pt solid ${rule}; }
@@ -416,13 +421,13 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
       display: flex;
       justify-content: space-between;
       align-items: flex-end;
-      margin: 24pt 0 12pt;
+      margin: 10pt 0 6pt;
     }
     h1 {
       font-family: 'Playfair Display', Georgia, serif;
-      font-size: 22pt;
+      font-size: 16pt;
       font-weight: 700;
-      letter-spacing: 3pt;
+      letter-spacing: 2pt;
       text-transform: uppercase;
       color: ${t.accent_colour};
       margin: 0;
@@ -430,7 +435,7 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
     .voucher-stub {
       border: 0.75pt solid ${t.accent_colour};
       border-left-style: dashed;
-      padding: 6pt 12pt;
+      padding: 3pt 12pt;
       text-align: center;
     }
     .voucher-stub-label {
@@ -443,7 +448,7 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
     }
     .voucher-stub-number {
       font-family: 'Playfair Display', Georgia, serif;
-      font-size: 14pt;
+      font-size: 11pt;
       font-weight: 700;
       color: ${t.accent_colour};
       margin-top: 2pt;
@@ -451,77 +456,78 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
 
     .guidance {
       font-family: 'Playfair Display', Georgia, serif;
-      font-size: 9pt;
+      font-size: 7.5pt;
       font-style: italic;
-      line-height: 1.6;
+      line-height: 1.3;
       color: #6B6B6B;
-      margin: 8pt 0 24pt;
+      margin: 4pt 0 10pt;
       padding-right: 48pt;
     }
 
-    .section { margin-bottom: 24pt; }
+    .section { margin-bottom: 10pt; }
     .section-title {
       font-family: 'Montserrat', Arial, sans-serif;
-      font-size: 8.5pt;
+      font-size: 7.5pt;
       font-weight: 600;
-      letter-spacing: 2pt;
+      letter-spacing: 1.2pt;
       text-transform: uppercase;
       color: ${t.section_bg};
       border-bottom: 0.5pt solid ${ruleFaint};
-      padding-bottom: 6pt;
-      margin-bottom: 12pt;
+      padding-bottom: 3pt;
+      margin-bottom: 5pt;
     }
     .info-row {
       display: flex;
       gap: 12pt;
-      padding: 3pt 0;
+      padding: 1.5pt 0;
     }
     /* Legacy tables ruled every provider-box row with a dotted line; Guest Information bands
        alternating rows instead (info-row-shaded) — same distinction the legacy voucher made. */
-    .info-row-dotted { border-bottom: 0.5pt dotted ${ruleFaint}; padding-bottom: 5pt; }
-    .info-row-shaded { background: #F4F4F4; margin: 0 -6pt; padding: 3pt 6pt; }
+    .info-row-dotted { border-bottom: 0.5pt dotted ${ruleFaint}; padding-bottom: 2.5pt; }
+    .info-row-shaded { background: #F4F4F4; margin: 0 -5pt; padding: 1.5pt 5pt; }
     .info-label {
       font-family: 'Montserrat', Arial, sans-serif;
-      font-size: 8.5pt;
+      font-size: 7.5pt;
       font-weight: 600;
-      letter-spacing: 1pt;
+      letter-spacing: 0.4pt;
       text-transform: uppercase;
+      text-align: right;
       color: #6B6B6B;
       padding-top: 1pt;
-      width: 140pt;
-      min-width: 140pt;
+      width: 108pt;
+      min-width: 108pt;
       flex-shrink: 0;
     }
-    .info-value { color: #2B2B2B; font-size: 10pt; flex: 1; }
+    .info-value { color: #2B2B2B; font-size: 9pt; flex: 1; }
 
-    .cell-row { display: flex; gap: 24pt; padding: 3pt 0; }
+    .cell-row { display: flex; gap: 16pt; padding: 1.5pt 0; }
     .cell-label {
       font-family: 'Montserrat', Arial, sans-serif;
-      font-size: 7.5pt;
+      font-size: 6.5pt;
       font-weight: 600;
       letter-spacing: 1pt;
       text-transform: uppercase;
       color: #6B6B6B;
       margin-bottom: 2pt;
     }
-    .cell-value { color: #2B2B2B; font-size: 10pt; }
+    .cell-value { color: #2B2B2B; font-size: 9pt; }
 
     .provider-box {
       border: 0.75pt solid ${ruleFaint};
-      padding: 16pt;
+      padding: 7pt 9pt;
     }
     .provider-name {
       font-family: 'Playfair Display', Georgia, serif;
-      font-size: 13pt;
+      font-size: 11pt;
       font-weight: 700;
       color: ${t.accent_colour};
-      margin-bottom: 4pt;
+      margin-bottom: 1.5pt;
     }
     .provider-contact {
       font-family: 'Montserrat', Arial, sans-serif;
-      font-size: 8pt;
+      font-size: 7pt;
       color: #6B6B6B;
-      margin-bottom: 10pt;
+      margin-bottom: 5pt;
     }
     .provider-description {
       font-family: 'Playfair Display', Georgia, serif;
@@ -529,6 +535,13 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
       color: #6B6B6B;
       font-style: italic;
       margin-bottom: 12pt;
+    }
+    .provider-footnote {
+      font-family: 'Playfair Display', Georgia, serif;
+      font-size: 7.5pt;
+      color: #6B6B6B;
+      font-style: italic;
+      margin-top: 3pt;
     }
 
     .end-of-services {
@@ -538,11 +551,11 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
       text-transform: uppercase;
       color: #9A9A9A;
       text-align: center;
-      margin: 4pt 0 18pt;
+      margin: 2pt 0 8pt;
     }
 
-    .footer-section { margin-top: 8pt; text-align: center; }
-    .footer-rule { width: 64pt; border-top: 0.5pt solid ${rule}; margin: 0 auto 12pt; }
+    .footer-section { margin-top: 6pt; text-align: center; }
+    .footer-rule { width: 64pt; border-top: 0.5pt solid ${rule}; margin: 0 auto 8pt; }
     .footer-company {
       font-family: 'Montserrat', Arial, sans-serif;
       font-size: 8.5pt;
@@ -563,7 +576,7 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
       text-align: center;
       font-size: 7.5pt;
       color: #9A9A9A;
-      margin-top: 20pt;
+      margin-top: 12pt;
     }
   </style>
 </head>

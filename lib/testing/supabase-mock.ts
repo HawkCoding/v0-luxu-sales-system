@@ -17,6 +17,7 @@ type Filter =
   | { kind: "in"; column: string; values: unknown[] }
   | { kind: "gte"; column: string; value: unknown }
   | { kind: "lte"; column: string; value: unknown }
+  | { kind: "lt"; column: string; value: unknown }
   | { kind: "ilike"; column: string; pattern: string }
   | { kind: "notNull"; column: string }
   | { kind: "isNull"; column: string }
@@ -136,6 +137,11 @@ export class MockQueryBuilder implements PromiseLike<{ data: unknown; error: unk
     return this
   }
 
+  lt(column: string, value: unknown): this {
+    this.filters.push({ kind: "lt", column, value })
+    return this
+  }
+
   ilike(column: string, pattern: string): this {
     this.filters.push({ kind: "ilike", column, pattern })
     return this
@@ -206,6 +212,8 @@ export class MockQueryBuilder implements PromiseLike<{ data: unknown; error: unk
           return !lessThan(value, filter.value)
         case "lte":
           return !lessThan(filter.value, value)
+        case "lt":
+          return lessThan(value, filter.value)
         case "ilike":
           return typeof value === "string" && ilikeToRegExp(filter.pattern).test(value)
         case "notNull":

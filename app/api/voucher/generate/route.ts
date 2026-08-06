@@ -167,6 +167,9 @@ export async function POST(req: Request) {
             smokingPreference: reservationDetails.smoking_preference as "smoking" | "non_smoking" | null,
           }
         : null,
+      travellerNames: (travellers ?? [])
+        .map((traveller) => [traveller.first_name, traveller.last_name].filter(Boolean).join(" ").trim())
+        .filter(Boolean),
     })
     serviceBlocks = built.blocks
   } catch (error) {

@@ -49,6 +49,11 @@ interface BuildContext {
     mealSeating: "first" | "second" | null
     smokingPreference: "smoking" | "non_smoking" | null
   } | null
+  /** Full names of the party's travellers, in booking order — printed on every flight block as
+   * "1.1 Name  1.2 Name", matching the legacy voucher's FlySafair passenger table. Every flight on
+   * a booking carries the whole party, since a captured transport request has no notion of which
+   * travellers are actually on which flight. */
+  travellerNames?: string[]
 }
 
 interface SupplierJoin {
@@ -339,6 +344,8 @@ interface TransportBlockContext {
   /** Leg-level vehicle category, used when the request doesn't set its own. */
   fallbackVehicle: string | null
   supplierReference: string | null
+  /** See `BuildContext.travellerNames` — only read for flight requests. */
+  travellerNames: string[] | null
 }
 
 /** One captured transfer/rental/flight trip → one client-facing block. Flights reuse this same
@@ -388,6 +395,7 @@ function transportRequestBlock(
         handLuggageKg: flight?.hand_luggage_kg ?? null,
         checkedLuggageKg: flight?.checked_luggage_kg ?? null,
         priorityBoarding: flight?.priority_boarding ?? null,
+        passengerNames: blockContext.travellerNames?.length ? blockContext.travellerNames : undefined,
         notes: request.notes,
         footnote: request.voucher_footnote,
       },
@@ -545,6 +553,7 @@ export async function buildVoucherServiceBlocks(
             supplier,
             fallbackVehicle: suite?.name ?? null,
             supplierReference: request.supplier_reference ?? null,
+            travellerNames: context.travellerNames ?? null,
           }),
         )
       }
@@ -640,6 +649,7 @@ export async function buildVoucherServiceBlocks(
           supplier,
           fallbackVehicle: null,
           supplierReference: request.supplier_reference ?? null,
+          travellerNames: context.travellerNames ?? null,
         }),
       )
     })

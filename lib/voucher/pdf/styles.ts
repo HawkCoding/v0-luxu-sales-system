@@ -1,17 +1,21 @@
 import { StyleSheet } from "@react-pdf/renderer"
 import { voucherTokens } from "./design-tokens"
+import { DENSITY, type DocumentDensity } from "./density"
 import type { DocumentFontPairing as VoucherFontPairing } from "@/lib/pdf/document-fonts"
 
 export function voucherStyles({
   accentColour,
   sectionBg,
   fonts,
+  density = "comfortable",
 }: {
   accentColour: string
   sectionBg: string
   fonts: VoucherFontPairing
+  density?: DocumentDensity
 }) {
   const t = voucherTokens({ accentColour, sectionBg })
+  const d = DENSITY[density]
 
   return StyleSheet.create({
     page: {
@@ -21,36 +25,36 @@ export function voucherStyles({
       // NOTE: do not set lineHeight on the Page — react-pdf drops `fixed`
       // render-prop text (the footer page number) when a Page ancestor has
       // lineHeight. Apply lineHeight on the individual text styles instead.
-      paddingBottom: 56,
-      paddingHorizontal: 56,
-      paddingTop: 48,
+      paddingBottom: d.page.paddingBottom,
+      paddingHorizontal: d.page.paddingHorizontal,
+      paddingTop: d.page.paddingTop,
     },
     frameOuter: {
       borderColor: t.frameOuter,
       borderWidth: 0.75,
-      bottom: 20,
-      left: 20,
+      bottom: d.frame.outerInset,
+      left: d.frame.outerInset,
       position: "absolute",
-      right: 20,
-      top: 20,
+      right: d.frame.outerInset,
+      top: d.frame.outerInset,
     },
     frameInner: {
       borderColor: t.frameInner,
       borderWidth: 0.5,
-      bottom: 24,
-      left: 24,
+      bottom: d.frame.innerInset,
+      left: d.frame.innerInset,
       position: "absolute",
-      right: 24,
-      top: 24,
+      right: d.frame.innerInset,
+      top: d.frame.innerInset,
     },
     header: {
-      marginBottom: 18,
+      marginBottom: d.header.marginBottom,
     },
     headerSplit: {
       borderBottomColor: t.rule,
       borderBottomWidth: 0.5,
       flexDirection: "row",
-      minHeight: 100,
+      minHeight: d.header.minHeight,
       paddingBottom: 12,
     },
     headerLogoSide: {
@@ -61,17 +65,17 @@ export function voucherStyles({
       width: 120,
     },
     headerLogo: {
-      height: 80,
+      height: d.header.logoHeight,
       objectFit: "contain",
-      width: 100,
+      width: d.header.logoWidth,
     },
     headerBannerSide: {
       flex: 1,
-      minHeight: 100,
+      minHeight: d.header.minHeight,
       position: "relative",
     },
     headerBanner: {
-      height: 100,
+      height: d.header.bannerHeight,
       objectFit: "cover",
       width: "100%",
     },
@@ -92,9 +96,9 @@ export function voucherStyles({
       paddingBottom: 12,
     },
     headerLogoCenter: {
-      height: 70,
+      height: d.header.logoCenterHeight,
       objectFit: "contain",
-      width: 180,
+      width: d.header.logoCenterWidth,
     },
     headerBannerOnly: {
       borderBottomColor: t.rule,
@@ -102,7 +106,7 @@ export function voucherStyles({
       paddingBottom: 8,
     },
     headerBannerFull: {
-      height: 110,
+      height: d.header.bannerFullHeight,
       objectFit: "cover",
       width: "100%",
     },
@@ -151,15 +155,15 @@ export function voucherStyles({
       alignItems: "flex-end",
       flexDirection: "row",
       justifyContent: "space-between",
-      marginBottom: 10,
-      marginTop: 18,
+      marginBottom: d.voucherNumberRow.marginBottom,
+      marginTop: d.voucherNumberRow.marginTop,
     },
     title: {
       color: t.accent,
       fontFamily: fonts.display,
-      fontSize: 22,
+      fontSize: d.title.fontSize,
       fontWeight: 700,
-      letterSpacing: 3,
+      letterSpacing: d.title.letterSpacing,
       textTransform: "uppercase",
     },
     voucherStub: {
@@ -168,7 +172,7 @@ export function voucherStyles({
       borderLeftStyle: "dashed",
       borderWidth: 0.75,
       paddingHorizontal: 12,
-      paddingVertical: 6,
+      paddingVertical: d.stub.paddingVertical,
     },
     voucherStubLabel: {
       color: t.inkMuted,
@@ -181,38 +185,38 @@ export function voucherStyles({
     voucherStubNumber: {
       color: t.accent,
       fontFamily: fonts.display,
-      fontSize: 14,
+      fontSize: d.stub.numberFontSize,
       fontWeight: 700,
       marginTop: 2,
     },
     guidance: {
       color: t.inkMuted,
       fontFamily: fonts.display,
-      fontSize: 9,
+      fontSize: d.guidance.fontSize,
       fontStyle: "italic",
-      lineHeight: 1.5,
-      marginBottom: 18,
+      lineHeight: d.guidance.lineHeight,
+      marginBottom: d.guidance.marginBottom,
       marginTop: 4,
       paddingRight: 48,
     },
     section: {
-      marginBottom: 18,
+      marginBottom: d.section.marginBottom,
     },
     sectionTitle: {
       borderBottomColor: t.ruleFaint,
       borderBottomWidth: 0.5,
       color: t.eyebrow,
       fontFamily: fonts.sans,
-      fontSize: 8.5,
+      fontSize: d.sectionTitle.fontSize,
       fontWeight: 600,
-      letterSpacing: 2,
-      marginBottom: 10,
-      paddingBottom: 6,
+      letterSpacing: d.sectionTitle.letterSpacing,
+      marginBottom: d.sectionTitle.marginBottom,
+      paddingBottom: d.sectionTitle.paddingBottom,
       textTransform: "uppercase",
     },
     infoRow: {
       flexDirection: "row",
-      marginBottom: 6,
+      marginBottom: d.infoRow.marginBottom,
     },
     // Legacy tables ruled every row with a dotted line — applied inside providerBox only;
     // Guest Information uses alternating bands (infoRowShaded) instead, since that's how the
@@ -223,42 +227,43 @@ export function voucherStyles({
     infoRowDotted: {
       borderBottomColor: t.ruleFaint,
       borderBottomWidth: 0.5,
-      paddingBottom: 5,
+      paddingBottom: d.infoRowDotted.paddingBottom,
     },
     infoRowShaded: {
       backgroundColor: t.rowShade,
       marginHorizontal: -6,
-      paddingHorizontal: 6,
-      paddingVertical: 3,
+      paddingHorizontal: d.infoRowShaded.paddingHorizontal,
+      paddingVertical: d.infoRowShaded.paddingVertical,
     },
     infoLabel: {
       color: t.inkMuted,
       fontFamily: fonts.sans,
-      fontSize: 8.5,
+      fontSize: d.infoLabel.fontSize,
       fontWeight: 600,
-      letterSpacing: 1,
+      letterSpacing: d.infoLabel.letterSpacing,
       paddingRight: 12,
       paddingTop: 1,
+      textAlign: d.infoLabel.textAlign,
       textTransform: "uppercase",
-      width: 140,
+      width: d.infoLabel.width,
     },
     infoValue: {
       color: t.ink,
       flex: 1,
-      fontSize: 10,
-      lineHeight: 1.4,
+      fontSize: d.infoValue.fontSize,
+      lineHeight: d.infoValue.lineHeight,
     },
     cellRow: {
       flexDirection: "row",
-      marginBottom: 6,
+      marginBottom: d.infoRow.marginBottom,
     },
     cell: {
-      marginRight: 24,
+      marginRight: d.cell.marginRight,
     },
     cellLabel: {
       color: t.inkMuted,
       fontFamily: fonts.sans,
-      fontSize: 7.5,
+      fontSize: d.cell.labelFontSize,
       fontWeight: 600,
       letterSpacing: 1,
       marginBottom: 2,
@@ -266,26 +271,27 @@ export function voucherStyles({
     },
     cellValue: {
       color: t.ink,
-      fontSize: 10,
-      lineHeight: 1.4,
+      fontSize: d.cell.valueFontSize,
+      lineHeight: d.infoValue.lineHeight,
     },
     providerBox: {
       borderColor: t.ruleFaint,
       borderWidth: 0.75,
-      padding: 14,
+      paddingHorizontal: d.providerBox.paddingHorizontal,
+      paddingVertical: d.providerBox.paddingVertical,
     },
     providerName: {
       color: t.accent,
       fontFamily: fonts.display,
-      fontSize: 13,
+      fontSize: d.providerName.fontSize,
       fontWeight: 700,
-      marginBottom: 4,
+      marginBottom: d.providerName.marginBottom,
     },
     providerContact: {
       color: t.inkMuted,
       fontFamily: fonts.sans,
-      fontSize: 8,
-      marginBottom: 10,
+      fontSize: d.providerContact.fontSize,
+      marginBottom: d.providerContact.marginBottom,
     },
     providerDescription: {
       color: t.inkMuted,
@@ -294,24 +300,31 @@ export function voucherStyles({
       fontStyle: "italic",
       marginBottom: 10,
     },
+    providerFootnote: {
+      color: t.inkMuted,
+      fontFamily: fonts.display,
+      fontSize: 7.5,
+      fontStyle: "italic",
+      marginTop: 3,
+    },
     endOfServices: {
       color: t.inkFaint,
       fontFamily: fonts.sans,
       fontSize: 8,
       letterSpacing: 1.5,
-      marginTop: 4,
-      marginBottom: 18,
+      marginTop: d.endOfServices.marginTop,
+      marginBottom: d.endOfServices.marginBottom,
       textAlign: "center",
       textTransform: "uppercase",
     },
     footerSection: {
       alignItems: "center",
-      marginTop: 8,
+      marginTop: d.footerSection.marginTop,
     },
     footerRule: {
       borderTopColor: t.rule,
       borderTopWidth: 0.5,
-      marginBottom: 12,
+      marginBottom: d.footerRule.marginBottom,
       width: 64,
     },
     footerCompany: {
@@ -329,7 +342,7 @@ export function voucherStyles({
       marginTop: 4,
     },
     pageNumber: {
-      bottom: 32,
+      bottom: d.pageNumber.bottom,
       color: t.inkFaint,
       fontFamily: fonts.sans,
       fontSize: 7.5,

@@ -32,26 +32,36 @@ export function extractDirectionLocationIds(
   return [hits[0].id, hits[1].id]
 }
 
+export interface RouteMatch {
+  routeId: string | null
+  /** True when the customer named the route's destination before its origin (e.g. the route is
+   *  filed as Pretoria -> Cape Town but the enquiry said "Cape Town to Pretoria"). Always false
+   *  for one_way routes, which can only ever match in their filed order. */
+  reversed: boolean
+}
+
+const NO_MATCH: RouteMatch = { routeId: null, reversed: false }
+
 /**
- * Resolves free-text direction wording to a route id by decomposing it into an endpoint pair and
- * matching against `routes`, honouring `direction_mode` (one_way routes must match origin/
- * destination in order; round_trip/loop match either order). Shared by the enquiries API and the
- * inbound-email importer.
+ * Resolves free-text direction wording to a route id (and which way round it was travelled) by
+ * decomposing it into an endpoint pair and matching against `routes`, honouring `direction_mode`
+ * (one_way routes must match origin/destination in order; round_trip/loop match either order).
+ * Shared by the enquiries API and the inbound-email importer.
  *
  * Never guesses: more than one candidate route for the same endpoint pair — with or without a
- * known supplier — means the pair alone can't disambiguate, so this returns null rather than
+ * known supplier — means the pair alone can't disambiguate, so this returns no match rather than
  * silently taking the first row the query happened to return.
  */
-export async function findRouteId(
+export async function findRouteMatch(
   supabase: ServiceClient,
   direction: unknown,
   supplierId: string | null = null,
-): Promise<string | null> {
-  if (typeof direction !== "string" || !direction.trim()) return null
+): Promise<RouteMatch> {
+  if (typeof direction !== "string" || !direction.trim()) return NO_MATCH
 
   const { data: locations } = await supabase.from("locations").select("id, name")
   const endpoints = extractDirectionLocationIds(direction, locations ?? [])
-  if (!endpoints) return null
+  if (!endpoints) return NO_MATCH
   const [firstLocId, secondLocId] = endpoints
 
   let routesQuery = supabase
@@ -77,6 +87,20 @@ export async function findRouteId(
     )
   })
 
-  if (matches.length === 1) return matches[0].id
-  return null
+  if (matches.length !== 1) return NO_MATCH
+  const route = matches[0]
+  // one_way already had to match in filed order to be a candidate at all; round_trip/loop
+  // travelled reversed exactly when the customer's first-named endpoint is the route's
+  // destination, not its origin.
+  const reversed = route.direction_mode !== "one_way" && route.origin_location_id === secondLocId
+  return { routeId: route.id, reversed }
+}
+
+/** Back-compat wrapper for callers that only need the id. Prefer `findRouteMatch`. */
+export async function findRouteId(
+  supabase: ServiceClient,
+  direction: unknown,
+  supplierId: string | null = null,
+): Promise<string | null> {
+  return (await findRouteMatch(supabase, direction, supplierId)).routeId
 }

@@ -28,12 +28,14 @@ function makeDraft(overrides: Partial<ParsedDraft["guests"]> = {}): ParsedDraft 
     guests: {
       adults: 2,
       children: 0,
+      childAges: [],
       suites: 1,
       suitePhrases: ["Deluxe Twin with shower"],
       suiteType: "Deluxe Twin with shower",
       ...overrides,
     },
     additionalServices: { requested: false, details: "" },
+    termsAccepted: true,
     notes: "",
     formFields: {
       title: "",
@@ -47,6 +49,7 @@ function makeDraft(overrides: Partial<ParsedDraft["guests"]> = {}): ParsedDraft 
       supplier: "Blue Train",
       departureDateRaw: "2026-05-11",
       suitePhrases: ["Deluxe Twin with shower"],
+      childAges: [],
       hotelPhase: "",
       extendStay: null,
       additionalServicesDetails: "",

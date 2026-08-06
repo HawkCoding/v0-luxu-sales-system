@@ -4,6 +4,7 @@ import path from "path"
 import { parseEmailDraft } from "@/lib/import/parseEmailDraft"
 import { getEmailImportReviewMetadata } from "@/lib/inbound-email/review"
 import { createEmailBookingFromParsedDraft } from "@/lib/inbound-email/import-booking"
+import { createServiceClient } from "@/lib/supabase/server"
 
 const DEMO_ACCOUNT_ID = "00000000-0000-0000-0000-00000000ea01"
 const FIXTURE_PATH = path.join(
@@ -25,8 +26,17 @@ export async function POST(): Promise<NextResponse> {
     date: string
   }
 
+  const supabase = createServiceClient()
+  const { data: trainOperators } = await supabase
+    .from("suppliers")
+    .select("name")
+    .eq("kind", "train_operator")
+    .eq("active", true)
+
   const rawText = fixture.text || ""
-  const parsedDraft = parseEmailDraft(rawText)
+  const parsedDraft = parseEmailDraft(rawText, {
+    trainOperatorNames: (trainOperators ?? []).map((row) => row.name),
+  })
   const review = getEmailImportReviewMetadata(parsedDraft)
 
   const created = await createEmailBookingFromParsedDraft(parsedDraft, {

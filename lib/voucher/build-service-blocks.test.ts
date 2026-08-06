@@ -790,6 +790,62 @@ describe("buildVoucherServiceBlocks", () => {
     expect(flight.serviceData.footnote).toBe("Check in 1h30 min prior to departure")
   })
 
+  it("carries the party's traveller names onto a flight block as passengerNames", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        transportRequests: [
+          {
+            id: "req-flight",
+            package_leg_id: null,
+            service_id: null,
+            service_type: "flight",
+            pickup_point: "CPT",
+            dropoff_point: "JNB",
+            pickup_at: "2026-09-11T16:20:00",
+            flight_number: "FA-120",
+            passenger_count: 2,
+            notes: null,
+            sort_order: 0,
+            suppliers: supplier({ name: "FlySafair", kind: "airline" }),
+            suite_types: null,
+            rental_details: null,
+            flight_details: null,
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID, travellerNames: ["Hans Ntshele Makweng", "Manini Florence Theletsane"] },
+    )
+
+    expect(blocks[0].serviceData.passengerNames).toEqual(["Hans Ntshele Makweng", "Manini Florence Theletsane"])
+  })
+
+  it("does not carry passengerNames onto a non-flight transfer block", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [transferSelection()],
+        transportRequests: [
+          {
+            id: "req-transfer",
+            package_leg_id: "leg-transfer",
+            service_type: "transfer",
+            pickup_point: "Airport",
+            dropoff_point: "Hotel",
+            pickup_at: null,
+            flight_number: null,
+            notes: null,
+            sort_order: 0,
+            suppliers: supplier(),
+            suite_types: null,
+            rental_details: null,
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID, travellerNames: ["Hans Ntshele Makweng"] },
+    )
+
+    expect(blocks[0].serviceData.passengerNames).toBeUndefined()
+  })
+
   it("carries a leg's own contact name, footnote and excursions onto its block", async () => {
     const { blocks } = await buildVoucherServiceBlocks(
       buildSupabase({

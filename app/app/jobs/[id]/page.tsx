@@ -58,6 +58,7 @@ import { useVersionedSave } from "@/hooks/use-versioned-save"
 import { useBookingNotes } from "@/lib/use-data"
 import type { GateFailure, ManualConfirmations } from "@/lib/pipeline/validate-transition"
 import { getApiErrorMessage, parseStageTransitionFailurePayload } from "@/lib/pipeline/stage-transition-response"
+import { resolvePendingSendAction } from "@/lib/pipeline/pending-send-action"
 import { toast } from "sonner"
 
 interface JobPatchResponse {
@@ -179,9 +180,11 @@ export default function JobDetailPage() {
   const [transitionIsManager, setTransitionIsManager] = useState(false)
   const [transitionSubmitting, setTransitionSubmitting] = useState(false)
   const [depositInvoiceOpen, setDepositInvoiceOpen] = useState(false)
+  const [depositInvoiceAutoPreview, setDepositInvoiceAutoPreview] = useState(false)
   const [paymentConfirmationOpen, setPaymentConfirmationOpen] = useState(false)
   const [depositPaymentConfirmationOpen, setDepositPaymentConfirmationOpen] = useState(false)
   const [voucherOpen, setVoucherOpen] = useState(false)
+  const [voucherAutoPreview, setVoucherAutoPreview] = useState(false)
   const [pendingStage, setPendingStage] = useState<PipelineStage | null>(null)
   const [customerSearch, setCustomerSearch] = useState("")
   const [customerResults, setCustomerResults] = useState<Array<{ id: string; firstName: string; lastName: string; email: string }>>([])
@@ -219,6 +222,9 @@ export default function JobDetailPage() {
     entity: "job",
     recordId: id,
     expectedUpdatedAt: data?.job?.updatedAt,
+    // Only the change-customer flow goes through this hook today; its sole
+    // field is customerId, so a fixed single-field baseline is safe here.
+    baseline: data?.customer?.id ? { customerId: data.customer.id } : undefined,
   })
 
   useEffect(() => {
@@ -252,6 +258,32 @@ export default function JobDetailPage() {
 
   useEffect(() => {
     setActiveTab(parseJobDetailTab(searchParams.get("tab")))
+  }, [searchParams])
+
+  // Deep-link from the pipeline board: a drag that only needs a document
+  // sent lands here instead of showing a blocked-move message on the board,
+  // where the send dialogs aren't mounted. One-shot: strip the params once
+  // handled so a refresh doesn't reopen the dialog.
+  useEffect(() => {
+    const send = searchParams.get("send")
+    const stage = searchParams.get("stage")
+    if (!send || !stage) return
+    const targetStage = PIPELINE_STAGES.find((s) => s.key === stage)?.key ?? null
+    if (!targetStage) return
+
+    router.replace(`/app/bookings/${id}`)
+    setPendingStage(targetStage)
+    if (send === "deposit_invoice") {
+      setDepositInvoiceAutoPreview(true)
+      setDepositInvoiceOpen(true)
+    } else if (send === "payment_confirmation") {
+      setPaymentConfirmationOpen(true)
+    } else if (send === "voucher") {
+      setVoucherAutoPreview(true)
+      setVoucherOpen(true)
+    }
+    // Only re-run when the URL actually changes; router/id are stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
 
   useEffect(() => {
@@ -372,6 +404,7 @@ export default function JobDetailPage() {
         body: JSON.stringify({
           customerInvoiceNumber: invoiceNumberDraft.trim().length > 0 ? invoiceNumberDraft.trim() : null,
           expectedUpdatedAt: data?.job?.updatedAt,
+          baseline: { customerInvoiceNumber: currentInvoiceNumber || null },
         }),
       })
       if (!response.ok) {
@@ -403,7 +436,11 @@ export default function JobDetailPage() {
       const response = await fetch(`/api/jobs/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assignedSalespersonId: next, expectedUpdatedAt: data?.job?.updatedAt }),
+        body: JSON.stringify({
+          assignedSalespersonId: next,
+          expectedUpdatedAt: data?.job?.updatedAt,
+          baseline: { assignedSalespersonId },
+        }),
       })
       if (!response.ok) {
         const payload = await response.json().catch(() => null)
@@ -440,6 +477,8 @@ export default function JobDetailPage() {
     setTransitionFailures([])
     setTransitionIsManager(false)
     setPendingStage(null)
+    setDepositInvoiceAutoPreview(false)
+    setVoucherAutoPreview(false)
   }
 
   const moveStageTo = async (
@@ -480,6 +519,34 @@ export default function JobDetailPage() {
           setPendingStage(targetStage)
           setTransitionFailures(stageGatePayload.failures)
           setTransitionIsManager(stageGatePayload.isManager)
+          setVoucherOpen(true)
+          return
+        }
+
+        // Document already generated, only the email is missing — jump
+        // straight into the existing preview-and-send dialog instead of
+        // reporting a blocked move.
+        const pendingSendAction = resolvePendingSendAction(stageGatePayload.failures)
+        if (pendingSendAction === "deposit_invoice") {
+          setPendingStage(targetStage)
+          setTransitionFailures(stageGatePayload.failures)
+          setTransitionIsManager(stageGatePayload.isManager)
+          setDepositInvoiceAutoPreview(true)
+          setDepositInvoiceOpen(true)
+          return
+        }
+        if (pendingSendAction === "payment_confirmation" && payments.length > 0) {
+          setPendingStage(targetStage)
+          setTransitionFailures(stageGatePayload.failures)
+          setTransitionIsManager(stageGatePayload.isManager)
+          setPaymentConfirmationOpen(true)
+          return
+        }
+        if (pendingSendAction === "voucher") {
+          setPendingStage(targetStage)
+          setTransitionFailures(stageGatePayload.failures)
+          setTransitionIsManager(stageGatePayload.isManager)
+          setVoucherAutoPreview(true)
           setVoucherOpen(true)
           return
         }
@@ -536,7 +603,11 @@ export default function JobDetailPage() {
       const response = await fetch(`/api/jobs/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assignedSalespersonId: next, expectedUpdatedAt: data?.job?.updatedAt }),
+        body: JSON.stringify({
+          assignedSalespersonId: next,
+          expectedUpdatedAt: data?.job?.updatedAt,
+          baseline: { assignedSalespersonId },
+        }),
       })
       const payload = (await response.json().catch(() => ({}))) as { error?: string }
       if (!response.ok) throw new Error(payload.error ?? failMessage)
@@ -1094,18 +1165,24 @@ export default function JobDetailPage() {
 
       <GenerateDepositInvoiceDialog
         open={depositInvoiceOpen}
-        onOpenChange={setDepositInvoiceOpen}
+        onOpenChange={(next) => {
+          setDepositInvoiceOpen(next)
+          if (!next) setDepositInvoiceAutoPreview(false)
+        }}
         trigger={false}
         jobId={id}
         bookingNumber={job.jobNumber}
+        invoiceNumber={currentInvoiceNumber || undefined}
         customerName={`${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()}
         quotes={quotes}
         defaultDepositPercentage={settings?.defaultDepositPercentage ?? 25}
         departureDate={enquiry?.departureDate ?? null}
         draftInvoice={draftDepositInvoice}
         amending={invoiceNeedsAmendment}
+        autoPreview={depositInvoiceAutoPreview}
         onSent={async () => {
           setDepositInvoiceOpen(false)
+          setDepositInvoiceAutoPreview(false)
           await mutate()
           resetPendingTransition()
         }}
@@ -1145,16 +1222,21 @@ export default function JobDetailPage() {
 
       <GenerateVoucherDialog
         open={voucherOpen}
-        onOpenChange={setVoucherOpen}
+        onOpenChange={(next) => {
+          setVoucherOpen(next)
+          if (!next) setVoucherAutoPreview(false)
+        }}
         trigger={false}
         jobId={id}
         bookingNumber={job.jobNumber}
         invoiceNumber={currentInvoiceNumber || undefined}
+        autoPreview={voucherAutoPreview}
         onGenerated={async () => {
           await mutate()
         }}
         onSent={async () => {
           setVoucherOpen(false)
+          setVoucherAutoPreview(false)
           await mutate()
           resetPendingTransition()
         }}

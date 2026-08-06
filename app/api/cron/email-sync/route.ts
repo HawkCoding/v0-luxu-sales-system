@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server"
 import { syncAllEnabledInboundEmailAccounts } from "@/lib/inbound-email/sync"
 
+// Hobby plan ceiling. Not the root cause of the connection-drop incident this batch of changes
+// fixes (the run's Critical log was written, so the function was alive when the socket died) --
+// set anyway as defensive hygiene now that each account's sync is bounded by MAX_UIDS_PER_RUN.
+export const maxDuration = 60
+
 export async function GET(request: Request) {
   const authHeader = request.headers.get("authorization")
 

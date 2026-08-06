@@ -24,7 +24,7 @@ import { COMPLETED_REPEAT_BOOKING_STAGES } from "@/lib/customer-repeat-status"
 import { findHotelSupplierId, resolveTrainSupplierId } from "@/lib/resolvers/supplier-resolver"
 import { autoBuildBookingServices } from "@/lib/auto-build/build-from-enquiry"
 import { createDraftQuoteForBooking } from "@/lib/quotes/create-draft-quote"
-import { findRouteId } from "@/lib/resolvers/route-resolver"
+import { findRouteMatch } from "@/lib/resolvers/route-resolver"
 
 type ServiceClient = ReturnType<typeof createServiceClient>
 type TransportServiceType = "transfer" | "rental"
@@ -362,7 +362,7 @@ export async function POST(req: Request) {
   // same never-guess way findHotelSupplierId already resolves body.hotelOption below, rather than
   // silently dropping every request that arrives without a client-resolved id.
   const trainSupplierId = body.supplierId ?? (await resolveTrainSupplierId(supabase, body.supplier))
-  const routeId = await findRouteId(supabase, body.direction, trainSupplierId)
+  const { routeId, reversed: routeReversed } = await findRouteMatch(supabase, body.direction, trainSupplierId)
   const hotelSupplierId = await findHotelSupplierId(supabase, body.hotelOption)
   let jobNumberAllocation: JobNumberAllocation
   try {
@@ -520,6 +520,7 @@ export async function POST(req: Request) {
       trainSupplierId,
       hotelSupplierId,
       routeId,
+      routeReversed,
       departureDate: body.departureDate || null,
       hotelPhase: body.hotelPhase ?? null,
     })

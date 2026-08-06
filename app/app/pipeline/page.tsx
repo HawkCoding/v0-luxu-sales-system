@@ -31,6 +31,7 @@ import { toast } from "sonner"
 import { StageTransitionModal } from "@/components/stage-transition-modal"
 import type { GateFailure, ManualConfirmations } from "@/lib/pipeline/validate-transition"
 import { parseStageTransitionFailurePayload } from "@/lib/pipeline/stage-transition-response"
+import { resolvePendingSendAction } from "@/lib/pipeline/pending-send-action"
 import { useRouter } from "next/navigation"
 
 interface PipelineJob {
@@ -201,6 +202,15 @@ export default function PipelinePage() {
     }
 
     if (payload.failures?.length) {
+      // The board doesn't load the invoices/quotes/documents a send dialog
+      // needs, so a "document generated but not sent" gate can't be resolved
+      // here — hand off to the booking page, which can.
+      const pendingSendAction = resolvePendingSendAction(payload.failures)
+      if (pendingSendAction) {
+        router.push(`/app/bookings/${jobId}?send=${pendingSendAction}&stage=${toStage}`)
+        return
+      }
+
       setTransitionFailures(payload.failures)
       setTransitionIsManager(Boolean(payload.isManager))
       setPendingJobId(jobId)

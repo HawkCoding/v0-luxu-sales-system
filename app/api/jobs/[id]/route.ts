@@ -19,12 +19,25 @@ import {
 } from "@/lib/supabase/columns"
 import type { Json } from "@/lib/supabase/types"
 import { requireUser } from "@/lib/api/auth"
-import { staleVersionResponse } from "@/lib/concurrency"
+import { detectFieldConflicts, fieldConflictResponse, staleVersionResponse } from "@/lib/concurrency"
+import { mapPostgrestError } from "@/lib/api/responses"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { CONSULTANTS } from "@/lib/types"
 import type { PipelineStage } from "@/lib/types"
 import { extractRoleFromJwt } from "@/lib/role-utils"
-import { applyTransition } from "@/lib/pipeline/apply-transition"
+import { applyTransition, StaleTransitionError } from "@/lib/pipeline/apply-transition"
+import type { PostgrestError } from "@supabase/supabase-js"
+
+function isPostgrestError(error: unknown): error is PostgrestError {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    "message" in error &&
+    "details" in error &&
+    "hint" in error
+  )
+}
 import { validateTransition } from "@/lib/pipeline/validate-transition"
 import { mapBookingTransportRequest } from "@/lib/suppliers"
 import { getDefaultDepositPercentage } from "@/lib/pipeline/constants"
@@ -74,6 +87,10 @@ const patchJobSchema = z.object({
   customerId: z.string().optional(),
   customerInvoiceNumber: z.string().trim().max(120).nullable().optional(),
   expectedUpdatedAt: z.string().datetime({ offset: true }).optional(),
+  // Values the client loaded for the fields it's changing (keyed by the same
+  // client-facing names as the patch body), so a sibling write that bumped
+  // updated_at without touching these fields doesn't block this save.
+  baseline: z.record(z.string(), z.unknown()).optional(),
   parsedFieldEdits: z
     .object({
       noOfAdults: z.number().int().min(0).optional(),
@@ -538,7 +555,39 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
-  if (body.expectedUpdatedAt && body.expectedUpdatedAt !== booking.updated_at) {
+  // Only the scalar single-value edits (reassign, invoice number, change
+  // customer) go through baseline-based conflict detection today. Stage
+  // transitions and multi-field parsed edits keep the coarser row-version
+  // check below — a concurrent write there is a real conflict, not noise.
+  const JOB_BASELINE_FIELD_MAP: Record<string, keyof typeof booking> = {
+    consultant: "consultant",
+    assignedSalespersonId: "assigned_salesperson_id",
+    customerId: "customer_id",
+    customerInvoiceNumber: "customer_invoice_number",
+  }
+
+  const supportedBaselineFields: Record<string, unknown> = {}
+  const currentForConflict: Record<string, unknown> = {}
+  const patchForConflict: Record<string, unknown> = {}
+  const bodyRecord = body as Record<string, unknown>
+  for (const [clientField, column] of Object.entries(JOB_BASELINE_FIELD_MAP)) {
+    if (!body.baseline || !(clientField in body.baseline)) continue
+    supportedBaselineFields[clientField] = body.baseline[clientField]
+    currentForConflict[clientField] = booking[column]
+    patchForConflict[clientField] = bodyRecord[clientField]
+  }
+
+  if (Object.keys(supportedBaselineFields).length > 0) {
+    const conflicts = detectFieldConflicts(patchForConflict, supportedBaselineFields, currentForConflict)
+    if (conflicts.length > 0) {
+      return fieldConflictResponse("booking", conflicts, booking.updated_at)
+    }
+    // The baseline check cleared this save, but the client's expectedUpdatedAt
+    // may still be stale (that's the whole point — a sibling write bumped it).
+    // Swap in the freshly-read row version so the guarded write below doesn't
+    // immediately fail the coarse check we just decided doesn't apply.
+    body.expectedUpdatedAt = booking.updated_at
+  } else if (body.expectedUpdatedAt && body.expectedUpdatedAt !== booking.updated_at) {
     return staleVersionResponse("booking", booking.updated_at)
   }
 
@@ -705,10 +754,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         body.expectedUpdatedAt = transition.updated.updated_at
       }
     } catch (error) {
-      return NextResponse.json(
-        { error: error instanceof Error ? error.message : "Stage update failed" },
-        { status: 500 },
-      )
+      if (error instanceof StaleTransitionError) {
+        return staleVersionResponse("booking", error.currentUpdatedAt)
+      }
+      if (isPostgrestError(error)) {
+        return (
+          mapPostgrestError("jobs/[id]:transition", error) ??
+          safeSupabaseError("jobs/[id]:transition", error, "Stage update failed")
+        )
+      }
+      console.error("jobs/[id]:transition", error)
+      return NextResponse.json({ error: "Stage update failed" }, { status: 500 })
     }
 
     const historyInsert = await supabase.from("pipeline_history").insert({
@@ -718,7 +774,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       moved_by: actorName,
       moved_by_user_id: user.id,
     })
-    if (historyInsert.error) return NextResponse.json({ error: historyInsert.error.message }, { status: 500 })
+    if (historyInsert.error) {
+      return safeSupabaseError("jobs/[id]:pipeline_history", historyInsert.error, "Failed to record stage change")
+    }
 
     const stageAudit = await supabase.from("audit_logs").insert({
       actor: actorName,
@@ -733,7 +791,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         manual_confirmations: body.manualConfirmations ?? null,
       } as Json,
     })
-    if (stageAudit.error) return NextResponse.json({ error: stageAudit.error.message }, { status: 500 })
+    if (stageAudit.error) {
+      return safeSupabaseError("jobs/[id]:audit_logs", stageAudit.error, "Failed to record stage change")
+    }
 
     if (body.override === true) {
       const overrideAudit = await supabase.from("audit_logs").insert({
@@ -756,7 +816,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
           })),
         } as Json,
       })
-      if (overrideAudit.error) return NextResponse.json({ error: overrideAudit.error.message }, { status: 500 })
+      if (overrideAudit.error) {
+        return safeSupabaseError("jobs/[id]:audit_logs", overrideAudit.error, "Failed to record override")
+      }
     }
 
     if (fromStage === "closed" && targetStage !== "closed") {
@@ -770,7 +832,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         after_json: { stage: targetStage },
         meta_json: { reason: body.closedReopenReason?.trim() },
       })
-      if (reopenAudit.error) return NextResponse.json({ error: reopenAudit.error.message }, { status: 500 })
+      if (reopenAudit.error) {
+        return safeSupabaseError("jobs/[id]:audit_logs", reopenAudit.error, "Failed to record reopen")
+      }
     }
   }
 
@@ -976,7 +1040,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   const { data: updated, error } = await updateQuery
     .select()
-    .single()
+    .maybeSingle()
+
+  if (error) {
+    return mapPostgrestError("jobs/[id]", error) ?? safeSupabaseError("jobs/[id]", error)
+  }
 
   if (!updated && body.expectedUpdatedAt) {
     const { data: current } = await supabase
@@ -988,7 +1056,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return staleVersionResponse("booking", current?.updated_at ?? booking.updated_at)
   }
 
-  if (error) return safeSupabaseError("jobs/[id]", error)
+  if (!updated) {
+    return NextResponse.json({ error: "Failed to update booking" }, { status: 500 })
+  }
 
   return NextResponse.json({
     id: updated.id,

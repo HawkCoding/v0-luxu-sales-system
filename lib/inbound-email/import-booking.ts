@@ -11,7 +11,7 @@ import { createRawEmailPreview } from "@/lib/inbound-email/html"
 import type { Database, Json } from "@/lib/supabase/types"
 import { COMPLETED_REPEAT_BOOKING_STAGES } from "@/lib/customer-repeat-status"
 import { resolveTrainSupplierId, findHotelSupplierId } from "@/lib/resolvers/supplier-resolver"
-import { findRouteId } from "@/lib/resolvers/route-resolver"
+import { findRouteMatch } from "@/lib/resolvers/route-resolver"
 import { autoBuildBookingServices } from "@/lib/auto-build/build-from-enquiry"
 import { createDraftQuoteForBooking } from "@/lib/quotes/create-draft-quote"
 
@@ -183,7 +183,7 @@ export async function createEmailBookingFromParsedDraft(
   }
 
   const trainSupplierId = await resolveTrainSupplierId(supabase, parsed.trip.supplier)
-  const routeId = await findRouteId(supabase, payload.direction, trainSupplierId)
+  const { routeId, reversed: routeReversed } = await findRouteMatch(supabase, payload.direction, trainSupplierId)
   const hotelSupplierId = await findHotelSupplierId(supabase, payload.hotelOption)
 
   // Suite resolution needs the supplier's vocabulary, so it can only run once the train operator
@@ -262,9 +262,10 @@ export async function createEmailBookingFromParsedDraft(
     no_of_adults_original: payload.noOfAdults || 1,
     no_of_children_original: payload.noOfChildren || 0,
     no_of_suites: payload.noOfSuites || 1,
+    child_ages: payload.childAges.length > 0 ? payload.childAges : null,
     raw_text: context.rawText,
     extracted_json: extractedJson,
-    terms_accepted: true,
+    terms_accepted: payload.termsAccepted,
     hotel_phase: payload.hotelPhase || "none",
     extend_stay: payload.extendStay ?? false,
     additional_services: payload.additionalServices,
@@ -329,6 +330,7 @@ export async function createEmailBookingFromParsedDraft(
       trainSupplierId,
       hotelSupplierId,
       routeId,
+      routeReversed,
       departureDate: payload.departureDate || null,
       hotelPhase: payload.hotelPhase ?? null,
     })

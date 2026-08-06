@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useMemo, useState } from "react"
-import { AlertTriangle, CheckCircle2, FileText, ShieldAlert, Wand2 } from "lucide-react"
+import { CheckCircle2, FileText, Info, Send, ShieldAlert, Wand2 } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -37,6 +37,27 @@ const GATE_TAB_CONFIG: Record<string, { path: string; label: string }> = {
   voucher_document: { path: "?tab=documents", label: "Documents" },
   voucher_correspondence: { path: "?tab=correspondence", label: "Emails Sent" },
   email_import_review: { path: "?tab=enquiry", label: "Enquiry" },
+}
+
+// These three gates never mean something went wrong — the document already
+// exists, it just hasn't been emailed yet. They get calmer copy, an icon,
+// and badge than a genuine hard failure (see stage-transition-modal.test.tsx).
+const PENDING_SEND_GATE_IDS = new Set([
+  "invoice_correspondence",
+  "final_invoice_correspondence",
+  "voucher_correspondence",
+])
+
+function gateBadgeLabel(failure: GateFailure): string {
+  if (failure.severity === "confirm") return "Confirmation"
+  if (PENDING_SEND_GATE_IDS.has(failure.gateId)) return "Not sent yet"
+  return "Needs action"
+}
+
+function GateIcon({ failure }: { failure: GateFailure }) {
+  if (PENDING_SEND_GATE_IDS.has(failure.gateId)) return <Send className="text-muted-foreground" />
+  if (failure.severity === "confirm") return <CheckCircle2 className="text-muted-foreground" />
+  return <Info className="text-muted-foreground" />
 }
 
 interface StageTransitionModalProps {
@@ -134,13 +155,21 @@ export function StageTransitionModal({
       >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            {allConfirmationsOnly ? <CheckCircle2 data-icon="inline-start" /> : <AlertTriangle data-icon="inline-start" />}
-            {allConfirmationsOnly ? "Confirm this stage move" : "Stage move needs attention"}
+            {allConfirmationsOnly ? (
+              <CheckCircle2 data-icon="inline-start" />
+            ) : (
+              <Info data-icon="inline-start" className="text-muted-foreground" />
+            )}
+            {allConfirmationsOnly
+              ? "Confirm this stage move"
+              : failures.length > 1
+                ? "A few steps first"
+                : "One more step first"}
           </DialogTitle>
           <DialogDescription>
             {allConfirmationsOnly
               ? `Confirm the checks below to move ${jobNumber} to ${targetStage ? getPipelineStageLabel(targetStage) : "the selected stage"}.`
-              : `${jobNumber} cannot move to ${targetStage ? getPipelineStageLabel(targetStage) : "the selected stage"} until these checks are cleared.`}
+              : `${jobNumber} can move to ${targetStage ? getPipelineStageLabel(targetStage) : "the selected stage"} once the items below are done.`}
           </DialogDescription>
         </DialogHeader>
 
@@ -158,17 +187,15 @@ export function StageTransitionModal({
               failure.gateId === "invoice_correspondence" &&
               typeof onSendDepositInvoice === "function"
             return (
-              <Alert key={failure.gateId} variant={failure.severity === "block" ? "destructive" : "default"}>
-                <AlertTriangle />
+              <Alert key={failure.gateId} variant="default" className="bg-muted/30">
+                <GateIcon failure={failure} />
                 <AlertDescription>
                   <div className="flex flex-col gap-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-medium">{failure.message}</span>
-                          <Badge variant={failure.severity === "block" ? "destructive" : "secondary"}>
-                            {failure.severity === "block" ? "Blocked" : "Confirmation"}
-                          </Badge>
+                          <Badge variant="secondary">{gateBadgeLabel(failure)}</Badge>
                         </div>
                         <p className="mt-1 text-sm">{failure.fixHint}</p>
                       </div>

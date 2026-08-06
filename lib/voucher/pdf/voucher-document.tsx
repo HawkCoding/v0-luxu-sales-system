@@ -39,7 +39,14 @@ function sectionFor(key: VoucherSectionKey, data: VoucherData, template: Voucher
     return (
       <View key={key}>
         {sortedVoucherServiceBlocks(blocks).map((block, idx) => (
-          <ServiceBlock key={`${block.serviceType}-${idx}`} block={block} styles={styles} />
+          <ServiceBlock
+            key={`${block.serviceType}-${idx}`}
+            block={block}
+            styles={styles}
+            density="compact"
+            showEyebrow={false}
+            showDescription={false}
+          />
         ))}
         <Text style={styles.endOfServices}>End of Services</Text>
       </View>
@@ -57,6 +64,7 @@ export function VoucherDocument({ data, template, docTitle = "TRAVEL VOUCHERS", 
     accentColour: t.accent_colour,
     sectionBg: t.section_bg,
     fonts: resolveDocumentFontPairing(t.font_family),
+    density: "compact",
   })
   const sectionOrder = t.section_order.length > 0 ? t.section_order : VOUCHER_TEMPLATE_DEFAULTS.section_order
   const hiddenSections = new Set(t.hidden_sections)

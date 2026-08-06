@@ -51,6 +51,15 @@ export interface ApplyTransitionInput {
   now?: Date
 }
 
+/** Thrown when a concurrent write beat us to the guarded update; carries the
+ *  fresh `updated_at` so the caller can surface a proper conflict response
+ *  instead of leaking a raw Postgrest error to the client. */
+export class StaleTransitionError extends Error {
+  constructor(public currentUpdatedAt: string) {
+    super("Booking was modified by another user since this transition started")
+  }
+}
+
 export interface ApplyTransitionResult {
   updated: BookingRow
   crossedStages: PipelineStage[]
@@ -137,9 +146,19 @@ export async function applyTransition(
     updateQuery = updateQuery.eq("updated_at", input.expectedUpdatedAt)
   }
 
-  const { data: updated, error } = await updateQuery.select().single()
-  if (error) throw new Error(error.message)
-  if (!updated) throw new Error("Booking update did not return a row")
+  const { data: updated, error } = await updateQuery.select().maybeSingle()
+  if (error) throw error
+  if (!updated) {
+    if (input.expectedUpdatedAt) {
+      const { data: current } = await supabase
+        .from("bookings")
+        .select("updated_at")
+        .eq("id", input.booking.id)
+        .maybeSingle()
+      throw new StaleTransitionError(current?.updated_at ?? input.booking.updated_at)
+    }
+    throw new Error("Booking update did not return a row")
+  }
 
   const latestQuote = newestAcceptedOrSentQuote(input.quotes ?? [])
 
