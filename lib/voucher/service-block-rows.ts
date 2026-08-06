@@ -30,8 +30,13 @@ function fmt(value: string | null | undefined): string | null {
 function fmtWithTime(date: string | null, time: string | null | undefined): string | null {
   if (!date) return null
   if (!time) return date
+  return `${date} at ${houseTime(time)}`
+}
+
+/** "13h00" — HH:MM converted to the house style used on client documents. */
+function houseTime(time: string): string {
   const [hours, minutes] = time.split(":")
-  return `${date} at ${hours}h${minutes}`
+  return `${hours}h${minutes}`
 }
 
 /**
@@ -49,13 +54,13 @@ export function voucherRowsForBlock(block: VoucherServiceBlock): VoucherRow[] {
   rows.push({ label: "Your Reference", value: referenceWithContact(block.supplierReference, block.supplierContactName) })
 
   if (block.serviceType === "train") {
-    rows.push({ label: "Route", value: d.route ?? "—" })
+    if (d.route) rows.push({ label: "Route", value: d.route })
     if (d.durationDays != null) {
       rows.push({ label: "Duration", value: `${d.durationDays} ${d.durationDays === 1 ? "day" : "days"}` })
     }
     rows.push({ label: "Departure Date", value: fmtWithTime(departureDate, d.startTime) ?? "—" })
     rows.push({ label: "Arrival Date", value: fmtWithTime(arrivalDate, d.endTime) ?? "TBC" })
-    rows.push(suiteRow("Suite Type", d.suiteType ?? "—", d.numberOfSuites))
+    if (d.suiteType) rows.push(suiteRow("Suite Type", d.suiteType, d.numberOfSuites))
     if (d.guestBreakdown) rows.push(guestsRow(d.guestBreakdown))
     if (d.mealPlan) rows.push({ label: "Meal Basis", value: d.mealPlan })
     if (d.inclusions && d.inclusions.length > 0) rows.push({ label: "Included", value: d.inclusions.join(", ") })
@@ -75,10 +80,9 @@ export function voucherRowsForBlock(block: VoucherServiceBlock): VoucherRow[] {
   } else if (block.serviceType === "transfer") {
     if (d.passengerCount != null) rows.push({ label: "No of Guests", value: `${d.passengerCount} Adults` })
     if (d.vehicleType) rows.push({ label: "Vehicle", value: d.vehicleType })
-    if (d.pickup) rows.push({ label: "Pickup", value: d.pickup })
+    const pickUp = pickUpLine(departureDate, d.pickup, d.startTime)
+    if (pickUp) rows.push({ label: "Pick Up", value: pickUp })
     if (d.dropoff) rows.push({ label: "Drop-off", value: d.dropoff })
-    if (departureDate) rows.push({ label: "Date", value: departureDate })
-    if (d.startTime) rows.push({ label: "Pickup Time", value: d.startTime })
     if (d.flightNumber) rows.push({ label: "Flight", value: d.flightNumber })
     if (arrivalDate) {
       rows.push({ label: "Return", value: d.endTime ? `${arrivalDate} ${d.endTime}` : arrivalDate })
@@ -91,10 +95,13 @@ export function voucherRowsForBlock(block: VoucherServiceBlock): VoucherRow[] {
     if (d.route) rows.push({ label: "Route", value: d.route })
     if (d.cabin) rows.push({ label: "Cabin", value: d.cabin })
     if (d.flightNumber) rows.push({ label: "Flight", value: d.flightNumber })
-    if (d.departureAirportCode) rows.push({ label: "Departure Airport", value: d.departureAirportCode })
-    if (departureDate) rows.push({ label: "Departure", value: fmtWithTime(departureDate, d.startTime) ?? departureDate })
-    if (d.arrivalAirportCode) rows.push({ label: "Arrival Airport", value: d.arrivalAirportCode })
-    if (arrivalDate) rows.push({ label: "Arrival", value: fmtWithTime(arrivalDate, d.endTime) ?? arrivalDate })
+    if (d.passengerNames && d.passengerNames.length > 0) rows.push({ label: "Passengers", value: passengersLine(d.passengerNames) })
+    if (departureDate) {
+      rows.push({ label: "Departure", value: airportDateTime(departureDate, d.departureAirportCode, d.startTime) })
+    }
+    if (arrivalDate) {
+      rows.push({ label: "Arrival", value: airportDateTime(arrivalDate, d.arrivalAirportCode, d.endTime) })
+    }
     if (d.handLuggageKg != null || d.checkedLuggageKg != null) {
       rows.push({
         label: "Baggage",
@@ -108,9 +115,31 @@ export function voucherRowsForBlock(block: VoucherServiceBlock): VoucherRow[] {
   }
 
   if (d.notes) rows.push({ label: "Notes", value: d.notes })
-  if (d.footnote) rows.push({ label: "Note", value: d.footnote })
 
   return rows
+}
+
+/** "09 September 2026: The Blue Train Station at 18h00" — date, pickup point and time folded into
+ * one row, matching the legacy voucher's single "Pick up" line instead of three separate rows. */
+function pickUpLine(date: string | null, pickup: string | null | undefined, time: string | null | undefined): string | null {
+  if (!date && !pickup) return null
+  const point = pickup ?? "—"
+  if (!date) return point
+  const withTime = time ? `${point} at ${houseTime(time)}` : point
+  return `${date}: ${withTime}`
+}
+
+/** "11 September 2026: CPT at 16h20" — date, airport code and time folded into one row, matching
+ * the legacy voucher's single departure/arrival line instead of a separate airport-code row. */
+function airportDateTime(date: string, code: string | null | undefined, time: string | null | undefined): string {
+  const withTime = time ? `${code ? `${code} at ` : ""}${houseTime(time)}` : code
+  return withTime ? `${date}: ${withTime}` : date
+}
+
+/** "1.1 Hans Ntshele Makweng  1.2 Manini Florence Theletsane" — numbered passenger list, matching
+ * the legacy voucher's FlySafair passenger table. */
+function passengersLine(names: string[]): string {
+  return names.map((name, idx) => `1.${idx + 1} ${name}`).join("  ")
 }
 
 /** "38562 – Carla" — a supplier reference with its named contact folded in, the way the legacy
@@ -151,6 +180,7 @@ export function voucherProviderContactLine(contact: VoucherServiceBlockContact):
     parts.push(`Emergency: ${contact.emergencyPhone}`)
   }
   if (contact.email) parts.push(`Email: ${contact.email}`)
+  if (contact.website) parts.push(contact.website)
   const address = [contact.streetAddress, contact.location].filter(Boolean).join(", ")
   if (address) parts.push(address)
   return parts.length > 0 ? parts.join(" • ") : null

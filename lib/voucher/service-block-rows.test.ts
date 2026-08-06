@@ -33,7 +33,7 @@ describe("voucherRowsForBlock", () => {
     expect(rows[0]).toEqual({ label: "Your Reference", value: "38562 – Carla" })
   })
 
-  it("train block: prints an Excursion row and a footnote Note row when present", () => {
+  it("train block: prints an Excursion row; the footnote is no longer a table row", () => {
     const rows = voucherRowsForBlock(
       block({
         serviceType: "train",
@@ -44,10 +44,12 @@ describe("voucherRowsForBlock", () => {
       }),
     )
     expect(rows.find((r) => r.label === "Excursion")?.value).toBe("Kimberley **Weather & Time Permitted")
-    expect(rows.find((r) => r.label === "Note")?.value).toBe("Check in IRENE COUNTRY LODGE 2h prior to departure")
+    // The footnote is printed by the renderers directly from `block.serviceData.footnote` as an
+    // italic line under the table, not as a labelled row — see sections/service-block.tsx.
+    expect(rows.some((r) => r.label === "Note")).toBe(false)
   })
 
-  it("airline block: airports, times, baggage cells, and priority boarding", () => {
+  it("airline block: dates fold in the airport code, plus baggage cells and priority boarding", () => {
     const rows = voucherRowsForBlock(
       block({
         serviceType: "airline",
@@ -64,12 +66,27 @@ describe("voucherRowsForBlock", () => {
         },
       }),
     )
-    expect(rows.find((r) => r.label === "Departure")?.value).toBe("11 September 2026 at 16h20")
+    expect(rows.find((r) => r.label === "Departure")?.value).toBe("11 September 2026: CPT at 16h20")
+    expect(rows.find((r) => r.label === "Arrival")?.value).toBe("11 September 2026: JNB at 18h25")
+    expect(rows.some((r) => r.label === "Departure Airport")).toBe(false)
+    expect(rows.some((r) => r.label === "Arrival Airport")).toBe(false)
     expect(rows.find((r) => r.label === "Baggage")?.cells).toEqual([
       { label: "Hand Luggage", value: "7kg" },
       { label: "Checked-in Luggage", value: "20kg" },
     ])
     expect(rows.find((r) => r.label === "Priority Boarding")?.value).toBe("Yes")
+  })
+
+  it("airline block: prints numbered Passengers when names are captured", () => {
+    const rows = voucherRowsForBlock(
+      block({
+        serviceType: "airline",
+        serviceData: { passengerNames: ["Hans Ntshele Makweng", "Manini Florence Theletsane"] },
+      }),
+    )
+    expect(rows.find((r) => r.label === "Passengers")?.value).toBe(
+      "1.1 Hans Ntshele Makweng  1.2 Manini Florence Theletsane",
+    )
   })
 
   it("train block: route, duration, dates, suite, meal basis in order", () => {
@@ -151,6 +168,14 @@ describe("voucherRowsForBlock", () => {
     expect(rows.find((r) => r.label === "Occasion")?.value).toBe("Birthday Celebration")
   })
 
+  it("train block: drops Route and Suite Type entirely when unset, instead of printing an em dash", () => {
+    const rows = voucherRowsForBlock(
+      block({ serviceType: "train", serviceData: { departureDate: "2026-08-21" } }),
+    )
+    expect(rows.some((r) => r.label === "Route")).toBe(false)
+    expect(rows.some((r) => r.label === "Suite Type")).toBe(false)
+  })
+
   it("train block: arrival date falls back to TBC when unresolved", () => {
     const rows = voucherRowsForBlock(block({ serviceType: "train", serviceData: { route: "A → B" } }))
     expect(rows.find((r) => r.label === "Arrival Date")?.value).toBe("TBC")
@@ -197,6 +222,20 @@ describe("voucherRowsForBlock", () => {
       }),
     )
     expect(labels(rows)).toEqual(["Your Reference", "Room Type", "Nights", "Check-In"])
+  })
+
+  it("transfer block: folds date, pickup point and time into a single Pick Up row", () => {
+    const rows = voucherRowsForBlock(
+      block({
+        serviceType: "transfer",
+        serviceData: { pickup: "The Blue Train Station", departureDate: "2026-09-09", startTime: "18:00" },
+      }),
+    )
+    const pickUpRow = rows.find((r) => r.label === "Pick Up")
+    expect(pickUpRow?.value).toBe("09 September 2026: The Blue Train Station at 18h00")
+    expect(rows.some((r) => r.label === "Date")).toBe(false)
+    expect(rows.some((r) => r.label === "Pickup")).toBe(false)
+    expect(rows.some((r) => r.label === "Pickup Time")).toBe(false)
   })
 
   it("transfer block: composes Return from arrival date + end time", () => {
@@ -279,6 +318,15 @@ describe("voucherProviderContactLine", () => {
 
   it("omits missing parts without leaving stray separators", () => {
     expect(voucherProviderContactLine({ phone: "084 604 1454" })).toBe("Tel: 084 604 1454")
+  })
+
+  it("includes the website after email, matching the legacy voucher's FlySafair contact line", () => {
+    const line = voucherProviderContactLine({
+      phone: "087 357 0030",
+      email: undefined,
+      website: "flysafair.co.za",
+    })
+    expect(line).toBe("Tel: 087 357 0030 • flysafair.co.za")
   })
 
   it("folds an emergency number and street address in, matching the legacy voucher's header line", () => {
