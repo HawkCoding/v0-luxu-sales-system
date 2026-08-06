@@ -2,9 +2,19 @@
 
 import { useCallback, useState } from "react"
 import { broadcast } from "@/lib/cross-tab"
-import type { StaleVersionConflictPayload } from "@/lib/concurrency"
+import type { StaleVersionConflictPayload, FieldConflictPayload } from "@/lib/concurrency"
 
 type VersionedEntity = "job" | "quote" | "customer"
+
+export interface DuplicateEmailConflictPayload {
+  error: string
+  code: "DUPLICATE_EMAIL"
+  existingCustomer: { id: string; firstName: string; lastName: string }
+}
+
+export type SaveConflict = StaleVersionConflictPayload | FieldConflictPayload | DuplicateEmailConflictPayload
+
+export type VersionedSaveError = Error & { conflict?: SaveConflict }
 
 interface VersionedSaveOptions {
   url: string
@@ -12,29 +22,51 @@ interface VersionedSaveOptions {
   entity: VersionedEntity
   recordId: string
   expectedUpdatedAt: string | undefined
+  // Values the caller loaded for the fields it's about to change, so the
+  // server only flags a real conflict when someone else touched the same
+  // field — a sibling write to an unrelated column won't trip this.
+  baseline?: Record<string, unknown>
 }
 
 interface SaveResponseWithUpdatedAt {
   updatedAt?: string
 }
 
-function parseStaleVersionConflictPayload(payload: unknown): StaleVersionConflictPayload | null {
+function parseConflictPayload(payload: unknown): SaveConflict | null {
   if (!payload || typeof payload !== "object") return null
 
   const candidate = payload as Record<string, unknown>
-  if (
-    candidate.code !== "STALE_VERSION" ||
-    typeof candidate.error !== "string" ||
-    typeof candidate.currentUpdatedAt !== "string"
-  ) {
-    return null
+  if (typeof candidate.error !== "string") return null
+
+  if (candidate.code === "STALE_VERSION" && typeof candidate.currentUpdatedAt === "string") {
+    return { code: "STALE_VERSION", error: candidate.error, currentUpdatedAt: candidate.currentUpdatedAt }
   }
 
-  return {
-    code: "STALE_VERSION",
-    error: candidate.error,
-    currentUpdatedAt: candidate.currentUpdatedAt,
+  if (
+    candidate.code === "FIELD_CONFLICT" &&
+    typeof candidate.currentUpdatedAt === "string" &&
+    Array.isArray(candidate.fields)
+  ) {
+    return {
+      code: "FIELD_CONFLICT",
+      error: candidate.error,
+      currentUpdatedAt: candidate.currentUpdatedAt,
+      fields: candidate.fields.filter((field): field is string => typeof field === "string"),
+    }
   }
+
+  if (candidate.code === "DUPLICATE_EMAIL" && candidate.existingCustomer && typeof candidate.existingCustomer === "object") {
+    const existing = candidate.existingCustomer as Record<string, unknown>
+    if (typeof existing.id === "string" && typeof existing.firstName === "string" && typeof existing.lastName === "string") {
+      return {
+        code: "DUPLICATE_EMAIL",
+        error: candidate.error,
+        existingCustomer: { id: existing.id, firstName: existing.firstName, lastName: existing.lastName },
+      }
+    }
+  }
+
+  return null
 }
 
 export function useVersionedSave<TPayload extends object, TResponse extends SaveResponseWithUpdatedAt>(
@@ -42,11 +74,11 @@ export function useVersionedSave<TPayload extends object, TResponse extends Save
 ): {
   save: (payload: TPayload, options?: { ignoreExpectedUpdatedAt?: boolean }) => Promise<TResponse>
   isSaving: boolean
-  conflict: StaleVersionConflictPayload | null
+  conflict: SaveConflict | null
   clearConflict: () => void
 } {
   const [isSaving, setIsSaving] = useState(false)
-  const [conflict, setConflict] = useState<StaleVersionConflictPayload | null>(null)
+  const [conflict, setConflict] = useState<SaveConflict | null>(null)
 
   const clearConflict = useCallback(() => {
     setConflict(null)
@@ -58,14 +90,14 @@ export function useVersionedSave<TPayload extends object, TResponse extends Save
       setConflict(null)
 
       try {
+        const skipVersioning = options?.ignoreExpectedUpdatedAt
         const response = await fetch(opts.url, {
           method: opts.method,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             ...payload,
-            ...(opts.expectedUpdatedAt && !options?.ignoreExpectedUpdatedAt
-              ? { expectedUpdatedAt: opts.expectedUpdatedAt }
-              : {}),
+            ...(opts.expectedUpdatedAt && !skipVersioning ? { expectedUpdatedAt: opts.expectedUpdatedAt } : {}),
+            ...(opts.baseline && !skipVersioning ? { baseline: opts.baseline } : {}),
           }),
         })
 
@@ -73,10 +105,12 @@ export function useVersionedSave<TPayload extends object, TResponse extends Save
 
         if (!response.ok) {
           if (response.status === 409) {
-            const staleConflict = parseStaleVersionConflictPayload(responsePayload)
-            if (staleConflict) {
-              setConflict(staleConflict)
-              throw new Error(staleConflict.error)
+            const parsedConflict = parseConflictPayload(responsePayload)
+            if (parsedConflict) {
+              setConflict(parsedConflict)
+              const conflictError: VersionedSaveError = new Error(parsedConflict.error)
+              conflictError.conflict = parsedConflict
+              throw conflictError
             }
           }
 
@@ -102,7 +136,7 @@ export function useVersionedSave<TPayload extends object, TResponse extends Save
         setIsSaving(false)
       }
     },
-    [opts.entity, opts.expectedUpdatedAt, opts.method, opts.recordId, opts.url],
+    [opts.baseline, opts.entity, opts.expectedUpdatedAt, opts.method, opts.recordId, opts.url],
   )
 
   return { save, isSaving, conflict, clearConflict }

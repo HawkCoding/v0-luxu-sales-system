@@ -30,8 +30,8 @@ const BASE_BOOKING = {
   stage: "enquiry",
   booking_number: "BT-2026-0001",
   customer_id: "00000000-0000-4000-8000-000000000099",
-  consultant: null,
-  assigned_salesperson_id: null,
+  consultant: null as string | null,
+  assigned_salesperson_id: null as string | null,
   source: "enquiry_form",
   raw_text: null,
   email_import_needs_review: false,
@@ -64,7 +64,7 @@ function createSupabase({
     vi.fn((patch: Record<string, unknown>) => ({
       eq: vi.fn(() => ({
         select: vi.fn(() => ({
-          single: vi.fn(async () => ({ data: { ...booking, ...patch }, error: null })),
+          maybeSingle: vi.fn(async () => ({ data: { ...booking, ...patch }, error: null })),
         })),
       })),
     }))
@@ -135,12 +135,78 @@ describe("PATCH /api/jobs/[id]", () => {
     expect(res.status).toBe(403)
   })
 
+  describe("baseline field-conflict detection", () => {
+    const SALESPERSON_CURRENT = "00000000-0000-4000-8000-0000000000c1"
+    const SALESPERSON_NEW = "00000000-0000-4000-8000-0000000000c2"
+    const SALESPERSON_ORIGINAL = "00000000-0000-4000-8000-0000000000c3"
+    const SALESPERSON_SOMEONE_ELSE = "00000000-0000-4000-8000-0000000000c4"
+
+    it("succeeds despite a stale expectedUpdatedAt when the baseline for the changed field matches", async () => {
+      // Row's updated_at has moved on (e.g. a sibling write), but the
+      // reassign target field itself still matches what the client loaded.
+      const booking = {
+        ...BASE_BOOKING,
+        updated_at: "2026-01-02T00:00:00.000Z",
+        assigned_salesperson_id: SALESPERSON_CURRENT,
+      }
+      const updateMock = vi.fn((patch: Record<string, unknown>) => {
+        const chain = {
+          eq: vi.fn(() => chain),
+          select: vi.fn(() => ({
+            maybeSingle: vi.fn(async () => ({ data: { ...booking, ...patch }, error: null })),
+          })),
+        }
+        return chain
+      })
+      supabaseMocks.createSessionClient.mockResolvedValue(
+        createSupabase({ role: "manager", booking, updateMock }),
+      )
+
+      const res = await PATCH(
+        makeRequest({
+          assignedSalespersonId: SALESPERSON_NEW,
+          expectedUpdatedAt: BASE_BOOKING.updated_at,
+          baseline: { assignedSalespersonId: SALESPERSON_CURRENT },
+        }),
+        { params: Promise.resolve({ id: BOOKING_ID }) },
+      )
+
+      expect(res.status).toBe(200)
+      expect(updateMock).toHaveBeenCalledWith(
+        expect.objectContaining({ assigned_salesperson_id: SALESPERSON_NEW }),
+      )
+    })
+
+    it("returns 409 FIELD_CONFLICT listing assignedSalespersonId when another user reassigned it first", async () => {
+      const booking = {
+        ...BASE_BOOKING,
+        updated_at: "2026-01-02T00:00:00.000Z",
+        assigned_salesperson_id: SALESPERSON_SOMEONE_ELSE,
+      }
+      supabaseMocks.createSessionClient.mockResolvedValue(createSupabase({ booking }))
+
+      const res = await PATCH(
+        makeRequest({
+          assignedSalespersonId: SALESPERSON_NEW,
+          expectedUpdatedAt: BASE_BOOKING.updated_at,
+          baseline: { assignedSalespersonId: SALESPERSON_ORIGINAL },
+        }),
+        { params: Promise.resolve({ id: BOOKING_ID }) },
+      )
+      const body = await res.json()
+
+      expect(res.status).toBe(409)
+      expect(body.code).toBe("FIELD_CONFLICT")
+      expect(body.fields).toEqual(["assignedSalespersonId"])
+    })
+  })
+
   describe("parsedFieldEdits.childAges", () => {
     it("writes child_ages alongside noOfChildren when they agree", async () => {
       const updateMock = vi.fn((patch: Record<string, unknown>) => ({
         eq: vi.fn(() => ({
           select: vi.fn(() => ({
-            single: vi.fn(async () => ({ data: { ...BASE_BOOKING, ...patch }, error: null })),
+            maybeSingle: vi.fn(async () => ({ data: { ...BASE_BOOKING, ...patch }, error: null })),
           })),
         })),
       }))
@@ -186,7 +252,7 @@ describe("PATCH /api/jobs/[id]", () => {
       const updateMock = vi.fn((patch: Record<string, unknown>) => ({
         eq: vi.fn(() => ({
           select: vi.fn(() => ({
-            single: vi.fn(async () => ({ data: { ...BASE_BOOKING, ...patch }, error: null })),
+            maybeSingle: vi.fn(async () => ({ data: { ...BASE_BOOKING, ...patch }, error: null })),
           })),
         })),
       }))

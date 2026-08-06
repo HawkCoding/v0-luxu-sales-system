@@ -149,6 +149,9 @@ function createTransitionSupabase(updatedRow: unknown) {
       single() {
         return Promise.resolve({ data: updatedRow, error: null })
       },
+      maybeSingle() {
+        return Promise.resolve({ data: updatedRow, error: null })
+      },
       then<TResult1 = { data: null; error: null }, TResult2 = never>(
         onfulfilled?: ((value: { data: null; error: null }) => TResult1 | PromiseLike<TResult1>) | null,
         onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,

@@ -32,7 +32,7 @@ import { getPipelineStageLabel, PIPELINE_STAGES } from "@/lib/types"
 import { useCustomerDetail, useRateTypes } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
 import { useRecordPresence } from "@/hooks/use-record-presence"
-import { useVersionedSave } from "@/hooks/use-versioned-save"
+import { useVersionedSave, type VersionedSaveError } from "@/hooks/use-versioned-save"
 
 type Presentation = "page" | "modal"
 
@@ -118,8 +118,13 @@ export function CustomerDetailView({
   const [linkedAccountsAccordionValue, setLinkedAccountsAccordionValue] = useState<string | undefined>(
     undefined,
   )
+  const [addLinkedAccountPrefill, setAddLinkedAccountPrefill] = useState<LinkedAccountFormValue | null>(null)
   const hasLoadError = Boolean(error)
   const lastSeenCustomerUpdatedAtRef = useRef<string | undefined>(undefined)
+  // Values loaded into the form at the moment editing started, so the server
+  // can tell "someone else changed a field I'm also changing" from "someone
+  // else saved this record for an unrelated reason while I was editing".
+  const editingBaselineRef = useRef<Record<string, unknown> | null>(null)
   const customerUpdatedAt = data && "customer" in data ? data.customer.updatedAt : undefined
   const {
     save: saveCustomer,
@@ -132,6 +137,7 @@ export function CustomerDetailView({
     entity: "customer",
     recordId: customerId,
     expectedUpdatedAt: isEditing ? editingStartedUpdatedAt : customerUpdatedAt,
+    baseline: isEditing ? (editingBaselineRef.current ?? undefined) : undefined,
   })
 
   useEffect(() => {
@@ -276,15 +282,24 @@ export function CustomerDetailView({
 
     try {
       const updated = await saveCustomer(payload, options)
-      await mutate()
-      await mutateGlobal((key) => typeof key === "string" && key.startsWith("/api/data"))
+      // Update local state before awaiting mutate() so the "customer changed
+      // elsewhere" effect doesn't mistake our own just-saved updatedAt for an
+      // external change while the SWR revalidation is in flight.
       setIsEditing(false)
       setEditingStartedUpdatedAt(updated.updatedAt)
+      lastSeenCustomerUpdatedAtRef.current = updated.updatedAt
       setHasExternalUpdate(false)
       clearCustomerConflict()
+      await mutate()
+      await mutateGlobal((key) => typeof key === "string" && key.startsWith("/api/data"))
       toast.success("Customer saved")
       return true
     } catch (error) {
+      // A typed conflict (stale version, field conflict, duplicate email) is
+      // already rendered as its own banner below — no need to also toast it.
+      if ((error as VersionedSaveError | undefined)?.conflict) {
+        return false
+      }
       const message = error instanceof Error ? error.message : "Could not save customer"
       toast.error(message)
       return false
@@ -320,6 +335,7 @@ export function CustomerDetailView({
       await mutate()
       await mutateGlobal((key) => typeof key === "string" && key.startsWith("/api/data"))
       setIsAddingLinkedAccount(false)
+      setAddLinkedAccountPrefill(null)
       toast.success("Linked account saved")
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not save linked account"
@@ -448,6 +464,7 @@ export function CustomerDetailView({
                       variant="secondary"
                       onClick={() => {
                         setEditingStartedUpdatedAt(customer.updatedAt)
+                        editingBaselineRef.current = getCustomerPatchPayload() as unknown as Record<string, unknown>
                         setHasExternalUpdate(false)
                         clearCustomerConflict()
                         setIsEditing(true)
@@ -480,6 +497,7 @@ export function CustomerDetailView({
                       setCommunicationPreferencesDraft(customer.communicationPreferences ?? "")
                       setDefaultRateTypeIdDraft(customer.defaultRateTypeId ?? "")
                       setIsEditing(false)
+                      editingBaselineRef.current = null
                       setHasExternalUpdate(false)
                       clearCustomerConflict()
                     }}
@@ -499,7 +517,47 @@ export function CustomerDetailView({
         </div>
       </div>
 
-      {(customerConflict || hasExternalUpdate) && (
+      {customerConflict?.code === "DUPLICATE_EMAIL" ? (
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Email already in use</AlertTitle>
+          <AlertDescription>
+            <p>
+              That email already belongs to{" "}
+              <Link href={`/app/customers/${customerConflict.existingCustomer.id}`} className="underline">
+                {customerConflict.existingCustomer.firstName} {customerConflict.existingCustomer.lastName}
+              </Link>
+              .
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button type="button" size="sm" variant="outline" asChild>
+                <Link href={`/app/customers/${customerConflict.existingCustomer.id}`}>Open that customer</Link>
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => {
+                  const existingCustomer = customerConflict.existingCustomer
+                  setAddLinkedAccountPrefill({
+                    relationship: null,
+                    firstName: existingCustomer.firstName,
+                    lastName: existingCustomer.lastName,
+                    email: emailDraft || null,
+                    phone: null,
+                    linkedCustomerId: existingCustomer.id,
+                  })
+                  setEditingLinkedAccountId(null)
+                  setIsAddingLinkedAccount(true)
+                  setLinkedAccountsAccordionValue(LINKED_ACCOUNTS_ACCORDION_VALUE)
+                  clearCustomerConflict()
+                }}
+              >
+                Add as linked account
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      ) : (customerConflict || hasExternalUpdate) ? (
         <Alert>
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>This customer changed elsewhere</AlertTitle>
@@ -537,7 +595,7 @@ export function CustomerDetailView({
             </div>
           </AlertDescription>
         </Alert>
-      )}
+      ) : null}
 
       <Card>
         <CardHeader>
@@ -840,6 +898,7 @@ export function CustomerDetailView({
                     size="sm"
                     onClick={() => {
                       setEditingLinkedAccountId(null)
+                      setAddLinkedAccountPrefill(null)
                       setIsAddingLinkedAccount((current) => {
                         const nextValue = !current
                         if (nextValue) {
@@ -862,9 +921,13 @@ export function CustomerDetailView({
                     currentCustomerId={customerId}
                     currentCustomerEmail={customer.email}
                     currentCustomerPhone={customer.phone}
+                    initialValue={addLinkedAccountPrefill ?? undefined}
                     submitLabel="Save linked account"
                     isSubmitting={isSavingLinkedAccount}
-                    onCancel={() => setIsAddingLinkedAccount(false)}
+                    onCancel={() => {
+                      setIsAddingLinkedAccount(false)
+                      setAddLinkedAccountPrefill(null)
+                    }}
                     onSubmit={createLinkedAccount}
                   />
                 ) : null}

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { staleVersionResponse } from "@/lib/concurrency"
+import { mapPostgrestError, safeSupabaseError } from "@/lib/api/responses"
 import { mapSupplierDetail } from "@/lib/suppliers"
 import {
   allowedRoles,
@@ -673,7 +674,10 @@ export async function PATCH(
 
   if (supplierUpdateError) {
     logSupplierMutationError("supplier-update", supplierId, supplierUpdateError)
-    return NextResponse.json({ error: "Failed to update supplier" }, { status: 500 })
+    return (
+      mapPostgrestError("suppliers/[slug]", supplierUpdateError) ??
+      safeSupabaseError("suppliers/[slug]", supplierUpdateError, "Failed to update supplier")
+    )
   }
 
   if (!updatedSupplier) {

@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest"
 import { z } from "zod"
+import type { PostgrestError } from "@supabase/supabase-js"
 
-import { flattenZod, jsonError, jsonZodError, safeSupabaseError } from "./responses"
+import { flattenZod, jsonError, jsonZodError, mapPostgrestError, safeSupabaseError } from "./responses"
+
+function makePostgrestError(overrides: Partial<PostgrestError>): PostgrestError {
+  return { message: "boom", details: "", hint: "", code: "", name: "PostgrestError", ...overrides }
+}
 
 describe("jsonError", () => {
   it("returns the requested status with only an error message when no details supplied", async () => {
@@ -48,6 +53,88 @@ describe("safeSupabaseError", () => {
       expect(response.status).toBe(500)
       expect(await response.json()).toEqual({ error: "Database error" })
       expect(spy).toHaveBeenCalled()
+    } finally {
+      spy.mockRestore()
+    }
+  })
+})
+
+describe("mapPostgrestError", () => {
+  it("maps a duplicate email unique violation to a DUPLICATE_EMAIL 409, without echoing the raw message", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const error = makePostgrestError({
+        code: "23505",
+        message: 'duplicate key value violates unique constraint "customers_email_unique"',
+        details: "Key (lower(email))=(jane@example.com) already exists.",
+      })
+      const response = mapPostgrestError("scope:test", error)
+      expect(response?.status).toBe(409)
+      const body = await response?.json()
+      expect(body.code).toBe("DUPLICATE_EMAIL")
+      expect(body.error).not.toContain("jane@example.com")
+      expect(body.error).not.toContain("customers_email_unique")
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("maps a generic unique violation to a 409 without a specific code", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const error = makePostgrestError({ code: "23505", message: "duplicate key value violates unique constraint \"foo_unique\"" })
+      const response = mapPostgrestError("scope:test", error)
+      expect(response?.status).toBe(409)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("maps a foreign key violation to 400", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const response = mapPostgrestError("scope:test", makePostgrestError({ code: "23503" }))
+      expect(response?.status).toBe(400)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("maps a check violation to 400", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const response = mapPostgrestError("scope:test", makePostgrestError({ code: "23514" }))
+      expect(response?.status).toBe(400)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("maps a not-null violation to 400", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const response = mapPostgrestError("scope:test", makePostgrestError({ code: "23502" }))
+      expect(response?.status).toBe(400)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("maps an RLS/permission failure to 403", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const response = mapPostgrestError("scope:test", makePostgrestError({ code: "42501" }))
+      expect(response?.status).toBe(403)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it("returns null for an unmapped code so the caller can fall back", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      const response = mapPostgrestError("scope:test", makePostgrestError({ code: "99999" }))
+      expect(response).toBeNull()
     } finally {
       spy.mockRestore()
     }

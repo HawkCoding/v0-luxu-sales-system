@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { mapPostgrestError, safeSupabaseError } from "@/lib/api/responses"
 import { upsertPackageSchema, type UpsertPackageInput } from "../schemas"
 import { requireAuthenticatedUser } from "../../suppliers/helpers"
 import {
@@ -120,7 +121,10 @@ export async function PATCH(
     .maybeSingle()
 
   if (updateError) {
-    return NextResponse.json({ error: "Failed to update package" }, { status: 500 })
+    return (
+      mapPostgrestError("packages/[slug]", updateError) ??
+      safeSupabaseError("packages/[slug]", updateError, "Failed to update package")
+    )
   }
 
   if (!updatedPackage) {

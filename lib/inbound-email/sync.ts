@@ -114,6 +114,19 @@ async function loadActiveRules(supabase: ServiceClient): Promise<InboundSubjectR
   return (data ?? []).map(mapRule)
 }
 
+// Loaded once per sync run (not per message) and threaded into parseEmailDraft so a newly added
+// train operator is recognised without a code change -- see ParseEmailDraftOptions.
+async function loadActiveTrainOperatorNames(supabase: ServiceClient): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("suppliers")
+    .select("name")
+    .eq("kind", "train_operator")
+    .eq("active", true)
+
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((row) => row.name)
+}
+
 function firstSyncSinceDate(): Date {
   const since = new Date()
   since.setDate(since.getDate() - 30)
@@ -306,6 +319,7 @@ async function importCollectedMessages(
   runId: string,
   uidvalidity: number,
   summary: EmailSyncSummary,
+  trainOperatorNames: string[],
 ): Promise<void> {
   for (const { uid, source } of messages) {
     const parsedMail = await simpleParser(source)
@@ -373,7 +387,7 @@ async function importCollectedMessages(
     }
 
     const rawText = getMessageBody(parsedMail.text, parsedMail.html)
-    const parsedDraft = parseEmailDraft(rawText)
+    const parsedDraft = parseEmailDraft(rawText, { trainOperatorNames })
     const review = getEmailImportReviewMetadata(parsedDraft)
 
     let created: Awaited<ReturnType<typeof createEmailBookingFromParsedDraft>>
@@ -520,6 +534,7 @@ async function fileOutstandingMessages(
 export async function syncInboundEmailAccount(account: AccountRow): Promise<EmailSyncSummary> {
   const supabase = createServiceClient()
   const rules = await loadActiveRules(supabase)
+  const trainOperatorNames = await loadActiveTrainOperatorNames(supabase)
   const summary: EmailSyncSummary = {
     scannedCount: 0,
     importedCount: 0,
@@ -544,7 +559,7 @@ export async function syncInboundEmailAccount(account: AccountRow): Promise<Emai
     const collected = await collectCandidateMessages(account, supabase, summary)
     uidvalidity = collected.uidvalidity
 
-    await importCollectedMessages(collected.messages, account, supabase, rules, run.id, uidvalidity, summary)
+    await importCollectedMessages(collected.messages, account, supabase, rules, run.id, uidvalidity, summary, trainOperatorNames)
 
     await supabase
       .from("inbound_email_accounts")

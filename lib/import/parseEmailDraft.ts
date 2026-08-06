@@ -90,6 +90,19 @@ export interface ValidationResult {
   warnings: string[]
 }
 
+export interface ParseEmailDraftOptions {
+  /**
+   * Active train-operator supplier names to scan the email for, longest-first so "The Blue Train"
+   * doesn't get missed by a shorter alias. Callers with DB access (the inbound-email importer, the
+   * paste-to-parse dialog) should pass the live `suppliers` list so a newly added operator is
+   * recognised without a code change. Defaults to the two operators this system has always run
+   * with, so callers that can't reach the DB (or existing tests) keep working unchanged.
+   */
+  trainOperatorNames?: string[]
+}
+
+const DEFAULT_TRAIN_OPERATOR_NAMES = ['Rovos Rail', 'Blue Train']
+
 export interface ValidateDraftOptions {
   /**
    * Review-modal only. The modal has the supplier vocabulary loaded, so a supplier that never
@@ -310,6 +323,15 @@ function extractSuitePhrases(text: string): string[] {
   return []
 }
 
+function titleCase(value: string): string {
+  return value
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ')
+}
+
 const MONTH_ABBREVIATIONS: { [key: string]: string } = {
   jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
   jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
@@ -352,7 +374,7 @@ function extractDateWithConfidence(text: string): { value: string; confidence: '
   return { value: extractDateString(text), confidence: 'low' }
 }
 
-export function parseEmailDraft(text: string): ParsedDraft {
+export function parseEmailDraft(text: string, options?: ParseEmailDraftOptions): ParsedDraft {
   const confidence: { [key: string]: 'high' | 'low' } = {}
   const title = getLabeledFieldValue(text, [/^title$/i])
   const country = getLabeledFieldValue(text, [/^country$/i])
@@ -480,46 +502,56 @@ export function parseEmailDraft(text: string): ParsedDraft {
     confidence['trip.purpose'] = 'high'
   }
   
-  // Extract supplier (high confidence) - Only Rovos Rail and Blue Train
+  // Extract supplier (high confidence). Scans against the caller-supplied active train-operator
+  // list (falls back to the historical two operators when none is supplied) rather than a
+  // hardcoded name check, so a newly added operator is recognised without editing this parser --
+  // see ParseEmailDraftOptions.
+  const trainOperatorNames = options?.trainOperatorNames?.length
+    ? options.trainOperatorNames
+    : DEFAULT_TRAIN_OPERATOR_NAMES
   let supplier = ''
-  if (/rovos/i.test(text)) {
-    supplier = 'Rovos Rail'
-    confidence['trip.supplier'] = 'high'
-  } else if (/blue\s*train/i.test(text)) {
-    supplier = 'Blue Train'
-    confidence['trip.supplier'] = 'high'
-  }
-  
-  // Extract route/direction (medium confidence)
-  let route = ''
-  const routePatterns = [
-    /pretoria\s+to\s+cape\s*town/i,
-    /cape\s*town\s+to\s+pretoria/i,
-    /pretoria\s+to\s+victoria\s*falls/i,
-    /victoria\s*falls\s+to\s+pretoria/i,
-    /pretoria\s+to\s+durban/i,
-    /durban\s+to\s+pretoria/i,
-    /pretoria\s+to\s+swakopmund/i,
-    /swakopmund\s+to\s+pretoria/i,
-    /cape\s*town\s+to\s+dar\s*es\s*salaam/i,
-    /dar\s*es\s*salaam\s+to\s+cape\s*town/i
-  ]
-  
-  for (const pattern of routePatterns) {
-    const match = text.match(pattern)
-    if (match) {
-      route = match[0].replace(/\s+/g, ' ').trim()
-      // Capitalize
-      route = route.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
-      confidence['trip.route'] = 'high'
+  for (const name of [...trainOperatorNames].sort((a, b) => b.length - a.length)) {
+    const pattern = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i')
+    if (pattern.test(text)) {
+      supplier = name
+      confidence['trip.supplier'] = 'high'
       break
     }
   }
-  
+
+  // Extract route/direction (high confidence). The labelled "Direction" field wins when present --
+  // trusted verbatim (title-cased) whatever route pair it names, so a new route added to the
+  // operator's book is recognised without editing this parser. Falls back to scanning free-form
+  // prose for an "X to Y" pattern when no such label exists (e.g. a "Route:" label, or an
+  // unstructured enquiry).
+  const directionLabelValue = getLabeledFieldValue(text, [/^direction$/i])
+  let route = ''
+  if (directionLabelValue) {
+    route = titleCase(directionLabelValue)
+    confidence['trip.route'] = 'high'
+  } else {
+    // [ \t] rather than \s for the internal word joiner -- \s also matches newlines, which let
+    // this cross a line break and swallow the next line's label (e.g. "Cape Town\nDeparture").
+    const proseMatch = text.match(
+      /\b([A-Za-z][A-Za-z'-]*(?:[ \t]+[A-Za-z][A-Za-z'-]*){0,3})[ \t]+to[ \t]+([A-Za-z][A-Za-z'-]*(?:[ \t]+[A-Za-z][A-Za-z'-]*){0,3})\b/i,
+    )
+    if (proseMatch) {
+      route = titleCase(`${proseMatch[1]} to ${proseMatch[2]}`)
+      confidence['trip.route'] = 'high'
+    }
+  }
+
   // Extract departure date (various formats). A value read from the labelled "Departure Date"
   // field is trustworthy regardless of which format it's written in -- low confidence is reserved
   // for dates inferred from free-form prose, not for a form field the customer filled in directly.
-  const departureDateLabelValue = getLabeledFieldValue(text, [/^departure\s*date$/i])
+  const departureDateLabelValue = getLabeledFieldValue(text, [
+    /^departure\s*date$/i,
+    // Some templates (Rovos) glue the direction into the date label itself, e.g.
+    // "Date: Pretoria to Cape Town" with the actual date on the next line -- the generic same-line
+    // splitter would otherwise misread "Pretoria to Cape Town" as the value. Scoped to labels that
+    // contain "to" so it can't shadow a plain "Date: 2026-05-15" same-line label.
+    /^date\s*:\s*.+\bto\b.+$/i,
+  ])
   const departureDateFromLabel = departureDateLabelValue ? extractDateString(departureDateLabelValue) : ''
   let departureDate = ''
   if (departureDateFromLabel) {
@@ -530,6 +562,17 @@ export function parseEmailDraft(text: string): ParsedDraft {
     if (departureDateFromText.value) {
       departureDate = departureDateFromText.value
       confidence['trip.departureDate'] = departureDateFromText.confidence
+    }
+  }
+
+  // Sanity-check the year even when the date came from a labelled field: a value like "25 August
+  // 2028" is far more likely a typo (2026) than a genuine three-years-out enquiry, and nothing
+  // upstream checks this -- a labelled field was otherwise trusted regardless of content.
+  if (departureDate) {
+    const departureYear = parseInt(departureDate.slice(0, 4), 10)
+    const currentYear = new Date().getFullYear()
+    if (departureYear > currentYear + 2) {
+      confidence['trip.departureDate'] = 'low'
     }
   }
   

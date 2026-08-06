@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
+import type { PostgrestError } from "@supabase/supabase-js"
 import { createSessionClient } from "@/lib/supabase/server"
 import { CUSTOMER_COLUMNS } from "@/lib/supabase/columns"
-import { staleVersionResponse } from "@/lib/concurrency"
+import { detectFieldConflicts, fieldConflictResponse, staleVersionResponse } from "@/lib/concurrency"
+import { mapPostgrestError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import {
   COMPLETED_REPEAT_BOOKING_STAGES,
@@ -32,7 +34,37 @@ const patchCustomerSchema = z.object({
   communication_preferences: z.string().trim().max(1000).nullable().optional(),
   default_rate_type_id: z.string().uuid().nullable().optional(),
   expectedUpdatedAt: z.string().datetime({ offset: true }).optional(),
+  // Values the client loaded for the fields it's changing, so the server can
+  // tell an unrelated sibling write from a real edit conflict.
+  baseline: z.record(z.string(), z.unknown()).optional(),
 })
+
+const CUSTOMER_PATCH_SELECT =
+  "id, notes, email, phone, fax, province, company_name, address_line1, address_line2, city, postal_code, vat_number, date_of_birth, id_passport, vip_status, preferences, communication_preferences, default_rate_type_id, first_travel_date, last_travel_date, updated_at"
+
+interface CustomerPatchRow {
+  id: string
+  notes: string | null
+  email: string
+  phone: string | null
+  fax: string | null
+  province: string | null
+  company_name: string | null
+  address_line1: string | null
+  address_line2: string | null
+  city: string | null
+  postal_code: string | null
+  vat_number: string | null
+  date_of_birth: string | null
+  id_passport: string | null
+  vip_status: boolean
+  preferences: string | null
+  communication_preferences: string | null
+  default_rate_type_id: string | null
+  first_travel_date: string | null
+  last_travel_date: string | null
+  updated_at: string
+}
 
 /** Trim, then fold empty strings to null so blank inputs clear the column. */
 function blankToNull(value: string | null | undefined): string | null {
@@ -275,18 +307,10 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
   }
 
-  const { data: existingCustomer, error: existingCustomerError } = await supabase
-    .from("customers")
-    .select("updated_at")
-    .eq("id", id)
-    .single()
+  let current = await supabase.from("customers").select(CUSTOMER_PATCH_SELECT).eq("id", id).maybeSingle()
 
-  if (existingCustomerError || !existingCustomer) {
+  if (current.error || !current.data) {
     return NextResponse.json({ error: "Customer not found" }, { status: 404 })
-  }
-
-  if (parsed.expectedUpdatedAt && parsed.expectedUpdatedAt !== existingCustomer.updated_at) {
-    return staleVersionResponse("customer", existingCustomer.updated_at)
   }
 
   const normalizedNotes = parsed.notes.trim()
@@ -296,67 +320,150 @@ export async function PATCH(
   const normalizedPreferences = parsed.preferences?.trim()
   const normalizedCommunicationPreferences = parsed.communication_preferences?.trim()
 
-  let updateQuery = supabase
-    .from("customers")
-    .update({
-      notes: normalizedNotes ? normalizedNotes : null,
-      email: normalizedEmail,
-      phone: normalizedPhone ? normalizedPhone : null,
-      province: normalizedProvince ? normalizedProvince : null,
-      date_of_birth: parsed.date_of_birth ?? null,
-      ...(parsed.id_passport !== undefined ? { id_passport: blankToNull(parsed.id_passport) } : {}),
-      vip_status: parsed.vip_status ?? false,
-      preferences: normalizedPreferences ? normalizedPreferences : null,
-      communication_preferences: normalizedCommunicationPreferences
-        ? normalizedCommunicationPreferences
-        : null,
-      // Only write a billing field when the client sent it, so a partial patch
-      // never wipes an address the edit form did not include.
-      ...(parsed.fax !== undefined ? { fax: blankToNull(parsed.fax) } : {}),
-      ...(parsed.company_name !== undefined
-        ? { company_name: blankToNull(parsed.company_name) }
-        : {}),
-      ...(parsed.address_line1 !== undefined
-        ? { address_line1: blankToNull(parsed.address_line1) }
-        : {}),
-      ...(parsed.address_line2 !== undefined
-        ? { address_line2: blankToNull(parsed.address_line2) }
-        : {}),
-      ...(parsed.city !== undefined ? { city: blankToNull(parsed.city) } : {}),
-      ...(parsed.postal_code !== undefined
-        ? { postal_code: blankToNull(parsed.postal_code) }
-        : {}),
-      ...(parsed.vat_number !== undefined
-        ? { vat_number: blankToNull(parsed.vat_number) }
-        : {}),
-      ...(parsed.default_rate_type_id !== undefined
-        ? { default_rate_type_id: parsed.default_rate_type_id }
-        : {}),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", id)
-
-  if (parsed.expectedUpdatedAt) {
-    updateQuery = updateQuery.eq("updated_at", parsed.expectedUpdatedAt)
-  }
-
-  const { data: updated, error: updateError } = await updateQuery
-    .select(
-      "id, notes, email, phone, fax, province, company_name, address_line1, address_line2, city, postal_code, vat_number, date_of_birth, id_passport, vip_status, preferences, communication_preferences, default_rate_type_id, first_travel_date, last_travel_date, updated_at",
-    )
-    .single()
-
-  if (!updated && parsed.expectedUpdatedAt) {
-    const { data: currentCustomer } = await supabase
+  // Someone else's email, not a stale row: this is a distinct, actionable
+  // conflict (see linked-account flow), not "modified by another user".
+  if (normalizedEmail !== current.data.email) {
+    const { data: emailOwner } = await supabase
       .from("customers")
-      .select("updated_at")
-      .eq("id", id)
+      .select("id, first_name, last_name")
+      .ilike("email", normalizedEmail)
+      .neq("id", id)
       .maybeSingle()
 
-    return staleVersionResponse("customer", currentCustomer?.updated_at ?? existingCustomer.updated_at)
+    if (emailOwner) {
+      return NextResponse.json(
+        {
+          error: "That email already belongs to another customer.",
+          code: "DUPLICATE_EMAIL",
+          existingCustomer: {
+            id: emailOwner.id,
+            firstName: emailOwner.first_name,
+            lastName: emailOwner.last_name,
+          },
+        },
+        { status: 409 },
+      )
+    }
   }
 
-  if (updateError || !updated) {
+  const patchValues: {
+    notes: string | null
+    email: string
+    phone: string | null
+    province: string | null
+    date_of_birth: string | null
+    id_passport?: string | null
+    vip_status: boolean
+    preferences: string | null
+    communication_preferences: string | null
+    fax?: string | null
+    company_name?: string | null
+    address_line1?: string | null
+    address_line2?: string | null
+    city?: string | null
+    postal_code?: string | null
+    vat_number?: string | null
+    default_rate_type_id?: string | null
+  } = {
+    notes: normalizedNotes ? normalizedNotes : null,
+    email: normalizedEmail,
+    phone: normalizedPhone ? normalizedPhone : null,
+    province: normalizedProvince ? normalizedProvince : null,
+    date_of_birth: parsed.date_of_birth ?? null,
+    ...(parsed.id_passport !== undefined ? { id_passport: blankToNull(parsed.id_passport) } : {}),
+    vip_status: parsed.vip_status ?? false,
+    preferences: normalizedPreferences ? normalizedPreferences : null,
+    communication_preferences: normalizedCommunicationPreferences
+      ? normalizedCommunicationPreferences
+      : null,
+    // Only write a billing field when the client sent it, so a partial patch
+    // never wipes an address the edit form did not include.
+    ...(parsed.fax !== undefined ? { fax: blankToNull(parsed.fax) } : {}),
+    ...(parsed.company_name !== undefined ? { company_name: blankToNull(parsed.company_name) } : {}),
+    ...(parsed.address_line1 !== undefined
+      ? { address_line1: blankToNull(parsed.address_line1) }
+      : {}),
+    ...(parsed.address_line2 !== undefined
+      ? { address_line2: blankToNull(parsed.address_line2) }
+      : {}),
+    ...(parsed.city !== undefined ? { city: blankToNull(parsed.city) } : {}),
+    ...(parsed.postal_code !== undefined ? { postal_code: blankToNull(parsed.postal_code) } : {}),
+    ...(parsed.vat_number !== undefined ? { vat_number: blankToNull(parsed.vat_number) } : {}),
+    ...(parsed.default_rate_type_id !== undefined
+      ? { default_rate_type_id: parsed.default_rate_type_id }
+      : {}),
+  }
+
+  const hasVersionCheck = Boolean(parsed.expectedUpdatedAt) || Boolean(parsed.baseline)
+
+  let updated: CustomerPatchRow | null = null
+  let updateError: PostgrestError | null = null
+
+  if (!hasVersionCheck) {
+    const result = await supabase
+      .from("customers")
+      .update({ ...patchValues, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select(CUSTOMER_PATCH_SELECT)
+      .maybeSingle()
+    updated = result.data
+    updateError = result.error
+  } else {
+    // Bounded CAS retry: a sibling write between our read and write (e.g. a
+    // traveller save touching this same customer row) shouldn't fail the
+    // user's edit unless it actually touched a field they're also changing.
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      if (parsed.baseline) {
+        const conflicts = detectFieldConflicts(patchValues, parsed.baseline, current.data as Record<string, unknown>)
+        if (conflicts.length > 0) {
+          return fieldConflictResponse("customer", conflicts, current.data.updated_at)
+        }
+      } else if (parsed.expectedUpdatedAt && parsed.expectedUpdatedAt !== current.data.updated_at) {
+        return staleVersionResponse("customer", current.data.updated_at)
+      }
+
+      const result = await supabase
+        .from("customers")
+        .update({ ...patchValues, updated_at: new Date().toISOString() })
+        .eq("id", id)
+        .eq("updated_at", current.data.updated_at)
+        .select(CUSTOMER_PATCH_SELECT)
+        .maybeSingle()
+
+      if (result.error) {
+        updateError = result.error
+        break
+      }
+
+      if (result.data) {
+        updated = result.data
+        break
+      }
+
+      if (attempt === 2) {
+        const { data: latest } = await supabase
+          .from("customers")
+          .select("updated_at")
+          .eq("id", id)
+          .maybeSingle()
+        return staleVersionResponse("customer", latest?.updated_at ?? current.data.updated_at)
+      }
+
+      current = await supabase.from("customers").select(CUSTOMER_PATCH_SELECT).eq("id", id).maybeSingle()
+      if (current.error || !current.data) {
+        return NextResponse.json({ error: "Customer not found" }, { status: 404 })
+      }
+    }
+  }
+
+  if (updateError) {
+    return (
+      mapPostgrestError("customers/[id]", updateError) ??
+      safeSupabaseError("customers/[id]", updateError, "Failed to update customer")
+    )
+  }
+
+  if (!updated) {
     return NextResponse.json({ error: "Failed to update customer" }, { status: 500 })
   }
 

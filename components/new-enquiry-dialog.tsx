@@ -10,6 +10,7 @@ import { parseEmailDraft, type ParsedDraft } from "@/lib/import/parseEmailDraft"
 import { buildEnquiryImportPayload } from "@/lib/import/enquiry-payload"
 import { ReviewImportedDraftModal } from "@/components/review-imported-draft-modal"
 import { ProgressDialog } from "@/components/progress-dialog"
+import { useSuppliers } from "@/lib/use-data"
 
 interface PresetCustomer {
   id: string
@@ -86,6 +87,10 @@ export function NewEnquiryDialog({ open, onOpenChange, onSaved, presetCustomer }
   const [saveStepIndex, setSaveStepIndex] = useState(0)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [failedDraft, setFailedDraft] = useState<ParsedDraft | null>(null)
+  const { data: suppliers } = useSuppliers()
+  const trainOperatorNames = (suppliers ?? [])
+    .filter((supplier) => supplier.kind === "train_operator" && supplier.active)
+    .map((supplier) => supplier.name)
 
   useEffect(() => {
     if (!open) return
@@ -122,7 +127,7 @@ export function NewEnquiryDialog({ open, onOpenChange, onSaved, presetCustomer }
 
   const handlePasteImport = () => {
     if (!pasteText.trim()) return
-    setParsedDraft(parseEmailDraft(pasteText))
+    setParsedDraft(parseEmailDraft(pasteText, { trainOperatorNames }))
     setScreen("review")
   }
 

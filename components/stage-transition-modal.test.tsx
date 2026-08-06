@@ -58,7 +58,7 @@ const depositGate: GateFailure = {
 
 const finalPaymentGate: GateFailure = {
   gateId: "final_payment_confirmation",
-  message: "Confirm the final payment has been received.",
+  message: "Confirm the booking is paid in full.",
   fixHint: "Tick to confirm — no amount entry needed.",
   severity: "confirm",
 }
@@ -67,10 +67,10 @@ describe("StageTransitionModal", () => {
   it("shows a confirmation title when every failure is confirm-only", () => {
     renderModal([finalPaymentGate])
     expect(screen.getByText("Confirm this stage move")).toBeInTheDocument()
-    expect(screen.queryByText("Stage move needs attention")).not.toBeInTheDocument()
+    expect(screen.queryByText("One more step first")).not.toBeInTheDocument()
   })
 
-  it("shows the attention title when a blocking failure is present", () => {
+  it("shows the multi-step title when more than one failure is present", () => {
     renderModal([
       finalPaymentGate,
       {
@@ -80,7 +80,12 @@ describe("StageTransitionModal", () => {
         severity: "block",
       },
     ])
-    expect(screen.getByText("Stage move needs attention")).toBeInTheDocument()
+    expect(screen.getByText("A few steps first")).toBeInTheDocument()
+  })
+
+  it("shows the single-step title when exactly one failure is present", () => {
+    renderModal([depositGate])
+    expect(screen.getByText("One more step first")).toBeInTheDocument()
   })
 
   it("renders a Fix link to the Payments tab for the deposit-received gate", () => {
@@ -98,12 +103,12 @@ describe("StageTransitionModal", () => {
     renderModal([
       {
         gateId: "invoice_correspondence",
-        message: "The deposit invoice has been generated but not sent to the customer.",
-        fixHint: "Send the deposit invoice to the customer, or have a manager force the move with a reason.",
+        message: "The deposit invoice is ready but hasn't been sent yet.",
+        fixHint: "Send it to the customer to continue. A manager can also move this booking on with a reason.",
         severity: "block",
       },
     ])
-    expect(screen.getByText("Stage move needs attention")).toBeInTheDocument()
+    expect(screen.getByText("One more step first")).toBeInTheDocument()
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /Confirm and move/i })).not.toBeInTheDocument()
   })

@@ -118,13 +118,21 @@ export async function POST(request: Request) {
 
   const { data: existing } = await supabase
     .from("customers")
-    .select("id")
-    .eq("email", parsed.email)
+    .select("id, first_name, last_name")
+    .ilike("email", parsed.email)
     .maybeSingle()
 
   if (existing) {
     return NextResponse.json(
-      { error: "A customer with this email address already exists." },
+      {
+        error: "That email already belongs to another customer.",
+        code: "DUPLICATE_EMAIL",
+        existingCustomer: {
+          id: existing.id,
+          firstName: existing.first_name,
+          lastName: existing.last_name,
+        },
+      },
       { status: 409 },
     )
   }
@@ -156,7 +164,7 @@ export async function POST(request: Request) {
   if (insertError) {
     if (insertError.code === "23505") {
       return NextResponse.json(
-        { error: "A customer with this email address already exists." },
+        { error: "That email already belongs to another customer.", code: "DUPLICATE_EMAIL" },
         { status: 409 },
       )
     }

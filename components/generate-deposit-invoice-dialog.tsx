@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { FileText, Send } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -43,6 +43,12 @@ interface GenerateDepositInvoiceDialogProps {
    * been superseded — the action re-issues that same invoice at the new total.
    */
   amending?: boolean
+  /**
+   * Skip the resume-mode confirmation card and go straight to preview — used
+   * when the dialog was opened because the only thing left to do is send the
+   * already-generated draft (e.g. a stage move that's otherwise ready).
+   */
+  autoPreview?: boolean
   onSent: () => Promise<void> | void
   /** Called after "Change amount" voids the draft, so the caller can refetch. */
   onDraftDiscarded?: () => Promise<void> | void
@@ -115,6 +121,7 @@ export function GenerateDepositInvoiceDialog({
   departureDate = null,
   draftInvoice = null,
   amending = false,
+  autoPreview = false,
   onSent,
   onDraftDiscarded,
 }: GenerateDepositInvoiceDialogProps) {
@@ -207,6 +214,23 @@ export function GenerateDepositInvoiceDialog({
       setGenerating(false)
     }
   }
+
+  // autoPreview: skip straight to the preview step for an already-generated
+  // draft, same as clicking "Preview & Send" — no need to re-render the
+  // resume card first. Guarded with a ref so a re-render (or the preview
+  // closing back to the form) doesn't re-fire the request.
+  const autoPreviewFired = useRef(false)
+  useEffect(() => {
+    if (!dialogOpen) {
+      autoPreviewFired.current = false
+      return
+    }
+    if (!autoPreview || !resumingDraft || autoPreviewFired.current || generating) return
+    autoPreviewFired.current = true
+    void generateInvoice()
+    // Only re-run when the dialog opens or the draft to resume changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dialogOpen, autoPreview, resumingDraft])
 
   async function handleSent() {
     if (!generated) return

@@ -621,4 +621,60 @@ I decline the Terms and Conditions
 
     expect(draft.termsAccepted).toBe(true)
   })
+
+  it("reads a Rovos-style glued 'Date: <direction>' label as the departure date, not the direction text", () => {
+    // Regression test for the reported bug: Rovos's Gravity Forms notification labels the
+    // departure date as "Date: Pretoria to Cape Town" (direction glued into the label) with the
+    // actual date on the next line. The generic same-line splitter used to read "Pretoria to Cape
+    // Town" as the date value, leaving the real date to be found only via a low-confidence prose
+    // scan.
+    const draft = parseEmailDraft(`
+*Direction*
+  Pretoria to Cape Town
+*Date: Pretoria to Cape Town*
+  25 August 2027
+`)
+
+    expect(draft.trip.route).toBe("Pretoria To Cape Town")
+    expect(draft.confidence["trip.route"]).toBe("high")
+    expect(draft.trip.departureDate).toBe("2027-08-25")
+    expect(draft.confidence["trip.departureDate"]).toBe("high")
+  })
+
+  it("does not let a plain same-line 'Date: <date>' label get shadowed by the glued-label pattern", () => {
+    const draft = parseEmailDraft("Date: 2026-05-15")
+
+    expect(draft.trip.departureDate).toBe("2026-05-15")
+  })
+
+  it("downgrades an implausibly far-future departure date to low confidence even from a labelled field", () => {
+    const draft = parseEmailDraft(`
+Departure Date
+25 August 2032
+`)
+
+    expect(draft.trip.departureDate).toBe("2032-08-25")
+    expect(draft.confidence["trip.departureDate"]).toBe("low")
+  })
+
+  it("recognises a supplier from a caller-supplied active operator list instead of the hardcoded default", () => {
+    const withoutList = parseEmailDraft("Please quote Shongololo Express for our honeymoon.")
+    expect(withoutList.trip.supplier).toBe("")
+
+    const withList = parseEmailDraft("Please quote Shongololo Express for our honeymoon.", {
+      trainOperatorNames: ["Shongololo Express", "Rovos Rail", "Blue Train"],
+    })
+    expect(withList.trip.supplier).toBe("Shongololo Express")
+    expect(withList.confidence["trip.supplier"]).toBe("high")
+  })
+
+  it("resolves a route direction that isn't Pretoria-anchored (generalized, not a hardcoded pair)", () => {
+    const draft = parseEmailDraft(`
+*Direction*
+  Durban to Dar es Salaam
+`)
+
+    expect(draft.trip.route).toBe("Durban To Dar Es Salaam")
+    expect(draft.confidence["trip.route"]).toBe("high")
+  })
 })
