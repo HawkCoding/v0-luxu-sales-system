@@ -575,7 +575,7 @@ export function parseEmailDraft(text: string, options?: ParseEmailDraftOptions):
       confidence['trip.departureDate'] = 'low'
     }
   }
-  
+
   // Extract adults (high confidence if explicit)
   let adults = 0
   const adultsLabelValue = getLabeledFieldValue(text, [
