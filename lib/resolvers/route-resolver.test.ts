@@ -51,12 +51,11 @@ describe("findRouteId", () => {
     expect(routeId).toBe("route-1")
   })
 
-  it("never guesses: two candidate routes for the same endpoint pair resolve to null, even with a known supplier", async () => {
-    // Regression test for the removed `matches[0]` fallback -- a duplicate/ambiguous route must
-    // not be silently resolved to whichever row the query happens to return first.
+  it("breaks a tie across suppliers by the same rule when no supplier is known", async () => {
     const { supabase } = mockWith([
       {
         id: "route-1",
+        name: "African Collage Tour",
         supplier_id: "supplier-1",
         origin_location_id: "loc-pretoria",
         destination_location_id: "loc-cape-town",
@@ -65,40 +64,17 @@ describe("findRouteId", () => {
       },
       {
         id: "route-2",
-        supplier_id: "supplier-1",
-        origin_location_id: "loc-pretoria",
-        destination_location_id: "loc-cape-town",
-        direction_mode: "one_way",
-        active: true,
-      },
-    ])
-
-    const routeId = await findRouteId(supabase as never, "Pretoria to Cape Town", "supplier-1")
-    expect(routeId).toBeNull()
-  })
-
-  it("never guesses without a known supplier either", async () => {
-    const { supabase } = mockWith([
-      {
-        id: "route-1",
-        supplier_id: "supplier-1",
-        origin_location_id: "loc-pretoria",
-        destination_location_id: "loc-cape-town",
-        direction_mode: "one_way",
-        active: true,
-      },
-      {
-        id: "route-2",
+        name: "Cape Town Journey",
         supplier_id: "supplier-2",
         origin_location_id: "loc-pretoria",
         destination_location_id: "loc-cape-town",
-        direction_mode: "one_way",
+        direction_mode: "round_trip",
         active: true,
       },
     ])
 
     const routeId = await findRouteId(supabase as never, "Pretoria to Cape Town", null)
-    expect(routeId).toBeNull()
+    expect(routeId).toBe("route-2")
   })
 
   it("matches round_trip routes regardless of endpoint order", async () => {
@@ -184,27 +160,106 @@ describe("findRouteMatch", () => {
     expect(match).toEqual({ routeId: "route-1", reversed: false })
   })
 
-  it("returns no match (and false) for an ambiguous endpoint pair", async () => {
+  it("returns no match when nothing shares the endpoint pair", async () => {
     const { supabase } = mockWith([
       {
         id: "route-1",
+        name: "Durban Safari",
         supplier_id: "supplier-1",
         origin_location_id: "loc-pretoria",
-        destination_location_id: "loc-cape-town",
-        direction_mode: "one_way",
-        active: true,
-      },
-      {
-        id: "route-2",
-        supplier_id: "supplier-1",
-        origin_location_id: "loc-pretoria",
-        destination_location_id: "loc-cape-town",
-        direction_mode: "one_way",
+        destination_location_id: "loc-durban",
+        direction_mode: "round_trip",
         active: true,
       },
     ])
 
     const match = await findRouteMatch(supabase as never, "Pretoria to Cape Town", "supplier-1")
     expect(match).toEqual({ routeId: null, reversed: false })
+  })
+
+  it("still computes reversed off the route the tie-break chose, not the first row", async () => {
+    // Filed Cape Town -> Pretoria; the enquiry named Pretoria first, so the chosen round_trip
+    // route is travelled reversed. The one_way row would have yielded reversed: false.
+    const { supabase } = mockWith([
+      {
+        id: "route-one-way",
+        name: "African Collage Tour",
+        supplier_id: "supplier-1",
+        origin_location_id: "loc-pretoria",
+        destination_location_id: "loc-cape-town",
+        direction_mode: "one_way",
+        active: true,
+      },
+      {
+        id: "route-round-trip",
+        name: "Cape Town Journey",
+        supplier_id: "supplier-1",
+        origin_location_id: "loc-cape-town",
+        destination_location_id: "loc-pretoria",
+        direction_mode: "round_trip",
+        active: true,
+      },
+    ])
+
+    const match = await findRouteMatch(supabase as never, "Pretoria to Cape Town", "supplier-1")
+    expect(match).toEqual({ routeId: "route-round-trip", reversed: true })
+  })
+})
+
+describe("findRouteMatch tie-break", () => {
+  function mockWith(routes: Array<Record<string, unknown>>) {
+    return createSupabaseMock({ locations: LOCATIONS, routes })
+  }
+
+  function pretoriaToCapeTown(overrides: Record<string, unknown>) {
+    return {
+      supplier_id: "supplier-1",
+      origin_location_id: "loc-pretoria",
+      destination_location_id: "loc-cape-town",
+      active: true,
+      ...overrides,
+    }
+  }
+
+  it("prefers round_trip over one_way", async () => {
+    // The real Rovos collision: "Cape Town Journey" (round_trip) vs "African Collage Tour"
+    // (one_way) share Pretoria -> Cape Town.
+    const { supabase } = mockWith([
+      pretoriaToCapeTown({ id: "one-way", name: "African Collage Tour", direction_mode: "one_way" }),
+      pretoriaToCapeTown({ id: "round-trip", name: "Cape Town Journey", direction_mode: "round_trip" }),
+    ])
+
+    const match = await findRouteMatch(supabase as never, "Pretoria to Cape Town", "supplier-1")
+    expect(match.routeId).toBe("round-trip")
+  })
+
+  it("prefers the shorter duration when the direction mode ties", async () => {
+    const { supabase } = mockWith([
+      pretoriaToCapeTown({ id: "long", name: "A Long Journey", direction_mode: "round_trip", duration_days: 5 }),
+      pretoriaToCapeTown({ id: "short", name: "Z Short Journey", direction_mode: "round_trip", duration_days: 3 }),
+    ])
+
+    const match = await findRouteMatch(supabase as never, "Pretoria to Cape Town", "supplier-1")
+    expect(match.routeId).toBe("short")
+  })
+
+  it("sorts an unset duration last", async () => {
+    const { supabase } = mockWith([
+      pretoriaToCapeTown({ id: "unset", name: "A Journey", direction_mode: "round_trip", duration_days: null }),
+      pretoriaToCapeTown({ id: "known", name: "Z Journey", direction_mode: "round_trip", duration_days: 9 }),
+    ])
+
+    const match = await findRouteMatch(supabase as never, "Pretoria to Cape Town", "supplier-1")
+    expect(match.routeId).toBe("known")
+  })
+
+  it("falls back to name A-Z when mode and duration both tie", async () => {
+    const { supabase } = mockWith([
+      pretoriaToCapeTown({ id: "zulu", name: "Zulu Journey", direction_mode: "round_trip", duration_days: 4 }),
+      pretoriaToCapeTown({ id: "alpha", name: "alpha journey", direction_mode: "round_trip", duration_days: 4 }),
+    ])
+
+    const match = await findRouteMatch(supabase as never, "Pretoria to Cape Town", "supplier-1")
+    expect(match.routeId).toBe("alpha")
   })
 })

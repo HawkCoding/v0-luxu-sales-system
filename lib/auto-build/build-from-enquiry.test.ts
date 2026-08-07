@@ -103,37 +103,39 @@ describe("autoBuildBookingServices", () => {
     expect(hotel).toMatchObject({ service_date: null })
   })
 
-  it("still dates a pre-departure hotel off the rail departure date", async () => {
+  it("dates a pre-departure hotel the night before departure, with a matching night count", async () => {
+    // The customer flies in and sleeps over so they can board the next morning -- giving that
+    // night the departure date books a bed for a night they are already on the train.
     const { supabase, store } = createSupabaseMock(baseSeed())
     await autoBuildBookingServices(
       supabase as never,
       baseInput({ hotelSupplierId: HOTEL_SUPPLIER_ID, routeId: ROUTE_ID, hotelPhase: "pre" }),
-    )
-
-    const hotel = store.rows("booking_services").find((s) => s.supplier_id === HOTEL_SUPPLIER_ID)
-    expect(hotel).toMatchObject({ service_date: "2026-09-01" })
-  })
-
-  it("leaves a post-departure hotel's service_date unset rather than defaulting it to the rail departure date", async () => {
-    const { supabase, store } = createSupabaseMock(baseSeed())
-    await autoBuildBookingServices(
-      supabase as never,
-      baseInput({ hotelSupplierId: HOTEL_SUPPLIER_ID, routeId: ROUTE_ID, hotelPhase: "post" }),
     )
 
     const services = store.rows("booking_services")
     const rail = services.find((s) => s.supplier_id === TRAIN_SUPPLIER_ID)
     const hotel = services.find((s) => s.supplier_id === HOTEL_SUPPLIER_ID)
+    expect(hotel).toMatchObject({ service_date: "2026-08-31", nights: 1 })
     // The rail leg's own date is unaffected by the hotel's phase.
-    expect(rail).toMatchObject({ service_date: "2026-09-01" })
-    expect(hotel).toMatchObject({ service_date: null })
+    expect(rail).toMatchObject({ service_date: "2026-09-01", nights: null })
   })
 
-  it("still dates a pre-departure hotel off the rail departure date", async () => {
+  it("leaves a pre-departure hotel undated when there is no departure date to count back from", async () => {
     const { supabase, store } = createSupabaseMock(baseSeed())
     await autoBuildBookingServices(
       supabase as never,
-      baseInput({ hotelSupplierId: HOTEL_SUPPLIER_ID, routeId: ROUTE_ID, hotelPhase: "pre" }),
+      baseInput({ hotelSupplierId: HOTEL_SUPPLIER_ID, hotelPhase: "pre", departureDate: null }),
+    )
+
+    const hotel = store.rows("booking_services").find((s) => s.supplier_id === HOTEL_SUPPLIER_ID)
+    expect(hotel).toMatchObject({ service_date: null })
+  })
+
+  it("dates a hotel off the departure date when the enquiry never said which phase", async () => {
+    const { supabase, store } = createSupabaseMock(baseSeed())
+    await autoBuildBookingServices(
+      supabase as never,
+      baseInput({ hotelSupplierId: HOTEL_SUPPLIER_ID, routeId: ROUTE_ID, hotelPhase: "none" }),
     )
 
     const hotel = store.rows("booking_services").find((s) => s.supplier_id === HOTEL_SUPPLIER_ID)

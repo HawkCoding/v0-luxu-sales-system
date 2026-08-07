@@ -156,3 +156,83 @@ describe("inbound email import: rovos-rail-glued-headers.json", () => {
     ])
   })
 })
+
+describe("inbound email import: rovos-rail-quote-package.json", () => {
+  const fixture = loadFixture("rovos-rail-quote-package.json")
+  const rawText = getMessageBody(fixture.text, fixture.html)
+  const draft = parseEmailDraft(rawText)
+  const payload = buildEnquiryImportPayload(draft)
+
+  it("extracts the trip fields from the Quote template", () => {
+    expect(draft.trip.purpose).toBe("quote")
+    expect(draft.trip.packageOption).toBe("Cape Town - Train only")
+    expect(draft.trip.route).toBe("Pretoria To Cape Town")
+    expect(draft.trip.departureDate).toBe("2026-07-24")
+    expect(draft.guests.adults).toBe(2)
+    expect(draft.guests.suites).toBe(1)
+    expect(draft.guests.suitePhrases).toEqual(["Deluxe Suite - Twin beds"])
+  })
+
+  it("still reads the services request when its label is glued onto the section header", () => {
+    // "Additional Pre and Post Train Travel ServicesWould you like to add additional travel
+    // services? (Please specify below)" arrives as one line. This template answers in the field
+    // itself rather than a separate explain box, so the answer IS the detail.
+    expect(draft.additionalServices.requested).toBe(true)
+    expect(draft.additionalServices.details).toBe(
+      "Taxi transport from Bela Bela (Warmbaths) on 24.07 2026 to Rovos Rail Pretoria",
+    )
+    expect(payload.additionalServicesDetails).toBe(
+      "Taxi transport from Bela Bela (Warmbaths) on 24.07 2026 to Rovos Rail Pretoria",
+    )
+  })
+
+  it("leaves hotel fields empty when the template has no hotel section", () => {
+    expect(draft.trip.hotelOption).toBe("")
+    expect(draft.trip.hotelPhase).toBe("")
+  })
+})
+
+describe("inbound email import: rovos-rail-availability-hotel.json", () => {
+  const fixture = loadFixture("rovos-rail-availability-hotel.json")
+  const rawText = getMessageBody(fixture.text, fixture.html)
+  const draft = parseEmailDraft(rawText)
+  const payload = buildEnquiryImportPayload(draft)
+
+  it("extracts the trip fields from the Availability template, which has no Package field", () => {
+    expect(draft.trip.purpose).toBe("availability")
+    expect(draft.trip.packageOption).toBe("")
+    expect(draft.trip.route).toBe("Pretoria To Victoria Falls")
+    expect(draft.trip.departureDate).toBe("2027-08-11")
+    expect(draft.guests.adults).toBe(2)
+    expect(draft.guests.suites).toBe(1)
+    expect(draft.guests.suitePhrases).toEqual(["Deluxe Double Suite"])
+  })
+
+  it("reads the hotel phase from this template's 'Hotel Booking' label", () => {
+    // The Blue Train templates label the same field just "Hotel"; reading only that left every
+    // Availability enquiry filed as hotel_phase 'none'.
+    expect(draft.trip.hotelPhase).toBe("pre")
+    expect(payload.hotelPhase).toBe("pre")
+    expect(draft.trip.extendStay).toBe(false)
+  })
+
+  it("reads the property, not the region code, from a 'Hotel Option: PTY' label", () => {
+    // The label carries its own colon; the generic same-line splitter used to answer "PTY".
+    expect(draft.trip.hotelOption).toBe("Irene Country Lodge - Pretoria")
+    expect(payload.hotelOption).toBe("Irene Country Lodge - Pretoria")
+  })
+
+  it("keeps every line of a multi-line travel-services explanation", () => {
+    expect(draft.additionalServices.requested).toBe(true)
+    expect(draft.additionalServices.details).toBe(
+      "Transfer from JNB to Irene Country Lodge on August 10th 2027\n" +
+        "Then Transfer from Irene Country Lodge to Rovos Rail on August 11th to Start Rail Journey",
+    )
+    expect(payload.additionalServices).toBe(true)
+  })
+
+  it("does not let the bare Yes flag leak into the detail text, nor the Consent block", () => {
+    expect(draft.additionalServices.details).not.toMatch(/^Yes/)
+    expect(draft.additionalServices.details).not.toMatch(/Terms and Conditions/)
+  })
+})

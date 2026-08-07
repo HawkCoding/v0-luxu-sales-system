@@ -149,12 +149,20 @@ const FORM_FIELD_LABEL_PATTERNS = [
   /^package\s*options?$/i,
   /^package$/i,
   /^hotel$/i,
+  /^hotel\s*booking$/i,
   /^hotel\s*options$/i,
+  /^hotel\s*options?\s*:\s*.+$/i,
   /^extend\s+your\s+stay$/i,
   /^would\s+you\s+like\s+to\s+add\s+additional\s+travel\s+services/i,
+  /^do\s+you\s+require\s+additional\s+travel\s+services/i,
+  /^briefly\s+explain\s+the\s+travel\s+services/i,
   /^flight\s*booking$/i,
   /^flight\s*departure\s*date$/i,
   /^acceptance$/i,
+  // Boundary only -- the Availability form's terms section is headed "Consent", and without it
+  // listed here a multi-line block (see getLabeledFieldBlock) would run straight past it and
+  // swallow the terms sentence as trip detail. Reading its value is deliberately not wired up.
+  /^consent$/i,
   /^please\s+indicate\s+the\s+purpose\s+of\s+your\s+request$/i,
   /^contact\s+information$/i,
   /^.+\s+information$/i,
@@ -171,12 +179,18 @@ function normalizeLabel(line: string): string {
 
 /**
  * Some templates glue a section header directly onto the next label with no line break
- * (e.g. "Personal Contact InformationTitle"). Strips a recognised "... Information" prefix
- * so the trailing label is still matchable. Returns the input unchanged when no such prefix
- * is present.
+ * (e.g. "Personal Contact InformationTitle"). Strips a recognised section-header prefix so the
+ * trailing label is still matchable. Returns the input unchanged when no such prefix is present.
+ *
+ * The travel-services header is matched literally rather than by a generic "... Services" rule:
+ * that rule would also fire mid-label on "Would you like to add additional travel services?
+ * (Please specify below)" and cut it down to "? (Please specify below)".
  */
+const GLUED_SECTION_HEADER =
+  /^(?:.+?\s+Information|Additional\s+Pre\s+and\s+Post\s+Train\s+Travel\s+Services)(.+)$/i
+
 function stripGluedSectionHeader(label: string): string {
-  const match = label.match(/^.+?\s+Information(.+)$/i)
+  const match = label.match(GLUED_SECTION_HEADER)
   return match ? match[1] : label
 }
 
@@ -185,7 +199,55 @@ function isFormFieldLabel(line: string): boolean {
   return FORM_FIELD_LABEL_PATTERNS.some((pattern) => pattern.test(label))
 }
 
+/**
+ * True when a caller's patterns claim the *whole* line as a label, colon and all -- some Gravity
+ * labels contain a colon of their own ("Hotel Option: PTY" names the region; the property is on
+ * the next line). Without this the generic same-line splitter reads "PTY" as the answer and the
+ * real value is never seen. Only fires for callers that opt in by supplying such a pattern.
+ */
+function lineIsWholeLabel(rawLine: string, labelPatterns: RegExp[]): boolean {
+  const wholeLine = stripGluedSectionHeader(normalizeLabel(rawLine))
+  return labelPatterns.some((pattern) => pattern.test(wholeLine))
+}
+
 function getLabeledFieldValue(text: string, labelPatterns: RegExp[]): string {
+  const lines = text.split(/\r?\n/)
+
+  for (const rawLine of lines) {
+    const sameLineMatch = rawLine.trim().match(/^(.+?)\s*[:|]\s*(.+)$/)
+    if (!sameLineMatch) continue
+    if (lineIsWholeLabel(rawLine, labelPatterns)) continue
+
+    const label = stripGluedSectionHeader(normalizeLabel(sameLineMatch[1]))
+    const value = sameLineMatch[2].trim()
+    if (value && labelPatterns.some((pattern) => pattern.test(label))) {
+      return value
+    }
+  }
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const label = stripGluedSectionHeader(normalizeLabel(lines[index]))
+    if (!labelPatterns.some((pattern) => pattern.test(label))) continue
+
+    const value = lines.slice(index + 1).map((line) => line.trim()).find((line) => line.length > 0)
+    if (value && !isFormFieldLabel(value)) {
+      return value
+    }
+  }
+
+  return ''
+}
+
+/**
+ * Same as `getLabeledFieldValue`, but keeps every line of a free-text answer instead of only its
+ * first. Gravity Forms renders a paragraph field as consecutive lines under its label, so the
+ * single-line reader silently truncates a customer who listed two transfers on two lines. Collects
+ * until the next recognised form label (or a blank line), so it can't run on into the next section.
+ *
+ * A same-line value (`Label: value`) is returned as-is -- that shape is always a single-line
+ * answer, and continuing past it would sweep in whatever unrelated line followed.
+ */
+function getLabeledFieldBlock(text: string, labelPatterns: RegExp[]): string {
   const lines = text.split(/\r?\n/)
 
   for (const rawLine of lines) {
@@ -203,10 +265,18 @@ function getLabeledFieldValue(text: string, labelPatterns: RegExp[]): string {
     const label = stripGluedSectionHeader(normalizeLabel(lines[index]))
     if (!labelPatterns.some((pattern) => pattern.test(label))) continue
 
-    const value = lines.slice(index + 1).map((line) => line.trim()).find((line) => line.length > 0)
-    if (value && !isFormFieldLabel(value)) {
-      return value
+    const collected: string[] = []
+    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+      const line = lines[cursor].trim()
+      if (!line) {
+        if (collected.length > 0) break
+        continue
+      }
+      if (isFormFieldLabel(line)) break
+      collected.push(line)
     }
+
+    if (collected.length > 0) return collected.join("\n")
   }
 
   return ''
@@ -387,14 +457,20 @@ export function parseEmailDraft(text: string, options?: ParseEmailDraftOptions):
   const packageOption =
     getLabeledFieldValue(text, [/^package\s*options?$/i, /^package$/i]) ||
     (/\bI do not require a package\b/i.test(text) ? 'I do not require a package' : '')
-  const hotelOption = getLabeledFieldValue(text, [/^hotel\s*options?$/i])
+  // The Availability form suffixes the label with the region it offered ("Hotel Option: PTY") and
+  // puts the property on the next line -- see lineIsWholeLabel.
+  const hotelOption = getLabeledFieldValue(text, [
+    /^hotel\s*options?$/i,
+    /^hotel\s*options?\s*:\s*.+$/i,
+  ])
   const flightBooking = getLabeledFieldValue(text, [/^flight\s*booking$/i])
   const flightDepartureDateValue = getLabeledFieldValue(text, [/^flight\s*departure\s*date$/i])
 
   // "Hotel" states whether a stay is pre- or post-departure (or none) -- distinct from
   // "Hotel Options", which names the property. Needed so the auto-built hotel leg gets the
-  // right service date instead of defaulting to the rail departure date.
-  const hotelPhaseValue = getLabeledFieldValue(text, [/^hotel$/i])
+  // right service date instead of defaulting to the rail departure date. The Availability form
+  // labels the same field "Hotel Booking".
+  const hotelPhaseValue = getLabeledFieldValue(text, [/^hotel$/i, /^hotel\s*booking$/i])
   let hotelPhase: 'pre' | 'post' | 'none' | '' = ''
   if (/pre/i.test(hotelPhaseValue)) {
     hotelPhase = 'pre'
@@ -417,11 +493,28 @@ export function parseEmailDraft(text: string, options?: ParseEmailDraftOptions):
     confidence['trip.extendStay'] = 'high'
   }
 
-  const additionalServicesDetails = getLabeledFieldValue(text, [
+  // The two form templates ask for extra services differently. The Quote form asks once and takes
+  // the description in the answer ("Would you like to add... / Taxi transport from..."). The
+  // Availability form splits it in two: a Yes/No question plus a separate "Briefly explain" box,
+  // so reading only the first label loses both the flag and the text.
+  const additionalServicesAnswer = getLabeledFieldBlock(text, [
     /^would\s+you\s+like\s+to\s+add\s+additional\s+travel\s+services/i,
+    /^do\s+you\s+require\s+additional\s+travel\s+services/i,
   ])
-  const additionalServicesRequested = Boolean(additionalServicesDetails)
-  if (additionalServicesDetails) confidence['additionalServices.requested'] = 'high'
+  const additionalServicesExplanation = getLabeledFieldBlock(text, [
+    /^briefly\s+explain\s+the\s+travel\s+services/i,
+  ])
+  // A bare Yes/No is the flag only -- anything else is the customer describing what they want,
+  // which is how the Quote form has always carried its detail.
+  const answerIsBareFlag = /^(?:yes|no)$/i.test(additionalServicesAnswer.trim())
+  const additionalServicesDetails =
+    additionalServicesExplanation || (answerIsBareFlag ? '' : additionalServicesAnswer)
+  const additionalServicesRequested = answerIsBareFlag
+    ? /^yes$/i.test(additionalServicesAnswer.trim())
+    : Boolean(additionalServicesDetails)
+  if (additionalServicesAnswer || additionalServicesDetails) {
+    confidence['additionalServices.requested'] = 'high'
+  }
 
   if (title) confidence['customer.title'] = 'high'
   if (country) confidence['customer.country'] = 'high'

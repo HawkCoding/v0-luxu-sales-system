@@ -42,10 +42,12 @@ interface MockTrainSupplier {
 
 interface MockRoute {
   id: string
+  name: string
   supplier_id: string
   origin_location_id: string | null
   destination_location_id: string | null
   direction_mode: "one_way" | "round_trip"
+  duration_days?: number | null
   active: boolean
 }
 
@@ -62,10 +64,10 @@ const DEFAULT_TRAIN_SUPPLIERS: MockTrainSupplier[] = [
 ]
 
 const DEFAULT_ROUTES: MockRoute[] = [
-  { id: "route-rovos-pta-cpt", supplier_id: "sup-rovos", origin_location_id: "loc-pta", destination_location_id: "loc-cpt", direction_mode: "round_trip", active: true },
-  { id: "route-blue-pta-cpt", supplier_id: "sup-blue", origin_location_id: "loc-pta", destination_location_id: "loc-cpt", direction_mode: "round_trip", active: true },
-  { id: "route-rovos-cpt-dar", supplier_id: "sup-rovos", origin_location_id: "loc-cpt", destination_location_id: "loc-dar", direction_mode: "round_trip", active: true },
-  { id: "route-rovos-pta-dur-oneway", supplier_id: "sup-rovos", origin_location_id: "loc-pta", destination_location_id: "loc-dur", direction_mode: "one_way", active: true },
+  { id: "route-rovos-pta-cpt", name: "Cape Town Journey", supplier_id: "sup-rovos", origin_location_id: "loc-pta", destination_location_id: "loc-cpt", direction_mode: "round_trip", active: true },
+  { id: "route-blue-pta-cpt", name: "Pretoria to Cape Town", supplier_id: "sup-blue", origin_location_id: "loc-pta", destination_location_id: "loc-cpt", direction_mode: "round_trip", active: true },
+  { id: "route-rovos-cpt-dar", name: "Dar Es Salaam Journey", supplier_id: "sup-rovos", origin_location_id: "loc-cpt", destination_location_id: "loc-dar", direction_mode: "round_trip", active: true },
+  { id: "route-rovos-pta-dur-oneway", name: "Durban Safari", supplier_id: "sup-rovos", origin_location_id: "loc-pta", destination_location_id: "loc-dur", direction_mode: "one_way", active: true },
 ]
 
 interface MockState {
@@ -685,9 +687,36 @@ Deluxe Twin with shower
     expect(await importRoute(reverseState, "Rovos Rail Information", "Durban to Pretoria")).toBeNull()
   })
 
-  it("does not auto-link an ambiguous city pair when the supplier is unknown", async () => {
+  it("tie-breaks an ambiguous city pair deterministically when the supplier is unknown", async () => {
+    // Both candidates are round_trip with no duration, so the name A-Z step decides: "Cape Town
+    // Journey" before "Pretoria to Cape Town". Leaving it unresolved would strand the booking
+    // with no route and no way to price a quote.
     const state = createState({ trainSuppliers: [] })
-    expect(await importRoute(state, "Rovos Rail Information", "Pretoria to Cape Town")).toBeNull()
+    expect(await importRoute(state, "Rovos Rail Information", "Pretoria to Cape Town")).toBe(
+      "route-rovos-pta-cpt",
+    )
+  })
+
+  it("prefers a round_trip route over a one_way sharing the same endpoints", async () => {
+    // The real Rovos collision: Pretoria -> Victoria Falls is both the round-trip flagship and a
+    // one-way special, which used to resolve to nothing at all.
+    const state = createState({
+      routes: [
+        ...DEFAULT_ROUTES,
+        {
+          id: "route-rovos-pta-cpt-oneway",
+          name: "African Collage Tour",
+          supplier_id: "sup-rovos",
+          origin_location_id: "loc-pta",
+          destination_location_id: "loc-cpt",
+          direction_mode: "one_way",
+          active: true,
+        },
+      ],
+    })
+    expect(await importRoute(state, "Rovos Rail Information", "Pretoria to Cape Town")).toBe(
+      "route-rovos-pta-cpt",
+    )
   })
 })
 
