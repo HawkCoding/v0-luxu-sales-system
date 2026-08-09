@@ -48,4 +48,32 @@ describe("resolveDefaultRateTypeId", () => {
   it("returns null when there are no active rate types", () => {
     expect(resolveDefaultRateTypeId("airline", [], [])).toBeNull()
   })
+
+  describe("supplier override", () => {
+    const kindDefaults: SupplierKindDefaultRateType[] = [
+      { kind: "hotel_property", rateTypeId: "sto" },
+    ]
+
+    it("beats both the per-kind mapping and the global default", () => {
+      expect(resolveDefaultRateTypeId("hotel_property", kindDefaults, rateTypes, "rac")).toBe("rac")
+      expect(resolveDefaultRateTypeId("train_operator", kindDefaults, rateTypes, "sto")).toBe("sto")
+    })
+
+    it("lets two suppliers of the same kind hold different baselines", () => {
+      // The case that motivated the column: two train operators, two house rates.
+      expect(resolveDefaultRateTypeId("train_operator", [], rateTypes, "sto")).toBe("sto")
+      expect(resolveDefaultRateTypeId("train_operator", [], rateTypes, "rac")).toBe("rac")
+    })
+
+    it("falls through when the override points at an archived or unknown rate type", () => {
+      expect(resolveDefaultRateTypeId("hotel_property", kindDefaults, rateTypes, "gone")).toBe("sto")
+      expect(resolveDefaultRateTypeId("train_operator", [], rateTypes, "gone")).toBe("rac")
+    })
+
+    it("reproduces the pre-override result when null or omitted", () => {
+      expect(resolveDefaultRateTypeId("hotel_property", kindDefaults, rateTypes, null)).toBe("sto")
+      expect(resolveDefaultRateTypeId("hotel_property", kindDefaults, rateTypes)).toBe("sto")
+      expect(resolveDefaultRateTypeId("train_operator", kindDefaults, rateTypes, null)).toBe("rac")
+    })
+  })
 })

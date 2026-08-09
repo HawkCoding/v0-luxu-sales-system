@@ -10,7 +10,8 @@ import type {
 } from "@/lib/types"
 import { fetchDefaultAgeBuckets, resolveAgeBuckets } from "@/lib/pricing/age-buckets"
 import { projectPassengerTotals } from "@/lib/packages/passenger-totals"
-import { isRateCardValidOn } from "@/lib/rate-cards/resolve"
+import { isRateCardValidOn, selectRateCard } from "@/lib/rate-cards/resolve"
+import { loadSupplierDefaultRateTypeResolver } from "@/lib/rate-types/load-supplier-defaults"
 import {
   buildCommissionBreakdown,
   calculateCommissionAmount,
@@ -100,12 +101,22 @@ export async function priceExtraLineItems(
     .single()
   if (jobError || !job) throw new Error("Job not found")
 
-  const { data: supplier, error: supplierError } = await supabase
-    .from("suppliers")
-    .select("id, name, kind, infant_max_age, child_max_age")
-    .eq("id", supplierId)
-    .single()
+  const [{ data: supplier, error: supplierError }, resolveSupplierDefaultRateTypeId, { data: rateTypeRows }] =
+    await Promise.all([
+      supabase
+        .from("suppliers")
+        .select("id, name, kind, infant_max_age, child_max_age, default_rate_type_id")
+        .eq("id", supplierId)
+        .single(),
+      loadSupplierDefaultRateTypeResolver(supabase),
+      // Names the chosen rate type in errors, and stamps code/name into the snapshot so an extra
+      // line carries the same rate-type provenance a package line does.
+      supabase.from("rate_types").select("id, code, name"),
+    ])
   if (supplierError || !supplier) throw new Error("Supplier not found")
+
+  const rateTypeMetaById = new Map((rateTypeRows ?? []).map((row) => [row.id, row]))
+  const rateTypeLabel = (id: string) => rateTypeMetaById.get(id)?.name ?? id
 
   const { data: route, error: routeError } = await supabase
     .from("routes")
@@ -143,9 +154,37 @@ export async function priceExtraLineItems(
         : `No rate card for ${where}. Add one under Suppliers → ${supplier.name} → rate cards.`,
     )
   }
-  const chosen = rateTypeId ?? null
-  const byRateType = (id: string | null) => (id ? validCards.find((card) => card.rate_type_id === id) : undefined)
-  const card = byRateType(chosen) ?? byRateType(fallbackRateTypeId) ?? validCards[0]
+  // Same precedence the package builder uses -- routed through selectRateCard so the two can't drift.
+  const selected = selectRateCard(
+    validCards.map((candidate) => ({
+      ...candidate,
+      routeId,
+      suiteTypeId,
+      rateTypeId: candidate.rate_type_id,
+      validFrom: candidate.valid_from,
+      validTo: candidate.valid_to,
+    })),
+    rateTypeId,
+    null,
+    fallbackRateTypeId,
+    resolveSupplierDefaultRateTypeId(supplier.kind as SupplierKind, supplier.default_rate_type_id ?? null),
+  )
+  if (!selected) {
+    throw new Error(`No rate card covers ${travelDate} for "${suiteType.name}" on "${route.name}" (${supplier.name}).`)
+  }
+  if (!selected.ok) {
+    // Cards exist on this date, just not for the requested rate type. Pricing off a different
+    // rate's card would quote a price nobody chose, so this fails instead.
+    const where = `"${suiteType.name}" on "${route.name}" (${supplier.name})`
+    const label = rateTypeLabel(selected.requestedRateTypeId)
+    throw new Error(
+      (rateCards ?? []).some((c) => c.rate_type_id === selected.requestedRateTypeId)
+        ? `No "${label}" rate covers ${travelDate} for ${where}. Extend that rate's validity period or add a rate card.`
+        : `"${label}" has no rate card for ${where}. Add one under Suppliers → ${supplier.name} → rate cards.`,
+    )
+  }
+  const card = selected.card
+  const rateTypeInherited = selected.inherited
 
   const variantGroups = await loadVariantGroups(supabase, suiteTypeId)
   const variantSuffix =
@@ -216,6 +255,9 @@ export async function priceExtraLineItems(
         suiteTypeName: suiteRow.name,
         rateCardId: card.id,
         rateTypeId: card.rate_type_id,
+        rateTypeCode: rateTypeMetaById.get(card.rate_type_id)?.code ?? null,
+        rateTypeName: rateTypeMetaById.get(card.rate_type_id)?.name ?? null,
+        rateTypeInherited,
         travelDate,
         passengerKind,
         baseUnitPrice: unitPrice,

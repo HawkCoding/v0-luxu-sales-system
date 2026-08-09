@@ -41,20 +41,63 @@ export function hasAnyRateCardFor(
   return cards.some((card) => card.routeId === routeId && card.suiteTypeId === suiteTypeId)
 }
 
-/** Resolve deterministically: a per-leg override beats the quote-level choice, which beats the
- * system default, which beats any remaining card. */
+/** Ignores dates, scoped to one rate type: separates "this rate expired here" from "this rate was
+ * never priced here", which are different things to tell the user to go fix. */
+export function hasAnyRateCardForRateType(
+  cards: readonly Pick<RateCardWindow, "routeId" | "suiteTypeId" | "rateTypeId">[],
+  routeId: string,
+  suiteTypeId: string,
+  rateTypeId: string,
+): boolean {
+  return cards.some(
+    (card) =>
+      card.routeId === routeId && card.suiteTypeId === suiteTypeId && card.rateTypeId === rateTypeId,
+  )
+}
+
+/** `inherited` marks a card resolved off a default rather than an explicit choice — the caller
+ * stamps it onto the quote line so a fallback stays visible after the dialog closes. */
+export type RateCardSelection<T> =
+  | { ok: true; card: T; inherited: boolean }
+  | { ok: false; requestedRateTypeId: string }
+
+/**
+ * Resolve deterministically. An explicit per-leg rate type is a contract: it prices at its own card
+ * or not at all. Anything else walks the default chain (customer → supplier → system).
+ *
+ * Returning `{ ok: false }` rather than another rate type's card is deliberate. Substituting used to
+ * be silent, so picking a rate whose card had expired quoted the default rate's price as though it
+ * were the chosen one — the caller is expected to turn this into an error naming the rate type.
+ */
 export function selectRateCard<T extends RateCardWindow>(
   candidates: readonly T[],
   preferredRateTypeId?: string | null,
   quoteRateTypeId?: string | null,
   fallbackRateTypeId?: string | null,
-): T | undefined {
+  supplierDefaultRateTypeId?: string | null,
+): RateCardSelection<T> | undefined {
   if (candidates.length === 0) return undefined
 
   const byRateType = (rateTypeId: string | null | undefined) =>
     rateTypeId ? candidates.find((card) => card.rateTypeId === rateTypeId) : undefined
 
-  return (
-    byRateType(preferredRateTypeId ?? quoteRateTypeId) ?? byRateType(fallbackRateTypeId) ?? candidates[0]
-  )
+  // The leg's own dropdown value — never falls through to another rate type.
+  if (preferredRateTypeId) {
+    const card = byRateType(preferredRateTypeId)
+    return card ? { ok: true, card, inherited: false } : { ok: false, requestedRateTypeId: preferredRateTypeId }
+  }
+
+  for (const inheritedRateTypeId of [quoteRateTypeId, supplierDefaultRateTypeId, fallbackRateTypeId]) {
+    const card = byRateType(inheritedRateTypeId)
+    if (card) return { ok: true, card, inherited: true }
+  }
+
+  // Every tier was set but none had a card: report the most specific one so the error names the
+  // rate type the user is most likely to recognise.
+  const mostSpecificRequested = quoteRateTypeId ?? supplierDefaultRateTypeId ?? fallbackRateTypeId
+  if (mostSpecificRequested) return { ok: false, requestedRateTypeId: mostSpecificRequested }
+
+  // No rate type is knowable at all (no customer, supplier, or system default configured), so
+  // there is nothing to honour or contradict — any valid card is as correct as another.
+  return { ok: true, card: candidates[0], inherited: true }
 }

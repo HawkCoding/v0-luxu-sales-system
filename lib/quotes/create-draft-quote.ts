@@ -9,20 +9,23 @@ import { getDefaultCommission } from "@/lib/pricing/default-commission"
 type ServiceClient = SupabaseClient<Database>
 
 /**
- * The rate types the auto-quote prices against: the booking customer's own default where they
- * have one, falling back to the system default -- the same precedence the Build Booking dialog
+ * The rate types the auto-quote prices against -- the same precedence the Build Booking dialog
  * applies, so an auto-priced quote and a hand-built one agree.
+ *
+ * `rateTypeId` deliberately stays null when the customer has no default of their own: collapsing it
+ * onto the system default here would shadow each leg's supplier default, which selectRateCard slots
+ * in between the two.
  */
 async function resolveRateTypes(supabase: ServiceClient, bookingId: string) {
   const [{ data: rateTypeRows }, { data: booking }] = await Promise.all([
-    supabase.from("rate_types").select("id, code, name, is_default"),
+    supabase.from("rate_types").select("id, code, name, is_default").is("archived_at", null),
     supabase.from("bookings").select("customers(default_rate_type_id)").eq("id", bookingId).maybeSingle(),
   ])
 
   const rateTypes = (rateTypeRows ?? []).map(({ id, code, name }) => ({ id, code, name }))
   const fallbackRateTypeId = (rateTypeRows ?? []).find((rt) => rt.is_default)?.id ?? null
   const customer = Array.isArray(booking?.customers) ? booking?.customers[0] : booking?.customers
-  const rateTypeId = customer?.default_rate_type_id ?? fallbackRateTypeId
+  const rateTypeId = customer?.default_rate_type_id ?? null
 
   return { rateTypes, fallbackRateTypeId, rateTypeId }
 }

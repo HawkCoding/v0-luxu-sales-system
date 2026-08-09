@@ -621,6 +621,9 @@ export interface PricingSnapshot {
   rateTypeId?: string | null
   rateTypeCode?: string | null
   rateTypeName?: string | null
+  /** True when the rate type came from a default (customer/supplier/system) rather than an explicit
+   * per-leg choice. Null on lines with no rate card at all (manual-pricing legs). */
+  rateTypeInherited?: boolean | null
   travelDate: string
   passengerKind: "adult" | "child" | "infant" | "single_supplement" | "service" | "included"
   baseUnitPrice: number
@@ -675,6 +678,11 @@ export interface PackageLeg {
   sortOrder: number
   /** Hotel legs only: pre-stay (night(s) before departure) or post-stay (from train arrival). */
   dateAnchor: "pre" | "post" | null
+  /**
+   * The supplier's resolved default rate type (own override -> kind default -> system default).
+   * Sits between the customer's default and the system default when picking this leg's rate card.
+   */
+  defaultRateTypeId: string | null
   routes: SupplierRoute[]
   rateCards: SupplierRateCard[]
   suiteTypes: SupplierSuiteType[]
@@ -791,8 +799,15 @@ export interface SupplierDetail extends Supplier {
   rateTypes: RateType[]
   /** Non-default rates that apply to this supplier and their markdown. */
   rateAdjustments: SupplierRateAdjustment[]
-  /** Resolved default rate type for this supplier's kind (the baseline). */
+  /**
+   * Fully resolved default rate type -- the baseline every rateAdjustment is measured against.
+   * Honours the supplier's own override first, then the per-kind mapping, then the global default.
+   */
   defaultRateTypeId: string | null
+  /** The supplier's own override, or null when it inherits. This is what the edit form edits. */
+  defaultRateTypeOverrideId: string | null
+  /** What defaultRateTypeId would be if the override were cleared -- shown as the inherit option. */
+  inheritedDefaultRateTypeId: string | null
 }
 
 export interface BookingTransportRequest {

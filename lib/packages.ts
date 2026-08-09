@@ -25,6 +25,8 @@ export interface PackageLegWithSupplier extends PackageLegRow {
   supplierDescription: string | null
   supplierKind: SupplierKind
   supplierPricingMode: "rate_card" | "manual"
+  /** Already resolved via loadSupplierDefaultRateTypeResolver -- not the raw supplier column. */
+  supplierDefaultRateTypeId: string | null
 }
 
 export function buildPackageSlugBase(name: string): string {
@@ -55,7 +57,8 @@ function mapVehicleRentalRouteDetails(
 
 export function mapPackageListItem(
   row: PackageRow,
-  legs: PackageLegWithSupplier[],
+  // Only the kind is read, so list callers don't have to resolve each supplier's default rate type.
+  legs: Pick<PackageLegWithSupplier, "supplierKind">[],
   prices: number[],
   trainRouteName: string | null,
 ): Package {
@@ -183,6 +186,7 @@ export function mapPackageLeg(
     label: row.label,
     sortOrder: row.sort_order,
     dateAnchor: normalizeLegDateAnchor(row.date_anchor),
+    defaultRateTypeId: row.supplierDefaultRateTypeId ?? null,
     routes: eligibleRoutes.map((route) =>
       mapPackageRoute(route, detailsByRouteId.get(route.id), locationNameById),
     ),

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server"
 import { staleVersionResponse } from "@/lib/concurrency"
 import { mapPostgrestError, safeSupabaseError } from "@/lib/api/responses"
-import { mapSupplierDetail } from "@/lib/suppliers"
+import { mapRateType, mapSupplierDetail } from "@/lib/suppliers"
+import { resolveDefaultRateTypeId } from "@/lib/rate-types/default-rate-type"
 import {
   allowedRoles,
   checkDeletionDependencies,
@@ -18,7 +19,7 @@ import {
   type SupplierDraftSaveInput,
   type SupplierSaveInput,
 } from "../schemas"
-import { getSupplierVocabulary, isTransportSupplier } from "@/lib/types"
+import { getSupplierVocabulary, isTransportSupplier, type SupplierKind } from "@/lib/types"
 import { buildRouteName } from "@/lib/routes/route-name"
 import { areRateCardDateRangesOverlapping, checkRateCardOverlaps } from "@/lib/rate-cards/overlap"
 
@@ -426,10 +427,27 @@ export async function PATCH(
   const activeRateTypeIds = new Set(
     (existingDetail.rateTypes ?? []).filter((row) => !row.archived_at).map((row) => row.id),
   )
-  const defaultRateTypeId =
-    (existingDetail.rateTypes ?? []).find((row) => row.is_default && !row.archived_at)?.id
-    ?? (existingDetail.rateTypes ?? []).find((row) => !row.archived_at)?.id
-    ?? null
+  // The baseline a rate card falls back to when the client didn't name a rate type: the supplier's
+  // own default where it has one, then its kind's default, then the system default. Resolved off
+  // the incoming payload (not the stored row) so a save that changes the kind or the override in
+  // the same request tags new cards with the value the user just chose.
+  const requestedDefaultRateTypeId = parsed.defaultRateTypeId ?? null
+  const defaultRateTypeId = resolveDefaultRateTypeId(
+    parsed.kind,
+    (existingDetail.kindDefaultRateTypes ?? []).map((row) => ({
+      kind: row.kind as SupplierKind,
+      rateTypeId: row.rate_type_id,
+    })),
+    (existingDetail.rateTypes ?? []).map(mapRateType),
+    requestedDefaultRateTypeId,
+  )
+
+  if (requestedDefaultRateTypeId && !activeRateTypeIds.has(requestedDefaultRateTypeId)) {
+    return NextResponse.json(
+      { error: "The default rate type must reference an active rate type." },
+      { status: 400 },
+    )
+  }
   const existingRateCardByBusinessKey = new Map(
     existingDetail.rateCards.map((rateCard) => [getRateCardBusinessKey(rateCard), rateCard]),
   )
@@ -659,6 +677,7 @@ export async function PATCH(
     default_time_end: parsed.defaultTimeEnd ?? null,
     inclusions: parsed.inclusions,
     exclusions: parsed.exclusions,
+    default_rate_type_id: requestedDefaultRateTypeId,
     active: nextActive,
     status: nextStatus,
   }

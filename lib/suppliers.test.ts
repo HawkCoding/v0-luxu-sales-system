@@ -22,6 +22,7 @@ const supplierRow: SupplierRow = {
   slug: "blue-train",
   kind: "train_operator",
   pricing_mode: "rate_card",
+  default_rate_type_id: null,
   status: "draft",
   name: "Blue Train",
   description: null,

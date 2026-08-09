@@ -1,7 +1,18 @@
 "use client"
 
+import { useState } from "react"
 import Link from "next/link"
 import { Plus, Trash2 } from "lucide-react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -25,6 +36,11 @@ export interface ApplicableRatesCardProps {
   defaultRateTypeId: string | null
   adjustments: SupplierRateAdjustment[]
   onChange: (next: SupplierRateAdjustment[]) => void
+  /**
+   * Set this supplier's own default rate. Omit to render the default as read-only (used where the
+   * supplier has no baseline to choose, e.g. manual-pricing suppliers).
+   */
+  onChangeDefaultRateType?: (rateTypeId: string) => void
 }
 
 export function ApplicableRatesCard({
@@ -33,7 +49,9 @@ export function ApplicableRatesCard({
   defaultRateTypeId,
   adjustments,
   onChange,
+  onChangeDefaultRateType,
 }: ApplicableRatesCardProps) {
+  const [pendingDefaultRateTypeId, setPendingDefaultRateTypeId] = useState<string | null>(null)
   const activeRateTypes = rateTypes.filter((rt) => !rt.archivedAt)
   const rateTypeById = new Map(activeRateTypes.map((rt) => [rt.id, rt]))
   const defaultRateType =
@@ -70,6 +88,28 @@ export function ApplicableRatesCard({
   }
 
   const defaultLabel = defaultRateType?.name ?? "default rate"
+  const canEditDefault = isEditing && Boolean(onChangeDefaultRateType) && activeRateTypes.length > 0
+  const pendingDefaultLabel = pendingDefaultRateTypeId
+    ? rateTypeById.get(pendingDefaultRateTypeId)?.name ?? "the selected rate"
+    : null
+
+  // Changing the baseline resets every percentage, so it always goes through a confirm -- unless
+  // there is nothing to lose yet.
+  const requestDefaultChange = (rateTypeId: string) => {
+    if (rateTypeId === defaultRateType?.id) return
+    if (applied.length === 0) {
+      onChangeDefaultRateType?.(rateTypeId)
+      return
+    }
+    setPendingDefaultRateTypeId(rateTypeId)
+  }
+
+  const confirmDefaultChange = () => {
+    if (pendingDefaultRateTypeId) {
+      onChangeDefaultRateType?.(pendingDefaultRateTypeId)
+    }
+    setPendingDefaultRateTypeId(null)
+  }
 
   return (
     <div className="rounded-lg border p-4 space-y-3 bg-card">
@@ -88,7 +128,26 @@ export function ApplicableRatesCard({
         </p>
       </div>
 
-      {defaultRateType ? (
+      {canEditDefault ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Label htmlFor="supplier-default-rate" className="text-xs font-medium">
+            Default rate
+          </Label>
+          <Select value={defaultRateType?.id ?? ""} onValueChange={requestDefaultChange}>
+            <SelectTrigger id="supplier-default-rate" className="w-56">
+              <SelectValue placeholder="Select the default rate" />
+            </SelectTrigger>
+            <SelectContent>
+              {activeRateTypes.map((rt) => (
+                <SelectItem key={rt.id} value={rt.id}>
+                  {rt.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <span className="text-xs text-muted-foreground">Baseline · 0% markdown</span>
+        </div>
+      ) : defaultRateType ? (
         <div className="flex items-center gap-2">
           <Badge variant="secondary">{defaultLabel}</Badge>
           <span className="text-xs text-muted-foreground">Default · baseline (0% markdown)</span>
@@ -178,6 +237,31 @@ export function ApplicableRatesCard({
           </Button>
         </div>
       ) : null}
+
+      <AlertDialog
+        open={pendingDefaultRateTypeId !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDefaultRateTypeId(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Change the default rate to {pendingDefaultLabel}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Every percentage on this supplier resets to 0% — they were measured against{" "}
+              {defaultLabel}, and there is no safe way to re-express them against{" "}
+              {pendingDefaultLabel}. {defaultLabel} stays listed so its existing rate cards keep
+              their tab; re-enter each percentage afterwards.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDefaultChange}>
+              Change default and reset
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

@@ -9,7 +9,11 @@ import type {
 import type { PassengerTotals } from "@/lib/packages/passenger-totals"
 import { findAnchorTrainLeg, resolveHotelStayDates } from "@/lib/packages/hotel-dates"
 import { dateOnly } from "@/lib/packages/trip-date-range"
-import { findRateCardCandidates, hasAnyRateCardFor } from "@/lib/rate-cards/resolve"
+import {
+  findRateCardCandidates,
+  hasAnyRateCardFor,
+  hasAnyRateCardForRateType,
+} from "@/lib/rate-cards/resolve"
 
 /**
  * Pure state model for Build Booking's configure step (components/build-booking-dialog.tsx --
@@ -199,8 +203,12 @@ export interface BuildDefaultLegStatesOptions {
   tripStartDate: string | null
   /** Booking-level totals per supplier — seeds the first unit's passenger split on split legs. */
   totalsBySupplierId?: Record<string, PassengerTotals>
-  /** Seeds every leg's rate type (customer default falling back to system default). */
-  defaultRateTypeId?: string | null
+  /**
+   * Seeds each leg's rate type. Per-leg rather than one shared value because the precedence runs
+   * customer default → that leg's supplier default → system default, so two legs from different
+   * suppliers can seed differently.
+   */
+  resolveLegRateTypeId?: (leg: PackageLeg) => string | null
 }
 
 export function buildDefaultLegStates(
@@ -222,7 +230,7 @@ function buildRawDefaultLegStates(
         supplierKind: leg.supplierKind,
         selected: leg.supplierKind === "train_operator",
         routeId: defaultRouteId(leg),
-        rateTypeId: options.defaultRateTypeId ?? null,
+        rateTypeId: options.resolveLegRateTypeId?.(leg) ?? null,
         requests: [createDraftTransportRequest(leg)],
         origin: "consultant",
       } satisfies TransportLegState
@@ -246,7 +254,7 @@ function buildRawDefaultLegStates(
       // An un-anchored hotel keeps today's behaviour: a manually picked service date.
       dateAnchor: isHotel ? leg.dateAnchor ?? "custom" : null,
       notes: null,
-      rateTypeId: options.defaultRateTypeId ?? null,
+      rateTypeId: options.resolveLegRateTypeId?.(leg) ?? null,
       units: [createDraftUnit(totals)],
       origin: "consultant",
     } satisfies SuiteLegState
@@ -614,23 +622,43 @@ export function toApplySelections(
 
 export interface ValidateConfigureStateOptions {
   totalsBySupplierId?: Record<string, PassengerTotals>
+  /** Names the chosen rate type in pricing errors. Without it a rate-type miss still blocks, it
+   * just reports the raw id — so a caller that hasn't loaded rate types stays safe. */
+  rateTypes?: { id: string; name: string }[]
 }
 
-/** Distinguishes "this route+type was never priced" from "priced, but not on this date" —
- * mirrors the two-case error thrown at build time in lib/quotes/build-from-package.ts. */
+/** Distinguishes "this route+type was never priced" from "priced, but not on this date", and both
+ * from "priced, but not for the rate type you picked" — mirrors the three-case error thrown at
+ * build time in lib/quotes/build-from-package.ts. Keep the two in sync. */
 function describeMissingRateCard(
   leg: PackageLeg,
   routeId: string,
   suiteTypeId: string,
   pricingDate: string,
+  rateTypeId?: string | null,
+  rateTypeNameById?: Map<string, string>,
 ): string | null {
-  if (findRateCardCandidates(leg.rateCards, routeId, suiteTypeId, pricingDate).length > 0) return null
   const suiteTypeName = leg.suiteTypes.find((s) => s.id === suiteTypeId)?.name ?? "this type"
   const routeName = leg.routes.find((r) => r.id === routeId)?.name ?? "this route"
   const where = `"${suiteTypeName}" on "${routeName}"`
-  return hasAnyRateCardFor(leg.rateCards, routeId, suiteTypeId)
-    ? `no rate card covers ${pricingDate} for ${where} — extend the validity period or add a new one`
-    : `no rate card for ${where} — add one under Suppliers → ${leg.supplierName}`
+
+  if (findRateCardCandidates(leg.rateCards, routeId, suiteTypeId, pricingDate).length === 0) {
+    return hasAnyRateCardFor(leg.rateCards, routeId, suiteTypeId)
+      ? `no rate card covers ${pricingDate} for ${where} — extend the validity period or add a new one`
+      : `no rate card for ${where} — add one under Suppliers → ${leg.supplierName}`
+  }
+
+  // Cards exist on this date. An explicitly chosen rate type must be among them: the builder
+  // refuses to substitute another rate's price, so catch it here rather than at Apply.
+  if (!rateTypeId) return null
+  const covered = findRateCardCandidates(leg.rateCards, routeId, suiteTypeId, pricingDate).some(
+    (card) => card.rateTypeId === rateTypeId,
+  )
+  if (covered) return null
+  const label = rateTypeNameById?.get(rateTypeId) ?? rateTypeId
+  return hasAnyRateCardForRateType(leg.rateCards, routeId, suiteTypeId, rateTypeId)
+    ? `no "${label}" rate covers ${pricingDate} for ${where} — extend that rate's validity period or add a rate card`
+    : `"${label}" has no rate card for ${where} — add one under Suppliers → ${leg.supplierName}`
 }
 
 /** Mirrors the server-side rules so the user sees actionable errors before the Next sequence.
@@ -642,6 +670,7 @@ export function validateConfigureState(
 ): string[] {
   const errors: string[] = []
   const legById = new Map(detail.legs.map((leg) => [leg.id, leg]))
+  const rateTypeNameById = new Map((options.rateTypes ?? []).map((rt) => [rt.id, rt.name]))
 
   for (const state of states) {
     if (!state.selected) continue
@@ -680,6 +709,8 @@ export function validateConfigureState(
             request.routeId,
             request.suiteTypeId,
             pricingDate,
+            state.rateTypeId,
+            rateTypeNameById,
           )
           if (pricingError) errors.push(`${label}: ${pricingError}`)
         }
@@ -699,7 +730,14 @@ export function validateConfigureState(
         // Manual-pricing legs (e.g. airlines) have no rate card to check -- the fare is typed
         // in, and a blank one is allowed here (flagged as pricing_incomplete on the quote
         // instead of blocking the itinerary from being built).
-        const pricingError = describeMissingRateCard(leg, state.routeId, unit.suiteTypeId, state.serviceDate)
+        const pricingError = describeMissingRateCard(
+          leg,
+          state.routeId,
+          unit.suiteTypeId,
+          state.serviceDate,
+          state.rateTypeId,
+          rateTypeNameById,
+        )
         if (pricingError) errors.push(`${legLabel}: ${pricingError}`)
       }
     })

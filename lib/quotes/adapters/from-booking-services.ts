@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { mapPackageDetail, type PackageLegWithSupplier } from "@/lib/packages"
 import { attachSuiteVariantVocab } from "@/app/api/packages/[slug]/helpers"
+import { loadSupplierDefaultRateTypeResolver } from "@/lib/rate-types/load-supplier-defaults"
 import type { PackageDetail, SupplierKind } from "@/lib/types"
 import type { PackageLegSelection, PackageUnitSelection } from "@/lib/quotes/build-from-package"
 
@@ -16,6 +17,7 @@ interface SupplierJoin {
   description: string | null
   kind: string
   pricing_mode: "rate_card" | "manual"
+  default_rate_type_id: string | null
 }
 
 interface BookingServiceWithSupplier extends BookingServiceRow {
@@ -48,11 +50,14 @@ export async function loadBookingServicesPackageDetail(
   bookingId: string,
   bookingNumber: string,
 ): Promise<BookingServicesData> {
-  const { data: serviceRows } = await supabase
-    .from("booking_services")
-    .select("*, suppliers(name, description, kind, pricing_mode)")
-    .eq("booking_id", bookingId)
-    .order("sort_order", { ascending: true })
+  const [{ data: serviceRows }, resolveSupplierDefaultRateTypeId] = await Promise.all([
+    supabase
+      .from("booking_services")
+      .select("*, suppliers(name, description, kind, pricing_mode, default_rate_type_id)")
+      .eq("booking_id", bookingId)
+      .order("sort_order", { ascending: true }),
+    loadSupplierDefaultRateTypeResolver(supabase),
+  ])
 
   const services = (serviceRows ?? []) as BookingServiceWithSupplier[]
   const serviceIds = services.map((service) => service.id)
@@ -112,6 +117,7 @@ export async function loadBookingServicesPackageDetail(
 
   const legs: PackageLegWithSupplier[] = services.map((service) => {
     const supplier = firstRecord(service.suppliers)
+    const supplierKind = (supplier?.kind as SupplierKind) ?? "train_operator"
     return {
       id: service.id,
       package_id: bookingId,
@@ -124,8 +130,12 @@ export async function loadBookingServicesPackageDetail(
       created_at: service.created_at,
       supplierName: supplier?.name ?? "Unknown supplier",
       supplierDescription: supplier?.description ?? null,
-      supplierKind: (supplier?.kind as SupplierKind) ?? "train_operator",
+      supplierKind,
       supplierPricingMode: supplier?.pricing_mode ?? "rate_card",
+      supplierDefaultRateTypeId: resolveSupplierDefaultRateTypeId(
+        supplierKind,
+        supplier?.default_rate_type_id ?? null,
+      ),
     }
   })
 

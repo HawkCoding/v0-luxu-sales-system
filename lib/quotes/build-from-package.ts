@@ -11,7 +11,12 @@ import {
   calculateCommissionAmount,
   resolveCommission,
 } from "@/lib/pricing/commission"
-import { findRateCardCandidates, hasAnyRateCardFor, selectRateCard } from "@/lib/rate-cards/resolve"
+import {
+  findRateCardCandidates,
+  hasAnyRateCardFor,
+  hasAnyRateCardForRateType,
+  selectRateCard,
+} from "@/lib/rate-cards/resolve"
 import { applyCommissionBonus } from "@/lib/quotes/apply-commission-bonus"
 
 /** One independent suite/room booked on a hotel or train/tour/airline leg — its own suite type,
@@ -280,6 +285,9 @@ export async function buildPackageQuoteLineItems({
   // The rate card resolved for the leg currently being priced; addLineItem
   // reads it to stamp the rate type into each line's pricing snapshot.
   let activeRateCard: PackageDetail["legs"][number]["rateCards"][number] | null = null
+  // True when the active card came from a default rather than the leg's own chosen rate type.
+  // Stamped onto the snapshot so "priced off the default" survives past the build dialog.
+  let activeRateCardInherited = false
   // The leg + route currently being priced. addLineItem stamps these into the
   // snapshot so downstream (e.g. resolvePrimaryRoute → booking.route_id sync)
   // can recover which journey a quote is for.
@@ -427,6 +435,7 @@ export async function buildPackageQuoteLineItems({
         rateTypeId: activeRateCard?.rateTypeId ?? null,
         rateTypeCode: rateTypeMeta?.code ?? null,
         rateTypeName: rateTypeMeta?.name ?? null,
+        rateTypeInherited: activeRateCard ? activeRateCardInherited : null,
         travelDate: activePricingDate,
         passengerKind: "adult",
         baseUnitPrice: unitPrice,
@@ -474,7 +483,19 @@ export async function buildPackageQuoteLineItems({
     perLegRateTypeId?: string | null,
   ) {
     const candidates = findRateCardCandidates(leg.rateCards, routeId, suiteTypeId, pricingDate)
-    return selectRateCard(candidates, perLegRateTypeId, quoteRateTypeId, fallbackRateTypeId)
+    return selectRateCard(
+      candidates,
+      perLegRateTypeId,
+      quoteRateTypeId,
+      fallbackRateTypeId,
+      leg.defaultRateTypeId,
+    )
+  }
+
+  /** Falls back to the raw id so an error still points somewhere when the metadata wasn't loaded. */
+  function getRateTypeLabel(rateTypeId: string): string {
+    const meta = rateTypeMetaById.get(rateTypeId)
+    return meta ? meta.name : rateTypeId
   }
 
   function getRouteName(leg: PackageDetail["legs"][number], routeId: string, reversed = false) {
@@ -609,21 +630,37 @@ export async function buildPackageQuoteLineItems({
         if (!suiteBelongsToLeg) {
           throw new Error(`Selected type is not available for leg: ${legLabel}`)
         }
-        const validRateCard = getValidRateCard(leg, routeId, suiteTypeId, pricingDate, selection.rateTypeId)
+        const selected = getValidRateCard(leg, routeId, suiteTypeId, pricingDate, selection.rateTypeId)
         const suiteTypeName = getSuiteTypeName(leg, suiteTypeId)
-        if (!validRateCard) {
-          // Name the route + type: the missing dimension is almost never the date, and an error
-          // that only names the supplier sends people hunting through validity periods.
-          const typeLabel = suiteTypeName ?? SUPPLIER_VOCABULARY[leg.supplierKind].suiteType
-          const where = `"${typeLabel}" on "${routeName ?? "this route"}" (${legLabel})`
+        // Name the route + type: the missing dimension is almost never the date, and an error
+        // that only names the supplier sends people hunting through validity periods.
+        const typeLabel = suiteTypeName ?? SUPPLIER_VOCABULARY[leg.supplierKind].suiteType
+        const where = `"${typeLabel}" on "${routeName ?? "this route"}" (${legLabel})`
+        if (!selected) {
           throw new Error(
             hasAnyRateCardFor(leg.rateCards, routeId, suiteTypeId)
               ? `No rate card covers ${pricingDate} for ${where}. Extend the validity period or add a new one.`
               : `No rate card for ${where}. Add one under Suppliers → ${leg.supplierName} → rate cards.`,
           )
         }
+        if (!selected.ok) {
+          // Cards exist for this route + type on this date, just not for the rate type that was
+          // asked for. Substituting one silently is what made a chosen rate quote at another
+          // rate's price, so this is an error rather than a fallback.
+          const rateLabel = getRateTypeLabel(selected.requestedRateTypeId)
+          throw new Error(
+            hasAnyRateCardForRateType(leg.rateCards, routeId, suiteTypeId, selected.requestedRateTypeId)
+              ? `No "${rateLabel}" rate covers ${pricingDate} for ${where}. Extend that rate's validity period or add a rate card.`
+              : `"${rateLabel}" has no rate card for ${where}. Add one under Suppliers → ${leg.supplierName} → rate cards.`,
+          )
+        }
         const description = [legLabel, routeName].filter(Boolean).join(" - ")
-        return { validRateCard, description, suiteTypeName }
+        return {
+          validRateCard: selected.card,
+          rateTypeInherited: selected.inherited,
+          description,
+          suiteTypeName,
+        }
       }
 
       // Manual-pricing legs (see PackageLeg.pricingMode) never touch rate_cards -- the fare is
@@ -650,8 +687,11 @@ export async function buildPackageQuoteLineItems({
         const nights = Math.max(1, selection.nights ?? 1)
 
         for (const unitSelection of units) {
-          const { validRateCard, description, suiteTypeName } = resolveUnit(unitSelection.suiteTypeId)
+          const { validRateCard, rateTypeInherited, description, suiteTypeName } = resolveUnit(
+            unitSelection.suiteTypeId,
+          )
           activeRateCard = validRateCard
+          activeRateCardInherited = rateTypeInherited
           addLineItem({
             description,
             qty: nights,
@@ -682,8 +722,12 @@ export async function buildPackageQuoteLineItems({
           }
           const requestPricingDate = dateOnly(transportRequest?.pickup_at) ?? legPricingDate
           activePricingDate = requestPricingDate
-          const { validRateCard, description, suiteTypeName } = resolveUnit(suiteTypeId, requestPricingDate)
+          const { validRateCard, rateTypeInherited, description, suiteTypeName } = resolveUnit(
+            suiteTypeId,
+            requestPricingDate,
+          )
           activeRateCard = validRateCard
+          activeRateCardInherited = rateTypeInherited
 
           const pointLabel =
             transportRequest?.pickup_point.trim() && transportRequest?.dropoff_point.trim()
@@ -774,6 +818,7 @@ export async function buildPackageQuoteLineItems({
             description = resolved.description
             suiteTypeName = resolved.suiteTypeName
             activeRateCard = null
+            activeRateCardInherited = false
             // A group's units share an identical typed-price triple by construction (see the
             // grouping key above), so the first unit's prices speak for the whole group.
             const adultPrice = groupUnits[0].manualAdultPrice ?? 0
@@ -789,6 +834,7 @@ export async function buildPackageQuoteLineItems({
             description = resolved.description
             suiteTypeName = resolved.suiteTypeName
             activeRateCard = resolved.validRateCard
+            activeRateCardInherited = resolved.rateTypeInherited
             const validRateCard = resolved.validRateCard
             passengerKinds = [
               { key: "adultCount", label: "Adult", unitPrice: validRateCard.pricePerPerson },

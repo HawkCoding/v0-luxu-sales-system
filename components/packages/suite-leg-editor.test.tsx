@@ -13,6 +13,7 @@ const leg: PackageLeg = {
   supplierDescription: null,
   supplierKind: "train_operator",
   pricingMode: "rate_card",
+  defaultRateTypeId: null,
   label: "The Blue Train",
   sortOrder: 0,
   dateAnchor: null,

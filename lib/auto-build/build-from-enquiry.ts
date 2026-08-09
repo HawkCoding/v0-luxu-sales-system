@@ -1,7 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { isOptionalPackageLegKind, type SupplierKind } from "@/lib/types"
+import { addDays } from "@/lib/packages/hotel-dates"
 import { seedUnitsForServices } from "@/app/api/jobs/[id]/package/seed"
+
+/** Nights an auto-built hotel leg is seeded with — see the service_date comment below. */
+const HOTEL_AUTO_BUILD_NIGHTS = 1
 
 type ServiceClient = SupabaseClient<Database>
 type BookingServiceInsert = Database["public"]["Tables"]["booking_services"]["Insert"]
@@ -17,11 +21,14 @@ export interface AutoBuildInput {
   routeReversed?: boolean
   departureDate: string | null
   /**
-   * Whether the hotel stay is before or after the rail journey. A post-departure hotel must not
-   * inherit the rail departure date -- that night happens after the trip ends, on a date this
-   * engine has no way to compute (trip length isn't known at intake). Left null for pre-departure
-   * or when the email didn't say either way, in which case the rail departure date is still the
-   * closest available estimate.
+   * Whether the hotel stay is before or after the rail journey, which decides the hotel leg's
+   * service date:
+   *   pre  -> the night before departure. The customer flies in and sleeps over so they can board
+   *           the next morning; giving that night the departure date books them a bed for a night
+   *           they are already on the train.
+   *   post -> left null. That night happens after the trip ends, on a date this engine has no way
+   *           to compute (trip length isn't known at intake).
+   *   none / unstated -> the rail departure date, the closest available estimate.
    */
   hotelPhase?: 'pre' | 'post' | 'none' | null
 }
@@ -104,24 +111,40 @@ export async function autoBuildBookingServices(
 
   if (planned.length === 0) return { servicesCreated: 0, unitsCreated: 0, skipped }
 
-  const serviceRows: BookingServiceInsert[] = planned.map((service, index) => ({
-    id: crypto.randomUUID(),
-    booking_id: input.bookingId,
-    supplier_id: service.supplierId,
-    // Route is set only for the rail leg -- the one entity a resolved routeId was ever computed
-    // for at intake; a hotel leg has no route/meal-plan signal to fill from an enquiry.
-    route_id: service.supplierId === input.trainSupplierId ? input.routeId : null,
-    route_reversed: service.supplierId === input.trainSupplierId ? (input.routeReversed ?? false) : false,
-    service_date:
-      service.supplierId === input.hotelSupplierId && input.hotelPhase === 'post'
-        ? null
-        : input.departureDate,
-    // Mirrors buildDefaultPackageSelections: only the rail leg starts selected, every optional
-    // kind (hotel, transfer, ...) stays opt-in until a consultant turns it on.
-    selected: !isOptionalPackageLegKind(service.kind as SupplierKind),
-    sort_order: index,
-    origin: "auto",
-  }))
+  const serviceRows: BookingServiceInsert[] = planned.map((service, index) => {
+    const isTrainLeg = service.supplierId === input.trainSupplierId
+    const isHotelLeg = !isTrainLeg && service.supplierId === input.hotelSupplierId
+
+    // A pre-departure stay is the night *before* the train leaves, so it can only be dated once
+    // a departure date exists. HOTEL_AUTO_BUILD_NIGHTS keeps the stay length agreeing with that
+    // date -- resolveHotelStayDates derives check-in the same way (departure - nights), so a
+    // consultant editing nights later stays consistent with what was seeded here.
+    let serviceDate = input.departureDate
+    if (isHotelLeg && input.hotelPhase === 'post') {
+      serviceDate = null
+    } else if (isHotelLeg && input.hotelPhase === 'pre' && input.departureDate) {
+      serviceDate = addDays(input.departureDate, -HOTEL_AUTO_BUILD_NIGHTS)
+    }
+
+    return {
+      id: crypto.randomUUID(),
+      booking_id: input.bookingId,
+      supplier_id: service.supplierId,
+      // Route is set only for the rail leg -- the one entity a resolved routeId was ever computed
+      // for at intake; a hotel leg has no route/meal-plan signal to fill from an enquiry.
+      route_id: isTrainLeg ? input.routeId : null,
+      route_reversed: isTrainLeg ? (input.routeReversed ?? false) : false,
+      service_date: serviceDate,
+      // The enquiry never states a night count, so a single night is the conservative default --
+      // enough to date the stay, and the number a consultant is most likely to keep.
+      nights: isHotelLeg ? HOTEL_AUTO_BUILD_NIGHTS : null,
+      // Mirrors buildDefaultPackageSelections: only the rail leg starts selected, every optional
+      // kind (hotel, transfer, ...) stays opt-in until a consultant turns it on.
+      selected: !isOptionalPackageLegKind(service.kind as SupplierKind),
+      sort_order: index,
+      origin: "auto",
+    }
+  })
 
   const { error: insertError } = await supabase.from("booking_services").insert(serviceRows)
   if (insertError) return NOOP_RESULT(`Failed to insert services: ${insertError.message}`)
