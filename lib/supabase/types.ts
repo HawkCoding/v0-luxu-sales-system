@@ -3658,6 +3658,7 @@ export type Database = {
           child_max_age: number | null
           created_at: string
           default_contact_name: string | null
+          default_rate_type_id: string | null
           default_time_end: string | null
           default_time_start: string | null
           description: string | null
@@ -3688,6 +3689,7 @@ export type Database = {
           child_max_age?: number | null
           created_at?: string
           default_contact_name?: string | null
+          default_rate_type_id?: string | null
           default_time_end?: string | null
           default_time_start?: string | null
           description?: string | null
@@ -3718,6 +3720,7 @@ export type Database = {
           child_max_age?: number | null
           created_at?: string
           default_contact_name?: string | null
+          default_rate_type_id?: string | null
           default_time_end?: string | null
           default_time_start?: string | null
           description?: string | null
@@ -3744,6 +3747,13 @@ export type Database = {
           website?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "suppliers_default_rate_type_id_fkey"
+            columns: ["default_rate_type_id"]
+            isOneToOne: false
+            referencedRelation: "rate_types"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "suppliers_location_area_id_fkey"
             columns: ["location_area_id"]

@@ -81,6 +81,32 @@ export const rateAdjustmentSchema = z.object({
   discountPct: z.number().finite().min(0).max(100),
 })
 
+/** The supplier's own default rate type; null means "inherit from the kind/system default". */
+export const defaultRateTypeIdSchema = z.string().uuid().nullable().optional()
+
+/** The default rate is the implicit 0% baseline, so it is never stored as an adjustment. */
+function checkRateAdjustments(
+  value: { rateAdjustments: { rateTypeId: string }[]; defaultRateTypeId?: string | null },
+  ctx: z.RefinementCtx,
+) {
+  const rateTypeIds = value.rateAdjustments.map((a) => a.rateTypeId)
+  if (new Set(rateTypeIds).size !== rateTypeIds.length) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["rateAdjustments"],
+      message: "Each rate type may only appear once in rate adjustments",
+    })
+  }
+
+  if (value.defaultRateTypeId && rateTypeIds.includes(value.defaultRateTypeId)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["rateAdjustments"],
+      message: "The default rate type is the 0% baseline and cannot also be a rate adjustment",
+    })
+  }
+}
+
 export const routeSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().trim().min(1, "Route name is required"),
@@ -174,16 +200,10 @@ export const supplierSaveSchema = z.object({
   bedroomLayouts: z.array(variantValueSchema).default([]),
   bathroomTypes: z.array(variantValueSchema).default([]),
   rateAdjustments: z.array(rateAdjustmentSchema).default([]),
+  defaultRateTypeId: defaultRateTypeIdSchema,
   expectedUpdatedAt: z.string().optional(),
 }).superRefine((value, ctx) => {
-  const rateTypeIds = value.rateAdjustments.map((a) => a.rateTypeId)
-  if (new Set(rateTypeIds).size !== rateTypeIds.length) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["rateAdjustments"],
-      message: "Each rate type may only appear once in rate adjustments",
-    })
-  }
+  checkRateAdjustments(value, ctx)
 
   for (const [index, route] of value.routes.entries()) {
     if (value.kind === "transfers" || value.kind === "vehicle_rental") {
@@ -321,16 +341,8 @@ export const supplierDraftSaveSchema = z.object({
   bedroomLayouts: z.array(draftVariantValueSchema).default([]),
   bathroomTypes: z.array(draftVariantValueSchema).default([]),
   rateAdjustments: z.array(rateAdjustmentSchema).default([]),
+  defaultRateTypeId: defaultRateTypeIdSchema,
   expectedUpdatedAt: z.string().optional(),
-}).superRefine((value, ctx) => {
-  const rateTypeIds = value.rateAdjustments.map((a) => a.rateTypeId)
-  if (new Set(rateTypeIds).size !== rateTypeIds.length) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["rateAdjustments"],
-      message: "Each rate type may only appear once in rate adjustments",
-    })
-  }
-})
+}).superRefine(checkRateAdjustments)
 
 export type SupplierDraftSaveInput = z.infer<typeof supplierDraftSaveSchema>

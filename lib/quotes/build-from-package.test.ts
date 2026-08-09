@@ -72,6 +72,7 @@ function leg(partial: Partial<PackageLeg> & { id: string; supplierKind: Supplier
     supplierName: `Supplier ${partial.id}`,
     supplierDescription: null,
     pricingMode: "rate_card",
+    defaultRateTypeId: null,
     label: null,
     sortOrder: 0,
     dateAnchor: null,
@@ -1082,6 +1083,102 @@ describe("buildPackageQuoteLineItems", () => {
       expect(adultLine?.unitPrice).toBe(2000)
       expect(adultLine?.description).not.toContain("single supplement")
       expect(lineItems.some((li) => li.description.includes("Single supplement"))).toBe(false)
+    })
+  })
+
+  /**
+   * The reported bug, reduced: Rovos Rail on the Cape Town Journey, priced for 2028. The chosen
+   * "Rovos Rail SADC" rate only has a 2026 card, so it dropped out of the date-filtered candidate
+   * list and the builder quoted the Blue Train Domestic card that did cover 2028 -- R59 900 where
+   * the salesperson had picked a R22 500 rate.
+   */
+  describe("a chosen rate type is honoured or the build fails", () => {
+    const SADC = "rate-type-rvsadc"
+    const BTLD = "rate-type-btld"
+    const rateTypes = [
+      { id: SADC, code: "RVSADC", name: "Rovos Rail SADC" },
+      { id: BTLD, code: "BTLD", name: "Blue Train Domestic Rate" },
+    ]
+
+    const trainLeg = leg({
+      id: "leg-rovos",
+      supplierKind: "train_operator",
+      supplierName: "Rovos Rail",
+      routes: [route("route-ctj", "supplier-leg-rovos", "Cape Town Journey")],
+      suiteTypes: [suiteType("suite-pullman", "supplier-leg-rovos", "Pullman Suite")],
+      rateCards: [
+        rateCard({
+          id: "rc-sadc-2026",
+          routeId: "route-ctj",
+          suiteTypeId: "suite-pullman",
+          rateTypeId: SADC,
+          pricePerPerson: 22500,
+          childPrice: 11250,
+          validFrom: "2026-06-30",
+          validTo: "2026-09-30",
+        }),
+        rateCard({
+          id: "rc-btld-open",
+          routeId: "route-ctj",
+          suiteTypeId: "suite-pullman",
+          rateTypeId: BTLD,
+          pricePerPerson: 59900,
+          childPrice: 29950,
+          validFrom: "2026-01-01",
+          validTo: null,
+        }),
+      ],
+    })
+
+    function build(travelDate: string, rateTypeId: string | undefined) {
+      return buildPackageQuoteLineItems({
+        supabase: buildSupabase(),
+        packageDetail: detail([trainLeg]),
+        jobId: JOB_ID,
+        travelDate,
+        rateTypes,
+        fallbackRateTypeId: BTLD,
+        selections: [
+          {
+            legId: "leg-rovos",
+            selected: true,
+            routeId: "route-ctj",
+            rateTypeId,
+            units: [{ suiteTypeId: "suite-pullman", adultCount: 2, childCount: 1, infantCount: 0 }],
+          },
+        ],
+      })
+    }
+
+    it("refuses to price a chosen rate off another rate type's card", async () => {
+      await expect(build("2028-08-25", SADC)).rejects.toThrow(
+        /No "Rovos Rail SADC" rate covers 2028-08-25 .*Extend that rate's validity period/,
+      )
+    })
+
+    it("prices at the chosen rate when its card covers the date", async () => {
+      const { lineItems } = await build("2026-08-25", SADC)
+      const adultLine = lineItems.find((li) => li.description.includes("Adult"))
+      const childLine = lineItems.find((li) => li.description.includes("Child"))
+      expect(adultLine?.unitPrice).toBe(22500)
+      expect(childLine?.unitPrice).toBe(11250)
+      expect(adultLine?.pricingSnapshot?.rateTypeId).toBe(SADC)
+      expect(adultLine?.pricingSnapshot?.rateTypeName).toBe("Rovos Rail SADC")
+      expect(adultLine?.pricingSnapshot?.rateTypeInherited).toBe(false)
+    })
+
+    it("names the rate type when it was never priced on the route at all", async () => {
+      await expect(build("2026-08-25", "rate-type-nett")).rejects.toThrow(
+        /has no rate card for "Pullman Suite" on "Cape Town Journey"/,
+      )
+    })
+
+    it("still falls back to a default when the leg chose no rate type, and marks it inherited", async () => {
+      const { lineItems } = await build("2028-08-25", undefined)
+      const adultLine = lineItems.find((li) => li.description.includes("Adult"))
+      expect(adultLine?.unitPrice).toBe(59900)
+      expect(adultLine?.pricingSnapshot?.rateTypeId).toBe(BTLD)
+      expect(adultLine?.pricingSnapshot?.rateTypeInherited).toBe(true)
     })
   })
 })

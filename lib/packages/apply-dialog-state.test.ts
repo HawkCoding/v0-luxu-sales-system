@@ -20,6 +20,7 @@ function leg(partial: Partial<PackageLeg> & { id: string; supplierKind: Supplier
     supplierName: `Supplier ${partial.id}`,
     supplierDescription: null,
     pricingMode: "rate_card",
+    defaultRateTypeId: null,
     label: null,
     sortOrder: 0,
     dateAnchor: null,
@@ -507,12 +508,23 @@ describe("toApplySelections", () => {
 })
 
 describe("per-leg rate types", () => {
-  it("buildDefaultLegStates seeds every leg from defaultRateTypeId, null when omitted", () => {
-    const seeded = buildDefaultLegStates(pkg, { tripStartDate: null, defaultRateTypeId: "rate-std" })
+  it("buildDefaultLegStates seeds every leg from resolveLegRateTypeId, null when omitted", () => {
+    const seeded = buildDefaultLegStates(pkg, { tripStartDate: null, resolveLegRateTypeId: () => "rate-std" })
     expect(seeded.every((state) => state.rateTypeId === "rate-std")).toBe(true)
 
     const unseeded = buildDefaultLegStates(pkg, { tripStartDate: null })
     expect(unseeded.every((state) => state.rateTypeId === null)).toBe(true)
+  })
+
+  it("buildDefaultLegStates seeds each leg from its own supplier default", () => {
+    // Two legs, two suppliers, two different baselines -- the case a single shared default
+    // could not express.
+    const states = buildDefaultLegStates(pkg, {
+      tripStartDate: null,
+      resolveLegRateTypeId: (leg) => (leg.id === "leg-train" ? "rate-blue-train" : "rate-std"),
+    })
+    expect(suiteState(states, "leg-train").rateTypeId).toBe("rate-blue-train")
+    expect(suiteState(states, "leg-hotel").rateTypeId).toBe("rate-std")
   })
 
   it("hydrateFromSaved restores a saved rate_type_id and falls back to the default when null", () => {
@@ -554,7 +566,7 @@ describe("per-leg rate types", () => {
       ],
     }
 
-    const states = hydrateFromSaved(pkg, saved, [], { tripStartDate: "2026-09-01", defaultRateTypeId: "rate-std" })
+    const states = hydrateFromSaved(pkg, saved, [], { tripStartDate: "2026-09-01", resolveLegRateTypeId: () => "rate-std" })
     expect(suiteState(states, "leg-train").rateTypeId).toBe("rate-resident")
     expect(transportState(states, "leg-transfer").rateTypeId).toBe("rate-std")
     // Leg with no saved row keeps the seeded default.
@@ -562,7 +574,7 @@ describe("per-leg rate types", () => {
   })
 
   it("toPackageSelectionsPatch emits rateTypeId for suite and transport legs", () => {
-    const states = buildDefaultLegStates(pkg, { tripStartDate: null, defaultRateTypeId: "rate-std" })
+    const states = buildDefaultLegStates(pkg, { tripStartDate: null, resolveLegRateTypeId: () => "rate-std" })
     const train = suiteState(states, "leg-train")
     train.rateTypeId = "rate-resident"
 
@@ -572,7 +584,7 @@ describe("per-leg rate types", () => {
   })
 
   it("toApplySelections emits rateTypeId per leg and omits it when null", () => {
-    const states = buildDefaultLegStates(pkg, { tripStartDate: null, defaultRateTypeId: "rate-std" })
+    const states = buildDefaultLegStates(pkg, { tripStartDate: null, resolveLegRateTypeId: () => "rate-std" })
     const hotel = suiteState(states, "leg-hotel")
     hotel.rateTypeId = null
 
@@ -646,5 +658,61 @@ describe("validateConfigureState", () => {
 
     rental.selected = false
     expect(validateConfigureState(rentalPkg, states)).toEqual([])
+  })
+
+  // Mirrors the server-side rule in lib/quotes/build-from-package.ts: a chosen rate type that has
+  // no card for the date is caught here so the salesperson sees it on the leg, not at Apply.
+  describe("chosen rate type", () => {
+    const SADC = "rate-type-rvsadc"
+    const ratePkg = detail([
+      {
+        ...trainLeg,
+        rateCards: [
+          ...trainLeg.rateCards,
+          {
+            id: "rate-train-sadc",
+            routeId: "route-1",
+            suiteTypeId: "suite-1",
+            rateTypeId: SADC,
+            pricePerPerson: 500,
+            childPrice: null,
+            infantPrice: null,
+            currency: "ZAR",
+            validFrom: "2026-06-30",
+            validTo: "2026-09-30",
+            createdAt: "",
+          },
+        ] as PackageLeg["rateCards"],
+      },
+    ])
+
+    function stateFor(serviceDate: string, rateTypeId: string | null) {
+      const states = buildDefaultLegStates(ratePkg, { tripStartDate: serviceDate })
+      const train = suiteState(states, "leg-train")
+      train.selected = true
+      train.units[0].suiteTypeId = "suite-1"
+      train.rateTypeId = rateTypeId
+      return states
+    }
+
+    const rateTypes = [{ id: SADC, name: "Rovos Rail SADC" }]
+
+    it("flags a chosen rate whose card does not cover the service date", () => {
+      const errors = validateConfigureState(ratePkg, stateFor("2028-08-25", SADC), { rateTypes })
+      expect(errors.some((e) => e.includes('no "Rovos Rail SADC" rate covers 2028-08-25'))).toBe(true)
+    })
+
+    it("stays silent when the chosen rate has a valid card", () => {
+      expect(validateConfigureState(ratePkg, stateFor("2026-08-25", SADC), { rateTypes })).toEqual([])
+    })
+
+    it("stays silent when no rate type is chosen — a default will be inherited", () => {
+      expect(validateConfigureState(ratePkg, stateFor("2028-08-25", null), { rateTypes })).toEqual([])
+    })
+
+    it("still blocks without rate-type names loaded, naming the raw id", () => {
+      const errors = validateConfigureState(ratePkg, stateFor("2028-08-25", SADC))
+      expect(errors.some((e) => e.includes(SADC))).toBe(true)
+    })
   })
 })

@@ -295,3 +295,78 @@ describe("supplierDraftSaveSchema", () => {
     ).toBe(true)
   })
 })
+
+describe("rate adjustments and the supplier default rate type", () => {
+  const RAC = "00000000-0000-4000-8000-0000000000a1"
+  const STO = "00000000-0000-4000-8000-0000000000a2"
+
+  it("accepts a null default rate type (inherit) and an omitted one", () => {
+    expect(
+      supplierSaveSchema.safeParse({ ...buildValidPayload(), defaultRateTypeId: null }).success,
+    ).toBe(true)
+    expect(supplierSaveSchema.safeParse(buildValidPayload()).success).toBe(true)
+  })
+
+  it("accepts adjustments for rates other than the default", () => {
+    const parsed = supplierSaveSchema.safeParse({
+      ...buildValidPayload(),
+      defaultRateTypeId: RAC,
+      rateAdjustments: [{ rateTypeId: STO, discountPct: 20 }],
+    })
+    expect(parsed.success).toBe(true)
+  })
+
+  it("rejects an adjustment that references the supplier's own default", () => {
+    // The default is the implicit 0% baseline and is never stored as an adjustment.
+    const parsed = supplierSaveSchema.safeParse({
+      ...buildValidPayload(),
+      defaultRateTypeId: RAC,
+      rateAdjustments: [{ rateTypeId: RAC, discountPct: 0 }],
+    })
+    expect(parsed.success).toBe(false)
+    expect(parsed.success ? [] : parsed.error.issues.map((issue) => issue.message)).toContain(
+      "The default rate type is the 0% baseline and cannot also be a rate adjustment",
+    )
+  })
+
+  it("rejects a duplicated rate type across adjustments", () => {
+    const parsed = supplierSaveSchema.safeParse({
+      ...buildValidPayload(),
+      rateAdjustments: [
+        { rateTypeId: STO, discountPct: 20 },
+        { rateTypeId: STO, discountPct: 30 },
+      ],
+    })
+    expect(parsed.success).toBe(false)
+  })
+
+  it("rejects a discount outside 0-100", () => {
+    for (const discountPct of [-1, 101]) {
+      expect(
+        supplierSaveSchema.safeParse({
+          ...buildValidPayload(),
+          rateAdjustments: [{ rateTypeId: STO, discountPct }],
+        }).success,
+      ).toBe(false)
+    }
+  })
+
+  it("applies the same rules to the draft schema", () => {
+    expect(
+      supplierDraftSaveSchema.safeParse({
+        kind: "train_operator",
+        name: "Draft",
+        defaultRateTypeId: RAC,
+        rateAdjustments: [{ rateTypeId: RAC, discountPct: 0 }],
+      }).success,
+    ).toBe(false)
+    expect(
+      supplierDraftSaveSchema.safeParse({
+        kind: "train_operator",
+        name: "Draft",
+        defaultRateTypeId: RAC,
+        rateAdjustments: [{ rateTypeId: STO, discountPct: 50 }],
+      }).success,
+    ).toBe(true)
+  })
+})

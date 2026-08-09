@@ -47,6 +47,7 @@ function buildDetail(): PackageDetail {
         supplierDescription: null,
         supplierKind: "train_operator",
         pricingMode: "rate_card",
+        defaultRateTypeId: null,
         dateAnchor: null,
         label: "Blue Train",
         sortOrder: 0,

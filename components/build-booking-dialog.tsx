@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Boxes, ChevronDown, ChevronUp, Percent, TriangleAlert } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -163,7 +163,17 @@ export function BuildBookingDialog({
   })
 
   const filteredSuppliers = suppliers.filter((supplier) => supplier.kind === pickerKind)
-  const defaultRateTypeId = customerDefaultRateTypeId || systemDefaultRateTypeId || null
+
+  /**
+   * Seeds one leg's rate type: the customer's own default first, then the leg supplier's default,
+   * then the system default. Mirrors selectRateCard's precedence (lib/rate-cards/resolve.ts) so
+   * what the dialog pre-selects is what the server would have picked unprompted.
+   */
+  const resolveLegRateTypeId = useCallback(
+    (leg: { defaultRateTypeId: string | null }) =>
+      customerDefaultRateTypeId || leg.defaultRateTypeId || systemDefaultRateTypeId || null,
+    [customerDefaultRateTypeId, systemDefaultRateTypeId],
+  )
 
   useEffect(() => {
     setEditing(open && step !== "services")
@@ -175,21 +185,23 @@ export function BuildBookingDialog({
     onAutoOpenHandled?.()
   }, [autoOpen, onAutoOpenHandled])
 
-  // Reconcile per-leg rate types once the rate-type list resolves (it may load after
-  // the configure step opens): fill empty ones and replace archived ones with the default.
+  // Reconcile per-leg rate types once the rate-type list resolves (it may load after the configure
+  // step opens): fill empty ones and replace archived ones with that leg's own default.
   useEffect(() => {
-    if (step !== "configure" || !defaultRateTypeId) return
+    if (step !== "configure" || rateTypes.length === 0) return
     const activeIds = new Set(rateTypes.map((rt) => rt.id))
+    const legById = new Map((packageDetail?.legs ?? []).map((leg) => [leg.id, leg]))
     setLegStates((prev) =>
       prev.some((state) => !state.rateTypeId || !activeIds.has(state.rateTypeId))
-        ? prev.map((state) =>
-            state.rateTypeId && activeIds.has(state.rateTypeId)
-              ? state
-              : { ...state, rateTypeId: defaultRateTypeId },
-          )
+        ? prev.map((state) => {
+            if (state.rateTypeId && activeIds.has(state.rateTypeId)) return state
+            const leg = legById.get(state.legId)
+            const fallback = leg ? resolveLegRateTypeId(leg) : systemDefaultRateTypeId || null
+            return fallback ? { ...state, rateTypeId: fallback } : state
+          })
         : prev,
     )
-  }, [step, defaultRateTypeId, rateTypes])
+  }, [step, rateTypes, packageDetail, resolveLegRateTypeId, systemDefaultRateTypeId])
 
   // Re-opening the dialog on a priced quote pre-fills the commission from what the existing
   // lines were built with, so the salesperson doesn't have to remember and retype it.
@@ -395,7 +407,7 @@ export function BuildBookingDialog({
       const stateOptions = {
         tripStartDate: savedState?.tripStartDate ?? travelDate ?? null,
         totalsBySupplierId: totals,
-        defaultRateTypeId,
+        resolveLegRateTypeId,
       }
       const savedLegIds = new Set((savedState?.selections ?? []).map((row) => row.package_leg_id))
       const states =
@@ -538,7 +550,7 @@ export function BuildBookingDialog({
   async function validateAndPreview() {
     if (!packageDetail) return
 
-    const problems = validateConfigureState(packageDetail, legStates, { totalsBySupplierId })
+    const problems = validateConfigureState(packageDetail, legStates, { totalsBySupplierId, rateTypes })
     // Pricing needs at least one dated service (rate cards match on the derived trip start).
     const derivedRange = deriveTripDateRangeFromStates(packageDetail, legStates)
     if (problems.length === 0 && !derivedRange.start) {
@@ -960,16 +972,9 @@ export function BuildBookingDialog({
                         {li.pricingSnapshot?.rateTypeName && (
                           <span className="text-[11px] text-muted-foreground">
                             {li.pricingSnapshot.rateTypeName}
-                            {(() => {
-                              const chosen = legStates.find(
-                                (state) => state.legId === li.pricingSnapshot?.legId,
-                              )?.rateTypeId
-                              return chosen &&
-                                li.pricingSnapshot.rateTypeId &&
-                                li.pricingSnapshot.rateTypeId !== chosen
-                                ? " (fallback)"
-                                : ""
-                            })()}
+                            {/* An explicitly chosen rate type now errors rather than substituting,
+                                so this can only mean the leg had none and a default was used. */}
+                            {li.pricingSnapshot.rateTypeInherited ? " (default)" : ""}
                           </span>
                         )}
                         <CommissionBadge

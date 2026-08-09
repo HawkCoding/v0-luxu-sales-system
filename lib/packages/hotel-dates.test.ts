@@ -16,6 +16,7 @@ function leg(id: string, supplierKind: SupplierKind, sortOrder: number): Package
     supplierDescription: null,
     supplierKind,
     pricingMode: "rate_card",
+    defaultRateTypeId: null,
     label: null,
     sortOrder,
     dateAnchor: null,

@@ -80,6 +80,7 @@ import {
 } from "@/lib/pricing/age-buckets"
 import { shortenUrl } from "@/lib/url"
 import { applyRateMarkdown } from "@/lib/pricing/rate-markdown"
+import { rebaseRateAdjustments } from "@/lib/rate-types/rebase-adjustments"
 import { cn } from "@/lib/utils"
 import { useAgeBandsSettings, useLocations, useSupplierDetail, useTrainChildPriceRatio } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
@@ -199,6 +200,8 @@ interface SupplierFormState {
   /** One client-facing bullet per line; split into a string[] on save. */
   inclusions: string
   exclusions: string
+  /** This supplier's own default rate type; null means inherit from its kind / the system default. */
+  defaultRateTypeOverrideId: string | null
   rateAdjustments: SupplierRateAdjustment[]
   suiteTypes: EditableSuiteType[]
   packages: EditablePackage[]
@@ -377,6 +380,7 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
     defaultTimeEnd: (supplier.defaultTimeEnd ?? "").slice(0, 5),
     inclusions: (supplier.inclusions ?? []).join("\n"),
     exclusions: (supplier.exclusions ?? []).join("\n"),
+    defaultRateTypeOverrideId: supplier.defaultRateTypeOverrideId ?? null,
     rateAdjustments: (supplier.rateAdjustments ?? []).map((adjustment) => ({
       rateTypeId: adjustment.rateTypeId,
       discountPct: adjustment.discountPct,
@@ -2524,6 +2528,30 @@ export function SupplierDetailView({
     setForm((current) => (current ? { ...current, [key]: value } : current))
   }
 
+  /**
+   * The baseline every rate adjustment on this supplier is measured against. While editing this
+   * follows the unsaved override so the "% off X" labels and matrix tabs update as soon as the
+   * default is changed, rather than only after a save round-trip.
+   */
+  const hasForm = form !== null
+  const formDefaultRateTypeOverrideId = form?.defaultRateTypeOverrideId ?? null
+  const effectiveDefaultRateTypeId = useMemo(() => {
+    const active = (supplier?.rateTypes ?? []).filter((rt) => !rt.archivedAt)
+    const candidates = [
+      hasForm ? formDefaultRateTypeOverrideId : supplier?.defaultRateTypeOverrideId ?? null,
+      supplier?.inheritedDefaultRateTypeId ?? null,
+      active.find((rt) => rt.isDefault)?.id ?? null,
+      active[0]?.id ?? null,
+    ]
+    return candidates.find((id) => id && active.some((rt) => rt.id === id)) ?? null
+  }, [
+    hasForm,
+    formDefaultRateTypeOverrideId,
+    supplier?.rateTypes,
+    supplier?.defaultRateTypeOverrideId,
+    supplier?.inheritedDefaultRateTypeId,
+  ])
+
   const updateSupplierKind = (kind: SupplierKind) => {
     setForm((current) =>
       current
@@ -3089,6 +3117,25 @@ export function SupplierDetailView({
     })
   }, [])
 
+  const handleChangeDefaultRateType = useCallback(
+    (nextDefaultRateTypeId: string) => {
+      setForm((current) =>
+        current
+          ? {
+              ...current,
+              defaultRateTypeOverrideId: nextDefaultRateTypeId,
+              rateAdjustments: rebaseRateAdjustments(
+                current.rateAdjustments,
+                effectiveDefaultRateTypeId,
+                nextDefaultRateTypeId,
+              ),
+            }
+          : current,
+      )
+    },
+    [effectiveDefaultRateTypeId],
+  )
+
   const handleApplyRateMarkdown = useCallback(
     (
       packageIndex: number,
@@ -3097,14 +3144,6 @@ export function SupplierDetailView({
       rateTypeId: string,
       discountPct: number,
     ) => {
-      const activeRateTypes = (supplier?.rateTypes ?? []).filter((rt) => !rt.archivedAt)
-      const effectiveDefaultRateTypeId =
-        (supplier?.defaultRateTypeId && activeRateTypes.some((rt) => rt.id === supplier.defaultRateTypeId)
-          ? supplier.defaultRateTypeId
-          : null) ??
-        activeRateTypes.find((rt) => rt.isDefault)?.id ??
-        activeRateTypes[0]?.id ??
-        null
       if (!effectiveDefaultRateTypeId) {
         toast.error("No rate types configured — add one in Settings before applying markdown.", {
           id: "apply-markdown-no-type",
@@ -3184,7 +3223,7 @@ export function SupplierDetailView({
         })
 
         const baseRateName =
-          activeRateTypes.find((rt) => rt.id === effectiveDefaultRateTypeId)?.name ?? "Rack"
+          (supplier?.rateTypes ?? []).find((rt) => rt.id === effectiveDefaultRateTypeId)?.name ?? "Rack"
 
         if (applied === 0) {
           toast.error(`No ${baseRateName} prices found — add ${baseRateName} rate cards first.`, {
@@ -3208,7 +3247,7 @@ export function SupplierDetailView({
         return { ...pkg, rateCards: nextRateCards }
       })
     },
-    [updatePackage, supplier],
+    [updatePackage, supplier, effectiveDefaultRateTypeId],
   )
 
   useEffect(() => {
@@ -3497,6 +3536,7 @@ export function SupplierDetailView({
           inclusions: splitBulletLines(form.inclusions),
           exclusions: splitBulletLines(form.exclusions),
           rateAdjustments: form.rateAdjustments,
+          defaultRateTypeId: form.defaultRateTypeOverrideId,
           suiteTypes: cleanedSuiteTypes,
           routes: cleanedRoutes,
           bedroomTypes: cleanedBedroomTypes,
@@ -4394,9 +4434,10 @@ export function SupplierDetailView({
                 <ApplicableRatesCard
                   isEditing={isEditing}
                   rateTypes={supplier.rateTypes ?? []}
-                  defaultRateTypeId={supplier.defaultRateTypeId ?? null}
+                  defaultRateTypeId={effectiveDefaultRateTypeId}
                   adjustments={isEditing ? form.rateAdjustments : supplier.rateAdjustments ?? []}
                   onChange={(next) => updateField("rateAdjustments", next)}
+                  onChangeDefaultRateType={handleChangeDefaultRateType}
                 />
               ) : null}
 
@@ -4535,7 +4576,7 @@ export function SupplierDetailView({
                   rateCards={routeRateGroup.rateCards}
                   suiteTypes={form.suiteTypes}
                   rateTypes={supplier.rateTypes ?? []}
-                  defaultRateTypeId={supplier.defaultRateTypeId ?? null}
+                  defaultRateTypeId={effectiveDefaultRateTypeId}
                   adjustments={form.rateAdjustments}
                   onAddRate={addRateAdjustment}
                   onApplyMarkdown={handleApplyRateMarkdown}
@@ -4562,7 +4603,7 @@ export function SupplierDetailView({
                   pkg={supplierRouteRatePackage}
                   suiteTypes={supplier.suiteTypes}
                   rateTypes={supplier.rateTypes ?? []}
-                  defaultRateTypeId={supplier.defaultRateTypeId ?? null}
+                  defaultRateTypeId={effectiveDefaultRateTypeId}
                   locationsById={locationsById}
                   vocabulary={activeVocabulary}
                 />

@@ -6,6 +6,10 @@ import {
   type PackageLegWithSupplier,
 } from "@/lib/packages"
 import type { Database } from "@/lib/supabase/types"
+import {
+  loadSupplierDefaultRateTypeResolver,
+  type SupplierDefaultRateTypeResolver,
+} from "@/lib/rate-types/load-supplier-defaults"
 import { getSupplierVocabulary, isTransportSupplier, type SupplierKind } from "@/lib/types"
 import type { SessionClient } from "../../suppliers/helpers"
 import type { UpsertPackageInput } from "../schemas"
@@ -21,6 +25,7 @@ interface SupplierJoin {
   description: string | null
   kind: SupplierKind
   pricing_mode: "rate_card" | "manual"
+  default_rate_type_id: string | null
 }
 
 interface PackageLegJoinRow extends PackageLegRow {
@@ -79,20 +84,28 @@ export async function resolveUniquePackageSlug(
 
 function normalizeLegRows(
   rows: PackageLegJoinRow[] | null,
+  resolveSupplierDefaultRateTypeId: SupplierDefaultRateTypeResolver,
 ): PackageLegWithSupplier[] {
-  return (rows ?? []).map((row) => ({
-    id: row.id,
-    package_id: row.package_id,
-    supplier_id: row.supplier_id,
-    label: row.label,
-    sort_order: row.sort_order,
-    date_anchor: row.date_anchor,
-    created_at: row.created_at,
-    supplierName: row.suppliers?.name ?? "Unknown supplier",
-    supplierDescription: row.suppliers?.description ?? null,
-    supplierKind: row.suppliers?.kind ?? "train_operator",
-    supplierPricingMode: row.suppliers?.pricing_mode ?? "rate_card",
-  }))
+  return (rows ?? []).map((row) => {
+    const supplierKind = row.suppliers?.kind ?? "train_operator"
+    return {
+      id: row.id,
+      package_id: row.package_id,
+      supplier_id: row.supplier_id,
+      label: row.label,
+      sort_order: row.sort_order,
+      date_anchor: row.date_anchor,
+      created_at: row.created_at,
+      supplierName: row.suppliers?.name ?? "Unknown supplier",
+      supplierDescription: row.suppliers?.description ?? null,
+      supplierKind,
+      supplierPricingMode: row.suppliers?.pricing_mode ?? "rate_card",
+      supplierDefaultRateTypeId: resolveSupplierDefaultRateTypeId(
+        supplierKind,
+        row.suppliers?.default_rate_type_id ?? null,
+      ),
+    }
+  })
 }
 
 export async function loadPackageDetail(supabase: SupabaseClient<Database>, slug: string) {
@@ -114,11 +127,14 @@ export async function loadPackageDetail(supabase: SupabaseClient<Database>, slug
     }
   }
 
-  const { data: legRows, error: legsError } = await supabase
-    .from("package_legs")
-    .select("*, suppliers(name, description, kind, pricing_mode)")
-    .eq("package_id", pkg.id)
-    .order("sort_order", { ascending: true })
+  const [{ data: legRows, error: legsError }, resolveSupplierDefaultRateTypeId] = await Promise.all([
+    supabase
+      .from("package_legs")
+      .select("*, suppliers(name, description, kind, pricing_mode, default_rate_type_id)")
+      .eq("package_id", pkg.id)
+      .order("sort_order", { ascending: true }),
+    loadSupplierDefaultRateTypeResolver(supabase),
+  ])
 
   if (legsError) {
     return {
@@ -126,7 +142,10 @@ export async function loadPackageDetail(supabase: SupabaseClient<Database>, slug
     }
   }
 
-  const legs = normalizeLegRows((legRows ?? []) as PackageLegJoinRow[])
+  const legs = normalizeLegRows(
+    (legRows ?? []) as PackageLegJoinRow[],
+    resolveSupplierDefaultRateTypeId,
+  )
   const legIds = legs.map((leg) => leg.id)
   const supplierIds = Array.from(new Set(legs.map((leg) => leg.supplier_id)))
 

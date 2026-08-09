@@ -32,7 +32,14 @@ type BookingTransportRequestWithRentalDetails = BookingTransportRequestRow & {
 type LocationRow = Database["public"]["Tables"]["locations"]["Row"]
 type RateCardRow = Database["public"]["Tables"]["rate_cards"]["Row"]
 type RouteRow = Database["public"]["Tables"]["routes"]["Row"]
-type SupplierRow = Database["public"]["Tables"]["suppliers"]["Row"]
+/**
+ * postgrest-js infers a narrower shape for `select("*")` than the generated Row -- it drops
+ * `default_rate_type_id` (it does the same to customers.default_rate_type_id). Postgres still
+ * returns the column at runtime, so accept it as optional rather than widening every query.
+ */
+type SupplierRow = Omit<Database["public"]["Tables"]["suppliers"]["Row"], "default_rate_type_id"> & {
+  default_rate_type_id?: string | null
+}
 type SupplierEmailRow = Database["public"]["Tables"]["supplier_emails"]["Row"]
 type RateTypeRow = Database["public"]["Tables"]["rate_types"]["Row"]
 type SupplierRateAdjustmentRow = Database["public"]["Tables"]["supplier_rate_adjustments"]["Row"]
@@ -481,6 +488,12 @@ export function mapSupplierDetail(
   const locationNameById = new Map(locations.map((location) => [location.id, location.name]))
 
   const mapped = mapSupplier(supplier)
+  const kindDefaults = (variants.kindDefaultRateTypes ?? []).map((row) => ({
+    kind: row.kind as SupplierKind,
+    rateTypeId: row.rate_type_id,
+  }))
+  const defaultRateTypeOverrideId = supplier.default_rate_type_id ?? null
+
   return {
     ...mapped,
     emails: emails.map(mapSupplierEmail),
@@ -509,11 +522,11 @@ export function mapSupplierDetail(
     })),
     defaultRateTypeId: resolveDefaultRateTypeId(
       mapped.kind,
-      (variants.kindDefaultRateTypes ?? []).map((row) => ({
-        kind: row.kind as SupplierKind,
-        rateTypeId: row.rate_type_id,
-      })),
+      kindDefaults,
       rateTypes,
+      defaultRateTypeOverrideId,
     ),
+    defaultRateTypeOverrideId,
+    inheritedDefaultRateTypeId: resolveDefaultRateTypeId(mapped.kind, kindDefaults, rateTypes, null),
   }
 }
