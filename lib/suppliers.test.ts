@@ -226,5 +226,58 @@ describe("mapSupplierDetail", () => {
     expect(detail.rateCards).toHaveLength(1)
     expect(detail.locations).toHaveLength(1)
     expect(detail.locations[0].id).toBe(locationRow.id)
+    expect(detail.stationAddresses).toEqual([])
+  })
+
+  it("maps station addresses and orders them by city name", () => {
+    const pretoriaRow: LocationRow = {
+      ...locationRow,
+      id: "00000000-0000-4000-8000-000000000102",
+      name: "Pretoria",
+      region_code: "ZA-GP",
+    }
+    const detail = mapSupplierDetail(
+      supplierRow,
+      [suiteTypeRow],
+      [supplierEmailRow],
+      [routeRow],
+      [rateCardRow],
+      [locationRow, pretoriaRow],
+      [],
+      {
+        stationAddresses: [
+          {
+            id: "00000000-0000-4000-8000-000000000201",
+            supplier_id: supplierRow.id,
+            location_id: pretoriaRow.id,
+            station_name: "Rovos Rail Station",
+            street_address: "Capital Park",
+            notes: null,
+            created_at: "2026-01-01T10:00:00.000Z",
+            updated_at: "2026-01-01T10:00:00.000Z",
+          },
+          {
+            id: "00000000-0000-4000-8000-000000000202",
+            supplier_id: supplierRow.id,
+            location_id: locationRow.id,
+            station_name: "Cape Town Station",
+            street_address: null,
+            notes: "Platform 24",
+            created_at: "2026-01-01T10:00:00.000Z",
+            updated_at: "2026-01-01T10:00:00.000Z",
+          },
+        ],
+      },
+    )
+
+    expect(detail.stationAddresses.map((station) => station.stationName)).toEqual([
+      "Cape Town Station",
+      "Rovos Rail Station",
+    ])
+    expect(detail.stationAddresses[0]).toMatchObject({
+      locationId: locationRow.id,
+      streetAddress: null,
+      notes: "Platform 24",
+    })
   })
 })

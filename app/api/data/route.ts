@@ -224,6 +224,7 @@ export async function GET(req: Request) {
     response.bookings = (bookings ?? []).map((b) => ({
       id: b.id,
       bookingNumber: b.booking_number,
+      customerInvoiceNumber: b.customer_invoice_number ?? null,
       customerId: b.customer_id,
       stage: b.stage,
       purpose: b.purpose,

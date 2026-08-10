@@ -732,6 +732,26 @@ export interface SupplierEmail {
   createdAtDisplay?: string
 }
 
+/**
+ * A train supplier's boarding/alighting address in one city. A train serves several stations, so
+ * the supplier-level `streetAddress` (its head office) can't answer "where does the guest board?" --
+ * that depends on the leg's route and its booked direction. One row per (supplier, city); the
+ * voucher resolves a leg's boarding point from its route's origin and its arrival point from the
+ * destination, swapping the two when `route_reversed` is set.
+ */
+export interface SupplierStationAddress {
+  id: string
+  supplierId: string
+  /** The city this station serves -- matched against a route's origin/destination location. */
+  locationId: string
+  /** e.g. "Rovos Rail Station". */
+  stationName: string | null
+  /** e.g. "Capital Park, Pretoria". */
+  streetAddress: string | null
+  /** Internal only -- never printed on client documents. */
+  notes: string | null
+}
+
 export interface Supplier {
   id: string
   slug: string
@@ -787,6 +807,8 @@ export interface SupplierDetail extends Supplier {
   suiteTypes: SupplierSuiteType[]
   routes: SupplierRoute[]
   rateCards: SupplierRateCard[]
+  /** Per-city station addresses -- only train operators use these today. */
+  stationAddresses: SupplierStationAddress[]
   locations: Location[]
   bedroomTypes: SupplierVariantValue[]
   bedroomLayouts: SupplierVariantValue[]

@@ -23,6 +23,7 @@ import { buildSuiteTokens } from "@/lib/templates/suite-description"
 import { loadSuiteSelections } from "@/lib/templates/suite-selections"
 import { buildQuoteSummaryBlock, formatMoney } from "@/lib/quotes/quote-summary-block"
 import { deriveFlightCapPerPerson, deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
+import { legIdsFromLineItems } from "@/lib/quotes/accepted-quote-scope"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 import { getBankingSettings, getDocumentTextSettings } from "@/lib/settings-access"
 
@@ -40,6 +41,18 @@ function orPlaceholder(value: string | null | undefined): string {
 
 function latestByCreatedAt<T extends { created_at: string | null }>(rows: T[] | null): T | null {
   return (rows ?? []).slice().sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))[0] ?? null
+}
+
+/**
+ * The quote these tokens describe: the accepted one when there is one, since that is the record
+ * of what the customer bought. Falls back to the newest quote of any status because this helper
+ * also serves pre-acceptance sends (see app/api/correspondence/route.ts), where nothing is
+ * accepted yet.
+ */
+function quoteForTokens<T extends { created_at: string | null; status: string | null }>(
+  rows: T[] | null,
+): T | null {
+  return latestByCreatedAt((rows ?? []).filter((row) => row.status === "accepted")) ?? latestByCreatedAt(rows)
 }
 
 /** Invoice amounts carry their own currency, unlike the always-ZAR quote total. */
@@ -109,6 +122,7 @@ interface QuoteRow {
   validity_until: string | null
   total: number | null
   created_at: string | null
+  status: string | null
 }
 
 interface InvoiceRow {
@@ -155,7 +169,10 @@ export async function resolveSharedEmailTokens(
           .maybeSingle(),
       ),
       safeQuery<QuoteRow[]>(() =>
-        supabase.from("quotes").select("id, quote_number, validity_until, total, created_at").eq("booking_id", bookingId),
+        supabase
+          .from("quotes")
+          .select("id, quote_number, validity_until, total, created_at, status")
+          .eq("booking_id", bookingId),
       ),
       safeQuery<InvoiceRow[]>(() =>
         supabase
@@ -211,7 +228,7 @@ export async function resolveSharedEmailTokens(
       .map((c) => ({ ...c, created_at: c.sent_at })),
   )
 
-  const latestQuote = latestByCreatedAt(quotes)
+  const latestQuote = quoteForTokens(quotes)
   const latestInvoice = latestByCreatedAt(invoices)
   const latestDepositInvoice = (invoices ?? [])
     .filter((inv) => inv.kind === "deposit")
@@ -226,11 +243,7 @@ export async function resolveSharedEmailTokens(
         .select("unit_price, pricing_snapshot")
         .eq("quote_id", latestQuote.id)
 
-      const legIds = new Set(
-        (lineItems ?? [])
-          .map((li) => (li.pricing_snapshot as PricingSnapshot | null)?.legId)
-          .filter((legId): legId is string => Boolean(legId)),
-      )
+      const legIds = legIdsFromLineItems(lineItems)
 
       const { blocks: itineraryBlocks } = await buildVoucherServiceBlocks(supabase, {
         bookingId,
@@ -327,7 +340,11 @@ export async function resolveSharedEmailTokens(
     receivedAmount,
     outstandingAmount,
     daysOverdue,
-    voucherNumber: orPlaceholder(latestVoucher?.voucher_number),
+    // A voucher carries the same customer invoice reference the office files the job under, so
+    // before a voucher row exists the token still resolves off the booking rather than blanking.
+    voucherNumber: orPlaceholder(
+      latestVoucher?.voucher_number ?? (booking?.booking_number ? clientInvoiceNumber(booking) : null),
+    ),
     lastSentDate: orPlaceholder(lastQuoteSentAt ? formatDisplayDateLong(lastQuoteSentAt.sent_at) : null),
   }
 

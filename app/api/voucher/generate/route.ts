@@ -4,6 +4,12 @@ import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { writeAuditLog } from "@/lib/audit-write"
 import { formatDisplayDateLong } from "@/lib/date-format"
 import type { VoucherData } from "@/lib/generate-voucher"
+import {
+  findMissingQuotedLegs,
+  resolveAcceptedQuoteScope,
+  scopeLegIdsFilter,
+  type AcceptedQuoteScope,
+} from "@/lib/quotes/accepted-quote-scope"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 import { checkVoucherReadiness } from "@/lib/voucher/check-readiness"
 import { loadLegReferenceRows, missingLegReferenceLabels } from "@/lib/voucher/leg-references"
@@ -16,6 +22,7 @@ import { renderVoucherPdf } from "@/lib/voucher/render-pdf"
 import { getDocumentBrandSettings, getDocumentTextSettings, resolveDocumentBrand } from "@/lib/settings-access"
 import { buildSpecialRequestsText } from "@/lib/reservation-details/format-special-requests"
 import { resolveConsultant } from "@/lib/consultant/resolve-consultant"
+import { clientInvoiceNumber } from "@/lib/invoices/invoice-status"
 import { VOUCHER_TEMPLATE_DEFAULTS, type VoucherTemplate } from "@/lib/types"
 import type { Database, Json } from "@/lib/supabase/types"
 
@@ -43,6 +50,7 @@ type SupplierRecord = {
 type BookingVoucherRecord = {
   id: string
   booking_number: string
+  customer_invoice_number: string | null
   stage: string | null
   invoice_balance: number | null
   consultant: string | null
@@ -109,7 +117,7 @@ export async function POST(req: Request) {
     supabase
       .from("bookings")
       .select(
-        "id, booking_number, stage, invoice_balance, consultant, assigned_salesperson_id, departure_date, no_of_suites, no_of_adults, no_of_children, additional_services_details, customer:customers(first_name, last_name, email, phone, title), route:routes(name, supplier:suppliers(name, description))",
+        "id, booking_number, customer_invoice_number, stage, invoice_balance, consultant, assigned_salesperson_id, departure_date, no_of_suites, no_of_adults, no_of_children, additional_services_details, customer:customers(first_name, last_name, email, phone, title), route:routes(name, supplier:suppliers(name, description))",
       )
       .eq("id", parsed.data.jobId)
       .single(),
@@ -145,9 +153,22 @@ export async function POST(req: Request) {
   const booking = bookingRaw as unknown as BookingVoucherRecord
   const customer = firstRecord(booking.customer)
 
+  // The accepted quote is the record of what the customer bought, so it — not whatever is
+  // currently selected in the builder — decides which services this voucher describes. The
+  // builder still supplies each service's operational detail (references, dates, times).
+  let quoteScope: AcceptedQuoteScope
+  let missingQuotedLegLabels: string[] = []
+  try {
+    quoteScope = await resolveAcceptedQuoteScope(supabase, booking.id)
+    missingQuotedLegLabels = await findMissingQuotedLegs(supabase, booking.id, quoteScope)
+  } catch (error) {
+    return safeSupabaseError("voucher:resolve-accepted-quote", error)
+  }
+  const scopedLegIds = scopeLegIdsFilter(quoteScope)
+
   let legReferenceRows: Awaited<ReturnType<typeof loadLegReferenceRows>> = []
   try {
-    legReferenceRows = await loadLegReferenceRows(supabase, booking.id)
+    legReferenceRows = await loadLegReferenceRows(supabase, booking.id, { legIds: scopedLegIds })
   } catch (error) {
     return safeSupabaseError("voucher:load-leg-references", error)
   }
@@ -160,6 +181,8 @@ export async function POST(req: Request) {
     const built = await buildVoucherServiceBlocks(supabase, {
       bookingId: booking.id,
       additionalServicesDetails: booking.additional_services_details ?? null,
+      legIds: scopedLegIds,
+      includeUnlinkedTransportRequests: false,
       reservationDetails: reservationDetails
         ? {
             occasion: reservationDetails.occasion,
@@ -182,11 +205,13 @@ export async function POST(req: Request) {
     departureDate: booking.departure_date,
     customerEmail: customer?.email ?? null,
     missingLegReferenceLabels: missingLegReferenceLabels(legReferenceRows),
+    missingQuotedLegLabels,
     serviceBlocks: serviceBlocks.map((block) => ({
       title: block.title,
       serviceType: block.serviceType,
       supplierContactName: block.supplierContactName,
       streetAddress: block.contactDetails.streetAddress,
+      boardingPoint: block.serviceData.boardingPoint,
       startTime: block.serviceData.startTime,
       endTime: block.serviceData.endTime,
       hasGuestBreakdown: Boolean(block.serviceData.guestBreakdown),
@@ -220,8 +245,14 @@ export async function POST(req: Request) {
   const allTravellers = travellers ?? []
   const template = normalizeTemplate(templateRaw as VoucherTemplateRow | null)
 
+  // The number printed on the voucher and quoted back by the office is the salesperson-entered
+  // customer invoice number — the same reference the invoice, its emails, and the bank payment
+  // reference use. It falls back to the internal LTT-…-INV number only when it has not been
+  // captured yet (a stage gate forces it before deposit_requested, long before a voucher exists).
+  const voucherReference = clientInvoiceNumber(booking)
+
   const voucherData: VoucherData = {
-    voucherNumber: booking.booking_number,
+    voucherNumber: voucherReference,
     guestNames: buildGuestNames(customer, allTravellers),
     consultantName: consultant?.name ?? "",
     supplierName: supplier,
@@ -277,8 +308,12 @@ export async function POST(req: Request) {
     return jsonError("Voucher PDF could not be rendered", 500)
   }
 
-  const filename = `voucher-${sanitizePathPart(booking.booking_number)}.pdf`
-  const storagePath = `${sanitizePathPart(booking.booking_number)}/${filename}`
+  // Storage keys stay pinned to the immutable booking_number so regenerating after the invoice
+  // number is edited overwrites the same object instead of orphaning the old one; only the
+  // customer-facing download name below carries the reference.
+  const storageFilename = `voucher-${sanitizePathPart(booking.booking_number)}.pdf`
+  const storagePath = `${sanitizePathPart(booking.booking_number)}/${storageFilename}`
+  const filename = `voucher-${sanitizePathPart(voucherReference)}.pdf`
   const { error: uploadError } = await supabase.storage
     .from(VOUCHER_BUCKET)
     .upload(storagePath, pdfBuffer, {
@@ -334,7 +369,7 @@ export async function POST(req: Request) {
   const nowIso = new Date().toISOString()
   const voucherPayload: Database["public"]["Tables"]["vouchers"]["Insert"] = {
     booking_id: booking.id,
-    voucher_number: booking.booking_number,
+    voucher_number: voucherReference,
     pdf_document_id: documentWrite.data.id,
     generated_at: nowIso,
     created_by: user.id,
@@ -346,7 +381,7 @@ export async function POST(req: Request) {
         .update({
           pdf_document_id: documentWrite.data.id,
           generated_at: nowIso,
-          voucher_number: booking.booking_number,
+          voucher_number: voucherReference,
         })
         .eq("id", existingVoucher.id)
         .select("id, sent_at, generated_at")
@@ -399,7 +434,7 @@ export async function POST(req: Request) {
     action: existingVoucher ? "voucher_regenerated" : "voucher_generated",
     meta: {
       voucher_id: voucherId,
-      voucher_number: booking.booking_number,
+      voucher_number: voucherReference,
       document_id: documentWrite.data.id,
       service_block_count: serviceBlocks.length,
     },
@@ -413,7 +448,7 @@ export async function POST(req: Request) {
       customerName: customerName || "Valued Guest",
       jobNumber: booking.booking_number,
       direction: route,
-      voucherNumber: booking.booking_number,
+      voucherNumber: voucherReference,
       departureDate: voucherData.departure,
       consultantName: consultant?.name ?? "",
       ...buildSuiteTokens(await loadSuiteSelections(supabase, booking.id)),
@@ -434,7 +469,7 @@ export async function POST(req: Request) {
     },
     voucherRecord: {
       id: voucherId,
-      voucherNumber: booking.booking_number,
+      voucherNumber: voucherReference,
       generatedAt: voucherWrite.data.generated_at,
       sentAt: voucherWrite.data.sent_at,
       serviceBlockCount: serviceBlocks.length,

@@ -124,6 +124,23 @@ function buildSupabase(state: MockState = {}) {
           })),
         }
       }
+      // No accepted quote on these bookings, so the reference list stays unscoped — the
+      // scoping itself is covered by lib/quotes/accepted-quote-scope.test.ts.
+      if (table === "quotes") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                order: vi.fn(() => ({
+                  limit: vi.fn(() => ({
+                    maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+                  })),
+                })),
+              })),
+            })),
+          })),
+        }
+      }
       throw new Error(`Unexpected table ${table}`)
     }),
   }

@@ -249,6 +249,61 @@ describe("buildVoucherServiceBlocks", () => {
     expect(blocks[0].serviceData.numberOfSuites).toBe(1)
   })
 
+  it("gives a 1-day train route an arrival date on its departure day", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "sel-train",
+            package_leg_id: "leg-train",
+            selected: true,
+            supplier_id: "supplier-train",
+            route_id: "route-train",
+            suite_type_id: "suite-royal",
+            service_date: "2028-08-25",
+            nights: null,
+            notes: null,
+            package_legs: { sort_order: 0, label: "Rovos Rail" },
+            suppliers: supplier({ kind: "train_operator", name: "Rovos Rail" }),
+            routes: { name: "Pretoria → Cape Town", duration_days: 1 },
+            suite_types: { name: "Pullman Suite" },
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceData.departureDate).toBe("2028-08-25")
+    expect(blocks[0].serviceData.arrivalDate).toBe("2028-08-25")
+  })
+
+  it("leaves a train arrival date unset when the route has no duration, so the voucher prints TBC", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "sel-train",
+            package_leg_id: "leg-train",
+            selected: true,
+            supplier_id: "supplier-train",
+            route_id: "route-train",
+            suite_type_id: "suite-royal",
+            service_date: "2028-08-25",
+            nights: null,
+            notes: null,
+            package_legs: { sort_order: 0, label: "Rovos Rail" },
+            suppliers: supplier({ kind: "train_operator", name: "Rovos Rail" }),
+            routes: { name: "Pretoria → Cape Town", duration_days: null },
+            suite_types: { name: "Pullman Suite" },
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceData.arrivalDate).toBeNull()
+  })
+
   it("resolves suite type and suite count from per-unit rows when present, over the legacy leg-level join", async () => {
     const { blocks } = await buildVoucherServiceBlocks(
       buildSupabase({
@@ -444,6 +499,35 @@ describe("buildVoucherServiceBlocks", () => {
     expect(blocks[0].serviceData.departureDate).toBe("2026-08-01")
   })
 
+  it("drops transport requests tied to no leg when includeUnlinkedTransportRequests is false, since nothing unlinked can have been priced into a quote", async () => {
+    const unlinkedRequest = {
+      id: "req-manual",
+      package_leg_id: null,
+      service_id: null,
+      service_type: "transfer",
+      pickup_point: "OR Tambo",
+      dropoff_point: "Rovos Rail Station",
+      pickup_at: "2026-08-01T09:00:00",
+      flight_number: null,
+      notes: null,
+      sort_order: 0,
+      suppliers: supplier(),
+      suite_types: null,
+      rental_details: null,
+    }
+
+    const tables = { transportRequests: [unlinkedRequest] }
+
+    const included = await buildVoucherServiceBlocks(buildSupabase(tables), { bookingId: BOOKING_ID })
+    expect(included.blocks).toHaveLength(1)
+
+    const excluded = await buildVoucherServiceBlocks(buildSupabase(tables), {
+      bookingId: BOOKING_ID,
+      includeUnlinkedTransportRequests: false,
+    })
+    expect(excluded.blocks).toHaveLength(0)
+  })
+
   it("renders a Build Booking (booking_services) leg the same as an equivalent catalogue-package selection", async () => {
     const trainService = {
       id: "svc-blue-train",
@@ -556,6 +640,137 @@ describe("buildVoucherServiceBlocks", () => {
 
     expect(blocks).toHaveLength(1)
     expect(blocks[0].serviceData.pickup).toBe("Cape Town International Airport")
+  })
+
+  describe("train station addresses", () => {
+    const PRETORIA_ID = "loc-pretoria"
+    const CAPE_TOWN_ID = "loc-cape-town"
+
+    const stationRows = [
+      {
+        location_id: PRETORIA_ID,
+        station_name: "Rovos Rail Station",
+        street_address: "Capital Park, Pretoria",
+      },
+      {
+        location_id: CAPE_TOWN_ID,
+        station_name: "Cape Town Station",
+        street_address: "Adderley Street",
+      },
+    ]
+
+    function trainLeg(partial: Record<string, unknown> = {}, supplierPartial: Record<string, unknown> = {}) {
+      return {
+        id: "svc-rovos",
+        label: "Rovos Rail",
+        sort_order: 0,
+        selected: true,
+        supplier_id: "supplier-rovos",
+        route_id: "route-rovos",
+        route_reversed: false,
+        suite_type_id: null,
+        service_date: "2026-09-01",
+        nights: null,
+        notes: null,
+        supplier_reference: null,
+        suppliers: supplier({
+          kind: "train_operator",
+          name: "Rovos Rail",
+          station_addresses: stationRows,
+          ...supplierPartial,
+        }),
+        routes: {
+          name: "Pretoria ↔ Cape Town",
+          duration_days: 3,
+          direction_mode: "round_trip",
+          origin: { id: PRETORIA_ID, name: "Pretoria" },
+          destination: { id: CAPE_TOWN_ID, name: "Cape Town" },
+        },
+        suite_types: null,
+        units: null,
+        ...partial,
+      }
+    }
+
+    it("resolves boarding and arrival addresses from the route's own endpoint cities", async () => {
+      const { blocks } = await buildVoucherServiceBlocks(
+        buildSupabase({ services: [trainLeg()] }),
+        { bookingId: BOOKING_ID },
+      )
+
+      expect(blocks[0].serviceData.boardingPoint).toBe("Rovos Rail Station, Capital Park, Pretoria")
+      expect(blocks[0].serviceData.arrivalPoint).toBe("Cape Town Station, Adderley Street")
+    })
+
+    it("swaps boarding and arrival on a reversed leg, matching the arrival station", async () => {
+      const { blocks } = await buildVoucherServiceBlocks(
+        buildSupabase({ services: [trainLeg({ route_reversed: true })] }),
+        { bookingId: BOOKING_ID },
+      )
+
+      expect(blocks[0].serviceData.boardingPoint).toBe("Cape Town Station, Adderley Street")
+      expect(blocks[0].serviceData.arrivalPoint).toBe("Rovos Rail Station, Capital Park, Pretoria")
+      expect(blocks[0].serviceData.arrivalStation).toBe("Pretoria")
+    })
+
+    it("leaves both null when the supplier has no station rows, never falling back to street_address", async () => {
+      const { blocks } = await buildVoucherServiceBlocks(
+        buildSupabase({
+          services: [trainLeg({}, { station_addresses: null, street_address: "1 Head Office Road" })],
+        }),
+        { bookingId: BOOKING_ID },
+      )
+
+      expect(blocks[0].serviceData.boardingPoint).toBeNull()
+      expect(blocks[0].serviceData.arrivalPoint).toBeNull()
+      expect(blocks[0].contactDetails.streetAddress).toBe("1 Head Office Road")
+    })
+
+    it("resolves only the cities it has rows for, leaving the other side null", async () => {
+      const { blocks } = await buildVoucherServiceBlocks(
+        buildSupabase({
+          services: [trainLeg({}, { station_addresses: [stationRows[0]] })],
+        }),
+        { bookingId: BOOKING_ID },
+      )
+
+      expect(blocks[0].serviceData.boardingPoint).toBe("Rovos Rail Station, Capital Park, Pretoria")
+      expect(blocks[0].serviceData.arrivalPoint).toBeNull()
+    })
+
+    it("never sets station points on a non-train block", async () => {
+      const { blocks } = await buildVoucherServiceBlocks(
+        buildSupabase({
+          selections: [
+            {
+              id: "sel-hotel",
+              package_leg_id: "leg-hotel",
+              selected: true,
+              supplier_id: "supplier-hotel",
+              route_id: null,
+              suite_type_id: null,
+              service_date: "2026-09-04",
+              nights: 2,
+              notes: null,
+              package_legs: { sort_order: 0, label: "The Silo Hotel" },
+              suppliers: supplier({
+                kind: "hotel_property",
+                name: "The Silo Hotel",
+                station_addresses: stationRows,
+              }),
+              routes: null,
+              suite_types: null,
+              units: null,
+            },
+          ],
+        }),
+        { bookingId: BOOKING_ID },
+      )
+
+      expect(blocks[0].serviceType).toBe("hotel")
+      expect(blocks[0].serviceData.boardingPoint).toBeNull()
+      expect(blocks[0].serviceData.arrivalPoint).toBeNull()
+    })
   })
 
   it("sums adult/child/infant counts across a train leg's units into guestBreakdown", async () => {

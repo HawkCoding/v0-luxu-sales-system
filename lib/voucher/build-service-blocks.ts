@@ -41,6 +41,12 @@ interface BuildContext {
    * it, instead of whatever is currently selected live on the job. Manually-added transport
    * requests (no package leg) are never priced this way and stay unfiltered. */
   legIds?: Set<string>
+  /** Transport requests tied to neither a package leg nor a booking service are never priced
+   * into a quote (see `findTransportRequestsForLeg` in lib/quotes/build-from-package.ts), so on
+   * a surface scoped to the accepted quote they would be the one thing `legIds` cannot filter.
+   * Voucher and itinerary pass false; quote surfaces leave the default so their behavior is
+   * unchanged. */
+  includeUnlinkedTransportRequests?: boolean
   /** The booking's reservation-details form — folded into every train/hotel block as a
    * "Requests" and "Occasion" row, mirroring how the legacy voucher repeated the party's meal
    * seating, smoking preference and occasion on each service block. */
@@ -54,6 +60,13 @@ interface BuildContext {
    * a booking carries the whole party, since a captured transport request has no notion of which
    * travellers are actually on which flight. */
   travellerNames?: string[]
+}
+
+/** A train supplier's boarding/alighting address in one city — see `resolveStationPoints`. */
+interface StationAddressJoin {
+  location_id: string | null
+  station_name: string | null
+  street_address: string | null
 }
 
 interface SupplierJoin {
@@ -71,6 +84,7 @@ interface SupplierJoin {
   default_time_end: string | null
   inclusions: string[] | null
   exclusions: string[] | null
+  station_addresses: StationAddressJoin[] | null
 }
 
 interface RouteJoin {
@@ -78,8 +92,8 @@ interface RouteJoin {
   duration_days: number | null
   direction_mode: string | null
   default_excursions: string[] | null
-  origin: { name: string | null } | { name: string | null }[] | null
-  destination: { name: string | null } | { name: string | null }[] | null
+  origin: { id: string | null; name: string | null } | { id: string | null; name: string | null }[] | null
+  destination: { id: string | null; name: string | null } | { id: string | null; name: string | null }[] | null
 }
 
 interface FlightDetailsJoin {
@@ -336,6 +350,45 @@ function resolveVoucherArrivalStation(route: RouteJoin | null | undefined, rever
   return resolveDirectedArrivalName(origin, destination, reversed)
 }
 
+/** "Rovos Rail Station, Capital Park, Pretoria" — a station row rendered as one address line.
+ * Null when the row carries neither a name nor an address. */
+function formatStationAddress(station: StationAddressJoin | undefined): string | null {
+  if (!station) return null
+  const parts = [station.station_name?.trim(), station.street_address?.trim()].filter(Boolean)
+  return parts.length > 0 ? parts.join(", ") : null
+}
+
+/**
+ * Where a train leg boards and where it alights, as street addresses. A train supplier serves a
+ * different station in every city, so these come from its per-city `supplier_station_addresses`
+ * rows keyed on the route's own endpoints — never from the supplier's `street_address`, which is
+ * its head office and knows nothing of city or direction.
+ *
+ * `reversed` swaps origin and destination exactly as `resolveVoucherArrivalStation` does, so the
+ * printed arrival station and the printed arrival address can never disagree.
+ */
+function resolveStationPoints(
+  supplier: SupplierJoin | null | undefined,
+  route: RouteJoin | null | undefined,
+  reversed: boolean,
+): { boarding: string | null; arrival: string | null } {
+  const stations = supplier?.station_addresses ?? []
+  if (stations.length === 0 || !route) return { boarding: null, arrival: null }
+
+  const originId = firstRecord(route.origin)?.id
+  const destinationId = firstRecord(route.destination)?.id
+  const boardingId = reversed ? destinationId : originId
+  const arrivalId = reversed ? originId : destinationId
+
+  const byLocationId = new Map(
+    stations.flatMap((station) => (station.location_id ? [[station.location_id, station] as const] : [])),
+  )
+  return {
+    boarding: formatStationAddress(boardingId ? byLocationId.get(boardingId) : undefined),
+    arrival: formatStationAddress(arrivalId ? byLocationId.get(arrivalId) : undefined),
+  }
+}
+
 interface TransportBlockContext {
   title: string
   displayOrder: number
@@ -450,8 +503,8 @@ export async function buildVoucherServiceBlocks(
     .select(
       `id, package_leg_id, selected, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, notes, supplier_reference, supplier_contact_name, voucher_footnote, excursions,
        package_legs(sort_order, label),
-       suppliers(name, phone, email, website, location, description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions),
-       routes(name, duration_days, direction_mode, default_excursions, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name)),
+       suppliers(name, phone, email, website, location, description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions, station_addresses:supplier_station_addresses(location_id, station_name, street_address)),
+       routes(name, duration_days, direction_mode, default_excursions, origin:locations!routes_origin_location_id_fkey(id, name), destination:locations!routes_destination_location_id_fkey(id, name)),
        suite_types(name),
        units:booking_package_selection_units(suite_type_id, sort_order, adult_count, child_count, infant_count, suite_types(name), bedroom_types(name), bedroom_layouts(name), bathroom_types(name))`,
     )
@@ -466,8 +519,8 @@ export async function buildVoucherServiceBlocks(
     .from("booking_services")
     .select(
       `id, label, sort_order, selected, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, notes, supplier_reference, supplier_contact_name, voucher_footnote, excursions,
-       suppliers(name, phone, email, website, location, description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions),
-       routes(name, duration_days, direction_mode, default_excursions, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name)),
+       suppliers(name, phone, email, website, location, description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions, station_addresses:supplier_station_addresses(location_id, station_name, street_address)),
+       routes(name, duration_days, direction_mode, default_excursions, origin:locations!routes_origin_location_id_fkey(id, name), destination:locations!routes_destination_location_id_fkey(id, name)),
        suite_types(name),
        units:booking_service_units(suite_type_id, sort_order, adult_count, child_count, infant_count, suite_types(name), bedroom_types(name), bedroom_layouts(name), bathroom_types(name))`,
     )
@@ -481,7 +534,7 @@ export async function buildVoucherServiceBlocks(
     .from("booking_transport_requests")
     .select(
       `id, package_leg_id, service_id, supplier_id, service_type, pickup_point, dropoff_point, pickup_at, flight_number, passenger_count, notes, sort_order, supplier_reference, supplier_contact_name, voucher_footnote,
-       suppliers(name, phone, email, website, location, description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions),
+       suppliers(name, phone, email, website, location, description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions, station_addresses:supplier_station_addresses(location_id, station_name, street_address)),
        suite_types(name),
        rental_details:booking_vehicle_rental_details(return_at),
        flight_details:booking_flight_details(cabin, departure_airport_code, arrival_airport_code, arrival_at, hand_luggage_kg, checked_luggage_kg, priority_boarding)`,
@@ -567,7 +620,11 @@ export async function buildVoucherServiceBlocks(
     if (serviceDate) {
       if (isHotel) {
         if (nights) arrivalDate = addDays(serviceDate, nights)
-      } else if (durationDays && durationDays > 1) {
+      } else if (durationDays && durationDays > 0) {
+        // A 1-day route arrives on its departure day — still a real arrival date, so it must
+        // print. Only an unconfigured duration leaves this null, where the voucher's "TBC" is
+        // honest: silently claiming same-day arrival on a multi-day train would be a wrong
+        // statement on a client document.
         arrivalDate = trainArrivalDate(serviceDate, durationDays)
       }
     }
@@ -581,11 +638,16 @@ export async function buildVoucherServiceBlocks(
     const directedRouteName = resolveVoucherRouteName(route, row.route_reversed ?? false)
     const arrivalStation =
       serviceType === "train" ? resolveVoucherArrivalStation(route, row.route_reversed ?? false) : null
+    const stationPoints = isTrain
+      ? resolveStationPoints(supplier, route, row.route_reversed ?? false)
+      : { boarding: null, arrival: null }
     const { names: suiteNames, unitCount } = resolveLegSuiteNames(row, serviceType === "train")
     const suiteName = suiteNames.length > 0 ? suiteNames.join(", ") : null
     const serviceData: VoucherServiceBlockData = {
       route: isHotel ? null : directedRouteName,
       arrivalStation,
+      boardingPoint: stationPoints.boarding,
+      arrivalPoint: stationPoints.arrival,
       mealPlan: isHotel ? route?.name ?? null : null,
       suiteType: suiteName,
       numberOfSuites: unitCount > 0 ? unitCount : null,
@@ -626,8 +688,12 @@ export async function buildVoucherServiceBlocks(
   })
 
   // Manually added transfers (not tied to a package leg or a booking service) belong on the
-  // documents too.
-  const manualRequests = transportRequests.filter((request) => !request.package_leg_id && !request.service_id)
+  // documents too — except where the caller renders only what an accepted quote priced, since a
+  // request linked to no leg can never have been priced (see `includeUnlinkedTransportRequests`).
+  const manualRequests =
+    context.includeUnlinkedTransportRequests === false
+      ? []
+      : transportRequests.filter((request) => !request.package_leg_id && !request.service_id)
   if (manualRequests.length > 0) {
     const orderBase = blocks.reduce((max, block) => Math.max(max, block.displayOrder), -1) + 1
     manualRequests.forEach((request, index) => {

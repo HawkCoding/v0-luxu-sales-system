@@ -87,3 +87,17 @@ export function clientInvoiceNumber(booking: {
 }): string {
   return booking.customer_invoice_number?.trim() || unifiedInvoiceNumber(booking.booking_number)
 }
+
+/**
+ * The reference internal list and board views lead with (pipeline cards, All
+ * Items rows). Salespeople recognise a booking by the invoice number they
+ * typed in, so that wins; until it is captured we fall back to the system
+ * booking number — not the `-INV` auto number, which is a backend-only handle
+ * and would be noise on screen. Takes the camelCase API shape, not DB rows.
+ */
+export function bookingDisplayReference(booking: {
+  customerInvoiceNumber?: string | null
+  bookingNumber: string
+}): string {
+  return booking.customerInvoiceNumber?.trim() || booking.bookingNumber
+}

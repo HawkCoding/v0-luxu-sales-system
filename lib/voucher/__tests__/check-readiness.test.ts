@@ -82,6 +82,19 @@ describe("checkVoucherReadiness", () => {
     )
   })
 
+  it("returns quoted_leg_missing when the accepted quote prices a leg the builder no longer has", () => {
+    const result = checkVoucherReadiness({ ...readyInput, missingQuotedLegLabels: ["Rovos Rail"] })
+    expect(result.ready).toBe(false)
+    expect(result.failures).toContainEqual(
+      expect.objectContaining({ code: "quoted_leg_missing", message: expect.stringContaining("Rovos Rail") }),
+    )
+  })
+
+  it("stays ready when no quoted legs are missing", () => {
+    expect(checkVoucherReadiness({ ...readyInput, missingQuotedLegLabels: [] }).ready).toBe(true)
+    expect(checkVoucherReadiness({ ...readyInput }).ready).toBe(true)
+  })
+
   it("accumulates all five failures simultaneously", () => {
     const result = checkVoucherReadiness({
       stage: "deposit_paid",
@@ -137,6 +150,64 @@ describe("checkVoucherReadiness", () => {
       "guest_counts_missing",
     ])
     expect(result.warnings[0].message).toContain("The Blue Train")
+  })
+
+  it("does not warn about a train block's address once it has a boarding point, even with no street address", () => {
+    const result = checkVoucherReadiness({
+      ...readyInput,
+      serviceBlocks: [
+        {
+          title: "Rovos Rail",
+          serviceType: "train",
+          supplierContactName: "Carla",
+          streetAddress: null,
+          boardingPoint: "Rovos Rail Station, Capital Park, Pretoria",
+          startTime: "09:00",
+          endTime: "16:00",
+          hasGuestBreakdown: true,
+        },
+      ],
+    })
+    expect(result.warnings).toEqual([])
+  })
+
+  it("warns about a train block with a street address but no boarding point", () => {
+    const result = checkVoucherReadiness({
+      ...readyInput,
+      serviceBlocks: [
+        {
+          title: "Rovos Rail",
+          serviceType: "train",
+          supplierContactName: "Carla",
+          streetAddress: "1 Head Office Road",
+          boardingPoint: null,
+          startTime: "09:00",
+          endTime: "16:00",
+          hasGuestBreakdown: true,
+        },
+      ],
+    })
+    expect(result.warnings.map((w) => w.code)).toEqual(["supplier_address_missing"])
+    expect(result.warnings[0].message).toContain("Rovos Rail")
+  })
+
+  it("still judges a hotel block on its street address, ignoring any boarding point", () => {
+    const result = checkVoucherReadiness({
+      ...readyInput,
+      serviceBlocks: [
+        {
+          title: "The Silo Hotel",
+          serviceType: "hotel",
+          supplierContactName: "Reservations",
+          streetAddress: null,
+          boardingPoint: "Cape Town Station",
+          startTime: "14:00",
+          endTime: "11:00",
+          hasGuestBreakdown: true,
+        },
+      ],
+    })
+    expect(result.warnings.map((w) => w.code)).toEqual(["supplier_address_missing"])
   })
 
   it("does not warn about times/guests for a transfer block (neither concept applies)", () => {

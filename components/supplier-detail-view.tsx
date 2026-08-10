@@ -56,6 +56,10 @@ import {
   SupplierEmailEditor,
   type EditableSupplierEmail,
 } from "@/components/supplier-email-editor"
+import {
+  SupplierStationAddressEditor,
+  type EditableStationAddress,
+} from "@/components/supplier-station-address-editor"
 import { useRole } from "@/lib/role-context"
 import {
   parseStaleVersionConflictPayload,
@@ -188,6 +192,8 @@ interface SupplierFormState {
   location: string
   locationDetail: string
   locationId: string | null
+  /** Per-city boarding addresses; train operators only. */
+  stationAddresses: EditableStationAddress[]
   description: string
   notes: string
   active: boolean
@@ -369,6 +375,13 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
     location: supplier.location ?? "",
     locationDetail: supplier.locationDetail ?? "",
     locationId: supplier.kind === "train_operator" ? null : supplier.locationId ?? null,
+    stationAddresses: (supplier.stationAddresses ?? []).map((station) => ({
+      id: station.id,
+      locationId: station.locationId,
+      stationName: station.stationName ?? "",
+      streetAddress: station.streetAddress ?? "",
+      notes: station.notes ?? "",
+    })),
     description: supplier.description ?? "",
     notes: supplier.notes ?? "",
     active: supplier.active,
@@ -2496,6 +2509,8 @@ export function SupplierDetailView({
                   : supplier.email
                     ? [{ id: makeClientId(), email: supplier.email, label: "General" }]
                     : [createEmptySupplierEmail()],
+              // Drafts stored before station addresses existed have no such key.
+              stationAddresses: parsed.stationAddresses ?? [],
             })
             return
           }
@@ -2559,6 +2574,9 @@ export function SupplierDetailView({
             ...current,
             kind,
             locationId: kind === "train_operator" ? null : current.locationId,
+            // Only trains board at a station; the server drops these for other kinds anyway, so
+            // clear them here too rather than leaving invisible rows in the form.
+            stationAddresses: kind === "train_operator" ? current.stationAddresses : [],
             packages: current.packages.map((pkg) => ({
               ...pkg,
               routes: pkg.routes.map((route) => ({
@@ -3503,6 +3521,20 @@ export function SupplierDetailView({
           })),
       }))
 
+    // Rows with no city chosen are half-filled editor rows; the server would drop them anyway.
+    const cleanedStationAddresses =
+      form.kind === "train_operator"
+        ? form.stationAddresses
+            .filter((station) => station.locationId)
+            .map((station) => ({
+              id: station.id,
+              locationId: station.locationId,
+              stationName: station.stationName.trim() || null,
+              streetAddress: station.streetAddress.trim() || null,
+              notes: station.notes.trim() || null,
+            }))
+        : []
+
     if (!tryAcquirePatchWriteLock()) {
       toast.error("A supplier save is already in progress. Please wait a moment and try again.")
       return
@@ -3539,6 +3571,7 @@ export function SupplierDetailView({
           defaultRateTypeId: form.defaultRateTypeOverrideId,
           suiteTypes: cleanedSuiteTypes,
           routes: cleanedRoutes,
+          stationAddresses: cleanedStationAddresses,
           bedroomTypes: cleanedBedroomTypes,
           bedroomLayouts: cleanedBedroomLayouts,
           bathroomTypes: cleanedBathroomTypes,
@@ -4012,6 +4045,15 @@ export function SupplierDetailView({
                   </div>
                 </div>
 
+                {isTrainOperatorForm && (
+                  <SupplierStationAddressEditor
+                    stations={form.stationAddresses}
+                    locations={locations}
+                    onChange={(stationAddresses) => updateField("stationAddresses", stationAddresses)}
+                    idPrefix="supplier-station"
+                  />
+                )}
+
                 <SupplierEmailEditor
                   emails={form.emails}
                   onChange={(emails) => updateField("emails", emails)}
@@ -4194,6 +4236,33 @@ export function SupplierDetailView({
                     <MapPin className="h-4 w-4" />
                     <span>{supplier.location || "No location on file"}</span>
                   </div>
+                  {isTrainOperatorSupplier && (
+                    <div className="space-y-2 text-sm text-muted-foreground sm:col-span-3">
+                      <div className="flex items-center gap-2">
+                        <MapPin className="h-4 w-4" />
+                        <span>Station addresses</span>
+                      </div>
+                      {supplier.stationAddresses.length > 0 ? (
+                        <ul className="space-y-1">
+                          {supplier.stationAddresses.map((station) => (
+                            <li key={station.id} className="flex flex-wrap items-center gap-2">
+                              <Badge variant="outline" className="rounded-full">
+                                {locations.find((loc) => loc.id === station.locationId)?.name ??
+                                  "Unknown city"}
+                              </Badge>
+                              <span>
+                                {[station.stationName, station.streetAddress]
+                                  .filter(Boolean)
+                                  .join(", ") || "No address captured"}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <span>No station addresses on file</span>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-3">

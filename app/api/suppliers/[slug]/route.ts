@@ -152,6 +152,7 @@ export async function GET(
         rateTypes: detail.rateTypes,
         rateAdjustments: detail.rateAdjustments,
         kindDefaultRateTypes: detail.kindDefaultRateTypes,
+        stationAddresses: detail.stationAddresses,
       },
     ),
   )
@@ -348,6 +349,27 @@ export async function PATCH(
       }))
       .filter((entry) => entry.name.length > 0)
   }
+
+  // Only train operators board guests at a station, so any station rows sent for another kind are
+  // dropped rather than persisted -- same rule as route locations below. Rows without a city are
+  // half-filled editor rows and never reach the DB (location_id is NOT NULL).
+  const supplierUsesStations = parsed.kind === "train_operator"
+  const normalizedStationAddresses = supplierUsesStations
+    ? (parsed.stationAddresses ?? []).flatMap((station) => {
+        const locationId = normalizeOptionalUuid(station.locationId)
+        if (!locationId) return []
+        return [{
+          id: station.id ?? makeUuid(),
+          supplier_id: supplierId,
+          location_id: locationId,
+          station_name: normalizeOptionalText(station.stationName),
+          street_address: normalizeOptionalText(station.streetAddress),
+          notes: normalizeOptionalText(station.notes),
+          created_at: now,
+          updated_at: now,
+        }]
+      })
+    : []
 
   const normalizedBedroomTypes = normalizeVariantList(parsed.bedroomTypes ?? [])
   const normalizedBedroomLayouts = normalizeVariantList(parsed.bedroomLayouts ?? [])
@@ -599,6 +621,10 @@ export async function PATCH(
   const emailIdsToDelete = existingDetail.emails
     .map((entry) => entry.id)
     .filter((entryId) => !incomingEmailIds.has(entryId))
+  const incomingStationAddressIds = new Set(normalizedStationAddresses.map((station) => station.id))
+  const stationAddressIdsToDelete = existingDetail.stationAddresses
+    .map((station) => station.id)
+    .filter((stationId) => !incomingStationAddressIds.has(stationId))
 
   const [
     conflictingRouteIds,
@@ -906,6 +932,44 @@ export async function PATCH(
     }
   }
 
+  // Removed stations go first: moving a city's station to a fresh row would otherwise collide with
+  // the outgoing row on the (supplier_id, location_id) unique index before the delete could run.
+  if (stationAddressIdsToDelete.length > 0) {
+    const { error: deleteStationAddressesError } = await deleteInChunks(
+      supabase,
+      "supplier_station_addresses",
+      stationAddressIdsToDelete,
+    )
+
+    if (deleteStationAddressesError) {
+      logSupplierMutationError("station-addresses-delete", supplierId, deleteStationAddressesError)
+      return NextResponse.json(
+        { error: "Failed to remove old supplier station addresses" },
+        { status: 500 },
+      )
+    }
+  }
+
+  if (normalizedStationAddresses.length > 0) {
+    const { error: stationAddressesError } = await supabase
+      .from("supplier_station_addresses")
+      .upsert(normalizedStationAddresses, { onConflict: "id" })
+
+    if (stationAddressesError) {
+      logSupplierMutationError("station-addresses-upsert", supplierId, stationAddressesError)
+      if (stationAddressesError.code === "23505") {
+        return NextResponse.json(
+          { error: "Each city may only have one station address for this supplier." },
+          { status: 409 },
+        )
+      }
+      return NextResponse.json(
+        { error: "Failed to update supplier station addresses" },
+        { status: 500 },
+      )
+    }
+  }
+
   if (parsed.kind === "vehicle_rental") {
     if (normalizedVehicleRentalDetails.length > 0) {
       const { error: vehicleRentalDetailsError } = await supabase
@@ -1166,6 +1230,7 @@ export async function PATCH(
         rateTypes: updatedDetail.rateTypes,
         rateAdjustments: updatedDetail.rateAdjustments,
         kindDefaultRateTypes: updatedDetail.kindDefaultRateTypes,
+        stationAddresses: updatedDetail.stationAddresses,
       },
     ),
   )

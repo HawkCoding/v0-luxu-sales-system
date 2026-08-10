@@ -55,6 +55,10 @@ export function voucherRowsForBlock(block: VoucherServiceBlock): VoucherRow[] {
 
   if (block.serviceType === "train") {
     if (d.route) rows.push({ label: "Route", value: d.route })
+    // A train boards at a different station in every city it serves, so these are the leg's own
+    // station addresses -- not the supplier's head office on the contact line above.
+    if (d.boardingPoint) rows.push({ label: "Boarding Point", value: d.boardingPoint })
+    if (d.arrivalPoint) rows.push({ label: "Arrival Point", value: d.arrivalPoint })
     if (d.durationDays != null) {
       rows.push({ label: "Duration", value: `${d.durationDays} ${d.durationDays === 1 ? "day" : "days"}` })
     }

@@ -58,6 +58,8 @@ interface BookingServiceRow {
 interface TransportRequestRow {
   id: string
   package_leg_id: string | null
+  /** Set instead of package_leg_id for a Build Booking (booking_services) leg. */
+  service_id: string | null
   service_type: string
   pickup_point: string
   dropoff_point: string
@@ -79,12 +81,25 @@ function transportLabel(request: TransportRequestRow): string {
   return pickup && dropoff ? `${verb}: ${pickup} → ${dropoff}` : verb
 }
 
+export interface LoadLegReferenceOptions {
+  /** Restricts the rows to legs priced into the accepted quote, so the readiness gate never
+   * demands a supplier reference for a service the customer did not buy. Leg-linked transport
+   * requests follow their leg; unlinked ones are dropped entirely, since they can never have
+   * been priced. Omit (or pass an empty set) to list everything on the booking. */
+  legIds?: Set<string>
+}
+
 /** Every leg/trip that will render as its own block on the voucher, in one flat list: selected
  * package legs (hotel/train/tour/airline) plus every transfer/rental trip (leg-tied or manual). */
 export async function loadLegReferenceRows(
   supabase: SupabaseClient<Database>,
   bookingId: string,
+  options: LoadLegReferenceOptions = {},
 ): Promise<LegReferenceRow[]> {
+  const { legIds } = options
+  // An empty set means "this quote priced no legs" (manual quote), which stays unfiltered —
+  // same convention as `buildVoucherServiceBlocks`.
+  const inScope = legIds && legIds.size > 0 ? (legId: string) => legIds.has(legId) : () => true
   const [
     { data: selectionRows, error: selectionsError },
     { data: serviceRows, error: servicesError },
@@ -109,7 +124,7 @@ export async function loadLegReferenceRows(
     supabase
       .from("booking_transport_requests")
       .select(
-        "id, package_leg_id, service_type, pickup_point, dropoff_point, sort_order, supplier_reference, supplier_contact_name, voucher_footnote, suppliers(name, default_contact_name)",
+        "id, package_leg_id, service_id, service_type, pickup_point, dropoff_point, sort_order, supplier_reference, supplier_contact_name, voucher_footnote, suppliers(name, default_contact_name)",
       )
       .eq("booking_id", bookingId)
       .order("sort_order", { ascending: true }),
@@ -125,6 +140,7 @@ export async function loadLegReferenceRows(
 
   const selectionRowsOut = selections
     .filter((row) => {
+      if (!inScope(row.package_leg_id)) return false
       const kind = firstRecord(row.suppliers)?.kind ?? null
       return !kind || !TRANSPORT_SUPPLIER_KINDS.has(kind)
     })
@@ -151,6 +167,8 @@ export async function loadLegReferenceRows(
 
   const serviceRowsOut = services
     .filter((row) => {
+      // A Build Booking service row is its own leg, so its id is what a quote snapshot records.
+      if (!inScope(row.id)) return false
       const kind = firstRecord(row.suppliers)?.kind ?? null
       return !kind || !TRANSPORT_SUPPLIER_KINDS.has(kind)
     })
@@ -174,20 +192,28 @@ export async function loadLegReferenceRows(
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .map((entry) => entry.row)
 
-  const transportRowsOut = transportRequests.map((request) => {
-    const supplier = firstRecord(request.suppliers)
-    return {
-      key: `transport_request:${request.id}`,
-      kind: "transport_request" as const,
-      id: request.id,
-      label: transportLabel(request),
-      supplierName: supplier?.name ?? null,
-      supplierReference: request.supplier_reference,
-      supplierContactName: request.supplier_contact_name ?? supplier?.default_contact_name ?? null,
-      voucherFootnote: request.voucher_footnote ?? null,
-      excursions: [],
-    }
-  })
+  const transportRowsOut = transportRequests
+    .filter((request) => {
+      const legId = request.package_leg_id ?? request.service_id
+      // Unlinked requests were never priced into any quote, so a scoped caller drops them
+      // (mirrors `includeUnlinkedTransportRequests` in buildVoucherServiceBlocks).
+      if (!legId) return !legIds || legIds.size === 0
+      return inScope(legId)
+    })
+    .map((request) => {
+      const supplier = firstRecord(request.suppliers)
+      return {
+        key: `transport_request:${request.id}`,
+        kind: "transport_request" as const,
+        id: request.id,
+        label: transportLabel(request),
+        supplierName: supplier?.name ?? null,
+        supplierReference: request.supplier_reference,
+        supplierContactName: request.supplier_contact_name ?? supplier?.default_contact_name ?? null,
+        voucherFootnote: request.voucher_footnote ?? null,
+        excursions: [],
+      }
+    })
 
   return [...selectionRowsOut, ...serviceRowsOut, ...transportRowsOut]
 }

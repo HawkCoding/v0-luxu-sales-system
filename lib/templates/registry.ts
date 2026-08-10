@@ -67,7 +67,10 @@ const amountDue: TemplateTokenSpec = {
   name: "amountDue",
   description: "Amount due on the invoice (formatted)",
   kind: "scalar",
-  sample: "12 500.00",
+  // Money samples must carry the "R" symbol: these tokens resolve through
+  // Intl.NumberFormat ZAR currency style, so a bare-number sample makes the
+  // editor preview hide a literal "R" the author typed in front of the token.
+  sample: "R 12 500,00",
 }
 const dueDate: TemplateTokenSpec = {
   name: "dueDate",
@@ -165,7 +168,7 @@ const ALL_TOKENS: TemplateTokenSpec[] = [
   invoiceNumber,
   amountDue,
   dueDate,
-  { name: "depositAmount", description: "Deposit amount due (formatted)", kind: "scalar", sample: "14 725.00" },
+  { name: "depositAmount", description: "Deposit amount due (formatted)", kind: "scalar", sample: "R 14 725,00" },
   { name: "depositPercentage", description: "Deposit percentage applied", kind: "scalar", sample: "25" },
   {
     name: "finalDueDate",
@@ -173,11 +176,11 @@ const ALL_TOKENS: TemplateTokenSpec[] = [
     kind: "scalar",
     sample: "14 July 2026",
   },
-  { name: "finalAmount", description: "Final amount due after the deposit (formatted)", kind: "scalar", sample: "44 175.00" },
-  { name: "receivedAmount", description: "Total amount received to date (formatted)", kind: "scalar", sample: "14 725.00" },
-  { name: "outstandingAmount", description: "Amount still outstanding (formatted)", kind: "scalar", sample: "44 175.00" },
+  { name: "finalAmount", description: "Final amount due after the deposit (formatted)", kind: "scalar", sample: "R 44 175,00" },
+  { name: "receivedAmount", description: "Total amount received to date (formatted)", kind: "scalar", sample: "R 14 725,00" },
+  { name: "outstandingAmount", description: "Amount still outstanding (formatted)", kind: "scalar", sample: "R 44 175,00" },
   { name: "daysOverdue", description: "Days past the due date (\"—\" if not yet due)", kind: "scalar", sample: "3" },
-  { name: "voucherNumber", description: "Voucher number", kind: "scalar", sample: "180226-01" },
+  { name: "voucherNumber", description: "Voucher reference — the customer invoice number", kind: "scalar", sample: "180226-01" },
   guestInfo,
   bankingDetails,
 ]

@@ -1,3 +1,4 @@
+import { resolveAcceptedQuoteScope, scopeLegIdsFilter } from "@/lib/quotes/accepted-quote-scope"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import type { SupabaseClient } from "@supabase/supabase-js"
@@ -25,9 +26,15 @@ export async function buildItineraryData(
     consultantName: string
   },
 ): Promise<ItineraryData> {
+  // The itinerary ships alongside the voucher, so it describes the same thing the voucher does:
+  // the services on the accepted quote, not whatever is currently selected in the builder.
+  const quoteScope = await resolveAcceptedQuoteScope(supabase, input.bookingId)
+
   const { blocks } = await buildVoucherServiceBlocks(supabase, {
     bookingId: input.bookingId,
     additionalServicesDetails: null,
+    legIds: scopeLegIdsFilter(quoteScope),
+    includeUnlinkedTransportRequests: false,
   })
 
   return {

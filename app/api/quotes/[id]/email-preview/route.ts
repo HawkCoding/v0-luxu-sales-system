@@ -9,6 +9,7 @@ import { buildQuoteSummaryBlock, formatMoney } from "@/lib/quotes/quote-summary-
 import { deriveFlightCapPerPerson, deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
 import { resolvePrimaryRoute, resolvePrimarySupplierId } from "@/lib/quotes/resolve-primary-route"
 import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
+import { legIdsFromLineItems } from "@/lib/quotes/accepted-quote-scope"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import type { PricingSnapshot } from "@/lib/types"
@@ -110,11 +111,7 @@ export async function POST(req: Request, { params }: RouteParams) {
   // Scope the itinerary to legs actually priced into this quote version, not whatever is
   // currently selected live on the job — an empty set means a manual/no-package quote, so fall
   // back to unfiltered (today's behavior) rather than rendering an empty itinerary.
-  const quoteLegIds = new Set(
-    lineItems
-      .map((li) => (li.pricing_snapshot as PricingSnapshot | null)?.legId)
-      .filter((legId): legId is string => Boolean(legId)),
-  )
+  const quoteLegIds = legIdsFromLineItems(lineItems)
 
   // Itinerary degrades to an omitted section rather than failing the preview.
   let itineraryBlocks: VoucherServiceBlock[] = []

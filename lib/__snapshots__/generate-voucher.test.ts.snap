@@ -237,7 +237,7 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
   <div class="voucher-number-row">
     <h1>TRAVEL VOUCHERS</h1>
     <div class="voucher-stub">
-      <div class="voucher-stub-label">Voucher no.</div>
+      <div class="voucher-stub-label">Reference no.</div>
       <div class="voucher-stub-number">LX-2026-001</div>
     </div>
   </div>

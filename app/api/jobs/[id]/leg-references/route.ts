@@ -2,6 +2,7 @@ import { z } from "zod"
 import { requireRole, requireUser } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { writeAuditLog } from "@/lib/audit-write"
+import { resolveAcceptedQuoteScope, scopeLegIdsFilter } from "@/lib/quotes/accepted-quote-scope"
 import { loadLegReferenceRows } from "@/lib/voucher/leg-references"
 
 export const runtime = "nodejs"
@@ -17,7 +18,12 @@ export async function GET(_req: Request, { params }: RouteParams) {
   const { id } = await params
 
   try {
-    const rows = await loadLegReferenceRows(auth.value.supabase, id)
+    // Only services on the accepted quote are listed, so a consultant is never asked for a
+    // supplier reference for something the customer did not buy.
+    const quoteScope = await resolveAcceptedQuoteScope(auth.value.supabase, id)
+    const rows = await loadLegReferenceRows(auth.value.supabase, id, {
+      legIds: scopeLegIdsFilter(quoteScope),
+    })
     return Response.json({ rows })
   } catch (error) {
     return safeSupabaseError("leg-references:list", error)
@@ -100,7 +106,8 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   })
 
   try {
-    const rows = await loadLegReferenceRows(supabase, id)
+    const quoteScope = await resolveAcceptedQuoteScope(supabase, id)
+    const rows = await loadLegReferenceRows(supabase, id, { legIds: scopeLegIdsFilter(quoteScope) })
     return Response.json({ rows })
   } catch (error) {
     return safeSupabaseError("leg-references:reload", error)

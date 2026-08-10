@@ -13,6 +13,7 @@ import { logError } from "@/lib/error-log"
 import { nightsBetween } from "@/lib/packages/trip-date-range"
 import type { Database } from "@/lib/supabase/types"
 import type { PricingSnapshot } from "@/lib/types"
+import { legIdsFromLineItems } from "@/lib/quotes/accepted-quote-scope"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 
 /**
@@ -212,6 +213,9 @@ export async function buildInvoiceView(
   const routeSupplier = Array.isArray(route?.supplier) ? route.supplier[0] : route?.supplier
 
   let items: InvoiceItem[] = []
+  // The invoice's quote is the accepted one, so its priced legs also scope the departure block
+  // below — no second lookup needed. Empty means a manual quote, which stays unfiltered.
+  let quoteLegIds: Set<string> | undefined
   if (quoteId) {
     const { data: lineItems, error } = await supabase
       .from("quote_line_items")
@@ -228,6 +232,8 @@ export async function buildInvoiceView(
       })
     } else {
       items = buildInvoiceItems(lineItems ?? [])
+      const legIds = legIdsFromLineItems(lineItems)
+      quoteLegIds = legIds.size > 0 ? legIds : undefined
     }
   }
 
@@ -236,6 +242,8 @@ export async function buildInvoiceView(
     const { blocks } = await buildVoucherServiceBlocks(supabase, {
       bookingId,
       additionalServicesDetails: null,
+      legIds: quoteLegIds,
+      includeUnlinkedTransportRequests: false,
     })
     departure = buildDeparture(blocks, journeyHeading, {
       trainName: routeSupplier?.name ?? null,
