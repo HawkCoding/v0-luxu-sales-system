@@ -107,6 +107,46 @@ function checkRateAdjustments(
   }
 }
 
+/**
+ * A train supplier's boarding/alighting address in one city. Keyed by city because a route resolves
+ * its boarding point from its own origin location -- see lib/voucher/build-service-blocks.ts.
+ */
+export const stationAddressSchema = z.object({
+  id: z.string().uuid().optional(),
+  locationId: z.string().uuid(),
+  stationName: z.string().trim().max(255).nullable().optional(),
+  streetAddress: z.string().trim().max(255).nullable().optional(),
+  notes: z.string().trim().max(1000).nullable().optional(),
+})
+
+export const draftStationAddressSchema = z.object({
+  id: z.string().uuid().optional(),
+  locationId: z.union([z.string().uuid(), z.literal("")]).default(""),
+  stationName: z.string().trim().max(255).nullable().default(null),
+  streetAddress: z.string().trim().max(255).nullable().default(null),
+  notes: z.string().trim().max(1000).nullable().default(null),
+})
+
+/** One station per city per supplier -- the DB enforces this with a unique index, so catch it here
+ * and return a field-level 400 instead of letting the upsert surface a raw Postgres conflict. */
+function checkStationAddresses(
+  value: { stationAddresses: { locationId: string }[] },
+  ctx: z.RefinementCtx,
+) {
+  const seen = new Set<string>()
+  for (const [index, station] of value.stationAddresses.entries()) {
+    if (!station.locationId) continue
+    if (seen.has(station.locationId)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["stationAddresses", index, "locationId"],
+        message: "Each city may only have one station address",
+      })
+    }
+    seen.add(station.locationId)
+  }
+}
+
 export const routeSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().trim().min(1, "Route name is required"),
@@ -196,6 +236,7 @@ export const supplierSaveSchema = z.object({
   emails: z.array(supplierEmailSchema).default([]),
   suiteTypes: z.array(suiteTypeSchema),
   routes: z.array(routeSchema).default([]),
+  stationAddresses: z.array(stationAddressSchema).default([]),
   bedroomTypes: z.array(variantValueSchema).default([]),
   bedroomLayouts: z.array(variantValueSchema).default([]),
   bathroomTypes: z.array(variantValueSchema).default([]),
@@ -204,6 +245,7 @@ export const supplierSaveSchema = z.object({
   expectedUpdatedAt: z.string().optional(),
 }).superRefine((value, ctx) => {
   checkRateAdjustments(value, ctx)
+  checkStationAddresses(value, ctx)
 
   for (const [index, route] of value.routes.entries()) {
     if (value.kind === "transfers" || value.kind === "vehicle_rental") {
@@ -337,12 +379,16 @@ export const supplierDraftSaveSchema = z.object({
   emails: z.array(draftSupplierEmailSchema).default([]),
   suiteTypes: z.array(draftSuiteTypeSchema).default([]),
   routes: z.array(draftRouteSchema).default([]),
+  stationAddresses: z.array(draftStationAddressSchema).default([]),
   bedroomTypes: z.array(draftVariantValueSchema).default([]),
   bedroomLayouts: z.array(draftVariantValueSchema).default([]),
   bathroomTypes: z.array(draftVariantValueSchema).default([]),
   rateAdjustments: z.array(rateAdjustmentSchema).default([]),
   defaultRateTypeId: defaultRateTypeIdSchema,
   expectedUpdatedAt: z.string().optional(),
-}).superRefine(checkRateAdjustments)
+}).superRefine((value, ctx) => {
+  checkRateAdjustments(value, ctx)
+  checkStationAddresses(value, ctx)
+})
 
 export type SupplierDraftSaveInput = z.infer<typeof supplierDraftSaveSchema>

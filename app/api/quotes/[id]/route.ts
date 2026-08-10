@@ -26,6 +26,17 @@ interface RouteParams {
   params: Promise<{ id: string }>
 }
 
+/**
+ * Statuses whose line items are a record rather than a working draft. An accepted quote is what
+ * the customer bought — and what the voucher, itinerary and invoice now render from — so editing
+ * it in place would silently rewrite the sold scope. `Revise` is the supported path: it
+ * supersedes this quote and opens a new version (see lib/quotes/revision-reset.ts).
+ *
+ * `sent` is deliberately left editable: nothing renders off a quote before it is accepted, so
+ * locking it would restrict the salesperson for no integrity gain.
+ */
+const LOCKED_QUOTE_STATUSES = ["accepted", "superseded", "cancelled"]
+
 export async function PATCH(req: Request, { params }: RouteParams) {
   const auth = await requireRole(["admin", "manager", "consultant"])
   if (!auth.ok) return auth.response
@@ -52,6 +63,18 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   if (parsed.expectedUpdatedAt && parsed.expectedUpdatedAt !== quote.updated_at) {
     return staleVersionResponse("quote", quote.updated_at)
+  }
+
+  if (LOCKED_QUOTE_STATUSES.includes(quote.status)) {
+    return NextResponse.json(
+      {
+        error:
+          quote.status === "accepted"
+            ? "An accepted quote cannot be edited. Use Revise to create a new version."
+            : `A ${quote.status} quote cannot be edited.`,
+      },
+      { status: 409 },
+    )
   }
 
   const normalizedLineItems: QuoteLineItem[] = parsed.lineItems.map((li) => ({

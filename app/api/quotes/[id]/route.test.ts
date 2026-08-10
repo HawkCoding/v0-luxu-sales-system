@@ -24,7 +24,7 @@ interface PrevLine {
   pricing_snapshot: unknown
 }
 
-function buildAuth(previousLineItems: PrevLine[]) {
+function buildAuth(previousLineItems: PrevLine[], status = "draft") {
   const rpc = vi.fn(async () => ({ error: null }))
   const auditInsert = vi.fn(async () => ({ error: null }))
   const quoteUpdate = vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) }))
@@ -41,6 +41,7 @@ function buildAuth(previousLineItems: PrevLine[]) {
                   id: QUOTE_ID,
                   subtotal: 0,
                   total: 0,
+                  status,
                   updated_at: "2026-07-14T00:00:00.000Z",
                   override_reason: null,
                 },
@@ -105,6 +106,43 @@ function prevLine(overrides: Partial<PrevLine> = {}): PrevLine {
 describe("PATCH /api/quotes/[id]", () => {
   beforeEach(() => {
     authMocks.requireRole.mockReset()
+  })
+
+  it("refuses to edit an accepted quote, since documents now render from what it priced", async () => {
+    const { rpc } = buildAuth([prevLine()], "accepted")
+
+    const res = await PATCH(
+      patchReq({ lineItems: [{ description: "Package Total", qty: 1, unitPrice: 24800, total: 24800 }] }),
+      routeParams,
+    )
+
+    expect(res.status).toBe(409)
+    expect((await res.json()).error).toContain("Revise")
+    expect(rpc).not.toHaveBeenCalled()
+  })
+
+  it("refuses to edit a superseded quote", async () => {
+    const { rpc } = buildAuth([prevLine()], "superseded")
+
+    const res = await PATCH(
+      patchReq({ lineItems: [{ description: "Package Total", qty: 1, unitPrice: 24800, total: 24800 }] }),
+      routeParams,
+    )
+
+    expect(res.status).toBe(409)
+    expect(rpc).not.toHaveBeenCalled()
+  })
+
+  it("still allows editing a sent quote, which nothing renders from yet", async () => {
+    const { rpc } = buildAuth([prevLine({ description: "Package Total", unit_price: 24800, total: 24800 })], "sent")
+
+    const res = await PATCH(
+      patchReq({ lineItems: [{ description: "Package Total", qty: 1, unitPrice: 24800, total: 24800 }] }),
+      routeParams,
+    )
+
+    expect(res.status).toBe(200)
+    expect(rpc).toHaveBeenCalled()
   })
 
   it("deletes a line from an all-snapshot-less quote without an override reason", async () => {

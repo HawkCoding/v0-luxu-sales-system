@@ -74,6 +74,7 @@ function mockSupplierDetail(overrides: Partial<typeof supplierRow> = {}) {
       },
     ],
     routes: [],
+    stationAddresses: [],
     rateCards: [],
     locations: [],
     bedroomTypes: [],
@@ -560,6 +561,7 @@ describe("PATCH /api/suppliers/[slug]", () => {
         },
       ],
       routes: [],
+      stationAddresses: [],
       rateCards: [],
       locations: [
         { id: ORIGIN_ID, name: "Pretoria" },
@@ -638,5 +640,193 @@ describe("PATCH /api/suppliers/[slug]", () => {
     const routeRows = routeUpsertPayloads[0] as Array<{ name: string }>
     expect(routeRows[0].name).toBe("Custom Journey Name")
     expect(routeRows[1].name).toBe("Pretoria ↔ Cape Town")
+  })
+
+  describe("station addresses", () => {
+    const PRETORIA_ID = "00000000-0000-4000-8000-0000000000c1"
+    const CAPE_TOWN_ID = "00000000-0000-4000-8000-0000000000c2"
+    const STATION_ID = "00000000-0000-4000-8000-0000000000c3"
+    const STALE_STATION_ID = "00000000-0000-4000-8000-0000000000c4"
+
+    /** Wires the mocks this group shares and returns the captured station upsert payloads. */
+    function setupStationSave(kind: "train_operator" | "hotel_property") {
+      const supplierMaybeSingle = vi.fn(async () => ({
+        data: { updated_at: "2026-01-03T00:00:00.000Z" },
+        error: null,
+      }))
+      const supplierEqMock = vi.fn()
+      const supplierUpdateQuery = {
+        eq: supplierEqMock,
+        select: () => ({ maybeSingle: supplierMaybeSingle }),
+      }
+      supplierEqMock.mockReturnValue(supplierUpdateQuery)
+
+      const stationUpsertPayloads: Array<unknown> = []
+      const linkDeleteFactory = () => ({ delete: () => ({ in: async () => ({ error: null }) }) })
+
+      mockAuth()
+      helperMocks.checkDeletionDependencies.mockResolvedValue([])
+      helperMocks.deleteInChunks.mockResolvedValue({ error: null })
+      helperMocks.loadSupplierDetail.mockResolvedValue({
+        supplier: { ...supplierRow, kind },
+        suiteTypes: [],
+        emails: [],
+        routes: [],
+        stationAddresses: [
+          {
+            id: STALE_STATION_ID,
+            supplier_id: SUPPLIER_ID,
+            location_id: CAPE_TOWN_ID,
+            station_name: "Old Station",
+            street_address: null,
+            notes: null,
+            created_at: "2026-01-01T00:00:00.000Z",
+            updated_at: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+        rateCards: [],
+        locations: [
+          { id: PRETORIA_ID, name: "Pretoria" },
+          { id: CAPE_TOWN_ID, name: "Cape Town" },
+        ],
+        bedroomTypes: [],
+        bedroomLayouts: [],
+        bathroomTypes: [],
+        suiteTypeBedroomTypes: [],
+        suiteTypeBedroomLayouts: [],
+        suiteTypeBathroomTypes: [],
+        rateTypes: [],
+      })
+
+      helperMocks.supabaseFrom.mockImplementation((table: string) => {
+        if (table === "profiles") return profileQuery("manager")
+        if (table === "suppliers") return { update: () => supplierUpdateQuery }
+        // The bare `email` field seeds a fallback supplier_emails row when `emails` is empty.
+        if (table === "supplier_emails") return { upsert: async () => ({ error: null }) }
+        if (table === "supplier_station_addresses") {
+          return {
+            upsert: async (payload: unknown) => {
+              stationUpsertPayloads.push(payload)
+              return { error: null }
+            },
+          }
+        }
+        if (table === "vehicle_rental_route_details") return linkDeleteFactory()
+        if (table === "supplier_rate_adjustments") {
+          return { delete: () => ({ eq: async () => ({ error: null }) }) }
+        }
+        throw new Error(`Unexpected table ${table}`)
+      })
+
+      return { stationUpsertPayloads }
+    }
+
+    function stationSaveBody(kind: string) {
+      return JSON.stringify({
+        name: "Rovos Rail",
+        kind,
+        email: "ops@example.com",
+        phone: "",
+        website: "",
+        location: "Pretoria",
+        notes: "",
+        singleSupplementPct: 0,
+        active: true,
+        emails: [],
+        suiteTypes: [],
+        routes: [],
+        stationAddresses: [
+          {
+            id: STATION_ID,
+            locationId: PRETORIA_ID,
+            stationName: "Rovos Rail Station",
+            streetAddress: "Capital Park",
+            notes: "Check in 2h prior",
+          },
+        ],
+        expectedUpdatedAt: "2026-01-02T00:00:00.000Z",
+      })
+    }
+
+    it("persists a train supplier's station rows and deletes the ones no longer sent", async () => {
+      const { stationUpsertPayloads } = setupStationSave("train_operator")
+
+      const response = await PATCH(
+        new Request("http://localhost/api/suppliers/test", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: stationSaveBody("train_operator"),
+        }),
+        { params: Promise.resolve({ slug: "test" }) },
+      )
+
+      expect(response.status).toBe(200)
+      expect(stationUpsertPayloads[0]).toEqual([
+        expect.objectContaining({
+          id: STATION_ID,
+          supplier_id: SUPPLIER_ID,
+          location_id: PRETORIA_ID,
+          station_name: "Rovos Rail Station",
+          street_address: "Capital Park",
+          notes: "Check in 2h prior",
+        }),
+      ])
+      // The stale Cape Town row wasn't resent, so it goes -- and before the upsert, so a city
+      // moved onto a fresh row can't collide on the (supplier_id, location_id) unique index.
+      expect(helperMocks.deleteInChunks).toHaveBeenCalledWith(
+        expect.anything(),
+        "supplier_station_addresses",
+        [STALE_STATION_ID],
+      )
+    })
+
+    it("drops station rows sent for a non-train supplier", async () => {
+      const { stationUpsertPayloads } = setupStationSave("hotel_property")
+
+      const response = await PATCH(
+        new Request("http://localhost/api/suppliers/test", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: stationSaveBody("hotel_property"),
+        }),
+        { params: Promise.resolve({ slug: "test" }) },
+      )
+
+      expect(response.status).toBe(200)
+      expect(stationUpsertPayloads).toEqual([])
+    })
+
+    it("rejects two station rows for the same city with a 400", async () => {
+      setupStationSave("train_operator")
+
+      const response = await PATCH(
+        new Request("http://localhost/api/suppliers/test", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: "Rovos Rail",
+            kind: "train_operator",
+            email: "ops@example.com",
+            phone: "",
+            website: "",
+            location: "Pretoria",
+            notes: "",
+            singleSupplementPct: 0,
+            active: true,
+            emails: [],
+            suiteTypes: [],
+            routes: [],
+            stationAddresses: [
+              { locationId: PRETORIA_ID, stationName: "Rovos Rail Station" },
+              { locationId: PRETORIA_ID, stationName: "Duplicate Station" },
+            ],
+            expectedUpdatedAt: "2026-01-02T00:00:00.000Z",
+          }),
+        }),
+        { params: Promise.resolve({ slug: "test" }) },
+      )
+
+      expect(response.status).toBe(400)
+    })
   })
 })

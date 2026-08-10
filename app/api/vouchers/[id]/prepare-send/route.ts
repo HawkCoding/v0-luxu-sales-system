@@ -3,6 +3,11 @@ import { jsonError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDateLong } from "@/lib/date-format"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { checkVoucherReadiness } from "@/lib/voucher/check-readiness"
+import {
+  findMissingQuotedLegs,
+  resolveAcceptedQuoteScope,
+  scopeLegIdsFilter,
+} from "@/lib/quotes/accepted-quote-scope"
 import { loadLegReferenceRows, missingLegReferenceLabels } from "@/lib/voucher/leg-references"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
@@ -120,9 +125,16 @@ export async function POST(_req: Request, { params }: RouteParams) {
   const route = firstRecord(booking.route)
   const voucherDocument = firstRecord(voucher.document)
 
+  // Same scoping rule the generate route applies: only services on the accepted quote count,
+  // so the send gate cannot demand a reference for something the customer did not buy.
   let legReferenceRows: Awaited<ReturnType<typeof loadLegReferenceRows>> = []
+  let missingQuotedLegLabels: string[] = []
   try {
-    legReferenceRows = await loadLegReferenceRows(supabase, booking.id)
+    const quoteScope = await resolveAcceptedQuoteScope(supabase, booking.id)
+    missingQuotedLegLabels = await findMissingQuotedLegs(supabase, booking.id, quoteScope)
+    legReferenceRows = await loadLegReferenceRows(supabase, booking.id, {
+      legIds: scopeLegIdsFilter(quoteScope),
+    })
   } catch (error) {
     return safeSupabaseError("voucher-prepare-send:load-leg-references", error)
   }
@@ -133,6 +145,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
     departureDate: booking.departure_date,
     customerEmail: customer?.email ?? null,
     missingLegReferenceLabels: missingLegReferenceLabels(legReferenceRows),
+    missingQuotedLegLabels,
   })
   if (!readiness.ready) {
     return jsonError("Voucher is not ready to send", 400, { failures: readiness.failures })

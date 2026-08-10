@@ -140,9 +140,17 @@ function buildAuth(options: AuthOptions = {}) {
         })),
       }
     }
-    return {
-      eq: vi.fn(async () => ({ data: [], error: null })),
-    }
+    // Chainable and awaitable: shared email tokens await after .eq(), while the accepted-quote
+    // scope lookup chains .eq().eq().order().limit().maybeSingle(). No quotes in these fixtures,
+    // so both resolve empty and the voucher readiness gate stays unscoped.
+    const self: Record<string, unknown> = {}
+    self.eq = vi.fn(() => self)
+    self.order = vi.fn(() => self)
+    self.limit = vi.fn(() => self)
+    self.maybeSingle = vi.fn(async () => ({ data: null, error: null }))
+    self.then = (resolve: (value: unknown) => unknown) =>
+      Promise.resolve({ data: [], error: null }).then(resolve)
+    return self
   })
 
   const documentSelect = vi.fn(() => ({

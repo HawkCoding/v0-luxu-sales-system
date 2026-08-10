@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -3648,6 +3648,54 @@ export type Database = {
             columns: ["period_id"]
             isOneToOne: false
             referencedRelation: "supplier_seasonal_periods"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      supplier_station_addresses: {
+        Row: {
+          created_at: string
+          id: string
+          location_id: string
+          notes: string | null
+          station_name: string | null
+          street_address: string | null
+          supplier_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          location_id: string
+          notes?: string | null
+          station_name?: string | null
+          street_address?: string | null
+          supplier_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          location_id?: string
+          notes?: string | null
+          station_name?: string | null
+          street_address?: string | null
+          supplier_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_station_addresses_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_station_addresses_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
             referencedColumns: ["id"]
           },
         ]

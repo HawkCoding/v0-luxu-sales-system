@@ -23,6 +23,11 @@ import { FileDown, Loader2, Mail, Trash2, X } from "lucide-react"
 
 const EDITABLE_QUOTE_STATUSES = ["draft", "pricing_incomplete", "ready"]
 
+/** Statuses whose services can still be rebuilt. Mirrors LOCKED_QUOTE_STATUSES in
+ * app/api/quotes/[id]/route.ts — an accepted quote is the record of what was sold, so changing
+ * it goes through Revise instead. */
+const BUILDABLE_QUOTE_STATUSES = [...EDITABLE_QUOTE_STATUSES, "sent", "expired"]
+
 const STATUS_BADGE: Record<string, { variant: "default" | "secondary" | "outline" | "destructive"; label: string; className?: string }> = {
   draft: { variant: "secondary", label: "Provisional" },
   pricing_incomplete: { variant: "outline", label: "Provisional (Incomplete)" },
@@ -240,21 +245,23 @@ export function JobQuotesTab({
                         )}
                         PDF
                       </Button>
-                      <BuildBookingDialog
-                        jobId={jobId}
-                        quoteId={q.id}
-                        travelDate={travelDate}
-                        existingLineItemCount={q.lineItems.length}
-                        existingLineItems={q.lineItems}
-                        expectedUpdatedAt={q.updatedAt}
-                        customerDefaultRateTypeId={customerDefaultRateTypeId}
-                        onApplied={mutate}
-                        autoOpen={autoOpenBuildBookingQuoteId === q.id}
-                        onAutoOpenHandled={() => {
-                          setAutoOpenBuildBookingQuoteId(null)
-                          onAutoOpenBuildBookingHandled?.()
-                        }}
-                      />
+                      {BUILDABLE_QUOTE_STATUSES.includes(q.status) && (
+                        <BuildBookingDialog
+                          jobId={jobId}
+                          quoteId={q.id}
+                          travelDate={travelDate}
+                          existingLineItemCount={q.lineItems.length}
+                          existingLineItems={q.lineItems}
+                          expectedUpdatedAt={q.updatedAt}
+                          customerDefaultRateTypeId={customerDefaultRateTypeId}
+                          onApplied={mutate}
+                          autoOpen={autoOpenBuildBookingQuoteId === q.id}
+                          onAutoOpenHandled={() => {
+                            setAutoOpenBuildBookingQuoteId(null)
+                            onAutoOpenBuildBookingHandled?.()
+                          }}
+                        />
+                      )}
                     </>
                   )}
                 </div>

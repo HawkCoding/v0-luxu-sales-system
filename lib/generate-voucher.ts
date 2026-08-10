@@ -37,6 +37,12 @@ export interface VoucherServiceBlockData {
    * `route_reversed` swaps the booked direction. Never derive this from the supplier's own
    * static `location` field, which has no notion of leg direction. */
   arrivalStation?: string | null
+  /** Train-only: the street address the guest boards at — the supplier's station row for the
+   * route's origin city, or its destination city when `route_reversed` flips the leg. Never the
+   * supplier's own `street_address`, which is its head office and knows nothing of direction. */
+  boardingPoint?: string | null
+  /** Train-only: the arrival station's address, resolved by the same rule in reverse. */
+  arrivalPoint?: string | null
   departureDate?: string | null
   arrivalDate?: string | null
   /** HH:MM the service starts — train departure, hotel check-in, transfer pickup. */
@@ -588,7 +594,7 @@ ${buildHeaderHtml(t)}
   <div class="voucher-number-row">
     <h1>TRAVEL VOUCHERS</h1>
     <div class="voucher-stub">
-      <div class="voucher-stub-label">Voucher no.</div>
+      <div class="voucher-stub-label">Reference no.</div>
       <div class="voucher-stub-number">${escapeHtml(data.voucherNumber)}</div>
     </div>
   </div>

@@ -84,7 +84,7 @@ export function VoucherDocument({ data, template, docTitle = "TRAVEL VOUCHERS", 
         <View style={styles.voucherNumberRow}>
           <Text style={styles.title}>{docTitle}</Text>
           <View style={styles.voucherStub}>
-            <Text style={styles.voucherStubLabel}>Voucher no.</Text>
+            <Text style={styles.voucherStubLabel}>Reference no.</Text>
             <Text style={styles.voucherStubNumber}>{data.voucherNumber}</Text>
           </View>
         </View>

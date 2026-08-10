@@ -101,10 +101,15 @@ function buildSupabase(options: BuildOptions = {}) {
         }
       }
       if (table === "quotes") {
-        return {
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-        }
+        // Chainable, and `maybeSingle` yields no accepted quote — these fixtures have none, so
+        // the readiness gate stays unscoped (scoping is covered by accepted-quote-scope.test.ts).
+        const self: Record<string, unknown> = {}
+        self.select = vi.fn(() => self)
+        self.eq = vi.fn(() => self)
+        self.order = vi.fn(() => self)
+        self.limit = vi.fn(() => self)
+        self.maybeSingle = vi.fn(async () => ({ data: null, error: null }))
+        return self
       }
       // Supplier fallback lookup for {{supplierName}} — no route supplier in these fixtures.
       if (table === "bookings") {

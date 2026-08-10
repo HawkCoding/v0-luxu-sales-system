@@ -4,7 +4,7 @@ import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { depositPercentageToRate, getDefaultDepositPercentage } from "@/lib/pipeline/constants"
 
 const BOOKING_COLUMNS =
-  "id, booking_number, customer_id, stage, consultant, purpose, source, departure_date, duration_nights, trip_end_date, created_at, updated_at, route:routes(name)"
+  "id, booking_number, customer_invoice_number, customer_id, stage, consultant, purpose, source, departure_date, duration_nights, trip_end_date, created_at, updated_at, route:routes(name)"
 
 function addDaysToDateString(value: string, days: number): string {
   const [year = "1970", month = "1", day = "1"] = value.split("-")
@@ -70,6 +70,7 @@ export async function GET() {
     return {
       id: booking.id,
       bookingNumber: booking.booking_number,
+      customerInvoiceNumber: booking.customer_invoice_number ?? null,
       customerId: booking.customer_id,
       stage: booking.stage,
       consultant: booking.consultant,

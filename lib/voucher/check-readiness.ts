@@ -4,6 +4,7 @@ export type ReadinessFailureCode =
   | "departure_date_missing"
   | "customer_email_missing"
   | "leg_references_missing"
+  | "quoted_leg_missing"
 
 export interface ReadinessFailure {
   code: ReadinessFailureCode
@@ -39,6 +40,8 @@ export interface ReadinessBlockSummary {
   serviceType: string
   supplierContactName?: string | null
   streetAddress?: string | null
+  /** Train blocks are judged on this instead of `streetAddress` — see `buildWarnings`. */
+  boardingPoint?: string | null
   startTime?: string | null
   endTime?: string | null
   hasGuestBreakdown: boolean
@@ -55,6 +58,11 @@ export interface VoucherReadinessInput {
   departureDate: string | null
   customerEmail: string | null
   missingLegReferenceLabels: string[]
+  /** Services the accepted quote priced that no longer exist in the booking's builder. Deleting a
+   * service also cascades away its units, transport requests and supplier references, so there is
+   * nothing left to print for it — generating anyway would ship a voucher silently missing
+   * something the customer paid for. Empty when the booking has no accepted quote. */
+  missingQuotedLegLabels?: string[]
   /** Omit to skip the warnings pass (e.g. a caller that only needs the hard gate). */
   serviceBlocks?: ReadinessBlockSummary[]
 }
@@ -90,8 +98,12 @@ function buildWarnings(blocks: ReadinessBlockSummary[]): ReadinessWarning[] {
     aggregateWarning(
       "supplier_address_missing",
       "No street address for",
-      "Add a street address to the supplier record.",
-      supplierBacked.filter((b) => !b.streetAddress?.trim()).map((b) => b.title),
+      "Add a street address to the supplier record — for a train, a station address for the cities its route runs between.",
+      // A train supplier has no single street address: it boards guests at a different station in
+      // every city, so the address that matters to the guest is the leg's own boarding point.
+      supplierBacked
+        .filter((b) => (b.serviceType === "train" ? !b.boardingPoint?.trim() : !b.streetAddress?.trim()))
+        .map((b) => b.title),
     ),
     aggregateWarning(
       "service_times_missing",
@@ -160,6 +172,14 @@ export function checkVoucherReadiness(input: VoucherReadinessInput): VoucherRead
       code: "customer_email_missing",
       message: "Customer email is required before generating a voucher.",
       fixHint: "Add an email address to the customer record.",
+    })
+  }
+
+  if ((input.missingQuotedLegLabels ?? []).length > 0) {
+    failures.push({
+      code: "quoted_leg_missing",
+      message: `Services on the accepted quote are no longer in the booking: ${(input.missingQuotedLegLabels ?? []).join(", ")}.`,
+      fixHint: "Re-add the service under Edit Quote, or revise the quote to match what is being delivered.",
     })
   }
 

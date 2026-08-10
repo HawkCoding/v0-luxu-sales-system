@@ -16,6 +16,11 @@ import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import type { Json } from "@/lib/supabase/types"
 import type { PipelineStage } from "@/lib/types"
 import { checkVoucherReadiness } from "@/lib/voucher/check-readiness"
+import {
+  findMissingQuotedLegs,
+  resolveAcceptedQuoteScope,
+  scopeLegIdsFilter,
+} from "@/lib/quotes/accepted-quote-scope"
 import { loadLegReferenceRows, missingLegReferenceLabels } from "@/lib/voucher/leg-references"
 
 export const runtime = "nodejs"
@@ -174,9 +179,16 @@ export async function POST(req: Request) {
   }
 
   if (isVoucherSend(parsed.data.kind, parsed.data.moveStage)) {
+    // Scoped to the accepted quote, matching the generate and prepare-send gates — a service
+    // the customer never bought must not hold up the voucher send.
     let legReferenceRows: Awaited<ReturnType<typeof loadLegReferenceRows>> = []
+    let missingQuotedLegLabels: string[] = []
     try {
-      legReferenceRows = await loadLegReferenceRows(supabase, booking.id)
+      const quoteScope = await resolveAcceptedQuoteScope(supabase, booking.id)
+      missingQuotedLegLabels = await findMissingQuotedLegs(supabase, booking.id, quoteScope)
+      legReferenceRows = await loadLegReferenceRows(supabase, booking.id, {
+        legIds: scopeLegIdsFilter(quoteScope),
+      })
     } catch (error) {
       return safeSupabaseError("correspondence:load-leg-references", error)
     }
@@ -187,6 +199,7 @@ export async function POST(req: Request) {
       departureDate: booking.departure_date,
       customerEmail: customerRecord?.email ?? null,
       missingLegReferenceLabels: missingLegReferenceLabels(legReferenceRows),
+      missingQuotedLegLabels,
     })
 
     if (!readiness.ready) {

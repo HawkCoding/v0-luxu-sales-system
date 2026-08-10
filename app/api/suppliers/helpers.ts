@@ -13,6 +13,7 @@ export type RefTableName =
   | "rate_cards"
   | "routes"
   | "supplier_emails"
+  | "supplier_station_addresses"
   | "suite_types"
   | "bedroom_types"
   | "bedroom_layouts"
@@ -224,6 +225,7 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     { data: suiteTypes, error: suiteTypesError },
     { data: emails, error: emailsError },
     { data: routes, error: routesError },
+    { data: stationAddresses, error: stationAddressesError },
   ] = await Promise.all([
     supabase
       .from("suite_types")
@@ -242,6 +244,10 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
       .select("*")
       .eq("supplier_id", supplierId)
       .order("name", { ascending: true }),
+    supabase
+      .from("supplier_station_addresses")
+      .select("*")
+      .eq("supplier_id", supplierId),
   ])
 
   if (suiteTypesError) {
@@ -370,13 +376,38 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     }
   }
 
+  if (stationAddressesError) {
+    console.error("Failed to load supplier station addresses", {
+      supplierId,
+      supplierSlug: slug,
+      error: stationAddressesError,
+    })
+    return {
+      error: NextResponse.json(
+        {
+          error: "Failed to load supplier station addresses",
+          details: {
+            message: stationAddressesError.message,
+            code: (stationAddressesError as { code?: string }).code,
+            hint: (stationAddressesError as { hint?: string }).hint,
+            details: (stationAddressesError as { details?: string }).details,
+          },
+        },
+        { status: 500 },
+      ),
+    }
+  }
+
+  // Station cities join the route endpoints here so a station in a city no route touches still
+  // resolves to a name in the editor and in mapSupplierDetail's ordering.
   const locationIds = Array.from(
-    new Set(
-      (routes ?? []).flatMap((route) => [
+    new Set([
+      ...(routes ?? []).flatMap((route) => [
         route.origin_location_id,
         route.destination_location_id,
       ]),
-    ),
+      ...(stationAddresses ?? []).map((station) => station.location_id),
+    ]),
   ).filter((locationId): locationId is string => Boolean(locationId))
 
   const locationResult:
@@ -503,6 +534,7 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     suiteTypes: suiteTypes ?? [],
     emails: emails ?? [],
     routes: routes ?? [],
+    stationAddresses: stationAddresses ?? [],
     rateCards: rateCards ?? [],
     locations: locations ?? [],
     vehicleRentalRouteDetails: vehicleRentalRouteDetails ?? [],

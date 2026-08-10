@@ -31,6 +31,7 @@ function buildSupabase() {
                 {
                   id: "b1",
                   booking_number: "BT-2026-0001",
+                  customer_invoice_number: "244453",
                   customer_id: "c1",
                   stage: "quote_sent",
                   consultant: "LB",
@@ -98,6 +99,11 @@ describe("GET /api/pipeline", () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as Array<Record<string, unknown>>
     expect(body).toHaveLength(1)
-    expect(body[0]).toMatchObject({ id: "b1", bookingNumber: "BT-2026-0001", customerName: "Jane Smith" })
+    expect(body[0]).toMatchObject({
+      id: "b1",
+      bookingNumber: "BT-2026-0001",
+      customerInvoiceNumber: "244453",
+      customerName: "Jane Smith",
+    })
   })
 })

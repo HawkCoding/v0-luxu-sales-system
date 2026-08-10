@@ -72,7 +72,7 @@ const EMAIL_PLACEHOLDERS: { token: string; description: string }[] = (() => {
 })()
 
 const VOUCHER_PLACEHOLDERS = [
-  { token: "{voucher_number}",   description: "Unique voucher identifier" },
+  { token: "{voucher_number}",   description: "Voucher reference — the customer invoice number" },
   { token: "{guest_names}",      description: "Names of all guests on the booking" },
   { token: "{consultant_name}",  description: "Name of the assigned consultant" },
   { token: "{supplier_name}",    description: "Name of the service supplier" },

@@ -3,6 +3,7 @@
 import { usePipeline, useData } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
 import { depositPercentageToRate } from "@/lib/pipeline/constants"
+import { bookingDisplayReference } from "@/lib/invoices/invoice-status"
 import {
   getCanonicalPipelineStage,
   getPipelineStageLabel,
@@ -37,6 +38,7 @@ import { useRouter } from "next/navigation"
 interface PipelineJob {
   id: string
   bookingNumber: string
+  customerInvoiceNumber: string | null
   customerName: string
   direction: string
   departureDate: string
@@ -294,7 +296,11 @@ export default function PipelinePage() {
   })
 
   const filtered = enriched.filter((b: any) => {
-    const matchSearch = !search || [b.bookingNumber, b.customerName, b.direction].some((f: string) => f?.toLowerCase().includes(search.toLowerCase()))
+    const matchSearch =
+      !search ||
+      [b.customerInvoiceNumber, b.bookingNumber, b.customerName, b.direction].some((f: string | null) =>
+        f?.toLowerCase().includes(search.toLowerCase()),
+      )
     const matchStage = stageFilter === "all" || getCanonicalPipelineStage(b.stage as PipelineStage) === stageFilter
     return matchSearch && matchStage
   })
@@ -390,7 +396,7 @@ export default function PipelinePage() {
                         <div className={`w-3 h-3 rounded-full flex-shrink-0 ${PAYMENT_COLORS[b.paymentColor] || "bg-muted-foreground"}`} title={`Payment: ${PAYMENT_STATUS_LABELS[b.paymentColor] ?? b.paymentColor}`} />
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="text-sm font-semibold text-foreground">{b.bookingNumber}</span>
+                            <span className="text-sm font-semibold text-foreground">{bookingDisplayReference(b)}</span>
                             <span className="text-sm text-muted-foreground">{b.customerName}</span>
                           </div>
                           <p className="text-sm text-muted-foreground truncate mt-1">
@@ -571,7 +577,8 @@ function PipelineCard({
 }) {
   const paymentDotClass = PAYMENT_COLORS[job.paymentColor] || "bg-muted-foreground"
   const showTripCompleteBadge = job.stage === "voucher_sent" && isPastOrToday(job.tripEndDate)
-  
+  const displayReference = bookingDisplayReference(job)
+
   const handleDownloadAudit = async (e: React.MouseEvent, allAuditLogs: any[]) => {
     e.preventDefault()
     e.stopPropagation()
@@ -598,7 +605,7 @@ function PipelineCard({
       <CardContent className="p-3">
         <div className="flex items-start justify-between gap-1 mb-1">
           <Link href={`/app/bookings/${job.id}`} className="text-xs font-bold text-foreground hover:text-primary transition-colors">
-            {job.bookingNumber}
+            {displayReference}
           </Link>
           <div className="flex items-center gap-1.5">
             {job.consultant && (
@@ -633,7 +640,7 @@ function PipelineCard({
               }}
             >
               <SelectTrigger
-                aria-label={`Move ${job.bookingNumber} to stage`}
+                aria-label={`Move ${displayReference} to stage`}
                 className="h-7 w-full text-[11px]"
               >
                 <SelectValue placeholder="Move to" />
@@ -651,7 +658,7 @@ function PipelineCard({
         <button
           onClick={(e) => handleDownloadAudit(e, auditLogs)}
           className="absolute bottom-1.5 right-1.5 opacity-0 transition-opacity p-1 hover:bg-secondary rounded group-hover:opacity-100 focus:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
-          aria-label={`Download audit log for ${job.bookingNumber}`}
+          aria-label={`Download audit log for ${displayReference}`}
           title="Download audit log"
         >
           <Download className="w-3 h-3 text-muted-foreground" />

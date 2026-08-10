@@ -49,6 +49,50 @@ describe("voucherRowsForBlock", () => {
     expect(rows.some((r) => r.label === "Note")).toBe(false)
   })
 
+  it("train block: prints Boarding Point and Arrival Point straight after the Route", () => {
+    const rows = voucherRowsForBlock(
+      block({
+        serviceType: "train",
+        serviceData: {
+          route: "Pretoria → Cape Town",
+          boardingPoint: "Rovos Rail Station, Capital Park, Pretoria",
+          arrivalPoint: "Cape Town Station, Adderley Street",
+        },
+      }),
+    )
+    expect(labels(rows).slice(0, 4)).toEqual([
+      "Your Reference",
+      "Route",
+      "Boarding Point",
+      "Arrival Point",
+    ])
+    expect(rows.find((r) => r.label === "Boarding Point")?.value).toBe(
+      "Rovos Rail Station, Capital Park, Pretoria",
+    )
+  })
+
+  it("train block: omits either station row when that side has no address", () => {
+    const rows = voucherRowsForBlock(
+      block({
+        serviceType: "train",
+        serviceData: { route: "Pretoria → Cape Town", boardingPoint: "Rovos Rail Station" },
+      }),
+    )
+    expect(labels(rows)).toContain("Boarding Point")
+    expect(labels(rows)).not.toContain("Arrival Point")
+  })
+
+  it("hotel block: never prints station rows even when the data carries them", () => {
+    const rows = voucherRowsForBlock(
+      block({
+        serviceType: "hotel",
+        serviceData: { boardingPoint: "Cape Town Station", arrivalPoint: "Rovos Rail Station" },
+      }),
+    )
+    expect(labels(rows)).not.toContain("Boarding Point")
+    expect(labels(rows)).not.toContain("Arrival Point")
+  })
+
   it("airline block: dates fold in the airport code, plus baggage cells and priority boarding", () => {
     const rows = voucherRowsForBlock(
       block({

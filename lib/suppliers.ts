@@ -15,6 +15,7 @@ import type {
   SupplierRateAdjustment,
   SupplierRateCard,
   SupplierRoute,
+  SupplierStationAddress,
   SupplierSuiteType,
   SupplierSuiteAlias,
   SupplierVariantValue,
@@ -41,6 +42,7 @@ type SupplierRow = Omit<Database["public"]["Tables"]["suppliers"]["Row"], "defau
   default_rate_type_id?: string | null
 }
 type SupplierEmailRow = Database["public"]["Tables"]["supplier_emails"]["Row"]
+type SupplierStationAddressRow = Database["public"]["Tables"]["supplier_station_addresses"]["Row"]
 type RateTypeRow = Database["public"]["Tables"]["rate_types"]["Row"]
 type SupplierRateAdjustmentRow = Database["public"]["Tables"]["supplier_rate_adjustments"]["Row"]
 type SupplierKindDefaultRateTypeRow = Database["public"]["Tables"]["supplier_kind_default_rate_types"]["Row"]
@@ -364,6 +366,17 @@ export function mapSupplierEmail(row: SupplierEmailRow): SupplierEmail {
   }
 }
 
+export function mapSupplierStationAddress(row: SupplierStationAddressRow): SupplierStationAddress {
+  return {
+    id: row.id,
+    supplierId: row.supplier_id,
+    locationId: row.location_id,
+    stationName: row.station_name ?? null,
+    streetAddress: row.street_address ?? null,
+    notes: row.notes ?? null,
+  }
+}
+
 export interface SupplierDetailMapInput {
   bedroomTypes?: BedroomTypeRow[]
   bedroomLayouts?: BedroomLayoutRow[]
@@ -375,6 +388,7 @@ export interface SupplierDetailMapInput {
   rateAdjustments?: SupplierRateAdjustmentRow[]
   kindDefaultRateTypes?: SupplierKindDefaultRateTypeRow[]
   suiteAliases?: SuiteVocabAliasRow[]
+  stationAddresses?: SupplierStationAddressRow[]
 }
 
 type SuiteVocabAliasRow = {
@@ -502,6 +516,12 @@ export function mapSupplierDetail(
       mapSupplierRoute(route, detailsByRouteId.get(route.id), locationNameById),
     ),
     rateCards: rateCards.map(mapSupplierRateCard),
+    // Sorted by city name so the editor lists stations in a stable, readable order.
+    stationAddresses: [...(variants.stationAddresses ?? [])]
+      .sort((a, b) =>
+        (locationNameById.get(a.location_id) ?? "").localeCompare(locationNameById.get(b.location_id) ?? ""),
+      )
+      .map(mapSupplierStationAddress),
     locations: locations.map(mapLocation),
     bedroomTypes: [...bedroomTypeRows]
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.name.localeCompare(b.name))

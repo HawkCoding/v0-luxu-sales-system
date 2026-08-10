@@ -26,6 +26,27 @@ vi.mock("@/lib/voucher/build-service-blocks", () => ({
   buildVoucherServiceBlocks: buildBlocksMock,
 }))
 
+const scopeMocks = vi.hoisted(() => ({
+  resolveAcceptedQuoteScope: vi.fn(),
+  findMissingQuotedLegs: vi.fn(),
+}))
+vi.mock("@/lib/quotes/accepted-quote-scope", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/quotes/accepted-quote-scope")>()
+  return {
+    ...actual,
+    resolveAcceptedQuoteScope: scopeMocks.resolveAcceptedQuoteScope,
+    findMissingQuotedLegs: scopeMocks.findMissingQuotedLegs,
+  }
+})
+
+const legReferenceMocks = vi.hoisted(() => ({
+  loadLegReferenceRows: vi.fn(),
+}))
+vi.mock("@/lib/voucher/leg-references", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/voucher/leg-references")>()
+  return { ...actual, loadLegReferenceRows: legReferenceMocks.loadLegReferenceRows }
+})
+
 const auditMocks = vi.hoisted(() => ({
   writeAuditLog: vi.fn(async () => ({ error: null })),
 }))
@@ -67,6 +88,7 @@ function createSelectResult(data: unknown) {
 interface BookingOpts {
   stage: string
   invoiceBalance: number | null
+  customerInvoiceNumber?: string | null
   existingDocumentId?: string
   existingVoucherId?: string
   blocks?: Array<{
@@ -76,7 +98,14 @@ interface BookingOpts {
   }>
 }
 
-function buildAuth({ stage, invoiceBalance, existingDocumentId, existingVoucherId, blocks }: BookingOpts) {
+function buildAuth({
+  stage,
+  invoiceBalance,
+  customerInvoiceNumber = null,
+  existingDocumentId,
+  existingVoucherId,
+  blocks,
+}: BookingOpts) {
   const documentWrite = {
     data: {
       id: existingDocumentId ?? "document-1",
@@ -130,6 +159,7 @@ function buildAuth({ stage, invoiceBalance, existingDocumentId, existingVoucherI
         return createSelectResult({
           id: BOOKING_ID,
           booking_number: "BT-2026-0001",
+          customer_invoice_number: customerInvoiceNumber,
           stage,
           invoice_balance: invoiceBalance,
           consultant: "LB",
@@ -283,6 +313,81 @@ describe("POST /api/voucher/generate", () => {
     vi.mocked(renderVoucherPdf).mockResolvedValue(Buffer.from("pdf"))
     auditMocks.writeAuditLog.mockClear()
     buildBlocksMock.mockReset()
+    scopeMocks.resolveAcceptedQuoteScope.mockReset()
+    scopeMocks.findMissingQuotedLegs.mockReset()
+    legReferenceMocks.loadLegReferenceRows.mockReset()
+    // Default: an accepted quote pricing one leg, and a builder that still has it.
+    scopeMocks.resolveAcceptedQuoteScope.mockResolvedValue({
+      quoteId: "quote-1",
+      quoteNumber: "BT-2026-0001-Q1",
+      legIds: new Set(["leg-train"]),
+      legLabels: new Map([["leg-train", "Rovos Rail"]]),
+      hasAcceptedQuote: true,
+    })
+    scopeMocks.findMissingQuotedLegs.mockResolvedValue([])
+    legReferenceMocks.loadLegReferenceRows.mockResolvedValue([
+      {
+        key: "service:leg-train",
+        kind: "service",
+        id: "leg-train",
+        label: "Rovos Rail",
+        supplierName: "Rovos Rail",
+        supplierReference: "242541",
+        supplierContactName: "Carla",
+        voucherFootnote: null,
+        excursions: [],
+      },
+    ])
+  })
+
+  it("scopes the voucher to the accepted quote's legs and drops transport requests tied to no leg", async () => {
+    buildAuth({ stage: "final_paid", invoiceBalance: 0 })
+
+    const res = await POST(postJson({ jobId: BOOKING_ID }))
+
+    expect(res.status).toBe(200)
+    expect(buildBlocksMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        legIds: new Set(["leg-train"]),
+        includeUnlinkedTransportRequests: false,
+      }),
+    )
+    // The references gate reads the same scope, so an unsold service can never demand a reference.
+    expect(legReferenceMocks.loadLegReferenceRows).toHaveBeenCalledWith(
+      expect.anything(),
+      BOOKING_ID,
+      { legIds: new Set(["leg-train"]) },
+    )
+  })
+
+  it("leaves the itinerary unfiltered when the accepted quote priced no legs (manual quote)", async () => {
+    scopeMocks.resolveAcceptedQuoteScope.mockResolvedValue({
+      quoteId: "quote-1",
+      quoteNumber: "BT-2026-0001-Q1",
+      legIds: new Set<string>(),
+      legLabels: new Map(),
+      hasAcceptedQuote: true,
+    })
+    buildAuth({ stage: "final_paid", invoiceBalance: 0 })
+
+    const res = await POST(postJson({ jobId: BOOKING_ID }))
+
+    expect(res.status).toBe(200)
+    expect(buildBlocksMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ legIds: undefined }),
+    )
+  })
+
+  it("blocks generation when a service on the accepted quote is gone from the builder", async () => {
+    scopeMocks.findMissingQuotedLegs.mockResolvedValue(["Rovos Rail"])
+    buildAuth({ stage: "final_paid", invoiceBalance: 0 })
+
+    const res = await POST(postJson({ jobId: BOOKING_ID }))
+
+    expect(res.status).toBe(422)
+    expect((await res.json()).error).toContain("Rovos Rail")
   })
 
   it("rejects voucher generation when the invoice balance is not zero", async () => {
@@ -312,6 +417,35 @@ describe("POST /api/voucher/generate", () => {
 
     expect(res.status).toBe(200)
     expect(renderVoucherPdf).toHaveBeenCalled()
+  })
+
+  it("numbers the voucher with the salesperson-entered customer invoice number", async () => {
+    buildAuth({ stage: "final_paid", invoiceBalance: 0, customerInvoiceNumber: "  242541  " })
+
+    const res = await POST(postJson({ jobId: BOOKING_ID }))
+    const body = (await res.json()) as {
+      voucherRecord: { voucherNumber: string }
+      voucher: { filename: string }
+    }
+
+    expect(res.status).toBe(200)
+    expect(body.voucherRecord.voucherNumber).toBe("242541")
+    expect(body.voucher.filename).toBe("voucher-242541.pdf")
+    expect(vi.mocked(renderVoucherPdf).mock.calls[0]?.[0].data.voucherNumber).toBe("242541")
+    expect(auditMocks.writeAuditLog).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ meta: expect.objectContaining({ voucher_number: "242541" }) }),
+    )
+  })
+
+  it("falls back to the internal invoice number when none has been captured", async () => {
+    buildAuth({ stage: "final_paid", invoiceBalance: 0, customerInvoiceNumber: null })
+
+    const res = await POST(postJson({ jobId: BOOKING_ID }))
+    const body = (await res.json()) as { voucherRecord: { voucherNumber: string } }
+
+    expect(res.status).toBe(200)
+    expect(body.voucherRecord.voucherNumber).toBe("BT-2026-0001-INV")
   })
 
   it("logs voucher_regenerated when a voucher row already exists", async () => {

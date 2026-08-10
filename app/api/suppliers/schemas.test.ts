@@ -99,6 +99,35 @@ describe("supplierSaveSchema", () => {
     ).toBe(false)
   })
 
+  it("defaults stationAddresses to an empty list and accepts one row per city", () => {
+    expect(supplierSaveSchema.parse(buildValidPayload()).stationAddresses).toEqual([])
+
+    const parsed = supplierSaveSchema.parse({
+      ...buildValidPayload(),
+      stationAddresses: [
+        { locationId: UUID_3, stationName: "Rovos Rail Station", streetAddress: "Capital Park" },
+        { locationId: UUID_4, stationName: "Cape Town Station", streetAddress: null },
+      ],
+    })
+    expect(parsed.stationAddresses).toHaveLength(2)
+  })
+
+  it("rejects two station addresses for the same city", () => {
+    const result = supplierSaveSchema.safeParse({
+      ...buildValidPayload(),
+      stationAddresses: [
+        { locationId: UUID_3, stationName: "Rovos Rail Station" },
+        { locationId: UUID_3, stationName: "Another Station" },
+      ],
+    })
+    expect(result.success).toBe(false)
+    expect(result.success === false && result.error.issues[0].path).toEqual([
+      "stationAddresses",
+      1,
+      "locationId",
+    ])
+  })
+
   it("accepts HH:MM default times and null unset", () => {
     expect(
       supplierSaveSchema.safeParse({
