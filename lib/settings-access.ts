@@ -11,6 +11,10 @@ import {
   FOOTER_BRAND_PRODUCT_LINE,
   getFooterBrandLogoUrl,
 } from "@/lib/assets/footer-brand"
+import {
+  parseInvoiceStatusOptions,
+  type InvoiceStatusOption,
+} from "@/lib/invoices/invoice-status-options"
 import { createServiceClient, createSessionClient } from "@/lib/supabase/server"
 import type { Database } from "@/lib/supabase/types"
 
@@ -239,47 +243,18 @@ export async function getDocumentTextSettings(
   ) as DocumentTextSettings
 }
 
-// Client-facing status labels shown in the invoice header. The four system
-// roles drive automatic derivation from the booking's payment state; extra
-// entries (role: null) are manual-only labels.
-export type InvoiceStatusRole = "provisional" | "confirmed" | "paid" | "cancelled"
-
-export interface InvoiceStatusOption {
-  role: InvoiceStatusRole | null
-  label: string
-}
-
-export const DEFAULT_INVOICE_STATUS_OPTIONS: InvoiceStatusOption[] = [
-  { role: "provisional", label: "Provisional" },
-  { role: "confirmed", label: "Confirmed" },
-  { role: "paid", label: "Paid in Full" },
-  { role: "cancelled", label: "Cancelled" },
-]
-
-const INVOICE_STATUS_ROLES: readonly string[] = ["provisional", "confirmed", "paid", "cancelled"]
-
-export function parseInvoiceStatusOptions(value: string | null | undefined): InvoiceStatusOption[] {
-  if (!value) return [...DEFAULT_INVOICE_STATUS_OPTIONS]
-  try {
-    const parsed: unknown = JSON.parse(value)
-    if (!Array.isArray(parsed)) return [...DEFAULT_INVOICE_STATUS_OPTIONS]
-    const options = parsed
-      .filter((entry): entry is { role?: unknown; label?: unknown } =>
-        typeof entry === "object" && entry !== null,
-      )
-      .map((entry) => ({
-        role:
-          typeof entry.role === "string" && INVOICE_STATUS_ROLES.includes(entry.role)
-            ? (entry.role as InvoiceStatusRole)
-            : null,
-        label: typeof entry.label === "string" ? entry.label.trim() : "",
-      }))
-      .filter((entry) => entry.label.length > 0)
-    return options.length > 0 ? options : [...DEFAULT_INVOICE_STATUS_OPTIONS]
-  } catch {
-    return [...DEFAULT_INVOICE_STATUS_OPTIONS]
-  }
-}
+// The status-option shapes, defaults and parser live in
+// lib/invoices/invoice-status-options.ts so Client Components can reach them
+// without pulling this server-only module in. Re-exported here because callers
+// already import them from settings-access alongside getInvoiceStatusOptions.
+export {
+  DEFAULT_INVOICE_STATUS_OPTIONS,
+  parseInvoiceStatusOptions,
+} from "@/lib/invoices/invoice-status-options"
+export type {
+  InvoiceStatusOption,
+  InvoiceStatusRole,
+} from "@/lib/invoices/invoice-status-options"
 
 export async function getInvoiceStatusOptions(
   supabase: SupabaseClient<Database>,

@@ -2,7 +2,7 @@ import {
   DEFAULT_INVOICE_STATUS_OPTIONS,
   type InvoiceStatusOption,
   type InvoiceStatusRole,
-} from "@/lib/settings-access"
+} from "@/lib/invoices/invoice-status-options"
 
 /**
  * The booking facts the client-facing invoice status is derived from. The
