@@ -34,7 +34,7 @@ const updateSchema = z.object({
   updates: z
     .array(
       z.object({
-        kind: z.enum(["selection", "service", "transport_request"]),
+        kind: z.enum(["service", "transport_request"]),
         id: z.string().uuid(),
         supplierReference: z.string().trim().max(200).nullable(),
         supplierContactName: z.string().trim().max(200).nullable().optional(),
@@ -46,7 +46,6 @@ const updateSchema = z.object({
 })
 
 const TABLE_BY_KIND = {
-  selection: { table: "booking_package_selections", matchColumn: "package_leg_id" },
   service: { table: "booking_services", matchColumn: "id" },
   transport_request: { table: "booking_transport_requests", matchColumn: "id" },
 } as const

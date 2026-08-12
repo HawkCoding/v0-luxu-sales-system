@@ -12,7 +12,7 @@ export const runtime = "nodejs"
 
 /**
  * Build Booking's equivalent of PATCH /api/jobs/[id]/package-selections, operating on
- * booking_services/booking_service_units instead of booking_package_selections/_units. A
+ * booking_services/booking_service_units, which replaced the removed catalogue tables. A
  * booking_services row already is the leg and the selection collapsed into one (see
  * supabase/migrations/20260729100000_booking_services.sql), so there is no separate
  * package_leg_id lookup step here — the request's "packageLegId" field is the booking_services

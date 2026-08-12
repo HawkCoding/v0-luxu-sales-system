@@ -26,11 +26,8 @@ function buildSupabase(tables: MockTables = {}) {
 
   return {
     from: (table: string) => {
-      if (table === "booking_package_selections") {
-        return chain({ data: tables.selections ?? [], error: null })
-      }
       if (table === "booking_services") {
-        return chain({ data: tables.services ?? [], error: null })
+        return chain({ data: [...(tables.selections ?? []), ...(tables.services ?? [])], error: null })
       }
       if (table === "booking_transport_requests") {
         return chain({ data: tables.transportRequests ?? [], error: null })
@@ -58,8 +55,7 @@ function supplier(partial: Record<string, unknown> = {}) {
 
 function transferSelection(partial: Record<string, unknown> = {}) {
   return {
-    id: "sel-transfer",
-    package_leg_id: "leg-transfer",
+    id: "leg-transfer",
     selected: true,
     supplier_id: "supplier-transfer",
     route_id: "route-1",
@@ -67,7 +63,7 @@ function transferSelection(partial: Record<string, unknown> = {}) {
     service_date: null,
     nights: null,
     notes: "Leg-level note",
-    package_legs: { sort_order: 2, label: "Airport transfers" },
+    sort_order: 2, label: "Airport transfers",
     suppliers: supplier(),
     routes: { name: "Airport → Hotel", duration_days: null },
     suite_types: { name: "Sedan" },
@@ -83,7 +79,7 @@ describe("buildVoucherServiceBlocks", () => {
         transportRequests: [
           {
             id: "req-1",
-            package_leg_id: "leg-transfer",
+            service_id: "leg-transfer",
             service_type: "transfer",
             pickup_point: "Cape Town International Airport",
             dropoff_point: "The Silo Hotel",
@@ -97,7 +93,7 @@ describe("buildVoucherServiceBlocks", () => {
           },
           {
             id: "req-2",
-            package_leg_id: "leg-transfer",
+            service_id: "leg-transfer",
             service_type: "transfer",
             pickup_point: "The Silo Hotel",
             dropoff_point: "Cape Town Station",
@@ -156,7 +152,7 @@ describe("buildVoucherServiceBlocks", () => {
         transportRequests: [
           {
             id: "req-manual",
-            package_leg_id: null,
+            service_id: null,
             service_type: "transfer",
             pickup_point: "Private villa, Bantry Bay",
             dropoff_point: "V&A Waterfront",
@@ -187,13 +183,14 @@ describe("buildVoucherServiceBlocks", () => {
         selections: [
           transferSelection({
             suppliers: supplier({ kind: "vehicle_rental", name: "Cape Rentals" }),
-            package_legs: { sort_order: 1, label: "Rental car" },
+            sort_order: 1,
+            label: "Rental car",
           }),
         ],
         transportRequests: [
           {
             id: "req-rental",
-            package_leg_id: "leg-transfer",
+            service_id: "leg-transfer",
             service_type: "rental",
             pickup_point: "Airport depot",
             dropoff_point: "Airport depot",
@@ -220,8 +217,7 @@ describe("buildVoucherServiceBlocks", () => {
       buildSupabase({
         selections: [
           {
-            id: "sel-train",
-            package_leg_id: "leg-train",
+            id: "leg-train",
             selected: true,
             supplier_id: "supplier-train",
             route_id: "route-train",
@@ -229,7 +225,7 @@ describe("buildVoucherServiceBlocks", () => {
             service_date: "2026-09-01",
             nights: null,
             notes: null,
-            package_legs: { sort_order: 0, label: "The Blue Train" },
+            sort_order: 0, label: "The Blue Train",
             suppliers: supplier({ kind: "train_operator", name: "Blue Train" }),
             routes: { name: "Pretoria ↔ Cape Town", duration_days: 3 },
             suite_types: { name: "Royal Suite" },
@@ -254,8 +250,7 @@ describe("buildVoucherServiceBlocks", () => {
       buildSupabase({
         selections: [
           {
-            id: "sel-train",
-            package_leg_id: "leg-train",
+            id: "leg-train",
             selected: true,
             supplier_id: "supplier-train",
             route_id: "route-train",
@@ -263,7 +258,7 @@ describe("buildVoucherServiceBlocks", () => {
             service_date: "2028-08-25",
             nights: null,
             notes: null,
-            package_legs: { sort_order: 0, label: "Rovos Rail" },
+            sort_order: 0, label: "Rovos Rail",
             suppliers: supplier({ kind: "train_operator", name: "Rovos Rail" }),
             routes: { name: "Pretoria → Cape Town", duration_days: 1 },
             suite_types: { name: "Pullman Suite" },
@@ -282,8 +277,7 @@ describe("buildVoucherServiceBlocks", () => {
       buildSupabase({
         selections: [
           {
-            id: "sel-train",
-            package_leg_id: "leg-train",
+            id: "leg-train",
             selected: true,
             supplier_id: "supplier-train",
             route_id: "route-train",
@@ -291,7 +285,7 @@ describe("buildVoucherServiceBlocks", () => {
             service_date: "2028-08-25",
             nights: null,
             notes: null,
-            package_legs: { sort_order: 0, label: "Rovos Rail" },
+            sort_order: 0, label: "Rovos Rail",
             suppliers: supplier({ kind: "train_operator", name: "Rovos Rail" }),
             routes: { name: "Pretoria → Cape Town", duration_days: null },
             suite_types: { name: "Pullman Suite" },
@@ -304,13 +298,159 @@ describe("buildVoucherServiceBlocks", () => {
     expect(blocks[0].serviceData.arrivalDate).toBeNull()
   })
 
+  it("takes a train's times from its route, not from the operator's supplier-wide defaults", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "leg-train",
+            selected: true,
+            supplier_id: "supplier-train",
+            route_id: "route-train",
+            suite_type_id: "suite-royal",
+            service_date: "2026-09-01",
+            nights: null,
+            notes: null,
+            sort_order: 0, label: "The Blue Train",
+            // Stale supplier-wide pair from before times moved onto the route — must not win.
+            suppliers: supplier({
+              kind: "train_operator",
+              name: "Blue Train",
+              default_time_start: "06:00:00",
+              default_time_end: "12:00:00",
+            }),
+            routes: {
+              name: "Pretoria → Cape Town",
+              duration_days: 2,
+              departure_time: "08:30:00",
+              arrival_time: "17:45:00",
+              return_departure_time: null,
+              return_arrival_time: null,
+            },
+            suite_types: { name: "Royal Suite" },
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceData.startTime).toBe("08:30")
+    expect(blocks[0].serviceData.endTime).toBe("17:45")
+  })
+
+  it("prints the return times when the booking travels a two-way route in reverse", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "leg-train",
+            selected: true,
+            supplier_id: "supplier-train",
+            route_id: "route-train",
+            route_reversed: true,
+            suite_type_id: "suite-royal",
+            service_date: "2026-09-01",
+            nights: null,
+            notes: null,
+            sort_order: 0, label: "The Blue Train",
+            suppliers: supplier({ kind: "train_operator", name: "Blue Train" }),
+            routes: {
+              name: "Pretoria ↔ Cape Town",
+              duration_days: 2,
+              direction_mode: "round_trip",
+              departure_time: "08:30:00",
+              arrival_time: "17:45:00",
+              return_departure_time: "10:15:00",
+              return_arrival_time: "19:00:00",
+            },
+            suite_types: { name: "Royal Suite" },
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceData.startTime).toBe("10:15")
+    expect(blocks[0].serviceData.endTime).toBe("19:00")
+  })
+
+  it("leaves a train's times unset when its route has none, rather than borrowing the supplier's", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "leg-train",
+            selected: true,
+            supplier_id: "supplier-train",
+            route_id: "route-train",
+            suite_type_id: "suite-royal",
+            service_date: "2026-09-01",
+            nights: null,
+            notes: null,
+            sort_order: 0, label: "Rovos Rail",
+            suppliers: supplier({
+              kind: "train_operator",
+              name: "Rovos Rail",
+              default_time_start: "06:00:00",
+              default_time_end: "12:00:00",
+            }),
+            routes: {
+              name: "Pretoria → Cape Town",
+              duration_days: 2,
+              departure_time: null,
+              arrival_time: null,
+              return_departure_time: null,
+              return_arrival_time: null,
+            },
+            suite_types: { name: "Pullman Suite" },
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceData.startTime).toBeNull()
+    expect(blocks[0].serviceData.endTime).toBeNull()
+  })
+
+  it("still reads a hotel's times from the supplier — a hotel's route is its meal plan", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "leg-hotel",
+            selected: true,
+            supplier_id: "supplier-hotel",
+            route_id: "meal-plan-bb",
+            suite_type_id: "room-deluxe",
+            service_date: "2026-09-04",
+            nights: 2,
+            notes: null,
+            sort_order: 1, label: "The Silo Hotel",
+            suppliers: supplier({
+              kind: "hotel_property",
+              name: "The Silo Hotel",
+              default_time_start: "14:00:00",
+              default_time_end: "11:00:00",
+            }),
+            routes: { name: "Bed & Breakfast", duration_days: null },
+            suite_types: { name: "Deluxe Room" },
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceData.startTime).toBe("14:00")
+    expect(blocks[0].serviceData.endTime).toBe("11:00")
+  })
+
   it("resolves suite type and suite count from per-unit rows when present, over the legacy leg-level join", async () => {
     const { blocks } = await buildVoucherServiceBlocks(
       buildSupabase({
         selections: [
           {
-            id: "sel-train-units",
-            package_leg_id: "leg-train",
+            id: "leg-train",
             selected: true,
             supplier_id: "supplier-train",
             route_id: "route-train",
@@ -318,7 +458,7 @@ describe("buildVoucherServiceBlocks", () => {
             service_date: "2026-09-01",
             nights: null,
             notes: null,
-            package_legs: { sort_order: 0, label: "The Blue Train" },
+            sort_order: 0, label: "The Blue Train",
             suppliers: supplier({ kind: "train_operator", name: "Blue Train" }),
             routes: { name: "Pretoria ↔ Cape Town", duration_days: 3 },
             // Leg-level join is stale (pre-cutover value) — units must win.
@@ -344,8 +484,7 @@ describe("buildVoucherServiceBlocks", () => {
       buildSupabase({
         selections: [
           {
-            id: "sel-train-config",
-            package_leg_id: "leg-train",
+            id: "leg-train",
             selected: true,
             supplier_id: "supplier-train",
             route_id: "route-train",
@@ -353,7 +492,7 @@ describe("buildVoucherServiceBlocks", () => {
             service_date: "2026-09-01",
             nights: null,
             notes: null,
-            package_legs: { sort_order: 0, label: "The Blue Train" },
+            sort_order: 0, label: "The Blue Train",
             suppliers: supplier({ kind: "train_operator", name: "Blue Train" }),
             routes: { name: "Pretoria ↔ Cape Town", duration_days: 3 },
             suite_types: null,
@@ -382,8 +521,7 @@ describe("buildVoucherServiceBlocks", () => {
       buildSupabase({
         selections: [
           {
-            id: "sel-hotel-config",
-            package_leg_id: "leg-hotel",
+            id: "leg-hotel",
             selected: true,
             supplier_id: "supplier-hotel",
             route_id: "route-hotel",
@@ -391,7 +529,7 @@ describe("buildVoucherServiceBlocks", () => {
             service_date: "2026-09-01",
             nights: 2,
             notes: null,
-            package_legs: { sort_order: 0, label: "Irene Country Lodge" },
+            sort_order: 0, label: "Irene Country Lodge",
             suppliers: supplier({ kind: "hotel_property", name: "Irene Country Lodge" }),
             routes: { name: "Full Board", duration_days: null },
             suite_types: null,
@@ -420,8 +558,7 @@ describe("buildVoucherServiceBlocks", () => {
       buildSupabase({
         selections: [
           {
-            id: "sel-hotel-units",
-            package_leg_id: "leg-hotel",
+            id: "leg-hotel",
             selected: true,
             supplier_id: "supplier-hotel",
             route_id: "route-hotel",
@@ -429,13 +566,13 @@ describe("buildVoucherServiceBlocks", () => {
             service_date: "2026-09-01",
             nights: 2,
             notes: null,
-            package_legs: { sort_order: 0, label: "Irene Country Lodge" },
+            sort_order: 0, label: "Irene Country Lodge",
             suppliers: supplier({ kind: "hotel_property", name: "Irene Country Lodge" }),
             routes: { name: "Full Board", duration_days: null },
             suite_types: null,
             units: [
               { suite_type_id: "room-standard", sort_order: 0, suite_types: { name: "Standard Room" } },
-              { suite_type_id: "room-deluxe", sort_order: 1, suite_types: { name: "Deluxe Room" } },
+              { suite_type_id: "leg-blue-train", sort_order: 1, suite_types: { name: "Deluxe Room" } },
             ],
           },
         ],
@@ -450,8 +587,7 @@ describe("buildVoucherServiceBlocks", () => {
 
   it("scopes selections (and their leg-scoped transport requests) to legIds when given, so a leg left selected on the job but not priced into this quote is excluded", async () => {
     const blueTrain = {
-      id: "sel-blue-train",
-      package_leg_id: "leg-blue-train",
+      id: "leg-blue-train",
       selected: true,
       supplier_id: "supplier-blue-train",
       route_id: "route-blue-train",
@@ -459,7 +595,7 @@ describe("buildVoucherServiceBlocks", () => {
       service_date: "2026-08-01",
       nights: null,
       notes: null,
-      package_legs: { sort_order: 0, label: "The Blue Train" },
+      sort_order: 0, label: "The Blue Train",
       suppliers: supplier({ kind: "train_operator", name: "Blue Train" }),
       routes: { name: "Pretoria ↔ Cape Town", duration_days: 1 },
       suite_types: { name: "Royal Suite" },
@@ -467,13 +603,12 @@ describe("buildVoucherServiceBlocks", () => {
     // Selected on the job (e.g. left over from an earlier draft) but never priced into this
     // quote — must be dropped, along with the transfer request captured against its leg.
     const rovosRailTransfer = transferSelection({
-      id: "sel-rovos-transfer",
-      package_leg_id: "leg-rovos-transfer",
-      package_legs: { sort_order: 1, label: "Rovos Rail transfer" },
+      id: "leg-rovos-transfer",
+      sort_order: 1, label: "Rovos Rail transfer",
     })
     const rovosTransferRequest = {
       id: "req-rovos-transfer",
-      package_leg_id: "leg-rovos-transfer",
+      service_id: "leg-rovos-transfer",
       service_type: "transfer",
       pickup_point: "Rovos Rail Station",
       dropoff_point: "The Silo Hotel",
@@ -502,7 +637,6 @@ describe("buildVoucherServiceBlocks", () => {
   it("drops transport requests tied to no leg when includeUnlinkedTransportRequests is false, since nothing unlinked can have been priced into a quote", async () => {
     const unlinkedRequest = {
       id: "req-manual",
-      package_leg_id: null,
       service_id: null,
       service_type: "transfer",
       pickup_point: "OR Tambo",
@@ -619,7 +753,6 @@ describe("buildVoucherServiceBlocks", () => {
     }
     const request = {
       id: "req-1",
-      package_leg_id: null,
       service_id: "svc-transfer",
       service_type: "transfer",
       pickup_point: "Cape Town International Airport",
@@ -743,8 +876,7 @@ describe("buildVoucherServiceBlocks", () => {
         buildSupabase({
           selections: [
             {
-              id: "sel-hotel",
-              package_leg_id: "leg-hotel",
+              id: "leg-hotel",
               selected: true,
               supplier_id: "supplier-hotel",
               route_id: null,
@@ -752,7 +884,7 @@ describe("buildVoucherServiceBlocks", () => {
               service_date: "2026-09-04",
               nights: 2,
               notes: null,
-              package_legs: { sort_order: 0, label: "The Silo Hotel" },
+              sort_order: 0, label: "The Silo Hotel",
               suppliers: supplier({
                 kind: "hotel_property",
                 name: "The Silo Hotel",
@@ -778,8 +910,7 @@ describe("buildVoucherServiceBlocks", () => {
       buildSupabase({
         selections: [
           {
-            id: "sel-train-guests",
-            package_leg_id: "leg-train",
+            id: "leg-train",
             selected: true,
             supplier_id: "supplier-train",
             route_id: "route-train",
@@ -787,13 +918,13 @@ describe("buildVoucherServiceBlocks", () => {
             service_date: "2026-09-01",
             nights: null,
             notes: null,
-            package_legs: { sort_order: 0, label: "The Blue Train" },
+            sort_order: 0, label: "The Blue Train",
             suppliers: supplier({ kind: "train_operator", name: "Blue Train" }),
             routes: { name: "Pretoria ↔ Cape Town", duration_days: 3 },
             suite_types: null,
             units: [
               { suite_type_id: "s1", sort_order: 0, adult_count: 2, child_count: 0, infant_count: 0, suite_types: { name: "Deluxe" } },
-              { suite_type_id: "s2", sort_order: 1, adult_count: 1, child_count: 1, infant_count: 0, suite_types: { name: "Deluxe" } },
+              { suite_type_id: "leg-train", sort_order: 1, adult_count: 1, child_count: 1, infant_count: 0, suite_types: { name: "Deluxe" } },
             ],
           },
         ],
@@ -810,7 +941,6 @@ describe("buildVoucherServiceBlocks", () => {
         selections: [
           {
             id: "sel-train-legacy",
-            package_leg_id: "leg-train",
             selected: true,
             supplier_id: "supplier-train",
             route_id: "route-train",
@@ -818,7 +948,7 @@ describe("buildVoucherServiceBlocks", () => {
             service_date: "2026-09-01",
             nights: null,
             notes: null,
-            package_legs: { sort_order: 0, label: "The Blue Train" },
+            sort_order: 0, label: "The Blue Train",
             suppliers: supplier({ kind: "train_operator", name: "Blue Train" }),
             routes: { name: "Pretoria ↔ Cape Town", duration_days: 3 },
             suite_types: { name: "Royal Suite" },
@@ -836,8 +966,7 @@ describe("buildVoucherServiceBlocks", () => {
       buildSupabase({
         selections: [
           {
-            id: "sel-train-desc",
-            package_leg_id: "leg-train",
+            id: "leg-train",
             selected: true,
             supplier_id: "supplier-train",
             route_id: "route-train",
@@ -845,7 +974,7 @@ describe("buildVoucherServiceBlocks", () => {
             service_date: "2026-09-01",
             nights: null,
             notes: null,
-            package_legs: { sort_order: 0, label: "The Blue Train" },
+            sort_order: 0, label: "The Blue Train",
             suppliers: supplier({ kind: "train_operator", name: "Blue Train", description: "Luxury rail since 1989." }),
             routes: { name: "Pretoria ↔ Cape Town", duration_days: 3 },
             suite_types: { name: "Royal Suite" },
@@ -865,7 +994,7 @@ describe("buildVoucherServiceBlocks", () => {
         transportRequests: [
           {
             id: "req-pax",
-            package_leg_id: "leg-transfer",
+            service_id: "leg-transfer",
             service_type: "transfer",
             pickup_point: "Airport",
             dropoff_point: "Hotel",
@@ -891,8 +1020,7 @@ describe("buildVoucherServiceBlocks", () => {
       buildSupabase({
         selections: [
           {
-            id: "sel-train-req",
-            package_leg_id: "leg-train",
+            id: "leg-train",
             selected: true,
             supplier_id: "supplier-train",
             route_id: "route-train",
@@ -900,7 +1028,7 @@ describe("buildVoucherServiceBlocks", () => {
             service_date: "2026-09-01",
             nights: null,
             notes: null,
-            package_legs: { sort_order: 0, label: "The Blue Train" },
+            sort_order: 0, label: "The Blue Train",
             suppliers: supplier({ kind: "train_operator", name: "Blue Train" }),
             routes: { name: "Pretoria ↔ Cape Town", duration_days: 3 },
             suite_types: { name: "Royal Suite" },
@@ -927,8 +1055,7 @@ describe("buildVoucherServiceBlocks", () => {
       buildSupabase({
         selections: [
           {
-            id: "sel-tour",
-            package_leg_id: "leg-tour",
+            id: "leg-tour",
             selected: true,
             supplier_id: "supplier-tour",
             route_id: "route-tour",
@@ -936,7 +1063,7 @@ describe("buildVoucherServiceBlocks", () => {
             service_date: "2026-09-08",
             nights: null,
             notes: null,
-            package_legs: { sort_order: 0, label: "Kimberley Excursion" },
+            sort_order: 0, label: "Kimberley Excursion",
             suppliers: supplier({ kind: "tour_operator", name: "Kimberley Tours" }),
             routes: { name: "Kimberley Day Tour", duration_days: 1 },
             suite_types: null,
@@ -956,7 +1083,6 @@ describe("buildVoucherServiceBlocks", () => {
         transportRequests: [
           {
             id: "req-flight",
-            package_leg_id: null,
             service_id: null,
             service_type: "flight",
             pickup_point: "CPT",
@@ -1011,7 +1137,6 @@ describe("buildVoucherServiceBlocks", () => {
         transportRequests: [
           {
             id: "req-flight",
-            package_leg_id: null,
             service_id: null,
             service_type: "flight",
             pickup_point: "CPT",
@@ -1041,7 +1166,7 @@ describe("buildVoucherServiceBlocks", () => {
         transportRequests: [
           {
             id: "req-transfer",
-            package_leg_id: "leg-transfer",
+            service_id: "leg-transfer",
             service_type: "transfer",
             pickup_point: "Airport",
             dropoff_point: "Hotel",
@@ -1066,8 +1191,7 @@ describe("buildVoucherServiceBlocks", () => {
       buildSupabase({
         selections: [
           {
-            id: "sel-train-details",
-            package_leg_id: "leg-train",
+            id: "leg-train",
             selected: true,
             supplier_id: "supplier-train",
             route_id: "route-train",
@@ -1078,7 +1202,7 @@ describe("buildVoucherServiceBlocks", () => {
             supplier_contact_name: "Carla",
             voucher_footnote: "Check in IRENE COUNTRY LODGE 2h prior to departure",
             excursions: ["Kimberley **Weather & Time Permitted"],
-            package_legs: { sort_order: 0, label: "The Blue Train" },
+            sort_order: 0, label: "The Blue Train",
             suppliers: supplier({ kind: "train_operator", name: "Blue Train" }),
             routes: { name: "Pretoria ↔ Cape Town", duration_days: 3, default_excursions: ["Route default"] },
             suite_types: { name: "Royal Suite" },
@@ -1098,8 +1222,7 @@ describe("buildVoucherServiceBlocks", () => {
       buildSupabase({
         selections: [
           {
-            id: "sel-train-route-excursions",
-            package_leg_id: "leg-train",
+            id: "leg-train",
             selected: true,
             supplier_id: "supplier-train",
             route_id: "route-train",
@@ -1108,7 +1231,7 @@ describe("buildVoucherServiceBlocks", () => {
             nights: null,
             notes: null,
             excursions: null,
-            package_legs: { sort_order: 0, label: "The Blue Train" },
+            sort_order: 0, label: "The Blue Train",
             suppliers: supplier({ kind: "train_operator", name: "Blue Train" }),
             routes: { name: "Pretoria ↔ Cape Town", duration_days: 3, default_excursions: ["Kimberley day trip"] },
             suite_types: { name: "Royal Suite" },

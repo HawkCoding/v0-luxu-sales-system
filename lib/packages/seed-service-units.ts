@@ -2,12 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { computeLegPassengerTotals, distributePassengerTotals } from "@/lib/packages/passenger-totals"
 
-export const TRANSPORT_SUPPLIER_KINDS = new Set(["transfers", "vehicle_rental"])
+const TRANSPORT_SUPPLIER_KINDS = new Set(["transfers", "vehicle_rental"])
 
-type BookingPackageSelectionInsert =
-  Database["public"]["Tables"]["booking_package_selections"]["Insert"]
-type BookingPackageSelectionUnitInsert =
-  Database["public"]["Tables"]["booking_package_selection_units"]["Insert"]
 type BookingServiceUnitInsert =
   Database["public"]["Tables"]["booking_service_units"]["Insert"]
 type BookingTransportRequestInsert =
@@ -36,7 +32,7 @@ interface CapturedSuite {
 
 /**
  * The suites captured on the enquiry, grouped by the supplier that owns each suite type, so a
- * package leg can pick up the ones belonging to its own supplier. Suites with no resolved suite
+ * service can pick up the ones belonging to its own supplier. Suites with no resolved suite
  * type are skipped -- there is nothing to carry, and a unit must not be invented for a room whose
  * type is still unknown.
  */
@@ -83,7 +79,7 @@ async function loadCapturedSuitesBySupplier(
 }
 
 /**
- * The booking-level headcount a leg's units have to add up to. Read once per seeding run and
+ * The booking-level headcount a service's units have to add up to. Read once per seeding run and
  * re-bucketed per supplier, because the adult/child/infant boundary is supplier-scoped.
  */
 async function loadBookingPassengerInputs(
@@ -103,114 +99,10 @@ async function loadBookingPassengerInputs(
   }
 }
 
-/** Fan out a package's legs into booking_package_selections (+ units seeded from the enquiry) and
- * booking_transport_requests (+ blank rental details) for a booking. Shared by the
- * predefined-package assign flow and the Build Booking (hidden-package) flow. */
-export async function seedSelectionsForLegs(
-  supabase: SupabaseClient<Database>,
-  bookingId: string,
-  legs: SeedLeg[],
-  { tripStartDate, tripEndDate }: SeedOptions,
-): Promise<{ error: string } | { error: null }> {
-  if (legs.length === 0) return { error: null }
-
-  const rows: BookingPackageSelectionInsert[] = legs.map((leg) => ({
-    booking_id: bookingId,
-    package_leg_id: leg.id,
-    selected: true,
-    supplier_id: leg.supplier_id,
-    service_date: tripStartDate,
-  }))
-
-  const { data: insertedSelections, error: insertError } = await supabase
-    .from("booking_package_selections")
-    .insert(rows)
-    .select("id, package_leg_id")
-
-  if (insertError) return { error: insertError.message }
-
-  // Seed units per non-transport leg. Where the enquiry already captured a suite for this leg's
-  // supplier, carry its suite type AND configuration across -- otherwise the bedroom/layout/
-  // bathroom values captured at intake would be silently dropped at the point they finally
-  // matter, since booking_package_selection_units is what quote build and the voucher read.
-  const selectionIdByLegId = new Map((insertedSelections ?? []).map((row) => [row.package_leg_id, row.id]))
-  const unitLegs = legs.filter((leg) => !TRANSPORT_SUPPLIER_KINDS.has(leg.kind ?? ""))
-  if (unitLegs.length > 0) {
-    const capturedSuitesBySupplier = await loadCapturedSuitesBySupplier(supabase, bookingId)
-
-    const unitRows: BookingPackageSelectionUnitInsert[] = unitLegs.flatMap((leg) => {
-      const selectionId = selectionIdByLegId.get(leg.id)
-      if (!selectionId) return []
-
-      const captured = capturedSuitesBySupplier.get(leg.supplier_id) ?? []
-      if (captured.length === 0) {
-        return [{ selection_id: selectionId, sort_order: 0 }]
-      }
-
-      return captured.map((suite, index) => ({
-        selection_id: selectionId,
-        suite_type_id: suite.suiteTypeId,
-        bedroom_type_id: suite.bedroomTypeId,
-        bedroom_layout_id: suite.bedroomLayoutId,
-        bathroom_type_id: suite.bathroomTypeId,
-        sort_order: index,
-      }))
-    })
-
-    if (unitRows.length > 0) {
-      const { error: unitInsertError } = await supabase
-        .from("booking_package_selection_units")
-        .insert(unitRows)
-
-      if (unitInsertError) return { error: unitInsertError.message }
-    }
-  }
-
-  const transportLegs = legs.filter((leg) => TRANSPORT_SUPPLIER_KINDS.has(leg.kind ?? ""))
-
-  if (transportLegs.length > 0) {
-    const transportRows: BookingTransportRequestInsert[] = transportLegs.map((leg) => ({
-      booking_id: bookingId,
-      package_leg_id: leg.id,
-      supplier_id: leg.supplier_id,
-      service_type: leg.kind === "vehicle_rental" ? "rental" : "transfer",
-      pickup_point: "",
-      dropoff_point: "",
-      pickup_at: tripStartDate ? `${tripStartDate}T00:00:00+00:00` : null,
-      sort_order: 0,
-    }))
-
-    const { data: insertedTransportRows, error: transportInsertError } = await supabase
-      .from("booking_transport_requests")
-      .insert(transportRows)
-      .select("id, service_type")
-
-    if (transportInsertError) return { error: transportInsertError.message }
-
-    const rentalDetailRows: BookingVehicleRentalDetailInsert[] = (insertedTransportRows ?? [])
-      .filter((row) => row.service_type === "rental")
-      .map((row) => ({
-        transport_request_id: row.id,
-        return_at: tripEndDate ? `${tripEndDate}T00:00:00+00:00` : null,
-      }))
-
-    if (rentalDetailRows.length > 0) {
-      const { error: rentalInsertError } = await supabase
-        .from("booking_vehicle_rental_details")
-        .insert(rentalDetailRows)
-
-      if (rentalInsertError) return { error: rentalInsertError.message }
-    }
-  }
-
-  return { error: null }
-}
-
 /**
- * Build Booking's equivalent of seedSelectionsForLegs: seeds booking_service_units (+ blank
- * booking_transport_requests) for newly-created booking_services rows. Unlike the catalogue-
- * package path there is no separate "selection" row to create -- a booking_services row already
- * is the leg and the selection, inserted directly by the caller before this runs.
+ * Seeds booking_service_units (+ blank booking_transport_requests) for newly-created
+ * booking_services rows. There is no separate "selection" row to create -- a booking_services row
+ * already is the leg and the selection, inserted directly by the caller before this runs.
  *
  * `origin` records whether this seeding happened as part of a human building the booking (Build
  * Booking, 'consultant') or the auto-build engine ('auto') -- see lib/auto-build. It is stamped

@@ -186,7 +186,7 @@ on conflict (id) do update set
 
 -- ============================================================
 -- ============================================================
--- SECTIONS 4-6: SUPPLIERS, RATE CARDS, PACKAGES (from production, full replace)
+-- SECTIONS 4-6: SUPPLIERS, SUITE TYPES, ROUTES & RATE CARDS (from production, full replace)
 -- ============================================================
 
 -- SUPPLIERS (from production, full replace)
@@ -865,6 +865,13 @@ insert into public.routes (id,origin_location_id,destination_location_id,name,ac
   ('fc389376-c2fe-4e1a-8138-1ffad4b27271','00000000-0000-0000-0000-000000001001','3ac373b2-7038-4838-aeae-df286c2653f3','Kruger National Park',true,'2026-07-22T09:49:57.502+00:00','2026-07-22T09:49:59.666285+00:00','002b438f-df83-483a-9274-f17e9fef7f35',null,null,'one_way',null,null,null,null,null,3)
 on conflict (id) do nothing;
 
+-- Departure/arrival times live on the route, so a train operator's routes can each run to their own
+-- schedule. Set here rather than in the insert above so the column list stays stable.
+update public.routes set departure_time = '08:30', arrival_time = '16:00', return_departure_time = '10:00', return_arrival_time = '17:30'
+  where id = 'a409fa56-f2d0-4981-a211-798ab54f1fa6';
+update public.routes set departure_time = '09:00', arrival_time = '15:00'
+  where id = 'fc389376-c2fe-4e1a-8138-1ffad4b27271';
+
 insert into public.rate_cards (id,route_id,suite_type_id,rate_type_id,price_per_person,currency,valid_from,valid_to,created_at,child_price,infant_price) values
   ('506e89e2-b2e9-434a-af83-194d083b6828','4cbf3ae9-3cf6-4142-8b69-2bd5ddf7a58f','48a4d650-4b0b-422e-ac5a-13f95437d342',(select id from public.rate_types where code='STO'),3575,'ZAR','2026-07-01','2026-08-31','2026-07-06T09:59:14.602+00:00',null,null),
   ('e9be597c-0fde-4e24-b32a-cb437eb5bdc6','4cbf3ae9-3cf6-4142-8b69-2bd5ddf7a58f','116b14f6-0ffe-4413-ab84-2da025794a5c',(select id from public.rate_types where code='STO'),3425,'ZAR','2026-07-01','2026-08-31','2026-07-06T09:59:14.602+00:00',null,null),
@@ -1353,27 +1360,6 @@ insert into public.rate_cards (id,route_id,suite_type_id,rate_type_id,price_per_
   ('2ecdff3b-78fc-4eb7-9c2d-363f69bf6556','518e80f9-be66-4122-9b6a-625197152340','ff632a10-6faf-42ad-a7ef-d1fec7072707',(select id from public.rate_types where code='RAC'),109500,'ZAR','2027-10-01','2028-09-30','2026-06-30T08:20:57.88+00:00',54750,null)
 on conflict (id) do nothing;
 
--- PACKAGES, LEGS & LEG ROUTES (from production, excluding per-booking synthetic packages)
-insert into public.packages (id,name,description,active,created_at,updated_at,duration_nights,single_supplement_pct,currency,slug,fixed_price_per_person,markup_pct) values
-  ('7af631c8-99ff-4eff-8964-96971736278f','Blue Train Five Night Package',null,true,'2026-07-08T09:10:59.747152+00:00','2026-07-08T09:10:59.747152+00:00',5,50,'ZAR','blue-train-five-night-package',null,0)
-on conflict (id) do nothing;
-
-insert into public.package_legs (id,package_id,supplier_id,label,sort_order,created_at,date_anchor) values
-  ('1631c0a8-9c2b-4fe9-8b94-884084beeaa0','7af631c8-99ff-4eff-8964-96971736278f','002b438f-df83-483a-9274-f17e9fef7f35','The Blue Train',0,'2026-07-08T09:11:00.134+00:00',null),
-  ('5bd4c566-b0b5-4fa3-8035-e9a7fd3a4ee4','7af631c8-99ff-4eff-8964-96971736278f','d13eedf1-9700-40ae-8fce-e9cf1cb277fa','Ulysses Tours & Transfers',1,'2026-07-08T09:11:00.134+00:00',null),
-  ('18da3cc2-ebe5-440a-958e-5474ec0f349f','7af631c8-99ff-4eff-8964-96971736278f','fa22aa9c-7e8d-4f7e-9abb-16cf8011d8c9','The President Hotel',2,'2026-07-08T09:11:00.134+00:00',null),
-  ('569ef307-9a27-4e6d-84a4-8be9e4b12766','7af631c8-99ff-4eff-8964-96971736278f','87cbbf54-5085-4146-afe7-172f522b3325','City Sightseeing Bus Tours',3,'2026-07-08T09:11:00.134+00:00',null),
-  ('c68f1ea0-df95-4a61-95d3-6b84ad6c6353','7af631c8-99ff-4eff-8964-96971736278f','d13eedf1-9700-40ae-8fce-e9cf1cb277fa','Ulysses Tours & Transfers',4,'2026-07-08T09:11:00.134+00:00',null),
-  ('54e9d8bd-aa12-46d7-b15e-1e38660242ae','7af631c8-99ff-4eff-8964-96971736278f','c3c2de5c-c68d-41c5-b04a-053708edca5a','FlySafair',5,'2026-07-08T09:11:00.134+00:00',null)
-on conflict (id) do nothing;
-
-insert into public.package_leg_routes (package_leg_id,route_id,created_at) values
-  ('1631c0a8-9c2b-4fe9-8b94-884084beeaa0','a409fa56-f2d0-4981-a211-798ab54f1fa6','2026-07-08T09:11:00.134+00:00'),
-  ('5bd4c566-b0b5-4fa3-8035-e9a7fd3a4ee4','5d50f736-f4a3-4fb1-9518-da7dc67c14e6','2026-07-08T09:11:00.134+00:00'),
-  ('569ef307-9a27-4e6d-84a4-8be9e4b12766','635df36f-b0b9-4199-bec7-4e6d8bf00332','2026-07-08T09:11:00.134+00:00'),
-  ('c68f1ea0-df95-4a61-95d3-6b84ad6c6353','4b8b200f-f34d-4e5a-9192-4e60e5d91a24','2026-07-08T09:11:00.134+00:00'),
-  ('54e9d8bd-aa12-46d7-b15e-1e38660242ae','fdd66479-3d2c-4b75-b7d2-23743d12203e','2026-07-08T09:11:00.134+00:00')
-on conflict do nothing;
 
 commit;
 
@@ -1473,10 +1459,13 @@ begin;
 -- ============================================================
 -- SECTION 9: BOOKINGS (9)
 -- Consultant map: LB=a2, CDJ=a1, DR=a3, MVE=a4, DL=a5
+-- Stage coverage is deliberate: every pipeline stage from enquiry to closed has at
+-- least one booking, so QA and demo flows always have something to open. Do not drop
+-- a booking without checking which stage loses its only fixture.
 -- ============================================================
 
 insert into public.bookings (
-  id,booking_number,customer_id,package_id,route_id,
+  id,booking_number,customer_id,route_id,
   purpose,source,stage,consultant,owner_user_id,assigned_salesperson_id,
   departure_date,duration_nights,no_of_adults,no_of_children,no_of_suites,
   hotel_phase,hotel_supplier_id,extend_stay,extra_nights,
@@ -1486,15 +1475,15 @@ insert into public.bookings (
   deposit_paid_at,final_paid_at,voucher_sent_at,closed_at,
   created_at,updated_at
 ) values
-('00000000-0000-0000-0000-000000009040','LTT-2025-0001','00000000-0000-0000-0000-000000008007','7af631c8-99ff-4eff-8964-96971736278f','a409fa56-f2d0-4981-a211-798ab54f1fa6','reservation','email','closed','CDJ','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000a1','2025-05-15',4,2,0,1,'post','fa22aa9c-7e8d-4f7e-9abb-16cf8011d8c9',false,null,false,null,true,true,0,'2025-02-10T09:00:00Z','2025-02-20T14:00:00Z','2025-02-22T09:00:00Z','2025-03-01T11:00:00Z','2025-04-15T15:00:00Z','2025-05-01T09:00:00Z','2025-07-01T10:00:00Z','2025-02-01T09:00:00Z','2025-07-01T10:00:00Z'),
-('00000000-0000-0000-0000-000000009033','LTT-2025-0003','00000000-0000-0000-0000-000000008001','7af631c8-99ff-4eff-8964-96971736278f','a409fa56-f2d0-4981-a211-798ab54f1fa6','reservation','web_form','closed','LB','00000000-0000-0000-0000-0000000000a2','00000000-0000-0000-0000-0000000000a2','2025-11-10',4,2,0,1,'post','fa22aa9c-7e8d-4f7e-9abb-16cf8011d8c9',false,null,false,null,true,true,0,'2025-08-28T09:00:00Z','2025-09-08T14:00:00Z','2025-09-12T09:00:00Z','2025-09-20T11:00:00Z','2025-10-05T15:00:00Z','2025-10-28T09:00:00Z','2025-12-01T10:00:00Z','2025-08-20T09:00:00Z','2025-12-01T10:00:00Z'),
-('00000000-0000-0000-0000-000000009029','LTT-2025-0007','00000000-0000-0000-0000-000000008011','7af631c8-99ff-4eff-8964-96971736278f','a409fa56-f2d0-4981-a211-798ab54f1fa6','reservation','referral','voucher_sent','DL','00000000-0000-0000-0000-0000000000a5','00000000-0000-0000-0000-0000000000a5','2026-06-08',4,2,0,1,'post','fa22aa9c-7e8d-4f7e-9abb-16cf8011d8c9',false,null,false,null,true,true,0,'2025-11-10T09:00:00Z','2025-11-20T14:00:00Z','2025-11-25T09:00:00Z','2025-12-05T11:00:00Z','2026-03-28T15:00:00Z','2026-05-01T09:00:00Z',null,'2025-11-01T09:00:00Z','2026-05-01T09:00:00Z'),
-('00000000-0000-0000-0000-000000009024','LTT-2025-0009','00000000-0000-0000-0000-000000008014','7af631c8-99ff-4eff-8964-96971736278f','a409fa56-f2d0-4981-a211-798ab54f1fa6','reservation','email','final_paid','DL','00000000-0000-0000-0000-0000000000a5','00000000-0000-0000-0000-0000000000a5','2026-06-11',4,2,0,1,'post','fa22aa9c-7e8d-4f7e-9abb-16cf8011d8c9',false,null,false,null,true,true,0,'2025-12-05T09:00:00Z','2025-12-15T14:00:00Z','2025-12-20T09:00:00Z','2025-12-28T11:00:00Z','2026-04-10T15:00:00Z',null,null,'2025-11-28T09:00:00Z','2026-04-10T15:00:00Z'),
-('00000000-0000-0000-0000-000000009021','LTT-2026-0015','00000000-0000-0000-0000-000000008002','7af631c8-99ff-4eff-8964-96971736278f','a409fa56-f2d0-4981-a211-798ab54f1fa6','reservation','travel_agent','deposit_paid','CDJ','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000a1','2026-06-04',4,2,0,1,'post','fa22aa9c-7e8d-4f7e-9abb-16cf8011d8c9',false,null,false,null,true,true,83662.50,'2026-01-30T09:00:00Z','2026-02-08T14:00:00Z','2026-02-12T09:00:00Z','2026-02-18T11:00:00Z',null,null,null,'2026-01-25T09:00:00Z','2026-02-18T11:00:00Z'),
-('00000000-0000-0000-0000-000000009018','LTT-2026-0021','00000000-0000-0000-0000-000000008008','7af631c8-99ff-4eff-8964-96971736278f','a409fa56-f2d0-4981-a211-798ab54f1fa6','reservation','email','deposit_requested','CDJ','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000a1','2026-09-15',4,2,2,1,'post','fa22aa9c-7e8d-4f7e-9abb-16cf8011d8c9',false,null,true,'Cape Town city sightseeing day tour',true,false,152400.00,'2026-03-12T09:00:00Z','2026-03-20T14:00:00Z','2026-03-25T09:00:00Z',null,null,null,null,'2026-03-05T09:00:00Z','2026-03-25T09:00:00Z'),
-('00000000-0000-0000-0000-000000009013','LTT-2026-0025','00000000-0000-0000-0000-000000008006','7af631c8-99ff-4eff-8964-96971736278f','a409fa56-f2d0-4981-a211-798ab54f1fa6','reservation','walk_in','accepted','DR','00000000-0000-0000-0000-0000000000a3','00000000-0000-0000-0000-0000000000a3','2026-09-01',4,2,0,1,'post','fa22aa9c-7e8d-4f7e-9abb-16cf8011d8c9',false,null,false,null,true,false,null,'2026-04-01T09:00:00Z','2026-04-10T14:00:00Z',null,null,null,null,null,'2026-03-25T09:00:00Z','2026-04-10T14:00:00Z'),
-('00000000-0000-0000-0000-000000009008','LTT-2026-0030','00000000-0000-0000-0000-000000008002','7af631c8-99ff-4eff-8964-96971736278f','a409fa56-f2d0-4981-a211-798ab54f1fa6','reservation','email','quote_sent','CDJ','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000a1','2026-09-10',4,2,0,1,'post','fa22aa9c-7e8d-4f7e-9abb-16cf8011d8c9',false,null,false,null,true,false,null,'2026-04-25T09:00:00Z',null,null,null,null,null,null,'2026-04-20T09:00:00Z','2026-04-25T09:00:00Z'),
-('00000000-0000-0000-0000-000000009002','LTT-2026-0033','00000000-0000-0000-0000-000000008018','7af631c8-99ff-4eff-8964-96971736278f','a409fa56-f2d0-4981-a211-798ab54f1fa6','reservation','email','enquiry','DL','00000000-0000-0000-0000-0000000000a5','00000000-0000-0000-0000-0000000000a5','2026-09-20',4,2,0,1,'post','fa22aa9c-7e8d-4f7e-9abb-16cf8011d8c9',false,null,true,'Honeymoon arrangement — rose petals, champagne, private dinner',false,false,null,null,null,null,null,null,null,null,'2026-05-08T09:00:00Z','2026-05-08T09:00:00Z');
+('00000000-0000-0000-0000-000000009040','LTT-2025-0001','00000000-0000-0000-0000-000000008007','a409fa56-f2d0-4981-a211-798ab54f1fa6','reservation','email','closed','CDJ','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000a1','2025-05-15',4,2,0,1,'post','fa22aa9c-7e8d-4f7e-9abb-16cf8011d8c9',false,null,false,null,true,true,0,'2025-02-10T09:00:00Z','2025-02-20T14:00:00Z','2025-02-22T09:00:00Z','2025-03-01T11:00:00Z','2025-04-15T15:00:00Z','2025-05-01T09:00:00Z','2025-07-01T10:00:00Z','2025-02-01T09:00:00Z','2025-07-01T10:00:00Z'),
+('00000000-0000-0000-0000-000000009033','LTT-2025-0003','00000000-0000-0000-0000-000000008001','a409fa56-f2d0-4981-a211-798ab54f1fa6','reservation','web_form','closed','LB','00000000-0000-0000-0000-0000000000a2','00000000-0000-0000-0000-0000000000a2','2025-11-10',4,2,0,1,'post','fa22aa9c-7e8d-4f7e-9abb-16cf8011d8c9',false,null,false,null,true,true,0,'2025-08-28T09:00:00Z','2025-09-08T14:00:00Z','2025-09-12T09:00:00Z','2025-09-20T11:00:00Z','2025-10-05T15:00:00Z','2025-10-28T09:00:00Z','2025-12-01T10:00:00Z','2025-08-20T09:00:00Z','2025-12-01T10:00:00Z'),
+('00000000-0000-0000-0000-000000009024','LTT-2025-0009','00000000-0000-0000-0000-000000008014','a409fa56-f2d0-4981-a211-798ab54f1fa6','reservation','email','final_paid','DL','00000000-0000-0000-0000-0000000000a5','00000000-0000-0000-0000-0000000000a5','2026-06-11',4,2,0,1,'post','fa22aa9c-7e8d-4f7e-9abb-16cf8011d8c9',false,null,false,null,true,true,0,'2025-12-05T09:00:00Z','2025-12-15T14:00:00Z','2025-12-20T09:00:00Z','2025-12-28T11:00:00Z','2026-04-10T15:00:00Z',null,null,'2025-11-28T09:00:00Z','2026-04-10T15:00:00Z'),
+('00000000-0000-0000-0000-000000009021','LTT-2026-0015','00000000-0000-0000-0000-000000008002','a409fa56-f2d0-4981-a211-798ab54f1fa6','reservation','travel_agent','deposit_paid','CDJ','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000a1','2026-06-04',4,2,0,1,'post','fa22aa9c-7e8d-4f7e-9abb-16cf8011d8c9',false,null,false,null,true,true,83662.50,'2026-01-30T09:00:00Z','2026-02-08T14:00:00Z','2026-02-12T09:00:00Z','2026-02-18T11:00:00Z',null,null,null,'2026-01-25T09:00:00Z','2026-02-18T11:00:00Z'),
+('00000000-0000-0000-0000-000000009013','LTT-2026-0025','00000000-0000-0000-0000-000000008006','a409fa56-f2d0-4981-a211-798ab54f1fa6','reservation','walk_in','accepted','DR','00000000-0000-0000-0000-0000000000a3','00000000-0000-0000-0000-0000000000a3','2026-09-01',4,2,0,1,'post','fa22aa9c-7e8d-4f7e-9abb-16cf8011d8c9',false,null,false,null,true,false,null,'2026-04-01T09:00:00Z','2026-04-10T14:00:00Z',null,null,null,null,null,'2026-03-25T09:00:00Z','2026-04-10T14:00:00Z'),
+('00000000-0000-0000-0000-000000009029','LTT-2025-0007','00000000-0000-0000-0000-000000008011','a409fa56-f2d0-4981-a211-798ab54f1fa6','reservation','referral','voucher_sent','DL','00000000-0000-0000-0000-0000000000a5','00000000-0000-0000-0000-0000000000a5','2026-06-08',4,2,0,1,'post','fa22aa9c-7e8d-4f7e-9abb-16cf8011d8c9',false,null,false,null,true,true,0,'2025-11-10T09:00:00Z','2025-11-20T14:00:00Z','2025-11-25T09:00:00Z','2025-12-05T11:00:00Z','2026-03-28T15:00:00Z','2026-05-01T09:00:00Z',null,'2025-11-01T09:00:00Z','2026-05-01T09:00:00Z'),
+('00000000-0000-0000-0000-000000009018','LTT-2026-0021','00000000-0000-0000-0000-000000008008','a409fa56-f2d0-4981-a211-798ab54f1fa6','reservation','email','deposit_requested','CDJ','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000a1','2026-09-15',4,2,2,1,'post','fa22aa9c-7e8d-4f7e-9abb-16cf8011d8c9',false,null,true,'Cape Town city sightseeing day tour',true,false,152400.00,'2026-03-12T09:00:00Z','2026-03-20T14:00:00Z','2026-03-25T09:00:00Z',null,null,null,null,'2026-03-05T09:00:00Z','2026-03-25T09:00:00Z'),
+('00000000-0000-0000-0000-000000009008','LTT-2026-0030','00000000-0000-0000-0000-000000008002','a409fa56-f2d0-4981-a211-798ab54f1fa6','reservation','email','quote_sent','CDJ','00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000a1','2026-09-10',4,2,0,1,'post','fa22aa9c-7e8d-4f7e-9abb-16cf8011d8c9',false,null,false,null,true,false,null,'2026-04-25T09:00:00Z',null,null,null,null,null,null,'2026-04-20T09:00:00Z','2026-04-25T09:00:00Z'),
+('00000000-0000-0000-0000-000000009002','LTT-2026-0033','00000000-0000-0000-0000-000000008018','a409fa56-f2d0-4981-a211-798ab54f1fa6','reservation','email','enquiry','DL','00000000-0000-0000-0000-0000000000a5','00000000-0000-0000-0000-0000000000a5','2026-09-20',4,2,0,1,'post','fa22aa9c-7e8d-4f7e-9abb-16cf8011d8c9',false,null,true,'Honeymoon arrangement — rose petals, champagne, private dinner',false,false,null,null,null,null,null,null,null,null,'2026-05-08T09:00:00Z','2026-05-08T09:00:00Z');
 
 commit;
 
@@ -1506,21 +1495,21 @@ begin;
 -- SECTION 10: BOOKING SUITES
 insert into public.booking_suites (id,booking_id,suite_number,suite_type_id,suite_type_name,created_at) values
 ('00000000-0000-0000-0000-00000000a003','00000000-0000-0000-0000-000000009033',1,'66958bfc-888f-44db-9279-e2babc8b5e7c','Luxury Suite','2025-08-20T09:11:00Z'),
-('00000000-0000-0000-0000-00000000a007','00000000-0000-0000-0000-000000009029',1,'642e34ee-9a7b-4532-bb20-12a61c2f6e85','Deluxe Suite','2025-11-01T09:11:00Z'),
 ('00000000-0000-0000-0000-00000000a009','00000000-0000-0000-0000-000000009024',1,'642e34ee-9a7b-4532-bb20-12a61c2f6e85','Deluxe Suite','2025-11-28T09:11:00Z'),
 ('00000000-0000-0000-0000-00000000a014','00000000-0000-0000-0000-000000009021',1,'642e34ee-9a7b-4532-bb20-12a61c2f6e85','Deluxe Suite','2026-01-25T09:11:00Z'),
-('00000000-0000-0000-0000-00000000a019','00000000-0000-0000-0000-000000009018',1,'66958bfc-888f-44db-9279-e2babc8b5e7c','Luxury Suite','2026-03-05T09:11:00Z'),
 ('00000000-0000-0000-0000-00000000a023','00000000-0000-0000-0000-000000009013',1,'66958bfc-888f-44db-9279-e2babc8b5e7c','Luxury Suite','2026-03-25T09:11:00Z'),
+('00000000-0000-0000-0000-00000000a007','00000000-0000-0000-0000-000000009029',1,'642e34ee-9a7b-4532-bb20-12a61c2f6e85','Deluxe Suite','2025-11-01T09:11:00Z'),
+('00000000-0000-0000-0000-00000000a019','00000000-0000-0000-0000-000000009018',1,'66958bfc-888f-44db-9279-e2babc8b5e7c','Luxury Suite','2026-03-05T09:11:00Z'),
 ('00000000-0000-0000-0000-00000000a028','00000000-0000-0000-0000-000000009008',1,'642e34ee-9a7b-4532-bb20-12a61c2f6e85','Deluxe Suite','2026-04-20T09:11:00Z');
 
 -- SECTION 11: TRAVELLERS (key bookings)
 insert into public.travellers (id,booking_id,prefix,first_name,last_name,id_passport,date_of_birth,is_child,sort_order,created_at) values
 ('00000000-0000-0000-0000-00000000b007','00000000-0000-0000-0000-000000009033','Mr','James','Mitchell','ZA8501015800081','1985-01-15',false,1,'2025-08-20T09:12:00Z'),
 ('00000000-0000-0000-0000-00000000b008','00000000-0000-0000-0000-000000009033','Mrs','Linda','Mitchell','ZA8703025800082','1987-03-02',false,2,'2025-08-20T09:12:00Z'),
-('00000000-0000-0000-0000-00000000b015','00000000-0000-0000-0000-000000009029','Mr','Henrik','Johansson','SE12345678','1982-04-22',false,1,'2025-11-01T09:12:00Z'),
-('00000000-0000-0000-0000-00000000b016','00000000-0000-0000-0000-000000009029','Ms','Astrid','Johansson','SE87654321','1985-08-14',false,2,'2025-11-01T09:12:00Z'),
 ('00000000-0000-0000-0000-00000000b019','00000000-0000-0000-0000-000000009024','Mrs','Chloe','Beaumont','CA23456789','1988-06-15',false,1,'2025-11-28T09:12:00Z'),
 ('00000000-0000-0000-0000-00000000b020','00000000-0000-0000-0000-000000009024','Mr','Louis','Beaumont','CA98765432','1985-11-03',false,2,'2025-11-28T09:12:00Z'),
+('00000000-0000-0000-0000-00000000b015','00000000-0000-0000-0000-000000009029','Mr','Henrik','Johansson','SE12345678','1982-04-22',false,1,'2025-11-01T09:12:00Z'),
+('00000000-0000-0000-0000-00000000b016','00000000-0000-0000-0000-000000009029','Ms','Astrid','Johansson','SE87654321','1985-08-14',false,2,'2025-11-01T09:12:00Z'),
 ('00000000-0000-0000-0000-00000000b027','00000000-0000-0000-0000-000000009018','Mrs','Elizabeth','Taylor','AU12345678','1980-03-12',false,1,'2026-03-05T09:12:00Z'),
 ('00000000-0000-0000-0000-00000000b028','00000000-0000-0000-0000-000000009018','Mr','George','Taylor','AU87654321','1978-07-18',false,2,'2026-03-05T09:12:00Z'),
 ('00000000-0000-0000-0000-00000000b029','00000000-0000-0000-0000-000000009018','Miss','Emma','Taylor','AU55556666','2018-05-12',true,3,'2026-03-05T09:12:00Z'),
@@ -1533,98 +1522,14 @@ commit;
 
 begin;
 
--- ============================================================
--- SECTION 11b: BOOKING PACKAGE SELECTIONS, UNITS & TRANSPORT REQUESTS
--- One row per Blue Train Five Night Package leg (train, transfer, hotel,
--- tour, transfer, flight) for each of the 3 bookings, so Build Booking /
--- the Reservation tab render the package's real supplier chain instead of
--- an empty leg list. Transport requests cover the two Ulysses transfer
--- legs only (booking_transport_requests.service_type allows 'transfer'/
--- 'rental', not flights); the FlySafair leg is carried purely via the
--- selection + unit rows.
--- ============================================================
-
-insert into public.booking_package_selections (id,booking_id,package_leg_id,selected,supplier_id,route_id,suite_type_id,service_date,notes,created_at,updated_at) values
--- Sarah Van Der Berg (LTT-2026-0030)
-('00000000-0000-0000-0000-00000000f110','00000000-0000-0000-0000-000000009008','1631c0a8-9c2b-4fe9-8b94-884084beeaa0',true,'002b438f-df83-483a-9274-f17e9fef7f35','a409fa56-f2d0-4981-a211-798ab54f1fa6','642e34ee-9a7b-4532-bb20-12a61c2f6e85','2026-09-10',null,'2026-04-25T09:15:00Z','2026-04-25T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f111','00000000-0000-0000-0000-000000009008','5bd4c566-b0b5-4fa3-8035-e9a7fd3a4ee4',true,'d13eedf1-9700-40ae-8fce-e9cf1cb277fa','5d50f736-f4a3-4fb1-9518-da7dc67c14e6',null,'2026-09-13',null,'2026-04-25T09:15:00Z','2026-04-25T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f112','00000000-0000-0000-0000-000000009008','18da3cc2-ebe5-440a-958e-5474ec0f349f',true,'fa22aa9c-7e8d-4f7e-9abb-16cf8011d8c9',null,'f6ec6260-5d6c-4130-81be-0fd21e77d021','2026-09-13',null,'2026-04-25T09:15:00Z','2026-04-25T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f113','00000000-0000-0000-0000-000000009008','569ef307-9a27-4e6d-84a4-8be9e4b12766',true,'87cbbf54-5085-4146-afe7-172f522b3325','635df36f-b0b9-4199-bec7-4e6d8bf00332',null,'2026-09-14',null,'2026-04-25T09:15:00Z','2026-04-25T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f114','00000000-0000-0000-0000-000000009008','c68f1ea0-df95-4a61-95d3-6b84ad6c6353',true,'d13eedf1-9700-40ae-8fce-e9cf1cb277fa','4b8b200f-f34d-4e5a-9192-4e60e5d91a24',null,'2026-09-15',null,'2026-04-25T09:15:00Z','2026-04-25T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f115','00000000-0000-0000-0000-000000009008','54e9d8bd-aa12-46d7-b15e-1e38660242ae',true,'c3c2de5c-c68d-41c5-b04a-053708edca5a','fdd66479-3d2c-4b75-b7d2-23743d12203e',null,'2026-09-15','Flight FA123 CPT > ORT','2026-04-25T09:15:00Z','2026-04-25T09:15:00Z'),
--- Elizabeth Taylor family (LTT-2026-0021)
-('00000000-0000-0000-0000-00000000f120','00000000-0000-0000-0000-000000009018','1631c0a8-9c2b-4fe9-8b94-884084beeaa0',true,'002b438f-df83-483a-9274-f17e9fef7f35','a409fa56-f2d0-4981-a211-798ab54f1fa6','66958bfc-888f-44db-9279-e2babc8b5e7c','2026-09-15',null,'2026-03-12T09:15:00Z','2026-03-25T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f121','00000000-0000-0000-0000-000000009018','5bd4c566-b0b5-4fa3-8035-e9a7fd3a4ee4',true,'d13eedf1-9700-40ae-8fce-e9cf1cb277fa','5d50f736-f4a3-4fb1-9518-da7dc67c14e6',null,'2026-09-18',null,'2026-03-12T09:15:00Z','2026-03-25T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f122','00000000-0000-0000-0000-000000009018','18da3cc2-ebe5-440a-958e-5474ec0f349f',true,'fa22aa9c-7e8d-4f7e-9abb-16cf8011d8c9',null,'159d8f01-77b1-45a6-add6-198d66241d52','2026-09-18',null,'2026-03-12T09:15:00Z','2026-03-25T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f123','00000000-0000-0000-0000-000000009018','569ef307-9a27-4e6d-84a4-8be9e4b12766',true,'87cbbf54-5085-4146-afe7-172f522b3325','635df36f-b0b9-4199-bec7-4e6d8bf00332',null,'2026-09-19',null,'2026-03-12T09:15:00Z','2026-03-25T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f124','00000000-0000-0000-0000-000000009018','c68f1ea0-df95-4a61-95d3-6b84ad6c6353',true,'d13eedf1-9700-40ae-8fce-e9cf1cb277fa','4b8b200f-f34d-4e5a-9192-4e60e5d91a24',null,'2026-09-20',null,'2026-03-12T09:15:00Z','2026-03-25T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f125','00000000-0000-0000-0000-000000009018','54e9d8bd-aa12-46d7-b15e-1e38660242ae',true,'c3c2de5c-c68d-41c5-b04a-053708edca5a','fdd66479-3d2c-4b75-b7d2-23743d12203e',null,'2026-09-20','Flight FA124 CPT > ORT','2026-03-12T09:15:00Z','2026-03-25T09:15:00Z'),
--- Henrik & Astrid Johansson (LTT-2025-0007)
-('00000000-0000-0000-0000-00000000f130','00000000-0000-0000-0000-000000009029','1631c0a8-9c2b-4fe9-8b94-884084beeaa0',true,'002b438f-df83-483a-9274-f17e9fef7f35','a409fa56-f2d0-4981-a211-798ab54f1fa6','642e34ee-9a7b-4532-bb20-12a61c2f6e85','2026-06-08',null,'2025-11-10T09:15:00Z','2025-11-10T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f131','00000000-0000-0000-0000-000000009029','5bd4c566-b0b5-4fa3-8035-e9a7fd3a4ee4',true,'d13eedf1-9700-40ae-8fce-e9cf1cb277fa','5d50f736-f4a3-4fb1-9518-da7dc67c14e6',null,'2026-06-11',null,'2025-11-10T09:15:00Z','2025-11-10T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f132','00000000-0000-0000-0000-000000009029','18da3cc2-ebe5-440a-958e-5474ec0f349f',true,'fa22aa9c-7e8d-4f7e-9abb-16cf8011d8c9',null,'a8cb7e9a-fa21-4103-91a4-271ffd5f8d02','2026-06-11',null,'2025-11-10T09:15:00Z','2025-11-10T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f133','00000000-0000-0000-0000-000000009029','569ef307-9a27-4e6d-84a4-8be9e4b12766',true,'87cbbf54-5085-4146-afe7-172f522b3325','635df36f-b0b9-4199-bec7-4e6d8bf00332',null,'2026-06-12',null,'2025-11-10T09:15:00Z','2025-11-10T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f134','00000000-0000-0000-0000-000000009029','c68f1ea0-df95-4a61-95d3-6b84ad6c6353',true,'d13eedf1-9700-40ae-8fce-e9cf1cb277fa','4b8b200f-f34d-4e5a-9192-4e60e5d91a24',null,'2026-06-13',null,'2025-11-10T09:15:00Z','2025-11-10T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f135','00000000-0000-0000-0000-000000009029','54e9d8bd-aa12-46d7-b15e-1e38660242ae',true,'c3c2de5c-c68d-41c5-b04a-053708edca5a','fdd66479-3d2c-4b75-b7d2-23743d12203e',null,'2026-06-13','Flight FA125 CPT > ORT','2025-11-10T09:15:00Z','2025-11-10T09:15:00Z')
-on conflict (booking_id, package_leg_id) do update set
-  selected=excluded.selected,supplier_id=excluded.supplier_id,route_id=excluded.route_id,
-  suite_type_id=excluded.suite_type_id,service_date=excluded.service_date,notes=excluded.notes,
-  updated_at=excluded.updated_at;
-
-insert into public.booking_package_selection_units (id,selection_id,suite_type_id,adult_count,child_count,infant_count,sort_order,created_at,updated_at) values
--- Sarah
-('00000000-0000-0000-0000-00000000f210','00000000-0000-0000-0000-00000000f110','642e34ee-9a7b-4532-bb20-12a61c2f6e85',2,0,0,0,'2026-04-25T09:15:00Z','2026-04-25T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f211','00000000-0000-0000-0000-00000000f111',null,2,0,0,0,'2026-04-25T09:15:00Z','2026-04-25T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f212','00000000-0000-0000-0000-00000000f112','f6ec6260-5d6c-4130-81be-0fd21e77d021',2,0,0,0,'2026-04-25T09:15:00Z','2026-04-25T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f213','00000000-0000-0000-0000-00000000f113',null,2,0,0,0,'2026-04-25T09:15:00Z','2026-04-25T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f214','00000000-0000-0000-0000-00000000f114',null,2,0,0,0,'2026-04-25T09:15:00Z','2026-04-25T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f215','00000000-0000-0000-0000-00000000f115',null,2,0,0,0,'2026-04-25T09:15:00Z','2026-04-25T09:15:00Z'),
--- Taylor family
-('00000000-0000-0000-0000-00000000f220','00000000-0000-0000-0000-00000000f120','66958bfc-888f-44db-9279-e2babc8b5e7c',2,2,0,0,'2026-03-12T09:15:00Z','2026-03-25T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f221','00000000-0000-0000-0000-00000000f121',null,2,2,0,0,'2026-03-12T09:15:00Z','2026-03-25T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f222','00000000-0000-0000-0000-00000000f122','159d8f01-77b1-45a6-add6-198d66241d52',2,2,0,0,'2026-03-12T09:15:00Z','2026-03-25T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f223','00000000-0000-0000-0000-00000000f123',null,2,2,0,0,'2026-03-12T09:15:00Z','2026-03-25T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f224','00000000-0000-0000-0000-00000000f124',null,2,2,0,0,'2026-03-12T09:15:00Z','2026-03-25T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f225','00000000-0000-0000-0000-00000000f125',null,2,2,0,0,'2026-03-12T09:15:00Z','2026-03-25T09:15:00Z'),
--- Johansson
-('00000000-0000-0000-0000-00000000f230','00000000-0000-0000-0000-00000000f130','642e34ee-9a7b-4532-bb20-12a61c2f6e85',2,0,0,0,'2025-11-10T09:15:00Z','2025-11-10T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f231','00000000-0000-0000-0000-00000000f131',null,2,0,0,0,'2025-11-10T09:15:00Z','2025-11-10T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f232','00000000-0000-0000-0000-00000000f132','a8cb7e9a-fa21-4103-91a4-271ffd5f8d02',2,0,0,0,'2025-11-10T09:15:00Z','2025-11-10T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f233','00000000-0000-0000-0000-00000000f133',null,2,0,0,0,'2025-11-10T09:15:00Z','2025-11-10T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f234','00000000-0000-0000-0000-00000000f134',null,2,0,0,0,'2025-11-10T09:15:00Z','2025-11-10T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f235','00000000-0000-0000-0000-00000000f135',null,2,0,0,0,'2025-11-10T09:15:00Z','2025-11-10T09:15:00Z')
-on conflict (id) do update set
-  suite_type_id=excluded.suite_type_id,adult_count=excluded.adult_count,child_count=excluded.child_count,
-  infant_count=excluded.infant_count,updated_at=excluded.updated_at;
-
-insert into public.booking_transport_requests (id,booking_id,service_type,supplier_id,route_id,package_leg_id,pickup_point,dropoff_point,pickup_at,passenger_count,luggage_count,sort_order,created_at,updated_at) values
--- Sarah
-('00000000-0000-0000-0000-00000000f311','00000000-0000-0000-0000-000000009008','transfer','d13eedf1-9700-40ae-8fce-e9cf1cb277fa','5d50f736-f4a3-4fb1-9518-da7dc67c14e6','5bd4c566-b0b5-4fa3-8035-e9a7fd3a4ee4','Cape Town Station','Cape Town Hotel (CBD)','2026-09-13T09:00:00Z',2,2,1,'2026-04-25T09:15:00Z','2026-04-25T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f314','00000000-0000-0000-0000-000000009008','transfer','d13eedf1-9700-40ae-8fce-e9cf1cb277fa','4b8b200f-f34d-4e5a-9192-4e60e5d91a24','c68f1ea0-df95-4a61-95d3-6b84ad6c6353','Cape Town Hotel','Cape Town Airport','2026-09-15T09:00:00Z',2,2,4,'2026-04-25T09:15:00Z','2026-04-25T09:15:00Z'),
--- Taylor family
-('00000000-0000-0000-0000-00000000f321','00000000-0000-0000-0000-000000009018','transfer','d13eedf1-9700-40ae-8fce-e9cf1cb277fa','5d50f736-f4a3-4fb1-9518-da7dc67c14e6','5bd4c566-b0b5-4fa3-8035-e9a7fd3a4ee4','Cape Town Station','Cape Town Hotel (CBD)','2026-09-18T09:00:00Z',4,4,1,'2026-03-12T09:15:00Z','2026-03-25T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f324','00000000-0000-0000-0000-000000009018','transfer','d13eedf1-9700-40ae-8fce-e9cf1cb277fa','4b8b200f-f34d-4e5a-9192-4e60e5d91a24','c68f1ea0-df95-4a61-95d3-6b84ad6c6353','Cape Town Hotel','Cape Town Airport','2026-09-20T09:00:00Z',4,4,4,'2026-03-12T09:15:00Z','2026-03-25T09:15:00Z'),
--- Johansson
-('00000000-0000-0000-0000-00000000f331','00000000-0000-0000-0000-000000009029','transfer','d13eedf1-9700-40ae-8fce-e9cf1cb277fa','5d50f736-f4a3-4fb1-9518-da7dc67c14e6','5bd4c566-b0b5-4fa3-8035-e9a7fd3a4ee4','Cape Town Station','Cape Town Hotel (CBD)','2026-06-11T09:00:00Z',2,2,1,'2025-11-10T09:15:00Z','2025-11-10T09:15:00Z'),
-('00000000-0000-0000-0000-00000000f334','00000000-0000-0000-0000-000000009029','transfer','d13eedf1-9700-40ae-8fce-e9cf1cb277fa','4b8b200f-f34d-4e5a-9192-4e60e5d91a24','c68f1ea0-df95-4a61-95d3-6b84ad6c6353','Cape Town Hotel','Cape Town Airport','2026-06-13T09:00:00Z',2,2,4,'2025-11-10T09:15:00Z','2025-11-10T09:15:00Z')
-on conflict (id) do update set
-  supplier_id=excluded.supplier_id,route_id=excluded.route_id,pickup_point=excluded.pickup_point,
-  dropoff_point=excluded.dropoff_point,pickup_at=excluded.pickup_at,passenger_count=excluded.passenger_count,
-  luggage_count=excluded.luggage_count,updated_at=excluded.updated_at;
-
-commit;
-
-
-begin;
-
 -- SECTION 12: ITINERARIES
 insert into public.itineraries (id,booking_id,name,notes,accepted_at,created_at,updated_at) values
 ('00000000-0000-0000-0000-00000000c003','00000000-0000-0000-0000-000000009033','Blue Train Cape Town Explorer — Mitchell VIP','Four-night Pretoria to Cape Town. Luxury Suite with post-stay at The President Hotel.','2025-09-08T14:00:00Z','2025-09-05T09:00:00Z','2025-09-08T14:00:00Z'),
-('00000000-0000-0000-0000-00000000c007','00000000-0000-0000-0000-000000009029','Blue Train Cape Town Explorer — Johansson','Four-night Pretoria to Cape Town. Post-stay at The President Hotel, with return transfers via Ulysses Tours & Transfers and a FlySafair flight home.','2025-11-20T14:00:00Z','2025-11-17T09:00:00Z','2025-11-20T14:00:00Z'),
 ('00000000-0000-0000-0000-00000000c009','00000000-0000-0000-0000-000000009024','Blue Train Cape Town Explorer — Beaumont','Four-night Pretoria to Cape Town. Post-stay at The President Hotel.','2025-12-15T14:00:00Z','2025-12-12T09:00:00Z','2025-12-15T14:00:00Z'),
 ('00000000-0000-0000-0000-00000000c014','00000000-0000-0000-0000-000000009021','Blue Train Cape Town Explorer — Van Der Berg','Four-night Pretoria to Cape Town. Post-stay at The President Hotel.','2026-02-08T14:00:00Z','2026-02-05T09:00:00Z','2026-02-08T14:00:00Z'),
-('00000000-0000-0000-0000-00000000c019','00000000-0000-0000-0000-000000009018','Blue Train Cape Town Explorer — Taylor Family','Four-night with 2 children. Post-stay at The President Hotel, City Sightseeing Cape Town day tour, Ulysses transfers and a FlySafair flight home.','2026-03-20T14:00:00Z','2026-03-17T09:00:00Z','2026-03-20T14:00:00Z'),
-('00000000-0000-0000-0000-00000000c023','00000000-0000-0000-0000-000000009013','Blue Train Cape Town Explorer — Naidoo (accepted)','Four-night Pretoria to Cape Town. Post-stay.','2026-04-10T14:00:00Z','2026-04-07T09:00:00Z','2026-04-10T14:00:00Z');
+('00000000-0000-0000-0000-00000000c023','00000000-0000-0000-0000-000000009013','Blue Train Cape Town Explorer — Naidoo (accepted)','Four-night Pretoria to Cape Town. Post-stay.','2026-04-10T14:00:00Z','2026-04-07T09:00:00Z','2026-04-10T14:00:00Z'),
+('00000000-0000-0000-0000-00000000c007','00000000-0000-0000-0000-000000009029','Blue Train Cape Town Explorer — Johansson','Four-night Pretoria to Cape Town. Post-stay at The President Hotel, with return transfers via Ulysses Tours & Transfers and a FlySafair flight home.','2025-11-20T14:00:00Z','2025-11-17T09:00:00Z','2025-11-20T14:00:00Z'),
+('00000000-0000-0000-0000-00000000c019','00000000-0000-0000-0000-000000009018','Blue Train Cape Town Explorer — Taylor Family','Four-night with 2 children. Post-stay at The President Hotel, City Sightseeing Cape Town day tour, Ulysses transfers and a FlySafair flight home.','2026-03-20T14:00:00Z','2026-03-17T09:00:00Z','2026-03-20T14:00:00Z');
 
 commit;
 
@@ -1635,44 +1540,41 @@ begin;
 -- validity_until is exactly 14 days from created_at (quotes are valid 14 days).
 insert into public.quotes (id,booking_id,itinerary_id,quote_number,status,validity_until,subtotal,total,last_sent_at,created_at,updated_at) values
 ('00000000-0000-0000-0000-00000000d003','00000000-0000-0000-0000-000000009033','00000000-0000-0000-0000-00000000c003','LTT-2025-0003-Q1','accepted','2025-09-28',143478.26,143478.26,'2025-08-28T09:30:00Z','2025-08-28T09:00:00Z','2025-09-08T14:00:00Z'),
-('00000000-0000-0000-0000-00000000d007','00000000-0000-0000-0000-000000009029','00000000-0000-0000-0000-00000000c007','LTT-2025-0007-Q1','accepted','2025-11-24',97000.00,97000.00,'2025-11-10T09:30:00Z','2025-11-10T09:00:00Z','2025-11-20T14:00:00Z'),
 ('00000000-0000-0000-0000-00000000d009','00000000-0000-0000-0000-000000009024','00000000-0000-0000-0000-00000000c009','LTT-2025-0009-Q1','accepted','2026-01-05',97000.00,97000.00,'2025-12-05T09:30:00Z','2025-12-05T09:00:00Z','2025-12-15T14:00:00Z'),
 ('00000000-0000-0000-0000-00000000d014','00000000-0000-0000-0000-000000009021','00000000-0000-0000-0000-00000000c014','LTT-2026-0015-Q1','accepted','2026-02-28',97000.00,97000.00,'2026-01-30T09:30:00Z','2026-01-30T09:00:00Z','2026-02-08T14:00:00Z'),
-('00000000-0000-0000-0000-00000000d019','00000000-0000-0000-0000-000000009018','00000000-0000-0000-0000-00000000c019','LTT-2026-0021-Q1','accepted','2026-03-26',152400.00,152400.00,'2026-03-12T09:30:00Z','2026-03-12T09:00:00Z','2026-03-20T14:00:00Z'),
 ('00000000-0000-0000-0000-00000000d023','00000000-0000-0000-0000-000000009013','00000000-0000-0000-0000-00000000c023','LTT-2026-0025-Q1','accepted','2026-05-01',110400.00,110400.00,'2026-04-01T09:30:00Z','2026-04-01T09:00:00Z','2026-04-10T14:00:00Z'),
+('00000000-0000-0000-0000-00000000d007','00000000-0000-0000-0000-000000009029','00000000-0000-0000-0000-00000000c007','LTT-2025-0007-Q1','accepted','2025-11-24',97000.00,97000.00,'2025-11-10T09:30:00Z','2025-11-10T09:00:00Z','2025-11-20T14:00:00Z'),
+('00000000-0000-0000-0000-00000000d019','00000000-0000-0000-0000-000000009018','00000000-0000-0000-0000-00000000c019','LTT-2026-0021-Q1','accepted','2026-03-26',152400.00,152400.00,'2026-03-12T09:30:00Z','2026-03-12T09:00:00Z','2026-03-20T14:00:00Z'),
 ('00000000-0000-0000-0000-00000000d028','00000000-0000-0000-0000-000000009008',null,'LTT-2026-0030-Q1','sent','2026-05-09',97000.00,97000.00,'2026-04-25T09:30:00Z','2026-04-25T09:00:00Z','2026-04-25T09:30:00Z');
 
 -- SECTION 13b: QUOTE LINE ITEMS
--- One line per package leg supplier actually selected in SECTION 11b
--- (the two Ulysses transfer legs are combined into a single return-transfers line).
+-- One line per supplier actually sold on the quote (the two Ulysses transfer legs
+-- are combined into a single return-transfers line). Plain descriptive rows — these
+-- carry no foreign key to any catalogue structure.
 insert into public.quote_line_items (id,quote_id,description,qty,unit_price,total,sort_order,created_at) values
--- James & Linda Mitchell — LTT-2025-0003-Q1 (2 adults, VIP)
 ('00000000-0000-0000-0000-00000000e004','00000000-0000-0000-0000-00000000d003','Luxury Suite (2 pax) — Blue Train Cape Town Explorer',1,144000.00,144000.00,1,'2025-08-28T09:05:00Z'),
 ('00000000-0000-0000-0000-00000000e005','00000000-0000-0000-0000-00000000d003','The President Hotel — 2 nights (2 pax)',1,19000.00,19000.00,2,'2025-08-28T09:05:00Z'),
--- Chloe & Louis Beaumont — LTT-2025-0009-Q1 (2 adults)
 ('00000000-0000-0000-0000-00000000e011','00000000-0000-0000-0000-00000000d009','Deluxe Suite (2 pax) — Blue Train Cape Town Explorer',1,97000.00,97000.00,1,'2025-12-05T09:05:00Z'),
--- Sarah Van Der Berg (repeat booking) — LTT-2026-0015-Q1 (2 adults)
 ('00000000-0000-0000-0000-00000000e017','00000000-0000-0000-0000-00000000d014','Deluxe Suite (2 pax) — Blue Train Cape Town Explorer',1,97000.00,97000.00,1,'2026-01-30T09:05:00Z'),
--- Priya Naidoo — LTT-2026-0025-Q1 (2 adults)
 ('00000000-0000-0000-0000-00000000e027','00000000-0000-0000-0000-00000000d023','Luxury Suite (2 pax) — Blue Train Cape Town Explorer',1,110400.00,110400.00,1,'2026-04-01T09:05:00Z'),
--- Sarah Van Der Berg — LTT-2026-0030-Q1 (2 adults)
-('00000000-0000-0000-0000-00000000e032','00000000-0000-0000-0000-00000000d028','The Blue Train — Deluxe Suite (2 adults), Pretoria ↔ Cape Town',1,82000.00,82000.00,1,'2026-04-25T09:05:00Z'),
-('00000000-0000-0000-0000-00000000e033','00000000-0000-0000-0000-00000000d028','Ulysses Tours & Transfers — return station/airport transfers (2 adults)',1,3200.00,3200.00,2,'2026-04-25T09:05:00Z'),
-('00000000-0000-0000-0000-00000000e034','00000000-0000-0000-0000-00000000d028','The President Hotel — 2 nights, Classic Ocean Room (2 adults)',1,9800.00,9800.00,3,'2026-04-25T09:05:00Z'),
-('00000000-0000-0000-0000-00000000e035','00000000-0000-0000-0000-00000000d028','City Sightseeing Bus Tours — Cape Town day pass (2 adults)',1,1200.00,1200.00,4,'2026-04-25T09:05:00Z'),
-('00000000-0000-0000-0000-00000000e036','00000000-0000-0000-0000-00000000d028','FlySafair — Cape Town to Johannesburg flight (2 adults)',1,800.00,800.00,5,'2026-04-25T09:05:00Z'),
+-- Henrik & Astrid Johansson — LTT-2025-0007-Q1 (2 adults)
+('00000000-0000-0000-0000-00000000e009','00000000-0000-0000-0000-00000000d007','The Blue Train — Deluxe Suite (2 adults), Pretoria ↔ Cape Town',1,82000.00,82000.00,1,'2025-11-10T09:05:00Z'),
+('00000000-0000-0000-0000-00000000e010','00000000-0000-0000-0000-00000000d007','Ulysses Tours & Transfers — return station/airport transfers (2 adults)',1,3200.00,3200.00,2,'2025-11-10T09:05:00Z'),
+('00000000-0000-0000-0000-00000000e014','00000000-0000-0000-0000-00000000d007','The President Hotel — 2 nights, Classic Room (2 adults)',1,9800.00,9800.00,3,'2025-11-10T09:05:00Z'),
+('00000000-0000-0000-0000-00000000e012','00000000-0000-0000-0000-00000000d007','City Sightseeing Bus Tours — Cape Town day pass (2 adults)',1,1200.00,1200.00,4,'2025-11-10T09:05:00Z'),
+('00000000-0000-0000-0000-00000000e013','00000000-0000-0000-0000-00000000d007','FlySafair — Cape Town to Johannesburg flight (2 adults)',1,800.00,800.00,5,'2025-11-10T09:05:00Z'),
 -- Elizabeth Taylor family — LTT-2026-0021-Q1 (2 adults, 2 children)
 ('00000000-0000-0000-0000-00000000e022','00000000-0000-0000-0000-00000000d019','The Blue Train — Luxury Suite (2 adults, 2 children), Pretoria ↔ Cape Town',1,128000.00,128000.00,1,'2026-03-12T09:05:00Z'),
 ('00000000-0000-0000-0000-00000000e023','00000000-0000-0000-0000-00000000d019','Ulysses Tours & Transfers — return station/airport transfers (family of 4)',1,4800.00,4800.00,2,'2026-03-12T09:05:00Z'),
 ('00000000-0000-0000-0000-00000000e024','00000000-0000-0000-0000-00000000d019','The President Hotel — 2 nights, Classic Apartment (2 adults, 2 children)',1,14200.00,14200.00,3,'2026-03-12T09:05:00Z'),
 ('00000000-0000-0000-0000-00000000e025','00000000-0000-0000-0000-00000000d019','City Sightseeing Bus Tours — Cape Town day pass (family of 4)',1,2400.00,2400.00,4,'2026-03-12T09:05:00Z'),
 ('00000000-0000-0000-0000-00000000e026','00000000-0000-0000-0000-00000000d019','FlySafair — Cape Town to Johannesburg flight (family of 4)',1,3000.00,3000.00,5,'2026-03-12T09:05:00Z'),
--- Henrik & Astrid Johansson — LTT-2025-0007-Q1 (2 adults)
-('00000000-0000-0000-0000-00000000e009','00000000-0000-0000-0000-00000000d007','The Blue Train — Deluxe Suite (2 adults), Pretoria ↔ Cape Town',1,82000.00,82000.00,1,'2025-11-10T09:05:00Z'),
-('00000000-0000-0000-0000-00000000e010','00000000-0000-0000-0000-00000000d007','Ulysses Tours & Transfers — return station/airport transfers (2 adults)',1,3200.00,3200.00,2,'2025-11-10T09:05:00Z'),
-('00000000-0000-0000-0000-00000000e014','00000000-0000-0000-0000-00000000d007','The President Hotel — 2 nights, Classic Room (2 adults)',1,9800.00,9800.00,3,'2025-11-10T09:05:00Z'),
-('00000000-0000-0000-0000-00000000e012','00000000-0000-0000-0000-00000000d007','City Sightseeing Bus Tours — Cape Town day pass (2 adults)',1,1200.00,1200.00,4,'2025-11-10T09:05:00Z'),
-('00000000-0000-0000-0000-00000000e013','00000000-0000-0000-0000-00000000d007','FlySafair — Cape Town to Johannesburg flight (2 adults)',1,800.00,800.00,5,'2025-11-10T09:05:00Z');
+-- Sarah Van Der Berg — LTT-2026-0030-Q1 (2 adults)
+('00000000-0000-0000-0000-00000000e032','00000000-0000-0000-0000-00000000d028','The Blue Train — Deluxe Suite (2 adults), Pretoria ↔ Cape Town',1,82000.00,82000.00,1,'2026-04-25T09:05:00Z'),
+('00000000-0000-0000-0000-00000000e033','00000000-0000-0000-0000-00000000d028','Ulysses Tours & Transfers — return station/airport transfers (2 adults)',1,3200.00,3200.00,2,'2026-04-25T09:05:00Z'),
+('00000000-0000-0000-0000-00000000e034','00000000-0000-0000-0000-00000000d028','The President Hotel — 2 nights, Classic Ocean Room (2 adults)',1,9800.00,9800.00,3,'2026-04-25T09:05:00Z'),
+('00000000-0000-0000-0000-00000000e035','00000000-0000-0000-0000-00000000d028','City Sightseeing Bus Tours — Cape Town day pass (2 adults)',1,1200.00,1200.00,4,'2026-04-25T09:05:00Z'),
+('00000000-0000-0000-0000-00000000e036','00000000-0000-0000-0000-00000000d028','FlySafair — Cape Town to Johannesburg flight (2 adults)',1,800.00,800.00,5,'2026-04-25T09:05:00Z');
 
 commit;
 
@@ -1684,12 +1586,12 @@ begin;
 insert into public.invoices (id,booking_id,quote_id,kind,status,invoice_number,deposit_percentage,amount,currency,due_date,sent_at,created_at,updated_at) values
 ('00000000-0000-0000-0000-0000000e0005','00000000-0000-0000-0000-000000009033','00000000-0000-0000-0000-00000000d003','deposit','paid','DEP-2025-000003',25,41250.00,'ZAR','2025-09-19','2025-09-12T09:30:00Z','2025-09-12T09:00:00Z','2025-09-20T11:30:00Z'),
 ('00000000-0000-0000-0000-0000000e0006','00000000-0000-0000-0000-000000009033','00000000-0000-0000-0000-00000000d003','final','paid','FIN-2025-000003',null,123750.00,'ZAR','2025-10-02','2025-09-22T09:30:00Z','2025-09-22T09:00:00Z','2025-10-05T15:30:00Z'),
-('00000000-0000-0000-0000-0000000e0013','00000000-0000-0000-0000-000000009029','00000000-0000-0000-0000-00000000d007','deposit','paid','DEP-2025-000007',25,24250.00,'ZAR','2025-12-02','2025-11-25T09:30:00Z','2025-11-25T09:00:00Z','2025-12-05T11:30:00Z'),
-('00000000-0000-0000-0000-0000000e0014','00000000-0000-0000-0000-000000009029','00000000-0000-0000-0000-00000000d007','final','paid','FIN-2025-000007',null,72750.00,'ZAR','2026-03-21','2026-03-05T09:30:00Z','2026-03-05T09:00:00Z','2026-03-28T15:30:00Z'),
 ('00000000-0000-0000-0000-0000000e0017','00000000-0000-0000-0000-000000009024','00000000-0000-0000-0000-00000000d009','deposit','paid','DEP-2025-000009',25,27887.50,'ZAR','2026-01-04','2025-12-20T09:30:00Z','2025-12-20T09:00:00Z','2025-12-28T11:30:00Z'),
 ('00000000-0000-0000-0000-0000000e0018','00000000-0000-0000-0000-000000009024','00000000-0000-0000-0000-00000000d009','final','paid','FIN-2025-000009',null,83662.50,'ZAR','2026-04-03','2026-03-20T09:30:00Z','2026-03-20T09:00:00Z','2026-04-10T15:30:00Z'),
 ('00000000-0000-0000-0000-0000000e0027','00000000-0000-0000-0000-000000009021','00000000-0000-0000-0000-00000000d014','deposit','paid','DEP-2026-000015',25,27887.50,'ZAR','2026-02-15','2026-02-12T09:30:00Z','2026-02-12T09:00:00Z','2026-02-18T11:30:00Z'),
 ('00000000-0000-0000-0000-0000000e0028','00000000-0000-0000-0000-000000009021','00000000-0000-0000-0000-00000000d014','final','sent','FIN-2026-000015',null,83662.50,'ZAR','2026-05-28','2026-05-05T09:30:00Z','2026-05-05T09:00:00Z','2026-05-05T09:30:00Z'),
+('00000000-0000-0000-0000-0000000e0013','00000000-0000-0000-0000-000000009029','00000000-0000-0000-0000-00000000d007','deposit','paid','DEP-2025-000007',25,24250.00,'ZAR','2025-12-02','2025-11-25T09:30:00Z','2025-11-25T09:00:00Z','2025-12-05T11:30:00Z'),
+('00000000-0000-0000-0000-0000000e0014','00000000-0000-0000-0000-000000009029','00000000-0000-0000-0000-00000000d007','final','paid','FIN-2025-000007',null,72750.00,'ZAR','2026-03-21','2026-03-05T09:30:00Z','2026-03-05T09:00:00Z','2026-03-28T15:30:00Z'),
 ('00000000-0000-0000-0000-0000000e0035','00000000-0000-0000-0000-000000009018','00000000-0000-0000-0000-00000000d019','deposit','sent','DEP-2026-000021',25,38100.00,'ZAR','2026-04-01','2026-03-25T09:30:00Z','2026-03-25T09:00:00Z','2026-03-25T09:30:00Z');
 
 commit;
@@ -1701,11 +1603,11 @@ begin;
 insert into public.payments (id,booking_id,amount,method,reference,notes,received_at,created_at) values
 ('00000000-0000-0000-0000-00000000f005','00000000-0000-0000-0000-000000009033',41250.00,'Bank Transfer','BT-MIT-DEP-001','Deposit — Blue Train Cape Town Explorer VIP','2025-09-20T11:00:00Z','2025-09-20T11:00:00Z'),
 ('00000000-0000-0000-0000-00000000f006','00000000-0000-0000-0000-000000009033',123750.00,'Credit Card','CC-MIT-FIN-001','Final payment — Blue Train Cape Town Explorer','2025-10-05T15:00:00Z','2025-10-05T15:00:00Z'),
-('00000000-0000-0000-0000-00000000f013','00000000-0000-0000-0000-000000009029',24250.00,'Credit Card','CC-JOH-DEP-001','Deposit — Blue Train Cape Town Explorer','2025-12-05T11:00:00Z','2025-12-05T11:00:00Z'),
-('00000000-0000-0000-0000-00000000f014','00000000-0000-0000-0000-000000009029',72750.00,'EFT','EFT-JOH-FIN-001','Final balance — Blue Train Cape Town Explorer','2026-03-28T15:00:00Z','2026-03-28T15:00:00Z'),
 ('00000000-0000-0000-0000-00000000f017','00000000-0000-0000-0000-000000009024',27887.50,'EFT','EFT-BEA-DEP-001','Deposit — Blue Train Cape Town Explorer','2025-12-28T11:00:00Z','2025-12-28T11:00:00Z'),
 ('00000000-0000-0000-0000-00000000f018','00000000-0000-0000-0000-000000009024',83662.50,'Bank Transfer','BT-BEA-FIN-001','Final balance — Blue Train Cape Town Explorer','2026-04-10T15:00:00Z','2026-04-10T15:00:00Z'),
-('00000000-0000-0000-0000-00000000f026','00000000-0000-0000-0000-000000009021',27887.50,'Bank Transfer','BT-VDB-DEP-001','Deposit 25% — Blue Train Cape Town Explorer','2026-02-18T11:00:00Z','2026-02-18T11:00:00Z');
+('00000000-0000-0000-0000-00000000f026','00000000-0000-0000-0000-000000009021',27887.50,'Bank Transfer','BT-VDB-DEP-001','Deposit 25% — Blue Train Cape Town Explorer','2026-02-18T11:00:00Z','2026-02-18T11:00:00Z'),
+('00000000-0000-0000-0000-00000000f013','00000000-0000-0000-0000-000000009029',24250.00,'Credit Card','CC-JOH-DEP-001','Deposit — Blue Train Cape Town Explorer','2025-12-05T11:00:00Z','2025-12-05T11:00:00Z'),
+('00000000-0000-0000-0000-00000000f014','00000000-0000-0000-0000-000000009029',72750.00,'EFT','EFT-JOH-FIN-001','Final balance — Blue Train Cape Town Explorer','2026-03-28T15:00:00Z','2026-03-28T15:00:00Z');
 
 -- SECTION 16: DOCUMENTS
 insert into public.documents (id,booking_id,kind,status,storage_path,created_at) values
@@ -1723,33 +1625,33 @@ insert into public.documents (id,booking_id,kind,status,storage_path,created_at)
 insert into public.correspondences (id,booking_id,channel,kind,subject,body_html,status,sent_at,scheduled_at,created_at) values
 ('00000000-0000-0000-0000-00000000bb02','00000000-0000-0000-0000-000000009033','email','quote_email','Your Blue Train Quote — LTT-2025-0003','<p>Dear James, please find your quotation attached.</p>','sent','2025-08-28T09:30:00Z',null,'2025-08-28T09:30:00Z'),
 ('00000000-0000-0000-0000-00000000bb07','00000000-0000-0000-0000-000000009033','email','deposit_request','Deposit Invoice — LTT-2025-0003','<p>Dear James, your deposit invoice is attached.</p>','sent','2025-09-12T09:30:00Z',null,'2025-09-12T09:30:00Z'),
-('00000000-0000-0000-0000-00000000bb20','00000000-0000-0000-0000-000000009008','email','quote_email','Your Blue Train Quote — LTT-2026-0030','<p>Dear Sarah, please find your quotation attached.</p>','sent','2026-04-25T09:30:00Z',null,'2026-04-25T09:30:00Z'),
-('00000000-0000-0000-0000-00000000bb21','00000000-0000-0000-0000-000000009008','email','follow_up','Following up on your Blue Train quote — LTT-2026-0030','<p>Dear Sarah, we are following up on your Blue Train Cape Town Explorer quotation.</p>','scheduled',null,'2026-05-24T09:00:00Z','2026-05-14T09:00:00Z'),
-('00000000-0000-0000-0000-00000000bb09','00000000-0000-0000-0000-000000009018','email','quote_email','Your Blue Train Quote — LTT-2026-0021','<p>Dear Elizabeth, please find your quotation attached.</p>','sent','2026-03-12T09:30:00Z',null,'2026-03-12T09:30:00Z'),
-('00000000-0000-0000-0000-00000000bb10','00000000-0000-0000-0000-000000009018','email','deposit_request','Deposit Invoice — LTT-2026-0021','<p>Dear Elizabeth, your deposit invoice is attached.</p>','sent','2026-03-25T09:30:00Z',null,'2026-03-25T09:30:00Z'),
 ('00000000-0000-0000-0000-00000000bb24','00000000-0000-0000-0000-000000009029','email','quote_email','Your Blue Train Quote — LTT-2025-0007','<p>Dear Henrik, please find your quotation attached.</p>','sent','2025-11-10T09:30:00Z',null,'2025-11-10T09:30:00Z'),
 ('00000000-0000-0000-0000-00000000bb25','00000000-0000-0000-0000-000000009029','email','deposit_request','Deposit Invoice — LTT-2025-0007','<p>Dear Henrik, your deposit invoice is attached.</p>','sent','2025-11-25T09:30:00Z',null,'2025-11-25T09:30:00Z'),
-('00000000-0000-0000-0000-00000000bb13','00000000-0000-0000-0000-000000009029','email','voucher_email','Your Travel Voucher — LTT-2025-0007','<p>Dear Henrik, your travel voucher is attached.</p>','sent','2026-05-01T09:30:00Z',null,'2026-05-01T09:30:00Z');
+('00000000-0000-0000-0000-00000000bb13','00000000-0000-0000-0000-000000009029','email','voucher_email','Your Travel Voucher — LTT-2025-0007','<p>Dear Henrik, your travel voucher is attached.</p>','sent','2026-05-01T09:30:00Z',null,'2026-05-01T09:30:00Z'),
+('00000000-0000-0000-0000-00000000bb09','00000000-0000-0000-0000-000000009018','email','quote_email','Your Blue Train Quote — LTT-2026-0021','<p>Dear Elizabeth, please find your quotation attached.</p>','sent','2026-03-12T09:30:00Z',null,'2026-03-12T09:30:00Z'),
+('00000000-0000-0000-0000-00000000bb10','00000000-0000-0000-0000-000000009018','email','deposit_request','Deposit Invoice — LTT-2026-0021','<p>Dear Elizabeth, your deposit invoice is attached.</p>','sent','2026-03-25T09:30:00Z',null,'2026-03-25T09:30:00Z'),
+('00000000-0000-0000-0000-00000000bb20','00000000-0000-0000-0000-000000009008','email','quote_email','Your Blue Train Quote — LTT-2026-0030','<p>Dear Sarah, please find your quotation attached.</p>','sent','2026-04-25T09:30:00Z',null,'2026-04-25T09:30:00Z'),
+('00000000-0000-0000-0000-00000000bb21','00000000-0000-0000-0000-000000009008','email','follow_up','Following up on your Blue Train quote — LTT-2026-0030','<p>Dear Sarah, we are following up on your Blue Train Cape Town Explorer quotation.</p>','scheduled',null,'2026-05-24T09:00:00Z','2026-05-14T09:00:00Z');
 
 -- SECTION 18: PIPELINE HISTORY
 insert into public.pipeline_history (id,booking_id,from_stage,to_stage,moved_by,moved_by_user_id,moved_at) values
-('00000000-0000-0000-0000-00000000cc01','00000000-0000-0000-0000-000000009008','enquiry','quote_sent','Carmen de Jager','00000000-0000-0000-0000-0000000000a1','2026-04-25T09:00:00Z'),
-('00000000-0000-0000-0000-00000000cc10','00000000-0000-0000-0000-000000009018','enquiry','quote_sent','Carmen de Jager','00000000-0000-0000-0000-0000000000a1','2026-03-12T09:00:00Z'),
-('00000000-0000-0000-0000-00000000cc11','00000000-0000-0000-0000-000000009018','quote_sent','accepted','Carmen de Jager','00000000-0000-0000-0000-0000000000a1','2026-03-20T14:00:00Z'),
-('00000000-0000-0000-0000-00000000cc12','00000000-0000-0000-0000-000000009018','accepted','deposit_requested','Carmen de Jager','00000000-0000-0000-0000-0000000000a1','2026-03-25T09:00:00Z'),
-('00000000-0000-0000-0000-00000000cc40','00000000-0000-0000-0000-000000009029','enquiry','quote_sent','Douwlien Louw','00000000-0000-0000-0000-0000000000a5','2025-11-10T09:00:00Z'),
-('00000000-0000-0000-0000-00000000cc41','00000000-0000-0000-0000-000000009029','quote_sent','accepted','Douwlien Louw','00000000-0000-0000-0000-0000000000a5','2025-11-20T14:00:00Z'),
-('00000000-0000-0000-0000-00000000cc42','00000000-0000-0000-0000-000000009029','accepted','deposit_requested','Douwlien Louw','00000000-0000-0000-0000-0000000000a5','2025-11-25T09:00:00Z'),
-('00000000-0000-0000-0000-00000000cc43','00000000-0000-0000-0000-000000009029','deposit_requested','deposit_paid','Douwlien Louw','00000000-0000-0000-0000-0000000000a5','2025-12-05T11:00:00Z'),
-('00000000-0000-0000-0000-00000000cc44','00000000-0000-0000-0000-000000009029','deposit_paid','final_paid','Douwlien Louw','00000000-0000-0000-0000-0000000000a5','2026-03-28T15:00:00Z'),
-('00000000-0000-0000-0000-00000000cc45','00000000-0000-0000-0000-000000009029','final_paid','voucher_sent','Douwlien Louw','00000000-0000-0000-0000-0000000000a5','2026-05-01T09:00:00Z'),
 ('00000000-0000-0000-0000-00000000cc15','00000000-0000-0000-0000-000000009033','enquiry','quote_sent','Leonie Botha','00000000-0000-0000-0000-0000000000a2','2025-08-28T09:00:00Z'),
 ('00000000-0000-0000-0000-00000000cc16','00000000-0000-0000-0000-000000009033','quote_sent','accepted','Leonie Botha','00000000-0000-0000-0000-0000000000a2','2025-09-08T14:00:00Z'),
 ('00000000-0000-0000-0000-00000000cc17','00000000-0000-0000-0000-000000009033','accepted','deposit_requested','Leonie Botha','00000000-0000-0000-0000-0000000000a2','2025-09-12T09:00:00Z'),
 ('00000000-0000-0000-0000-00000000cc18','00000000-0000-0000-0000-000000009033','deposit_requested','deposit_paid','Leonie Botha','00000000-0000-0000-0000-0000000000a2','2025-09-20T11:00:00Z'),
 ('00000000-0000-0000-0000-00000000cc19','00000000-0000-0000-0000-000000009033','deposit_paid','final_paid','Leonie Botha','00000000-0000-0000-0000-0000000000a2','2025-10-05T15:00:00Z'),
 ('00000000-0000-0000-0000-00000000cc20','00000000-0000-0000-0000-000000009033','final_paid','voucher_sent','Leonie Botha','00000000-0000-0000-0000-0000000000a2','2025-10-28T09:00:00Z'),
-('00000000-0000-0000-0000-00000000cc21','00000000-0000-0000-0000-000000009033','voucher_sent','closed','Leonie Botha','00000000-0000-0000-0000-0000000000a2','2025-12-01T10:00:00Z');
+('00000000-0000-0000-0000-00000000cc21','00000000-0000-0000-0000-000000009033','voucher_sent','closed','Leonie Botha','00000000-0000-0000-0000-0000000000a2','2025-12-01T10:00:00Z'),
+('00000000-0000-0000-0000-00000000cc40','00000000-0000-0000-0000-000000009029','enquiry','quote_sent','Douwlien Louw','00000000-0000-0000-0000-0000000000a5','2025-11-10T09:00:00Z'),
+('00000000-0000-0000-0000-00000000cc41','00000000-0000-0000-0000-000000009029','quote_sent','accepted','Douwlien Louw','00000000-0000-0000-0000-0000000000a5','2025-11-20T14:00:00Z'),
+('00000000-0000-0000-0000-00000000cc42','00000000-0000-0000-0000-000000009029','accepted','deposit_requested','Douwlien Louw','00000000-0000-0000-0000-0000000000a5','2025-11-25T09:00:00Z'),
+('00000000-0000-0000-0000-00000000cc43','00000000-0000-0000-0000-000000009029','deposit_requested','deposit_paid','Douwlien Louw','00000000-0000-0000-0000-0000000000a5','2025-12-05T11:00:00Z'),
+('00000000-0000-0000-0000-00000000cc44','00000000-0000-0000-0000-000000009029','deposit_paid','final_paid','Douwlien Louw','00000000-0000-0000-0000-0000000000a5','2026-03-28T15:00:00Z'),
+('00000000-0000-0000-0000-00000000cc45','00000000-0000-0000-0000-000000009029','final_paid','voucher_sent','Douwlien Louw','00000000-0000-0000-0000-0000000000a5','2026-05-01T09:00:00Z'),
+('00000000-0000-0000-0000-00000000cc10','00000000-0000-0000-0000-000000009018','enquiry','quote_sent','Carmen de Jager','00000000-0000-0000-0000-0000000000a1','2026-03-12T09:00:00Z'),
+('00000000-0000-0000-0000-00000000cc11','00000000-0000-0000-0000-000000009018','quote_sent','accepted','Carmen de Jager','00000000-0000-0000-0000-0000000000a1','2026-03-20T14:00:00Z'),
+('00000000-0000-0000-0000-00000000cc12','00000000-0000-0000-0000-000000009018','accepted','deposit_requested','Carmen de Jager','00000000-0000-0000-0000-0000000000a1','2026-03-25T09:00:00Z'),
+('00000000-0000-0000-0000-00000000cc01','00000000-0000-0000-0000-000000009008','enquiry','quote_sent','Carmen de Jager','00000000-0000-0000-0000-0000000000a1','2026-04-25T09:00:00Z');
 
 -- SECTION 19: AUDIT LOGS
 insert into public.audit_logs (id,actor,actor_user_id,entity_type,entity_id,action,before_json,after_json,meta_json,created_at) values
@@ -1799,11 +1701,27 @@ on conflict (id) do update set
 
 -- ============================================================
 -- SECTION 23: VOUCHERS (sample voucher + service blocks)
-
+-- ============================================================
+-- Intentionally empty: vouchers are generated by the app, not seeded. The
+-- voucher_pdf rows in SECTION 16 are document records only.
 
 -- ============================================================
--- SECTION 12: INTERNAL BOOKING NOTES (demo data)
+-- SECTION 24: INTERNAL BOOKING NOTES (demo data)
 -- ============================================================
+
+-- ============================================================
+-- SECTION 25: SUPPLIER STREET ADDRESSES
+-- ============================================================
+-- Mirrors migration 20260810160000, which cannot reach these rows: `db reset` applies migrations
+-- before running this seed, so a fresh local database would otherwise have every supplier's
+-- street address blank and every non-train supplier tripping the voucher readiness warning.
+-- Trains are excluded on purpose -- they board at a different station in every city and use
+-- supplier_station_addresses instead.
+update public.suppliers
+set street_address = location_detail
+where street_address is null
+  and location_detail is not null
+  and btrim(location_detail) <> ''
+  and kind <> 'train_operator';
 
 commit;
-

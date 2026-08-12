@@ -302,7 +302,7 @@ function createSupabase(state: MockState) {
           }),
           // seedUnitsForServices (auto-build) reads back what was just captured -- these tests
           // never populate suiteInsertRows with a resolved suite_type_id, so there is nothing to
-          // carry across; that carry-over itself is covered in app/api/jobs/[id]/package/seed.test.ts.
+          // carry across; that carry-over itself is covered in lib/packages/seed-service-units.test.ts.
           select: vi.fn(() => createFilterableListQuery(state.suiteInsertRows)),
         }
       }

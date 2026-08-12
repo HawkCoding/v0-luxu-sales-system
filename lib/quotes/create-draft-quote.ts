@@ -5,6 +5,7 @@ import { isMissingPricing } from "@/lib/quotes/pricing-engine"
 import { buildQuoteNumber } from "@/lib/quotes/quote-number"
 import { bookingServicesToLegSelections, loadBookingServicesPackageDetail } from "@/lib/quotes/adapters/from-booking-services"
 import { getDefaultCommission } from "@/lib/pricing/default-commission"
+import { isoDateDaysFromNow, resolveValidityDays } from "@/lib/quotes/quote-validity"
 
 type ServiceClient = SupabaseClient<Database>
 
@@ -30,15 +31,15 @@ async function resolveRateTypes(supabase: ServiceClient, bookingId: string) {
   return { rateTypes, fallbackRateTypeId, rateTypeId }
 }
 
-function addDaysToDateString(value: string, days: number): string {
-  const [year = "1970", month = "1", day = "1"] = value.split("-")
-  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)))
-  date.setUTCDate(date.getUTCDate() + days)
-  return date.toISOString().slice(0, 10)
-}
-
-function getDefaultQuoteValidityDate(): string {
-  return addDaysToDateString(new Date().toISOString().slice(0, 10), 14)
+/** Same setting POST /api/quotes and POST /api/jobs/[id]/start-quote read, so all three
+ * quote-creation paths stamp the same window. Falls back to DEFAULT_QUOTE_VALIDITY_DAYS. */
+async function resolveQuoteValidityDate(supabase: ServiceClient): Promise<string> {
+  const { data } = await supabase
+    .from("app_settings")
+    .select("value")
+    .eq("key", "quote_validity_days")
+    .maybeSingle()
+  return isoDateDaysFromNow(resolveValidityDays(data?.value))
 }
 
 /**
@@ -100,12 +101,13 @@ export async function createDraftQuoteForBooking({
   }
 
   const totals = calculateQuoteTotals(lineItems)
+  const validityUntil = await resolveQuoteValidityDate(supabase)
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .insert({
       booking_id: bookingId,
       status,
-      validity_until: getDefaultQuoteValidityDate(),
+      validity_until: validityUntil,
       subtotal: totals.subtotal,
       total: totals.total,
       quote_number: buildQuoteNumber(bookingNumber, []),

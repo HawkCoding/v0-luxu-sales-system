@@ -285,8 +285,7 @@ describe("hydrateFromSaved", () => {
     supplierId: "supplier-leg-transfer",
     routeId: null,
     suiteTypeId: "vehicle-1",
-    packageLegId: "leg-transfer",
-    serviceId: null,
+    serviceId: "leg-transfer",
     pickupPoint: "Airport",
     dropoffPoint: "Hotel",
     pickupAt: "2026-09-01T08:00:00.000Z",
@@ -412,7 +411,7 @@ describe("toPackageSelectionsPatch", () => {
 })
 
 describe("toTransportRequestsPut", () => {
-  it("keeps manual rows, drops stale package-leg rows, and reindexes sortOrder", () => {
+  it("keeps manual rows, drops rows tied to a service no longer in state, and reindexes sortOrder", () => {
     const states = buildDefaultLegStates(pkg, { tripStartDate: null })
     const transfer = transportState(states, "leg-transfer")
     transfer.selected = true
@@ -421,19 +420,17 @@ describe("toTransportRequestsPut", () => {
     const manualRow: BookingTransportRequest = {
       ...transfer.requests[0],
       id: "manual-1",
-      packageLegId: null,
       serviceId: null,
       pickupPoint: "Manual pickup",
     }
-    const staleOldPackageRow: BookingTransportRequest = {
+    const staleServiceRow: BookingTransportRequest = {
       ...transfer.requests[0],
       id: "stale-1",
-      packageLegId: "leg-of-old-package",
-      serviceId: null,
+      serviceId: "leg-no-longer-in-state",
       pickupPoint: "Stale",
     }
 
-    const body = toTransportRequestsPut(states, [manualRow, staleOldPackageRow])
+    const body = toTransportRequestsPut(states, [manualRow, staleServiceRow])
     expect(body.transportRequests.map((r) => r.id)).toEqual(["manual-1", transfer.requests[0].id])
     expect(body.transportRequests.map((r) => r.sortOrder)).toEqual([0, 1])
   })

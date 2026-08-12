@@ -11,6 +11,7 @@ import { getHotelDefaultTimes, type HotelDefaultTimes } from "@/lib/suppliers/ho
 import type { Database } from "@/lib/supabase/types"
 import type { SupplierKind } from "@/lib/types"
 import { resolveDirectedArrivalName, resolveDirectedRouteName } from "@/lib/routes/route-name"
+import { resolveRouteSchedule, toHoursMinutes } from "@/lib/routes/route-schedule"
 import { firstRecord } from "@/lib/utils"
 
 export function mapSupplierKindToServiceType(kind: SupplierKind | string | null): VoucherServiceType {
@@ -91,6 +92,10 @@ interface RouteJoin {
   name: string | null
   duration_days: number | null
   direction_mode: string | null
+  departure_time: string | null
+  arrival_time: string | null
+  return_departure_time: string | null
+  return_arrival_time: string | null
   default_excursions: string[] | null
   origin: { id: string | null; name: string | null } | { id: string | null; name: string | null }[] | null
   destination: { id: string | null; name: string | null } | { id: string | null; name: string | null }[] | null
@@ -108,8 +113,7 @@ interface FlightDetailsJoin {
 
 interface TransportRequestJoinRow {
   id: string
-  package_leg_id: string | null
-  /** Set instead of package_leg_id for a Build Booking (booking_services) leg. */
+  /** The booking_services row this trip belongs to, or null for a manually-added trip. */
   service_id: string | null
   supplier_id: string | null
   service_type: string
@@ -190,12 +194,13 @@ interface BookingServiceJoinRow {
   units: SelectionUnitJoinRow[] | null
 }
 
-/** Reshapes a Build Booking (booking_services) row into the same SelectionJoinRow shape a
- * catalogue-package selection has, so every rule below this point (dates, times, suite labels,
- * transport-request matching) runs once, unaware of which table a booking actually used. The
- * service row IS the leg (no separate package_legs indirection), so its own id doubles as
- * package_leg_id -- transport-request matching and quote-version leg scoping both key off this
- * same field regardless of which table produced the row. */
+/** Reshapes a booking_services row into the flat SelectionJoinRow shape every rule below this
+ * point (dates, times, suite labels, transport-request matching) reads.
+ *
+ * The `package_leg_id` / `package_legs` field names are historical: this used to also serve
+ * catalogue-package bookings, which carried a real package_legs row. Those tables are gone --
+ * a service row IS the leg, so its own id fills package_leg_id, which is still the key
+ * transport-request matching and quote-version leg scoping both join on. */
 function serviceRowToSelectionRow(row: BookingServiceJoinRow): SelectionJoinRow {
   return {
     id: row.id,
@@ -222,13 +227,6 @@ function serviceRowToSelectionRow(row: BookingServiceJoinRow): SelectionJoinRow 
 
 export interface BuildVoucherServiceBlocksResult {
   blocks: VoucherServiceBlock[]
-}
-
-/** Postgres `time` comes back as HH:MM:SS; the documents only ever show HH:MM. */
-function toHoursMinutes(value: string | null | undefined): string | null {
-  const trimmed = value?.trim()
-  if (!trimmed) return null
-  return trimmed.slice(0, 5)
 }
 
 /** YYYY-MM-DD part of a pickup timestamp. */
@@ -268,9 +266,8 @@ function composeUnitSuiteLabel(
   return `${bedPrefix}${suite}${bathroomSuffix}`
 }
 
-/** Suite/room labels selected for a leg, in unit order, de-duplicated. Falls back to the legacy
- * leg-level suite_types join for selections captured before the per-unit cutover (migration
- * 20260701050000_booking_package_selection_units) — those rows have no unit children and no
+/** Suite/room labels selected for a leg, in unit order, de-duplicated. Falls back to the
+ * leg-level suite_types join for rows with no unit children, which therefore have no
  * bedroom/bathroom configuration to compose in.
  *
  * `includeConfig` composes each unit's bed/bathroom configuration into its label (train legs, so
@@ -491,36 +488,20 @@ function transportRequestBlock(
  * Dates: a hotel's service_date is its check-in, so check-out is check-in + nights. Everything else
  * runs for its route's duration_days, which counts the departure day itself.
  *
- * Times: a supplier's own default times win; hotels fall back to the app-wide check-in/check-out
- * settings so a stay always states a time.
+ * Times: a train leg takes its route's own departure/arrival pair, chosen by the direction the
+ * booking travels; every other kind takes the supplier's default pair, and hotels fall back to the
+ * app-wide check-in/check-out settings so a stay always states a time.
  */
 export async function buildVoucherServiceBlocks(
   supabase: SupabaseClient<Database>,
   context: BuildContext,
 ): Promise<BuildVoucherServiceBlocksResult> {
-  const { data: rows, error } = await supabase
-    .from("booking_package_selections")
-    .select(
-      `id, package_leg_id, selected, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, notes, supplier_reference, supplier_contact_name, voucher_footnote, excursions,
-       package_legs(sort_order, label),
-       suppliers(name, phone, email, website, location, description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions, station_addresses:supplier_station_addresses(location_id, station_name, street_address)),
-       routes(name, duration_days, direction_mode, default_excursions, origin:locations!routes_origin_location_id_fkey(id, name), destination:locations!routes_destination_location_id_fkey(id, name)),
-       suite_types(name),
-       units:booking_package_selection_units(suite_type_id, sort_order, adult_count, child_count, infant_count, suite_types(name), bedroom_types(name), bedroom_layouts(name), bathroom_types(name))`,
-    )
-    .eq("booking_id", context.bookingId)
-
-  if (error) throw error
-
-  // Build Booking's per-booking equivalent of the query above -- a booking uses one or the
-  // other, never both. Reshaped to the same row shape immediately below so nothing downstream
-  // needs to know which table it came from.
   const { data: serviceRows, error: servicesError } = await supabase
     .from("booking_services")
     .select(
       `id, label, sort_order, selected, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, notes, supplier_reference, supplier_contact_name, voucher_footnote, excursions,
        suppliers(name, phone, email, website, location, description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions, station_addresses:supplier_station_addresses(location_id, station_name, street_address)),
-       routes(name, duration_days, direction_mode, default_excursions, origin:locations!routes_origin_location_id_fkey(id, name), destination:locations!routes_destination_location_id_fkey(id, name)),
+       routes(name, duration_days, direction_mode, departure_time, arrival_time, return_departure_time, return_arrival_time, default_excursions, origin:locations!routes_origin_location_id_fkey(id, name), destination:locations!routes_destination_location_id_fkey(id, name)),
        suite_types(name),
        units:booking_service_units(suite_type_id, sort_order, adult_count, child_count, infant_count, suite_types(name), bedroom_types(name), bedroom_layouts(name), bathroom_types(name))`,
     )
@@ -533,7 +514,7 @@ export async function buildVoucherServiceBlocks(
   const { data: transportRows, error: transportError } = await supabase
     .from("booking_transport_requests")
     .select(
-      `id, package_leg_id, service_id, supplier_id, service_type, pickup_point, dropoff_point, pickup_at, flight_number, passenger_count, notes, sort_order, supplier_reference, supplier_contact_name, voucher_footnote,
+      `id, service_id, supplier_id, service_type, pickup_point, dropoff_point, pickup_at, flight_number, passenger_count, notes, sort_order, supplier_reference, supplier_contact_name, voucher_footnote,
        suppliers(name, phone, email, website, location, description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions, station_addresses:supplier_station_addresses(location_id, station_name, street_address)),
        suite_types(name),
        rental_details:booking_vehicle_rental_details(return_at),
@@ -545,13 +526,9 @@ export async function buildVoucherServiceBlocks(
   if (transportError) throw transportError
   const transportRequests = (transportRows ?? []) as unknown as TransportRequestJoinRow[]
 
-  const packageSelectionRows = (rows ?? []) as unknown as SelectionJoinRow[]
-  const serviceSelectionRows = ((serviceRows ?? []) as unknown as BookingServiceJoinRow[]).map(
-    serviceRowToSelectionRow,
-  )
-  const selections = [...packageSelectionRows, ...serviceSelectionRows].filter(
-    (row) => row.selected && (!context.legIds || context.legIds.has(row.package_leg_id)),
-  )
+  const selections = ((serviceRows ?? []) as unknown as BookingServiceJoinRow[])
+    .map(serviceRowToSelectionRow)
+    .filter((row) => row.selected && (!context.legIds || context.legIds.has(row.package_leg_id)))
 
   const hotelDefaults =
     context.hotelDefaultTimes ??
@@ -590,12 +567,8 @@ export async function buildVoucherServiceBlocks(
     // A transfer leg renders one block per captured trip; the leg-level selection only supplies
     // the fallback vehicle category and supplier contact.
     if (serviceType === "transfer") {
-      // row.package_leg_id is either a real package_legs.id or (for a Build Booking leg) a
-      // booking_services.id stashed in the same field by serviceRowToSelectionRow -- a request
-      // matches whichever of the two columns the leg system it came from actually set.
-      const legRequests = transportRequests.filter(
-        (request) => request.package_leg_id === row.package_leg_id || request.service_id === row.package_leg_id,
-      )
+      // row.package_leg_id holds a booking_services.id (see serviceRowToSelectionRow).
+      const legRequests = transportRequests.filter((request) => request.service_id === row.package_leg_id)
       if (legRequests.length > 0) {
         return legRequests.map((request, requestIndex) =>
           transportRequestBlock(request, {
@@ -629,10 +602,20 @@ export async function buildVoucherServiceBlocks(
       }
     }
 
-    const startTime =
-      toHoursMinutes(supplier?.default_time_start) ?? (isHotel ? hotelDefaults?.checkIn ?? null : null)
-    const endTime =
-      toHoursMinutes(supplier?.default_time_end) ?? (isHotel ? hotelDefaults?.checkOut ?? null : null)
+    // A train's schedule belongs to the route it runs, picked by the direction this booking
+    // travels, and the route is its only source — the operator's supplier-wide pair is no longer
+    // editable for trains, so falling back to it would print a time nobody can see or correct.
+    // Everything else still reads that pair, with hotels falling back to the app-wide
+    // check-in/check-out settings so a stay always states a time.
+    const routeSchedule = isTrain ? resolveRouteSchedule(route, row.route_reversed ?? false) : null
+    const startTime = isTrain
+      ? routeSchedule?.startTime ?? null
+      : toHoursMinutes(supplier?.default_time_start) ??
+        (isHotel ? hotelDefaults?.checkIn ?? null : null)
+    const endTime = isTrain
+      ? routeSchedule?.endTime ?? null
+      : toHoursMinutes(supplier?.default_time_end) ??
+        (isHotel ? hotelDefaults?.checkOut ?? null : null)
 
     // A hotel leg's "route" is its meal plan (see lib/packages/apply-dialog-state.ts).
     const directedRouteName = resolveVoucherRouteName(route, row.route_reversed ?? false)
@@ -693,7 +676,7 @@ export async function buildVoucherServiceBlocks(
   const manualRequests =
     context.includeUnlinkedTransportRequests === false
       ? []
-      : transportRequests.filter((request) => !request.package_leg_id && !request.service_id)
+      : transportRequests.filter((request) => !request.service_id)
   if (manualRequests.length > 0) {
     const orderBase = blocks.reduce((max, block) => Math.max(max, block.displayOrder), -1) + 1
     manualRequests.forEach((request, index) => {

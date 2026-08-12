@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { voucherProviderContactLine, voucherRowsForBlock } from "@/lib/voucher/service-block-rows"
+import { sampleVoucherServiceBlocks } from "@/lib/voucher/pdf/sample-data"
 
 // Both the react-pdf voucher and the HTML template-editor preview render from
 // voucherRowsForBlock — this is the single regression net that keeps them in sync.
@@ -91,6 +92,23 @@ describe("voucherRowsForBlock", () => {
     )
     expect(labels(rows)).not.toContain("Boarding Point")
     expect(labels(rows)).not.toContain("Arrival Point")
+  })
+
+  // The Templates design preview and the sample PDF downloads render from this fixture. It used to
+  // carry no station rows, so a manager tuning the voucher layout never saw the two longest rows a
+  // real train block prints.
+  it("the design-preview sample train block carries the same station rows a real voucher prints", () => {
+    const sampleTrainBlock = sampleVoucherServiceBlocks().find((b) => b.serviceType === "train")
+    expect(sampleTrainBlock).toBeDefined()
+
+    const rows = voucherRowsForBlock(sampleTrainBlock!)
+    expect(labels(rows)).toContain("Boarding Point")
+    expect(labels(rows)).toContain("Arrival Point")
+    // Boarding is the route's origin, arrival its destination -- a preview that had them the wrong
+    // way round would teach the wrong layout.
+    expect(sampleTrainBlock!.serviceData.route).toBe("Cape Town → Pretoria")
+    expect(rows.find((r) => r.label === "Boarding Point")?.value).toContain("Cape Town")
+    expect(rows.find((r) => r.label === "Arrival Point")?.value).toContain("Pretoria")
   })
 
   it("airline block: dates fold in the airport code, plus baggage cells and priority boarding", () => {

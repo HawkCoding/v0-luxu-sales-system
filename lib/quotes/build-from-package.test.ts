@@ -128,7 +128,7 @@ describe("buildPackageQuoteLineItems", () => {
             service_type: "transfer",
             route_id: null,
             suite_type_id: "vehicle-van",
-            package_leg_id: "leg-transfer",
+            service_id: "leg-transfer",
             pickup_point: "Airport",
             dropoff_point: "Hotel",
             pickup_at: null,
@@ -138,7 +138,7 @@ describe("buildPackageQuoteLineItems", () => {
             service_type: "transfer",
             route_id: null,
             suite_type_id: null,
-            package_leg_id: "leg-transfer",
+            service_id: "leg-transfer",
             pickup_point: "Hotel",
             dropoff_point: "Station",
             pickup_at: null,
@@ -160,7 +160,7 @@ describe("buildPackageQuoteLineItems", () => {
     expect(lineItems[1].unitPrice).toBe(500)
   })
 
-  it("prices a transport request keyed by service_id (a Build Booking / booking_services leg) the same as one keyed by package_leg_id", async () => {
+  it("prices a transport request keyed by service_id", async () => {
     const transferLeg = leg({
       id: "svc-transfer",
       supplierKind: "transfers",
@@ -176,8 +176,7 @@ describe("buildPackageQuoteLineItems", () => {
             service_type: "transfer",
             route_id: null,
             suite_type_id: "vehicle-sedan",
-            package_leg_id: null,
-            service_id: "svc-transfer",
+                        service_id: "svc-transfer",
             pickup_point: "Airport",
             dropoff_point: "Hotel",
             pickup_at: null,
@@ -211,7 +210,7 @@ describe("buildPackageQuoteLineItems", () => {
             service_type: "transfer",
             route_id: null,
             suite_type_id: "vehicle-sedan",
-            package_leg_id: "leg-transfer",
+            service_id: "leg-transfer",
             pickup_point: "Airport",
             dropoff_point: "Private villa, Bantry Bay",
             pickup_at: null,
@@ -222,7 +221,7 @@ describe("buildPackageQuoteLineItems", () => {
             service_type: "transfer",
             route_id: null,
             suite_type_id: "vehicle-sedan",
-            package_leg_id: "leg-transfer",
+            service_id: "leg-transfer",
             pickup_point: "Hotel",
             dropoff_point: "Station",
             pickup_at: null,

@@ -56,6 +56,10 @@ export function sampleVoucherServiceBlocks(): VoucherServiceBlock[] {
       },
       serviceData: {
         route: "Cape Town → Pretoria",
+        // The two longest rows on a train block -- kept here so the design preview shows the
+        // layout a real voucher actually renders.
+        boardingPoint: "Rovos Rail Lounge, Cape Town Station, Adderley Street, Cape Town, 8001",
+        arrivalPoint: "Rovos Rail Station, Capital Park, Pretoria, 0084",
         durationDays: 3,
         departureDate: "2026-03-10",
         arrivalDate: "2026-03-13",

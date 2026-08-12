@@ -12,7 +12,7 @@ import type { SupplierKind } from "@/lib/types"
 // The supplier kind rides along on the suite type so buildSuiteTokens can keep
 // the train leg and drop the flight/transfer "suite types" sitting beside it.
 const SELECT =
-  "id, units:booking_package_selection_units(sort_order, " +
+  "id, units:booking_service_units(sort_order, " +
   "suite_type:suite_types(name, supplier:suppliers(kind)), bedroom_type:bedroom_types(name), " +
   "bedroom_layout:bedroom_layouts(name), bathroom_type:bathroom_types(name))"
 
@@ -56,7 +56,7 @@ export async function loadSuiteSelections(
   bookingId: string,
 ): Promise<SuiteSelection[]> {
   const { data, error } = await supabase
-    .from("booking_package_selections")
+    .from("booking_services")
     .select(SELECT)
     .eq("booking_id", bookingId)
     .eq("selected", true)

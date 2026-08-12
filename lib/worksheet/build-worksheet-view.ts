@@ -76,7 +76,7 @@ export async function buildWorksheetView(
         `id, booking_number, consultant, departure_date, trip_end_date, no_of_adults, no_of_children,
          voucher_sent_at, deposit_paid_at, final_paid_at, invoice_balance,
          customer:customers(title, first_name, last_name, email, phone, country),
-         package:packages!bookings_package_id_fkey(name), route:routes(name)`,
+         route:routes(name)`,
       )
       .eq("id", bookingId)
       .maybeSingle(),
@@ -117,7 +117,6 @@ export async function buildWorksheetView(
   if (bookingError || !bookingRaw) throw new Error("Booking not found")
 
   const customer = firstRecord(bookingRaw.customer)
-  const bookingPackage = firstRecord(bookingRaw.package)
   const route = firstRecord(bookingRaw.route)
 
   const arriveDate = bookingRaw.departure_date
@@ -194,7 +193,7 @@ export async function buildWorksheetView(
 
   return {
     bookingNumber: bookingRaw.booking_number,
-    productName: bookingPackage?.name ?? route?.name ?? null,
+    productName: route?.name ?? null,
     consultant: bookingRaw.consultant,
     arriveDate,
     departDate,

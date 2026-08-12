@@ -134,7 +134,7 @@ function buildSupabase(state: MockState) {
       }
 
       // seedUnitsForServices carries the enquiry's captured suite configuration and headcount
-      // forward (app/api/jobs/[id]/package/seed.ts) -- covered separately in seed.test.ts.
+      // forward (lib/packages/seed-service-units.ts) -- covered separately in its own test.
       if (
         table === "booking_suites" ||
         table === "suite_types" ||

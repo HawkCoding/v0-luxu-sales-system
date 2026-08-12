@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { isOptionalPackageLegKind, type SupplierKind } from "@/lib/types"
 import { addDays } from "@/lib/packages/hotel-dates"
-import { seedUnitsForServices } from "@/app/api/jobs/[id]/package/seed"
+import { seedUnitsForServices } from "@/lib/packages/seed-service-units"
 
 /** Nights an auto-built hotel leg is seeded with — see the service_date comment below. */
 const HOTEL_AUTO_BUILD_NIGHTS = 1

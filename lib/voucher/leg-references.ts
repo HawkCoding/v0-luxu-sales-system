@@ -2,16 +2,17 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { firstRecord } from "@/lib/utils"
 
-/** Package legs of these supplier kinds have no reference of their own — the transport-request
+/** Legs of these supplier kinds have no reference of their own — the transport-request
  * rows they seed are the actual bookings a supplier confirmation belongs to. */
 const TRANSPORT_SUPPLIER_KINDS = new Set(["transfers", "vehicle_rental"])
 
-export type LegReferenceKind = "selection" | "service" | "transport_request"
+export type LegReferenceKind = "service" | "transport_request"
 
 export interface LegReferenceRow {
   key: string
   kind: LegReferenceKind
-  /** package_leg_id for a "selection" row, the transport request's own id for "transport_request". */
+  /** The booking_services id for a "service" row, the transport request's own id for
+   * "transport_request". */
   id: string
   label: string
   supplierName: string | null
@@ -21,23 +22,8 @@ export interface LegReferenceRow {
   supplierContactName: string | null
   /** One-off operational caveat, e.g. "Check in IRENE COUNTRY LODGE 2h prior to departure". */
   voucherFootnote: string | null
-  /** Only meaningful for "selection" rows on a train leg — excursions are otherwise always []. */
+  /** Only meaningful for "service" rows on a train leg — excursions are otherwise always []. */
   excursions: string[]
-}
-
-interface SelectionRow {
-  id: string
-  package_leg_id: string
-  selected: boolean
-  supplier_reference: string | null
-  supplier_contact_name: string | null
-  voucher_footnote: string | null
-  excursions: string[] | null
-  package_legs: { label: string | null; sort_order: number } | { label: string | null; sort_order: number }[] | null
-  suppliers:
-    | { name: string | null; kind: string | null; default_contact_name: string | null }
-    | { name: string | null; kind: string | null; default_contact_name: string | null }[]
-    | null
 }
 
 interface BookingServiceRow {
@@ -57,8 +43,7 @@ interface BookingServiceRow {
 
 interface TransportRequestRow {
   id: string
-  package_leg_id: string | null
-  /** Set instead of package_leg_id for a Build Booking (booking_services) leg. */
+  /** The booking_services row this trip belongs to, or null for a manually-added trip. */
   service_id: string | null
   service_type: string
   pickup_point: string
@@ -101,19 +86,9 @@ export async function loadLegReferenceRows(
   // same convention as `buildVoucherServiceBlocks`.
   const inScope = legIds && legIds.size > 0 ? (legId: string) => legIds.has(legId) : () => true
   const [
-    { data: selectionRows, error: selectionsError },
     { data: serviceRows, error: servicesError },
     { data: transportRows, error: transportError },
   ] = await Promise.all([
-    supabase
-      .from("booking_package_selections")
-      .select(
-        "id, package_leg_id, selected, supplier_reference, supplier_contact_name, voucher_footnote, excursions, package_legs(label, sort_order), suppliers(name, kind, default_contact_name)",
-      )
-      .eq("booking_id", bookingId)
-      .eq("selected", true),
-    // Build Booking's per-booking equivalent of the above -- a booking uses one or the other,
-    // never both, so merging is safe and lets this reader stay agnostic of which was used.
     supabase
       .from("booking_services")
       .select(
@@ -124,46 +99,17 @@ export async function loadLegReferenceRows(
     supabase
       .from("booking_transport_requests")
       .select(
-        "id, package_leg_id, service_id, service_type, pickup_point, dropoff_point, sort_order, supplier_reference, supplier_contact_name, voucher_footnote, suppliers(name, default_contact_name)",
+        "id, service_id, service_type, pickup_point, dropoff_point, sort_order, supplier_reference, supplier_contact_name, voucher_footnote, suppliers(name, default_contact_name)",
       )
       .eq("booking_id", bookingId)
       .order("sort_order", { ascending: true }),
   ])
 
-  if (selectionsError) throw selectionsError
   if (servicesError) throw servicesError
   if (transportError) throw transportError
 
-  const selections = (selectionRows ?? []) as unknown as SelectionRow[]
   const services = (serviceRows ?? []) as unknown as BookingServiceRow[]
   const transportRequests = (transportRows ?? []) as unknown as TransportRequestRow[]
-
-  const selectionRowsOut = selections
-    .filter((row) => {
-      if (!inScope(row.package_leg_id)) return false
-      const kind = firstRecord(row.suppliers)?.kind ?? null
-      return !kind || !TRANSPORT_SUPPLIER_KINDS.has(kind)
-    })
-    .map((row) => {
-      const leg = firstRecord(row.package_legs)
-      const supplier = firstRecord(row.suppliers)
-      return {
-        row: {
-          key: `selection:${row.id}`,
-          kind: "selection" as const,
-          id: row.package_leg_id,
-          label: leg?.label?.trim() || supplier?.name || "Leg",
-          supplierName: supplier?.name ?? null,
-          supplierReference: row.supplier_reference,
-          supplierContactName: row.supplier_contact_name ?? supplier?.default_contact_name ?? null,
-          voucherFootnote: row.voucher_footnote ?? null,
-          excursions: row.excursions ?? [],
-        },
-        sortOrder: leg?.sort_order ?? 0,
-      }
-    })
-    .sort((a, b) => a.sortOrder - b.sortOrder)
-    .map((entry) => entry.row)
 
   const serviceRowsOut = services
     .filter((row) => {
@@ -194,7 +140,7 @@ export async function loadLegReferenceRows(
 
   const transportRowsOut = transportRequests
     .filter((request) => {
-      const legId = request.package_leg_id ?? request.service_id
+      const legId = request.service_id
       // Unlinked requests were never priced into any quote, so a scoped caller drops them
       // (mirrors `includeUnlinkedTransportRequests` in buildVoucherServiceBlocks).
       if (!legId) return !legIds || legIds.size === 0
@@ -215,7 +161,7 @@ export async function loadLegReferenceRows(
       }
     })
 
-  return [...selectionRowsOut, ...serviceRowsOut, ...transportRowsOut]
+  return [...serviceRowsOut, ...transportRowsOut]
 }
 
 export function missingLegReferenceLabels(rows: LegReferenceRow[]): string[] {

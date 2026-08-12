@@ -9,7 +9,6 @@ import type {
   Customer,
   CustomerLinkedAccount,
   Location,
-  Package,
   RateType,
   Supplier,
   SupplierDetail,
@@ -220,7 +219,7 @@ export function useJobReservationDetails(bookingId: string | null | undefined) {
 
 export interface JobLegReferenceRow {
   key: string
-  kind: "selection" | "service" | "transport_request"
+  kind: "service" | "transport_request"
   id: string
   label: string
   supplierName: string | null
@@ -281,7 +280,6 @@ export function useCustomerDetail(id: string) {
           Pick<Booking, "id" | "bookingNumber" | "stage" | "consultant" | "departureDate" | "createdAt"> & {
             direction: string | null
             supplierName: string | null
-            packageName: string | null
           }
         >
       }
@@ -297,10 +295,6 @@ export function useLocations() {
 
 export function useSupplierEmailLabels() {
   return useSWR<SupplierEmailLabel[]>("/api/supplier-email-labels", fetcher, swrOptions)
-}
-
-export function useActivePackages() {
-  return useSWR<Package[]>("/api/packages", fetcher, swrOptions)
 }
 
 export function useRateTypes() {

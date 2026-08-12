@@ -117,24 +117,16 @@ export async function findMissingQuotedLegs(
 ): Promise<string[]> {
   if (scope.legIds.size === 0) return []
 
-  const [{ data: selections, error: selectionsError }, { data: services, error: servicesError }] =
-    await Promise.all([
-      supabase
-        .from("booking_package_selections")
-        .select("package_leg_id")
-        .eq("booking_id", bookingId)
-        .eq("selected", true),
-      // A Build Booking service row is its own leg, so its id is what the snapshot recorded.
-      supabase.from("booking_services").select("id").eq("booking_id", bookingId).eq("selected", true),
-    ])
+  // A service row is its own leg, so its id is what the snapshot recorded.
+  const { data: services, error: servicesError } = await supabase
+    .from("booking_services")
+    .select("id")
+    .eq("booking_id", bookingId)
+    .eq("selected", true)
 
-  if (selectionsError) throw selectionsError
   if (servicesError) throw servicesError
 
-  const liveLegIds = new Set<string>([
-    ...(selections ?? []).map((row) => row.package_leg_id),
-    ...(services ?? []).map((row) => row.id),
-  ])
+  const liveLegIds = new Set<string>((services ?? []).map((row) => row.id))
 
   return [...scope.legIds]
     .filter((legId) => !liveLegIds.has(legId))

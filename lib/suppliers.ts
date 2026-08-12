@@ -1,6 +1,7 @@
 import type { Database } from "@/lib/supabase/types"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { normalizeRouteDirectionMode } from "@/lib/routes/route-name"
+import { toHoursMinutes } from "@/lib/routes/route-schedule"
 import type {
   BookingScheduleSupplierKind,
   BookingSupplierSchedule,
@@ -185,6 +186,10 @@ export function mapSupplierRoute(
     vehicleRentalDetails: mapVehicleRentalRouteDetails(vehicleRentalDetails),
     directionMode: normalizeRouteDirectionMode(row.direction_mode),
     durationDays: row.duration_days ?? null,
+    departureTime: toHoursMinutes(row.departure_time),
+    arrivalTime: toHoursMinutes(row.arrival_time),
+    returnDepartureTime: toHoursMinutes(row.return_departure_time),
+    returnArrivalTime: toHoursMinutes(row.return_arrival_time),
     active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -270,7 +275,6 @@ export function mapBookingTransportRequest(row: BookingTransportRequestWithRenta
     supplierId: row.supplier_id ?? null,
     routeId: row.route_id ?? null,
     suiteTypeId: row.suite_type_id ?? null,
-    packageLegId: row.package_leg_id ?? null,
     serviceId: row.service_id ?? null,
     pickupPoint: row.pickup_point,
     dropoffPoint: row.dropoff_point,

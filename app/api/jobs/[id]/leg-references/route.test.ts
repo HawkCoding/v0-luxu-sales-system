@@ -31,37 +31,33 @@ function makeParams(id = BOOKING_ID) {
 }
 
 interface MockState {
-  selectionRows?: unknown[]
   serviceRows?: unknown[]
   transportRows?: unknown[]
 }
 
 function buildSupabase(state: MockState = {}) {
-  const selectionUpdateCalls: Array<{ legId: string; payload: Record<string, unknown> }> = []
   const serviceUpdateCalls: Array<{ serviceId: string; payload: Record<string, unknown> }> = []
   const transportUpdateCalls: Array<{ requestId: string; payload: Record<string, unknown> }> = []
 
-  const selectionRows =
-    state.selectionRows ??
+  const serviceRows =
+    state.serviceRows ??
     [
       {
-        id: "sel-1",
-        package_leg_id: LEG_A,
+        id: LEG_A,
+        label: "Rovos Rail",
+        sort_order: 0,
         selected: true,
         supplier_reference: null,
-        package_legs: { label: "Rovos Rail", sort_order: 0 },
         suppliers: { name: "Rovos Rail", kind: "train_operator" },
       },
     ]
-
-  const serviceRows = state.serviceRows ?? []
 
   const transportRows =
     state.transportRows ??
     [
       {
         id: TRANSPORT_ID,
-        package_leg_id: null,
+        service_id: null,
         service_type: "transfer",
         pickup_point: "Airport",
         dropoff_point: "Hotel",
@@ -73,23 +69,6 @@ function buildSupabase(state: MockState = {}) {
 
   const supabase = {
     from: vi.fn((table: string) => {
-      if (table === "booking_package_selections") {
-        return {
-          select: vi.fn(() => ({
-            eq: vi.fn(() => ({
-              eq: vi.fn(async () => ({ data: selectionRows, error: null })),
-            })),
-          })),
-          update: vi.fn((payload: Record<string, unknown>) => ({
-            eq: vi.fn(() => ({
-              eq: vi.fn(async (_col: string, legId: string) => {
-                selectionUpdateCalls.push({ legId, payload })
-                return { error: null }
-              }),
-            })),
-          })),
-        }
-      }
       if (table === "booking_transport_requests") {
         return {
           select: vi.fn(() => ({
@@ -145,7 +124,7 @@ function buildSupabase(state: MockState = {}) {
     }),
   }
 
-  return { supabase, selectionUpdateCalls, serviceUpdateCalls, transportUpdateCalls }
+  return { supabase, serviceUpdateCalls, transportUpdateCalls }
 }
 
 function mockAuthUser(state: MockState = {}) {
@@ -198,8 +177,8 @@ describe("GET /api/jobs/[id]/leg-references", () => {
     const body = await res.json()
     expect(body.rows).toEqual([
       {
-        key: `selection:sel-1`,
-        kind: "selection",
+        key: `service:${LEG_A}`,
+        kind: "service",
         id: LEG_A,
         label: "Rovos Rail",
         supplierName: "Rovos Rail",
@@ -224,7 +203,6 @@ describe("GET /api/jobs/[id]/leg-references", () => {
 
   it("returns booking_services rows (Build Booking) as service-kind reference rows", async () => {
     mockAuthUser({
-      selectionRows: [],
       serviceRows: [
         {
           id: SERVICE_ID,
@@ -257,13 +235,13 @@ describe("GET /api/jobs/[id]/leg-references", () => {
 
   it("excludes selected legs whose supplier kind is transfers/vehicle_rental", async () => {
     mockAuthUser({
-      selectionRows: [
+      serviceRows: [
         {
-          id: "sel-2",
-          package_leg_id: LEG_A,
+          id: LEG_A,
+          label: "Transfer leg",
+          sort_order: 0,
           selected: true,
           supplier_reference: null,
-          package_legs: { label: "Transfer leg", sort_order: 0 },
           suppliers: { name: "ABC Transfers", kind: "transfers" },
         },
       ],
@@ -289,7 +267,7 @@ describe("PATCH /api/jobs/[id]/leg-references", () => {
     const res = await PATCH(
       new Request("http://localhost", {
         method: "PATCH",
-        body: JSON.stringify({ updates: [{ kind: "selection", id: LEG_A, supplierReference: "REF" }] }),
+        body: JSON.stringify({ updates: [{ kind: "service", id: LEG_A, supplierReference: "REF" }] }),
       }),
       makeParams(),
     )
@@ -305,17 +283,17 @@ describe("PATCH /api/jobs/[id]/leg-references", () => {
     expect(res.status).toBe(400)
   })
 
-  it("updates supplier_reference on booking_package_selections for a selection row and audits", async () => {
-    const { selectionUpdateCalls } = mockAuthRole()
+  it("updates supplier_reference on booking_services for a service row and audits", async () => {
+    const { serviceUpdateCalls } = mockAuthRole()
     const res = await PATCH(
       new Request("http://localhost", {
         method: "PATCH",
-        body: JSON.stringify({ updates: [{ kind: "selection", id: LEG_A, supplierReference: "REF-456" }] }),
+        body: JSON.stringify({ updates: [{ kind: "service", id: LEG_A, supplierReference: "REF-456" }] }),
       }),
       makeParams(),
     )
     expect(res.status).toBe(200)
-    expect(selectionUpdateCalls).toEqual([{ legId: LEG_A, payload: { supplier_reference: "REF-456" } }])
+    expect(serviceUpdateCalls).toEqual([{ serviceId: LEG_A, payload: { supplier_reference: "REF-456" } }])
     expect(auditMocks.writeAuditLog).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ action: "leg_supplier_reference_updated" }),
@@ -323,7 +301,7 @@ describe("PATCH /api/jobs/[id]/leg-references", () => {
   })
 
   it("updates supplier_reference on booking_services for a service row (Build Booking)", async () => {
-    const { serviceUpdateCalls, selectionUpdateCalls } = mockAuthRole()
+    const { serviceUpdateCalls } = mockAuthRole()
     const res = await PATCH(
       new Request("http://localhost", {
         method: "PATCH",
@@ -333,7 +311,6 @@ describe("PATCH /api/jobs/[id]/leg-references", () => {
     )
     expect(res.status).toBe(200)
     expect(serviceUpdateCalls).toEqual([{ serviceId: SERVICE_ID, payload: { supplier_reference: "REF-999" } }])
-    expect(selectionUpdateCalls).toEqual([])
   })
 
   it("updates supplier_reference on booking_transport_requests for a transport_request row", async () => {
@@ -352,27 +329,27 @@ describe("PATCH /api/jobs/[id]/leg-references", () => {
   })
 
   it("normalizes a blank reference to null", async () => {
-    const { selectionUpdateCalls } = mockAuthRole()
+    const { serviceUpdateCalls } = mockAuthRole()
     const res = await PATCH(
       new Request("http://localhost", {
         method: "PATCH",
-        body: JSON.stringify({ updates: [{ kind: "selection", id: LEG_A, supplierReference: "   " }] }),
+        body: JSON.stringify({ updates: [{ kind: "service", id: LEG_A, supplierReference: "   " }] }),
       }),
       makeParams(),
     )
     expect(res.status).toBe(200)
-    expect(selectionUpdateCalls).toEqual([{ legId: LEG_A, payload: { supplier_reference: null } }])
+    expect(serviceUpdateCalls).toEqual([{ serviceId: LEG_A, payload: { supplier_reference: null } }])
   })
 
-  it("saves contact name, footnote and excursions on a selection row", async () => {
-    const { selectionUpdateCalls } = mockAuthRole()
+  it("saves contact name, footnote and excursions on a service row", async () => {
+    const { serviceUpdateCalls } = mockAuthRole()
     const res = await PATCH(
       new Request("http://localhost", {
         method: "PATCH",
         body: JSON.stringify({
           updates: [
             {
-              kind: "selection",
+              kind: "service",
               id: LEG_A,
               supplierReference: "38562",
               supplierContactName: "Carla",
@@ -385,9 +362,9 @@ describe("PATCH /api/jobs/[id]/leg-references", () => {
       makeParams(),
     )
     expect(res.status).toBe(200)
-    expect(selectionUpdateCalls).toEqual([
+    expect(serviceUpdateCalls).toEqual([
       {
-        legId: LEG_A,
+        serviceId: LEG_A,
         payload: {
           supplier_reference: "38562",
           supplier_contact_name: "Carla",

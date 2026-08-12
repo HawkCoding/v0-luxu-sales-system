@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { createSupabaseMock } from "@/lib/testing/supabase-mock"
-import { seedUnitsForServices, type SeedLeg } from "@/app/api/jobs/[id]/package/seed"
+import { seedUnitsForServices, type SeedLeg } from "@/lib/packages/seed-service-units"
 
 const BOOKING_ID = "booking-1"
 
