@@ -75,7 +75,7 @@ describe("GET /api/rate-types", () => {
   it("returns the list with canEdit", async () => {
     sessionMocks.getUser.mockResolvedValue({ data: { user: { id: USER_ID } }, error: null })
     sessionMocks.from.mockImplementation((table: string) => {
-      if (table === "profiles") return profileQuery("manager")
+      if (table === "profiles") return profileQuery("admin")
       if (table === "rate_types") {
         return listQuery([
           {
@@ -111,6 +111,20 @@ describe("GET /api/rate-types", () => {
       },
     ])
   })
+
+  it("gives managers read access without canEdit", async () => {
+    sessionMocks.getUser.mockResolvedValue({ data: { user: { id: USER_ID } }, error: null })
+    sessionMocks.from.mockImplementation((table: string) => {
+      if (table === "profiles") return profileQuery("manager")
+      if (table === "rate_types") return listQuery([])
+      throw new Error(`Unexpected table ${table}`)
+    })
+
+    const response = await GET()
+    const payload = await response.json()
+    expect(response.status).toBe(200)
+    expect(payload.canEdit).toBe(false)
+  })
 })
 
 describe("POST /api/rate-types", () => {
@@ -123,6 +137,22 @@ describe("POST /api/rate-types", () => {
     sessionMocks.getUser.mockResolvedValue({ data: { user: { id: USER_ID } }, error: null })
     sessionMocks.from.mockImplementation((table: string) => {
       if (table === "profiles") return profileQuery("readonly")
+      throw new Error(`Unexpected table ${table}`)
+    })
+
+    const response = await POST(
+      new Request("http://localhost/api/rate-types", {
+        method: "POST",
+        body: JSON.stringify({ code: "TRADE", name: "Trade Rate" }),
+      }),
+    )
+    expect(response.status).toBe(403)
+  })
+
+  it("rejects managers with 403", async () => {
+    sessionMocks.getUser.mockResolvedValue({ data: { user: { id: USER_ID } }, error: null })
+    sessionMocks.from.mockImplementation((table: string) => {
+      if (table === "profiles") return profileQuery("manager")
       throw new Error(`Unexpected table ${table}`)
     })
 

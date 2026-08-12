@@ -228,14 +228,6 @@ export default function JobDetailPage() {
   })
 
   useEffect(() => {
-    const status = (error as { status?: number } | undefined)?.status
-    if (status !== 404) {
-      return
-    }
-    router.replace("/app/bookings")
-  }, [error, router])
-
-  useEffect(() => {
     setEditing(
       cancelOpen ||
         changeCustomerOpen ||
@@ -291,26 +283,39 @@ export default function JobDetailPage() {
     setInvoiceNumberDraft(next)
   }, [data?.job])
 
-  if (hasLoadError && (error as { status?: number } | undefined)?.status !== 404) {
+  if (hasLoadError) {
+    const isNotFound = (error as { status?: number } | undefined)?.status === 404
     return (
       <div className="p-6">
         <Alert>
           <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Could not load booking</AlertTitle>
+          <AlertTitle>{isNotFound ? "Booking not found" : "Could not load booking"}</AlertTitle>
           <AlertDescription>
-            {error instanceof Error ? error.message : "Something went wrong loading this booking."} Refresh the page
-            or{" "}
-            <Link href="/app/bookings" className="underline">
-              return to bookings
-            </Link>
-            .
+            {isNotFound ? (
+              <>
+                This booking does not exist, or you no longer have access to it.{" "}
+                <Link href="/app/bookings" className="underline">
+                  Return to bookings
+                </Link>
+                .
+              </>
+            ) : (
+              <>
+                {error instanceof Error ? error.message : "Something went wrong loading this booking."} Refresh the
+                page or{" "}
+                <Link href="/app/bookings" className="underline">
+                  return to bookings
+                </Link>
+                .
+              </>
+            )}
           </AlertDescription>
         </Alert>
       </div>
     )
   }
 
-  if (isLoading || !data || hasLoadError) {
+  if (isLoading || !data) {
     return <JobDetailSkeleton />
   }
 

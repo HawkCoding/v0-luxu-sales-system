@@ -26,6 +26,9 @@ import { autoBuildBookingServices } from "@/lib/auto-build/build-from-enquiry"
 import { createDraftQuoteForBooking } from "@/lib/quotes/create-draft-quote"
 import { findRouteMatch } from "@/lib/resolvers/route-resolver"
 
+// Mirrors "create:enquiry" in lib/role-context.tsx.
+const ENQUIRY_CREATE_ROLES: readonly string[] = ["admin", "manager", "consultant"]
+
 type ServiceClient = ReturnType<typeof createServiceClient>
 type TransportServiceType = "transfer" | "rental"
 type TransportRequestInsert = {
@@ -282,6 +285,21 @@ export async function POST(req: Request) {
 
   if (!user && !isWebhookCaller) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
+  // Staff sessions need "create:enquiry" (see lib/role-context.tsx) — this route
+  // writes a customer, a booking and a draft quote, so read-only accounts must
+  // not reach it. The webhook path has no session and is authorised by secret.
+  if (user && !isWebhookCaller) {
+    const { data: profile } = await sessionClient
+      .from("profiles")
+      .select("clearance_level")
+      .eq("user_id", user.id)
+      .single()
+
+    if (!profile || !ENQUIRY_CREATE_ROLES.includes(profile.clearance_level)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    }
   }
 
   let rawBody: unknown
@@ -720,15 +738,18 @@ export async function resolveEnquiryCustomer(
       .limit(1)
     const customerIsRepeatClient = (priorCompletedBookings ?? []).length > 0
 
+    // Only write what this enquiry actually carries: an intake without a country
+    // must not null out the country an existing customer already has, which
+    // `customer_complete` then blocks every forward stage move on.
     await supabase
       .from("customers")
       .update({
         first_name: input.firstName ?? undefined,
         last_name: input.lastName ?? undefined,
-        phone: input.phone,
-        country: input.country,
-        province: input.province,
-        title: input.title,
+        phone: input.phone ?? undefined,
+        country: input.country ?? undefined,
+        province: input.province ?? undefined,
+        title: input.title ?? undefined,
         updated_at: input.nowIso,
       })
       .eq("id", existingCustomer.id)

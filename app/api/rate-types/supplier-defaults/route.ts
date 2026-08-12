@@ -4,7 +4,8 @@ import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
 import type { SupplierKind, SupplierKindDefaultRateType } from "@/lib/types"
 
-const ALLOWED_ROLES = new Set(["admin", "manager"])
+// Admin only — same gate as the Settings page link and the rest of /api/rate-types.
+const ALLOWED_ROLES = new Set(["admin"])
 
 const SUPPLIER_KINDS = [
   "train_operator",
