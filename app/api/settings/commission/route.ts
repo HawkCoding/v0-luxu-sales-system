@@ -12,10 +12,23 @@ import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 
 const allowedRoles = new Set(["admin", "manager"])
 
-const patchSchema = z.object({
-  type: z.enum(["percent", "per_person", "fixed"]),
-  value: z.number().min(0).max(1_000_000),
-})
+// A percent commission is bounded here rather than left to normalizeCommissionValue's clamp:
+// clamping happens after validation, so 250 would save as 100 and report 200 OK — the admin
+// would never learn the value they typed was not the value stored.
+const patchSchema = z
+  .object({
+    type: z.enum(["percent", "per_person", "fixed"]),
+    value: z.number().min(0).max(1_000_000),
+  })
+  .superRefine((data, ctx) => {
+    if (data.type === "percent" && data.value > 100) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["value"],
+        message: "Percent commission must be between 0 and 100",
+      })
+    }
+  })
 
 async function getAuthenticatedContext() {
   const supabase = await createSessionClient()

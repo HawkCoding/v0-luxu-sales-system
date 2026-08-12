@@ -1,18 +1,17 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Plus, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
 interface InvoiceStatusOption {
   /** System roles are auto-applied from the booking's payment state. */
-  role: "provisional" | "confirmed" | "paid" | "cancelled" | null
+  role: "provisional" | "confirmed" | "paid" | "cancelled"
   label: string
 }
 
-const ROLE_HINTS: Record<NonNullable<InvoiceStatusOption["role"]>, string> = {
+const ROLE_HINTS: Record<InvoiceStatusOption["role"], string> = {
   provisional: "Before the deposit is paid",
   confirmed: "Deposit received",
   paid: "Paid in full",
@@ -23,6 +22,11 @@ interface InvoiceStatusSettingsEditorProps {
   canEdit: boolean
 }
 
+/**
+ * Renames the four system statuses. Statuses cannot be added or removed: every label is applied
+ * automatically from the booking's payment state, and there is no per-invoice picker to apply an
+ * extra one with.
+ */
 export function InvoiceStatusSettingsEditor({ canEdit }: InvoiceStatusSettingsEditorProps) {
   const [options, setOptions] = useState<InvoiceStatusOption[]>([])
   const [loading, setLoading] = useState(true)
@@ -50,20 +54,10 @@ export function InvoiceStatusSettingsEditor({ canEdit }: InvoiceStatusSettingsEd
     )
   }
 
-  const removeOption = (index: number) => {
-    setOptions((current) => current.filter((_, i) => i !== index))
-  }
-
-  const addOption = () => {
-    setOptions((current) => [...current, { role: null, label: "" }])
-  }
-
   const handleSave = async () => {
-    const cleaned = options
-      .map((option) => ({ ...option, label: option.label.trim() }))
-      .filter((option) => option.label.length > 0)
-    if (cleaned.length === 0) {
-      toast.error("At least one status is required")
+    const cleaned = options.map((option) => ({ ...option, label: option.label.trim() }))
+    if (cleaned.some((option) => option.label.length === 0)) {
+      toast.error("Every status needs a label")
       return
     }
     setSaving(true)
@@ -94,7 +88,7 @@ export function InvoiceStatusSettingsEditor({ canEdit }: InvoiceStatusSettingsEd
     <div className="space-y-3">
       <div className="space-y-2">
         {options.map((option, index) => (
-          <div key={index} className="flex items-center gap-2">
+          <div key={option.role} className="flex items-center gap-2">
             <Input
               value={option.label}
               onChange={(e) => updateLabel(index, e.target.value)}
@@ -103,33 +97,14 @@ export function InvoiceStatusSettingsEditor({ canEdit }: InvoiceStatusSettingsEd
               aria-label={`Status label ${index + 1}`}
               className="h-8 max-w-xs text-sm"
             />
-            <span className="text-xs text-muted-foreground">
-              {option.role ? ROLE_HINTS[option.role] : "Manual"}
-            </span>
-            {canEdit ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-muted-foreground"
-                onClick={() => removeOption(index)}
-                aria-label={`Remove status ${option.label || index + 1}`}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            ) : null}
+            <span className="text-xs text-muted-foreground">{ROLE_HINTS[option.role]}</span>
           </div>
         ))}
       </div>
       {canEdit ? (
-        <div className="flex items-center gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={addOption}>
-            <Plus className="mr-1 h-3.5 w-3.5" /> Add status
-          </Button>
-          <Button type="button" size="sm" onClick={handleSave} disabled={saving}>
-            {saving ? "Saving…" : "Save statuses"}
-          </Button>
-        </div>
+        <Button type="button" size="sm" onClick={handleSave} disabled={saving}>
+          {saving ? "Saving…" : "Save statuses"}
+        </Button>
       ) : null}
     </div>
   )

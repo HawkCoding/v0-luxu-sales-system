@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { toast } from "sonner"
-import { ArrowLeft, Loader2, Plus, ToggleLeft, ToggleRight } from "lucide-react"
+import { ArrowLeft, Loader2, Plus } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -17,6 +17,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
 import { useRole } from "@/lib/role-context"
 
 interface OutcomeReason {
@@ -28,6 +29,16 @@ interface OutcomeReason {
 }
 
 type AppliesTo = "Lost" | "Cancelled" | "Both"
+
+async function errorMessage(res: Response, fallback: string): Promise<string> {
+  if (res.status === 401) return "Session expired — please log in again."
+  try {
+    const body = (await res.json()) as { error?: unknown }
+    return typeof body.error === "string" && body.error ? body.error : fallback
+  } catch {
+    return fallback
+  }
+}
 
 export default function OutcomeReasonsPage() {
   const { role } = useRole()
@@ -69,7 +80,7 @@ export default function OutcomeReasonsPage() {
         body: JSON.stringify({ active: !reason.active }),
       })
       if (!res.ok) {
-        toast.error("Failed to update reason")
+        toast.error(await errorMessage(res, "Failed to update reason"))
         return
       }
       await load()
@@ -91,7 +102,7 @@ export default function OutcomeReasonsPage() {
         body: JSON.stringify({ label: addLabel.trim(), appliesTo: addAppliesTo }),
       })
       if (!res.ok) {
-        toast.error("Failed to add reason")
+        toast.error(await errorMessage(res, "Failed to add reason"))
         return
       }
       setAddOpen(false)
@@ -164,22 +175,17 @@ export default function OutcomeReasonsPage() {
                       )}
                     </div>
                     {isManager && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={toggling === reason.id}
-                        onClick={() => void toggle(reason)}
-                        aria-label={reason.active ? `Deactivate ${reason.label}` : `Activate ${reason.label}`}
-                      >
-                        {toggling === reason.id ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : reason.active ? (
-                          <ToggleRight className="w-4 h-4 text-green-600" />
-                        ) : (
-                          <ToggleLeft className="w-4 h-4 text-muted-foreground" />
+                      <div className="flex items-center gap-2 shrink-0">
+                        {toggling === reason.id && (
+                          <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
                         )}
-                        <span className="sr-only">{reason.active ? "Deactivate" : "Activate"}</span>
-                      </Button>
+                        <Switch
+                          checked={reason.active}
+                          disabled={toggling === reason.id}
+                          onCheckedChange={() => void toggle(reason)}
+                          aria-label={reason.active ? `Deactivate ${reason.label}` : `Activate ${reason.label}`}
+                        />
+                      </div>
                     )}
                   </li>
                 ))}

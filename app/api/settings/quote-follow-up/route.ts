@@ -1,7 +1,7 @@
 import { safeSupabaseError } from "@/lib/api/responses"
 import { NextResponse } from "next/server"
 import { z } from "zod"
-import { requireManagerSettingsAccess } from "@/lib/settings-access"
+import { getQuoteFollowUpSettings, requireManagerSettingsAccess } from "@/lib/settings-access"
 import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 
 // Follow-up email wording is edited on the Templates page (templates table,
@@ -11,36 +11,26 @@ const KEYS = {
   cadence: "quote_follow_up_cadence",
 } as const
 
+// An empty cadence is rejected rather than stored: runQuoteFollowUpWorker would then skip every
+// quote while the Settings card still reads "Follow-ups enabled". Matches the UI's own
+// isCadenceValid rule, which already refuses to save an empty list.
 const patchSchema = z.object({
   enabled: z.boolean().optional(),
-  cadence: z.array(z.number().int().min(1)).optional(),
+  cadence: z
+    .array(z.number().int().min(1))
+    .min(1, "At least one follow-up day is required")
+    .optional(),
 })
 
 export async function GET() {
   const access = await requireManagerSettingsAccess()
   if (!access.ok) return access.response
 
-  const { supabase } = access.value
+  // Read through the same helper the worker uses, so the card can never claim "enabled"
+  // while runQuoteFollowUpWorker treats the setting as off (an absent row reads as disabled).
+  const settings = await getQuoteFollowUpSettings(access.value.supabase)
 
-  const { data: rows } = await supabase
-    .from("app_settings")
-    .select("key, value")
-    .in("key", Object.values(KEYS))
-
-  const map = Object.fromEntries((rows ?? []).map((r) => [r.key, r.value]))
-
-  let cadence: number[] = [3, 7]
-  try {
-    const parsed: unknown = JSON.parse(map[KEYS.cadence] ?? "")
-    if (Array.isArray(parsed)) cadence = parsed.filter((v): v is number => typeof v === "number")
-  } catch {
-    // use default
-  }
-
-  return NextResponse.json({
-    enabled: map[KEYS.enabled] !== "false",
-    cadence,
-  })
+  return NextResponse.json(settings)
 }
 
 export async function PATCH(req: Request) {
@@ -103,7 +93,7 @@ export async function PATCH(req: Request) {
   })
 
   return NextResponse.json({
-    enabled: enabled ?? before[KEYS.enabled] !== "false",
+    enabled: enabled ?? before[KEYS.enabled] === "true",
     cadence: cadence ?? JSON.parse(before[KEYS.cadence] ?? "[3,7]"),
   })
 }

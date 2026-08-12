@@ -59,7 +59,7 @@ import type { CommissionKind, Role } from "@/lib/types"
 import { APP_VERSION } from "@/lib/version"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
-import { AlertTriangle, Clock, KeyRound, MoreHorizontal, Pencil, ShieldCheck, Tag, Trash2, Upload, UserCheck, UserPlus, UserX } from "lucide-react"
+import { AlertTriangle, Clock, KeyRound, ListChecks, MoreHorizontal, Pencil, ShieldCheck, Tag, Trash2, Upload, UserCheck, UserPlus, UserX } from "lucide-react"
 
 interface AppUser {
   userId: string
@@ -1102,6 +1102,7 @@ function CompanyInfoCard({ canEdit, canEditLogo }: { canEdit: boolean; canEditLo
 
 function DepositSettingsCard({ canEdit }: { canEdit: boolean }) {
   const [defaultDepositPercentage, setDefaultDepositPercentage] = useState("25")
+  const [depositRefundable, setDepositRefundable] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -1110,9 +1111,13 @@ function DepositSettingsCard({ canEdit }: { canEdit: boolean }) {
 
     fetch("/api/settings/deposit")
       .then((response) => response.json())
-      .then((data: { defaultDepositPercentage?: number }) => {
-        if (!cancelled && typeof data.defaultDepositPercentage === "number") {
+      .then((data: { defaultDepositPercentage?: number; depositRefundable?: boolean }) => {
+        if (cancelled) return
+        if (typeof data.defaultDepositPercentage === "number") {
           setDefaultDepositPercentage(String(data.defaultDepositPercentage))
+        }
+        if (typeof data.depositRefundable === "boolean") {
+          setDepositRefundable(data.depositRefundable)
         }
       })
       .catch(() => {
@@ -1142,15 +1147,19 @@ function DepositSettingsCard({ canEdit }: { canEdit: boolean }) {
       const res = await fetch("/api/settings/deposit", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ defaultDepositPercentage: numericValue }),
+        body: JSON.stringify({ defaultDepositPercentage: numericValue, depositRefundable }),
       })
       if (!res.ok) throw new Error()
 
-      const data = (await res.json()) as { defaultDepositPercentage: number }
+      const data = (await res.json()) as {
+        defaultDepositPercentage: number
+        depositRefundable: boolean
+      }
       setDefaultDepositPercentage(String(data.defaultDepositPercentage))
-      toast.success("Default deposit percentage saved")
+      setDepositRefundable(data.depositRefundable)
+      toast.success("Deposit settings saved")
     } catch {
-      toast.error("Failed to save deposit percentage")
+      toast.error("Failed to save deposit settings")
     } finally {
       setSaving(false)
     }
@@ -1162,6 +1171,7 @@ function DepositSettingsCard({ canEdit }: { canEdit: boolean }) {
         <CardTitle className="text-sm font-medium">Quote & Invoice Defaults</CardTitle>
         <CardDescription className="text-xs">
           Deposit invoice generation uses this percentage unless a job-specific override is entered.
+          Refundability decides what happens to a paid deposit when a booking is cancelled.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
@@ -1203,6 +1213,25 @@ function DepositSettingsCard({ canEdit }: { canEdit: boolean }) {
           {!isValidPercentage && (
             <p className="text-xs text-destructive">Enter a value between 0 and 100.</p>
           )}
+        </div>
+
+        <div className="space-y-1 pt-2">
+          <div className="flex items-center gap-3">
+            <Switch
+              id="deposit-refundable"
+              checked={depositRefundable}
+              onCheckedChange={setDepositRefundable}
+              disabled={!canEdit || loading}
+              aria-label="Deposit is refundable on cancellation"
+            />
+            <Label htmlFor="deposit-refundable" className="text-sm">
+              {depositRefundable ? "Deposit is refundable" : "Deposit is non-refundable"}
+            </Label>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            When off, a cancelled booking keeps the paid deposit as the cancellation fee and only
+            the balance above it is refunded.
+          </p>
         </div>
       </CardContent>
     </Card>
@@ -2065,8 +2094,8 @@ export default function SettingsPage() {
         <CardHeader>
           <CardTitle className="text-sm font-medium">Invoice Statuses</CardTitle>
           <CardDescription className="text-xs">
-            Labels shown in the invoice header. System statuses apply automatically as the booking
-            progresses; extra statuses can be set manually per invoice.
+            Labels shown in the invoice header. Each status is applied automatically as the booking
+            progresses — only the wording is configurable.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -2146,6 +2175,25 @@ export default function SettingsPage() {
       )}
 
       {canEditDepositSettings && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Outcome Reasons</CardTitle>
+            <CardDescription className="text-xs">
+              Manage the selectable reasons shown when a booking outcome is set to Lost or Cancelled.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild size="sm" variant="outline" className="gap-2">
+              <Link href="/app/settings/outcome-reasons">
+                <ListChecks className="h-4 w-4" />
+                Manage Outcome Reasons
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {canEditDepositSettings && (
         <QuoteFollowUpSettingsCard canEdit={canEditDepositSettings} />
       )}
 
@@ -2176,24 +2224,30 @@ export default function SettingsPage() {
               v{APP_VERSION}
             </Badge>
           </div>
-          <Separator />
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Data Mode</span>
-            {systemInfo ? (
-              <Badge variant="secondary" className="text-xs">{systemInfo.dataMode}</Badge>
-            ) : (
-              <Skeleton className="h-4 w-36" />
-            )}
-          </div>
-          <Separator />
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Email Provider</span>
-            {systemInfo ? (
-              <Badge variant="secondary" className="text-xs">{systemInfo.emailProvider}</Badge>
-            ) : (
-              <Skeleton className="h-4 w-36" />
-            )}
-          </div>
+          {/* Data mode and email provider are infrastructure detail — admins only, so the
+              "limited information" caption above is actually true for everyone else. */}
+          {canEditSettings && (
+            <>
+              <Separator />
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Data Mode</span>
+                {systemInfo ? (
+                  <Badge variant="secondary" className="text-xs">{systemInfo.dataMode}</Badge>
+                ) : (
+                  <Skeleton className="h-4 w-36" />
+                )}
+              </div>
+              <Separator />
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Email Provider</span>
+                {systemInfo ? (
+                  <Badge variant="secondary" className="text-xs">{systemInfo.emailProvider}</Badge>
+                ) : (
+                  <Skeleton className="h-4 w-36" />
+                )}
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
     </div>
