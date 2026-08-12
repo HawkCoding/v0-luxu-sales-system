@@ -3,7 +3,7 @@ import { z } from "zod"
 import { loadCountryAliasMap, normalizeCountry } from "@/lib/countries"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
 import { createSessionClient } from "@/lib/supabase/server"
-import { allocateJobNumber } from "@/lib/job-numbering"
+import { allocateJobNumberBlock } from "@/lib/job-numbering"
 import { importRowSchema, payloadSchema } from "./schemas"
 
 const allowedRoles = new Set(["admin", "manager"])
@@ -448,30 +448,41 @@ export async function POST(req: Request) {
     (row): row is BookingImportRow & { sourceRowId: string } => row.sourceRowId !== null,
   )
   if (rowsWithSourceIds.length > 0) {
-    const customerIds = Array.from(new Set(rowsWithSourceIds.map((row) => row.customerId)))
-    const { data: existingBookingRows, error: existingBookingsError } = await supabase
-      .from("bookings")
-      .select("extracted_json")
-      .eq("owner_user_id", user.id)
-      .in("customer_id", customerIds)
-      .contains("extracted_json", { historical_import: { imported_via: "supplier_csv" } })
+    // Only customers that already existed can carry a prior historical import —
+    // the ones inserted moments ago in this request cannot — so an all-new file
+    // skips this lookup entirely. Batched because a single .in() with every id
+    // overruns the PostgREST request URI.
+    const existingCustomerIdSet = new Set(existingCustomerIds)
+    const customerIds = Array.from(new Set(rowsWithSourceIds.map((row) => row.customerId))).filter(
+      (customerId) => existingCustomerIdSet.has(customerId),
+    )
 
-    if (existingBookingsError) {
-      return buildImportErrorResponse({
-        traceId,
-        phase: "check_existing_bookings",
-        error: "Failed to validate existing historical imports",
-        status: 500,
-        cause: existingBookingsError,
-        context: {
-          customerCount: customerIds.length,
-          sourceRowCandidateCount: rowsWithSourceIds.length,
-        },
-      })
+    for (let index = 0; index < customerIds.length; index += LOOKUP_BY_CUSTOMER_BATCH_SIZE) {
+      const customerBatch = customerIds.slice(index, index + LOOKUP_BY_CUSTOMER_BATCH_SIZE)
+      const { data: existingBookingRows, error: existingBookingsError } = await supabase
+        .from("bookings")
+        .select("extracted_json")
+        .eq("owner_user_id", user.id)
+        .in("customer_id", customerBatch)
+        .contains("extracted_json", { historical_import: { imported_via: "supplier_csv" } })
+
+      if (existingBookingsError) {
+        return buildImportErrorResponse({
+          traceId,
+          phase: "check_existing_bookings",
+          error: "Failed to validate existing historical imports",
+          status: 500,
+          cause: existingBookingsError,
+          context: {
+            customerCount: customerIds.length,
+            sourceRowCandidateCount: rowsWithSourceIds.length,
+          },
+        })
+      }
+
+      const collected = collectHistoricalImportSourceRowIds(existingBookingRows ?? [])
+      collected.forEach((sourceRowId) => existingSourceRowIds.add(sourceRowId))
     }
-
-    const collected = collectHistoricalImportSourceRowIds(existingBookingRows ?? [])
-    collected.forEach((sourceRowId) => existingSourceRowIds.add(sourceRowId))
   }
 
   let bookingRows: Array<{
@@ -498,17 +509,25 @@ export async function POST(req: Request) {
   let skippedDuplicates = 0
   bookingRows = []
   try {
-    for (const row of bookingImportRows) {
+    const rowsToBook = bookingImportRows.filter((row) => {
       if (row.sourceRowId && existingSourceRowIds.has(row.sourceRowId)) {
         skippedDuplicates += 1
-        continue
+        return false
       }
       if (parsed.routeId && customerIdsWithHistoricalRouteBookings.has(row.customerId)) {
         skippedDuplicates += 1
-        continue
+        return false
       }
+      return true
+    })
 
-      const bookingNumber = await allocateJobNumber(supabase)
+    // One round trip for the whole file: allocating per row costs a round trip
+    // per row, which runs a full-size import past the function timeout.
+    const bookingNumbers =
+      rowsToBook.length > 0 ? await allocateJobNumberBlock(supabase, rowsToBook.length) : []
+
+    rowsToBook.forEach((row, index) => {
+      const bookingNumber = bookingNumbers[index]
       bookingRows.push({
         booking_number: bookingNumber,
         customer_id: row.customerId,
@@ -530,7 +549,7 @@ export async function POST(req: Request) {
           },
         },
       })
-    }
+    })
   } catch (error) {
     return buildImportErrorResponse({
       traceId,

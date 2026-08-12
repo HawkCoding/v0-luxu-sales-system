@@ -30,6 +30,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { useRole } from "@/lib/role-context"
 import { getPipelineStageLabel, PIPELINE_STAGES } from "@/lib/types"
 import { useCustomerDetail, useRateTypes } from "@/lib/use-data"
+import { COUNTRIES } from "@/lib/form-data"
+import { PHONE_VALIDATION_MESSAGE, isPlausiblePhone } from "@/lib/phone-format"
 import { formatDisplayDate } from "@/lib/date-format"
 import { useRecordPresence } from "@/hooks/use-record-presence"
 import { useVersionedSave, type VersionedSaveError } from "@/hooks/use-versioned-save"
@@ -41,6 +43,7 @@ interface CustomerPatchPayload {
   email: string
   phone: string | null
   fax: string | null
+  country: string | null
   province: string | null
   company_name: string | null
   address_line1: string | null
@@ -60,6 +63,7 @@ interface CustomerPatchResponse {
   notes: string | null
   email: string
   phone: string | null
+  country: string | null
   province: string | null
   dateOfBirth: string | null
   vipStatus: boolean
@@ -94,6 +98,7 @@ export function CustomerDetailView({
   const [phoneDraft, setPhoneDraft] = useState("")
   const [faxDraft, setFaxDraft] = useState("")
   const [notesDraft, setNotesDraft] = useState("")
+  const [countryDraft, setCountryDraft] = useState("")
   const [provinceDraft, setProvinceDraft] = useState("")
   const [companyNameDraft, setCompanyNameDraft] = useState("")
   const [addressLine1Draft, setAddressLine1Draft] = useState("")
@@ -156,6 +161,7 @@ export function CustomerDetailView({
         setPhoneDraft(data.customer.phone ?? "")
         setFaxDraft(data.customer.fax ?? "")
         setNotesDraft(data.customer.notes ?? "")
+        setCountryDraft(data.customer.country ?? "")
         setProvinceDraft(data.customer.province ?? "")
         setCompanyNameDraft(data.customer.companyName ?? "")
         setAddressLine1Draft(data.customer.addressLine1 ?? "")
@@ -233,11 +239,14 @@ export function CustomerDetailView({
     (booking) => booking.stage === "voucher_sent" || booking.stage === "trip_active" || booking.stage === "closed",
   ).length
   const isRepeatClient = (customer.isRepeatClient ?? false) || completedBookings > 0
+  const phoneDraftError =
+    phoneDraft.trim().length > 0 && !isPlausiblePhone(phoneDraft) ? PHONE_VALIDATION_MESSAGE : null
   const hasChanges =
     emailDraft !== customer.email ||
     phoneDraft !== (customer.phone ?? "") ||
     faxDraft !== (customer.fax ?? "") ||
     notesDraft !== (customer.notes ?? "") ||
+    countryDraft !== (customer.country ?? "") ||
     provinceDraft !== (customer.province ?? "") ||
     companyNameDraft !== (customer.companyName ?? "") ||
     addressLine1Draft !== (customer.addressLine1 ?? "") ||
@@ -258,6 +267,7 @@ export function CustomerDetailView({
       email: emailDraft,
       phone: phoneDraft || null,
       fax: faxDraft || null,
+      country: countryDraft || null,
       province: provinceDraft || null,
       company_name: companyNameDraft || null,
       address_line1: addressLine1Draft || null,
@@ -308,6 +318,11 @@ export function CustomerDetailView({
 
   async function saveNotes() {
     if (!canEditCustomers || !isEditing || !hasChanges || isSaving) {
+      return
+    }
+
+    if (phoneDraftError) {
+      toast.error(phoneDraftError)
       return
     }
 
@@ -483,6 +498,7 @@ export function CustomerDetailView({
                       setPhoneDraft(customer.phone ?? "")
                       setFaxDraft(customer.fax ?? "")
                       setNotesDraft(customer.notes ?? "")
+                      setCountryDraft(customer.country ?? "")
                       setProvinceDraft(customer.province ?? "")
                       setCompanyNameDraft(customer.companyName ?? "")
                       setAddressLine1Draft(customer.addressLine1 ?? "")
@@ -506,7 +522,7 @@ export function CustomerDetailView({
                   >
                     Cancel
                   </Button>
-                  <Button onClick={saveNotes} disabled={!hasChanges || isSaving}>
+                  <Button onClick={saveNotes} disabled={!hasChanges || isSaving || Boolean(phoneDraftError)}>
                     <Save className="mr-2 h-4 w-4" />
                     {isSaving ? "Saving..." : "Save changes"}
                   </Button>
@@ -626,20 +642,43 @@ export function CustomerDetailView({
                   readOnly={!canEditCustomers || !isEditing}
                   disabled={isSaving}
                   placeholder={isEditing ? "Enter phone number" : "Not provided"}
-                  className="pl-9"
+                  className={
+                    isEditing && phoneDraftError
+                      ? "pl-9 border-destructive focus-visible:ring-destructive"
+                      : "pl-9"
+                  }
+                  aria-invalid={isEditing && Boolean(phoneDraftError)}
                 />
               </div>
+              {isEditing && phoneDraftError && (
+                <p className="text-xs text-destructive">{phoneDraftError}</p>
+              )}
             </div>
           </div>
 
           <div className="space-y-2">
-            <Label>Country</Label>
-            <div className="inline-flex items-center gap-2">
-              <Badge variant="outline" className="text-xs gap-1">
-                <Globe className="w-3 h-3" />
-                {customer.country ?? "Not provided"}
-              </Badge>
-            </div>
+            <Label htmlFor="customer-country">Country</Label>
+            {canEditCustomers && isEditing ? (
+              <Select value={countryDraft} onValueChange={setCountryDraft} disabled={isSaving}>
+                <SelectTrigger id="customer-country" className="h-9 md:w-1/2">
+                  <SelectValue placeholder="Select country" />
+                </SelectTrigger>
+                <SelectContent>
+                  {COUNTRIES.map((countryName) => (
+                    <SelectItem key={countryName} value={countryName}>
+                      {countryName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <div className="inline-flex items-center gap-2">
+                <Badge variant="outline" className="text-xs gap-1">
+                  <Globe className="w-3 h-3" />
+                  {customer.country ?? "Not provided"}
+                </Badge>
+              </div>
+            )}
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">

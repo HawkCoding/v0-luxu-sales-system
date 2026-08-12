@@ -30,6 +30,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { ChevronDown, Loader2 } from "lucide-react"
 import { TITLES, COUNTRIES } from "@/lib/form-data"
+import { PHONE_VALIDATION_MESSAGE, isPlausiblePhone } from "@/lib/phone-format"
 import { useRateTypes } from "@/lib/use-data"
 
 interface CreateCustomerDialogProps {
@@ -101,7 +102,8 @@ function validateForm(form: FormState): FormErrors {
         : !EMAIL_PATTERN.test(form.email.trim())
           ? "Must be a valid email address"
           : null,
-    phone: null,
+    phone:
+      form.phone.trim().length > 0 && !isPlausiblePhone(form.phone) ? PHONE_VALIDATION_MESSAGE : null,
     country: null,
   }
 }
@@ -299,8 +301,13 @@ export function CreateCustomerDialog({ open, onOpenChange, onSuccess }: CreateCu
               type="tel"
               value={form.phone}
               onChange={(e) => setField("phone", e.target.value)}
+              onBlur={() => markTouched("phone")}
+              className={getFieldClassName("phone")}
               placeholder="+1 555 000 0000"
             />
+            {touched.phone && errors.phone && (
+              <p className="text-xs text-destructive">{errors.phone}</p>
+            )}
           </div>
 
           {/* Country */}

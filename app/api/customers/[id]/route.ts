@@ -6,6 +6,7 @@ import { CUSTOMER_COLUMNS } from "@/lib/supabase/columns"
 import { detectFieldConflicts, fieldConflictResponse, staleVersionResponse } from "@/lib/concurrency"
 import { mapPostgrestError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
+import { PHONE_VALIDATION_MESSAGE, isPlausiblePhone } from "@/lib/phone-format"
 import {
   COMPLETED_REPEAT_BOOKING_STAGES,
   isCompletedRepeatBookingStage,
@@ -16,8 +17,15 @@ const allowedRoles = new Set(["admin", "manager", "consultant"])
 const patchCustomerSchema = z.object({
   notes: z.string().max(5000),
   email: z.string().trim().toLowerCase().email().max(255),
-  phone: z.string().max(50).nullable(),
+  phone: z
+    .string()
+    .max(50)
+    .nullable()
+    .refine((value) => value === null || value.trim() === "" || isPlausiblePhone(value), {
+      message: PHONE_VALIDATION_MESSAGE,
+    }),
   fax: z.string().trim().max(50).nullable().optional(),
+  country: z.string().trim().max(100).nullable().optional(),
   province: z.string().trim().max(100).nullable().optional(),
   // Billing identity for tax invoices. All optional so an existing customer can
   // be saved without them, and cleared by sending an empty string.
@@ -40,7 +48,7 @@ const patchCustomerSchema = z.object({
 })
 
 const CUSTOMER_PATCH_SELECT =
-  "id, notes, email, phone, fax, province, company_name, address_line1, address_line2, city, postal_code, vat_number, date_of_birth, id_passport, vip_status, preferences, communication_preferences, default_rate_type_id, first_travel_date, last_travel_date, updated_at"
+  "id, notes, email, phone, fax, country, province, company_name, address_line1, address_line2, city, postal_code, vat_number, date_of_birth, id_passport, vip_status, preferences, communication_preferences, default_rate_type_id, first_travel_date, last_travel_date, updated_at"
 
 interface CustomerPatchRow {
   id: string
@@ -48,6 +56,7 @@ interface CustomerPatchRow {
   email: string
   phone: string | null
   fax: string | null
+  country: string | null
   province: string | null
   company_name: string | null
   address_line1: string | null
@@ -97,7 +106,7 @@ export async function GET(
       supabase
         .from("bookings")
         .select(
-          "id, booking_number, stage, consultant, departure_date, created_at, route:routes(name, supplier:suppliers(id, name)), package:packages!bookings_package_id_fkey(name), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(id, name), extracted_json",
+          "id, booking_number, stage, consultant, departure_date, created_at, route:routes(name, supplier:suppliers(id, name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(id, name), extracted_json",
         )
         .eq("customer_id", id)
         .order("created_at", { ascending: false }),
@@ -227,7 +236,6 @@ export async function GET(
       const routeInfo = booking.route as
         | { name?: string | null; supplier?: { id?: string; name?: string | null } | null }
         | null
-      const packageInfo = booking.package as { name?: string | null } | null
       const hotelSupplier = booking.hotel_supplier as { id?: string; name?: string | null } | null
       const historicalSupplierId = (
         booking.extracted_json as { historical_import?: { supplier_id?: string } } | null
@@ -249,7 +257,6 @@ export async function GET(
           ((booking.extracted_json as { historical_import?: { route?: string } } | null)
             ?.historical_import?.route ?? null),
         supplierName: routeInfo?.supplier?.name ?? hotelSupplier?.name ?? historicalSupplierName,
-        packageName: packageInfo?.name ?? null,
         createdAt: booking.created_at,
         createdAtDisplay: formatDisplayDateTime(booking.created_at),
       }
@@ -350,12 +357,13 @@ export async function PATCH(
     notes: string | null
     email: string
     phone: string | null
-    province: string | null
-    date_of_birth: string | null
+    country?: string | null
+    province?: string | null
+    date_of_birth?: string | null
     id_passport?: string | null
-    vip_status: boolean
-    preferences: string | null
-    communication_preferences: string | null
+    vip_status?: boolean
+    preferences?: string | null
+    communication_preferences?: string | null
     fax?: string | null
     company_name?: string | null
     address_line1?: string | null
@@ -368,16 +376,24 @@ export async function PATCH(
     notes: normalizedNotes ? normalizedNotes : null,
     email: normalizedEmail,
     phone: normalizedPhone ? normalizedPhone : null,
-    province: normalizedProvince ? normalizedProvince : null,
-    date_of_birth: parsed.date_of_birth ?? null,
+    // Only write a field when the client actually sent it, so a partial patch
+    // never wipes a value the edit form did not include. Sending null or ""
+    // still clears the column — that's how the UI clears a field.
+    ...(parsed.country !== undefined ? { country: blankToNull(parsed.country) } : {}),
+    ...(parsed.province !== undefined ? { province: normalizedProvince ? normalizedProvince : null } : {}),
+    ...(parsed.date_of_birth !== undefined ? { date_of_birth: parsed.date_of_birth } : {}),
     ...(parsed.id_passport !== undefined ? { id_passport: blankToNull(parsed.id_passport) } : {}),
-    vip_status: parsed.vip_status ?? false,
-    preferences: normalizedPreferences ? normalizedPreferences : null,
-    communication_preferences: normalizedCommunicationPreferences
-      ? normalizedCommunicationPreferences
-      : null,
-    // Only write a billing field when the client sent it, so a partial patch
-    // never wipes an address the edit form did not include.
+    ...(parsed.vip_status !== undefined ? { vip_status: parsed.vip_status } : {}),
+    ...(parsed.preferences !== undefined
+      ? { preferences: normalizedPreferences ? normalizedPreferences : null }
+      : {}),
+    ...(parsed.communication_preferences !== undefined
+      ? {
+          communication_preferences: normalizedCommunicationPreferences
+            ? normalizedCommunicationPreferences
+            : null,
+        }
+      : {}),
     ...(parsed.fax !== undefined ? { fax: blankToNull(parsed.fax) } : {}),
     ...(parsed.company_name !== undefined ? { company_name: blankToNull(parsed.company_name) } : {}),
     ...(parsed.address_line1 !== undefined
@@ -483,6 +499,7 @@ export async function PATCH(
     email: updated.email,
     phone: updated.phone,
     fax: updated.fax,
+    country: updated.country,
     province: updated.province,
     companyName: updated.company_name,
     addressLine1: updated.address_line1,

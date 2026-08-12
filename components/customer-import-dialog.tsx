@@ -195,6 +195,35 @@ function isEmail(value: string): boolean {
   return /^[\w.+-]+@[\w-]+\.[\w.-]+$/.test(value.trim())
 }
 
+/**
+ * Excel's "Save as CSV" on Windows can emit UTF-16. `file.text()` always decodes
+ * as UTF-8, which turns a UTF-16 header row into NUL-interleaved garbage and
+ * surfaces as a bogus "missing headers" error — so pick the decoder off the BOM.
+ */
+export async function readCsvText(file: File): Promise<string> {
+  const buffer = new Uint8Array(await file.arrayBuffer())
+
+  if (buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe) {
+    return new TextDecoder("utf-16le").decode(buffer.subarray(2))
+  }
+  if (buffer.length >= 2 && buffer[0] === 0xfe && buffer[1] === 0xff) {
+    return new TextDecoder("utf-16be").decode(buffer.subarray(2))
+  }
+
+  const withoutBom =
+    buffer.length >= 3 && buffer[0] === 0xef && buffer[1] === 0xbb && buffer[2] === 0xbf
+      ? buffer.subarray(3)
+      : buffer
+
+  const text = new TextDecoder("utf-8").decode(withoutBom)
+  // No BOM but NULs in the first line: a UTF-16 file saved without one.
+  if (text.slice(0, 4096).includes("\u0000")) {
+    throw new Error(`${file.name} is not a UTF-8 CSV. Re-save it as "CSV UTF-8" and try again.`)
+  }
+
+  return text
+}
+
 function normalizeHeader(value: string): string {
   return value
     .trim()
@@ -469,7 +498,7 @@ export function CustomerBulkImportPanel() {
   }, [isPreparingConflicts, isSubmitting, selectedRouteId, selectedValidRows, selectedValidUniqueEmailCount])
 
   const parseCsvFile = async (file: File): Promise<EditableImportRow[]> => {
-    const text = await file.text()
+    const text = await readCsvText(file)
     const lines = text
       .replace(/\r/g, "")
       .split("\n")

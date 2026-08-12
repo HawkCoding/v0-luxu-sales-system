@@ -41,6 +41,40 @@ export async function allocateJobNumber(
   return formatBookingNumber(prefix, year, data)
 }
 
+/**
+ * Reserves `count` consecutive booking numbers in a single round trip.
+ *
+ * Bulk import allocates one number per row; doing that one RPC at a time costs
+ * a round trip per row, which pushes a 1000-row file past the serverless
+ * function timeout on hosted Supabase. The block RPC increments the same
+ * counter by `count` atomically, so concurrent callers still cannot overlap.
+ */
+export async function allocateJobNumberBlock(
+  supabase: SupabaseServerClient,
+  count: number,
+  prefix: JobNumberPrefix = JOB_NUMBER_PREFIX,
+  createdAt: Date = new Date(),
+): Promise<string[]> {
+  if (!Number.isInteger(count) || count < 1) {
+    throw new Error(`Invalid booking number block size: ${count}`)
+  }
+
+  const year = getNumberYear(createdAt)
+  const { data, error } = await supabase.rpc("next_booking_number_block", {
+    p_product_code: prefix,
+    p_count: count,
+    p_year: year,
+  })
+
+  if (error || !data) {
+    throw new Error(error?.message || "Failed to allocate job number block")
+  }
+
+  const lastNumber = data
+  const firstNumber = lastNumber - count + 1
+  return Array.from({ length: count }, (_, index) => formatBookingNumber(prefix, year, firstNumber + index))
+}
+
 export async function allocateJobNumberForBooking(
   supabase: SupabaseServerClient,
   createdAt: Date = new Date(),

@@ -14,16 +14,28 @@ const SUPPLIER_ID = "00000000-0000-0000-0000-000000000111"
 interface MockState {
   customerInsertRows: Array<Record<string, unknown>>
   bookingInsertRows: Array<Record<string, unknown>>
-  precheckCustomerIds: string[]
+  precheckCustomerIdBatches: string[][]
   auditPayload: Record<string, unknown> | null
+  lastBookingNumber: number
 }
 
-function createMockSupabase(state: MockState) {
+function createMockSupabase(
+  state: MockState,
+  /** email -> id for customers that already exist in the database. */
+  existingCustomerEmails: Map<string, string> = new Map([["existing@example.com", "cust-existing"]]),
+  /** source_row_ids already imported for those customers. */
+  importedSourceRowIds: string[] = ["row-1"],
+) {
   return {
-    rpc: vi.fn(async () => ({
-      data: 1,
-      error: null,
-    })),
+    // Mirrors next_booking_number_block: returns the LAST number of the
+    // reserved range, so the caller derives [last - count + 1 .. last].
+    rpc: vi.fn(async (functionName: string, args: { p_count?: number }) => {
+      if (functionName !== "next_booking_number_block") {
+        return { data: null, error: { message: `Unexpected RPC: ${functionName}` } }
+      }
+      state.lastBookingNumber += args.p_count ?? 0
+      return { data: state.lastBookingNumber, error: null }
+    }),
     auth: {
       getUser: vi.fn().mockResolvedValue({
         data: { user: { id: USER_ID, email: "manager@example.com" } },
@@ -53,9 +65,9 @@ function createMockSupabase(state: MockState) {
         return {
           select: () => ({
             in: async (_column: string, emails: string[]) => ({
-              data: emails.includes("existing@example.com")
-                ? [{ id: "cust-existing", email: "existing@example.com" }]
-                : [],
+              data: emails
+                .filter((email) => existingCustomerEmails.has(email))
+                .map((email) => ({ id: existingCustomerEmails.get(email), email })),
               error: null,
             }),
           }),
@@ -63,8 +75,8 @@ function createMockSupabase(state: MockState) {
             state.customerInsertRows = rows
             return {
               select: async () => ({
-                data: rows.map((row) => ({
-                  id: row.email === "new@example.com" ? "cust-new" : "cust-unknown",
+                data: rows.map((row, index) => ({
+                  id: row.email === "new@example.com" ? "cust-new" : `cust-inserted-${index}`,
                   email: String(row.email),
                 })),
                 error: null,
@@ -110,19 +122,17 @@ function createMockSupabase(state: MockState) {
           select: () => ({
             eq: (_column: string, _value: string) => ({
               in: (_inColumn: string, customerIds: string[]) => {
-                state.precheckCustomerIds = customerIds
+                state.precheckCustomerIdBatches.push(customerIds)
                 return {
                   contains: async () => ({
-                    data: [
-                      {
-                        extracted_json: {
-                          historical_import: {
-                            imported_via: "supplier_csv",
-                            source_row_id: "row-1",
-                          },
+                    data: importedSourceRowIds.map((sourceRowId) => ({
+                      extracted_json: {
+                        historical_import: {
+                          imported_via: "supplier_csv",
+                          source_row_id: sourceRowId,
                         },
                       },
-                    ],
+                    })),
                     error: null,
                   }),
                 }
@@ -164,11 +174,13 @@ describe("POST /api/customers/import idempotency", () => {
     const state: MockState = {
       customerInsertRows: [],
       bookingInsertRows: [],
-      precheckCustomerIds: [],
+      precheckCustomerIdBatches: [],
       auditPayload: null,
+      lastBookingNumber: 0,
     }
 
-    createSessionClientMock.mockResolvedValue(createMockSupabase(state))
+    const supabase = createMockSupabase(state)
+    createSessionClientMock.mockResolvedValue(supabase)
 
     const request = new Request("http://localhost/api/customers/import", {
       method: "POST",
@@ -202,9 +214,13 @@ describe("POST /api/customers/import idempotency", () => {
       matchedCustomers: 1,
       importedBookings: 1,
     })
-    expect(state.precheckCustomerIds.sort()).toEqual(["cust-existing", "cust-new"])
+    // Only the pre-existing customer is looked up — one inserted moments ago in
+    // this same request cannot already carry a historical import.
+    expect(state.precheckCustomerIdBatches).toEqual([["cust-existing"]])
     expect(state.bookingInsertRows).toHaveLength(1)
-    expect(state.bookingInsertRows[0]?.booking_number).toBe("LTT-2026-0001")
+    expect(state.bookingInsertRows[0]?.booking_number).toMatch(/^LTT-\d{4}-0001$/)
+    // One allocation call for the whole file, not one per row.
+    expect(supabase.rpc).toHaveBeenCalledTimes(1)
     expect(state.bookingInsertRows[0]?.hotel_supplier_id).toBe(SUPPLIER_ID)
 
     const insertedBookingMeta = (state.bookingInsertRows[0].extracted_json as {
@@ -212,5 +228,81 @@ describe("POST /api/customers/import idempotency", () => {
     }).historical_import
 
     expect(insertedBookingMeta?.source_row_id).toBe("row-2")
+  })
+
+  // F05-3: the duplicate-source-row lookup used to issue a single .in() with
+  // every customer id, which overran the PostgREST request URI at ~200 rows and
+  // 500'd *after* the customers had been inserted.
+  it("batches the historical-import lookup for large imports", async () => {
+    const rowCount = 250
+    const existingCustomerEmails = new Map(
+      Array.from({ length: rowCount }, (_, index) => [`person${index}@example.com`, `cust-${index}`] as const),
+    )
+
+    const state: MockState = {
+      customerInsertRows: [],
+      bookingInsertRows: [],
+      precheckCustomerIdBatches: [],
+      auditPayload: null,
+      lastBookingNumber: 0,
+    }
+
+    createSessionClientMock.mockResolvedValue(
+      createMockSupabase(state, new Map(existingCustomerEmails), []),
+    )
+
+    const request = new Request("http://localhost/api/customers/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        supplierId: SUPPLIER_ID,
+        routeId: null,
+        rows: Array.from({ length: rowCount }, (_, index) => ({
+          source_row_id: `row-${index}`,
+          first_name: `Person${index}`,
+          last_name: "Smith",
+          email: `person${index}@example.com`,
+        })),
+      }),
+    })
+
+    const response = await POST(request)
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(payload).toMatchObject({ matchedCustomers: rowCount, importedBookings: rowCount })
+    expect(state.precheckCustomerIdBatches.length).toBeGreaterThan(1)
+    for (const batch of state.precheckCustomerIdBatches) {
+      expect(batch.length).toBeLessThanOrEqual(100)
+    }
+    expect(state.precheckCustomerIdBatches.flat()).toHaveLength(rowCount)
+  })
+
+  it("skips the historical-import lookup entirely when every customer is new", async () => {
+    const state: MockState = {
+      customerInsertRows: [],
+      bookingInsertRows: [],
+      precheckCustomerIdBatches: [],
+      auditPayload: null,
+      lastBookingNumber: 0,
+    }
+
+    createSessionClientMock.mockResolvedValue(createMockSupabase(state, new Map(), []))
+
+    const request = new Request("http://localhost/api/customers/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        supplierId: SUPPLIER_ID,
+        routeId: null,
+        rows: [{ source_row_id: "row-1", first_name: "New", last_name: "Customer", email: "new@example.com" }],
+      }),
+    })
+
+    const response = await POST(request)
+
+    expect(response.status).toBe(200)
+    expect(state.precheckCustomerIdBatches).toEqual([])
+    expect(state.bookingInsertRows).toHaveLength(1)
   })
 })

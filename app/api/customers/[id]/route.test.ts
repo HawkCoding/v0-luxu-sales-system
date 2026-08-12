@@ -23,6 +23,7 @@ function baseCustomerRow(overrides: MockRow = {}): MockRow {
     email: "jane@example.com",
     phone: "0110000000",
     fax: null,
+    country: null,
     province: null,
     company_name: null,
     address_line1: null,
@@ -171,6 +172,88 @@ describe("PATCH /api/customers/[id]", () => {
 
     expect(response.status).toBe(409)
     expect(payload.code).toBe("STALE_VERSION")
+  })
+
+  // F05-2: these five used to be written unconditionally from optional Zod
+  // values, so a patch that omitted them collapsed them to null / false.
+  it("leaves fields the caller did not send untouched", async () => {
+    const { supabase, store } = seedSupabase({
+      customers: [
+        baseCustomerRow({
+          country: "South Africa",
+          province: "Western Cape",
+          date_of_birth: "1980-05-04",
+          vip_status: true,
+          preferences: "Lower berth",
+          communication_preferences: "Email only",
+          id_passport: "QA7654321",
+        }),
+      ],
+    })
+    supabaseMocks.createSessionClient.mockResolvedValue(supabase)
+
+    const response = await PATCH(
+      patchRequest({ notes: "just a note", email: "jane@example.com", phone: "0110000000" }),
+      routeParams(),
+    )
+
+    expect(response.status).toBe(200)
+
+    const row = store.rows("customers")[0]
+    expect(row.notes).toBe("just a note")
+    expect(row.country).toBe("South Africa")
+    expect(row.province).toBe("Western Cape")
+    expect(row.date_of_birth).toBe("1980-05-04")
+    expect(row.vip_status).toBe(true)
+    expect(row.preferences).toBe("Lower berth")
+    expect(row.communication_preferences).toBe("Email only")
+    expect(row.id_passport).toBe("QA7654321")
+  })
+
+  it("still clears a field when the caller explicitly sends null", async () => {
+    const { supabase, store } = seedSupabase({
+      customers: [baseCustomerRow({ province: "Western Cape", vip_status: true })],
+    })
+    supabaseMocks.createSessionClient.mockResolvedValue(supabase)
+
+    const response = await PATCH(
+      patchRequest(validPatchBody({ province: null, vip_status: false })),
+      routeParams(),
+    )
+
+    expect(response.status).toBe(200)
+    expect(store.rows("customers")[0].province).toBeNull()
+    expect(store.rows("customers")[0].vip_status).toBe(false)
+  })
+
+  // F05-1: country was absent from the patch schema, so it was silently
+  // discarded and a customer with a null country could never be repaired.
+  it("persists a country change", async () => {
+    const { supabase, store } = seedSupabase({
+      customers: [baseCustomerRow({ country: "South Africa" })],
+    })
+    supabaseMocks.createSessionClient.mockResolvedValue(supabase)
+
+    const response = await PATCH(patchRequest(validPatchBody({ country: "Germany" })), routeParams())
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(payload.country).toBe("Germany")
+    expect(store.rows("customers")[0].country).toBe("Germany")
+  })
+
+  // F05-4
+  it("rejects a phone number that is not dialable", async () => {
+    const { supabase, store } = seedSupabase()
+    supabaseMocks.createSessionClient.mockResolvedValue(supabase)
+
+    const response = await PATCH(
+      patchRequest(validPatchBody({ phone: "((((not a phone))))###" })),
+      routeParams(),
+    )
+
+    expect(response.status).toBe(400)
+    expect(store.rows("customers")[0].phone).toBe("0110000000")
   })
 
   it("returns 403 (not 409) when the caller lacks a role permitted to edit customers", async () => {

@@ -161,6 +161,41 @@ describe("POST /api/customers", () => {
     })
   })
 
+  // F05-4: a junk phone used to be stored verbatim and reach client-facing documents.
+  it("rejects a phone number that is not dialable", async () => {
+    const { supabase, insertMock } = createSupabaseMock({ role: "consultant" })
+    supabaseMocks.createSessionClient.mockResolvedValue(supabase)
+
+    const response = await POST(
+      createPostRequest({
+        first_name: "Jane",
+        last_name: "Smith",
+        email: "jane@example.com",
+        phone: "((((not a phone))))###",
+      }),
+    )
+
+    expect(response.status).toBe(400)
+    expect(insertMock).not.toHaveBeenCalled()
+  })
+
+  it("accepts an international phone number", async () => {
+    const { supabase, insertMock } = createSupabaseMock({ role: "consultant" })
+    supabaseMocks.createSessionClient.mockResolvedValue(supabase)
+
+    const response = await POST(
+      createPostRequest({
+        first_name: "Jane",
+        last_name: "Smith",
+        email: "jane@example.com",
+        phone: "+27 82 555 0202",
+      }),
+    )
+
+    expect(response.status).toBe(201)
+    expect(insertMock).toHaveBeenCalledWith(expect.objectContaining({ phone: "+27 82 555 0202" }))
+  })
+
   it("returns a typed DUPLICATE_EMAIL conflict, not a generic error, when the email is already taken", async () => {
     const { supabase, insertMock } = createSupabaseMock({
       role: "consultant",
