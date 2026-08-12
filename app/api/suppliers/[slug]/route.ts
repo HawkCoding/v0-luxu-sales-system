@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { staleVersionResponse } from "@/lib/concurrency"
 import { mapPostgrestError, safeSupabaseError } from "@/lib/api/responses"
 import { mapRateType, mapSupplierDetail } from "@/lib/suppliers"
-import { resolveDefaultRateTypeId } from "@/lib/rate-types/default-rate-type"
+import { resolveSupplierRateTiers } from "@/lib/rate-types/supplier-rate-tiers"
 import {
   allowedRoles,
   checkDeletionDependencies,
@@ -155,7 +155,6 @@ export async function GET(
         suiteTypeBathroomTypes: detail.suiteTypeBathroomTypes,
         rateTypes: detail.rateTypes,
         rateAdjustments: detail.rateAdjustments,
-        kindDefaultRateTypes: detail.kindDefaultRateTypes,
         stationAddresses: detail.stationAddresses,
       },
     ),
@@ -492,23 +491,26 @@ export async function PATCH(
     (existingDetail.rateTypes ?? []).filter((row) => !row.archived_at).map((row) => row.id),
   )
   // The baseline a rate card falls back to when the client didn't name a rate type: the supplier's
-  // own default where it has one, then its kind's default, then the system default. Resolved off
-  // the incoming payload (not the stored row) so a save that changes the kind or the override in
-  // the same request tags new cards with the value the user just chose.
-  const requestedDefaultRateTypeId = parsed.defaultRateTypeId ?? null
-  const defaultRateTypeId = resolveDefaultRateTypeId(
-    parsed.kind,
-    (existingDetail.kindDefaultRateTypes ?? []).map((row) => ({
-      kind: row.kind as SupplierKind,
-      rateTypeId: row.rate_type_id,
-    })),
-    (existingDetail.rateTypes ?? []).map(mapRateType),
-    requestedDefaultRateTypeId,
-  )
+  // own base rate, else the system default. Resolved off the incoming payload (not the stored row)
+  // so a save that changes the base rate in the same request tags new cards with the value the
+  // user just chose.
+  const requestedBaseRateTypeId = parsed.baseRateTypeId ?? null
+  const requestedQuoteRateTypeId = parsed.quoteRateTypeId ?? null
+  const rateTiers = resolveSupplierRateTiers((existingDetail.rateTypes ?? []).map(mapRateType), {
+    baseRateTypeId: requestedBaseRateTypeId,
+    quoteRateTypeId: requestedQuoteRateTypeId,
+  })
+  const defaultRateTypeId = rateTiers.baseRateTypeId
 
-  if (requestedDefaultRateTypeId && !activeRateTypeIds.has(requestedDefaultRateTypeId)) {
+  if (requestedBaseRateTypeId && !activeRateTypeIds.has(requestedBaseRateTypeId)) {
     return NextResponse.json(
-      { error: "The default rate type must reference an active rate type." },
+      { error: "The base rate must reference an active rate type." },
+      { status: 400 },
+    )
+  }
+  if (requestedQuoteRateTypeId && !activeRateTypeIds.has(requestedQuoteRateTypeId)) {
+    return NextResponse.json(
+      { error: "The quoted rate must reference an active rate type." },
       { status: 400 },
     )
   }
@@ -779,7 +781,9 @@ export async function PATCH(
     default_time_end: parsed.defaultTimeEnd ?? null,
     inclusions: parsed.inclusions,
     exclusions: parsed.exclusions,
-    default_rate_type_id: requestedDefaultRateTypeId,
+    base_rate_type_id: requestedBaseRateTypeId,
+    // Normalised: nominating the base rate is the same as nominating nothing.
+    quote_rate_type_id: rateTiers.quoteRateTypeId,
     active: nextActive,
     status: nextStatus,
   }
@@ -1313,7 +1317,6 @@ export async function PATCH(
         suiteTypeBathroomTypes: updatedDetail.suiteTypeBathroomTypes,
         rateTypes: updatedDetail.rateTypes,
         rateAdjustments: updatedDetail.rateAdjustments,
-        kindDefaultRateTypes: updatedDetail.kindDefaultRateTypes,
         stationAddresses: updatedDetail.stationAddresses,
       },
     ),

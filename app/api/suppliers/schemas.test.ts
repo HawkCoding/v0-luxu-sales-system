@@ -379,37 +379,86 @@ describe("supplierDraftSaveSchema", () => {
   })
 })
 
-describe("rate adjustments and the supplier default rate type", () => {
+describe("rate adjustments, the supplier base rate, and the quoted rate", () => {
   const RAC = "00000000-0000-4000-8000-0000000000a1"
   const STO = "00000000-0000-4000-8000-0000000000a2"
+  const NETT = "00000000-0000-4000-8000-0000000000a3"
 
-  it("accepts a null default rate type (inherit) and an omitted one", () => {
+  it("accepts a null base rate (inherit the system default) and an omitted one", () => {
     expect(
-      supplierSaveSchema.safeParse({ ...buildValidPayload(), defaultRateTypeId: null }).success,
+      supplierSaveSchema.safeParse({ ...buildValidPayload(), baseRateTypeId: null }).success,
     ).toBe(true)
     expect(supplierSaveSchema.safeParse(buildValidPayload()).success).toBe(true)
   })
 
-  it("accepts adjustments for rates other than the default", () => {
+  it("accepts adjustments for rates other than the base rate", () => {
     const parsed = supplierSaveSchema.safeParse({
       ...buildValidPayload(),
-      defaultRateTypeId: RAC,
+      baseRateTypeId: RAC,
       rateAdjustments: [{ rateTypeId: STO, discountPct: 20 }],
     })
     expect(parsed.success).toBe(true)
   })
 
-  it("rejects an adjustment that references the supplier's own default", () => {
-    // The default is the implicit 0% baseline and is never stored as an adjustment.
+  it("rejects an adjustment that references the supplier's own base rate", () => {
+    // The base rate is the implicit 0% baseline and is never stored as an adjustment.
     const parsed = supplierSaveSchema.safeParse({
       ...buildValidPayload(),
-      defaultRateTypeId: RAC,
+      baseRateTypeId: RAC,
       rateAdjustments: [{ rateTypeId: RAC, discountPct: 0 }],
     })
     expect(parsed.success).toBe(false)
     expect(parsed.success ? [] : parsed.error.issues.map((issue) => issue.message)).toContain(
-      "The default rate type is the 0% baseline and cannot also be a rate adjustment",
+      "The base rate is the 0% baseline and cannot also be a rate adjustment",
     )
+  })
+
+  describe("the quoted rate", () => {
+    it("accepts the base rate itself", () => {
+      expect(
+        supplierSaveSchema.safeParse({
+          ...buildValidPayload(),
+          baseRateTypeId: RAC,
+          quoteRateTypeId: RAC,
+          rateAdjustments: [{ rateTypeId: STO, discountPct: 20 }],
+        }).success,
+      ).toBe(true)
+    })
+
+    it("accepts one of this supplier's applicable rates", () => {
+      expect(
+        supplierSaveSchema.safeParse({
+          ...buildValidPayload(),
+          baseRateTypeId: RAC,
+          quoteRateTypeId: STO,
+          rateAdjustments: [{ rateTypeId: STO, discountPct: 20 }],
+        }).success,
+      ).toBe(true)
+    })
+
+    it("accepts null (quote at the base rate)", () => {
+      expect(
+        supplierSaveSchema.safeParse({
+          ...buildValidPayload(),
+          baseRateTypeId: RAC,
+          quoteRateTypeId: null,
+        }).success,
+      ).toBe(true)
+    })
+
+    it("rejects a rate this supplier does not price at", () => {
+      // Starring a rate with no baseline and no markdown would nominate an undefined price.
+      const parsed = supplierSaveSchema.safeParse({
+        ...buildValidPayload(),
+        baseRateTypeId: RAC,
+        quoteRateTypeId: NETT,
+        rateAdjustments: [{ rateTypeId: STO, discountPct: 20 }],
+      })
+      expect(parsed.success).toBe(false)
+      expect(parsed.success ? [] : parsed.error.issues.map((issue) => issue.message)).toContain(
+        "The quoted rate must be the base rate or one of this supplier's applicable rates",
+      )
+    })
   })
 
   it("rejects a duplicated rate type across adjustments", () => {
@@ -439,7 +488,7 @@ describe("rate adjustments and the supplier default rate type", () => {
       supplierDraftSaveSchema.safeParse({
         kind: "train_operator",
         name: "Draft",
-        defaultRateTypeId: RAC,
+        baseRateTypeId: RAC,
         rateAdjustments: [{ rateTypeId: RAC, discountPct: 0 }],
       }).success,
     ).toBe(false)
@@ -447,7 +496,7 @@ describe("rate adjustments and the supplier default rate type", () => {
       supplierDraftSaveSchema.safeParse({
         kind: "train_operator",
         name: "Draft",
-        defaultRateTypeId: RAC,
+        baseRateTypeId: RAC,
         rateAdjustments: [{ rateTypeId: STO, discountPct: 50 }],
       }).success,
     ).toBe(true)

@@ -152,6 +152,11 @@ export function TransportLegEditor({ leg, value, onChange, rateTypes = [] }: Tra
           onChange={(rateTypeId) => onChange({ ...value, rateTypeId })}
           id={`rate-type-${leg.id}`}
           className="max-w-[280px]"
+          inheritLabel={
+            leg.inheritedRateTypeName
+              ? `Supplier default (${leg.inheritedRateTypeName})`
+              : "Supplier default"
+          }
         />
       ) : null}
 

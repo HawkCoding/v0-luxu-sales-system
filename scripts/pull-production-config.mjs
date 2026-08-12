@@ -18,7 +18,6 @@ const TABLES = [
   "supplier_seasonal_periods",
   "supplier_seasonal_prices",
   "supplier_rate_adjustments",
-  "supplier_kind_default_rate_types",
   "bathroom_types",
   "bedroom_layouts",
   "bedroom_types",

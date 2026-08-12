@@ -16,128 +16,11 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { SUPPLIER_KIND_LABELS, type RateType, type SupplierKind, type SupplierKindDefaultRateType } from "@/lib/types"
-
-const SUPPLIER_KINDS = Object.keys(SUPPLIER_KIND_LABELS) as SupplierKind[]
+import type { RateType } from "@/lib/types"
 
 interface RateTypesResponse {
   rateTypes: RateType[]
   canEdit: boolean
-}
-
-function SupplierDefaultRatesCard({
-  rateTypes,
-  canEdit,
-}: {
-  rateTypes: RateType[]
-  canEdit: boolean
-}) {
-  const [defaults, setDefaults] = useState<Record<string, string>>({})
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    fetch("/api/rate-types/supplier-defaults")
-      .then((r) => r.json())
-      .then((d: { defaults?: SupplierKindDefaultRateType[] }) => {
-        if (cancelled) return
-        const map: Record<string, string> = {}
-        for (const entry of d.defaults ?? []) map[entry.kind] = entry.rateTypeId
-        setDefaults(map)
-      })
-      .catch(() => toast.error("Failed to load default rates"))
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  const globalDefault = rateTypes.find((rt) => rt.isDefault)
-
-  const save = async () => {
-    const payload = SUPPLIER_KINDS.filter((kind) => defaults[kind]).map((kind) => ({
-      kind,
-      rateTypeId: defaults[kind],
-    }))
-    if (payload.length === 0) return
-    setSaving(true)
-    try {
-      const res = await fetch("/api/rate-types/supplier-defaults", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ defaults: payload }),
-      })
-      if (!res.ok) {
-        const detail = await res.json().catch(() => null)
-        toast.error(detail?.error ?? "Failed to save default rates")
-        return
-      }
-      toast.success("Default rates saved")
-    } catch {
-      toast.error("Failed to save default rates")
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base">Default rate per supplier type</CardTitle>
-        <CardDescription>
-          The rate a new supplier (and its rate matrix) starts on. Unset types fall back to the
-          global default{globalDefault ? ` (${globalDefault.name})` : ""}.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {loading ? (
-          <div className="flex items-center gap-2 text-muted-foreground text-sm py-2">
-            <Loader2 className="w-4 h-4 animate-spin" /> Loading…
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {SUPPLIER_KINDS.map((kind) => (
-              <div key={kind} className="flex items-center justify-between gap-3">
-                <Label className="text-sm">{SUPPLIER_KIND_LABELS[kind]}</Label>
-                <Select
-                  value={defaults[kind] ?? ""}
-                  onValueChange={(value) => setDefaults((prev) => ({ ...prev, [kind]: value }))}
-                  disabled={!canEdit}
-                >
-                  <SelectTrigger className="w-56">
-                    <SelectValue placeholder="Global default" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {rateTypes.map((rt) => (
-                      <SelectItem key={rt.id} value={rt.id}>
-                        {rt.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            ))}
-            {canEdit && (
-              <Button size="sm" onClick={() => void save()} disabled={saving}>
-                {saving ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}
-                Save
-              </Button>
-            )}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  )
 }
 
 export default function RateTypesPage() {
@@ -264,7 +147,10 @@ export default function RateTypesPage() {
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-base">Active</CardTitle>
-              <CardDescription>The default rate type is used when a quote line does not pick one.</CardDescription>
+              <CardDescription>
+                The default rate type is the last fallback, used when neither the quote line nor
+                the supplier names a rate. Each supplier picks its own base and quoted rate.
+              </CardDescription>
             </div>
             {canEdit && (
               <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
@@ -372,8 +258,6 @@ export default function RateTypesPage() {
           )}
         </CardContent>
       </Card>
-
-      <SupplierDefaultRatesCard rateTypes={active} canEdit={canEdit} />
 
       {archived.length > 0 && (
         <Card>

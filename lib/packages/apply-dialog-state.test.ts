@@ -20,7 +20,9 @@ function leg(partial: Partial<PackageLeg> & { id: string; supplierKind: Supplier
     supplierName: `Supplier ${partial.id}`,
     supplierDescription: null,
     pricingMode: "rate_card",
-    defaultRateTypeId: null,
+    baseRateTypeId: null,
+    quoteRateTypeId: null,
+    inheritedRateTypeName: null,
     label: null,
     sortOrder: 0,
     dateAnchor: null,
@@ -505,26 +507,15 @@ describe("toApplySelections", () => {
 })
 
 describe("per-leg rate types", () => {
-  it("buildDefaultLegStates seeds every leg from resolveLegRateTypeId, null when omitted", () => {
-    const seeded = buildDefaultLegStates(pkg, { tripStartDate: null, resolveLegRateTypeId: () => "rate-std" })
-    expect(seeded.every((state) => state.rateTypeId === "rate-std")).toBe(true)
-
-    const unseeded = buildDefaultLegStates(pkg, { tripStartDate: null })
-    expect(unseeded.every((state) => state.rateTypeId === null)).toBe(true)
+  it("buildDefaultLegStates leaves every leg on inherit", () => {
+    // Legs start with no explicit rate type so pricing walks the supplier's quoted rate, its base
+    // rate, then the system default. Seeding a concrete value here would turn every leg into the
+    // hard contract selectRateCard applies to hand-picked rates.
+    const states = buildDefaultLegStates(pkg, { tripStartDate: null })
+    expect(states.every((state) => state.rateTypeId === null)).toBe(true)
   })
 
-  it("buildDefaultLegStates seeds each leg from its own supplier default", () => {
-    // Two legs, two suppliers, two different baselines -- the case a single shared default
-    // could not express.
-    const states = buildDefaultLegStates(pkg, {
-      tripStartDate: null,
-      resolveLegRateTypeId: (leg) => (leg.id === "leg-train" ? "rate-blue-train" : "rate-std"),
-    })
-    expect(suiteState(states, "leg-train").rateTypeId).toBe("rate-blue-train")
-    expect(suiteState(states, "leg-hotel").rateTypeId).toBe("rate-std")
-  })
-
-  it("hydrateFromSaved restores a saved rate_type_id and falls back to the default when null", () => {
+  it("hydrateFromSaved restores a saved rate_type_id and leaves the rest inheriting", () => {
     const saved: SavedPackageState = {
       packageId: "pkg-1",
       tripStartDate: "2026-09-01",
@@ -563,27 +554,29 @@ describe("per-leg rate types", () => {
       ],
     }
 
-    const states = hydrateFromSaved(pkg, saved, [], { tripStartDate: "2026-09-01", resolveLegRateTypeId: () => "rate-std" })
+    const states = hydrateFromSaved(pkg, saved, [], { tripStartDate: "2026-09-01" })
     expect(suiteState(states, "leg-train").rateTypeId).toBe("rate-resident")
-    expect(transportState(states, "leg-transfer").rateTypeId).toBe("rate-std")
-    // Leg with no saved row keeps the seeded default.
-    expect(suiteState(states, "leg-hotel").rateTypeId).toBe("rate-std")
+    expect(transportState(states, "leg-transfer").rateTypeId).toBeNull()
+    // Leg with no saved row keeps inheriting.
+    expect(suiteState(states, "leg-hotel").rateTypeId).toBeNull()
   })
 
   it("toPackageSelectionsPatch emits rateTypeId for suite and transport legs", () => {
-    const states = buildDefaultLegStates(pkg, { tripStartDate: null, resolveLegRateTypeId: () => "rate-std" })
+    const states = buildDefaultLegStates(pkg, { tripStartDate: null })
     const train = suiteState(states, "leg-train")
     train.rateTypeId = "rate-resident"
+    const transfer = transportState(states, "leg-transfer")
+    transfer.rateTypeId = "rate-std"
 
     const patch = toPackageSelectionsPatch(states)
     expect(patch.selections.find((s) => s.packageLegId === "leg-train")?.rateTypeId).toBe("rate-resident")
     expect(patch.selections.find((s) => s.packageLegId === "leg-transfer")?.rateTypeId).toBe("rate-std")
   })
 
-  it("toApplySelections emits rateTypeId per leg and omits it when null", () => {
-    const states = buildDefaultLegStates(pkg, { tripStartDate: null, resolveLegRateTypeId: () => "rate-std" })
-    const hotel = suiteState(states, "leg-hotel")
-    hotel.rateTypeId = null
+  it("toApplySelections emits rateTypeId per leg and omits it when inheriting", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: null })
+    suiteState(states, "leg-train").rateTypeId = "rate-std"
+    transportState(states, "leg-transfer").rateTypeId = "rate-std"
 
     const selections = toApplySelections(states)
     expect(selections.find((s) => s.legId === "leg-train")?.rateTypeId).toBe("rate-std")

@@ -457,14 +457,16 @@ insert into public.supplier_rate_adjustments (id,supplier_id,rate_type_id,discou
   ('189be0f8-6b00-4680-9e6c-d7828bd7be6e','d6de79b1-07f9-4d5d-a122-35df6e7b93e6',(select id from public.rate_types where code='STO'),20,'2026-06-30T08:45:20.584836+00:00','2026-07-22T09:19:21.136+00:00')
 on conflict (id) do update set supplier_id=excluded.supplier_id,rate_type_id=excluded.rate_type_id,discount_pct=excluded.discount_pct,updated_at=excluded.updated_at;
 
-insert into public.supplier_kind_default_rate_types (kind,rate_type_id,created_at,updated_at) values
-  ('train_operator',(select id from public.rate_types where code='RAC'),'2026-06-19T09:06:44.217399+00:00','2026-07-07T09:23:18.172+00:00'),
-  ('hotel_property',(select id from public.rate_types where code='STO'),'2026-06-19T09:06:44.217399+00:00','2026-07-07T09:23:18.172+00:00'),
-  ('transfers',(select id from public.rate_types where code='RAC'),'2026-06-19T09:06:44.217399+00:00','2026-07-07T09:23:18.172+00:00'),
-  ('vehicle_rental',(select id from public.rate_types where code='RAC'),'2026-06-19T09:06:44.217399+00:00','2026-07-07T09:23:18.172+00:00'),
-  ('tour_operator',(select id from public.rate_types where code='RAC'),'2026-06-19T09:06:44.217399+00:00','2026-07-07T09:23:18.172+00:00'),
-  ('airline',(select id from public.rate_types where code='RAC'),'2026-06-19T09:06:44.217399+00:00','2026-07-07T09:23:18.172+00:00')
-on conflict (kind) do update set rate_type_id=excluded.rate_type_id,updated_at=excluded.updated_at;
+-- Baseline rate per supplier. Reproduces what the per-kind mapping used to
+-- resolve to (hotels -> STO, everything else -> RAC) before it was replaced by
+-- suppliers.base_rate_type_id, so a freshly seeded local DB matches production
+-- after the 20260812100000 migration backfill.
+update public.suppliers s
+   set base_rate_type_id = (
+         select id from public.rate_types
+          where code = case when s.kind = 'hotel_property' then 'STO' else 'RAC' end
+       )
+ where s.base_rate_type_id is null;
 -- SUITE TYPES & VARIANT VOCABULARY (from production)
 insert into public.suite_types (id,name,active,created_at,updated_at,supplier_id,passenger_capacity,luggage_capacity,description,sort_order) values
   ('d11d12fd-f300-437d-990e-d1c5401d23cf','1 Bedroom Luxury Suite',true,'2026-07-07T08:35:55.79+00:00','2026-07-07T08:35:57.114802+00:00','53278302-6b75-4a49-9f16-cd8cf6d4fef6',null,null,null,0),

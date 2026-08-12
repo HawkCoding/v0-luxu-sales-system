@@ -982,7 +982,6 @@ export default function JobDetailPage() {
             bookingNumber={job.jobNumber}
             travelDate={enquiry?.departureDate ?? null}
             customerName={`${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()}
-            customerDefaultRateTypeId={customer?.defaultRateTypeId ?? null}
             emailImportNeedsReview={needsEmailReview}
             mutate={mutate}
             autoOpenBuildBookingQuoteId={autoOpenBuildBookingQuoteId}

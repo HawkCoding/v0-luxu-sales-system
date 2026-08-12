@@ -30,7 +30,6 @@ const createCustomerSchema = z.object({
   vip_status: z.boolean().optional().default(false),
   preferences: z.string().trim().max(2000).nullable().optional(),
   communication_preferences: z.string().trim().max(1000).nullable().optional(),
-  default_rate_type_id: z.string().uuid().nullable().optional(),
 })
 
 export async function GET(request: Request) {
@@ -165,7 +164,6 @@ export async function POST(request: Request) {
       vip_status: parsed.vip_status,
       preferences: parsed.preferences ?? null,
       communication_preferences: parsed.communication_preferences ?? null,
-      default_rate_type_id: parsed.default_rate_type_id ?? null,
     })
     .select(CUSTOMER_COLUMNS)
     .single()
@@ -195,7 +193,6 @@ export async function POST(request: Request) {
       vipStatus: customer.vip_status,
       preferences: customer.preferences,
       communicationPreferences: customer.communication_preferences,
-      defaultRateTypeId: customer.default_rate_type_id,
       firstTravelDate: customer.first_travel_date,
       lastTravelDate: customer.last_travel_date,
       isRepeatClient: false,

@@ -455,7 +455,6 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     stBathroomTypesResult,
     rateTypesResult,
     rateAdjustmentsResult,
-    kindDefaultRateTypesResult,
     suiteAliasesResult,
   ] = await Promise.all([
     supabase
@@ -495,7 +494,6 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
       .from("supplier_rate_adjustments")
       .select("*")
       .eq("supplier_id", supplierId),
-    supabase.from("supplier_kind_default_rate_types").select("*"),
     supabase
       .from("suite_vocab_aliases")
       .select("axis, phrase, status, suite_type_id, bedroom_type_id, bedroom_layout_id, bathroom_type_id")
@@ -511,7 +509,6 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     stBathroomTypesResult.error,
     rateTypesResult.error,
     rateAdjustmentsResult.error,
-    kindDefaultRateTypesResult.error,
     suiteAliasesResult.error,
   ].filter((err) => Boolean(err))
 
@@ -546,7 +543,6 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     suiteTypeBathroomTypes: stBathroomTypesResult.data ?? [],
     rateTypes: rateTypesResult.data ?? [],
     rateAdjustments: rateAdjustmentsResult.data ?? [],
-    kindDefaultRateTypes: kindDefaultRateTypesResult.data ?? [],
     suiteAliases: suiteAliasesResult.data ?? [],
   }
 }

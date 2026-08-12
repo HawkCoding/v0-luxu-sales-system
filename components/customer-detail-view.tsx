@@ -29,7 +29,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { useRole } from "@/lib/role-context"
 import { getPipelineStageLabel, PIPELINE_STAGES } from "@/lib/types"
-import { useCustomerDetail, useRateTypes } from "@/lib/use-data"
+import { useCustomerDetail } from "@/lib/use-data"
 import { COUNTRIES } from "@/lib/form-data"
 import { PHONE_VALIDATION_MESSAGE, isPlausiblePhone } from "@/lib/phone-format"
 import { formatDisplayDate } from "@/lib/date-format"
@@ -56,7 +56,6 @@ interface CustomerPatchPayload {
   vip_status: boolean
   preferences: string | null
   communication_preferences: string | null
-  default_rate_type_id: string | null
 }
 
 interface CustomerPatchResponse {
@@ -69,7 +68,6 @@ interface CustomerPatchResponse {
   vipStatus: boolean
   preferences: string | null
   communicationPreferences: string | null
-  defaultRateTypeId: string | null
   updatedAt: string
 }
 
@@ -91,8 +89,6 @@ export function CustomerDetailView({
   const { others, setEditing: setPresenceEditing } = useRecordPresence("customer", customerId)
   const canEditCustomers = can("edit:customers")
   const canCreateBooking = can("create:enquiry")
-  const { data: rateTypesData } = useRateTypes()
-  const rateTypes = (rateTypesData?.rateTypes ?? []).filter((rt) => !rt.archivedAt)
   const [newBookingOpen, setNewBookingOpen] = useState(false)
   const [emailDraft, setEmailDraft] = useState("")
   const [phoneDraft, setPhoneDraft] = useState("")
@@ -111,7 +107,6 @@ export function CustomerDetailView({
   const [vipStatusDraft, setVipStatusDraft] = useState(false)
   const [preferencesDraft, setPreferencesDraft] = useState("")
   const [communicationPreferencesDraft, setCommunicationPreferencesDraft] = useState("")
-  const [defaultRateTypeIdDraft, setDefaultRateTypeIdDraft] = useState("")
   const [isEditing, setIsEditing] = useState(false)
   const [editingStartedUpdatedAt, setEditingStartedUpdatedAt] = useState<string | undefined>(undefined)
   const [hasExternalUpdate, setHasExternalUpdate] = useState(false)
@@ -174,7 +169,6 @@ export function CustomerDetailView({
         setVipStatusDraft(data.customer.vipStatus ?? false)
         setPreferencesDraft(data.customer.preferences ?? "")
         setCommunicationPreferencesDraft(data.customer.communicationPreferences ?? "")
-        setDefaultRateTypeIdDraft(data.customer.defaultRateTypeId ?? "")
         setEditingStartedUpdatedAt(undefined)
       }
 
@@ -258,8 +252,7 @@ export function CustomerDetailView({
     idPassportDraft !== (customer.idPassport ?? "") ||
     vipStatusDraft !== (customer.vipStatus ?? false) ||
     preferencesDraft !== (customer.preferences ?? "") ||
-    communicationPreferencesDraft !== (customer.communicationPreferences ?? "") ||
-    defaultRateTypeIdDraft !== (customer.defaultRateTypeId ?? "")
+    communicationPreferencesDraft !== (customer.communicationPreferences ?? "")
 
   function getCustomerPatchPayload(): CustomerPatchPayload {
     return {
@@ -280,7 +273,6 @@ export function CustomerDetailView({
       vip_status: vipStatusDraft,
       preferences: preferencesDraft || null,
       communication_preferences: communicationPreferencesDraft || null,
-      default_rate_type_id: defaultRateTypeIdDraft || null,
     }
   }
 
@@ -511,7 +503,6 @@ export function CustomerDetailView({
                       setVipStatusDraft(customer.vipStatus ?? false)
                       setPreferencesDraft(customer.preferences ?? "")
                       setCommunicationPreferencesDraft(customer.communicationPreferences ?? "")
-                      setDefaultRateTypeIdDraft(customer.defaultRateTypeId ?? "")
                       setIsEditing(false)
                       editingBaselineRef.current = null
                       setHasExternalUpdate(false)
@@ -880,33 +871,6 @@ export function CustomerDetailView({
             </div>
           </div>
 
-          {rateTypes.length > 0 && (
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="defaultRateType">Default rate type</Label>
-                <Select
-                  value={defaultRateTypeIdDraft || "none"}
-                  onValueChange={(v) => setDefaultRateTypeIdDraft(v === "none" ? "" : v)}
-                  disabled={!canEditCustomers || !isEditing || isSaving}
-                >
-                  <SelectTrigger id="defaultRateType" className="h-9">
-                    <SelectValue placeholder="System default" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">System default</SelectItem>
-                    {rateTypes.map((rt) => (
-                      <SelectItem key={rt.id} value={rt.id}>
-                        {rt.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Pre-selects the rate version (e.g. Resident) when quoting this customer.
-                </p>
-              </div>
-            </div>
-          )}
         </CardContent>
       </Card>
 

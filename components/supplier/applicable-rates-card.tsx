@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { Plus, Trash2 } from "lucide-react"
+import { Plus, Star, Trash2 } from "lucide-react"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { cn } from "@/lib/utils"
 import type { RateType, SupplierRateAdjustment } from "@/lib/types"
 
 const REMOVE_ICON_BUTTON_CLASS =
@@ -33,42 +34,54 @@ const REMOVE_ICON_BUTTON_CLASS =
 export interface ApplicableRatesCardProps {
   isEditing: boolean
   rateTypes: RateType[]
-  defaultRateTypeId: string | null
+  /** This supplier's own starting price -- every percentage below is measured off it. */
+  baseRateTypeId: string | null
+  /** The rate quotes use. Null means "quote at the base rate". */
+  quoteRateTypeId: string | null
   adjustments: SupplierRateAdjustment[]
   onChange: (next: SupplierRateAdjustment[]) => void
   /**
-   * Set this supplier's own default rate. Omit to render the default as read-only (used where the
-   * supplier has no baseline to choose, e.g. manual-pricing suppliers).
+   * Set this supplier's base rate. Omit to render it read-only (used where the supplier has no
+   * baseline to choose, e.g. manual-pricing suppliers).
    */
-  onChangeDefaultRateType?: (rateTypeId: string) => void
+  onChangeBaseRateType?: (rateTypeId: string) => void
+  /** Star a rate as the one quotes use. Passing the base rate's id clears the nomination. */
+  onChangeQuoteRateType?: (rateTypeId: string) => void
 }
 
 export function ApplicableRatesCard({
   isEditing,
   rateTypes,
-  defaultRateTypeId,
+  baseRateTypeId,
+  quoteRateTypeId,
   adjustments,
   onChange,
-  onChangeDefaultRateType,
+  onChangeBaseRateType,
+  onChangeQuoteRateType,
 }: ApplicableRatesCardProps) {
-  const [pendingDefaultRateTypeId, setPendingDefaultRateTypeId] = useState<string | null>(null)
+  const [pendingBaseRateTypeId, setPendingBaseRateTypeId] = useState<string | null>(null)
   const activeRateTypes = rateTypes.filter((rt) => !rt.archivedAt)
   const rateTypeById = new Map(activeRateTypes.map((rt) => [rt.id, rt]))
-  const defaultRateType =
-    (defaultRateTypeId ? rateTypeById.get(defaultRateTypeId) : undefined) ??
+  const baseRateType =
+    (baseRateTypeId ? rateTypeById.get(baseRateTypeId) : undefined) ??
     activeRateTypes.find((rt) => rt.isDefault) ??
     activeRateTypes[0] ??
     null
 
-  // Only show adjustments for rates that still exist and are not the default.
+  // Only show adjustments for rates that still exist and are not the base rate.
   const applied = adjustments.filter(
     (adjustment) =>
-      adjustment.rateTypeId !== defaultRateType?.id && rateTypeById.has(adjustment.rateTypeId),
+      adjustment.rateTypeId !== baseRateType?.id && rateTypeById.has(adjustment.rateTypeId),
   )
   const appliedIds = new Set(applied.map((adjustment) => adjustment.rateTypeId))
   const availableToAdd = activeRateTypes.filter(
-    (rt) => rt.id !== defaultRateType?.id && !appliedIds.has(rt.id),
+    (rt) => rt.id !== baseRateType?.id && !appliedIds.has(rt.id),
   )
+
+  // A nomination that no longer names a listed rate (archived, or its adjustment was removed)
+  // falls back to the base rate, matching how the server resolves it.
+  const quotedRateTypeId =
+    quoteRateTypeId && appliedIds.has(quoteRateTypeId) ? quoteRateTypeId : baseRateType?.id ?? null
 
   const addRate = (rateTypeId: string) => {
     if (appliedIds.has(rateTypeId)) return
@@ -84,43 +97,79 @@ export function ApplicableRatesCard({
   }
 
   const removeRate = (rateTypeId: string) => {
+    // Removing the starred rate hands the star back to the base rate -- nothing else is a safe
+    // guess, and leaving it pointed at a rate this supplier no longer prices would be worse.
+    if (rateTypeId === quotedRateTypeId && baseRateType) {
+      onChangeQuoteRateType?.(baseRateType.id)
+    }
     onChange(adjustments.filter((adjustment) => adjustment.rateTypeId !== rateTypeId))
   }
 
-  const defaultLabel = defaultRateType?.name ?? "default rate"
-  const canEditDefault = isEditing && Boolean(onChangeDefaultRateType) && activeRateTypes.length > 0
-  const pendingDefaultLabel = pendingDefaultRateTypeId
-    ? rateTypeById.get(pendingDefaultRateTypeId)?.name ?? "the selected rate"
+  const baseLabel = baseRateType?.name ?? "base rate"
+  const canEditBase = isEditing && Boolean(onChangeBaseRateType) && activeRateTypes.length > 0
+  const canStar = isEditing && Boolean(onChangeQuoteRateType)
+  const pendingBaseLabel = pendingBaseRateTypeId
+    ? rateTypeById.get(pendingBaseRateTypeId)?.name ?? "the selected rate"
     : null
 
-  // Changing the baseline resets every percentage, so it always goes through a confirm -- unless
+  // Changing the base rate resets every percentage, so it always goes through a confirm -- unless
   // there is nothing to lose yet.
-  const requestDefaultChange = (rateTypeId: string) => {
-    if (rateTypeId === defaultRateType?.id) return
+  const requestBaseChange = (rateTypeId: string) => {
+    if (rateTypeId === baseRateType?.id) return
     if (applied.length === 0) {
-      onChangeDefaultRateType?.(rateTypeId)
+      onChangeBaseRateType?.(rateTypeId)
       return
     }
-    setPendingDefaultRateTypeId(rateTypeId)
+    setPendingBaseRateTypeId(rateTypeId)
   }
 
-  const confirmDefaultChange = () => {
-    if (pendingDefaultRateTypeId) {
-      onChangeDefaultRateType?.(pendingDefaultRateTypeId)
+  const confirmBaseChange = () => {
+    if (pendingBaseRateTypeId) {
+      onChangeBaseRateType?.(pendingBaseRateTypeId)
     }
-    setPendingDefaultRateTypeId(null)
+    setPendingBaseRateTypeId(null)
   }
+
+  function StarControl({ rateTypeId, name }: { rateTypeId: string; name: string }) {
+    const starred = rateTypeId === quotedRateTypeId
+    if (!canStar) {
+      return (
+        <Star
+          aria-hidden
+          className={cn("h-4 w-4 shrink-0", starred ? "fill-current text-foreground" : "text-transparent")}
+        />
+      )
+    }
+    return (
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7 shrink-0"
+        aria-pressed={starred}
+        aria-label={`Use ${name} for quotes`}
+        title={starred ? `${name} is used on quotes` : `Use ${name} for quotes`}
+        onClick={() => onChangeQuoteRateType?.(rateTypeId)}
+      >
+        <Star
+          className={cn("h-4 w-4", starred ? "fill-current text-foreground" : "text-muted-foreground")}
+        />
+      </Button>
+    )
+  }
+
+  const quotedBadge = <Badge variant="secondary">Used on quotes</Badge>
 
   return (
     <div className="rounded-lg border p-4 space-y-3 bg-card">
       <div>
         <p className="text-sm font-semibold text-foreground">Applicable Rates</p>
         <p className="text-xs text-muted-foreground">
-          {defaultRateType ? (
+          {baseRateType ? (
             <>
-              <span className="font-medium text-foreground">{defaultLabel}</span> is the default and
-              starting point. Add other rates that apply to this supplier and how much cheaper they
-              are than {defaultLabel}.
+              <span className="font-medium text-foreground">{baseLabel}</span> is this supplier&apos;s
+              own starting price. Add other rates that apply and how much cheaper they are than{" "}
+              {baseLabel}. The starred rate is the one quotes use.
             </>
           ) : (
             "Configure rate types in Settings before adding applicable rates."
@@ -128,14 +177,14 @@ export function ApplicableRatesCard({
         </p>
       </div>
 
-      {canEditDefault ? (
+      {canEditBase ? (
         <div className="flex flex-wrap items-center gap-2">
-          <Label htmlFor="supplier-default-rate" className="text-xs font-medium">
-            Default rate
+          <Label htmlFor="supplier-base-rate" className="text-xs font-medium">
+            Base rate
           </Label>
-          <Select value={defaultRateType?.id ?? ""} onValueChange={requestDefaultChange}>
-            <SelectTrigger id="supplier-default-rate" className="w-56">
-              <SelectValue placeholder="Select the default rate" />
+          <Select value={baseRateType?.id ?? ""} onValueChange={requestBaseChange}>
+            <SelectTrigger id="supplier-base-rate" className="w-56">
+              <SelectValue placeholder="Select the base rate" />
             </SelectTrigger>
             <SelectContent>
               {activeRateTypes.map((rt) => (
@@ -147,29 +196,43 @@ export function ApplicableRatesCard({
           </Select>
           <span className="text-xs text-muted-foreground">Baseline · 0% markdown</span>
         </div>
-      ) : defaultRateType ? (
+      ) : baseRateType ? (
         <div className="flex items-center gap-2">
-          <Badge variant="secondary">{defaultLabel}</Badge>
-          <span className="text-xs text-muted-foreground">Default · baseline (0% markdown)</span>
+          <Label className="text-xs font-medium">Base rate</Label>
+          <Badge variant="secondary">{baseLabel}</Badge>
+          <span className="text-xs text-muted-foreground">Baseline · 0% markdown</span>
         </div>
       ) : null}
 
-      {applied.length > 0 ? (
+      {baseRateType ? (
         <div className="space-y-2">
+          {/* The base rate is listed first so it can be starred like any other rate. */}
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2">
+            <div className="flex items-center gap-2">
+              <StarControl rateTypeId={baseRateType.id} name={baseRateType.name} />
+              <Badge variant="outline">{baseRateType.name}</Badge>
+              <span className="text-xs text-muted-foreground">Baseline · 0%</span>
+            </div>
+            {quotedRateTypeId === baseRateType.id ? quotedBadge : null}
+          </div>
+
           {applied.map((adjustment) => {
             const rateType = rateTypeById.get(adjustment.rateTypeId)
+            const name = rateType?.name ?? "Unknown rate"
             return (
               <div
                 key={adjustment.rateTypeId}
                 className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2"
               >
                 <div className="flex items-center gap-2">
-                  <Badge variant="outline">{rateType?.name ?? "Unknown rate"}</Badge>
+                  <StarControl rateTypeId={adjustment.rateTypeId} name={name} />
+                  <Badge variant="outline">{name}</Badge>
                   {!isEditing ? (
                     <span className="text-xs text-muted-foreground tabular-nums">
-                      {adjustment.discountPct.toFixed(2)}% off {defaultLabel}
+                      {adjustment.discountPct.toFixed(2)}% off {baseLabel}
                     </span>
                   ) : null}
+                  {quotedRateTypeId === adjustment.rateTypeId ? quotedBadge : null}
                 </div>
                 {isEditing ? (
                   <div className="flex items-center gap-2">
@@ -185,7 +248,7 @@ export function ApplicableRatesCard({
                         className="w-24"
                       />
                       <span className="text-xs text-muted-foreground whitespace-nowrap">
-                        % off {defaultLabel}
+                        % off {baseLabel}
                       </span>
                     </div>
                     <Button
@@ -193,7 +256,7 @@ export function ApplicableRatesCard({
                       variant="outline"
                       size="icon"
                       className={REMOVE_ICON_BUTTON_CLASS}
-                      aria-label={`Remove ${rateType?.name ?? "rate"}`}
+                      aria-label={`Remove ${name}`}
                       onClick={() => removeRate(adjustment.rateTypeId)}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -203,10 +266,14 @@ export function ApplicableRatesCard({
               </div>
             )
           })}
+
+          {applied.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              No additional rates apply to this supplier.
+            </p>
+          ) : null}
         </div>
-      ) : (
-        <p className="text-xs text-muted-foreground">No additional rates apply to this supplier.</p>
-      )}
+      ) : null}
 
       {isEditing ? (
         <div className="flex items-center gap-2">
@@ -239,25 +306,26 @@ export function ApplicableRatesCard({
       ) : null}
 
       <AlertDialog
-        open={pendingDefaultRateTypeId !== null}
+        open={pendingBaseRateTypeId !== null}
         onOpenChange={(open) => {
-          if (!open) setPendingDefaultRateTypeId(null)
+          if (!open) setPendingBaseRateTypeId(null)
         }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Change the default rate to {pendingDefaultLabel}?</AlertDialogTitle>
+            <AlertDialogTitle>Change the base rate to {pendingBaseLabel}?</AlertDialogTitle>
             <AlertDialogDescription>
               Every percentage on this supplier resets to 0% — they were measured against{" "}
-              {defaultLabel}, and there is no safe way to re-express them against{" "}
-              {pendingDefaultLabel}. {defaultLabel} stays listed so its existing rate cards keep
-              their tab; re-enter each percentage afterwards.
+              {baseLabel}, and there is no safe way to re-express them against {pendingBaseLabel}.
+              The starred rate moves back to {pendingBaseLabel}, so quotes price at it until you
+              star another. {baseLabel} stays listed so its existing rate cards keep their tab;
+              re-enter each percentage afterwards.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDefaultChange}>
-              Change default and reset
+            <AlertDialogAction onClick={confirmBaseChange}>
+              Change base rate and reset
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

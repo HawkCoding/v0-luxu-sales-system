@@ -39,8 +39,7 @@ describe("canRolePerform", () => {
     expect(canRolePerform("consultant", "view:templates")).toBe(false)
     expect(canRolePerform("consultant", "view:reporting")).toBe(false)
     expect(canRolePerform("consultant", "view:audit")).toBe(false)
-    expect(canRolePerform("consultant", "view:settings")).toBe(true)
-    // view:settings includes consultant, so error logs need their own key.
+    expect(canRolePerform("consultant", "view:settings")).toBe(false)
     expect(canRolePerform("consultant", "view:error_logs")).toBe(false)
     expect(canRolePerform("consultant", "edit:quotes")).toBe(true)
   })

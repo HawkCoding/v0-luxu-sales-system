@@ -42,7 +42,13 @@ const BTLD_OPEN: RateCardRow = {
 }
 
 /** Minimal chainable supabase mock covering the tables price-extra-line touches. */
-function buildSupabase(rateCards: RateCardRow[]) {
+function buildSupabase(
+  rateCards: RateCardRow[],
+  supplierRateTiers: { base_rate_type_id: string | null; quote_rate_type_id: string | null } = {
+    base_rate_type_id: null,
+    quote_rate_type_id: null,
+  },
+) {
   const results: Record<string, { data: unknown; error: null }> = {
     bookings: {
       data: { no_of_adults: 2, no_of_children: 1, no_of_suites: 1, child_ages: [8] },
@@ -55,7 +61,7 @@ function buildSupabase(rateCards: RateCardRow[]) {
         kind: "train_operator",
         infant_max_age: null,
         child_max_age: null,
-        default_rate_type_id: null,
+        ...supplierRateTiers,
       },
       error: null,
     },
@@ -72,7 +78,6 @@ function buildSupabase(rateCards: RateCardRow[]) {
       ],
       error: null,
     },
-    supplier_kind_default_rate_types: { data: [], error: null },
   }
 
   function chain(result: { data: unknown; error: null }) {
@@ -143,5 +148,41 @@ describe("priceExtraLineItems", () => {
 
   it("reports the date, not the rate type, when nothing covers the travel date", async () => {
     await expect(price("2020-01-01", SADC)).rejects.toThrow(/No rate card covers 2020-01-01/)
+  })
+
+  describe("the supplier's quoted rate", () => {
+    function priceInherited(travelDate: string) {
+      return priceExtraLineItems({
+        supabase: buildSupabase([SADC_2026, BTLD_OPEN], {
+          base_rate_type_id: BTLD,
+          quote_rate_type_id: SADC,
+        }),
+        jobId: JOB_ID,
+        travelDate,
+        supplierId: SUPPLIER_ID,
+        routeId: ROUTE_ID,
+        suiteTypeId: SUITE_ID,
+        rateTypeId: null,
+        fallbackRateTypeId: BTLD,
+      })
+    }
+
+    it("is used when no rate is chosen on the line", async () => {
+      const { lineItems } = await priceInherited("2026-08-25")
+      const adultLine = lineItems.find((li) => li.description.includes("Adult"))
+      expect(adultLine?.unitPrice).toBe(22500)
+      expect(adultLine?.pricingSnapshot?.rateTypeId).toBe(SADC)
+      expect(adultLine?.pricingSnapshot?.rateTypeInherited).toBe(true)
+    })
+
+    // Inherited, not asked for: a missing card falls back rather than failing the way an
+    // explicit choice does. Extras follow the package builder here so the two can't drift.
+    it("falls through to the base rate when it has no card for the date", async () => {
+      const { lineItems } = await priceInherited("2028-08-25")
+      const adultLine = lineItems.find((li) => li.description.includes("Adult"))
+      expect(adultLine?.unitPrice).toBe(59900)
+      expect(adultLine?.pricingSnapshot?.rateTypeId).toBe(BTLD)
+      expect(adultLine?.pricingSnapshot?.rateTypeInherited).toBe(true)
+    })
   })
 })

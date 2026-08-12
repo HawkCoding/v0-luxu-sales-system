@@ -47,7 +47,6 @@ const applyServicesSchema = z.object({
   jobId: z.string().uuid(),
   quoteId: z.string().uuid(),
   travelDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD"),
-  rateTypeId: z.string().uuid().optional(),
   selections: z
     .array(
       z.object({
@@ -118,7 +117,6 @@ export async function POST(req: Request, { params }: RouteParams) {
       jobId: parsed.jobId,
       travelDate: parsed.travelDate,
       selections: parsed.selections,
-      rateTypeId: parsed.rateTypeId ?? null,
       fallbackRateTypeId,
       rateTypes,
       commissionBonus: Number(quoteRow?.commission_bonus ?? 0),

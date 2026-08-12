@@ -260,7 +260,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       city: customer.city,
       province: customer.province,
       postalCode: customer.postal_code,
-      defaultRateTypeId: customer.default_rate_type_id,
       isRepeatClient: customer.is_repeat_client,
       createdAt: customer.created_at,
         createdAtDisplay: formatDisplayDateTime(customer.created_at),

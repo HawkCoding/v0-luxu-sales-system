@@ -60,8 +60,11 @@ export interface PackageLegWithSupplier extends PackageLegRow {
   supplierDescription: string | null
   supplierKind: SupplierKind
   supplierPricingMode: "rate_card" | "manual"
-  /** Already resolved via loadSupplierDefaultRateTypeResolver -- not the raw supplier column. */
-  supplierDefaultRateTypeId: string | null
+  /** Already resolved via loadSupplierRateTiersResolver -- not the raw supplier columns. */
+  supplierBaseRateTypeId: string | null
+  supplierQuoteRateTypeId: string | null
+  /** Name of the rate type an un-chosen leg will inherit: the quoted rate, else the base rate. */
+  supplierInheritedRateTypeName: string | null
 }
 
 function mapVehicleRentalRouteDetails(
@@ -189,7 +192,9 @@ export function mapPackageLeg(
     label: row.label,
     sortOrder: row.sort_order,
     dateAnchor: normalizeLegDateAnchor(row.date_anchor),
-    defaultRateTypeId: row.supplierDefaultRateTypeId ?? null,
+    baseRateTypeId: row.supplierBaseRateTypeId ?? null,
+    quoteRateTypeId: row.supplierQuoteRateTypeId ?? null,
+    inheritedRateTypeName: row.supplierInheritedRateTypeName ?? null,
     routes: eligibleRoutes.map((route) =>
       mapPackageRoute(route, detailsByRouteId.get(route.id), locationNameById),
     ),

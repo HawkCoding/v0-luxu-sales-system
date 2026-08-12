@@ -7,7 +7,7 @@ import {
   type PackageRow,
 } from "@/lib/packages"
 import { attachSuiteVariantVocab } from "@/lib/packages/suite-variant-vocab"
-import { loadSupplierDefaultRateTypeResolver } from "@/lib/rate-types/load-supplier-defaults"
+import { loadSupplierRateTiersResolver } from "@/lib/rate-types/load-supplier-rate-tiers"
 import type { PackageDetail, SupplierKind } from "@/lib/types"
 import type { PackageLegSelection, PackageUnitSelection } from "@/lib/quotes/build-from-package"
 
@@ -20,7 +20,8 @@ interface SupplierJoin {
   description: string | null
   kind: string
   pricing_mode: "rate_card" | "manual"
-  default_rate_type_id: string | null
+  base_rate_type_id: string | null
+  quote_rate_type_id: string | null
 }
 
 interface BookingServiceWithSupplier extends BookingServiceRow {
@@ -53,13 +54,13 @@ export async function loadBookingServicesPackageDetail(
   bookingId: string,
   bookingNumber: string,
 ): Promise<BookingServicesData> {
-  const [{ data: serviceRows }, resolveSupplierDefaultRateTypeId] = await Promise.all([
+  const [{ data: serviceRows }, resolveSupplierRateTiers] = await Promise.all([
     supabase
       .from("booking_services")
-      .select("*, suppliers(name, description, kind, pricing_mode, default_rate_type_id)")
+      .select("*, suppliers(name, description, kind, pricing_mode, base_rate_type_id, quote_rate_type_id)")
       .eq("booking_id", bookingId)
       .order("sort_order", { ascending: true }),
-    loadSupplierDefaultRateTypeResolver(supabase),
+    loadSupplierRateTiersResolver(supabase),
   ])
 
   const services = (serviceRows ?? []) as BookingServiceWithSupplier[]
@@ -121,6 +122,10 @@ export async function loadBookingServicesPackageDetail(
   const legs: PackageLegWithSupplier[] = services.map((service) => {
     const supplier = firstRecord(service.suppliers)
     const supplierKind = (supplier?.kind as SupplierKind) ?? "train_operator"
+    const rateTiers = resolveSupplierRateTiers({
+      baseRateTypeId: supplier?.base_rate_type_id ?? null,
+      quoteRateTypeId: supplier?.quote_rate_type_id ?? null,
+    })
     return {
       id: service.id,
       package_id: bookingId,
@@ -135,10 +140,9 @@ export async function loadBookingServicesPackageDetail(
       supplierDescription: supplier?.description ?? null,
       supplierKind,
       supplierPricingMode: supplier?.pricing_mode ?? "rate_card",
-      supplierDefaultRateTypeId: resolveSupplierDefaultRateTypeId(
-        supplierKind,
-        supplier?.default_rate_type_id ?? null,
-      ),
+      supplierBaseRateTypeId: rateTiers.baseRateTypeId,
+      supplierQuoteRateTypeId: rateTiers.quoteRateTypeId,
+      supplierInheritedRateTypeName: rateTiers.inheritedRateTypeName,
     }
   })
 

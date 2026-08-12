@@ -118,7 +118,6 @@ export interface Customer {
   vipStatus?: boolean
   preferences?: string | null
   communicationPreferences?: string | null
-  defaultRateTypeId?: string | null
   firstTravelDate?: string | null
   firstTravelDateDisplay?: string
   lastTravelDate?: string | null
@@ -610,16 +609,6 @@ export interface RateType {
   updatedAt: string
 }
 
-/**
- * Per-supplier-kind default rate type. Decides which rate a supplier (and its
- * rate matrix) starts on. Falls back to the global default rate type when a
- * kind has no explicit mapping.
- */
-export interface SupplierKindDefaultRateType {
-  kind: SupplierKind
-  rateTypeId: string
-}
-
 export interface PricingSnapshot {
   source: "pricing_engine"
   pricingMode: "rate_card" | "fixed_package" | "manual"
@@ -640,8 +629,9 @@ export interface PricingSnapshot {
   rateTypeId?: string | null
   rateTypeCode?: string | null
   rateTypeName?: string | null
-  /** True when the rate type came from a default (customer/supplier/system) rather than an explicit
-   * per-leg choice. Null on lines with no rate card at all (manual-pricing legs). */
+  /** True when the rate type was inherited (the supplier's quoted or base rate, or the system
+   * default) rather than an explicit per-leg choice. Null on lines with no rate card at all
+   * (manual-pricing legs). */
   rateTypeInherited?: boolean | null
   travelDate: string
   passengerKind: "adult" | "child" | "infant" | "single_supplement" | "service" | "included"
@@ -698,10 +688,17 @@ export interface PackageLeg {
   /** Hotel legs only: pre-stay (night(s) before departure) or post-stay (from train arrival). */
   dateAnchor: "pre" | "post" | null
   /**
-   * The supplier's resolved default rate type (own override -> kind default -> system default).
-   * Sits between the customer's default and the system default when picking this leg's rate card.
+   * The supplier's baseline rate type (its own, else the system default). The last inherited tier
+   * before the system default when picking this leg's rate card.
    */
-  defaultRateTypeId: string | null
+  baseRateTypeId: string | null
+  /**
+   * The rate type this supplier's quotes should use, when it differs from the baseline. Tried
+   * first, and falls through to the baseline when it has no card for the route/suite/date.
+   */
+  quoteRateTypeId: string | null
+  /** Display name of the rate type a leg with no explicit choice will price at. */
+  inheritedRateTypeName: string | null
   routes: SupplierRoute[]
   rateCards: SupplierRateCard[]
   suiteTypes: SupplierSuiteType[]
@@ -824,14 +821,15 @@ export interface SupplierDetail extends Supplier {
   /** Non-default rates that apply to this supplier and their markdown. */
   rateAdjustments: SupplierRateAdjustment[]
   /**
-   * Fully resolved default rate type -- the baseline every rateAdjustment is measured against.
-   * Honours the supplier's own override first, then the per-kind mapping, then the global default.
+   * This supplier's base rate -- its own starting price, and the baseline every rateAdjustment is
+   * measured against. Falls back to the global default rate type when the supplier has none.
    */
-  defaultRateTypeId: string | null
-  /** The supplier's own override, or null when it inherits. This is what the edit form edits. */
-  defaultRateTypeOverrideId: string | null
-  /** What defaultRateTypeId would be if the override were cleared -- shown as the inherit option. */
-  inheritedDefaultRateTypeId: string | null
+  baseRateTypeId: string | null
+  /**
+   * The rate type this supplier's quotes price at, when it differs from the base rate. Null means
+   * "quote at the base rate", so a supplier that has never nominated one is unaffected.
+   */
+  quoteRateTypeId: string | null
 }
 
 export interface BookingTransportRequest {

@@ -50,7 +50,7 @@ export const permissions: Record<string, Role[]> = {
   // Mirrors requireManagerSettingsAccess() in lib/settings-access.ts, which guards
   // /api/error-logs. Keep the two in sync or client fetches 403 in the background.
   "view:error_logs": ["admin", "manager"],
-  "view:settings": ["admin", "manager", "consultant"],
+  "view:settings": ["admin", "manager"],
   "edit:settings": ["admin"],
   "manage:users": ["admin"],
 }

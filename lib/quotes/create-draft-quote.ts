@@ -13,22 +13,19 @@ type ServiceClient = SupabaseClient<Database>
  * The rate types the auto-quote prices against -- the same precedence the Build Booking dialog
  * applies, so an auto-priced quote and a hand-built one agree.
  *
- * `rateTypeId` deliberately stays null when the customer has no default of their own: collapsing it
- * onto the system default here would shadow each leg's supplier default, which selectRateCard slots
- * in between the two.
+ * Only the system-wide fallback is resolved here; each leg carries its supplier's quoted and base
+ * rates, which selectRateCard tries first.
  */
-async function resolveRateTypes(supabase: ServiceClient, bookingId: string) {
-  const [{ data: rateTypeRows }, { data: booking }] = await Promise.all([
-    supabase.from("rate_types").select("id, code, name, is_default").is("archived_at", null),
-    supabase.from("bookings").select("customers(default_rate_type_id)").eq("id", bookingId).maybeSingle(),
-  ])
+async function resolveRateTypes(supabase: ServiceClient) {
+  const { data: rateTypeRows } = await supabase
+    .from("rate_types")
+    .select("id, code, name, is_default")
+    .is("archived_at", null)
 
   const rateTypes = (rateTypeRows ?? []).map(({ id, code, name }) => ({ id, code, name }))
   const fallbackRateTypeId = (rateTypeRows ?? []).find((rt) => rt.is_default)?.id ?? null
-  const customer = Array.isArray(booking?.customers) ? booking?.customers[0] : booking?.customers
-  const rateTypeId = customer?.default_rate_type_id ?? null
 
-  return { rateTypes, fallbackRateTypeId, rateTypeId }
+  return { rateTypes, fallbackRateTypeId }
 }
 
 /** Same setting POST /api/quotes and POST /api/jobs/[id]/start-quote read, so all three
@@ -78,7 +75,7 @@ export async function createDraftQuoteForBooking({
       if (defaultCommission.value > 0 && selections.length > 0) {
         selections[0] = { ...selections[0], commissionOverride: defaultCommission }
       }
-      const { rateTypes, fallbackRateTypeId, rateTypeId } = await resolveRateTypes(supabase, bookingId)
+      const { rateTypes, fallbackRateTypeId } = await resolveRateTypes(supabase)
 
       const built = await buildPackageQuoteLineItems({
         supabase,
@@ -86,7 +83,6 @@ export async function createDraftQuoteForBooking({
         jobId: bookingId,
         travelDate: travelDate ?? new Date().toISOString().slice(0, 10),
         selections,
-        rateTypeId,
         fallbackRateTypeId,
         rateTypes,
       })

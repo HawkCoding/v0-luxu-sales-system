@@ -36,7 +36,6 @@ function baseCustomerRow(overrides: MockRow = {}): MockRow {
     vip_status: false,
     preferences: null,
     communication_preferences: null,
-    default_rate_type_id: null,
     first_travel_date: null,
     last_travel_date: null,
     updated_at: INITIAL_UPDATED_AT,

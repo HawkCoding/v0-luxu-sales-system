@@ -40,7 +40,6 @@ const patchCustomerSchema = z.object({
   vip_status: z.boolean().optional(),
   preferences: z.string().trim().max(2000).nullable().optional(),
   communication_preferences: z.string().trim().max(1000).nullable().optional(),
-  default_rate_type_id: z.string().uuid().nullable().optional(),
   expectedUpdatedAt: z.string().datetime({ offset: true }).optional(),
   // Values the client loaded for the fields it's changing, so the server can
   // tell an unrelated sibling write from a real edit conflict.
@@ -48,7 +47,7 @@ const patchCustomerSchema = z.object({
 })
 
 const CUSTOMER_PATCH_SELECT =
-  "id, notes, email, phone, fax, country, province, company_name, address_line1, address_line2, city, postal_code, vat_number, date_of_birth, id_passport, vip_status, preferences, communication_preferences, default_rate_type_id, first_travel_date, last_travel_date, updated_at"
+  "id, notes, email, phone, fax, country, province, company_name, address_line1, address_line2, city, postal_code, vat_number, date_of_birth, id_passport, vip_status, preferences, communication_preferences, first_travel_date, last_travel_date, updated_at"
 
 interface CustomerPatchRow {
   id: string
@@ -69,7 +68,6 @@ interface CustomerPatchRow {
   vip_status: boolean
   preferences: string | null
   communication_preferences: string | null
-  default_rate_type_id: string | null
   first_travel_date: string | null
   last_travel_date: string | null
   updated_at: string
@@ -221,7 +219,6 @@ export async function GET(
       vipStatus: customer.vip_status,
       preferences: customer.preferences,
       communicationPreferences: customer.communication_preferences,
-      defaultRateTypeId: customer.default_rate_type_id,
       firstTravelDate: customer.first_travel_date,
       firstTravelDateDisplay: formatDisplayDate(customer.first_travel_date),
       lastTravelDate: customer.last_travel_date,
@@ -371,7 +368,6 @@ export async function PATCH(
     city?: string | null
     postal_code?: string | null
     vat_number?: string | null
-    default_rate_type_id?: string | null
   } = {
     notes: normalizedNotes ? normalizedNotes : null,
     email: normalizedEmail,
@@ -405,9 +401,6 @@ export async function PATCH(
     ...(parsed.city !== undefined ? { city: blankToNull(parsed.city) } : {}),
     ...(parsed.postal_code !== undefined ? { postal_code: blankToNull(parsed.postal_code) } : {}),
     ...(parsed.vat_number !== undefined ? { vat_number: blankToNull(parsed.vat_number) } : {}),
-    ...(parsed.default_rate_type_id !== undefined
-      ? { default_rate_type_id: parsed.default_rate_type_id }
-      : {}),
   }
 
   const hasVersionCheck = Boolean(parsed.expectedUpdatedAt) || Boolean(parsed.baseline)
@@ -512,7 +505,6 @@ export async function PATCH(
     vipStatus: updated.vip_status,
     preferences: updated.preferences,
     communicationPreferences: updated.communication_preferences,
-    defaultRateTypeId: updated.default_rate_type_id,
     firstTravelDate: updated.first_travel_date,
     firstTravelDateDisplay: formatDisplayDate(updated.first_travel_date),
     lastTravelDate: updated.last_travel_date,

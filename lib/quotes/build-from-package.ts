@@ -86,9 +86,7 @@ interface BuildPackageQuoteLineItemsInput {
   jobId: string
   travelDate: string
   selections?: PackageLegSelection[]
-  /** Quote-level chosen rate type (e.g. Resident). Applies to every leg unless a leg sets its own. */
-  rateTypeId?: string | null
-  /** System default rate type, used as the fallback when a leg has no card for the chosen type. */
+  /** System default rate type, the last tier tried after the supplier's quoted and base rates. */
   fallbackRateTypeId?: string | null
   /** Optional rate-type metadata for stamping code/name into the pricing snapshot. */
   rateTypes?: RateTypeMeta[]
@@ -107,7 +105,6 @@ export async function buildPackageQuoteLineItems({
   jobId,
   travelDate,
   selections = [],
-  rateTypeId: quoteRateTypeId = null,
   fallbackRateTypeId = null,
   rateTypes = [],
   commissionBonus = 0,
@@ -485,9 +482,9 @@ export async function buildPackageQuoteLineItems({
     return selectRateCard(
       candidates,
       perLegRateTypeId,
-      quoteRateTypeId,
+      leg.quoteRateTypeId,
+      leg.baseRateTypeId,
       fallbackRateTypeId,
-      leg.defaultRateTypeId,
     )
   }
 

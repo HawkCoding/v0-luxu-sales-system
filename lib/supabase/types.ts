@@ -1383,7 +1383,6 @@ export type Database = {
           country: string | null
           created_at: string
           date_of_birth: string | null
-          default_rate_type_id: string | null
           email: string
           fax: string | null
           first_name: string
@@ -1412,7 +1411,6 @@ export type Database = {
           country?: string | null
           created_at?: string
           date_of_birth?: string | null
-          default_rate_type_id?: string | null
           email: string
           fax?: string | null
           first_name: string
@@ -1441,7 +1439,6 @@ export type Database = {
           country?: string | null
           created_at?: string
           date_of_birth?: string | null
-          default_rate_type_id?: string | null
           email?: string
           fax?: string | null
           first_name?: string
@@ -1461,15 +1458,7 @@ export type Database = {
           vat_number?: string | null
           vip_status?: boolean
         }
-        Relationships: [
-          {
-            foreignKeyName: "customers_default_rate_type_id_fkey"
-            columns: ["default_rate_type_id"]
-            isOneToOne: false
-            referencedRelation: "rate_types"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       documents: {
         Row: {
@@ -3123,35 +3112,6 @@ export type Database = {
           },
         ]
       }
-      supplier_kind_default_rate_types: {
-        Row: {
-          created_at: string
-          kind: string
-          rate_type_id: string
-          updated_at: string
-        }
-        Insert: {
-          created_at?: string
-          kind: string
-          rate_type_id: string
-          updated_at?: string
-        }
-        Update: {
-          created_at?: string
-          kind?: string
-          rate_type_id?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "supplier_kind_default_rate_types_rate_type_id_fkey"
-            columns: ["rate_type_id"]
-            isOneToOne: false
-            referencedRelation: "rate_types"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       supplier_pricing_options: {
         Row: {
           created_at: string
@@ -3372,10 +3332,10 @@ export type Database = {
       suppliers: {
         Row: {
           active: boolean
+          base_rate_type_id: string | null
           child_max_age: number | null
           created_at: string
           default_contact_name: string | null
-          default_rate_type_id: string | null
           default_time_end: string | null
           default_time_start: string | null
           description: string | null
@@ -3394,6 +3354,7 @@ export type Database = {
           notes: string | null
           phone: string | null
           pricing_mode: Database["public"]["Enums"]["supplier_pricing_mode"]
+          quote_rate_type_id: string | null
           single_supplement_pct: number
           slug: string
           status: string
@@ -3403,10 +3364,10 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          base_rate_type_id?: string | null
           child_max_age?: number | null
           created_at?: string
           default_contact_name?: string | null
-          default_rate_type_id?: string | null
           default_time_end?: string | null
           default_time_start?: string | null
           description?: string | null
@@ -3425,6 +3386,7 @@ export type Database = {
           notes?: string | null
           phone?: string | null
           pricing_mode?: Database["public"]["Enums"]["supplier_pricing_mode"]
+          quote_rate_type_id?: string | null
           single_supplement_pct?: number
           slug: string
           status?: string
@@ -3434,10 +3396,10 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          base_rate_type_id?: string | null
           child_max_age?: number | null
           created_at?: string
           default_contact_name?: string | null
-          default_rate_type_id?: string | null
           default_time_end?: string | null
           default_time_start?: string | null
           description?: string | null
@@ -3456,6 +3418,7 @@ export type Database = {
           notes?: string | null
           phone?: string | null
           pricing_mode?: Database["public"]["Enums"]["supplier_pricing_mode"]
+          quote_rate_type_id?: string | null
           single_supplement_pct?: number
           slug?: string
           status?: string
@@ -3465,8 +3428,8 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "suppliers_default_rate_type_id_fkey"
-            columns: ["default_rate_type_id"]
+            foreignKeyName: "suppliers_base_rate_type_id_fkey"
+            columns: ["base_rate_type_id"]
             isOneToOne: false
             referencedRelation: "rate_types"
             referencedColumns: ["id"]
@@ -3483,6 +3446,13 @@ export type Database = {
             columns: ["location_id"]
             isOneToOne: false
             referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "suppliers_quote_rate_type_id_fkey"
+            columns: ["quote_rate_type_id"]
+            isOneToOne: false
+            referencedRelation: "rate_types"
             referencedColumns: ["id"]
           },
         ]
