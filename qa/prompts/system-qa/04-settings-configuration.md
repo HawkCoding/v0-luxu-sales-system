@@ -18,7 +18,7 @@ QA 01 GREEN. Run as admin (carmen). Do not reset.
 - [app/app/settings/page.tsx](../../../app/app/settings/page.tsx) (~2200 lines, one scrolling column of cards)
 - [lib/settings-access.ts](../../../lib/settings-access.ts) — the server contract and the setting-key groups
 - `app/api/settings/*` — one route per card
-- [app/app/settings/rate-types/page.tsx](../../../app/app/settings/rate-types/page.tsx), [lib/rate-types/default-rate-type.ts](../../../lib/rate-types/default-rate-type.ts)
+- [app/app/settings/rate-types/page.tsx](../../../app/app/settings/rate-types/page.tsx), [lib/rate-types/supplier-rate-tiers.ts](../../../lib/rate-types/supplier-rate-tiers.ts)
 - [lib/pipeline/constants.ts](../../../lib/pipeline/constants.ts) — `DEFAULT_DEPOSIT_PERCENTAGE`, `calculateDepositAmount`
 
 ## Checks
@@ -51,14 +51,16 @@ then verify the downstream effect named below. Screenshot before and after.
 
 19. Create a rate type, edit it, archive it. Archived types disappear from
     pickers but existing references still render.
-20. **Precedence.** `lib/rate-types/default-rate-type.ts` resolves in the order:
-    supplier override → per-`supplier_kind` mapping → global `isDefault` → first
-    active. Construct all four situations and confirm the resolved rate type at
-    each level. Getting this wrong prices bookings incorrectly, so treat any
-    mismatch as Sev-2.
-21. Set a per-`supplier_kind` default via `PUT /api/rate-types/supplier-defaults`,
-    then create a quote leg for a supplier of that kind and confirm the rate type
-    that gets applied.
+20. **Precedence.** `lib/rate-cards/resolve.ts` resolves a quote line's rate card
+    in the order: the leg's own explicit choice → the supplier's quoted rate →
+    the supplier's base rate → the global `isDefault`. Construct all four
+    situations and confirm the rate type on each priced line. Getting this wrong
+    prices bookings incorrectly, so treat any mismatch as Sev-2.
+21. **Hard vs soft.** A rate picked by hand on a leg is a contract: if it has no
+    rate card for that route/suite/date the build must fail naming that rate. A
+    supplier's starred quoted rate is inherited, so the same gap must instead
+    fall through to the base rate with `pricing_snapshot.rateTypeInherited` true.
+    Verify both directions — they are the reason the base/quoted split exists.
 22. The Rate Types link is only rendered for `edit:settings` (admin); the API
     returns `canEdit`. Confirm a manager hitting the URL directly gets a
     read-only view, not an editable one.

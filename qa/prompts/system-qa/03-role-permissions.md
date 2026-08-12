@@ -37,15 +37,15 @@ still offers or honours it is a finding.
 
 2. **Sidebar contents per role.** Screenshot each. Consultant should show
    Dashboard, Enquiries, Pipeline, Bookings, Customers, Suppliers, Documents,
-   Emails Sent and Settings (`view:settings` includes consultant) — but no
-   Templates, Reporting or Audit Log.
+   and Emails Sent — but no Templates, Reporting, Audit Log or Settings
+   (`view:settings` is admin/manager only).
 
-3. **Hard-gated routes (server redirect).** `/app/audit` and `/app/audit/archive`
-   must redirect anyone who is not admin or manager to `/app`. Test by direct URL
-   as consultant.
+3. **Hard-gated routes (server redirect).** `/app/audit`, `/app/audit/archive`,
+   and `/app/settings` (plus every settings sub-page) must redirect anyone who is
+   not admin or manager to `/app`. Test by direct URL as consultant.
 
-4. **Nav-gated routes (no page guard).** `/app/templates`, `/app/reporting`,
-   `/app/settings` are hidden from the sidebar for roles that lack the
+4. **Nav-gated routes (no page guard).** `/app/templates` and `/app/reporting`
+   are hidden from the sidebar for roles that lack the
    permission, but the page components themselves have no guard. Enter each by
    **direct URL** as every role and record precisely what happens:
    - Does the page render its shell?

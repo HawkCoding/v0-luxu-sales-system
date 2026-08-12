@@ -92,7 +92,7 @@ Booking-detail tabs — `enquiry` 08/10 · `quotes` 11 · `reservation` 10 ·
 | `api/quotes`, `/[id]` | 11 |
 | `api/quotes/[id]/pdf`, `/email-preview` | 11 |
 | `api/quotes/[id]/revise`, `/cancel`, `/commission-bonus` | 11 |
-| `api/rate-types`, `/[id]`, `/supplier-defaults` | 04 |
+| `api/rate-types`, `/[id]` | 04 |
 | `api/reports/[report]`, `/export` | 19 |
 | `api/settings/age-bands` | 04 |
 | `api/settings/app-logo` | 04 |
