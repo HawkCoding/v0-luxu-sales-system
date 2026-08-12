@@ -104,10 +104,7 @@ interface SeededBooking {
   bookingNumber: string
 }
 
-async function seedBooking(
-  customerId: string,
-  packageId: string | null,
-): Promise<SeededBooking> {
+async function seedBooking(customerId: string): Promise<SeededBooking> {
   const supabase = createQaSupabase()
   const bookingNumber = await allocateQaBookingNumber()
   const bookingId = randomUUID()
@@ -118,7 +115,6 @@ async function seedBooking(
       id: bookingId,
       booking_number: bookingNumber,
       customer_id: customerId,
-      package_id: packageId,
       stage: "enquiry",
       purpose: "reservation",
       source: "web_form",
@@ -351,27 +347,6 @@ test("04-lifecycle: walk enquiry → voucher_sent capturing every gap", async ({
     })
   }
 
-  let packageId: string | null = state.package?.id ?? null
-  if (packageId) {
-    const { data: existingPackage } = await supabase
-      .from("packages")
-      .select("id")
-      .eq("id", packageId)
-      .maybeSingle()
-    if (!existingPackage) {
-      packageId = null
-    }
-  }
-  if (!packageId) {
-    report.step("Phase 4 proceeding without a package (Phase 2 fixture missing)", {
-      status: "warn",
-      notes: [
-        "Bookings.package_id is nullable so the lifecycle walk can still proceed.",
-        "Quote auto-population from the package will not be exercised.",
-      ],
-    })
-  }
-
   let bookingId: string | null = null
   let bookingNumber: string | null = null
 
@@ -384,7 +359,7 @@ test("04-lifecycle: walk enquiry → voucher_sent capturing every gap", async ({
       evidence: { removed: cleanup.removedCount, customerId },
     })
 
-    const seeded = await seedBooking(customerId, packageId)
+    const seeded = await seedBooking(customerId)
     bookingId = seeded.bookingId
     bookingNumber = seeded.bookingNumber
 
@@ -395,7 +370,7 @@ test("04-lifecycle: walk enquiry → voucher_sent capturing every gap", async ({
         "The only UI path to create a booking is the New Enquiry dialog at /app/pipeline or /app/enquiries — and it is heavyweight (paste-import, manual entry, draft review).",
         "Phase 4 therefore seeds the booking via direct DB insert so the lifecycle phase can focus on the pipeline stages themselves.",
       ],
-      evidence: { bookingId, bookingNumber, customerId, packageId },
+      evidence: { bookingId, bookingNumber, customerId },
     })
 
     // -----------------------------------------------------------------

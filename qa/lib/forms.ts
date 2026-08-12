@@ -5,9 +5,8 @@ import type { Locator, Page, Response } from "@playwright/test"
  * without `htmlFor`/`id`. Playwright's `getByLabel` cannot find those inputs.
  * Locate by walking from the label's exact text to the next input/textarea.
  *
- * Confirmed cases (as of Phase 2):
- * - components/package-wizard.tsx — every field in Step 1
- * - components/package-detail-view.tsx — package metadata card
+ * Confirmed cases:
+ * - components/build-booking-dialog.tsx — the configure step's leg fields
  *
  * Confirmed exceptions (use `getByLabel` directly):
  * - components/add-supplier-dialog.tsx — labels ARE properly associated

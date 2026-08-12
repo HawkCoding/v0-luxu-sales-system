@@ -41,25 +41,6 @@ test("17 enquiries", async ({ page }) => {
   await cap(page, "17-enquiries.png")
 })
 
-test("18 packages list + detail", async ({ page }) => {
-  await page.goto("/app/packages")
-  await page.waitForTimeout(1500)
-  await cap(page, "18-packages-list.png")
-
-  const { data: pkg } = await db.from("packages").select("slug").limit(1).maybeSingle()
-  if (pkg?.slug) {
-    await page.goto(`/app/packages/${pkg.slug}`)
-    await page.waitForTimeout(1500)
-    await cap(page, "19-package-detail.png", { scroll: true })
-  }
-})
-
-test("20 quotes", async ({ page }) => {
-  await page.goto("/app/quotes")
-  await page.waitForTimeout(1500)
-  await cap(page, "20-quotes.png")
-})
-
 test("21 booking detail (stage stepper + tabs)", async ({ page }) => {
   const { data: q } = await db
     .from("quotes")
