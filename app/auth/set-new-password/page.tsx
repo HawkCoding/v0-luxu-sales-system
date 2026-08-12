@@ -84,8 +84,8 @@ export default function SetNewPasswordPage() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Min 6 characters"
-                minLength={6}
+                placeholder="Minimum 10 characters"
+                minLength={10}
                 autoComplete="new-password"
                 className="h-11"
               />

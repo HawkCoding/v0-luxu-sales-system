@@ -9,9 +9,13 @@
 
 import { NextResponse } from "next/server"
 import { z } from "zod"
-import { createServiceClient, createSessionClient } from "@/lib/supabase/server"
+import { adminAuthErrorResponse, requireAdmin } from "@/lib/api/require-admin"
+import { createServiceClient } from "@/lib/supabase/server"
 
 const roleSchema = z.enum(["admin", "manager", "consultant", "readonly"])
+
+/** How many booking references to name back in the "still assigned" error. */
+const BLOCKING_BOOKING_SAMPLE_SIZE = 5
 
 const patchSchema = z
   .object({
@@ -31,41 +35,13 @@ const patchSchema = z
     { message: "At least one field required" }
   )
 
-interface AdminContext {
-  adminName: string
-  adminUserId: string
-}
-
-async function requireAdmin():
-  Promise<{ ok: true; value: AdminContext } | { ok: false; status: 401 | 403 }> {
-  const sessionClient = await createSessionClient()
-  const {
-    data: { user },
-    error: userError,
-  } = await sessionClient.auth.getUser()
-  if (userError || !user) return { ok: false, status: 401 }
-
-  const { data: profile, error: profileError } = await sessionClient
-    .from("profiles")
-    .select("name, surname, email, clearance_level")
-    .eq("user_id", user.id)
-    .single()
-
-  if (profileError || !profile || profile.clearance_level !== "admin") {
-    return { ok: false, status: 403 }
-  }
-
-  const adminName = [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.email
-  return { ok: true, value: { adminName, adminUserId: user.id } }
-}
-
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ userId: string }> }
 ) {
   const auth = await requireAdmin()
   if (!auth.ok) {
-    return NextResponse.json({ error: auth.status === 401 ? "Unauthorized" : "Forbidden" }, { status: auth.status })
+    return adminAuthErrorResponse(auth.status)
   }
 
   const { userId } = await params
@@ -237,7 +213,7 @@ export async function DELETE(
 ) {
   const auth = await requireAdmin()
   if (!auth.ok) {
-    return NextResponse.json({ error: auth.status === 401 ? "Unauthorized" : "Forbidden" }, { status: auth.status })
+    return adminAuthErrorResponse(auth.status)
   }
 
   const { userId } = await params
@@ -260,6 +236,44 @@ export async function DELETE(
     return NextResponse.json({ error: "User not found" }, { status: 404 })
   }
 
+  // bookings.assigned_salesperson_id / owner_user_id reference auth.users, so a
+  // user still attached to a booking cannot be deleted. Say so instead of
+  // letting the FK surface as a 500.
+  const { data: linkedBookings, error: linkedBookingsError } = await service
+    .from("bookings")
+    .select("booking_number")
+    .or(`assigned_salesperson_id.eq.${userId},owner_user_id.eq.${userId}`)
+    .limit(BLOCKING_BOOKING_SAMPLE_SIZE + 1)
+
+  if (linkedBookingsError) {
+    console.error("Failed to check bookings before deleting user", linkedBookingsError)
+    return NextResponse.json({ error: "Failed to delete user" }, { status: 500 })
+  }
+
+  if (linkedBookings && linkedBookings.length > 0) {
+    const references = linkedBookings
+      .slice(0, BLOCKING_BOOKING_SAMPLE_SIZE)
+      .map((booking) => booking.booking_number)
+      .filter(Boolean)
+
+    return NextResponse.json(
+      {
+        error:
+          "This user is still assigned to bookings. Reassign or unassign them before deleting the account.",
+        details: { references },
+      },
+      { status: 409 }
+    )
+  }
+
+  const { error: deleteError } = await service.auth.admin.deleteUser(userId)
+  if (deleteError) {
+    console.error("Failed to delete user", { userId, message: deleteError.message })
+    return NextResponse.json({ error: "Failed to delete user" }, { status: 500 })
+  }
+
+  // Audit only what actually happened — logging before the delete recorded
+  // failed attempts as completed deletions (QA 02, F02-3).
   try {
     await service.from("audit_logs").insert({
       action: "user_deleted",
@@ -276,14 +290,6 @@ export async function DELETE(
     })
   } catch {
     // non-fatal
-  }
-
-  const { error: deleteError } = await service.auth.admin.deleteUser(userId)
-  if (deleteError) {
-    return NextResponse.json(
-      { error: deleteError.message || "Failed to delete user" },
-      { status: 500 }
-    )
   }
 
   return NextResponse.json({ ok: true })

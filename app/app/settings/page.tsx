@@ -571,8 +571,8 @@ function UserManagementCard() {
                 type="password"
                 value={createForm.password}
                 onChange={(e) => setCreateForm((prev) => ({ ...prev, password: e.target.value }))}
-                placeholder="Min 6 characters"
-                minLength={6}
+                placeholder="Minimum 10 characters"
+                minLength={10}
                 autoComplete="new-password"
               />
             </div>
@@ -627,8 +627,8 @@ function UserManagementCard() {
                 type="password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
-                placeholder="Min 6 characters"
-                minLength={6}
+                placeholder="Minimum 10 characters"
+                minLength={10}
                 autoComplete="new-password"
               />
             </div>

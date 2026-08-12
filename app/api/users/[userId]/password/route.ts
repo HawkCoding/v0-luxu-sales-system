@@ -8,42 +8,23 @@
  */
 
 import { NextResponse } from "next/server"
-import { createServiceClient, createSessionClient } from "@/lib/supabase/server"
+import { adminAuthErrorResponse, requireAdmin } from "@/lib/api/require-admin"
+import { createServiceClient } from "@/lib/supabase/server"
 import { getEmailFromAddress } from "@/lib/email/from"
 import { resolveSalespersonSender } from "@/lib/email/resolve-sender"
 import { sendEmail } from "@/lib/email/transport"
 
 export const runtime = "nodejs"
 
-async function requireAdmin() {
-  const sessionClient = await createSessionClient()
-  const {
-    data: { user },
-    error: userError,
-  } = await sessionClient.auth.getUser()
-  if (userError || !user) return { authorized: false as const, adminName: null, adminUserId: null }
-
-  const { data: profile, error: profileError } = await sessionClient
-    .from("profiles")
-    .select("name, surname, clearance_level")
-    .eq("user_id", user.id)
-    .single()
-
-  if (profileError || !profile || profile.clearance_level !== "admin") {
-    return { authorized: false as const, adminName: null, adminUserId: null }
-  }
-  const adminName = [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.name
-  return { authorized: true as const, adminName, adminUserId: user.id }
-}
-
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ userId: string }> }
 ) {
-  const { authorized, adminName, adminUserId } = await requireAdmin()
-  if (!authorized) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  const auth = await requireAdmin()
+  if (!auth.ok) {
+    return adminAuthErrorResponse(auth.status)
   }
+  const { adminName, adminUserId } = auth.value
 
   const { userId } = await params
   if (!userId?.trim()) {

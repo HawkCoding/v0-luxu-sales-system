@@ -3,6 +3,7 @@
 import { Suspense, useState, useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { AuthProvider, useAuth } from "@/lib/auth-context"
+import { getLoginErrorMessage } from "@/lib/auth-errors"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -158,13 +159,9 @@ function LoginForm() {
   }, [loading, user, router])
 
   useEffect(() => {
-    const authError = searchParams.get("error")
-    if (!authError) return
-    if (authError === "account-link-mismatch") {
-      setError("This email is already linked to another account. Contact your administrator.")
-      return
-    }
-    setError("Sign in failed. Please try again.")
+    const message = getLoginErrorMessage(searchParams.get("error"))
+    if (!message) return
+    setError(message)
   }, [searchParams])
 
   const handleEmailPasswordLogin = async (e: React.FormEvent) => {

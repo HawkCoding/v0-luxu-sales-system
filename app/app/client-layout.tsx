@@ -17,6 +17,7 @@ import {
 import { useState, useEffect, useRef, type ReactNode } from "react"
 import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
+import { AuthHashErrorNotice } from "@/components/auth-hash-error-notice"
 import { ConnectionErrorBanner } from "@/components/connection-error-banner"
 import { SessionTimeoutGuard } from "@/components/session-timeout-guard"
 import { useEnquiryCount } from "@/lib/use-data"
@@ -450,6 +451,7 @@ export default function AppClientLayout({
   return (
     <AuthProvider initialUser={initialUser}>
       <RoleProvider initialRole={initialUser?.role}>
+        <AuthHashErrorNotice />
         <div className="flex flex-col h-svh overflow-hidden">
           <AppShell>{children}</AppShell>
         </div>

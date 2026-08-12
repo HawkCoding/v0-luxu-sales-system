@@ -8,6 +8,7 @@
 
 import { NextResponse } from "next/server"
 import { z } from "zod"
+import { adminAuthErrorResponse, requireAdmin } from "@/lib/api/require-admin"
 import { createServiceClient, createSessionClient } from "@/lib/supabase/server"
 
 const roleSchema = z.enum(["admin", "manager", "consultant", "readonly"])
@@ -20,43 +21,10 @@ const createUserSchema = z.object({
   password: z.string().min(10, "Password must be at least 10 characters"),
 })
 
-interface AdminContext {
-  adminUserId: string
-  adminName: string
-}
-
-async function requireAdmin():
-  Promise<{ ok: true; value: AdminContext } | { ok: false; status: 401 | 403 }> {
-  const supabase = await createSessionClient()
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-  if (userError || !user) return { ok: false, status: 401 }
-
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("name, surname, clearance_level, email")
-    .eq("user_id", user.id)
-    .single()
-
-  if (profileError || !profile || profile.clearance_level !== "admin") {
-    return { ok: false, status: 403 }
-  }
-
-  return {
-    ok: true,
-    value: {
-      adminUserId: user.id,
-      adminName: [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.email,
-    },
-  }
-}
-
 export async function GET() {
   const auth = await requireAdmin()
   if (!auth.ok) {
-    return NextResponse.json({ error: auth.status === 401 ? "Unauthorized" : "Forbidden" }, { status: auth.status })
+    return adminAuthErrorResponse(auth.status)
   }
 
   const supabase = await createSessionClient()
@@ -108,7 +76,7 @@ export async function GET() {
 export async function POST(request: Request) {
   const auth = await requireAdmin()
   if (!auth.ok) {
-    return NextResponse.json({ error: auth.status === 401 ? "Unauthorized" : "Forbidden" }, { status: auth.status })
+    return adminAuthErrorResponse(auth.status)
   }
 
   let parsed: z.infer<typeof createUserSchema>
