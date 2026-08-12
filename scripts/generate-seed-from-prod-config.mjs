@@ -72,9 +72,10 @@ out += genSimple("supplier_email_labels", "on conflict (id) do update set name=e
 out += "-- RATE TYPES (from production)\n"
 out += genSimple("rate_types", "on conflict (id) do update set code=excluded.code,name=excluded.name,sort_order=excluded.sort_order,is_default=excluded.is_default,archived_at=excluded.archived_at,is_standard=excluded.is_standard,updated_at=excluded.updated_at")
 
-out += "-- SUPPLIER RATE ADJUSTMENTS & KIND DEFAULTS (from production)\n"
+// The base and quoted rate types live on suppliers itself, so they ride along
+// in the suppliers block above.
+out += "-- SUPPLIER RATE ADJUSTMENTS (from production)\n"
 out += genSimple("supplier_rate_adjustments", "on conflict (id) do update set supplier_id=excluded.supplier_id,rate_type_id=excluded.rate_type_id,discount_pct=excluded.discount_pct,updated_at=excluded.updated_at")
-out += genSimple("supplier_kind_default_rate_types", "on conflict (kind) do update set rate_type_id=excluded.rate_type_id,updated_at=excluded.updated_at")
 
 out += "-- SUITE TYPES & VARIANT VOCABULARY (from production)\n"
 out += genSimple("suite_types", "on conflict (id) do update set supplier_id=excluded.supplier_id,name=excluded.name,description=excluded.description,passenger_capacity=excluded.passenger_capacity,luggage_capacity=excluded.luggage_capacity,sort_order=excluded.sort_order,active=excluded.active,updated_at=excluded.updated_at")

@@ -22,6 +22,8 @@ import { requireUser } from "@/lib/api/auth"
 import { detectFieldConflicts, fieldConflictResponse, staleVersionResponse } from "@/lib/concurrency"
 import { mapPostgrestError } from "@/lib/api/responses"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
+import { buildSupplierRouteSchedules } from "@/lib/routes/route-schedule"
+import { firstRecord } from "@/lib/utils"
 import { CONSULTANTS } from "@/lib/types"
 import type { PipelineStage } from "@/lib/types"
 import { extractRoleFromJwt } from "@/lib/role-utils"
@@ -124,7 +126,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const auth = await requireUser()
   if (!auth.ok) return auth.response
 
-  const { supabase, user, profile } = auth.value
+  const { supabase } = auth.value
 
   const { data: booking } = await supabase
     .from("bookings")
@@ -134,13 +136,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   if (!booking) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
-  const role = profile.clearanceLevel
-  if (role === "readonly") return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-
-  if (role === "consultant") {
-    const isOwner = booking.owner_user_id === user.id || booking.assigned_salesperson_id === user.id
-    if (!isOwner) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-  }
+  // "view:jobs" is granted to all four roles (lib/role-context.tsx), so reading a
+  // booking is not scoped by role or ownership. Every write path — PATCH/DELETE
+  // below, /cancel, /outcome, notes, payments, documents — keeps its own gate.
 
   const [
     defaultDepositPercentage,
@@ -158,6 +156,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     { data: documentsData },
     { data: correspondenceData },
     { data: auditData },
+    { data: trainLegsData },
   ] = await Promise.all([
     getDefaultDepositPercentage(supabase),
     supabase.from("customers").select(CUSTOMER_COLUMNS).eq("id", booking.customer_id).single(),
@@ -178,6 +177,16 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     supabase.from("documents").select(DOCUMENT_COLUMNS).eq("booking_id", id).order("created_at"),
     supabase.from("correspondences").select(CORRESPONDENCE_COLUMNS).eq("booking_id", id).order("created_at"),
     supabase.from("audit_logs").select(AUDIT_LOG_COLUMNS).eq("entity_id", id).order("created_at", { ascending: false }),
+    // Each leg carries its own route_reversed, set at intake. bookings.route_reversed is only
+    // written once a quote exists (lib/quotes/resolve-primary-route.ts), so reading the leg is the
+    // only way an enquiry-stage reversed journey prefills its real departure time.
+    supabase
+      .from("booking_services")
+      .select(
+        "supplier_id, route_reversed, sort_order, suppliers(kind), routes(departure_time, arrival_time, return_departure_time, return_arrival_time)",
+      )
+      .eq("booking_id", id)
+      .order("sort_order"),
   ])
 
   // Map booking → shape matching the existing Job interface so page components are unchanged
@@ -251,7 +260,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       city: customer.city,
       province: customer.province,
       postalCode: customer.postal_code,
-      defaultRateTypeId: customer.default_rate_type_id,
       isRepeatClient: customer.is_repeat_client,
       createdAt: customer.created_at,
         createdAtDisplay: formatDisplayDateTime(customer.created_at),
@@ -270,6 +278,15 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const resolvedDirection = route?.name ?? null
   const resolvedSupplier = route?.supplier?.name ?? null
   const resolvedHotelOption = hotelSupplier?.name ?? null
+
+  const routeSchedules = buildSupplierRouteSchedules(
+    (trainLegsData ?? []).map((leg) => ({
+      supplier_id: leg.supplier_id,
+      route_reversed: leg.route_reversed,
+      supplierKind: firstRecord(leg.suppliers)?.kind ?? null,
+      route: firstRecord(leg.routes),
+    })),
+  )
 
   const enquiry = {
     id: booking.id,
@@ -295,6 +312,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     country: customer?.country ?? "",
     direction: resolvedDirection ?? readFormField(booking.extracted_json, "direction"),
     directionResolved: Boolean(resolvedDirection),
+    routeSchedules,
     supplier: resolvedSupplier ?? (readFormField(booking.extracted_json, "supplier") || undefined),
     supplierResolved: Boolean(resolvedSupplier),
     departureDate: booking.departure_date ?? "",

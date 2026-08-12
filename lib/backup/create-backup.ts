@@ -124,12 +124,9 @@ const TABLES_TO_SNAPSHOT = [
   "supplier_seasonal_periods",
   "supplier_seasonal_prices",
   "rate_cards",
-  // Routes & packages
+  // Routes
   "routes",
   "itineraries",
-  "packages",
-  "package_legs",
-  "package_leg_routes",
   // Inbound email
   "inbound_email_accounts",
   "inbound_email_rules",
@@ -141,7 +138,6 @@ const TABLES_TO_SNAPSHOT = [
   "bookings",
   "booking_suites",
   "booking_notes",
-  "booking_package_selections",
   "booking_supplier_schedules",
   "booking_transport_requests",
   "booking_vehicle_rental_details",

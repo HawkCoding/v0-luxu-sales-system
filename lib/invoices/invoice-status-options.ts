@@ -1,6 +1,7 @@
 // Client-facing status labels shown in the invoice header. The four system
-// roles drive automatic derivation from the booking's payment state; extra
-// entries (role: null) are manual-only labels.
+// roles drive automatic derivation from the booking's payment state; only their
+// labels are configurable. Entries without a known role are dropped on read —
+// nothing can apply them, since there is no per-invoice status picker.
 //
 // These live outside lib/settings-access.ts on purpose: that module imports the
 // server Supabase client (and therefore next/headers), so anything a Client
@@ -11,7 +12,7 @@
 export type InvoiceStatusRole = "provisional" | "confirmed" | "paid" | "cancelled"
 
 export interface InvoiceStatusOption {
-  role: InvoiceStatusRole | null
+  role: InvoiceStatusRole
   label: string
 }
 
@@ -40,7 +41,7 @@ export function parseInvoiceStatusOptions(value: string | null | undefined): Inv
             : null,
         label: typeof entry.label === "string" ? entry.label.trim() : "",
       }))
-      .filter((entry) => entry.label.length > 0)
+      .filter((entry): entry is InvoiceStatusOption => entry.role !== null && entry.label.length > 0)
     return options.length > 0 ? options : [...DEFAULT_INVOICE_STATUS_OPTIONS]
   } catch {
     return [...DEFAULT_INVOICE_STATUS_OPTIONS]

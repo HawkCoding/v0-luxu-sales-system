@@ -28,8 +28,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       .eq("user_id", user.id)
       .single()
 
-    if (!profile || profile.is_active === false) {
-      redirect("/login")
+    if (!profile) {
+      redirect("/auth/signed-out?reason=unauthorized")
+    }
+
+    if (profile.is_active === false) {
+      redirect("/auth/signed-out?reason=account-inactive")
     }
 
     role = jwtRole
@@ -44,8 +48,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       .eq("user_id", user.id)
       .single()
 
-    if (!profile || profile.is_active === false || !isRole(profile.clearance_level)) {
-      redirect("/login")
+    if (!profile || !isRole(profile.clearance_level)) {
+      redirect("/auth/signed-out?reason=unauthorized")
+    }
+
+    if (profile.is_active === false) {
+      redirect("/auth/signed-out?reason=account-inactive")
     }
 
     role = profile.clearance_level

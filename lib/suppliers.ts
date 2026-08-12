@@ -1,6 +1,7 @@
 import type { Database } from "@/lib/supabase/types"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { normalizeRouteDirectionMode } from "@/lib/routes/route-name"
+import { toHoursMinutes } from "@/lib/routes/route-schedule"
 import type {
   BookingScheduleSupplierKind,
   BookingSupplierSchedule,
@@ -22,7 +23,7 @@ import type {
   TransportRequestServiceType,
   VehicleRentalRouteDetails,
 } from "@/lib/types"
-import { resolveDefaultRateTypeId } from "@/lib/rate-types/default-rate-type"
+import { resolveSupplierRateTiers } from "@/lib/rate-types/supplier-rate-tiers"
 
 type BookingTransportRequestRow = Database["public"]["Tables"]["booking_transport_requests"]["Row"]
 type BookingSupplierScheduleRow = Database["public"]["Tables"]["booking_supplier_schedules"]["Row"]
@@ -34,18 +35,21 @@ type LocationRow = Database["public"]["Tables"]["locations"]["Row"]
 type RateCardRow = Database["public"]["Tables"]["rate_cards"]["Row"]
 type RouteRow = Database["public"]["Tables"]["routes"]["Row"]
 /**
- * postgrest-js infers a narrower shape for `select("*")` than the generated Row -- it drops
- * `default_rate_type_id` (it does the same to customers.default_rate_type_id). Postgres still
- * returns the column at runtime, so accept it as optional rather than widening every query.
+ * postgrest-js infers a narrower shape for `select("*")` than the generated Row -- it drops the
+ * rate-type columns. Postgres still returns them at runtime, so accept them as optional rather
+ * than widening every query.
  */
-type SupplierRow = Omit<Database["public"]["Tables"]["suppliers"]["Row"], "default_rate_type_id"> & {
-  default_rate_type_id?: string | null
+type SupplierRow = Omit<
+  Database["public"]["Tables"]["suppliers"]["Row"],
+  "base_rate_type_id" | "quote_rate_type_id"
+> & {
+  base_rate_type_id?: string | null
+  quote_rate_type_id?: string | null
 }
 type SupplierEmailRow = Database["public"]["Tables"]["supplier_emails"]["Row"]
 type SupplierStationAddressRow = Database["public"]["Tables"]["supplier_station_addresses"]["Row"]
 type RateTypeRow = Database["public"]["Tables"]["rate_types"]["Row"]
 type SupplierRateAdjustmentRow = Database["public"]["Tables"]["supplier_rate_adjustments"]["Row"]
-type SupplierKindDefaultRateTypeRow = Database["public"]["Tables"]["supplier_kind_default_rate_types"]["Row"]
 type SuiteTypeRow = Database["public"]["Tables"]["suite_types"]["Row"]
 type VehicleRentalRouteDetailsRow = Database["public"]["Tables"]["vehicle_rental_route_details"]["Row"]
 type BedroomTypeRow = Database["public"]["Tables"]["bedroom_types"]["Row"]
@@ -185,6 +189,10 @@ export function mapSupplierRoute(
     vehicleRentalDetails: mapVehicleRentalRouteDetails(vehicleRentalDetails),
     directionMode: normalizeRouteDirectionMode(row.direction_mode),
     durationDays: row.duration_days ?? null,
+    departureTime: toHoursMinutes(row.departure_time),
+    arrivalTime: toHoursMinutes(row.arrival_time),
+    returnDepartureTime: toHoursMinutes(row.return_departure_time),
+    returnArrivalTime: toHoursMinutes(row.return_arrival_time),
     active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -270,7 +278,6 @@ export function mapBookingTransportRequest(row: BookingTransportRequestWithRenta
     supplierId: row.supplier_id ?? null,
     routeId: row.route_id ?? null,
     suiteTypeId: row.suite_type_id ?? null,
-    packageLegId: row.package_leg_id ?? null,
     serviceId: row.service_id ?? null,
     pickupPoint: row.pickup_point,
     dropoffPoint: row.dropoff_point,
@@ -386,7 +393,6 @@ export interface SupplierDetailMapInput {
   suiteTypeBathroomTypes?: SuiteTypeBathroomTypeRow[]
   rateTypes?: RateTypeRow[]
   rateAdjustments?: SupplierRateAdjustmentRow[]
-  kindDefaultRateTypes?: SupplierKindDefaultRateTypeRow[]
   suiteAliases?: SuiteVocabAliasRow[]
   stationAddresses?: SupplierStationAddressRow[]
 }
@@ -502,11 +508,10 @@ export function mapSupplierDetail(
   const locationNameById = new Map(locations.map((location) => [location.id, location.name]))
 
   const mapped = mapSupplier(supplier)
-  const kindDefaults = (variants.kindDefaultRateTypes ?? []).map((row) => ({
-    kind: row.kind as SupplierKind,
-    rateTypeId: row.rate_type_id,
-  }))
-  const defaultRateTypeOverrideId = supplier.default_rate_type_id ?? null
+  const rateTiers = resolveSupplierRateTiers(rateTypes, {
+    baseRateTypeId: supplier.base_rate_type_id ?? null,
+    quoteRateTypeId: supplier.quote_rate_type_id ?? null,
+  })
 
   return {
     ...mapped,
@@ -540,13 +545,7 @@ export function mapSupplierDetail(
       rateTypeId: row.rate_type_id,
       discountPct: Number(row.discount_pct ?? 0),
     })),
-    defaultRateTypeId: resolveDefaultRateTypeId(
-      mapped.kind,
-      kindDefaults,
-      rateTypes,
-      defaultRateTypeOverrideId,
-    ),
-    defaultRateTypeOverrideId,
-    inheritedDefaultRateTypeId: resolveDefaultRateTypeId(mapped.kind, kindDefaults, rateTypes, null),
+    baseRateTypeId: rateTiers.baseRateTypeId,
+    quoteRateTypeId: rateTiers.quoteRateTypeId,
   }
 }

@@ -25,7 +25,7 @@ export async function recomputeBookingTripDates(
 ): Promise<{ error: string | null }> {
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
-    .select("id, package_id")
+    .select("id")
     .eq("id", bookingId)
     .maybeSingle()
 
@@ -43,26 +43,6 @@ export async function recomputeBookingTripDates(
   }
   const datedRows: DatedRow[] = []
 
-  if (booking.package_id) {
-    const { data: selections, error: selectionsError } = await supabase
-      .from("booking_package_selections")
-      .select("selected, service_date, nights, route_id, leg:package_legs(supplier:suppliers(kind))")
-      .eq("booking_id", bookingId)
-
-    if (selectionsError) return { error: selectionsError.message }
-
-    for (const row of selections ?? []) {
-      datedRows.push({
-        selected: row.selected,
-        service_date: row.service_date,
-        nights: row.nights,
-        route_id: row.route_id,
-        kind: row.leg?.supplier?.kind ?? null,
-      })
-    }
-  }
-
-  // Build Booking's per-booking equivalent — a booking uses one or the other, never both.
   const { data: services, error: servicesError } = await supabase
     .from("booking_services")
     .select("selected, service_date, nights, route_id, suppliers(kind)")
@@ -129,9 +109,9 @@ export async function recomputeBookingTripDates(
     spans.push({ start, end })
   }
 
-  // A booking with no services (catalogue or Build Booking) and no dated transport keeps
-  // whatever trip dates it has — don't clobber them from an unrelated transport edit.
-  if (!booking.package_id && datedRows.length === 0 && spans.length === 0) return { error: null }
+  // A booking with no services and no dated transport keeps whatever trip dates it has — don't
+  // clobber them from an unrelated transport edit.
+  if (datedRows.length === 0 && spans.length === 0) return { error: null }
 
   const range = deriveTripDateRange(spans)
 

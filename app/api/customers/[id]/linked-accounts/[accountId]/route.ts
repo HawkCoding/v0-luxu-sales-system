@@ -3,7 +3,7 @@ import { z } from "zod"
 import { normalizeOptionalString } from "@/lib/normalize-optional-string"
 import { createSessionClient } from "@/lib/supabase/server"
 
-const allowedRoles = new Set(["admin", "manager"])
+const allowedRoles = new Set(["admin", "manager", "consultant"])
 
 const linkedAccountPatchSchema = z.object({
   relationship: z.string().max(100).nullable().optional(),

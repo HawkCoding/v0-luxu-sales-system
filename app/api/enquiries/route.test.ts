@@ -312,6 +312,41 @@ describe("POST /api/enquiries customer CRM matching", () => {
     })
   })
 
+  // F05-1 related risk: an enquiry that carries no country used to write
+  // country: null over an existing customer, after which `customer_complete`
+  // blocks every forward stage move and the field cannot be repaired.
+  it("does not null out contact details the enquiry did not carry", async () => {
+    const state = createMockState()
+    const supabase = createSupabase(state)
+
+    await resolveEnquiryCustomer(
+      supabase as never,
+      enquiryCustomerInput({ country: null, province: null, phone: null, title: null }),
+    )
+
+    expect(state.customerUpdateRows[0]?.payload).toEqual(
+      expect.not.objectContaining({
+        country: expect.anything(),
+        province: expect.anything(),
+        phone: expect.anything(),
+        title: expect.anything(),
+      }),
+    )
+  })
+
+  it("still writes the contact details an enquiry does carry", async () => {
+    const state = createMockState()
+    const supabase = createSupabase(state)
+
+    await resolveEnquiryCustomer(supabase as never, enquiryCustomerInput({ country: "Germany" }))
+
+    expect(state.customerUpdateRows[0]?.payload).toMatchObject({
+      country: "Germany",
+      phone: "+27 82 000 0000",
+      title: "Ms",
+    })
+  })
+
   it("preserves CRM notes and preferences during existing-customer updates", async () => {
     const state = createMockState()
     const supabase = createSupabase(state)

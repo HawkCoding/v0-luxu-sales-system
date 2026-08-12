@@ -72,7 +72,9 @@ function leg(partial: Partial<PackageLeg> & { id: string; supplierKind: Supplier
     supplierName: `Supplier ${partial.id}`,
     supplierDescription: null,
     pricingMode: "rate_card",
-    defaultRateTypeId: null,
+    baseRateTypeId: null,
+    quoteRateTypeId: null,
+    inheritedRateTypeName: null,
     label: null,
     sortOrder: 0,
     dateAnchor: null,
@@ -128,7 +130,7 @@ describe("buildPackageQuoteLineItems", () => {
             service_type: "transfer",
             route_id: null,
             suite_type_id: "vehicle-van",
-            package_leg_id: "leg-transfer",
+            service_id: "leg-transfer",
             pickup_point: "Airport",
             dropoff_point: "Hotel",
             pickup_at: null,
@@ -138,7 +140,7 @@ describe("buildPackageQuoteLineItems", () => {
             service_type: "transfer",
             route_id: null,
             suite_type_id: null,
-            package_leg_id: "leg-transfer",
+            service_id: "leg-transfer",
             pickup_point: "Hotel",
             dropoff_point: "Station",
             pickup_at: null,
@@ -160,7 +162,7 @@ describe("buildPackageQuoteLineItems", () => {
     expect(lineItems[1].unitPrice).toBe(500)
   })
 
-  it("prices a transport request keyed by service_id (a Build Booking / booking_services leg) the same as one keyed by package_leg_id", async () => {
+  it("prices a transport request keyed by service_id", async () => {
     const transferLeg = leg({
       id: "svc-transfer",
       supplierKind: "transfers",
@@ -176,8 +178,7 @@ describe("buildPackageQuoteLineItems", () => {
             service_type: "transfer",
             route_id: null,
             suite_type_id: "vehicle-sedan",
-            package_leg_id: null,
-            service_id: "svc-transfer",
+                        service_id: "svc-transfer",
             pickup_point: "Airport",
             dropoff_point: "Hotel",
             pickup_at: null,
@@ -211,7 +212,7 @@ describe("buildPackageQuoteLineItems", () => {
             service_type: "transfer",
             route_id: null,
             suite_type_id: "vehicle-sedan",
-            package_leg_id: "leg-transfer",
+            service_id: "leg-transfer",
             pickup_point: "Airport",
             dropoff_point: "Private villa, Bantry Bay",
             pickup_at: null,
@@ -222,7 +223,7 @@ describe("buildPackageQuoteLineItems", () => {
             service_type: "transfer",
             route_id: null,
             suite_type_id: "vehicle-sedan",
-            package_leg_id: "leg-transfer",
+            service_id: "leg-transfer",
             pickup_point: "Hotel",
             dropoff_point: "Station",
             pickup_at: null,
@@ -1179,6 +1180,49 @@ describe("buildPackageQuoteLineItems", () => {
       expect(adultLine?.unitPrice).toBe(59900)
       expect(adultLine?.pricingSnapshot?.rateTypeId).toBe(BTLD)
       expect(adultLine?.pricingSnapshot?.rateTypeInherited).toBe(true)
+    })
+
+    /**
+     * The supplier's quoted rate is inherited, not asked for, so it gets the opposite treatment to
+     * an explicit per-leg choice: a missing card falls through to the base rate rather than failing.
+     */
+    describe("the supplier's quoted rate", () => {
+      function buildInherited(travelDate: string) {
+        return buildPackageQuoteLineItems({
+          supabase: buildSupabase(),
+          packageDetail: detail([
+            { ...trainLeg, quoteRateTypeId: SADC, baseRateTypeId: BTLD },
+          ]),
+          jobId: JOB_ID,
+          travelDate,
+          rateTypes,
+          fallbackRateTypeId: BTLD,
+          selections: [
+            {
+              legId: "leg-rovos",
+              selected: true,
+              routeId: "route-ctj",
+              units: [{ suiteTypeId: "suite-pullman", adultCount: 2, childCount: 1, infantCount: 0 }],
+            },
+          ],
+        })
+      }
+
+      it("prices at the quoted rate when its card covers the date", async () => {
+        const { lineItems } = await buildInherited("2026-08-25")
+        const adultLine = lineItems.find((li) => li.description.includes("Adult"))
+        expect(adultLine?.unitPrice).toBe(22500)
+        expect(adultLine?.pricingSnapshot?.rateTypeId).toBe(SADC)
+        expect(adultLine?.pricingSnapshot?.rateTypeInherited).toBe(true)
+      })
+
+      it("falls through to the base rate when the quoted rate has no card, without erroring", async () => {
+        const { lineItems } = await buildInherited("2028-08-25")
+        const adultLine = lineItems.find((li) => li.description.includes("Adult"))
+        expect(adultLine?.unitPrice).toBe(59900)
+        expect(adultLine?.pricingSnapshot?.rateTypeId).toBe(BTLD)
+        expect(adultLine?.pricingSnapshot?.rateTypeInherited).toBe(true)
+      })
     })
   })
 })

@@ -67,7 +67,7 @@ export interface SuiteLegState {
   /** Hotel legs only: `pre`/`post` derive serviceDate from the train leg, `custom` leaves it manual. */
   dateAnchor: HotelDateAnchor | null
   notes: string | null
-  /** Per-leg rate type; null falls back to the system default at pricing time. */
+  /** Explicit per-leg rate type; null inherits the supplier's quoted rate at pricing time. */
   rateTypeId: string | null
   units: SuiteUnitState[]
   /** 'auto' drives the "Auto-filled" chip — cleared (by the caller, in updateLegState) the
@@ -81,7 +81,7 @@ export interface TransportLegState {
   supplierKind: SupplierKind
   selected: boolean
   routeId: string | null
-  /** Per-leg rate type; null falls back to the system default at pricing time. */
+  /** Explicit per-leg rate type; null inherits the supplier's quoted rate at pricing time. */
   rateTypeId: string | null
   requests: BookingTransportRequest[]
   origin: "auto" | "consultant"
@@ -162,10 +162,7 @@ export function createDraftTransportRequest(leg: PackageLeg, routeId?: string | 
     supplierId: leg.supplierId,
     routeId: null,
     suiteTypeId: null,
-    // apply-dialog-state.ts is Build Booking's state model exclusively (the catalogue "apply
-    // package" dialog that once shared it is dead code) -- leg.id here is always a
-    // booking_services.id, so it belongs in serviceId, not packageLegId.
-    packageLegId: null,
+    // leg.id here is always a booking_services.id, so it belongs in serviceId.
     serviceId: leg.id,
     pickupPoint: route?.pickupPoint ?? "",
     dropoffPoint: route?.dropoffPoint ?? "",
@@ -203,12 +200,6 @@ export interface BuildDefaultLegStatesOptions {
   tripStartDate: string | null
   /** Booking-level totals per supplier — seeds the first unit's passenger split on split legs. */
   totalsBySupplierId?: Record<string, PassengerTotals>
-  /**
-   * Seeds each leg's rate type. Per-leg rather than one shared value because the precedence runs
-   * customer default → that leg's supplier default → system default, so two legs from different
-   * suppliers can seed differently.
-   */
-  resolveLegRateTypeId?: (leg: PackageLeg) => string | null
 }
 
 export function buildDefaultLegStates(
@@ -230,7 +221,7 @@ function buildRawDefaultLegStates(
         supplierKind: leg.supplierKind,
         selected: leg.supplierKind === "train_operator",
         routeId: defaultRouteId(leg),
-        rateTypeId: options.resolveLegRateTypeId?.(leg) ?? null,
+        rateTypeId: null,
         requests: [createDraftTransportRequest(leg)],
         origin: "consultant",
       } satisfies TransportLegState
@@ -254,7 +245,7 @@ function buildRawDefaultLegStates(
       // An un-anchored hotel keeps today's behaviour: a manually picked service date.
       dateAnchor: isHotel ? leg.dateAnchor ?? "custom" : null,
       notes: null,
-      rateTypeId: options.resolveLegRateTypeId?.(leg) ?? null,
+      rateTypeId: null,
       units: [createDraftUnit(totals)],
       origin: "consultant",
     } satisfies SuiteLegState
@@ -349,7 +340,7 @@ export function hydrateFromSaved(
 
     if (fallback.kind === "transport") {
       const legRequests = transportRequests
-        .filter((request) => request.serviceId === fallback.legId || request.packageLegId === fallback.legId)
+        .filter((request) => request.serviceId === fallback.legId)
         .slice()
         .sort((a, b) => a.sortOrder - b.sortOrder)
       return {
@@ -482,7 +473,6 @@ export interface TransportRequestsPutBody {
     supplierId: string | null
     routeId: string | null
     suiteTypeId: string | null
-    packageLegId: string | null
     serviceId: string | null
     pickupPoint: string
     dropoffPoint: string
@@ -505,7 +495,7 @@ export function toTransportRequestsPut(
   states: ApplyLegState[],
   existing: BookingTransportRequest[],
 ): TransportRequestsPutBody {
-  const untouched = existing.filter((request) => !request.packageLegId && !request.serviceId)
+  const untouched = existing.filter((request) => !request.serviceId)
   const managed = states.flatMap((state) =>
     state.kind === "transport" && state.selected ? state.requests : [],
   )
@@ -517,7 +507,6 @@ export function toTransportRequestsPut(
       supplierId: request.supplierId,
       routeId: request.routeId,
       suiteTypeId: request.suiteTypeId,
-      packageLegId: request.packageLegId,
       serviceId: request.serviceId,
       pickupPoint: request.pickupPoint,
       dropoffPoint: request.dropoffPoint,

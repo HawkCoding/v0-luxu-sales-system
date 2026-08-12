@@ -81,7 +81,49 @@ Use this setup to enable "Sign in with Microsoft" while authorizing access from 
 - Supabase Dashboard -> Authentication -> URL Configuration
 - Ensure these are present:
   - `http://localhost:3000/auth/callback`
-  - Production callback URL if app domain differs from local
+  - `http://localhost:3000/auth/confirm` (password recovery — see below)
+  - Production callback and confirm URLs if the app domain differs from local
+
+### 3b) Password recovery email template (hosted projects)
+
+Recovery links must carry a token hash, not a PKCE `code`: the PKCE verifier is a
+cookie in the browser that requested the reset, so a `code` link dies when it is
+opened on a phone (QA 02, F02-7). The local stack is configured in
+`supabase/config.toml` (`[auth.email.template.recovery]` →
+`supabase/templates/recovery.html`). Hosted projects keep their template in
+Supabase's own database, so a deploy cannot carry it.
+
+**Primary path — `scripts/sync-auth-recovery-config.mjs`.** Patches only the
+redirect allow-list and the recovery subject/body on a hosted project, leaving
+rate limits, external providers and JWT settings untouched. Dry run is the
+default; a snapshot of the current auth config is written to a temp directory
+first, for rollback.
+
+```
+pnpm auth:config:check:dev     # dry run, shows the diff
+pnpm auth:config:push:dev      # apply
+
+pnpm auth:config:check:prod
+ALLOW_PRODUCTION_AUTH_CONFIG_PUSH=I_UNDERSTAND_THIS_WRITES_TO_PRODUCTION pnpm auth:config:push:prod
+```
+
+Needs `SUPABASE_ACCESS_TOKEN` in `.env.local` and
+`SUPABASE_DEV_PROJECT_REF` / `SUPABASE_PROD_PROJECT_REF` in `.env.sync.local`.
+Do **not** use `supabase config push` for this — it would carry this repo's
+local-only `[auth]` values (including `email_sent = 2` per hour) into the hosted
+project.
+
+**Fallback — by hand in the dashboard:**
+
+- Authentication -> URL Configuration -> Redirect URLs -> add
+  `https://<domain>/auth/confirm` (keep `/auth/callback`, Azure OAuth uses it)
+- Authentication -> Email Templates -> Reset Password -> paste
+  `supabase/templates/recovery.html`, link target:
+  `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=recovery&next=/auth/set-new-password`
+
+Until one of those is done, those projects keep sending `code` links;
+`/auth/confirm` still accepts them as a fallback, but they remain same-browser
+only. Verify by requesting a reset on a desktop and opening the email on a phone.
 
 ### 4) User authorization model
 

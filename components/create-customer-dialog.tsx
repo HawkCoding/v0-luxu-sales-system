@@ -30,7 +30,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { ChevronDown, Loader2 } from "lucide-react"
 import { TITLES, COUNTRIES } from "@/lib/form-data"
-import { useRateTypes } from "@/lib/use-data"
+import { PHONE_VALIDATION_MESSAGE, isPlausiblePhone } from "@/lib/phone-format"
 
 interface CreateCustomerDialogProps {
   open: boolean
@@ -52,7 +52,6 @@ interface FormState {
   vipStatus: boolean
   preferences: string
   communicationPreferences: string
-  defaultRateTypeId: string
 }
 
 type FormField = keyof Omit<
@@ -64,7 +63,6 @@ type FormField = keyof Omit<
   | "vipStatus"
   | "preferences"
   | "communicationPreferences"
-  | "defaultRateTypeId"
 >
 type FormErrors = Record<FormField, string | null>
 type FormTouched = Partial<Record<FormField, boolean>>
@@ -86,7 +84,6 @@ function getInitialForm(): FormState {
     vipStatus: false,
     preferences: "",
     communicationPreferences: "",
-    defaultRateTypeId: "",
   }
 }
 
@@ -101,7 +98,8 @@ function validateForm(form: FormState): FormErrors {
         : !EMAIL_PATTERN.test(form.email.trim())
           ? "Must be a valid email address"
           : null,
-    phone: null,
+    phone:
+      form.phone.trim().length > 0 && !isPlausiblePhone(form.phone) ? PHONE_VALIDATION_MESSAGE : null,
     country: null,
   }
 }
@@ -112,8 +110,6 @@ export function CreateCustomerDialog({ open, onOpenChange, onSuccess }: CreateCu
   const [isSaving, setIsSaving] = useState(false)
   const [emailConflictError, setEmailConflictError] = useState<string | null>(null)
   const [advancedOpen, setAdvancedOpen] = useState(false)
-  const { data: rateTypesData } = useRateTypes()
-  const rateTypes = (rateTypesData?.rateTypes ?? []).filter((rt) => !rt.archivedAt)
 
   const errors = useMemo(() => validateForm(form), [form])
   const hasErrors = useMemo(() => Object.values(errors).some((e) => e !== null), [errors])
@@ -174,7 +170,6 @@ export function CreateCustomerDialog({ open, onOpenChange, onSuccess }: CreateCu
           communication_preferences: form.communicationPreferences.trim()
             ? form.communicationPreferences.trim()
             : null,
-          default_rate_type_id: form.defaultRateTypeId || null,
         }),
       })
 
@@ -299,8 +294,13 @@ export function CreateCustomerDialog({ open, onOpenChange, onSuccess }: CreateCu
               type="tel"
               value={form.phone}
               onChange={(e) => setField("phone", e.target.value)}
+              onBlur={() => markTouched("phone")}
+              className={getFieldClassName("phone")}
               placeholder="+1 555 000 0000"
             />
+            {touched.phone && errors.phone && (
+              <p className="text-xs text-destructive">{errors.phone}</p>
+            )}
           </div>
 
           {/* Country */}
@@ -425,31 +425,6 @@ export function CreateCustomerDialog({ open, onOpenChange, onSuccess }: CreateCu
                       maxLength={2000}
                     />
                   </div>
-
-                  {/* Default rate type */}
-                  {rateTypes.length > 0 && (
-                    <div className="col-span-2 space-y-1.5">
-                      <Label htmlFor="defaultRateTypeId">Default rate type</Label>
-                      <Select
-                        value={form.defaultRateTypeId}
-                        onValueChange={(v) => setField("defaultRateTypeId", v)}
-                      >
-                        <SelectTrigger id="defaultRateTypeId" className="h-9">
-                          <SelectValue placeholder="System default" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {rateTypes.map((rt) => (
-                            <SelectItem key={rt.id} value={rt.id}>
-                              {rt.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-muted-foreground">
-                        Pre-selects the rate version (e.g. Resident) when quoting this customer.
-                      </p>
-                    </div>
-                  )}
 
                   {/* Communication Preferences */}
                   <div className="col-span-2 space-y-1.5">

@@ -75,7 +75,7 @@ export function SessionTimeoutGuard() {
     clearTimers()
     setWarningOpen(false)
     void logoutRef.current().finally(() => {
-      window.location.replace("/login")
+      window.location.replace("/login?error=session-expired")
     })
   }, [clearTimers])
 

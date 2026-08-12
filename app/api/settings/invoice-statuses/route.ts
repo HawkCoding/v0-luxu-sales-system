@@ -11,17 +11,18 @@ export async function GET() {
   return Response.json({ options })
 }
 
+// Only the four system roles are storable: every status is derived from the booking's payment
+// state, so a role-less "manual" label would never be applied to an invoice.
 const putSchema = z.object({
   options: z
     .array(
       z.object({
-        // System roles drive automatic derivation; null = manual-only label.
-        role: z.enum(["provisional", "confirmed", "paid", "cancelled"]).nullable(),
+        role: z.enum(["provisional", "confirmed", "paid", "cancelled"]),
         label: z.string().trim().min(1).max(40),
       }),
     )
     .min(1)
-    .max(20),
+    .max(4),
 })
 
 export async function PUT(req: Request) {

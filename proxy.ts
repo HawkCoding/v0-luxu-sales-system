@@ -53,7 +53,10 @@ export async function proxy(request: NextRequest) {
   // Must not run any code between createServerClient and getUser that writes cookies.
   try {
     const { data, error } = await supabase.auth.getUser()
-    if (request.nextUrl.pathname === "/login" && data.user) {
+    // `?error=` means a guard just ejected this session to /login. Bouncing it
+    // back to /app would restart the loop the guard was breaking out of.
+    const isEjectedToLogin = request.nextUrl.searchParams.has("error")
+    if (request.nextUrl.pathname === "/login" && data.user && !isEjectedToLogin) {
       const redirectUrl = request.nextUrl.clone()
       redirectUrl.pathname = "/app"
       redirectUrl.search = ""

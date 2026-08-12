@@ -21,10 +21,13 @@ export async function GET(req: Request) {
   }
 
   const url = new URL(req.url)
+  // A blank parameter means "no identifier", not "invalid identifier" — a form
+  // that checks on every keystroke starts out empty.
+  const readParam = (name: string) => url.searchParams.get(name)?.trim() || undefined
   const parsed = querySchema.safeParse({
-    email: url.searchParams.get("email") ?? undefined,
-    phone: url.searchParams.get("phone") ?? undefined,
-    excludeId: url.searchParams.get("excludeId") ?? undefined,
+    email: readParam("email"),
+    phone: readParam("phone"),
+    excludeId: readParam("excludeId"),
   })
 
   if (!parsed.success) {

@@ -4,6 +4,7 @@ import { useState } from "react"
 import useSWR from "swr"
 import { toast } from "sonner"
 import { useData } from "@/lib/use-data"
+import { useRole } from "@/lib/role-context"
 import { formatDisplayDate } from "@/lib/date-format"
 import { getCanonicalPipelineStage, getPipelineStageLabel, PIPELINE_STAGES, type PipelineStage } from "@/lib/types"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -28,7 +29,13 @@ interface ScheduledEmailDetail {
 
 export default function DashboardPage() {
   const { data, isLoading, mutate } = useData(["bookings", "correspondences", "customers"])
-  const { data: errorLogCountData } = useSWR<{ count: number }>("/api/error-logs?resolved=false&count=true", fetcher)
+  const { can } = useRole()
+  // /api/error-logs is admin+manager only — consultants and readonly would just get a 403.
+  const canViewErrorLogs = can("view:error_logs")
+  const { data: errorLogCountData } = useSWR<{ count: number }>(
+    canViewErrorLogs ? "/api/error-logs?resolved=false&count=true" : null,
+    fetcher,
+  )
   const unresolvedErrors = errorLogCountData?.count ?? 0
   const [busyId, setBusyId] = useState<string | null>(null)
   const [sendTarget, setSendTarget] = useState<ScheduledEmailDetail | null>(null)
@@ -106,7 +113,9 @@ export default function DashboardPage() {
         <StatCard icon={FileText} label="Quotes Sent" value={quotedJobs} href="/app/pipeline" />
         <StatCard icon={CreditCard} label="Deposits Paid" value={depositsPaid} href="/app/payments" />
         <StatCard icon={CreditCard} label="Full Payment" value={fullPayments} href="/app/payments" />
-        <StatCard icon={AlertTriangle} label="Unresolved Errors" value={unresolvedErrors} href="/app/settings/error-log" />
+        {canViewErrorLogs && (
+          <StatCard icon={AlertTriangle} label="Unresolved Errors" value={unresolvedErrors} href="/app/settings/error-log" />
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

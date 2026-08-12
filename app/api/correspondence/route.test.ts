@@ -227,15 +227,6 @@ function buildAuth(options: AuthOptions = {}) {
       if (table === "audit_logs") {
         return { insert: auditInsert }
       }
-      if (table === "booking_package_selections") {
-        return {
-          select: vi.fn(() => ({
-            eq: vi.fn(() => ({
-              eq: vi.fn(async () => ({ data: [], error: null })),
-            })),
-          })),
-        }
-      }
       if (table === "booking_services") {
         return {
           select: vi.fn(() => ({

@@ -11,7 +11,7 @@ import type {
 import { fetchDefaultAgeBuckets, resolveAgeBuckets } from "@/lib/pricing/age-buckets"
 import { projectPassengerTotals } from "@/lib/packages/passenger-totals"
 import { isRateCardValidOn, selectRateCard } from "@/lib/rate-cards/resolve"
-import { loadSupplierDefaultRateTypeResolver } from "@/lib/rate-types/load-supplier-defaults"
+import { loadSupplierRateTiersResolver } from "@/lib/rate-types/load-supplier-rate-tiers"
 import {
   buildCommissionBreakdown,
   calculateCommissionAmount,
@@ -101,14 +101,14 @@ export async function priceExtraLineItems(
     .single()
   if (jobError || !job) throw new Error("Job not found")
 
-  const [{ data: supplier, error: supplierError }, resolveSupplierDefaultRateTypeId, { data: rateTypeRows }] =
+  const [{ data: supplier, error: supplierError }, resolveSupplierRateTiers, { data: rateTypeRows }] =
     await Promise.all([
       supabase
         .from("suppliers")
-        .select("id, name, kind, infant_max_age, child_max_age, default_rate_type_id")
+        .select("id, name, kind, infant_max_age, child_max_age, base_rate_type_id, quote_rate_type_id")
         .eq("id", supplierId)
         .single(),
-      loadSupplierDefaultRateTypeResolver(supabase),
+      loadSupplierRateTiersResolver(supabase),
       // Names the chosen rate type in errors, and stamps code/name into the snapshot so an extra
       // line carries the same rate-type provenance a package line does.
       supabase.from("rate_types").select("id, code, name"),
@@ -155,6 +155,10 @@ export async function priceExtraLineItems(
     )
   }
   // Same precedence the package builder uses -- routed through selectRateCard so the two can't drift.
+  const rateTiers = resolveSupplierRateTiers({
+    baseRateTypeId: supplier.base_rate_type_id ?? null,
+    quoteRateTypeId: supplier.quote_rate_type_id ?? null,
+  })
   const selected = selectRateCard(
     validCards.map((candidate) => ({
       ...candidate,
@@ -165,9 +169,9 @@ export async function priceExtraLineItems(
       validTo: candidate.valid_to,
     })),
     rateTypeId,
-    null,
+    rateTiers.quoteRateTypeId,
+    rateTiers.baseRateTypeId,
     fallbackRateTypeId,
-    resolveSupplierDefaultRateTypeId(supplier.kind as SupplierKind, supplier.default_rate_type_id ?? null),
   )
   if (!selected) {
     throw new Error(`No rate card covers ${travelDate} for "${suiteType.name}" on "${route.name}" (${supplier.name}).`)

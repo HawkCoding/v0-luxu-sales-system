@@ -398,196 +398,6 @@ export type Database = {
         }
         Relationships: []
       }
-      booking_package_selection_units: {
-        Row: {
-          adult_count: number
-          bathroom_type_id: string | null
-          bedroom_layout_id: string | null
-          bedroom_type_id: string | null
-          child_count: number
-          created_at: string
-          id: string
-          infant_count: number
-          selection_id: string
-          sort_order: number
-          suite_type_id: string | null
-          updated_at: string
-        }
-        Insert: {
-          adult_count?: number
-          bathroom_type_id?: string | null
-          bedroom_layout_id?: string | null
-          bedroom_type_id?: string | null
-          child_count?: number
-          created_at?: string
-          id?: string
-          infant_count?: number
-          selection_id: string
-          sort_order?: number
-          suite_type_id?: string | null
-          updated_at?: string
-        }
-        Update: {
-          adult_count?: number
-          bathroom_type_id?: string | null
-          bedroom_layout_id?: string | null
-          bedroom_type_id?: string | null
-          child_count?: number
-          created_at?: string
-          id?: string
-          infant_count?: number
-          selection_id?: string
-          sort_order?: number
-          suite_type_id?: string | null
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "booking_package_selection_units_bathroom_type_id_fkey"
-            columns: ["bathroom_type_id"]
-            isOneToOne: false
-            referencedRelation: "bathroom_types"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "booking_package_selection_units_bedroom_layout_id_fkey"
-            columns: ["bedroom_layout_id"]
-            isOneToOne: false
-            referencedRelation: "bedroom_layouts"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "booking_package_selection_units_bedroom_type_id_fkey"
-            columns: ["bedroom_type_id"]
-            isOneToOne: false
-            referencedRelation: "bedroom_types"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "booking_package_selection_units_selection_id_fkey"
-            columns: ["selection_id"]
-            isOneToOne: false
-            referencedRelation: "booking_package_selections"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "booking_package_selection_units_suite_type_id_fkey"
-            columns: ["suite_type_id"]
-            isOneToOne: false
-            referencedRelation: "suite_types"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      booking_package_selections: {
-        Row: {
-          booking_id: string
-          created_at: string
-          date_anchor: string | null
-          excursions: string[] | null
-          id: string
-          nights: number | null
-          notes: string | null
-          package_leg_id: string
-          rate_type_id: string | null
-          route_id: string | null
-          route_reversed: boolean
-          selected: boolean
-          service_date: string | null
-          suite_type_id: string | null
-          supplier_contact_name: string | null
-          supplier_id: string | null
-          supplier_reference: string | null
-          updated_at: string
-          voucher_footnote: string | null
-        }
-        Insert: {
-          booking_id: string
-          created_at?: string
-          date_anchor?: string | null
-          excursions?: string[] | null
-          id?: string
-          nights?: number | null
-          notes?: string | null
-          package_leg_id: string
-          rate_type_id?: string | null
-          route_id?: string | null
-          route_reversed?: boolean
-          selected?: boolean
-          service_date?: string | null
-          suite_type_id?: string | null
-          supplier_contact_name?: string | null
-          supplier_id?: string | null
-          supplier_reference?: string | null
-          updated_at?: string
-          voucher_footnote?: string | null
-        }
-        Update: {
-          booking_id?: string
-          created_at?: string
-          date_anchor?: string | null
-          excursions?: string[] | null
-          id?: string
-          nights?: number | null
-          notes?: string | null
-          package_leg_id?: string
-          rate_type_id?: string | null
-          route_id?: string | null
-          route_reversed?: boolean
-          selected?: boolean
-          service_date?: string | null
-          suite_type_id?: string | null
-          supplier_contact_name?: string | null
-          supplier_id?: string | null
-          supplier_reference?: string | null
-          updated_at?: string
-          voucher_footnote?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "booking_package_selections_booking_id_fkey"
-            columns: ["booking_id"]
-            isOneToOne: false
-            referencedRelation: "bookings"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "booking_package_selections_package_leg_id_fkey"
-            columns: ["package_leg_id"]
-            isOneToOne: false
-            referencedRelation: "package_legs"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "booking_package_selections_rate_type_id_fkey"
-            columns: ["rate_type_id"]
-            isOneToOne: false
-            referencedRelation: "rate_types"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "booking_package_selections_route_id_fkey"
-            columns: ["route_id"]
-            isOneToOne: false
-            referencedRelation: "routes"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "booking_package_selections_suite_type_id_fkey"
-            columns: ["suite_type_id"]
-            isOneToOne: false
-            referencedRelation: "suite_types"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "booking_package_selections_supplier_id_fkey"
-            columns: ["supplier_id"]
-            isOneToOne: false
-            referencedRelation: "suppliers"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       booking_reservation_details: {
         Row: {
           agency_address: string | null
@@ -1007,7 +817,6 @@ export type Database = {
           id: string
           luggage_count: number | null
           notes: string | null
-          package_leg_id: string | null
           passenger_count: number | null
           pickup_at: string | null
           pickup_point: string
@@ -1031,7 +840,6 @@ export type Database = {
           id?: string
           luggage_count?: number | null
           notes?: string | null
-          package_leg_id?: string | null
           passenger_count?: number | null
           pickup_at?: string | null
           pickup_point: string
@@ -1055,7 +863,6 @@ export type Database = {
           id?: string
           luggage_count?: number | null
           notes?: string | null
-          package_leg_id?: string | null
           passenger_count?: number | null
           pickup_at?: string | null
           pickup_point?: string
@@ -1077,13 +884,6 @@ export type Database = {
             columns: ["booking_id"]
             isOneToOne: false
             referencedRelation: "bookings"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "booking_transport_requests_package_leg_id_fkey"
-            columns: ["package_leg_id"]
-            isOneToOne: false
-            referencedRelation: "package_legs"
             referencedColumns: ["id"]
           },
           {
@@ -1199,7 +999,6 @@ export type Database = {
           outcome_set_at: string | null
           outcome_set_by: string | null
           owner_user_id: string | null
-          package_id: string | null
           package_travel_date: string | null
           promotion_code: string | null
           purpose: Database["public"]["Enums"]["booking_purpose"]
@@ -1272,7 +1071,6 @@ export type Database = {
           outcome_set_at?: string | null
           outcome_set_by?: string | null
           owner_user_id?: string | null
-          package_id?: string | null
           package_travel_date?: string | null
           promotion_code?: string | null
           purpose: Database["public"]["Enums"]["booking_purpose"]
@@ -1345,7 +1143,6 @@ export type Database = {
           outcome_set_at?: string | null
           outcome_set_by?: string | null
           owner_user_id?: string | null
-          package_id?: string | null
           package_travel_date?: string | null
           promotion_code?: string | null
           purpose?: Database["public"]["Enums"]["booking_purpose"]
@@ -1402,13 +1199,6 @@ export type Database = {
             columns: ["outcome_reason_id"]
             isOneToOne: false
             referencedRelation: "outcome_reasons"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "bookings_package_id_fkey"
-            columns: ["package_id"]
-            isOneToOne: false
-            referencedRelation: "packages"
             referencedColumns: ["id"]
           },
           {
@@ -1593,7 +1383,6 @@ export type Database = {
           country: string | null
           created_at: string
           date_of_birth: string | null
-          default_rate_type_id: string | null
           email: string
           fax: string | null
           first_name: string
@@ -1622,7 +1411,6 @@ export type Database = {
           country?: string | null
           created_at?: string
           date_of_birth?: string | null
-          default_rate_type_id?: string | null
           email: string
           fax?: string | null
           first_name: string
@@ -1651,7 +1439,6 @@ export type Database = {
           country?: string | null
           created_at?: string
           date_of_birth?: string | null
-          default_rate_type_id?: string | null
           email?: string
           fax?: string | null
           first_name?: string
@@ -1671,15 +1458,7 @@ export type Database = {
           vat_number?: string | null
           vip_status?: boolean
         }
-        Relationships: [
-          {
-            foreignKeyName: "customers_default_rate_type_id_fkey"
-            columns: ["default_rate_type_id"]
-            isOneToOne: false
-            referencedRelation: "rate_types"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       documents: {
         Row: {
@@ -1903,7 +1682,6 @@ export type Database = {
           hotel_supplier_id: string
           id: string
           location_id: string
-          package_id: string | null
           phase: Database["public"]["Enums"]["hotel_phase"]
           updated_at: string
         }
@@ -1913,7 +1691,6 @@ export type Database = {
           hotel_supplier_id: string
           id?: string
           location_id: string
-          package_id?: string | null
           phase: Database["public"]["Enums"]["hotel_phase"]
           updated_at?: string
         }
@@ -1923,7 +1700,6 @@ export type Database = {
           hotel_supplier_id?: string
           id?: string
           location_id?: string
-          package_id?: string | null
           phase?: Database["public"]["Enums"]["hotel_phase"]
           updated_at?: string
         }
@@ -1940,13 +1716,6 @@ export type Database = {
             columns: ["location_id"]
             isOneToOne: false
             referencedRelation: "locations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "hotel_offers_package_id_fkey"
-            columns: ["package_id"]
-            isOneToOne: false
-            referencedRelation: "packages"
             referencedColumns: ["id"]
           },
         ]
@@ -2349,129 +2118,6 @@ export type Database = {
           created_at?: string
           id?: string
           label?: string
-        }
-        Relationships: []
-      }
-      package_leg_routes: {
-        Row: {
-          created_at: string
-          package_leg_id: string
-          route_id: string
-        }
-        Insert: {
-          created_at?: string
-          package_leg_id: string
-          route_id: string
-        }
-        Update: {
-          created_at?: string
-          package_leg_id?: string
-          route_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "package_leg_routes_package_leg_id_fkey"
-            columns: ["package_leg_id"]
-            isOneToOne: false
-            referencedRelation: "package_legs"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "package_leg_routes_route_id_fkey"
-            columns: ["route_id"]
-            isOneToOne: false
-            referencedRelation: "routes"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      package_legs: {
-        Row: {
-          created_at: string
-          date_anchor: string | null
-          id: string
-          label: string | null
-          package_id: string
-          sort_order: number
-          supplier_id: string
-        }
-        Insert: {
-          created_at?: string
-          date_anchor?: string | null
-          id?: string
-          label?: string | null
-          package_id: string
-          sort_order?: number
-          supplier_id: string
-        }
-        Update: {
-          created_at?: string
-          date_anchor?: string | null
-          id?: string
-          label?: string | null
-          package_id?: string
-          sort_order?: number
-          supplier_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "package_legs_package_id_fkey"
-            columns: ["package_id"]
-            isOneToOne: false
-            referencedRelation: "packages"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "package_legs_supplier_id_fkey"
-            columns: ["supplier_id"]
-            isOneToOne: false
-            referencedRelation: "suppliers"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      packages: {
-        Row: {
-          active: boolean
-          created_at: string
-          currency: string
-          description: string | null
-          duration_nights: number | null
-          fixed_price_per_person: number | null
-          id: string
-          markup_pct: number
-          name: string
-          single_supplement_pct: number
-          slug: string
-          updated_at: string
-        }
-        Insert: {
-          active?: boolean
-          created_at?: string
-          currency?: string
-          description?: string | null
-          duration_nights?: number | null
-          fixed_price_per_person?: number | null
-          id?: string
-          markup_pct?: number
-          name: string
-          single_supplement_pct?: number
-          slug: string
-          updated_at?: string
-        }
-        Update: {
-          active?: boolean
-          created_at?: string
-          currency?: string
-          description?: string | null
-          duration_nights?: number | null
-          fixed_price_per_person?: number | null
-          id?: string
-          markup_pct?: number
-          name?: string
-          single_supplement_pct?: number
-          slug?: string
-          updated_at?: string
         }
         Relationships: []
       }
@@ -2967,8 +2613,10 @@ export type Database = {
       routes: {
         Row: {
           active: boolean
+          arrival_time: string | null
           created_at: string
           default_excursions: string[]
+          departure_time: string | null
           destination_location_id: string | null
           direction_mode: Database["public"]["Enums"]["route_direction_mode"]
           dropoff_point: string | null
@@ -2980,6 +2628,8 @@ export type Database = {
           one_way_fee: number | null
           origin_location_id: string | null
           pickup_point: string | null
+          return_arrival_time: string | null
+          return_departure_time: string | null
           security_deposit: number | null
           supplier_id: string
           transport_service_type: string | null
@@ -2987,8 +2637,10 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          arrival_time?: string | null
           created_at?: string
           default_excursions?: string[]
+          departure_time?: string | null
           destination_location_id?: string | null
           direction_mode?: Database["public"]["Enums"]["route_direction_mode"]
           dropoff_point?: string | null
@@ -3000,6 +2652,8 @@ export type Database = {
           one_way_fee?: number | null
           origin_location_id?: string | null
           pickup_point?: string | null
+          return_arrival_time?: string | null
+          return_departure_time?: string | null
           security_deposit?: number | null
           supplier_id: string
           transport_service_type?: string | null
@@ -3007,8 +2661,10 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          arrival_time?: string | null
           created_at?: string
           default_excursions?: string[]
+          departure_time?: string | null
           destination_location_id?: string | null
           direction_mode?: Database["public"]["Enums"]["route_direction_mode"]
           dropoff_point?: string | null
@@ -3020,6 +2676,8 @@ export type Database = {
           one_way_fee?: number | null
           origin_location_id?: string | null
           pickup_point?: string | null
+          return_arrival_time?: string | null
+          return_departure_time?: string | null
           security_deposit?: number | null
           supplier_id?: string
           transport_service_type?: string | null
@@ -3454,35 +3112,6 @@ export type Database = {
           },
         ]
       }
-      supplier_kind_default_rate_types: {
-        Row: {
-          created_at: string
-          kind: string
-          rate_type_id: string
-          updated_at: string
-        }
-        Insert: {
-          created_at?: string
-          kind: string
-          rate_type_id: string
-          updated_at?: string
-        }
-        Update: {
-          created_at?: string
-          kind?: string
-          rate_type_id?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "supplier_kind_default_rate_types_rate_type_id_fkey"
-            columns: ["rate_type_id"]
-            isOneToOne: false
-            referencedRelation: "rate_types"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       supplier_pricing_options: {
         Row: {
           created_at: string
@@ -3703,10 +3332,10 @@ export type Database = {
       suppliers: {
         Row: {
           active: boolean
+          base_rate_type_id: string | null
           child_max_age: number | null
           created_at: string
           default_contact_name: string | null
-          default_rate_type_id: string | null
           default_time_end: string | null
           default_time_start: string | null
           description: string | null
@@ -3725,6 +3354,7 @@ export type Database = {
           notes: string | null
           phone: string | null
           pricing_mode: Database["public"]["Enums"]["supplier_pricing_mode"]
+          quote_rate_type_id: string | null
           single_supplement_pct: number
           slug: string
           status: string
@@ -3734,10 +3364,10 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          base_rate_type_id?: string | null
           child_max_age?: number | null
           created_at?: string
           default_contact_name?: string | null
-          default_rate_type_id?: string | null
           default_time_end?: string | null
           default_time_start?: string | null
           description?: string | null
@@ -3756,6 +3386,7 @@ export type Database = {
           notes?: string | null
           phone?: string | null
           pricing_mode?: Database["public"]["Enums"]["supplier_pricing_mode"]
+          quote_rate_type_id?: string | null
           single_supplement_pct?: number
           slug: string
           status?: string
@@ -3765,10 +3396,10 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          base_rate_type_id?: string | null
           child_max_age?: number | null
           created_at?: string
           default_contact_name?: string | null
-          default_rate_type_id?: string | null
           default_time_end?: string | null
           default_time_start?: string | null
           description?: string | null
@@ -3787,6 +3418,7 @@ export type Database = {
           notes?: string | null
           phone?: string | null
           pricing_mode?: Database["public"]["Enums"]["supplier_pricing_mode"]
+          quote_rate_type_id?: string | null
           single_supplement_pct?: number
           slug?: string
           status?: string
@@ -3796,8 +3428,8 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "suppliers_default_rate_type_id_fkey"
-            columns: ["default_rate_type_id"]
+            foreignKeyName: "suppliers_base_rate_type_id_fkey"
+            columns: ["base_rate_type_id"]
             isOneToOne: false
             referencedRelation: "rate_types"
             referencedColumns: ["id"]
@@ -3814,6 +3446,13 @@ export type Database = {
             columns: ["location_id"]
             isOneToOne: false
             referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "suppliers_quote_rate_type_id_fkey"
+            columns: ["quote_rate_type_id"]
+            isOneToOne: false
+            referencedRelation: "rate_types"
             referencedColumns: ["id"]
           },
         ]
@@ -4130,6 +3769,10 @@ export type Database = {
       default_rate_type_id: { Args: never; Returns: string }
       next_booking_number: {
         Args: { p_product_code: string; p_year?: number }
+        Returns: number
+      }
+      next_booking_number_block: {
+        Args: { p_count: number; p_product_code: string; p_year?: number }
         Returns: number
       }
       replace_booking_transport_requests: {

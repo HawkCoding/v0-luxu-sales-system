@@ -4,7 +4,8 @@ import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
 import { mapRateType } from "@/lib/suppliers"
 
-const ALLOWED_ROLES = new Set(["admin", "manager"])
+// Admin only — same gate as the Settings page link and GET /api/rate-types.
+const ALLOWED_ROLES = new Set(["admin"])
 
 const patchSchema = z
   .object({

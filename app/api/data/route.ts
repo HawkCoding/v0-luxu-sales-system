@@ -53,6 +53,14 @@ function addDaysToDateString(value: string, days: number): string {
 export async function GET(req: Request) {
   const supabase = await createSessionClient()
 
+  // This is the app's widest data route; RLS is not its only line of defence.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+  }
+
   const url = new URL(req.url)
   const includeParam = url.searchParams.get("include")
   const requested: ReadonlySet<Entity> = includeParam
@@ -72,17 +80,17 @@ export async function GET(req: Request) {
 
   const auditCutoff = getAuditCutoffDate().toISOString()
   const defaultDepositPercentage = want("settings") ? await getDefaultDepositPercentage(supabase) : null
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  const { data: profile } = user
-    ? await supabase
-        .from("profiles")
-        .select("clearance_level")
-        .eq("user_id", user.id)
-        .single()
-    : { data: null }
-  const canReadAuditLogs = profile?.clearance_level === "admin" || profile?.clearance_level === "manager"
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("clearance_level")
+    .eq("user_id", user.id)
+    .single()
+  const isManagerOrAdmin =
+    profile?.clearance_level === "admin" || profile?.clearance_level === "manager"
+  const canReadAuditLogs = isManagerOrAdmin
+  // Mirrors "view:templates" — RLS on templates allows any authenticated user,
+  // so the per-entity gate has to live here (same shape as auditLogs above).
+  const canReadTemplates = isManagerOrAdmin
 
   const emptyResult = Promise.resolve({ data: [] })
 
@@ -143,7 +151,7 @@ export async function GET(req: Request) {
     want("pipelineHistory")
       ? supabase.from("pipeline_history").select(PIPELINE_HISTORY_COLUMNS).order("moved_at", { ascending: false })
       : emptyResult,
-    want("templates")
+    want("templates") && canReadTemplates
       ? supabase.from("templates").select(TEMPLATE_COLUMNS).order("key", { ascending: true })
       : emptyResult,
   ])

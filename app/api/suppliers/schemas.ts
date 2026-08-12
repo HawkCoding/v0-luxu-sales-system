@@ -9,6 +9,17 @@ export const dateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD")
 
+/** Stricter than TIME_PATTERN: a real wall-clock time, so an out-of-range hour is a 400 here rather
+ * than a raw Postgres error at insert. */
+const CLOCK_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/
+
+/** A route's departure/arrival time. A cleared `<input type="time">` posts "", which means "unset"
+ * here rather than a validation error — the route simply has no schedule captured yet. */
+const routeTimeSchema = z
+  .union([z.string().regex(CLOCK_TIME_PATTERN, "Expected HH:MM"), z.literal("")])
+  .nullable()
+  .transform((value) => (value ? value : null))
+
 export const suiteTypeSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().trim().min(1, "Suite type name is required"),
@@ -81,12 +92,25 @@ export const rateAdjustmentSchema = z.object({
   discountPct: z.number().finite().min(0).max(100),
 })
 
-/** The supplier's own default rate type; null means "inherit from the kind/system default". */
-export const defaultRateTypeIdSchema = z.string().uuid().nullable().optional()
+/** The supplier's base rate; null means "fall back to the system default rate type". */
+export const baseRateTypeIdSchema = z.string().uuid().nullable().optional()
 
-/** The default rate is the implicit 0% baseline, so it is never stored as an adjustment. */
+/** The rate this supplier's quotes use; null means "quote at the base rate". */
+export const quoteRateTypeIdSchema = z.string().uuid().nullable().optional()
+
+/**
+ * The base rate is the implicit 0% baseline, so it is never stored as an adjustment.
+ *
+ * The quoted rate must be one this supplier actually prices at -- its base rate, or a rate it
+ * carries a markdown for. Starring anything else would nominate a rate with no defined price,
+ * which is the mistake this whole split exists to prevent.
+ */
 function checkRateAdjustments(
-  value: { rateAdjustments: { rateTypeId: string }[]; defaultRateTypeId?: string | null },
+  value: {
+    rateAdjustments: { rateTypeId: string }[]
+    baseRateTypeId?: string | null
+    quoteRateTypeId?: string | null
+  },
   ctx: z.RefinementCtx,
 ) {
   const rateTypeIds = value.rateAdjustments.map((a) => a.rateTypeId)
@@ -98,11 +122,23 @@ function checkRateAdjustments(
     })
   }
 
-  if (value.defaultRateTypeId && rateTypeIds.includes(value.defaultRateTypeId)) {
+  if (value.baseRateTypeId && rateTypeIds.includes(value.baseRateTypeId)) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["rateAdjustments"],
-      message: "The default rate type is the 0% baseline and cannot also be a rate adjustment",
+      message: "The base rate is the 0% baseline and cannot also be a rate adjustment",
+    })
+  }
+
+  if (
+    value.quoteRateTypeId &&
+    value.quoteRateTypeId !== value.baseRateTypeId &&
+    !rateTypeIds.includes(value.quoteRateTypeId)
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["quoteRateTypeId"],
+      message: "The quoted rate must be the base rate or one of this supplier's applicable rates",
     })
   }
 }
@@ -157,6 +193,10 @@ export const routeSchema = z.object({
   vehicleRentalDetails: vehicleRentalRouteDetailsSchema.nullable().optional(),
   directionMode: routeDirectionModeSchema.default("one_way"),
   durationDays: z.number().int().min(1).nullable().optional(),
+  departureTime: routeTimeSchema.optional(),
+  arrivalTime: routeTimeSchema.optional(),
+  returnDepartureTime: routeTimeSchema.optional(),
+  returnArrivalTime: routeTimeSchema.optional(),
   active: z.boolean(),
   rateCards: z.array(rateCardSchema).default([]),
 })
@@ -222,6 +262,9 @@ export const supplierSaveSchema = z.object({
       message: "Location must be at least 2 characters",
     }),
   locationDetail: z.string().trim().max(255).nullable().optional(),
+  /** The supplier's own street address. Trains use per-city `stationAddresses` instead — a train
+   * boards guests at a different station in every city it serves. */
+  streetAddress: z.string().trim().max(255).nullable().optional(),
   locationId: z.string().uuid().nullable().optional(),
   description: z.string().trim().max(2000).nullable().optional(),
   notes: z.string().trim().max(5000),
@@ -241,7 +284,8 @@ export const supplierSaveSchema = z.object({
   bedroomLayouts: z.array(variantValueSchema).default([]),
   bathroomTypes: z.array(variantValueSchema).default([]),
   rateAdjustments: z.array(rateAdjustmentSchema).default([]),
-  defaultRateTypeId: defaultRateTypeIdSchema,
+  baseRateTypeId: baseRateTypeIdSchema,
+  quoteRateTypeId: quoteRateTypeIdSchema,
   expectedUpdatedAt: z.string().optional(),
 }).superRefine((value, ctx) => {
   checkRateAdjustments(value, ctx)
@@ -331,6 +375,10 @@ export const draftRouteSchema = z.object({
   vehicleRentalDetails: vehicleRentalRouteDetailsSchema.nullable().default(null),
   directionMode: routeDirectionModeSchema.default("one_way"),
   durationDays: z.number().int().min(1).nullable().default(null),
+  departureTime: routeTimeSchema.default(null),
+  arrivalTime: routeTimeSchema.default(null),
+  returnDepartureTime: routeTimeSchema.default(null),
+  returnArrivalTime: routeTimeSchema.default(null),
   active: z.boolean().default(true),
   rateCards: z.array(draftRateCardSchema).default([]),
 })
@@ -365,6 +413,7 @@ export const supplierDraftSaveSchema = z.object({
     .default(""),
   location: z.string().trim().max(255).default(""),
   locationDetail: z.string().trim().max(255).nullable().default(null),
+  streetAddress: z.string().trim().max(255).nullable().default(null),
   locationId: z.string().uuid().nullable().optional(),
   description: z.string().trim().max(2000).nullable().default(null),
   notes: z.string().trim().max(5000).default(""),
@@ -384,7 +433,8 @@ export const supplierDraftSaveSchema = z.object({
   bedroomLayouts: z.array(draftVariantValueSchema).default([]),
   bathroomTypes: z.array(draftVariantValueSchema).default([]),
   rateAdjustments: z.array(rateAdjustmentSchema).default([]),
-  defaultRateTypeId: defaultRateTypeIdSchema,
+  baseRateTypeId: baseRateTypeIdSchema,
+  quoteRateTypeId: quoteRateTypeIdSchema,
   expectedUpdatedAt: z.string().optional(),
 }).superRefine((value, ctx) => {
   checkRateAdjustments(value, ctx)

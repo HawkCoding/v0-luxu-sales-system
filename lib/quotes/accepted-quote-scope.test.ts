@@ -21,7 +21,6 @@ interface QuoteRow {
 interface MockTables {
   quotes?: QuoteRow[]
   lineItemsByQuoteId?: Record<string, { pricing_snapshot: unknown }[]>
-  selections?: { package_leg_id: string }[]
   services?: { id: string }[]
 }
 
@@ -71,9 +70,6 @@ function buildSupabase(tables: MockTables = {}) {
           items.map((item) => ({ ...item, quote_id: quoteId })),
         )
         return chain(rows)
-      }
-      if (table === "booking_package_selections") {
-        return chain((tables.selections ?? []).map((row) => ({ ...row, booking_id: BOOKING_ID, selected: true })))
       }
       if (table === "booking_services") {
         return chain((tables.services ?? []).map((row) => ({ ...row, booking_id: BOOKING_ID, selected: true })))
@@ -203,9 +199,9 @@ describe("findMissingQuotedLegs", () => {
     expect(missing).toEqual(["Irene Country Lodge"])
   })
 
-  it("matches catalogue-package legs on package_leg_id", async () => {
+  it("matches a live service on its own id", async () => {
     const missing = await findMissingQuotedLegs(
-      buildSupabase({ selections: [{ package_leg_id: "leg-train" }] }),
+      buildSupabase({ services: [{ id: "leg-train" }] }),
       BOOKING_ID,
       scopeOf(["leg-train"]),
     )

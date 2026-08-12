@@ -196,7 +196,7 @@ export async function buildInvoiceView(
     supabase
       .from("bookings")
       .select(
-        "id, consultant, assigned_salesperson_id, no_of_adults, no_of_children, no_of_suites, duration_nights, trip_start_date, trip_end_date, customer:customers(company_name, address_line1, address_line2, city, province, country, postal_code, phone, email, vat_number), package:packages!bookings_package_id_fkey(name), route:routes(name, supplier:suppliers(name))",
+        "id, consultant, assigned_salesperson_id, no_of_adults, no_of_children, no_of_suites, duration_nights, trip_start_date, trip_end_date, customer:customers(company_name, address_line1, address_line2, city, province, country, postal_code, phone, email, vat_number), route:routes(name, supplier:suppliers(name))",
       )
       .eq("id", bookingId)
       .maybeSingle(),
@@ -208,7 +208,6 @@ export async function buildInvoiceView(
   ])
 
   const customer = Array.isArray(booking?.customer) ? booking.customer[0] : booking?.customer
-  const bookingPackage = Array.isArray(booking?.package) ? booking.package[0] : booking?.package
   const route = Array.isArray(booking?.route) ? booking.route[0] : booking?.route
   const routeSupplier = Array.isArray(route?.supplier) ? route.supplier[0] : route?.supplier
 
@@ -247,7 +246,7 @@ export async function buildInvoiceView(
     })
     departure = buildDeparture(blocks, journeyHeading, {
       trainName: routeSupplier?.name ?? null,
-      tourName: bookingPackage?.name ?? null,
+      tourName: route?.name ?? null,
       durationNights: resolveDurationNights(booking, blocks),
       suites: booking?.no_of_suites ?? 0,
       adults: booking?.no_of_adults ?? 0,

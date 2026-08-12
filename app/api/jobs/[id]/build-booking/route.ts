@@ -5,7 +5,7 @@ import { writeAuditLog } from "@/lib/audit-write"
 import { loadBookingServicesPackageDetail } from "@/lib/quotes/adapters/from-booking-services"
 import type { SupplierKind } from "@/lib/types"
 import type { Database } from "@/lib/supabase/types"
-import { seedUnitsForServices } from "../package/seed"
+import { seedUnitsForServices } from "@/lib/packages/seed-service-units"
 
 export const runtime = "nodejs"
 

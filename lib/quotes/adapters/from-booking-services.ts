@@ -1,15 +1,18 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
-import { mapPackageDetail, type PackageLegWithSupplier } from "@/lib/packages"
-import { attachSuiteVariantVocab } from "@/app/api/packages/[slug]/helpers"
-import { loadSupplierDefaultRateTypeResolver } from "@/lib/rate-types/load-supplier-defaults"
+import {
+  mapPackageDetail,
+  type PackageLegRouteRow,
+  type PackageLegWithSupplier,
+  type PackageRow,
+} from "@/lib/packages"
+import { attachSuiteVariantVocab } from "@/lib/packages/suite-variant-vocab"
+import { loadSupplierRateTiersResolver } from "@/lib/rate-types/load-supplier-rate-tiers"
 import type { PackageDetail, SupplierKind } from "@/lib/types"
 import type { PackageLegSelection, PackageUnitSelection } from "@/lib/quotes/build-from-package"
 
 type BookingServiceRow = Database["public"]["Tables"]["booking_services"]["Row"]
 type BookingServiceUnitRow = Database["public"]["Tables"]["booking_service_units"]["Row"]
-type PackageRow = Database["public"]["Tables"]["packages"]["Row"]
-type PackageLegRouteRow = Database["public"]["Tables"]["package_leg_routes"]["Row"]
 type RouteRow = Database["public"]["Tables"]["routes"]["Row"]
 
 interface SupplierJoin {
@@ -17,7 +20,8 @@ interface SupplierJoin {
   description: string | null
   kind: string
   pricing_mode: "rate_card" | "manual"
-  default_rate_type_id: string | null
+  base_rate_type_id: string | null
+  quote_rate_type_id: string | null
 }
 
 interface BookingServiceWithSupplier extends BookingServiceRow {
@@ -50,13 +54,13 @@ export async function loadBookingServicesPackageDetail(
   bookingId: string,
   bookingNumber: string,
 ): Promise<BookingServicesData> {
-  const [{ data: serviceRows }, resolveSupplierDefaultRateTypeId] = await Promise.all([
+  const [{ data: serviceRows }, resolveSupplierRateTiers] = await Promise.all([
     supabase
       .from("booking_services")
-      .select("*, suppliers(name, description, kind, pricing_mode, default_rate_type_id)")
+      .select("*, suppliers(name, description, kind, pricing_mode, base_rate_type_id, quote_rate_type_id)")
       .eq("booking_id", bookingId)
       .order("sort_order", { ascending: true }),
-    loadSupplierDefaultRateTypeResolver(supabase),
+    loadSupplierRateTiersResolver(supabase),
   ])
 
   const services = (serviceRows ?? []) as BookingServiceWithSupplier[]
@@ -118,6 +122,10 @@ export async function loadBookingServicesPackageDetail(
   const legs: PackageLegWithSupplier[] = services.map((service) => {
     const supplier = firstRecord(service.suppliers)
     const supplierKind = (supplier?.kind as SupplierKind) ?? "train_operator"
+    const rateTiers = resolveSupplierRateTiers({
+      baseRateTypeId: supplier?.base_rate_type_id ?? null,
+      quoteRateTypeId: supplier?.quote_rate_type_id ?? null,
+    })
     return {
       id: service.id,
       package_id: bookingId,
@@ -132,10 +140,9 @@ export async function loadBookingServicesPackageDetail(
       supplierDescription: supplier?.description ?? null,
       supplierKind,
       supplierPricingMode: supplier?.pricing_mode ?? "rate_card",
-      supplierDefaultRateTypeId: resolveSupplierDefaultRateTypeId(
-        supplierKind,
-        supplier?.default_rate_type_id ?? null,
-      ),
+      supplierBaseRateTypeId: rateTiers.baseRateTypeId,
+      supplierQuoteRateTypeId: rateTiers.quoteRateTypeId,
+      supplierInheritedRateTypeName: rateTiers.inheritedRateTypeName,
     }
   })
 
@@ -149,7 +156,6 @@ export async function loadBookingServicesPackageDetail(
     // (app/api/jobs/[id]/build-booking/route.ts).
     single_supplement_pct: 50,
     fixed_price_per_person: null,
-    markup_pct: 0,
     currency: "ZAR",
     active: false,
     created_at: services[0]?.created_at ?? new Date().toISOString(),
@@ -167,9 +173,9 @@ export async function loadBookingServicesPackageDetail(
     locationNameById,
   )
 
-  // Same vocab layering the catalogue package flow does (app/api/packages/[slug]/helpers.ts) --
-  // without it every suite type here would come back with no bedroom/bathroom variant options,
-  // hiding those selectors from the Build Booking suite editor even when the supplier has them.
+  // Without this vocab layering every suite type here would come back with no bedroom/bathroom
+  // variant options, hiding those selectors from the Build Booking suite editor even when the
+  // supplier has them.
   await attachSuiteVariantVocab(supabase, detail)
 
   return { detail, services, units }

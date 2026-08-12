@@ -321,6 +321,11 @@ export function SuiteLegEditor({
               value={value.rateTypeId}
               onChange={(rateTypeId) => onChange({ ...value, rateTypeId })}
               id={`rate-type-${leg.id}`}
+              inheritLabel={
+                leg.inheritedRateTypeName
+                  ? `Supplier default (${leg.inheritedRateTypeName})`
+                  : "Supplier default"
+              }
             />
           </div>
 

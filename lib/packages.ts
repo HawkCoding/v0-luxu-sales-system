@@ -1,8 +1,8 @@
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { normalizeRouteDirectionMode } from "@/lib/routes/route-name"
+import { toHoursMinutes } from "@/lib/routes/route-schedule"
 import type { Database } from "@/lib/supabase/types"
 import type {
-  Package,
   PackageDetail,
   PackageLeg,
   SupplierKind,
@@ -12,9 +12,44 @@ import type {
   VehicleRentalRouteDetails,
 } from "@/lib/types"
 
-type PackageRow = Database["public"]["Tables"]["packages"]["Row"]
-type PackageLegRow = Database["public"]["Tables"]["package_legs"]["Row"]
-type PackageLegRouteRow = Database["public"]["Tables"]["package_leg_routes"]["Row"]
+/**
+ * The mappers below once read the catalogue `packages` / `package_legs` /
+ * `package_leg_routes` tables. Those tables are gone (see
+ * 20260811140000_drop_catalogue_packages.sql) -- the shapes are now synthesized from
+ * booking_services by lib/quotes/adapters/from-booking-services.ts, so they are declared here
+ * rather than derived from Database. Field names stay snake_case to match what the adapter
+ * builds and what the pricing engine downstream still reads.
+ */
+export interface PackageRow {
+  id: string
+  name: string
+  slug: string
+  description: string | null
+  duration_nights: number | null
+  single_supplement_pct: number
+  fixed_price_per_person: number | null
+  currency: string
+  active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface PackageLegRow {
+  id: string
+  package_id: string
+  supplier_id: string
+  label: string | null
+  sort_order: number
+  date_anchor: string | null
+  created_at: string
+}
+
+export interface PackageLegRouteRow {
+  package_leg_id: string
+  route_id: string
+  created_at: string
+}
+
 type RateCardRow = Database["public"]["Tables"]["rate_cards"]["Row"]
 type RouteRow = Database["public"]["Tables"]["routes"]["Row"]
 type SuiteTypeRow = Database["public"]["Tables"]["suite_types"]["Row"]
@@ -25,18 +60,11 @@ export interface PackageLegWithSupplier extends PackageLegRow {
   supplierDescription: string | null
   supplierKind: SupplierKind
   supplierPricingMode: "rate_card" | "manual"
-  /** Already resolved via loadSupplierDefaultRateTypeResolver -- not the raw supplier column. */
-  supplierDefaultRateTypeId: string | null
-}
-
-export function buildPackageSlugBase(name: string): string {
-  const slug = name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-
-  return slug || "package"
+  /** Already resolved via loadSupplierRateTiersResolver -- not the raw supplier columns. */
+  supplierBaseRateTypeId: string | null
+  supplierQuoteRateTypeId: string | null
+  /** Name of the rate type an un-chosen leg will inherit: the quoted rate, else the base rate. */
+  supplierInheritedRateTypeName: string | null
 }
 
 function mapVehicleRentalRouteDetails(
@@ -52,32 +80,6 @@ function mapVehicleRentalRouteDetails(
     oneWayFee: row.one_way_fee ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-  }
-}
-
-export function mapPackageListItem(
-  row: PackageRow,
-  // Only the kind is read, so list callers don't have to resolve each supplier's default rate type.
-  legs: Pick<PackageLegWithSupplier, "supplierKind">[],
-  prices: number[],
-  trainRouteName: string | null,
-): Package {
-  const priceFrom = prices.length > 0 ? Math.min(...prices) : null
-  const priceTo = prices.length > 0 ? Math.max(...prices) : null
-  return {
-    id: row.id,
-    name: row.name,
-    slug: row.slug,
-    description: row.description,
-    durationNights: row.duration_nights,
-    currency: row.currency,
-    active: row.active,
-    legCount: legs.length,
-    supplierKinds: Array.from(new Set(legs.map((leg) => leg.supplierKind))),
-    priceFrom: priceFrom === priceTo ? null : priceFrom,
-    priceTo: priceFrom === priceTo ? priceFrom : priceTo,
-    trainRouteName,
-    fixedPricePerPerson: row.fixed_price_per_person ?? null,
   }
 }
 
@@ -108,6 +110,10 @@ export function mapPackageRoute(
     directionMode: normalizeRouteDirectionMode(row.direction_mode),
     // Train routes carry their length here; hotel post-stay dates are derived from it.
     durationDays: row.duration_days ?? null,
+    departureTime: toHoursMinutes(row.departure_time),
+    arrivalTime: toHoursMinutes(row.arrival_time),
+    returnDepartureTime: toHoursMinutes(row.return_departure_time),
+    returnArrivalTime: toHoursMinutes(row.return_arrival_time),
     active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -186,7 +192,9 @@ export function mapPackageLeg(
     label: row.label,
     sortOrder: row.sort_order,
     dateAnchor: normalizeLegDateAnchor(row.date_anchor),
-    defaultRateTypeId: row.supplierDefaultRateTypeId ?? null,
+    baseRateTypeId: row.supplierBaseRateTypeId ?? null,
+    quoteRateTypeId: row.supplierQuoteRateTypeId ?? null,
+    inheritedRateTypeName: row.supplierInheritedRateTypeName ?? null,
     routes: eligibleRoutes.map((route) =>
       mapPackageRoute(route, detailsByRouteId.get(route.id), locationNameById),
     ),

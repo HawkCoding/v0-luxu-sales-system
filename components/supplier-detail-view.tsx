@@ -5,13 +5,16 @@ import { useRouter } from "next/navigation"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSWRConfig } from "swr"
 import {
+  AlertCircle,
   ArrowLeft,
+  Info,
   Mail,
   MapPin,
   Pencil,
   Phone,
   Plus,
   Save,
+  Star,
   Trash2,
 } from "lucide-react"
 import { SortableList } from "@/components/ui/sortable-list"
@@ -31,6 +34,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -51,6 +55,7 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   createEmptySupplierEmail,
   SupplierEmailEditor,
@@ -94,6 +99,7 @@ import {
   resolveRateTypePills,
 } from "@/lib/rate-types/view-rate-type-pills"
 import { buildRouteName } from "@/lib/routes/route-name"
+import { routeHasReturnLeg } from "@/lib/routes/route-schedule"
 import {
   getSupplierVocabulary,
   isTransportSupplier,
@@ -140,6 +146,11 @@ interface EditableRoute {
   vehicleRentalDetails: Omit<VehicleRentalRouteDetails, "routeId" | "createdAt" | "updatedAt"> | null
   directionMode: RouteDirectionMode
   durationDays: number | null
+  /** HH:MM, or "" while unset — an empty `<input type="time">` reads back as "". */
+  departureTime: string
+  arrivalTime: string
+  returnDepartureTime: string
+  returnArrivalTime: string
   active: boolean
 }
 
@@ -191,6 +202,8 @@ interface SupplierFormState {
   website: string
   location: string
   locationDetail: string
+  /** The supplier's own street address; every kind except trains, which use `stationAddresses`. */
+  streetAddress: string
   locationId: string | null
   /** Per-city boarding addresses; train operators only. */
   stationAddresses: EditableStationAddress[]
@@ -206,8 +219,10 @@ interface SupplierFormState {
   /** One client-facing bullet per line; split into a string[] on save. */
   inclusions: string
   exclusions: string
-  /** This supplier's own default rate type; null means inherit from its kind / the system default. */
-  defaultRateTypeOverrideId: string | null
+  /** This supplier's base rate -- the baseline its rate adjustments are measured off. */
+  baseRateTypeId: string | null
+  /** The rate its quotes use; null means "quote at the base rate". */
+  quoteRateTypeId: string | null
   rateAdjustments: SupplierRateAdjustment[]
   suiteTypes: EditableSuiteType[]
   packages: EditablePackage[]
@@ -312,6 +327,10 @@ function createEmptyRoute(kind: SupplierKind): EditableRoute {
         : null,
     directionMode: "one_way",
     durationDays: null,
+    departureTime: "",
+    arrivalTime: "",
+    returnDepartureTime: "",
+    returnArrivalTime: "",
     active: true,
   }
 }
@@ -374,6 +393,7 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
     website: supplier.website ?? "",
     location: supplier.location ?? "",
     locationDetail: supplier.locationDetail ?? "",
+    streetAddress: supplier.streetAddress ?? "",
     locationId: supplier.kind === "train_operator" ? null : supplier.locationId ?? null,
     stationAddresses: (supplier.stationAddresses ?? []).map((station) => ({
       id: station.id,
@@ -393,7 +413,8 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
     defaultTimeEnd: (supplier.defaultTimeEnd ?? "").slice(0, 5),
     inclusions: (supplier.inclusions ?? []).join("\n"),
     exclusions: (supplier.exclusions ?? []).join("\n"),
-    defaultRateTypeOverrideId: supplier.defaultRateTypeOverrideId ?? null,
+    baseRateTypeId: supplier.baseRateTypeId ?? null,
+    quoteRateTypeId: supplier.quoteRateTypeId ?? null,
     rateAdjustments: (supplier.rateAdjustments ?? []).map((adjustment) => ({
       rateTypeId: adjustment.rateTypeId,
       discountPct: adjustment.discountPct,
@@ -448,6 +469,10 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
             : null,
           directionMode: route.directionMode ?? "one_way",
           durationDays: route.durationDays ?? null,
+          departureTime: (route.departureTime ?? "").slice(0, 5),
+          arrivalTime: (route.arrivalTime ?? "").slice(0, 5),
+          returnDepartureTime: (route.returnDepartureTime ?? "").slice(0, 5),
+          returnArrivalTime: (route.returnArrivalTime ?? "").slice(0, 5),
           active: route.active,
         })),
         rateCards: supplier.rateCards.map((rateCard) => ({
@@ -1004,14 +1029,14 @@ function PackageRateCardMatrix({
   pkg,
   suiteTypes,
   rateTypes,
-  defaultRateTypeId,
+  baseRateTypeId,
   locationsById,
   vocabulary,
 }: {
   pkg: SupplierPackage
   suiteTypes: SupplierSuiteType[]
   rateTypes: RateType[]
-  defaultRateTypeId: string | null
+  baseRateTypeId: string | null
   locationsById: Record<string, Location>
   vocabulary: SupplierVocabulary
 }) {
@@ -1019,8 +1044,8 @@ function PackageRateCardMatrix({
   const [selectedRateTypeId, setSelectedRateTypeId] = useState<string | null>(null)
 
   const { pills: rateTypePills, defaultSelectedId: defaultRateTypePillId } = useMemo(
-    () => resolveRateTypePills(pkg.rateCards, rateTypes, defaultRateTypeId),
-    [pkg.rateCards, rateTypes, defaultRateTypeId],
+    () => resolveRateTypePills(pkg.rateCards, rateTypes, baseRateTypeId),
+    [pkg.rateCards, rateTypes, baseRateTypeId],
   )
   const effectiveSelectedRateTypeId =
     selectedRateTypeId && rateTypePills.some((pill) => pill.id === selectedRateTypeId)
@@ -1208,7 +1233,10 @@ interface RateCardMatrixEditorProps {
   rateCards: EditableRateCard[]
   suiteTypes: EditableSuiteType[]
   rateTypes: RateType[]
-  defaultRateTypeId: string | null
+  /** The baseline markdowns are measured off -- also the tab the matrix opens on. */
+  baseRateTypeId: string | null
+  /** The rate quotes use, marked with a star so the matrix and Applicable Rates agree. */
+  quoteRateTypeId: string | null
   adjustments: SupplierRateAdjustment[]
   packageIndex: number
   locationsById: Record<string, Location>
@@ -1443,7 +1471,8 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
   rateCards,
   suiteTypes,
   rateTypes,
-  defaultRateTypeId,
+  baseRateTypeId,
+  quoteRateTypeId,
   adjustments,
   packageIndex,
   locationsById,
@@ -1464,35 +1493,35 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
 }: RateCardMatrixEditorProps) {
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(routes[0]?.id ?? null)
   const activeRateTypes = useMemo(() => rateTypes.filter((rt) => !rt.archivedAt), [rateTypes])
-  const effectiveDefaultRateTypeId =
-    (defaultRateTypeId && activeRateTypes.some((rt) => rt.id === defaultRateTypeId)
-      ? defaultRateTypeId
+  const effectiveBaseRateTypeId =
+    (baseRateTypeId && activeRateTypes.some((rt) => rt.id === baseRateTypeId)
+      ? baseRateTypeId
       : null) ??
     activeRateTypes.find((rt) => rt.isDefault)?.id ??
     activeRateTypes[0]?.id ??
     null
-  // Only the default rate plus the rates flagged as applicable to this supplier
+  // Only the base rate plus the rates flagged as applicable to this supplier
   // are shown as tabs (in declared order, default first).
   const adjustmentIds = useMemo(() => new Set(adjustments.map((a) => a.rateTypeId)), [adjustments])
   const visibleRateTypes = useMemo(
     () =>
       activeRateTypes.filter(
-        (rt) => rt.id === effectiveDefaultRateTypeId || adjustmentIds.has(rt.id),
+        (rt) => rt.id === effectiveBaseRateTypeId || adjustmentIds.has(rt.id),
       ),
-    [activeRateTypes, effectiveDefaultRateTypeId, adjustmentIds],
+    [activeRateTypes, effectiveBaseRateTypeId, adjustmentIds],
   )
   const addableRateTypes = useMemo(
     () =>
       activeRateTypes.filter(
-        (rt) => rt.id !== effectiveDefaultRateTypeId && !adjustmentIds.has(rt.id),
+        (rt) => rt.id !== effectiveBaseRateTypeId && !adjustmentIds.has(rt.id),
       ),
-    [activeRateTypes, effectiveDefaultRateTypeId, adjustmentIds],
+    [activeRateTypes, effectiveBaseRateTypeId, adjustmentIds],
   )
   const [selectedRateTypeId, setSelectedRateTypeId] = useState<string | null>(
-    effectiveDefaultRateTypeId,
+    effectiveBaseRateTypeId,
   )
   const selectedDiscountPct =
-    selectedRateTypeId && selectedRateTypeId !== effectiveDefaultRateTypeId
+    selectedRateTypeId && selectedRateTypeId !== effectiveBaseRateTypeId
       ? adjustments.find((a) => a.rateTypeId === selectedRateTypeId)?.discountPct ?? null
       : null
   const periodGroups = useMemo(
@@ -1527,9 +1556,9 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
       return
     }
     if (!selectedRateTypeId || !visibleRateTypes.some((rt) => rt.id === selectedRateTypeId)) {
-      setSelectedRateTypeId(effectiveDefaultRateTypeId)
+      setSelectedRateTypeId(effectiveBaseRateTypeId)
     }
-  }, [visibleRateTypes, selectedRateTypeId, effectiveDefaultRateTypeId])
+  }, [visibleRateTypes, selectedRateTypeId, effectiveBaseRateTypeId])
 
   if (suiteTypes.length === 0) {
     return (
@@ -1567,7 +1596,8 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
           <div className="flex flex-wrap items-center gap-2">
             {visibleRateTypes.map((rt) => {
               const isSelected = selectedRateTypeId === rt.id
-              const isDefault = rt.id === effectiveDefaultRateTypeId
+              const isBase = rt.id === effectiveBaseRateTypeId
+              const isQuoted = rt.id === quoteRateTypeId
               return (
                 <Button
                   key={rt.id}
@@ -1576,12 +1606,14 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                   variant={isSelected ? "default" : "outline"}
                   className="h-7 rounded-full px-3 text-xs"
                   onClick={() => setSelectedRateTypeId(rt.id)}
-                  title={rt.code}
+                  title={isQuoted ? `${rt.code} — used on quotes` : rt.code}
                 >
+                  {isQuoted ? <Star aria-hidden className="mr-1 h-3 w-3 fill-current" /> : null}
                   {rt.name}
-                  {isDefault ? (
-                    <span className="ml-1 text-[10px] uppercase opacity-70">default</span>
+                  {isBase ? (
+                    <span className="ml-1 text-[10px] uppercase opacity-70">base</span>
                   ) : null}
+                  {isQuoted ? <span className="sr-only"> — used on quotes</span> : null}
                 </Button>
               )
             })}
@@ -1737,7 +1769,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                 </div>
               </div>
 
-              {selectedRateTypeId && selectedRateTypeId !== effectiveDefaultRateTypeId ? (
+              {selectedRateTypeId && selectedRateTypeId !== effectiveBaseRateTypeId ? (
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-secondary/10 px-4 py-2">
                   <p className="text-xs text-muted-foreground">
                     {selectedDiscountPct === null
@@ -2099,6 +2131,39 @@ function PassengerAgeBandsSection({
   )
 }
 
+interface RouteReturnTimeHintProps {
+  label: string
+  origin: string | null
+  destination: string | null
+  leg: "departure" | "arrival"
+}
+
+function RouteReturnTimeHint({ label, origin, destination, leg }: RouteReturnTimeHintProps) {
+  const reversed =
+    origin && destination ? `${destination} to ${origin}` : "the reverse direction"
+  const legText =
+    leg === "departure"
+      ? `the time the return leg leaves ${destination ?? "the destination"}`
+      : `the time the return leg reaches ${origin ?? "the origin"}`
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          className="text-muted-foreground hover:text-foreground focus-visible:ring-ring rounded-full focus-visible:outline-none focus-visible:ring-2"
+          aria-label={`About ${label}`}
+        >
+          <Info className="h-3.5 w-3.5" aria-hidden="true" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-72">
+        Used when a booking runs this route inverted ({reversed}) — {legText}. The
+        non-return times above apply to the forward direction.
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 interface RouteEditorRowProps {
   route: EditableRoute
   routeIndex: number
@@ -2135,6 +2200,15 @@ const RouteEditorRow = memo(function RouteEditorRow({
     if (!originName || !destinationName) return null
     return buildRouteName(originName, destinationName, route.directionMode)
   }, [autoDeriveName, locations, route.originLocationId, route.destinationLocationId, route.directionMode])
+
+  const originName = useMemo(
+    () => locations.find((l) => l.id === route.originLocationId)?.name ?? null,
+    [locations, route.originLocationId],
+  )
+  const destinationName = useMemo(
+    () => locations.find((l) => l.id === route.destinationLocationId)?.name ?? null,
+    [locations, route.destinationLocationId],
+  )
 
   useEffect(() => {
     if (!autoDeriveName || derivedRouteName === null) return
@@ -2346,6 +2420,89 @@ const RouteEditorRow = memo(function RouteEditorRow({
           <Trash2 className="h-4 w-4" />
         </Button>
       </div>
+      {vocabulary.routeHasSchedule ? (
+        // Own row: times differ per route, so they sit with the route rather than on the supplier.
+        <div className="col-span-full min-w-0 border-t pt-3">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-0 space-y-1.5">
+              <Label htmlFor={`${route.id}-departure-time`} className="whitespace-nowrap">
+                {vocabulary.scheduleFields?.timeStartLabel ?? "Departure time"}
+              </Label>
+              <BufferedInput
+                id={`${route.id}-departure-time`}
+                type="time"
+                className="w-32"
+                value={route.departureTime}
+                onValueChange={(value) =>
+                  onUpdateRoute(packageIndex, routeIndex, "departureTime", value)
+                }
+              />
+            </div>
+            <div className="min-w-0 space-y-1.5">
+              <Label htmlFor={`${route.id}-arrival-time`} className="whitespace-nowrap">
+                {vocabulary.scheduleFields?.timeEndLabel ?? "Arrival time"}
+              </Label>
+              <BufferedInput
+                id={`${route.id}-arrival-time`}
+                type="time"
+                className="w-32"
+                value={route.arrivalTime}
+                onValueChange={(value) =>
+                  onUpdateRoute(packageIndex, routeIndex, "arrivalTime", value)
+                }
+              />
+            </div>
+            {routeHasReturnLeg(route.directionMode) ? (
+              <>
+                <div className="min-w-0 space-y-1.5">
+                  <div className="flex items-center gap-1">
+                    <Label htmlFor={`${route.id}-return-departure-time`} className="whitespace-nowrap">
+                      {`Return ${(vocabulary.scheduleFields?.timeStartLabel ?? "Departure time").toLowerCase()}`}
+                    </Label>
+                    <RouteReturnTimeHint
+                      label={`Return ${(vocabulary.scheduleFields?.timeStartLabel ?? "Departure time").toLowerCase()}`}
+                      origin={originName}
+                      destination={destinationName}
+                      leg="departure"
+                    />
+                  </div>
+                  <BufferedInput
+                    id={`${route.id}-return-departure-time`}
+                    type="time"
+                    className="w-32"
+                    value={route.returnDepartureTime}
+                    onValueChange={(value) =>
+                      onUpdateRoute(packageIndex, routeIndex, "returnDepartureTime", value)
+                    }
+                  />
+                </div>
+                <div className="min-w-0 space-y-1.5">
+                  <div className="flex items-center gap-1">
+                    <Label htmlFor={`${route.id}-return-arrival-time`} className="whitespace-nowrap">
+                      {`Return ${(vocabulary.scheduleFields?.timeEndLabel ?? "Arrival time").toLowerCase()}`}
+                    </Label>
+                    <RouteReturnTimeHint
+                      label={`Return ${(vocabulary.scheduleFields?.timeEndLabel ?? "Arrival time").toLowerCase()}`}
+                      origin={originName}
+                      destination={destinationName}
+                      leg="arrival"
+                    />
+                  </div>
+                  <BufferedInput
+                    id={`${route.id}-return-arrival-time`}
+                    type="time"
+                    className="w-32"
+                    value={route.returnArrivalTime}
+                    onValueChange={(value) =>
+                      onUpdateRoute(packageIndex, routeIndex, "returnArrivalTime", value)
+                    }
+                  />
+                </div>
+              </>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 })
@@ -2444,13 +2601,6 @@ export function SupplierDetailView({
     setIsPatchInFlight(false)
   }, [])
 
-  useEffect(() => {
-    if (!hasLoadError) {
-      return
-    }
-    router.replace("/app/suppliers")
-  }, [hasLoadError, router])
-
   const exitSupplierDetail = useCallback(() => {
     if (presentation === "modal") {
       onClose?.()
@@ -2545,26 +2695,35 @@ export function SupplierDetailView({
 
   /**
    * The baseline every rate adjustment on this supplier is measured against. While editing this
-   * follows the unsaved override so the "% off X" labels and matrix tabs update as soon as the
-   * default is changed, rather than only after a save round-trip.
+   * follows the unsaved value so the "% off X" labels and matrix tabs update as soon as the base
+   * rate is changed, rather than only after a save round-trip.
    */
   const hasForm = form !== null
-  const formDefaultRateTypeOverrideId = form?.defaultRateTypeOverrideId ?? null
-  const effectiveDefaultRateTypeId = useMemo(() => {
+  const formBaseRateTypeId = form?.baseRateTypeId ?? null
+  const effectiveBaseRateTypeId = useMemo(() => {
     const active = (supplier?.rateTypes ?? []).filter((rt) => !rt.archivedAt)
     const candidates = [
-      hasForm ? formDefaultRateTypeOverrideId : supplier?.defaultRateTypeOverrideId ?? null,
-      supplier?.inheritedDefaultRateTypeId ?? null,
+      hasForm ? formBaseRateTypeId : supplier?.baseRateTypeId ?? null,
       active.find((rt) => rt.isDefault)?.id ?? null,
       active[0]?.id ?? null,
     ]
     return candidates.find((id) => id && active.some((rt) => rt.id === id)) ?? null
+  }, [hasForm, formBaseRateTypeId, supplier?.rateTypes, supplier?.baseRateTypeId])
+
+  /** The rate quotes actually use: the starred one where set, else the base rate. */
+  const formQuoteRateTypeId = form?.quoteRateTypeId ?? null
+  const effectiveQuoteRateTypeId = useMemo(() => {
+    const active = (supplier?.rateTypes ?? []).filter((rt) => !rt.archivedAt)
+    const nominated = hasForm ? formQuoteRateTypeId : supplier?.quoteRateTypeId ?? null
+    return nominated && active.some((rt) => rt.id === nominated)
+      ? nominated
+      : effectiveBaseRateTypeId
   }, [
     hasForm,
-    formDefaultRateTypeOverrideId,
+    formQuoteRateTypeId,
     supplier?.rateTypes,
-    supplier?.defaultRateTypeOverrideId,
-    supplier?.inheritedDefaultRateTypeId,
+    supplier?.quoteRateTypeId,
+    effectiveBaseRateTypeId,
   ])
 
   const updateSupplierKind = (kind: SupplierKind) => {
@@ -2574,15 +2733,14 @@ export function SupplierDetailView({
             ...current,
             kind,
             locationId: kind === "train_operator" ? null : current.locationId,
-            // Only trains board at a station; the server drops these for other kinds anyway, so
-            // clear them here too rather than leaving invisible rows in the form.
-            stationAddresses: kind === "train_operator" ? current.stationAddresses : [],
+            // Nothing is cleared on a category change. The station editor and the route location
+            // fields are simply not rendered for kinds that have no use for them, and the server
+            // preserves the stored values, so a supplier mis-categorised and put back comes home
+            // exactly as it was rather than losing its stations and route endpoints for good.
             packages: current.packages.map((pkg) => ({
               ...pkg,
               routes: pkg.routes.map((route) => ({
                 ...route,
-                originLocationId: isTransportSupplier(kind) ? null : route.originLocationId,
-                destinationLocationId: isTransportSupplier(kind) ? null : route.destinationLocationId,
                 vehicleRentalDetails:
                   kind === "vehicle_rental"
                     ? route.vehicleRentalDetails ?? {
@@ -3135,23 +3293,42 @@ export function SupplierDetailView({
     })
   }, [])
 
-  const handleChangeDefaultRateType = useCallback(
-    (nextDefaultRateTypeId: string) => {
+  const handleChangeBaseRateType = useCallback(
+    (nextBaseRateTypeId: string) => {
       setForm((current) =>
         current
           ? {
               ...current,
-              defaultRateTypeOverrideId: nextDefaultRateTypeId,
+              baseRateTypeId: nextBaseRateTypeId,
+              // Every percentage resets, so a rate starred for its markdown no longer means what
+              // it meant -- the star goes back to the new base rate.
+              quoteRateTypeId: null,
               rateAdjustments: rebaseRateAdjustments(
                 current.rateAdjustments,
-                effectiveDefaultRateTypeId,
-                nextDefaultRateTypeId,
+                effectiveBaseRateTypeId,
+                nextBaseRateTypeId,
               ),
             }
           : current,
       )
     },
-    [effectiveDefaultRateTypeId],
+    [effectiveBaseRateTypeId],
+  )
+
+  /** Stored as null when the starred rate is the base rate, so "quote at base" has one encoding. */
+  const handleChangeQuoteRateType = useCallback(
+    (nextQuoteRateTypeId: string) => {
+      setForm((current) =>
+        current
+          ? {
+              ...current,
+              quoteRateTypeId:
+                nextQuoteRateTypeId === effectiveBaseRateTypeId ? null : nextQuoteRateTypeId,
+            }
+          : current,
+      )
+    },
+    [effectiveBaseRateTypeId],
   )
 
   const handleApplyRateMarkdown = useCallback(
@@ -3162,13 +3339,13 @@ export function SupplierDetailView({
       rateTypeId: string,
       discountPct: number,
     ) => {
-      if (!effectiveDefaultRateTypeId) {
+      if (!effectiveBaseRateTypeId) {
         toast.error("No rate types configured — add one in Settings before applying markdown.", {
           id: "apply-markdown-no-type",
         })
         return
       }
-      if (rateTypeId === effectiveDefaultRateTypeId) return
+      if (rateTypeId === effectiveBaseRateTypeId) return
 
       updatePackage(packageIndex, (pkg) => {
         const targetCards = pkg.rateCards.filter(
@@ -3180,7 +3357,7 @@ export function SupplierDetailView({
         if (targetCards.length === 0) return pkg
 
         const baseCards = pkg.rateCards.filter(
-          (rateCard) => rateCard.routeId === routeId && rateCard.rateTypeId === effectiveDefaultRateTypeId,
+          (rateCard) => rateCard.routeId === routeId && rateCard.rateTypeId === effectiveBaseRateTypeId,
         )
         const targetIds = new Set(targetCards.map((card) => card.id))
 
@@ -3241,7 +3418,7 @@ export function SupplierDetailView({
         })
 
         const baseRateName =
-          (supplier?.rateTypes ?? []).find((rt) => rt.id === effectiveDefaultRateTypeId)?.name ?? "Rack"
+          (supplier?.rateTypes ?? []).find((rt) => rt.id === effectiveBaseRateTypeId)?.name ?? "Rack"
 
         if (applied === 0) {
           toast.error(`No ${baseRateName} prices found — add ${baseRateName} rate cards first.`, {
@@ -3265,7 +3442,7 @@ export function SupplierDetailView({
         return { ...pkg, rateCards: nextRateCards }
       })
     },
-    [updatePackage, supplier, effectiveDefaultRateTypeId],
+    [updatePackage, supplier, effectiveBaseRateTypeId],
   )
 
   useEffect(() => {
@@ -3434,11 +3611,16 @@ export function SupplierDetailView({
       for (const route of pkg.routes) {
         const isTransport = isTransportSupplier(form.kind)
         const needsLocations = vocabulary.routeHasLocations && !isTransport
-        if (
-          !route.name.trim() ||
-          (needsLocations && (!route.originLocationId || !route.destinationLocationId))
-        ) {
+        if (!route.name.trim()) {
           toast.error(`Complete all ${vocabulary.route.toLowerCase()} fields before saving.`)
+          return
+        }
+        if (needsLocations && (!route.originLocationId || !route.destinationLocationId)) {
+          // Most often hit right after changing the category to one whose routes are
+          // point-to-point, so name the route rather than the whole form.
+          toast.error(
+            `Add ${vocabulary.originLabel.toLowerCase()} and ${vocabulary.destinationLabel.toLowerCase()} for "${route.name.trim()}" before saving.`,
+          )
           return
         }
         if (isTransport && (!route.pickupPoint?.trim() || !route.dropoffPoint?.trim())) {
@@ -3504,6 +3686,10 @@ export function SupplierDetailView({
             : null,
         directionMode: route.directionMode,
         durationDays: route.durationDays,
+        departureTime: route.departureTime || null,
+        arrivalTime: route.arrivalTime || null,
+        returnDepartureTime: route.returnDepartureTime || null,
+        returnArrivalTime: route.returnArrivalTime || null,
         active: route.active,
         rateCards: activeRateCards
           .filter((rateCard) => rateCard.routeId === route.id)
@@ -3520,6 +3706,21 @@ export function SupplierDetailView({
             validTo: rateCard.validTo ?? "",
           })),
       }))
+
+    // A row where something was typed but no city was picked can't be stored (location_id is the
+    // key the voucher resolves a boarding point by), and dropping it quietly loses the typing.
+    // A wholly untouched row is just an unused "Add station" click and is dropped without fuss.
+    if (form.kind === "train_operator") {
+      const incompleteStation = form.stationAddresses.find(
+        (station) =>
+          !station.locationId &&
+          (station.stationName.trim() || station.streetAddress.trim() || station.notes.trim()),
+      )
+      if (incompleteStation) {
+        toast.error("Pick a city for the station address row, or remove it.")
+        return
+      }
+    }
 
     // Rows with no city chosen are half-filled editor rows; the server would drop them anyway.
     const cleanedStationAddresses =
@@ -3556,6 +3757,7 @@ export function SupplierDetailView({
           website: form.website.trim(),
           location: form.location.trim(),
           locationDetail: form.locationDetail.trim(),
+          streetAddress: form.streetAddress.trim() || null,
           locationId: getSupplierLocationId(form),
           description: form.description.trim() || null,
           notes: form.notes.trim(),
@@ -3568,7 +3770,8 @@ export function SupplierDetailView({
           inclusions: splitBulletLines(form.inclusions),
           exclusions: splitBulletLines(form.exclusions),
           rateAdjustments: form.rateAdjustments,
-          defaultRateTypeId: form.defaultRateTypeOverrideId,
+          baseRateTypeId: form.baseRateTypeId,
+          quoteRateTypeId: form.quoteRateTypeId,
           suiteTypes: cleanedSuiteTypes,
           routes: cleanedRoutes,
           stationAddresses: cleanedStationAddresses,
@@ -3738,7 +3941,38 @@ export function SupplierDetailView({
     }
   }
 
-  if (isLoading || hasLoadError) {
+  if (hasLoadError) {
+    const isNotFound = (error as { status?: number } | undefined)?.status === 404
+    return (
+      <div className={getContainerClass(presentation)}>
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>{isNotFound ? "Supplier not found" : "Could not load supplier"}</AlertTitle>
+          <AlertDescription>
+            {isNotFound
+              ? "This supplier does not exist, or you no longer have access to it."
+              : error instanceof Error
+                ? error.message
+                : "Something went wrong loading this supplier."}{" "}
+            {presentation === "page" ? (
+              <>
+                <Link href="/app/suppliers" className="underline">
+                  Return to suppliers
+                </Link>
+                .
+              </>
+            ) : (
+              <Button variant="link" className="h-auto p-0 align-baseline" onClick={exitSupplierDetail}>
+                Close
+              </Button>
+            )}
+          </AlertDescription>
+        </Alert>
+      </div>
+    )
+  }
+
+  if (isLoading) {
     return <SupplierDetailSkeleton presentation={presentation} />
   }
 
@@ -3750,6 +3984,17 @@ export function SupplierDetailView({
   const isTrainOperatorForm = form.kind === "train_operator"
   const isTrainOperatorSupplier = supplier.kind === "train_operator"
   const routeRateGroup = form?.packages[0] ?? createRoutesRateGroup()
+  // Read off live form state, not the saved supplier, so adding a route immediately widens the
+  // station editor's city list without needing a save first.
+  const formRouteLocationIds = [
+    ...new Set(
+      routeRateGroup.routes.flatMap((route) =>
+        [route.originLocationId, route.destinationLocationId].filter(
+          (locationId): locationId is string => Boolean(locationId),
+        ),
+      ),
+    ),
+  ]
   const supplierRouteRatePackage: SupplierPackage = {
     id: "supplier-routes-and-rates",
     slug: "supplier-routes-and-rates",
@@ -4035,24 +4280,24 @@ export function SupplierDetailView({
                     </div>
                   )}
 
-                  <div className="space-y-2">
-                    <Label htmlFor="supplier-location-detail">Suburb / Area</Label>
-                    <BufferedInput
-                      id="supplier-location-detail"
-                      value={form.locationDetail}
-                      onValueChange={(value) => updateField("locationDetail", value)}
-                    />
-                  </div>
+                  {/* A train has no single street address -- it boards guests at a different
+                      station in every city, so the Station addresses section under Routes
+                      covers it. */}
+                  {!isTrainOperatorForm && (
+                    <div className="space-y-2">
+                      <Label htmlFor="supplier-street-address">Street address</Label>
+                      <BufferedInput
+                        id="supplier-street-address"
+                        value={form.streetAddress}
+                        onValueChange={(value) => updateField("streetAddress", value)}
+                        placeholder="e.g. 4 Loop Street, Cape Town City Centre"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Printed on the voucher under the supplier name.
+                      </p>
+                    </div>
+                  )}
                 </div>
-
-                {isTrainOperatorForm && (
-                  <SupplierStationAddressEditor
-                    stations={form.stationAddresses}
-                    locations={locations}
-                    onChange={(stationAddresses) => updateField("stationAddresses", stationAddresses)}
-                    idPrefix="supplier-station"
-                  />
-                )}
 
                 <SupplierEmailEditor
                   emails={form.emails}
@@ -4172,7 +4417,9 @@ export function SupplierDetailView({
                   <InfoItem label="Phone" value={supplier.phone} />
                   <InfoItem label="Website" value={supplier.website} />
                   <InfoItem label="Location" value={supplier.location} />
-                  <InfoItem label="Suburb / Area" value={supplier.locationDetail} />
+                  {!isTrainOperatorSupplier && (
+                    <InfoItem label="Street address" value={supplier.streetAddress} />
+                  )}
                   {!isTrainOperatorSupplier && (
                     <InfoItem
                       label="City"
@@ -4236,33 +4483,6 @@ export function SupplierDetailView({
                     <MapPin className="h-4 w-4" />
                     <span>{supplier.location || "No location on file"}</span>
                   </div>
-                  {isTrainOperatorSupplier && (
-                    <div className="space-y-2 text-sm text-muted-foreground sm:col-span-3">
-                      <div className="flex items-center gap-2">
-                        <MapPin className="h-4 w-4" />
-                        <span>Station addresses</span>
-                      </div>
-                      {supplier.stationAddresses.length > 0 ? (
-                        <ul className="space-y-1">
-                          {supplier.stationAddresses.map((station) => (
-                            <li key={station.id} className="flex flex-wrap items-center gap-2">
-                              <Badge variant="outline" className="rounded-full">
-                                {locations.find((loc) => loc.id === station.locationId)?.name ??
-                                  "Unknown city"}
-                              </Badge>
-                              <span>
-                                {[station.stationName, station.streetAddress]
-                                  .filter(Boolean)
-                                  .join(", ") || "No address captured"}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <span>No station addresses on file</span>
-                      )}
-                    </div>
-                  )}
                 </div>
 
                 <div className="space-y-3">
@@ -4439,7 +4659,9 @@ export function SupplierDetailView({
                 </div>
               ) : null}
 
-              {form.kind === "hotel_property" || form.kind === "train_operator" ? (
+              {/* Trains carry their times per route (see RouteEditorRow) — a supplier-wide pair
+                  would claim every route departs at the same hour. */}
+              {form.kind === "hotel_property" ? (
                 <div className="rounded-lg border p-4">
                   {isEditing ? (
                     <div className="grid gap-3 sm:grid-cols-[minmax(0,10rem)_minmax(0,10rem)_1fr] sm:items-end">
@@ -4503,10 +4725,12 @@ export function SupplierDetailView({
                 <ApplicableRatesCard
                   isEditing={isEditing}
                   rateTypes={supplier.rateTypes ?? []}
-                  defaultRateTypeId={effectiveDefaultRateTypeId}
+                  baseRateTypeId={effectiveBaseRateTypeId}
+                  quoteRateTypeId={effectiveQuoteRateTypeId}
                   adjustments={isEditing ? form.rateAdjustments : supplier.rateAdjustments ?? []}
                   onChange={(next) => updateField("rateAdjustments", next)}
-                  onChangeDefaultRateType={handleChangeDefaultRateType}
+                  onChangeBaseRateType={handleChangeBaseRateType}
+                  onChangeQuoteRateType={handleChangeQuoteRateType}
                 />
               ) : null}
 
@@ -4629,6 +4853,48 @@ export function SupplierDetailView({
                 )}
               </div>
 
+              {/* Stations sit with the routes because the city list is derived from the route
+                  endpoints — picking a station only makes sense once its route exists. */}
+              {isEditing
+                ? isTrainOperatorForm && (
+                    <div className="rounded-lg border p-4">
+                      <SupplierStationAddressEditor
+                        stations={form.stationAddresses}
+                        locations={locations}
+                        routeLocationIds={formRouteLocationIds}
+                        onChange={(stationAddresses) =>
+                          updateField("stationAddresses", stationAddresses)
+                        }
+                        idPrefix="supplier-station"
+                      />
+                    </div>
+                  )
+                : isTrainOperatorSupplier && (
+                    <div className="rounded-lg border p-4 space-y-3">
+                      <p className="text-sm font-semibold text-foreground">Station addresses</p>
+                      {supplier.stationAddresses.length > 0 ? (
+                        <ul className="space-y-1 text-sm text-muted-foreground">
+                          {supplier.stationAddresses.map((station) => (
+                            <li key={station.id} className="flex flex-wrap items-center gap-2">
+                              <Badge variant="outline" className="rounded-full">
+                                {locationsById[station.locationId]?.name ?? "Unknown city"}
+                              </Badge>
+                              <span>
+                                {[station.stationName, station.streetAddress]
+                                  .filter(Boolean)
+                                  .join(", ") || "No address captured"}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                          No station addresses on file.
+                        </div>
+                      )}
+                    </div>
+                  )}
+
               <Separator />
 
               {(isEditing ? form.pricingMode : supplier.pricingMode) === "manual" ? (
@@ -4645,7 +4911,8 @@ export function SupplierDetailView({
                   rateCards={routeRateGroup.rateCards}
                   suiteTypes={form.suiteTypes}
                   rateTypes={supplier.rateTypes ?? []}
-                  defaultRateTypeId={effectiveDefaultRateTypeId}
+                  baseRateTypeId={effectiveBaseRateTypeId}
+                  quoteRateTypeId={effectiveQuoteRateTypeId}
                   adjustments={form.rateAdjustments}
                   onAddRate={addRateAdjustment}
                   onApplyMarkdown={handleApplyRateMarkdown}
@@ -4672,7 +4939,7 @@ export function SupplierDetailView({
                   pkg={supplierRouteRatePackage}
                   suiteTypes={supplier.suiteTypes}
                   rateTypes={supplier.rateTypes ?? []}
-                  defaultRateTypeId={effectiveDefaultRateTypeId}
+                  baseRateTypeId={effectiveBaseRateTypeId}
                   locationsById={locationsById}
                   vocabulary={activeVocabulary}
                 />

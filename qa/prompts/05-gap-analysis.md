@@ -6,7 +6,6 @@ demo-readiness verdict and a prioritized fix list.
 
 ## Inputs
 - `qa/reports/{today}-01-supplier.md`
-- `qa/reports/{today}-02-package.md`
 - `qa/reports/{today}-03-customer.md`
 - `qa/reports/{today}-04-lifecycle.md`
 - `qa/.run-state.json` (the fixture trail — useful for "what state was the

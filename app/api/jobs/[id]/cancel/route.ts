@@ -2,7 +2,7 @@ import { safeSupabaseError } from "@/lib/api/responses"
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
-import { extractRoleFromJwt } from "@/lib/role-utils"
+import { extractRoleFromJwt, isRole } from "@/lib/role-utils"
 import { writeAuditLog } from "@/lib/audit-write"
 import { calculateRefund } from "@/lib/invoices/calculate-refund"
 import { calculateDepositAmount, getDefaultDepositPercentage } from "@/lib/pipeline/constants"
@@ -49,7 +49,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     .maybeSingle()
 
   const role = extractRoleFromJwt(user) ?? actorProfile?.clearance_level ?? null
-  if (role === "readonly" || !role) {
+  // Anything that is not a current role (missing, or the retired `readonly`
+  // label the database enum still carries) cannot cancel a booking.
+  if (!isRole(role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 

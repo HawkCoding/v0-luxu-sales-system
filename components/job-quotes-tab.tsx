@@ -45,7 +45,6 @@ interface JobQuotesTabProps {
   bookingNumber: string
   travelDate: string | null
   customerName: string
-  customerDefaultRateTypeId?: string | null
   emailImportNeedsReview?: boolean
   mutate: () => void
   autoOpenBuildBookingQuoteId?: string | null
@@ -58,7 +57,6 @@ export function JobQuotesTab({
   bookingNumber,
   travelDate,
   customerName,
-  customerDefaultRateTypeId,
   emailImportNeedsReview = false,
   mutate,
   autoOpenBuildBookingQuoteId: externalAutoOpenBuildBookingQuoteId = null,
@@ -253,7 +251,6 @@ export function JobQuotesTab({
                           existingLineItemCount={q.lineItems.length}
                           existingLineItems={q.lineItems}
                           expectedUpdatedAt={q.updatedAt}
-                          customerDefaultRateTypeId={customerDefaultRateTypeId}
                           onApplied={mutate}
                           autoOpen={autoOpenBuildBookingQuoteId === q.id}
                           onAutoOpenHandled={() => {

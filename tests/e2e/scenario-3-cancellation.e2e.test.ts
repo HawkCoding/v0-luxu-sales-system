@@ -7,7 +7,8 @@ vi.mock("@/lib/supabase/server", () => ({
   createSessionClient: supabaseMocks.createSessionClient,
 }))
 
-vi.mock("@/lib/role-utils", () => ({
+vi.mock("@/lib/role-utils", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/role-utils")>()),
   extractRoleFromJwt: vi.fn(() => null),
 }))
 

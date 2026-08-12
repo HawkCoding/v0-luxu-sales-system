@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { staleVersionResponse } from "@/lib/concurrency"
 import { mapPostgrestError, safeSupabaseError } from "@/lib/api/responses"
 import { mapRateType, mapSupplierDetail } from "@/lib/suppliers"
-import { resolveDefaultRateTypeId } from "@/lib/rate-types/default-rate-type"
+import { resolveSupplierRateTiers } from "@/lib/rate-types/supplier-rate-tiers"
 import {
   allowedRoles,
   checkDeletionDependencies,
@@ -33,6 +33,10 @@ interface NormalizedRoute {
   dropoff_point: string | null
   direction_mode: "one_way" | "round_trip" | "loop"
   duration_days: number | null
+  departure_time: string | null
+  arrival_time: string | null
+  return_departure_time: string | null
+  return_arrival_time: string | null
   active: boolean
   created_at: string
   updated_at: string
@@ -151,7 +155,6 @@ export async function GET(
         suiteTypeBathroomTypes: detail.suiteTypeBathroomTypes,
         rateTypes: detail.rateTypes,
         rateAdjustments: detail.rateAdjustments,
-        kindDefaultRateTypes: detail.kindDefaultRateTypes,
         stationAddresses: detail.stationAddresses,
       },
     ),
@@ -259,11 +262,29 @@ export async function PATCH(
   }
 
   let parsed: SupplierSaveInput | SupplierDraftSaveInput
-  try {
-    const body = await req.json()
-    parsed = isDraftSave ? supplierDraftSaveSchema.parse(body) : supplierSaveSchema.parse(body)
-  } catch {
-    return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
+  {
+    let body: unknown
+    try {
+      body = await req.json()
+    } catch {
+      return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
+    }
+
+    const result = isDraftSave
+      ? supplierDraftSaveSchema.safeParse(body)
+      : supplierSaveSchema.safeParse(body)
+    if (!result.success) {
+      // Surface the first field-level message ("Each city may only have one station address" and
+      // friends) instead of a bare "Invalid request payload" the caller can do nothing with.
+      return NextResponse.json(
+        {
+          error: result.error.issues[0]?.message ?? "Invalid request payload",
+          details: result.error.issues,
+        },
+        { status: 400 },
+      )
+    }
+    parsed = result.data
   }
 
   const existingDetail = await loadSupplierDetail(supabase, slug)
@@ -350,9 +371,11 @@ export async function PATCH(
       .filter((entry) => entry.name.length > 0)
   }
 
-  // Only train operators board guests at a station, so any station rows sent for another kind are
-  // dropped rather than persisted -- same rule as route locations below. Rows without a city are
-  // half-filled editor rows and never reach the DB (location_id is NOT NULL).
+  // Only train operators board guests at a station, so the station editor is trains-only. A save
+  // for another kind leaves whatever rows already exist completely alone (see the guarded
+  // delete/upsert below) rather than deleting them: a supplier mis-categorised as a hotel and put
+  // back must come home intact -- same rule as the route locations carried forward below. Rows
+  // without a city are half-filled editor rows and never reach the DB (location_id is NOT NULL).
   const supplierUsesStations = parsed.kind === "train_operator"
   const normalizedStationAddresses = supplierUsesStations
     ? (parsed.stationAddresses ?? []).flatMap((station) => {
@@ -385,15 +408,25 @@ export async function PATCH(
   const locationNameById = new Map(existingDetail.locations.map((location) => [location.id, location.name]))
 
   // Kinds whose route editor has no location fields (hotels, tour operators)
-  // must never persist location links — stray ids would invisibly block
-  // location deletion.
+  // must never *acquire* location links — stray ids would invisibly block
+  // location deletion. A route that already carries endpoints keeps them
+  // though: a train mis-categorised as a hotel and put back must come home
+  // with its origins and destinations intact, and a train route without both
+  // cannot be saved at all (see supplierSaveSchema).
   const routeUsesLocations = !isTransport && getSupplierVocabulary(parsed.kind).routeHasLocations
   const routeUsesDuration = getSupplierVocabulary(parsed.kind).routeHasDuration
+  const routeUsesSchedule = getSupplierVocabulary(parsed.kind).routeHasSchedule
+  const existingRouteById = new Map(existingDetail.routes.map((route) => [route.id, route]))
 
   const normalizedRoutes: NormalizedRoute[] = parsed.routes
     .map((route) => {
-      const originLocationId = routeUsesLocations ? normalizeOptionalUuid(route.originLocationId) : null
-      const destinationLocationId = routeUsesLocations ? normalizeOptionalUuid(route.destinationLocationId) : null
+      const storedRoute = route.id ? existingRouteById.get(route.id) : undefined
+      const originLocationId = routeUsesLocations
+        ? normalizeOptionalUuid(route.originLocationId)
+        : storedRoute?.origin_location_id ?? null
+      const destinationLocationId = routeUsesLocations
+        ? normalizeOptionalUuid(route.destinationLocationId)
+        : storedRoute?.destination_location_id ?? null
       const directionMode = route.directionMode ?? "one_way"
       const originName = originLocationId ? locationNameById.get(originLocationId) : undefined
       const destinationName = destinationLocationId ? locationNameById.get(destinationLocationId) : undefined
@@ -411,6 +444,14 @@ export async function PATCH(
         dropoff_point: isTransport ? normalizeOptionalText(route.dropoffPoint) : null,
         direction_mode: directionMode,
         duration_days: routeUsesDuration ? route.durationDays ?? null : null,
+        departure_time: routeUsesSchedule ? route.departureTime ?? null : null,
+        arrival_time: routeUsesSchedule ? route.arrivalTime ?? null : null,
+        // A one-way route never travels back, so flipping a route off round_trip must clear the
+        // return pair — otherwise stale times would resurface if it were ever flipped back.
+        return_departure_time:
+          routeUsesSchedule && directionMode === "round_trip" ? route.returnDepartureTime ?? null : null,
+        return_arrival_time:
+          routeUsesSchedule && directionMode === "round_trip" ? route.returnArrivalTime ?? null : null,
         active: route.active,
         created_at: now,
         updated_at: now,
@@ -450,23 +491,26 @@ export async function PATCH(
     (existingDetail.rateTypes ?? []).filter((row) => !row.archived_at).map((row) => row.id),
   )
   // The baseline a rate card falls back to when the client didn't name a rate type: the supplier's
-  // own default where it has one, then its kind's default, then the system default. Resolved off
-  // the incoming payload (not the stored row) so a save that changes the kind or the override in
-  // the same request tags new cards with the value the user just chose.
-  const requestedDefaultRateTypeId = parsed.defaultRateTypeId ?? null
-  const defaultRateTypeId = resolveDefaultRateTypeId(
-    parsed.kind,
-    (existingDetail.kindDefaultRateTypes ?? []).map((row) => ({
-      kind: row.kind as SupplierKind,
-      rateTypeId: row.rate_type_id,
-    })),
-    (existingDetail.rateTypes ?? []).map(mapRateType),
-    requestedDefaultRateTypeId,
-  )
+  // own base rate, else the system default. Resolved off the incoming payload (not the stored row)
+  // so a save that changes the base rate in the same request tags new cards with the value the
+  // user just chose.
+  const requestedBaseRateTypeId = parsed.baseRateTypeId ?? null
+  const requestedQuoteRateTypeId = parsed.quoteRateTypeId ?? null
+  const rateTiers = resolveSupplierRateTiers((existingDetail.rateTypes ?? []).map(mapRateType), {
+    baseRateTypeId: requestedBaseRateTypeId,
+    quoteRateTypeId: requestedQuoteRateTypeId,
+  })
+  const defaultRateTypeId = rateTiers.baseRateTypeId
 
-  if (requestedDefaultRateTypeId && !activeRateTypeIds.has(requestedDefaultRateTypeId)) {
+  if (requestedBaseRateTypeId && !activeRateTypeIds.has(requestedBaseRateTypeId)) {
     return NextResponse.json(
-      { error: "The default rate type must reference an active rate type." },
+      { error: "The base rate must reference an active rate type." },
+      { status: 400 },
+    )
+  }
+  if (requestedQuoteRateTypeId && !activeRateTypeIds.has(requestedQuoteRateTypeId)) {
+    return NextResponse.json(
+      { error: "The quoted rate must reference an active rate type." },
       { status: 400 },
     )
   }
@@ -622,9 +666,12 @@ export async function PATCH(
     .map((entry) => entry.id)
     .filter((entryId) => !incomingEmailIds.has(entryId))
   const incomingStationAddressIds = new Set(normalizedStationAddresses.map((station) => station.id))
-  const stationAddressIdsToDelete = existingDetail.stationAddresses
-    .map((station) => station.id)
-    .filter((stationId) => !incomingStationAddressIds.has(stationId))
+  // Non-train saves never diff stations, so nothing is ever queued for deletion for them.
+  const stationAddressIdsToDelete = supplierUsesStations
+    ? existingDetail.stationAddresses
+        .map((station) => station.id)
+        .filter((stationId) => !incomingStationAddressIds.has(stationId))
+    : []
 
   const [
     conflictingRouteIds,
@@ -682,6 +729,36 @@ export async function PATCH(
     )
   }
 
+  // Station rows are replaced delete-then-upsert further down, and the writes are not in one
+  // transaction -- an unknown location_id reaching the upsert would raise an FK violation *after*
+  // the delete had already run, leaving the supplier with no station addresses at all. Reject the
+  // whole save here, before anything is written.
+  if (normalizedStationAddresses.length > 0) {
+    const stationLocationIds = [
+      ...new Set(normalizedStationAddresses.map((station) => station.location_id)),
+    ]
+    const { data: knownLocations, error: stationLocationsError } = await supabase
+      .from("locations")
+      .select("id")
+      .in("id", stationLocationIds)
+
+    if (stationLocationsError) {
+      logSupplierMutationError("station-addresses-location-check", supplierId, stationLocationsError)
+      return NextResponse.json(
+        { error: "Failed to validate supplier station addresses" },
+        { status: 500 },
+      )
+    }
+
+    const knownLocationIds = new Set((knownLocations ?? []).map((location) => location.id))
+    if (stationLocationIds.some((locationId) => !knownLocationIds.has(locationId))) {
+      return NextResponse.json(
+        { error: "A station address references a city that no longer exists." },
+        { status: 400 },
+      )
+    }
+  }
+
   const nextActive = isDraftSave ? false : parsed.active
   const nextStatus = isDraftSave ? "draft" : nextActive ? "active" : "inactive"
   const supplierUpdatePayload = {
@@ -693,6 +770,7 @@ export async function PATCH(
     website: parsed.website || null,
     location: parsed.location || null,
     location_detail: parsed.locationDetail?.trim() || null,
+    street_address: parsed.streetAddress?.trim() || null,
     location_id: parsed.locationId ?? null,
     description: parsed.description?.trim() || null,
     notes: parsed.notes || null,
@@ -703,7 +781,9 @@ export async function PATCH(
     default_time_end: parsed.defaultTimeEnd ?? null,
     inclusions: parsed.inclusions,
     exclusions: parsed.exclusions,
-    default_rate_type_id: requestedDefaultRateTypeId,
+    base_rate_type_id: requestedBaseRateTypeId,
+    // Normalised: nominating the base rate is the same as nominating nothing.
+    quote_rate_type_id: rateTiers.quoteRateTypeId,
     active: nextActive,
     status: nextStatus,
   }
@@ -961,6 +1041,14 @@ export async function PATCH(
         return NextResponse.json(
           { error: "Each city may only have one station address for this supplier." },
           { status: 409 },
+        )
+      }
+      // Belt and braces for the pre-flight check above: a city deleted between that read and this
+      // write still lands here rather than as an opaque 500.
+      if (stationAddressesError.code === "23503") {
+        return NextResponse.json(
+          { error: "A station address references a city that no longer exists." },
+          { status: 400 },
         )
       }
       return NextResponse.json(
@@ -1229,7 +1317,6 @@ export async function PATCH(
         suiteTypeBathroomTypes: updatedDetail.suiteTypeBathroomTypes,
         rateTypes: updatedDetail.rateTypes,
         rateAdjustments: updatedDetail.rateAdjustments,
-        kindDefaultRateTypes: updatedDetail.kindDefaultRateTypes,
         stationAddresses: updatedDetail.stationAddresses,
       },
     ),

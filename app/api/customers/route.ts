@@ -3,6 +3,7 @@ import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
 import { CUSTOMER_COLUMNS } from "@/lib/supabase/columns"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
+import { PHONE_VALIDATION_MESSAGE, isPlausiblePhone } from "@/lib/phone-format"
 import { COMPLETED_REPEAT_BOOKING_STAGES } from "@/lib/customer-repeat-status"
 
 const allowedRoles = new Set(["admin", "manager", "consultant"])
@@ -12,7 +13,15 @@ const createCustomerSchema = z.object({
   first_name: z.string().trim().min(1, "First name is required").max(100),
   last_name: z.string().trim().min(1, "Last name is required").max(100),
   email: z.string().trim().toLowerCase().email("Must be a valid email address").max(255),
-  phone: z.string().trim().max(50).nullable().optional(),
+  phone: z
+    .string()
+    .trim()
+    .max(50)
+    .nullable()
+    .optional()
+    .refine((value) => value === null || value === undefined || value === "" || isPlausiblePhone(value), {
+      message: PHONE_VALIDATION_MESSAGE,
+    }),
   country: z.string().trim().max(100).nullable().optional(),
   province: z.string().trim().max(100).nullable().optional(),
   notes: z.string().trim().max(5000).nullable().optional(),
@@ -21,7 +30,6 @@ const createCustomerSchema = z.object({
   vip_status: z.boolean().optional().default(false),
   preferences: z.string().trim().max(2000).nullable().optional(),
   communication_preferences: z.string().trim().max(1000).nullable().optional(),
-  default_rate_type_id: z.string().uuid().nullable().optional(),
 })
 
 export async function GET(request: Request) {
@@ -156,7 +164,6 @@ export async function POST(request: Request) {
       vip_status: parsed.vip_status,
       preferences: parsed.preferences ?? null,
       communication_preferences: parsed.communication_preferences ?? null,
-      default_rate_type_id: parsed.default_rate_type_id ?? null,
     })
     .select(CUSTOMER_COLUMNS)
     .single()
@@ -186,7 +193,6 @@ export async function POST(request: Request) {
       vipStatus: customer.vip_status,
       preferences: customer.preferences,
       communicationPreferences: customer.communication_preferences,
-      defaultRateTypeId: customer.default_rate_type_id,
       firstTravelDate: customer.first_travel_date,
       lastTravelDate: customer.last_travel_date,
       isRepeatClient: false,

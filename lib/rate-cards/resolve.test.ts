@@ -116,20 +116,12 @@ describe("selectRateCard", () => {
     expect(selectRateCard([])).toBeUndefined()
   })
 
-  it("prefers the per-leg override over the quote-level choice", () => {
+  it("prefers the per-leg override over the supplier's quoted rate", () => {
     expect(selectRateCard([rac, sto], STO, RAC, RAC)).toEqual({ ok: true, card: sto, inherited: false })
   })
 
-  it("falls back to the quote-level choice when there is no override", () => {
+  it("falls back to the supplier's quoted rate when there is no override", () => {
     expect(selectRateCard([rac, sto], null, STO, RAC)).toEqual({ ok: true, card: sto, inherited: true })
-  })
-
-  it("falls back to the system default when the quote-level choice has no card", () => {
-    expect(selectRateCard([rac, sto], null, "rate-type-missing", STO)).toEqual({
-      ok: true,
-      card: sto,
-      inherited: true,
-    })
   })
 
   describe("an explicitly chosen rate type is a contract", () => {
@@ -140,7 +132,7 @@ describe("selectRateCard", () => {
       })
     })
 
-    it("does not fall through to the supplier or system default either", () => {
+    it("does not fall through to the supplier's base rate or the system default either", () => {
       expect(selectRateCard([rac, sto], "rate-type-missing", RAC, STO, RAC)).toEqual({
         ok: false,
         requestedRateTypeId: "rate-type-missing",
@@ -156,8 +148,8 @@ describe("selectRateCard", () => {
   })
 
   describe("when nothing is explicitly chosen", () => {
-    it("reports the most specific default that missed", () => {
-      expect(selectRateCard([rac], null, "quote-missing", "system-missing", "supplier-missing")).toEqual({
+    it("reports the most specific tier that missed", () => {
+      expect(selectRateCard([rac], null, "quote-missing", "base-missing", "system-missing")).toEqual({
         ok: false,
         requestedRateTypeId: "quote-missing",
       })
@@ -172,41 +164,46 @@ describe("selectRateCard", () => {
     })
   })
 
-  describe("supplier default tier", () => {
+  describe("supplier tiers", () => {
     const NETT = "rate-type-nett"
     const nett = card({ rateTypeId: NETT })
 
-    it("loses to the per-leg override and to the customer default", () => {
-      expect(selectRateCard([rac, sto, nett], STO, null, RAC, NETT)).toEqual({
-        ok: true,
-        card: sto,
-        inherited: false,
-      })
-      expect(selectRateCard([rac, sto, nett], null, STO, RAC, NETT)).toEqual({
-        ok: true,
-        card: sto,
-        inherited: true,
-      })
-    })
-
-    it("wins over the system default when the customer has none", () => {
-      expect(selectRateCard([rac, sto, nett], null, null, RAC, NETT)).toEqual({
+    it("prices at the quoted rate ahead of the base rate", () => {
+      expect(selectRateCard([rac, sto, nett], null, NETT, RAC, STO)).toEqual({
         ok: true,
         card: nett,
         inherited: true,
       })
     })
 
-    it("falls through to the system default when the supplier default has no card", () => {
-      expect(selectRateCard([rac, sto], null, null, RAC, NETT)).toEqual({
+    // The reason this whole split exists: an inherited quoted rate was never asked for, so a
+    // missing card means "fall back", not "fail" -- unlike an explicit per-leg choice.
+    it("falls through to the base rate when the quoted rate has no card here", () => {
+      expect(selectRateCard([rac, sto], null, NETT, RAC, STO)).toEqual({
         ok: true,
         card: rac,
         inherited: true,
       })
     })
 
-    it("is skipped when null, leaving the previous precedence intact", () => {
-      expect(selectRateCard([rac, sto], null, null, STO, null)).toEqual({
+    it("falls through to the system default when neither supplier tier has a card", () => {
+      expect(selectRateCard([sto], null, NETT, RAC, STO)).toEqual({
+        ok: true,
+        card: sto,
+        inherited: true,
+      })
+    })
+
+    it("uses the base rate when no quoted rate is nominated", () => {
+      expect(selectRateCard([rac, sto], null, null, RAC, STO)).toEqual({
+        ok: true,
+        card: rac,
+        inherited: true,
+      })
+    })
+
+    it("skips a null base rate, leaving the system default", () => {
+      expect(selectRateCard([rac, sto], null, null, null, STO)).toEqual({
         ok: true,
         card: sto,
         inherited: true,

@@ -663,6 +663,8 @@ describe("PATCH /api/suppliers/[slug]", () => {
 
       const stationUpsertPayloads: Array<unknown> = []
       const linkDeleteFactory = () => ({ delete: () => ({ in: async () => ({ error: null }) }) })
+      // Cities the pre-flight FK check will find. Anything else is treated as deleted.
+      const knownLocationIds = [PRETORIA_ID, CAPE_TOWN_ID]
 
       mockAuth()
       helperMocks.checkDeletionDependencies.mockResolvedValue([])
@@ -703,6 +705,18 @@ describe("PATCH /api/suppliers/[slug]", () => {
         if (table === "suppliers") return { update: () => supplierUpdateQuery }
         // The bare `email` field seeds a fallback supplier_emails row when `emails` is empty.
         if (table === "supplier_emails") return { upsert: async () => ({ error: null }) }
+        if (table === "locations") {
+          return {
+            select: () => ({
+              in: async (_column: string, ids: string[]) => ({
+                data: ids
+                  .filter((id) => knownLocationIds.includes(id))
+                  .map((id) => ({ id })),
+                error: null,
+              }),
+            }),
+          }
+        }
         if (table === "supplier_station_addresses") {
           return {
             upsert: async (payload: unknown) => {
@@ -780,7 +794,7 @@ describe("PATCH /api/suppliers/[slug]", () => {
       )
     })
 
-    it("drops station rows sent for a non-train supplier", async () => {
+    it("ignores station rows sent for a non-train supplier without deleting the stored ones", async () => {
       const { stationUpsertPayloads } = setupStationSave("hotel_property")
 
       const response = await PATCH(
@@ -794,6 +808,55 @@ describe("PATCH /api/suppliers/[slug]", () => {
 
       expect(response.status).toBe(200)
       expect(stationUpsertPayloads).toEqual([])
+      // Re-categorising a train must not destroy its stations: switching back has to restore them,
+      // and the editor gives no warning that anything was at stake.
+      expect(helperMocks.deleteInChunks).not.toHaveBeenCalledWith(
+        expect.anything(),
+        "supplier_station_addresses",
+        expect.anything(),
+      )
+    })
+
+    it("rejects an unknown city with a 400 before deleting any stored station row", async () => {
+      const { stationUpsertPayloads } = setupStationSave("train_operator")
+      const UNKNOWN_CITY_ID = "11111111-1111-4111-8111-111111111111"
+
+      const response = await PATCH(
+        new Request("http://localhost/api/suppliers/test", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: "Rovos Rail",
+            kind: "train_operator",
+            email: "ops@example.com",
+            phone: "",
+            website: "",
+            location: "Pretoria",
+            notes: "",
+            singleSupplementPct: 0,
+            active: true,
+            emails: [],
+            suiteTypes: [],
+            routes: [],
+            stationAddresses: [{ locationId: UNKNOWN_CITY_ID, stationName: "Ghost Station" }],
+            expectedUpdatedAt: "2026-01-02T00:00:00.000Z",
+          }),
+        }),
+        { params: Promise.resolve({ slug: "test" }) },
+      )
+
+      expect(response.status).toBe(400)
+      await expect(response.json()).resolves.toMatchObject({
+        error: "A station address references a city that no longer exists.",
+      })
+      // The delete runs before the upsert and the writes share no transaction, so an FK violation
+      // reaching the upsert would leave the supplier with no station rows at all.
+      expect(stationUpsertPayloads).toEqual([])
+      expect(helperMocks.deleteInChunks).not.toHaveBeenCalledWith(
+        expect.anything(),
+        "supplier_station_addresses",
+        expect.anything(),
+      )
     })
 
     it("rejects two station rows for the same city with a 400", async () => {
@@ -827,6 +890,374 @@ describe("PATCH /api/suppliers/[slug]", () => {
       )
 
       expect(response.status).toBe(400)
+      // The schema already defines this message; the route used to swallow it and return a bare
+      // "Invalid request payload" the caller could do nothing with.
+      await expect(response.json()).resolves.toMatchObject({
+        error: "Each city may only have one station address",
+      })
+    })
+  })
+
+  describe("route locations on a category change", () => {
+    const ORIGIN_ID = "00000000-0000-4000-8000-0000000000d1"
+    const DESTINATION_ID = "00000000-0000-4000-8000-0000000000d2"
+    const ROUTE_ID = "00000000-0000-4000-8000-0000000000d3"
+
+    it("keeps a route's stored origin and destination when the supplier is saved as a hotel", async () => {
+      const supplierMaybeSingle = vi.fn(async () => ({
+        data: { updated_at: "2026-01-03T00:00:00.000Z" },
+        error: null,
+      }))
+      const supplierEqMock = vi.fn()
+      const supplierUpdateQuery = {
+        eq: supplierEqMock,
+        select: () => ({ maybeSingle: supplierMaybeSingle }),
+      }
+      supplierEqMock.mockReturnValue(supplierUpdateQuery)
+
+      const routeUpsertPayloads: Array<unknown> = []
+
+      mockAuth()
+      helperMocks.checkDeletionDependencies.mockResolvedValue([])
+      helperMocks.deleteInChunks.mockResolvedValue({ error: null })
+      helperMocks.loadSupplierDetail.mockResolvedValue({
+        supplier: { ...supplierRow, kind: "hotel_property" },
+        suiteTypes: [],
+        emails: [],
+        routes: [
+          {
+            id: ROUTE_ID,
+            supplier_id: SUPPLIER_ID,
+            name: "Pretoria to Cape Town",
+            origin_location_id: ORIGIN_ID,
+            destination_location_id: DESTINATION_ID,
+            pickup_point: null,
+            dropoff_point: null,
+            direction_mode: "one_way",
+            duration_days: 3,
+            active: true,
+            created_at: "2026-01-01T00:00:00.000Z",
+            updated_at: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+        stationAddresses: [],
+        rateCards: [],
+        locations: [
+          { id: ORIGIN_ID, name: "Pretoria" },
+          { id: DESTINATION_ID, name: "Cape Town" },
+        ],
+        bedroomTypes: [],
+        bedroomLayouts: [],
+        bathroomTypes: [],
+        suiteTypeBedroomTypes: [],
+        suiteTypeBedroomLayouts: [],
+        suiteTypeBathroomTypes: [],
+        rateTypes: [],
+      })
+
+      helperMocks.supabaseFrom.mockImplementation((table: string) => {
+        if (table === "profiles") return profileQuery("manager")
+        if (table === "suppliers") return { update: () => supplierUpdateQuery }
+        if (table === "supplier_emails") return { upsert: async () => ({ error: null }) }
+        if (table === "routes") {
+          return {
+            upsert: async (payload: unknown) => {
+              routeUpsertPayloads.push(payload)
+              return { error: null }
+            },
+          }
+        }
+        if (table === "vehicle_rental_route_details") {
+          return { delete: () => ({ in: async () => ({ error: null }) }) }
+        }
+        if (table === "supplier_rate_adjustments") {
+          return { delete: () => ({ eq: async () => ({ error: null }) }) }
+        }
+        throw new Error(`Unexpected table ${table}`)
+      })
+
+      const response = await PATCH(
+        new Request("http://localhost/api/suppliers/test", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: "Rovos Rail",
+            // A hotel's "routes" are meal plans and its editor has no location fields, so the
+            // client sends none back. Nulling them would strand the supplier: switching to Train
+            // again is refused because train routes require both endpoints.
+            kind: "hotel_property",
+            email: "ops@example.com",
+            phone: "",
+            website: "",
+            location: "Pretoria",
+            notes: "",
+            singleSupplementPct: 0,
+            active: true,
+            emails: [],
+            suiteTypes: [],
+            routes: [
+              {
+                id: ROUTE_ID,
+                name: "Pretoria to Cape Town",
+                directionMode: "one_way",
+                active: true,
+                rateCards: [],
+              },
+            ],
+            stationAddresses: [],
+            expectedUpdatedAt: "2026-01-02T00:00:00.000Z",
+          }),
+        }),
+        { params: Promise.resolve({ slug: "test" }) },
+      )
+
+      expect(response.status).toBe(200)
+      expect(routeUpsertPayloads[0]).toEqual([
+        expect.objectContaining({
+          id: ROUTE_ID,
+          origin_location_id: ORIGIN_ID,
+          destination_location_id: DESTINATION_ID,
+        }),
+      ])
+    })
+  })
+
+  describe("route departure/arrival times", () => {
+    const ORIGIN_ID = "00000000-0000-4000-8000-0000000000e1"
+    const DESTINATION_ID = "00000000-0000-4000-8000-0000000000e2"
+    const ROUTE_ID = "00000000-0000-4000-8000-0000000000e3"
+
+    /** Runs a train-operator PATCH and returns the payload the routes upsert received. */
+    async function patchTrainRoute(route: Record<string, unknown>) {
+      const supplierMaybeSingle = vi.fn(async () => ({
+        data: { updated_at: "2026-01-03T00:00:00.000Z" },
+        error: null,
+      }))
+      const supplierEqMock = vi.fn()
+      const supplierUpdateQuery = {
+        eq: supplierEqMock,
+        select: () => ({ maybeSingle: supplierMaybeSingle }),
+      }
+      supplierEqMock.mockReturnValue(supplierUpdateQuery)
+
+      const routeUpsertPayloads: Array<unknown> = []
+
+      mockAuth()
+      helperMocks.checkDeletionDependencies.mockResolvedValue([])
+      helperMocks.deleteInChunks.mockResolvedValue({ error: null })
+      helperMocks.loadSupplierDetail.mockResolvedValue({
+        supplier: { ...supplierRow, kind: "train_operator" },
+        suiteTypes: [],
+        emails: [],
+        routes: [],
+        stationAddresses: [],
+        rateCards: [],
+        locations: [
+          { id: ORIGIN_ID, name: "Pretoria" },
+          { id: DESTINATION_ID, name: "Cape Town" },
+        ],
+        bedroomTypes: [],
+        bedroomLayouts: [],
+        bathroomTypes: [],
+        suiteTypeBedroomTypes: [],
+        suiteTypeBedroomLayouts: [],
+        suiteTypeBathroomTypes: [],
+        rateTypes: [],
+      })
+
+      helperMocks.supabaseFrom.mockImplementation((table: string) => {
+        if (table === "profiles") return profileQuery("manager")
+        if (table === "suppliers") return { update: () => supplierUpdateQuery }
+        if (table === "supplier_emails") return { upsert: async () => ({ error: null }) }
+        if (table === "routes") {
+          return {
+            upsert: async (payload: unknown) => {
+              routeUpsertPayloads.push(payload)
+              return { error: null }
+            },
+          }
+        }
+        if (table === "vehicle_rental_route_details") {
+          return { delete: () => ({ in: async () => ({ error: null }) }) }
+        }
+        if (table === "supplier_rate_adjustments") {
+          return { delete: () => ({ eq: async () => ({ error: null }) }) }
+        }
+        return { upsert: async () => ({ error: null }) }
+      })
+
+      const response = await PATCH(
+        new Request("http://localhost/api/suppliers/test", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: "Rovos Rail",
+            kind: "train_operator",
+            email: "ops@example.com",
+            phone: "",
+            website: "",
+            location: "Pretoria",
+            notes: "",
+            singleSupplementPct: 0,
+            active: true,
+            emails: [],
+            suiteTypes: [],
+            routes: [
+              {
+                id: ROUTE_ID,
+                name: "Pretoria ↔ Cape Town",
+                originLocationId: ORIGIN_ID,
+                destinationLocationId: DESTINATION_ID,
+                active: true,
+                rateCards: [],
+                ...route,
+              },
+            ],
+            stationAddresses: [],
+            expectedUpdatedAt: "2026-01-02T00:00:00.000Z",
+          }),
+        }),
+        { params: Promise.resolve({ slug: "test" }) },
+      )
+
+      return { response, routeUpsertPayloads }
+    }
+
+    it("persists both legs' times on a two-way route", async () => {
+      const { response, routeUpsertPayloads } = await patchTrainRoute({
+        directionMode: "round_trip",
+        departureTime: "08:30",
+        arrivalTime: "17:45",
+        returnDepartureTime: "10:15",
+        returnArrivalTime: "19:00",
+      })
+
+      expect(response.status).toBe(200)
+      expect(routeUpsertPayloads[0]).toEqual([
+        expect.objectContaining({
+          id: ROUTE_ID,
+          departure_time: "08:30",
+          arrival_time: "17:45",
+          return_departure_time: "10:15",
+          return_arrival_time: "19:00",
+        }),
+      ])
+    })
+
+    it("clears the return times on a one-way route, so a stale pair can never resurface", async () => {
+      const { response, routeUpsertPayloads } = await patchTrainRoute({
+        directionMode: "one_way",
+        departureTime: "08:30",
+        arrivalTime: "17:45",
+        returnDepartureTime: "10:15",
+        returnArrivalTime: "19:00",
+      })
+
+      expect(response.status).toBe(200)
+      expect(routeUpsertPayloads[0]).toEqual([
+        expect.objectContaining({
+          departure_time: "08:30",
+          arrival_time: "17:45",
+          return_departure_time: null,
+          return_arrival_time: null,
+        }),
+      ])
+    })
+
+    it("stores no times for a kind whose routes have no schedule", async () => {
+      mockAuth()
+      helperMocks.checkDeletionDependencies.mockResolvedValue([])
+      helperMocks.deleteInChunks.mockResolvedValue({ error: null })
+
+      const supplierMaybeSingle = vi.fn(async () => ({
+        data: { updated_at: "2026-01-03T00:00:00.000Z" },
+        error: null,
+      }))
+      const supplierEqMock = vi.fn()
+      const supplierUpdateQuery = {
+        eq: supplierEqMock,
+        select: () => ({ maybeSingle: supplierMaybeSingle }),
+      }
+      supplierEqMock.mockReturnValue(supplierUpdateQuery)
+
+      const routeUpsertPayloads: Array<unknown> = []
+
+      helperMocks.loadSupplierDetail.mockResolvedValue({
+        supplier: { ...supplierRow, kind: "hotel_property" },
+        suiteTypes: [],
+        emails: [],
+        routes: [],
+        stationAddresses: [],
+        rateCards: [],
+        locations: [],
+        bedroomTypes: [],
+        bedroomLayouts: [],
+        bathroomTypes: [],
+        suiteTypeBedroomTypes: [],
+        suiteTypeBedroomLayouts: [],
+        suiteTypeBathroomTypes: [],
+        rateTypes: [],
+      })
+
+      helperMocks.supabaseFrom.mockImplementation((table: string) => {
+        if (table === "profiles") return profileQuery("manager")
+        if (table === "suppliers") return { update: () => supplierUpdateQuery }
+        if (table === "routes") {
+          return {
+            upsert: async (payload: unknown) => {
+              routeUpsertPayloads.push(payload)
+              return { error: null }
+            },
+          }
+        }
+        if (table === "vehicle_rental_route_details") {
+          return { delete: () => ({ in: async () => ({ error: null }) }) }
+        }
+        if (table === "supplier_rate_adjustments") {
+          return { delete: () => ({ eq: async () => ({ error: null }) }) }
+        }
+        return { upsert: async () => ({ error: null }) }
+      })
+
+      const response = await PATCH(
+        new Request("http://localhost/api/suppliers/test", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: "The Silo Hotel",
+            kind: "hotel_property",
+            email: "ops@example.com",
+            phone: "",
+            website: "",
+            location: "Cape Town",
+            notes: "",
+            singleSupplementPct: 0,
+            active: true,
+            emails: [],
+            suiteTypes: [],
+            routes: [
+              {
+                id: ROUTE_ID,
+                name: "Bed & Breakfast",
+                directionMode: "one_way",
+                active: true,
+                rateCards: [],
+                // A hotel editor never sends these; a hand-rolled request still must not set them.
+                departureTime: "08:30",
+                arrivalTime: "17:45",
+              },
+            ],
+            stationAddresses: [],
+            expectedUpdatedAt: "2026-01-02T00:00:00.000Z",
+          }),
+        }),
+        { params: Promise.resolve({ slug: "test" }) },
+      )
+
+      expect(response.status).toBe(200)
+      expect(routeUpsertPayloads[0]).toEqual([
+        expect.objectContaining({ departure_time: null, arrival_time: null }),
+      ])
     })
   })
 })

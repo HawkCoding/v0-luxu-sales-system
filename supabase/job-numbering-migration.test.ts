@@ -12,6 +12,11 @@ const lttMigrationSql = readFileSync(
   "utf8",
 )
 
+const blockMigrationSql = readFileSync(
+  join(process.cwd(), "supabase", "migrations", "20260812130000_booking_number_block_allocation.sql"),
+  "utf8",
+)
+
 describe("phase 8 job-numbering migration", () => {
   it("adds product-year sequences and atomic allocator", () => {
     expect(migrationSql).toContain("CREATE TABLE IF NOT EXISTS public.booking_number_sequences")
@@ -49,5 +54,22 @@ describe("LTT booking-number migration", () => {
     expect(lttMigrationSql).toContain("'^LTT-[0-9]{4}-[0-9]{4}$'")
     expect(lttMigrationSql).not.toContain("UPDATE public.bookings")
     expect(lttMigrationSql).not.toContain("UPDATE public.quotes")
+  })
+})
+
+describe("booking-number block allocation migration", () => {
+  it("reserves a range with the same atomic upsert as the per-row allocator", () => {
+    expect(blockMigrationSql).toContain("CREATE OR REPLACE FUNCTION public.next_booking_number_block")
+    expect(blockMigrationSql).toContain("ON CONFLICT (product_code, year)")
+    expect(blockMigrationSql).toContain("last_number = public.booking_number_sequences.last_number + p_count")
+  })
+
+  it("keeps the single-booking allocator in place", () => {
+    expect(blockMigrationSql).not.toContain("DROP FUNCTION IF EXISTS public.next_booking_number(")
+  })
+
+  it("bounds the block size and rejects other product codes", () => {
+    expect(blockMigrationSql).toContain("IF p_count < 1 OR p_count > 1000 THEN")
+    expect(blockMigrationSql).toContain("IF p_product_code <> 'LTT' THEN")
   })
 })

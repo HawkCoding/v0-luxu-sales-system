@@ -4,7 +4,9 @@ import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
 import { mapRateType } from "@/lib/suppliers"
 
-const ALLOWED_ROLES = new Set(["admin", "manager"])
+// Admin only, matching the Settings page gate (edit:settings) that surfaces the Rate Types link.
+// Managers keep read access — the page renders read-only off canEdit.
+const ALLOWED_ROLES = new Set(["admin"])
 
 const postSchema = z.object({
   code: z

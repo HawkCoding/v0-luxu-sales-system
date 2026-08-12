@@ -62,8 +62,6 @@ interface BuildBookingDialogProps {
   /** Existing quote lines — manual/extra lines (snapshot.isExtra) are preserved across re-apply. */
   existingLineItems?: QuoteLineItem[]
   expectedUpdatedAt?: string
-  /** Customer's default rate type — pre-selects the rate version when pricing. */
-  customerDefaultRateTypeId?: string | null
   onApplied: () => void
   /** Opens the dialog immediately on mount — used to skip the extra click right after a quote is created. */
   autoOpen?: boolean
@@ -113,7 +111,6 @@ export function BuildBookingDialog({
   existingLineItemCount,
   existingLineItems = [],
   expectedUpdatedAt,
-  customerDefaultRateTypeId,
   onApplied,
   autoOpen = false,
   onAutoOpenHandled,
@@ -124,7 +121,6 @@ export function BuildBookingDialog({
     () => (rateTypesData?.rateTypes ?? []).filter((rt) => !rt.archivedAt),
     [rateTypesData],
   )
-  const systemDefaultRateTypeId = rateTypes.find((rt) => rt.isDefault)?.id ?? ""
   const [open, setOpen] = useState(false)
   const [step, setStep] = useState<Step>("services")
   const [services, setServices] = useState<ServiceRow[]>([])
@@ -164,17 +160,6 @@ export function BuildBookingDialog({
 
   const filteredSuppliers = suppliers.filter((supplier) => supplier.kind === pickerKind)
 
-  /**
-   * Seeds one leg's rate type: the customer's own default first, then the leg supplier's default,
-   * then the system default. Mirrors selectRateCard's precedence (lib/rate-cards/resolve.ts) so
-   * what the dialog pre-selects is what the server would have picked unprompted.
-   */
-  const resolveLegRateTypeId = useCallback(
-    (leg: { defaultRateTypeId: string | null }) =>
-      customerDefaultRateTypeId || leg.defaultRateTypeId || systemDefaultRateTypeId || null,
-    [customerDefaultRateTypeId, systemDefaultRateTypeId],
-  )
-
   useEffect(() => {
     setEditing(open && step !== "services")
   }, [open, setEditing, step])
@@ -185,23 +170,22 @@ export function BuildBookingDialog({
     onAutoOpenHandled?.()
   }, [autoOpen, onAutoOpenHandled])
 
-  // Reconcile per-leg rate types once the rate-type list resolves (it may load after the configure
-  // step opens): fill empty ones and replace archived ones with that leg's own default.
+  // Clear per-leg rate types that point at an archived rate once the rate-type list resolves.
+  // They fall back to "inherit" (null) rather than being substituted: an explicit choice is a hard
+  // contract on the server, so silently swapping in another rate would quote a price nobody picked.
   useEffect(() => {
     if (step !== "configure" || rateTypes.length === 0) return
     const activeIds = new Set(rateTypes.map((rt) => rt.id))
-    const legById = new Map((packageDetail?.legs ?? []).map((leg) => [leg.id, leg]))
     setLegStates((prev) =>
-      prev.some((state) => !state.rateTypeId || !activeIds.has(state.rateTypeId))
-        ? prev.map((state) => {
-            if (state.rateTypeId && activeIds.has(state.rateTypeId)) return state
-            const leg = legById.get(state.legId)
-            const fallback = leg ? resolveLegRateTypeId(leg) : systemDefaultRateTypeId || null
-            return fallback ? { ...state, rateTypeId: fallback } : state
-          })
+      prev.some((state) => state.rateTypeId && !activeIds.has(state.rateTypeId))
+        ? prev.map((state) =>
+            state.rateTypeId && !activeIds.has(state.rateTypeId)
+              ? { ...state, rateTypeId: null }
+              : state,
+          )
         : prev,
     )
-  }, [step, rateTypes, packageDetail, resolveLegRateTypeId, systemDefaultRateTypeId])
+  }, [step, rateTypes])
 
   // Re-opening the dialog on a priced quote pre-fills the commission from what the existing
   // lines were built with, so the salesperson doesn't have to remember and retype it.
@@ -404,10 +388,11 @@ export function BuildBookingDialog({
       const totals = await refreshPassengerTotals(built.packageDetail)
 
       // The job's enquiry travel date seeds default service dates; everything stays editable.
+      // Legs seed with no rate type: pricing then walks the supplier's quoted rate, its base rate,
+      // and finally the system default. Picking one by hand makes it a hard contract instead.
       const stateOptions = {
         tripStartDate: savedState?.tripStartDate ?? travelDate ?? null,
         totalsBySupplierId: totals,
-        resolveLegRateTypeId,
       }
       const savedLegIds = new Set((savedState?.selections ?? []).map((row) => row.package_leg_id))
       const states =

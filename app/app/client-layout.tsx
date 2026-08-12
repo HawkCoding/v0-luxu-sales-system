@@ -17,6 +17,7 @@ import {
 import { useState, useEffect, useRef, type ReactNode } from "react"
 import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
+import { AuthHashErrorNotice } from "@/components/auth-hash-error-notice"
 import { ConnectionErrorBanner } from "@/components/connection-error-banner"
 import { SessionTimeoutGuard } from "@/components/session-timeout-guard"
 import { useEnquiryCount } from "@/lib/use-data"
@@ -77,8 +78,11 @@ function AppShell({ children }: { children: ReactNode }) {
 
   const enquiriesCount = enquiryCountData?.count ?? 0
 
+  // /api/error-logs is admin+manager only — skip the poll for roles that would
+  // only get a 403 back every 60 seconds.
+  const canViewErrorLogs = can("view:error_logs")
   const { data: errorLogCountData } = useSWR<{ count: number }>(
-    "/api/error-logs?resolved=false&count=true",
+    canViewErrorLogs ? "/api/error-logs?resolved=false&count=true" : null,
     fetcher,
     { refreshInterval: 60_000 },
   )
@@ -282,7 +286,7 @@ function AppShell({ children }: { children: ReactNode }) {
               const isEnquiries = item.href === "/app/enquiries"
               const isSettings = item.href === "/app/settings"
               const showBadge = isEnquiries && enquiriesCount > 0
-              const showSettingsBadge = isSettings && unresolvedErrorsCount > 0
+              const showSettingsBadge = isSettings && canViewErrorLogs && unresolvedErrorsCount > 0
               return (
                 <Link
                   key={item.href}
@@ -450,6 +454,7 @@ export default function AppClientLayout({
   return (
     <AuthProvider initialUser={initialUser}>
       <RoleProvider initialRole={initialUser?.role}>
+        <AuthHashErrorNotice />
         <div className="flex flex-col h-svh overflow-hidden">
           <AppShell>{children}</AppShell>
         </div>

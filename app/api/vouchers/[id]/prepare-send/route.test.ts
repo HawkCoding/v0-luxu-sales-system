@@ -120,14 +120,6 @@ function buildSupabase(options: BuildOptions = {}) {
         }
       }
       // Suite tokens for the voucher email — no package selections in these fixtures.
-      if (table === "booking_package_selections") {
-        return {
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          then: (resolve: (value: { data: unknown[]; error: null }) => unknown) =>
-            resolve({ data: [], error: null }),
-        }
-      }
       if (table === "booking_services") {
         return {
           select: vi.fn().mockReturnThis(),

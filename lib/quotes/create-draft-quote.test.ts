@@ -20,6 +20,7 @@ vi.mock("@/lib/quotes/build-from-package", async (importOriginal) => {
 })
 
 import { createDraftQuoteForBooking } from "@/lib/quotes/create-draft-quote"
+import { DEFAULT_QUOTE_VALIDITY_DAYS, isoDateDaysFromNow } from "@/lib/quotes/quote-validity"
 
 const BOOKING_ID = "booking-1"
 
@@ -127,6 +128,48 @@ describe("createDraftQuoteForBooking", () => {
     expect(buildMocks.buildPackageQuoteLineItems).toHaveBeenCalledWith(
       expect.objectContaining({ selections: [{ legId: "svc-1" }] }),
     )
+  })
+
+  it("stamps validity_until from the configured quote_validity_days", async () => {
+    adapterMocks.loadBookingServicesPackageDetail.mockResolvedValue({
+      detail: { id: BOOKING_ID, legs: [] },
+      services: [],
+      units: [],
+    })
+    const { supabase, store } = createSupabaseMock({
+      app_settings: [{ key: "quote_validity_days", value: "7" }],
+    })
+
+    await createDraftQuoteForBooking({
+      supabase: supabase as never,
+      bookingId: BOOKING_ID,
+      bookingNumber: "BT-2026-0001",
+      travelDate: "2026-09-01",
+    })
+
+    expect(store.rows("quotes")[0]).toMatchObject({
+      validity_until: isoDateDaysFromNow(7),
+    })
+  })
+
+  it("falls back to the 14-day default when the setting row is absent", async () => {
+    adapterMocks.loadBookingServicesPackageDetail.mockResolvedValue({
+      detail: { id: BOOKING_ID, legs: [] },
+      services: [],
+      units: [],
+    })
+    const { supabase, store } = createSupabaseMock()
+
+    await createDraftQuoteForBooking({
+      supabase: supabase as never,
+      bookingId: BOOKING_ID,
+      bookingNumber: "BT-2026-0001",
+      travelDate: "2026-09-01",
+    })
+
+    expect(store.rows("quotes")[0]).toMatchObject({
+      validity_until: isoDateDaysFromNow(DEFAULT_QUOTE_VALIDITY_DAYS),
+    })
   })
 
   it("still creates the quote and surfaces the engine's error as a warning when pricing throws", async () => {

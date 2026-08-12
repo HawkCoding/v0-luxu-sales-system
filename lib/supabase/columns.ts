@@ -2,7 +2,7 @@
 // Avoid select("*") so schema drift never silently widens API payloads.
 
 export const CUSTOMER_COLUMNS =
-  "id, first_name, last_name, email, phone, fax, country, province, title, company_name, address_line1, address_line2, city, postal_code, vat_number, notes, date_of_birth, id_passport, vip_status, preferences, communication_preferences, default_rate_type_id, first_travel_date, last_travel_date, is_repeat_client, created_at, updated_at"
+  "id, first_name, last_name, email, phone, fax, country, province, title, company_name, address_line1, address_line2, city, postal_code, vat_number, notes, date_of_birth, id_passport, vip_status, preferences, communication_preferences, first_travel_date, last_travel_date, is_repeat_client, created_at, updated_at"
 
 export const BOOKING_COLUMNS =
   "id, booking_number, customer_id, stage, purpose, source, consultant, owner_user_id, assigned_salesperson_id, is_repeat_client_at_creation, departure_date, duration_nights, email_import_needs_review, email_import_review_resolved_at, email_import_missing_fields, email_import_warnings, email_import_source_message_id, email_import_duplicate_of_booking_id, email_import_subject, email_import_mailbox, email_import_received_at, email_import_raw_preview, no_of_adults, no_of_children, no_of_adults_original, no_of_children_original, no_of_suites, child_ages, route_id, raw_text, extracted_json, terms_accepted, additional_services, additional_services_details, promotion_code, extend_stay, extra_nights, hotel_phase, hotel_supplier_id, customer_invoice_number, created_at, updated_at, quote_sent_at, accepted_at, reservation_form_received_at, deposit_requested_at, deposit_paid_at, final_paid_at, voucher_sent_at, closed_at, deposit_paid, invoice_balance, cancelled_at, refund_status, refund_amount, refund_reference, refunded_at, outcome, outcome_reason_id, outcome_notes, outcome_set_at, outcome_set_by"
@@ -20,7 +20,7 @@ export const TRAVELLER_COLUMNS =
   "id, booking_id, prefix, first_name, last_name, id_passport, date_of_birth, residence, room_with, room_type, is_child, is_primary, sort_order"
 
 export const BOOKING_TRANSPORT_REQUEST_COLUMNS =
-  "id, booking_id, supplier_id, route_id, suite_type_id, package_leg_id, service_id, service_type, pickup_point, dropoff_point, pickup_at, passenger_count, luggage_count, flight_number, price_override, notes, sort_order, supplier_reference, supplier_contact_name, voucher_footnote, created_at, updated_at, rental_details:booking_vehicle_rental_details(transport_request_id, return_at, return_cutoff_time, created_at, updated_at)"
+  "id, booking_id, supplier_id, route_id, suite_type_id, service_id, service_type, pickup_point, dropoff_point, pickup_at, passenger_count, luggage_count, flight_number, price_override, notes, sort_order, supplier_reference, supplier_contact_name, voucher_footnote, created_at, updated_at, rental_details:booking_vehicle_rental_details(transport_request_id, return_at, return_cutoff_time, created_at, updated_at)"
 
 export const BOOKING_SUPPLIER_SCHEDULE_COLUMNS =
   "id, booking_id, supplier_id, supplier_kind, label, date_from, date_to, time_start, time_end, notes, sort_order, created_at, updated_at, booking_date, confirmation_date, payment_made_date, paid_with, amount_payable, amount_receivable"

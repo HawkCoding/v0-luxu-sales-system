@@ -74,7 +74,7 @@ describe("GET /api/templates", () => {
   })
 
   it("returns 401 when unauthenticated", async () => {
-    authMocks.requireUser.mockResolvedValue({
+    authMocks.requireRole.mockResolvedValue({
       ok: false,
       response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
     })
@@ -82,8 +82,26 @@ describe("GET /api/templates", () => {
     expect(res.status).toBe(401)
   })
 
-  it("returns the template list when authenticated", async () => {
-    authMocks.requireUser.mockResolvedValue(buildAuth().context)
+  // Subjects and bodies are internal copy — "view:templates" is admin+manager,
+  // so reading the list needs the same gate as editing it.
+  it("asks for the admin/manager gate rather than any signed-in user", async () => {
+    authMocks.requireRole.mockResolvedValue(buildAuth().context)
+    await GET()
+    expect(authMocks.requireRole).toHaveBeenCalledWith(["admin", "manager"])
+    expect(authMocks.requireUser).not.toHaveBeenCalled()
+  })
+
+  it("returns 403 when the role gate rejects", async () => {
+    authMocks.requireRole.mockResolvedValue({
+      ok: false,
+      response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
+    })
+    const res = await GET()
+    expect(res.status).toBe(403)
+  })
+
+  it("returns the template list for a permitted role", async () => {
+    authMocks.requireRole.mockResolvedValue(buildAuth().context)
     const res = await GET()
     expect(res.status).toBe(200)
     const body = await res.json()

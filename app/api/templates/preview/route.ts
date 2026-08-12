@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { requireUser } from "@/lib/api/auth"
+import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError } from "@/lib/api/responses"
 import { createSessionClient } from "@/lib/supabase/server"
 import { composeFromTemplate } from "@/lib/templates/compose-email"
@@ -15,7 +15,9 @@ const previewSchema = z.object({
 // token values, so managers see what the customer will receive — including
 // warnings for tokens the send flow will not supply.
 export async function POST(req: Request) {
-  const auth = await requireUser()
+  // Mirrors "view:templates" — a preview renders template content, so it needs
+  // the same gate as GET /api/templates.
+  const auth = await requireRole(["admin", "manager"])
   if (!auth.ok) return auth.response
 
   let raw: unknown

@@ -65,7 +65,6 @@ interface TransportRequestRow {
   route_id: string | null
   suite_type_id: string | null
   /** Set for a catalogue-package leg. Booking-scoped services set service_id instead — never both. */
-  package_leg_id: string | null
   /** Set for a Build Booking (booking_services) leg. */
   service_id: string | null
   pickup_point: string
@@ -87,9 +86,7 @@ interface BuildPackageQuoteLineItemsInput {
   jobId: string
   travelDate: string
   selections?: PackageLegSelection[]
-  /** Quote-level chosen rate type (e.g. Resident). Applies to every leg unless a leg sets its own. */
-  rateTypeId?: string | null
-  /** System default rate type, used as the fallback when a leg has no card for the chosen type. */
+  /** System default rate type, the last tier tried after the supplier's quoted and base rates. */
   fallbackRateTypeId?: string | null
   /** Optional rate-type metadata for stamping code/name into the pricing snapshot. */
   rateTypes?: RateTypeMeta[]
@@ -108,7 +105,6 @@ export async function buildPackageQuoteLineItems({
   jobId,
   travelDate,
   selections = [],
-  rateTypeId: quoteRateTypeId = null,
   fallbackRateTypeId = null,
   rateTypes = [],
   commissionBonus = 0,
@@ -125,7 +121,7 @@ export async function buildPackageQuoteLineItems({
 
   const { data: transportRequests } = await supabase
     .from("booking_transport_requests")
-    .select("service_type, route_id, suite_type_id, package_leg_id, service_id, pickup_point, dropoff_point, pickup_at, price_override, rental_details:booking_vehicle_rental_details(return_at)")
+    .select("service_type, route_id, suite_type_id, service_id, pickup_point, dropoff_point, pickup_at, price_override, rental_details:booking_vehicle_rental_details(return_at)")
     .eq("booking_id", jobId)
     .order("sort_order", { ascending: true })
 
@@ -486,9 +482,9 @@ export async function buildPackageQuoteLineItems({
     return selectRateCard(
       candidates,
       perLegRateTypeId,
-      quoteRateTypeId,
+      leg.quoteRateTypeId,
+      leg.baseRateTypeId,
       fallbackRateTypeId,
-      leg.defaultRateTypeId,
     )
   }
 
@@ -517,12 +513,9 @@ export async function buildPackageQuoteLineItems({
     legId: string,
     serviceType: "transfer" | "rental",
   ): TransportRequestRow[] {
-    // A catalogue-package leg sets package_leg_id; a Build Booking (booking_services) leg sets
-    // service_id instead. A given request only ever has one of the two, so matching either is safe.
+    // legId is a booking_services id, which is what a request's service_id points at.
     return ((transportRequests ?? []) as TransportRequestRow[]).filter(
-      (request) =>
-        (request.package_leg_id === legId || request.service_id === legId) &&
-        request.service_type === serviceType,
+      (request) => request.service_id === legId && request.service_type === serviceType,
     )
   }
 

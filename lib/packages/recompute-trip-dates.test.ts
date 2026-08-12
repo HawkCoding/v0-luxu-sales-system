@@ -8,14 +8,12 @@ describe("recomputeBookingTripDates", () => {
       bookings: [
         {
           id: "b1",
-          package_id: "pkg-1",
           departure_date: "2026-09-20",
           trip_start_date: "2026-09-20",
           trip_end_date: "2026-09-20",
           package_travel_date: "2026-09-20",
         },
       ],
-      booking_package_selections: [],
       booking_transport_requests: [
         { id: "t1", booking_id: "b1", pickup_at: "2026-09-25T09:00:00.000Z" },
       ],
@@ -36,12 +34,16 @@ describe("recomputeBookingTripDates", () => {
       bookings: [
         {
           id: "b1",
-          package_id: "pkg-1",
           departure_date: "2026-09-20",
           trip_start_date: "2026-09-20",
         },
       ],
-      booking_package_selections: [],
+      // The booking has a service, so trip dates ARE derivable from it -- an undated service
+      // clears them. Contrast with the next test, where a booking with no services at all is
+      // left untouched.
+      booking_services: [
+        { id: "s1", booking_id: "b1", selected: true, service_date: null, nights: null, route_id: null },
+      ],
       booking_transport_requests: [],
     })
 
@@ -57,7 +59,7 @@ describe("recomputeBookingTripDates", () => {
 
   it("leaves a non-package booking untouched when nothing is dated", async () => {
     const { supabase, store } = createSupabaseMock({
-      bookings: [{ id: "b1", package_id: null, departure_date: "2026-09-20", trip_start_date: "2026-09-20" }],
+      bookings: [{ id: "b1", departure_date: "2026-09-20", trip_start_date: "2026-09-20" }],
       booking_transport_requests: [],
     })
 

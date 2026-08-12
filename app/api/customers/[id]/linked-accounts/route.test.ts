@@ -11,7 +11,7 @@ import { POST } from "./route"
 const USER_ID = "00000000-0000-4000-8000-000000000001"
 const CUSTOMER_ID = "690b9670-420c-4777-8334-3a5f380ecf97"
 
-function createSupabase() {
+function createSupabase(role = "manager") {
   const insertSingleMock = vi.fn(async () => ({
     data: {
       id: "00000000-0000-4000-8000-000000000010",
@@ -47,7 +47,7 @@ function createSupabase() {
           select: () => ({
             eq: () => ({
               single: async () => ({
-                data: { clearance_level: "manager" },
+                data: { clearance_level: role },
                 error: null,
               }),
             }),
@@ -118,6 +118,41 @@ describe("POST /api/customers/[id]/linked-accounts", () => {
         is_mirror: false,
       }),
     )
+  })
+
+  // F05-10: the form is gated on edit:customers, which consultants have — the
+  // route used to 403 them, so a visible, submittable form always failed.
+  it("allows consultants, who are shown the linked-account form", async () => {
+    const supabase = createSupabase("consultant")
+    createSessionClientMock.mockResolvedValue(supabase)
+
+    const response = await POST(
+      new Request(`http://localhost/api/customers/${CUSTOMER_ID}/linked-accounts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ relationship: "Partner" }),
+      }),
+      { params: Promise.resolve({ id: CUSTOMER_ID }) },
+    )
+
+    expect(response.status).toBe(201)
+  })
+
+  it("still refuses readonly users", async () => {
+    const supabase = createSupabase("readonly")
+    createSessionClientMock.mockResolvedValue(supabase)
+
+    const response = await POST(
+      new Request(`http://localhost/api/customers/${CUSTOMER_ID}/linked-accounts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ relationship: "Partner" }),
+      }),
+      { params: Promise.resolve({ id: CUSTOMER_ID }) },
+    )
+
+    expect(response.status).toBe(403)
+    expect(supabase.linkedAccountsInsertMock).not.toHaveBeenCalled()
   })
 
   it("still returns 400 for invalid email", async () => {

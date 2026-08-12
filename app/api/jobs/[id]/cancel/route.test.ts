@@ -5,7 +5,10 @@ const supabaseMocks = vi.hoisted(() => ({ createSessionClient: vi.fn() }))
 vi.mock("@/lib/supabase/server", () => ({
   createSessionClient: supabaseMocks.createSessionClient,
 }))
-vi.mock("@/lib/role-utils", () => ({ extractRoleFromJwt: vi.fn(() => null) }))
+vi.mock("@/lib/role-utils", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/role-utils")>()),
+  extractRoleFromJwt: vi.fn(() => null),
+}))
 vi.mock("@/lib/audit-write", () => ({ writeAuditLog: vi.fn(async () => {}) }))
 vi.mock("@/lib/invoices/sync-booking-payment-state", () => ({
   syncBookingPaymentState: vi.fn(async () => ({ totalPaid: 0, depositPaid: false, invoiceBalance: 0 })),
@@ -188,7 +191,7 @@ describe("POST /api/jobs/[id]/cancel", () => {
     expect(res.status).toBe(401)
   })
 
-  it("returns 403 for readonly role", async () => {
+  it("returns 403 for a retired or unrecognised clearance level", async () => {
     createSupabaseMock({ role: "readonly" })
     const res = await POST(postJson({ outcomeReasonId: REASON_ID }), makeParams())
     expect(res.status).toBe(403)

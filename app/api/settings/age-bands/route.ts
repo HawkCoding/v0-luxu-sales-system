@@ -5,7 +5,10 @@ import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 import { createSessionClient } from "@/lib/supabase/server"
 import { AGE_SETTINGS_KEYS, DEFAULT_AGE_BUCKETS } from "@/lib/pricing/age-buckets"
 
-const ALLOWED_ROLES = new Set(["admin", "manager"])
+// Admin-only, matching "edit:settings" in lib/role-context.tsx, the card copy
+// ("Only admins can change these defaults") and the sibling
+// train-child-price-ratio / session-timeout routes.
+const ALLOWED_ROLES = new Set(["admin"])
 
 const patchSchema = z
   .object({

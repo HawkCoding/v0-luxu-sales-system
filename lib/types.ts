@@ -1,4 +1,6 @@
-export type Role = "admin" | "manager" | "consultant" | "readonly"
+// `consultant` is the lowest clearance level. The database enum still carries a
+// retired `readonly` value (Postgres cannot drop enum labels) — it is not a Role.
+export type Role = "admin" | "manager" | "consultant"
 
 export type Purpose = "quote" | "availability" | "reservation"
 export type Source =
@@ -116,7 +118,6 @@ export interface Customer {
   vipStatus?: boolean
   preferences?: string | null
   communicationPreferences?: string | null
-  defaultRateTypeId?: string | null
   firstTravelDate?: string | null
   firstTravelDateDisplay?: string
   lastTravelDate?: string | null
@@ -270,6 +271,9 @@ export interface SupplierVocabulary {
   routeHasDirection: boolean
   /** Whether the route exposes a "Duration (days)" input for admins to record how long the journey takes. Train operators only; feeds the itinerary. */
   routeHasDuration: boolean
+  /** Whether the route exposes its own departure/arrival time inputs. Train operators only — every
+   * other kind still reads its times off the supplier (`defaultTimeStart`/`defaultTimeEnd`). */
+  routeHasSchedule: boolean
   /** Whether the route name is auto-filled from origin/destination + direction while the name is empty; user edits always win. Train operators only. */
   routeNameAutoDerived: boolean
   showSingleSupplement: boolean
@@ -299,6 +303,7 @@ const JOURNEY_SUPPLIER_VOCABULARY: SupplierVocabulary = {
   routeHasLocations: true,
   routeHasDirection: true,
   routeHasDuration: true,
+  routeHasSchedule: true,
   routeNameAutoDerived: true,
   showSingleSupplement: true,
   showDurationNights: true,
@@ -330,6 +335,7 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     routeHasLocations: false,
     routeHasDirection: false,
     routeHasDuration: false,
+    routeHasSchedule: false,
     routeNameAutoDerived: false,
     showSingleSupplement: false,
     showDurationNights: false,
@@ -358,6 +364,7 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     routeHasLocations: true,
     routeHasDirection: true,
     routeHasDuration: false,
+    routeHasSchedule: false,
     routeNameAutoDerived: false,
     showSingleSupplement: false,
     showDurationNights: false,
@@ -380,6 +387,7 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     routeHasLocations: true,
     routeHasDirection: false,
     routeHasDuration: false,
+    routeHasSchedule: false,
     routeNameAutoDerived: false,
     showSingleSupplement: false,
     showDurationNights: false,
@@ -408,6 +416,7 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     routeHasLocations: false,
     routeHasDirection: false,
     routeHasDuration: false,
+    routeHasSchedule: false,
     routeNameAutoDerived: false,
     showSingleSupplement: true,
     showDurationNights: true,
@@ -430,6 +439,7 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     routeHasLocations: true,
     routeHasDirection: true,
     routeHasDuration: false,
+    routeHasSchedule: false,
     routeNameAutoDerived: false,
     showSingleSupplement: true,
     showDurationNights: false,
@@ -509,6 +519,14 @@ export interface SupplierRoute {
   directionMode?: RouteDirectionMode
   /** Trip length in whole days; train routes only, null otherwise. */
   durationDays?: number | null
+  /** HH:MM departure/arrival of the outbound leg; train routes only, null otherwise. Printed on the
+   * quote itinerary, itinerary PDF and voucher, and prefilled on new booking schedules. */
+  departureTime?: string | null
+  arrivalTime?: string | null
+  /** Same, for the return leg of a two-way route (`directionMode === "round_trip"`). A booking
+   * travelling in reverse (`route_reversed`) renders these instead; null on one-way routes. */
+  returnDepartureTime?: string | null
+  returnArrivalTime?: string | null
   active: boolean
   createdAt: string
   createdAtDisplay?: string
@@ -591,16 +609,6 @@ export interface RateType {
   updatedAt: string
 }
 
-/**
- * Per-supplier-kind default rate type. Decides which rate a supplier (and its
- * rate matrix) starts on. Falls back to the global default rate type when a
- * kind has no explicit mapping.
- */
-export interface SupplierKindDefaultRateType {
-  kind: SupplierKind
-  rateTypeId: string
-}
-
 export interface PricingSnapshot {
   source: "pricing_engine"
   pricingMode: "rate_card" | "fixed_package" | "manual"
@@ -621,8 +629,9 @@ export interface PricingSnapshot {
   rateTypeId?: string | null
   rateTypeCode?: string | null
   rateTypeName?: string | null
-  /** True when the rate type came from a default (customer/supplier/system) rather than an explicit
-   * per-leg choice. Null on lines with no rate card at all (manual-pricing legs). */
+  /** True when the rate type was inherited (the supplier's quoted or base rate, or the system
+   * default) rather than an explicit per-leg choice. Null on lines with no rate card at all
+   * (manual-pricing legs). */
   rateTypeInherited?: boolean | null
   travelDate: string
   passengerKind: "adult" | "child" | "infant" | "single_supplement" | "service" | "included"
@@ -679,10 +688,17 @@ export interface PackageLeg {
   /** Hotel legs only: pre-stay (night(s) before departure) or post-stay (from train arrival). */
   dateAnchor: "pre" | "post" | null
   /**
-   * The supplier's resolved default rate type (own override -> kind default -> system default).
-   * Sits between the customer's default and the system default when picking this leg's rate card.
+   * The supplier's baseline rate type (its own, else the system default). The last inherited tier
+   * before the system default when picking this leg's rate card.
    */
-  defaultRateTypeId: string | null
+  baseRateTypeId: string | null
+  /**
+   * The rate type this supplier's quotes should use, when it differs from the baseline. Tried
+   * first, and falls through to the baseline when it has no card for the route/suite/date.
+   */
+  quoteRateTypeId: string | null
+  /** Display name of the rate type a leg with no explicit choice will price at. */
+  inheritedRateTypeName: string | null
   routes: SupplierRoute[]
   rateCards: SupplierRateCard[]
   suiteTypes: SupplierSuiteType[]
@@ -704,23 +720,6 @@ export interface PackageDetail {
   createdAtDisplay?: string
   updatedAt: string
   updatedAtDisplay?: string
-}
-
-export interface Package {
-  id: string
-  name: string
-  slug: string
-  description: string | null
-  durationNights: number | null
-  currency: string
-  active: boolean
-  legCount: number
-  supplierKinds: SupplierKind[]
-  priceFrom: number | null
-  priceTo: number | null
-  trainRouteName: string | null
-  fixedPricePerPerson: number | null
-  markupPct?: number
 }
 
 export interface SupplierEmail {
@@ -822,14 +821,15 @@ export interface SupplierDetail extends Supplier {
   /** Non-default rates that apply to this supplier and their markdown. */
   rateAdjustments: SupplierRateAdjustment[]
   /**
-   * Fully resolved default rate type -- the baseline every rateAdjustment is measured against.
-   * Honours the supplier's own override first, then the per-kind mapping, then the global default.
+   * This supplier's base rate -- its own starting price, and the baseline every rateAdjustment is
+   * measured against. Falls back to the global default rate type when the supplier has none.
    */
-  defaultRateTypeId: string | null
-  /** The supplier's own override, or null when it inherits. This is what the edit form edits. */
-  defaultRateTypeOverrideId: string | null
-  /** What defaultRateTypeId would be if the override were cleared -- shown as the inherit option. */
-  inheritedDefaultRateTypeId: string | null
+  baseRateTypeId: string | null
+  /**
+   * The rate type this supplier's quotes price at, when it differs from the base rate. Null means
+   * "quote at the base rate", so a supplier that has never nominated one is unaffected.
+   */
+  quoteRateTypeId: string | null
 }
 
 export interface BookingTransportRequest {
@@ -839,8 +839,7 @@ export interface BookingTransportRequest {
   supplierId: string | null
   routeId: string | null
   suiteTypeId: string | null
-  packageLegId: string | null
-  /** Set for booking-scoped services (Build Booking); packageLegId is set for catalogue packages. */
+  /** The booking_services row this trip belongs to, or null for a manually-added trip. */
   serviceId: string | null
   pickupPoint: string
   dropoffPoint: string
@@ -955,6 +954,10 @@ export interface Enquiry {
   direction: string
   /** False when `direction` is the customer's raw wording, not a route the system could resolve. */
   directionResolved?: boolean
+  /** HH:MM schedule per train operator on this booking, already resolved for the direction that
+   * operator's leg travels (see lib/routes/route-schedule.ts). Prefills a train journey's schedule
+   * row; absent operators simply have no times captured on their route. */
+  routeSchedules?: { supplierId: string; departureTime: string | null; arrivalTime: string | null }[]
   /** Train operator name, resolved if possible, otherwise the raw wording the customer used. */
   supplier?: string
   supplierResolved?: boolean

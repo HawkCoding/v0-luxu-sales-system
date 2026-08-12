@@ -39,6 +39,13 @@ interface SupplierStationAddressEditorProps {
   stations: EditableStationAddress[]
   /** Cities to choose from — sub-areas are filtered out, a station belongs to a city. */
   locations: Location[]
+  /**
+   * Cities this supplier's routes actually run between. A station in any other city is dead data:
+   * `resolveStationPoints` only ever looks a leg's route endpoints up, so it would never be
+   * printed. Narrowing to these also keeps airports out of a train's city list. Empty means the
+   * supplier has no routes with endpoints yet, and every city is offered.
+   */
+  routeLocationIds: string[]
   onChange: (next: EditableStationAddress[]) => void
   idPrefix: string
 }
@@ -51,10 +58,21 @@ interface SupplierStationAddressEditorProps {
 export function SupplierStationAddressEditor({
   stations,
   locations,
+  routeLocationIds,
   onChange,
   idPrefix,
 }: SupplierStationAddressEditorProps) {
-  const cityOptions = locations.filter((location) => !location.parentLocationId)
+  const topLevelLocations = locations.filter((location) => !location.parentLocationId)
+  // A city already saved against a station stays offered even if its route was since removed,
+  // otherwise the row would render with a city the dropdown can no longer show.
+  const offeredLocationIds = new Set([
+    ...routeLocationIds,
+    ...stations.map((station) => station.locationId).filter(Boolean),
+  ])
+  const cityOptions =
+    offeredLocationIds.size > 0
+      ? topLevelLocations.filter((location) => offeredLocationIds.has(location.id))
+      : topLevelLocations
   const usedLocationIds = new Set(stations.map((station) => station.locationId).filter(Boolean))
 
   const addStation = () => {
@@ -81,7 +99,8 @@ export function SupplierStationAddressEditor({
         <Label>Station addresses</Label>
         <p className="text-xs text-muted-foreground">
           Where guests board and disembark in each city. The voucher shows the station matching the
-          leg&apos;s route direction.
+          leg&apos;s route direction. Only cities this supplier&apos;s routes run between are listed
+          — a station anywhere else would never be printed.
         </p>
       </div>
 
