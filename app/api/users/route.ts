@@ -11,7 +11,7 @@ import { z } from "zod"
 import { adminAuthErrorResponse, requireAdmin } from "@/lib/api/require-admin"
 import { createServiceClient, createSessionClient } from "@/lib/supabase/server"
 
-const roleSchema = z.enum(["admin", "manager", "consultant", "readonly"])
+const roleSchema = z.enum(["admin", "manager", "consultant"])
 
 const createUserSchema = z.object({
   name: z.string().trim().min(1, "Name is required"),

@@ -10,7 +10,7 @@ const devUsers = [
   { id: "00000000-0000-0000-0000-0000000000a2", email: "leonie@luxustravel.co.za", role: "consultant" },
   { id: "00000000-0000-0000-0000-0000000000a3", email: "dirk@luxustravel.co.za", role: "manager" },
   { id: "00000000-0000-0000-0000-0000000000a4", email: "monade@luxustravel.co.za", role: "consultant" },
-  { id: "00000000-0000-0000-0000-0000000000a5", email: "douwlien@luxustravel.co.za", role: "readonly" },
+  { id: "00000000-0000-0000-0000-0000000000a5", email: "douwlien@luxustravel.co.za", role: "consultant" },
 ]
 
 describe("local Supabase seed", () => {

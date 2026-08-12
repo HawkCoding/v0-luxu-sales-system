@@ -93,7 +93,7 @@ interface CreateUserForm {
   confirmPassword: string
 }
 
-const ROLE_OPTIONS: Role[] = ["admin", "manager", "consultant", "readonly"]
+const ROLE_OPTIONS: Role[] = ["admin", "manager", "consultant"]
 
 const EMPTY_CREATE_FORM: CreateUserForm = {
   name: "",

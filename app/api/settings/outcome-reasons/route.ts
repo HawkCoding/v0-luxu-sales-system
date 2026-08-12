@@ -9,7 +9,7 @@ const createSchema = z.object({
 })
 
 export async function GET() {
-  const auth = await requireRole(["admin", "manager", "consultant", "readonly"])
+  const auth = await requireRole(["admin", "manager", "consultant"])
   if (!auth.ok) return auth.response
 
   const { supabase } = auth.value

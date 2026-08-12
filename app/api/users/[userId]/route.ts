@@ -12,7 +12,7 @@ import { z } from "zod"
 import { adminAuthErrorResponse, requireAdmin } from "@/lib/api/require-admin"
 import { createServiceClient } from "@/lib/supabase/server"
 
-const roleSchema = z.enum(["admin", "manager", "consultant", "readonly"])
+const roleSchema = z.enum(["admin", "manager", "consultant"])
 
 /** How many booking references to name back in the "still assigned" error. */
 const BLOCKING_BOOKING_SAMPLE_SIZE = 5

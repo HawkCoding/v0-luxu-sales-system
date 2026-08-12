@@ -1,4 +1,6 @@
-export type Role = "admin" | "manager" | "consultant" | "readonly"
+// `consultant` is the lowest clearance level. The database enum still carries a
+// retired `readonly` value (Postgres cannot drop enum labels) — it is not a Role.
+export type Role = "admin" | "manager" | "consultant"
 
 export type Purpose = "quote" | "availability" | "reservation"
 export type Source =

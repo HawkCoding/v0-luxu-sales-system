@@ -11,8 +11,14 @@ describe("canRolePerform", () => {
     for (const action of adminActions) {
       expect(canRolePerform("admin", action)).toBe(true)
     }
+  })
 
-    expect(canRolePerform("admin", "view:full_audit")).toBe(false)
+  it("grants admin every permission the matrix defines", () => {
+    // Guards against another write-only key like the removed view:full_audit,
+    // which granted manager a capability admin did not have and was read nowhere.
+    for (const action of allActions) {
+      expect(canRolePerform("admin", action)).toBe(true)
+    }
   })
 
   it("enforces the expected manager restrictions", () => {
@@ -21,6 +27,8 @@ describe("canRolePerform", () => {
     // Managers manage email/voucher templates (matches PATCH /api/templates).
     expect(canRolePerform("manager", "view:templates")).toBe(true)
     expect(canRolePerform("manager", "edit:templates")).toBe(true)
+    // Mirrors requireManagerSettingsAccess() guarding /api/error-logs.
+    expect(canRolePerform("manager", "view:error_logs")).toBe(true)
     expect(canRolePerform("manager", "edit:products")).toBe(false)
     expect(canRolePerform("manager", "edit:settings")).toBe(false)
     expect(canRolePerform("manager", "manage:users")).toBe(false)
@@ -32,33 +40,22 @@ describe("canRolePerform", () => {
     expect(canRolePerform("consultant", "view:reporting")).toBe(false)
     expect(canRolePerform("consultant", "view:audit")).toBe(false)
     expect(canRolePerform("consultant", "view:settings")).toBe(true)
+    // view:settings includes consultant, so error logs need their own key.
+    expect(canRolePerform("consultant", "view:error_logs")).toBe(false)
     expect(canRolePerform("consultant", "edit:quotes")).toBe(true)
   })
 
-  it("allows readonly users to perform only configured view actions", () => {
-    const readonlyExpected = new Set([
-      "view:dashboard",
-      "view:pipeline",
-      "view:enquiries",
-      "view:jobs",
-      "view:customers",
-      "view:quotes",
-      "view:payments",
-      "view:documents",
-      "view:notes",
-      "view:correspondence",
-      "view:suppliers",
-      "view:packages",
-      "view:products",
-    ])
-
+  it("grants nothing to a retired or unknown clearance level", () => {
+    // `readonly` was retired — consultant is the lowest role. The database enum
+    // still carries the label, so an old profile row must fall through to no
+    // permissions rather than inheriting anyone else's.
     for (const action of allActions) {
-      expect(canRolePerform("readonly", action)).toBe(readonlyExpected.has(action))
+      expect(canRolePerform("readonly" as Role, action)).toBe(false)
     }
   })
 
   it("returns false for unknown actions for every role", () => {
-    for (const role of ["admin", "manager", "consultant", "readonly"] satisfies Role[]) {
+    for (const role of ["admin", "manager", "consultant"] satisfies Role[]) {
       expect(canRolePerform(role, "unknown:action")).toBe(false)
     }
   })

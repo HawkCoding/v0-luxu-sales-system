@@ -6,7 +6,7 @@
 --   leonie@luxustravel.co.za  consultant (LB)
 --   dirk@luxustravel.co.za    manager  (DR)
 --   monade@luxustravel.co.za  consultant (MVE)
---   douwlien@luxustravel.co.za readonly (DL)
+--   douwlien@luxustravel.co.za consultant (DL)
 -- 9 bookings spanning the full pipeline: enquiry, accepted, deposit_requested,
 --   deposit_paid, final_paid, voucher_sent and closed, plus 3 with a fully
 --   built-out multi-supplier package leg chain (train, transfers, hotel,
@@ -51,7 +51,7 @@ insert into public.profiles (user_id,email,name,surname,clearance_level,is_activ
   ('00000000-0000-0000-0000-0000000000a2','leonie@luxustravel.co.za','Leonie','Botha','consultant',true,'2025-08-01T08:00:00Z','2025-08-01T08:00:00Z'),
   ('00000000-0000-0000-0000-0000000000a3','dirk@luxustravel.co.za','Dirk','Rossouw','manager',true,'2025-08-01T08:00:00Z','2025-08-01T08:00:00Z'),
   ('00000000-0000-0000-0000-0000000000a4','monade@luxustravel.co.za','Monade','van Eeden','consultant',true,'2025-08-01T08:00:00Z','2025-08-01T08:00:00Z'),
-  ('00000000-0000-0000-0000-0000000000a5','douwlien@luxustravel.co.za','Douwlien','Louw','readonly',true,'2025-08-01T08:00:00Z','2025-08-01T08:00:00Z')
+  ('00000000-0000-0000-0000-0000000000a5','douwlien@luxustravel.co.za','Douwlien','Louw','consultant',true,'2025-08-01T08:00:00Z','2025-08-01T08:00:00Z')
 on conflict (user_id) do update set email=excluded.email,name=excluded.name,surname=excluded.surname,
   clearance_level = excluded.clearance_level,
   is_active = excluded.is_active,
