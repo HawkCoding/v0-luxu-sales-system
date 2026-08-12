@@ -81,7 +81,24 @@ Use this setup to enable "Sign in with Microsoft" while authorizing access from 
 - Supabase Dashboard -> Authentication -> URL Configuration
 - Ensure these are present:
   - `http://localhost:3000/auth/callback`
-  - Production callback URL if app domain differs from local
+  - `http://localhost:3000/auth/confirm` (password recovery — see below)
+  - Production callback and confirm URLs if the app domain differs from local
+
+### 3b) Password recovery email template (hosted projects)
+
+Recovery links must carry a token hash, not a PKCE `code`: the PKCE verifier is a
+cookie in the browser that requested the reset, so a `code` link dies when it is
+opened on a phone (QA 02, F02-7). The local stack is configured in
+`supabase/config.toml` (`[auth.email.template.recovery]` →
+`supabase/templates/recovery.html`); **the hosted dev and production projects
+need the same body pasted in by hand**:
+
+- Dashboard -> Authentication -> Email Templates -> Reset Password
+- Link target:
+  `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=recovery&next=/auth/set-new-password`
+
+Until that is done those projects keep sending `code` links; `/auth/confirm`
+still accepts them as a fallback, but they remain same-browser only.
 
 ### 4) User authorization model
 

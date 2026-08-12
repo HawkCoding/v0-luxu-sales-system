@@ -11,6 +11,8 @@ export const LOGIN_ERROR_MESSAGES: Record<string, string> = {
   "account-inactive": "Your account has been deactivated. Contact your administrator.",
   unauthorized: "Your account is not set up for this app. Contact your administrator.",
   "session-expired": "You were signed out after a period of inactivity. Sign in again to continue.",
+  "link-invalid":
+    "That link is invalid or has already been used. Request a new password reset link.",
   "auth-failed": "Sign in failed. Please try again.",
 }
 

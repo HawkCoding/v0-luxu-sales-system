@@ -359,9 +359,28 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
     const supabase = getSupabase()
     const normalizedEmail = email.trim().toLowerCase()
     if (!normalizedEmail || !password) return false
-    const { error } = await supabase.auth.signInWithPassword({
-      email: normalizedEmail,
-      password,
+
+    // Goes through /api/auth/login rather than straight to Supabase: GoTrue
+    // answers `user_banned` for a deactivated account even on a wrong password,
+    // which enumerates disabled staff accounts (QA 02, F02-6). The route
+    // collapses every failure into one response and hands back the tokens.
+    const response = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: normalizedEmail, password }),
+    })
+
+    if (!response.ok) return false
+
+    const { accessToken, refreshToken } = (await response.json()) as {
+      accessToken?: string
+      refreshToken?: string
+    }
+    if (!accessToken || !refreshToken) return false
+
+    const { error } = await supabase.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
     })
     return !error
   }
@@ -371,7 +390,10 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
     const normalizedEmail = email.trim().toLowerCase()
     if (!normalizedEmail) return { ok: false, error: "Email is required" }
     const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
-      redirectTo: `${window.location.origin}/auth/callback?next=/auth/set-new-password`,
+      // /auth/confirm verifies a device-independent token_hash link, and still
+      // falls back to a PKCE code for projects whose email template has not been
+      // updated yet (QA 02, F02-7).
+      redirectTo: `${window.location.origin}/auth/confirm?next=/auth/set-new-password`,
     })
     return { ok: !error, error: error?.message }
   }
