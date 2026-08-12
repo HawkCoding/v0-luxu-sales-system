@@ -76,7 +76,6 @@ function createEmptyTransportRequest(sortOrder: number): EditableTransportReques
     supplierId: null,
     routeId: null,
     suiteTypeId: null,
-    packageLegId: null,
     serviceId: null,
     pickupPoint: "",
     dropoffPoint: "",
@@ -284,11 +283,19 @@ export function JobEnquiryTab({
         const updated = { ...schedule, [key]: value }
         if (key === "supplierId" && value) {
           const supplier = suppliers.find((s) => s.id === value)
-          if (supplier?.defaultTimeStart && !schedule.timeStart) {
-            updated.timeStart = supplier.defaultTimeStart
+          // A train's times live on the route it runs, not on the operator, so a train journey
+          // prefills from that operator's leg on this booking — resolved for the direction the leg
+          // travels. Every other kind still has a single supplier-wide pair.
+          const legSchedule = enquiry?.routeSchedules?.find((entry) => entry.supplierId === value)
+          const [start, end] =
+            supplier?.kind === "train_operator"
+              ? [legSchedule?.departureTime ?? null, legSchedule?.arrivalTime ?? null]
+              : [supplier?.defaultTimeStart ?? null, supplier?.defaultTimeEnd ?? null]
+          if (start && !schedule.timeStart) {
+            updated.timeStart = start
           }
-          if (supplier?.defaultTimeEnd && !schedule.timeEnd) {
-            updated.timeEnd = supplier.defaultTimeEnd
+          if (end && !schedule.timeEnd) {
+            updated.timeEnd = end
           }
         }
         return updated
@@ -317,7 +324,6 @@ export function JobEnquiryTab({
             supplierId: request.supplierId,
             routeId: request.routeId,
             suiteTypeId: request.suiteTypeId,
-            packageLegId: request.packageLegId,
             pickupPoint: request.pickupPoint,
             dropoffPoint: request.dropoffPoint,
             pickupAt: request.pickupAt,

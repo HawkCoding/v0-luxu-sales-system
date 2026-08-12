@@ -9,6 +9,17 @@ export const dateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD")
 
+/** Stricter than TIME_PATTERN: a real wall-clock time, so an out-of-range hour is a 400 here rather
+ * than a raw Postgres error at insert. */
+const CLOCK_TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/
+
+/** A route's departure/arrival time. A cleared `<input type="time">` posts "", which means "unset"
+ * here rather than a validation error — the route simply has no schedule captured yet. */
+const routeTimeSchema = z
+  .union([z.string().regex(CLOCK_TIME_PATTERN, "Expected HH:MM"), z.literal("")])
+  .nullable()
+  .transform((value) => (value ? value : null))
+
 export const suiteTypeSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().trim().min(1, "Suite type name is required"),
@@ -157,6 +168,10 @@ export const routeSchema = z.object({
   vehicleRentalDetails: vehicleRentalRouteDetailsSchema.nullable().optional(),
   directionMode: routeDirectionModeSchema.default("one_way"),
   durationDays: z.number().int().min(1).nullable().optional(),
+  departureTime: routeTimeSchema.optional(),
+  arrivalTime: routeTimeSchema.optional(),
+  returnDepartureTime: routeTimeSchema.optional(),
+  returnArrivalTime: routeTimeSchema.optional(),
   active: z.boolean(),
   rateCards: z.array(rateCardSchema).default([]),
 })
@@ -222,6 +237,9 @@ export const supplierSaveSchema = z.object({
       message: "Location must be at least 2 characters",
     }),
   locationDetail: z.string().trim().max(255).nullable().optional(),
+  /** The supplier's own street address. Trains use per-city `stationAddresses` instead — a train
+   * boards guests at a different station in every city it serves. */
+  streetAddress: z.string().trim().max(255).nullable().optional(),
   locationId: z.string().uuid().nullable().optional(),
   description: z.string().trim().max(2000).nullable().optional(),
   notes: z.string().trim().max(5000),
@@ -331,6 +349,10 @@ export const draftRouteSchema = z.object({
   vehicleRentalDetails: vehicleRentalRouteDetailsSchema.nullable().default(null),
   directionMode: routeDirectionModeSchema.default("one_way"),
   durationDays: z.number().int().min(1).nullable().default(null),
+  departureTime: routeTimeSchema.default(null),
+  arrivalTime: routeTimeSchema.default(null),
+  returnDepartureTime: routeTimeSchema.default(null),
+  returnArrivalTime: routeTimeSchema.default(null),
   active: z.boolean().default(true),
   rateCards: z.array(draftRateCardSchema).default([]),
 })
@@ -365,6 +387,7 @@ export const supplierDraftSaveSchema = z.object({
     .default(""),
   location: z.string().trim().max(255).default(""),
   locationDetail: z.string().trim().max(255).nullable().default(null),
+  streetAddress: z.string().trim().max(255).nullable().default(null),
   locationId: z.string().uuid().nullable().optional(),
   description: z.string().trim().max(2000).nullable().default(null),
   notes: z.string().trim().max(5000).default(""),

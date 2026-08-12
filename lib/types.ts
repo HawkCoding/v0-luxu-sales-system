@@ -272,6 +272,9 @@ export interface SupplierVocabulary {
   routeHasDirection: boolean
   /** Whether the route exposes a "Duration (days)" input for admins to record how long the journey takes. Train operators only; feeds the itinerary. */
   routeHasDuration: boolean
+  /** Whether the route exposes its own departure/arrival time inputs. Train operators only — every
+   * other kind still reads its times off the supplier (`defaultTimeStart`/`defaultTimeEnd`). */
+  routeHasSchedule: boolean
   /** Whether the route name is auto-filled from origin/destination + direction while the name is empty; user edits always win. Train operators only. */
   routeNameAutoDerived: boolean
   showSingleSupplement: boolean
@@ -301,6 +304,7 @@ const JOURNEY_SUPPLIER_VOCABULARY: SupplierVocabulary = {
   routeHasLocations: true,
   routeHasDirection: true,
   routeHasDuration: true,
+  routeHasSchedule: true,
   routeNameAutoDerived: true,
   showSingleSupplement: true,
   showDurationNights: true,
@@ -332,6 +336,7 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     routeHasLocations: false,
     routeHasDirection: false,
     routeHasDuration: false,
+    routeHasSchedule: false,
     routeNameAutoDerived: false,
     showSingleSupplement: false,
     showDurationNights: false,
@@ -360,6 +365,7 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     routeHasLocations: true,
     routeHasDirection: true,
     routeHasDuration: false,
+    routeHasSchedule: false,
     routeNameAutoDerived: false,
     showSingleSupplement: false,
     showDurationNights: false,
@@ -382,6 +388,7 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     routeHasLocations: true,
     routeHasDirection: false,
     routeHasDuration: false,
+    routeHasSchedule: false,
     routeNameAutoDerived: false,
     showSingleSupplement: false,
     showDurationNights: false,
@@ -410,6 +417,7 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     routeHasLocations: false,
     routeHasDirection: false,
     routeHasDuration: false,
+    routeHasSchedule: false,
     routeNameAutoDerived: false,
     showSingleSupplement: true,
     showDurationNights: true,
@@ -432,6 +440,7 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     routeHasLocations: true,
     routeHasDirection: true,
     routeHasDuration: false,
+    routeHasSchedule: false,
     routeNameAutoDerived: false,
     showSingleSupplement: true,
     showDurationNights: false,
@@ -511,6 +520,14 @@ export interface SupplierRoute {
   directionMode?: RouteDirectionMode
   /** Trip length in whole days; train routes only, null otherwise. */
   durationDays?: number | null
+  /** HH:MM departure/arrival of the outbound leg; train routes only, null otherwise. Printed on the
+   * quote itinerary, itinerary PDF and voucher, and prefilled on new booking schedules. */
+  departureTime?: string | null
+  arrivalTime?: string | null
+  /** Same, for the return leg of a two-way route (`directionMode === "round_trip"`). A booking
+   * travelling in reverse (`route_reversed`) renders these instead; null on one-way routes. */
+  returnDepartureTime?: string | null
+  returnArrivalTime?: string | null
   active: boolean
   createdAt: string
   createdAtDisplay?: string
@@ -708,23 +725,6 @@ export interface PackageDetail {
   updatedAtDisplay?: string
 }
 
-export interface Package {
-  id: string
-  name: string
-  slug: string
-  description: string | null
-  durationNights: number | null
-  currency: string
-  active: boolean
-  legCount: number
-  supplierKinds: SupplierKind[]
-  priceFrom: number | null
-  priceTo: number | null
-  trainRouteName: string | null
-  fixedPricePerPerson: number | null
-  markupPct?: number
-}
-
 export interface SupplierEmail {
   id: string
   supplierId: string
@@ -841,8 +841,7 @@ export interface BookingTransportRequest {
   supplierId: string | null
   routeId: string | null
   suiteTypeId: string | null
-  packageLegId: string | null
-  /** Set for booking-scoped services (Build Booking); packageLegId is set for catalogue packages. */
+  /** The booking_services row this trip belongs to, or null for a manually-added trip. */
   serviceId: string | null
   pickupPoint: string
   dropoffPoint: string
@@ -957,6 +956,10 @@ export interface Enquiry {
   direction: string
   /** False when `direction` is the customer's raw wording, not a route the system could resolve. */
   directionResolved?: boolean
+  /** HH:MM schedule per train operator on this booking, already resolved for the direction that
+   * operator's leg travels (see lib/routes/route-schedule.ts). Prefills a train journey's schedule
+   * row; absent operators simply have no times captured on their route. */
+  routeSchedules?: { supplierId: string; departureTime: string | null; arrivalTime: string | null }[]
   /** Train operator name, resolved if possible, otherwise the raw wording the customer used. */
   supplier?: string
   supplierResolved?: boolean

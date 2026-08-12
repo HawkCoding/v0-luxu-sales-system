@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSWRConfig } from "swr"
 import {
+  AlertCircle,
   ArrowLeft,
   Mail,
   MapPin,
@@ -31,6 +32,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -94,6 +96,7 @@ import {
   resolveRateTypePills,
 } from "@/lib/rate-types/view-rate-type-pills"
 import { buildRouteName } from "@/lib/routes/route-name"
+import { routeHasReturnLeg } from "@/lib/routes/route-schedule"
 import {
   getSupplierVocabulary,
   isTransportSupplier,
@@ -140,6 +143,11 @@ interface EditableRoute {
   vehicleRentalDetails: Omit<VehicleRentalRouteDetails, "routeId" | "createdAt" | "updatedAt"> | null
   directionMode: RouteDirectionMode
   durationDays: number | null
+  /** HH:MM, or "" while unset — an empty `<input type="time">` reads back as "". */
+  departureTime: string
+  arrivalTime: string
+  returnDepartureTime: string
+  returnArrivalTime: string
   active: boolean
 }
 
@@ -191,6 +199,8 @@ interface SupplierFormState {
   website: string
   location: string
   locationDetail: string
+  /** The supplier's own street address; every kind except trains, which use `stationAddresses`. */
+  streetAddress: string
   locationId: string | null
   /** Per-city boarding addresses; train operators only. */
   stationAddresses: EditableStationAddress[]
@@ -312,6 +322,10 @@ function createEmptyRoute(kind: SupplierKind): EditableRoute {
         : null,
     directionMode: "one_way",
     durationDays: null,
+    departureTime: "",
+    arrivalTime: "",
+    returnDepartureTime: "",
+    returnArrivalTime: "",
     active: true,
   }
 }
@@ -374,6 +388,7 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
     website: supplier.website ?? "",
     location: supplier.location ?? "",
     locationDetail: supplier.locationDetail ?? "",
+    streetAddress: supplier.streetAddress ?? "",
     locationId: supplier.kind === "train_operator" ? null : supplier.locationId ?? null,
     stationAddresses: (supplier.stationAddresses ?? []).map((station) => ({
       id: station.id,
@@ -448,6 +463,10 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
             : null,
           directionMode: route.directionMode ?? "one_way",
           durationDays: route.durationDays ?? null,
+          departureTime: (route.departureTime ?? "").slice(0, 5),
+          arrivalTime: (route.arrivalTime ?? "").slice(0, 5),
+          returnDepartureTime: (route.returnDepartureTime ?? "").slice(0, 5),
+          returnArrivalTime: (route.returnArrivalTime ?? "").slice(0, 5),
           active: route.active,
         })),
         rateCards: supplier.rateCards.map((rateCard) => ({
@@ -2346,6 +2365,78 @@ const RouteEditorRow = memo(function RouteEditorRow({
           <Trash2 className="h-4 w-4" />
         </Button>
       </div>
+      {vocabulary.routeHasSchedule ? (
+        // Own row: times differ per route, so they sit with the route rather than on the supplier.
+        <div className="col-span-full min-w-0 border-t pt-3">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-0 space-y-1.5">
+              <Label htmlFor={`${route.id}-departure-time`} className="whitespace-nowrap">
+                {vocabulary.scheduleFields?.timeStartLabel ?? "Departure time"}
+              </Label>
+              <BufferedInput
+                id={`${route.id}-departure-time`}
+                type="time"
+                className="w-32"
+                value={route.departureTime}
+                onValueChange={(value) =>
+                  onUpdateRoute(packageIndex, routeIndex, "departureTime", value)
+                }
+              />
+            </div>
+            <div className="min-w-0 space-y-1.5">
+              <Label htmlFor={`${route.id}-arrival-time`} className="whitespace-nowrap">
+                {vocabulary.scheduleFields?.timeEndLabel ?? "Arrival time"}
+              </Label>
+              <BufferedInput
+                id={`${route.id}-arrival-time`}
+                type="time"
+                className="w-32"
+                value={route.arrivalTime}
+                onValueChange={(value) =>
+                  onUpdateRoute(packageIndex, routeIndex, "arrivalTime", value)
+                }
+              />
+            </div>
+            {routeHasReturnLeg(route.directionMode) ? (
+              <>
+                <div className="min-w-0 space-y-1.5">
+                  <Label htmlFor={`${route.id}-return-departure-time`} className="whitespace-nowrap">
+                    {`Return ${(vocabulary.scheduleFields?.timeStartLabel ?? "Departure time").toLowerCase()}`}
+                  </Label>
+                  <BufferedInput
+                    id={`${route.id}-return-departure-time`}
+                    type="time"
+                    className="w-32"
+                    value={route.returnDepartureTime}
+                    onValueChange={(value) =>
+                      onUpdateRoute(packageIndex, routeIndex, "returnDepartureTime", value)
+                    }
+                  />
+                </div>
+                <div className="min-w-0 space-y-1.5">
+                  <Label htmlFor={`${route.id}-return-arrival-time`} className="whitespace-nowrap">
+                    {`Return ${(vocabulary.scheduleFields?.timeEndLabel ?? "Arrival time").toLowerCase()}`}
+                  </Label>
+                  <BufferedInput
+                    id={`${route.id}-return-arrival-time`}
+                    type="time"
+                    className="w-32"
+                    value={route.returnArrivalTime}
+                    onValueChange={(value) =>
+                      onUpdateRoute(packageIndex, routeIndex, "returnArrivalTime", value)
+                    }
+                  />
+                </div>
+              </>
+            ) : null}
+            <p className="min-w-0 flex-1 text-sm text-muted-foreground">
+              {routeHasReturnLeg(route.directionMode)
+                ? "Shown on the quote itinerary and documents. The return times are used when a booking travels this route in reverse."
+                : "Shown on the quote itinerary and documents, and prefilled on new booking schedules."}
+            </p>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 })
@@ -2443,13 +2534,6 @@ export function SupplierDetailView({
     patchWriteLockRef.current.release()
     setIsPatchInFlight(false)
   }, [])
-
-  useEffect(() => {
-    if (!hasLoadError) {
-      return
-    }
-    router.replace("/app/suppliers")
-  }, [hasLoadError, router])
 
   const exitSupplierDetail = useCallback(() => {
     if (presentation === "modal") {
@@ -2574,15 +2658,14 @@ export function SupplierDetailView({
             ...current,
             kind,
             locationId: kind === "train_operator" ? null : current.locationId,
-            // Only trains board at a station; the server drops these for other kinds anyway, so
-            // clear them here too rather than leaving invisible rows in the form.
-            stationAddresses: kind === "train_operator" ? current.stationAddresses : [],
+            // Nothing is cleared on a category change. The station editor and the route location
+            // fields are simply not rendered for kinds that have no use for them, and the server
+            // preserves the stored values, so a supplier mis-categorised and put back comes home
+            // exactly as it was rather than losing its stations and route endpoints for good.
             packages: current.packages.map((pkg) => ({
               ...pkg,
               routes: pkg.routes.map((route) => ({
                 ...route,
-                originLocationId: isTransportSupplier(kind) ? null : route.originLocationId,
-                destinationLocationId: isTransportSupplier(kind) ? null : route.destinationLocationId,
                 vehicleRentalDetails:
                   kind === "vehicle_rental"
                     ? route.vehicleRentalDetails ?? {
@@ -3434,11 +3517,16 @@ export function SupplierDetailView({
       for (const route of pkg.routes) {
         const isTransport = isTransportSupplier(form.kind)
         const needsLocations = vocabulary.routeHasLocations && !isTransport
-        if (
-          !route.name.trim() ||
-          (needsLocations && (!route.originLocationId || !route.destinationLocationId))
-        ) {
+        if (!route.name.trim()) {
           toast.error(`Complete all ${vocabulary.route.toLowerCase()} fields before saving.`)
+          return
+        }
+        if (needsLocations && (!route.originLocationId || !route.destinationLocationId)) {
+          // Most often hit right after changing the category to one whose routes are
+          // point-to-point, so name the route rather than the whole form.
+          toast.error(
+            `Add ${vocabulary.originLabel.toLowerCase()} and ${vocabulary.destinationLabel.toLowerCase()} for "${route.name.trim()}" before saving.`,
+          )
           return
         }
         if (isTransport && (!route.pickupPoint?.trim() || !route.dropoffPoint?.trim())) {
@@ -3504,6 +3592,10 @@ export function SupplierDetailView({
             : null,
         directionMode: route.directionMode,
         durationDays: route.durationDays,
+        departureTime: route.departureTime || null,
+        arrivalTime: route.arrivalTime || null,
+        returnDepartureTime: route.returnDepartureTime || null,
+        returnArrivalTime: route.returnArrivalTime || null,
         active: route.active,
         rateCards: activeRateCards
           .filter((rateCard) => rateCard.routeId === route.id)
@@ -3520,6 +3612,21 @@ export function SupplierDetailView({
             validTo: rateCard.validTo ?? "",
           })),
       }))
+
+    // A row where something was typed but no city was picked can't be stored (location_id is the
+    // key the voucher resolves a boarding point by), and dropping it quietly loses the typing.
+    // A wholly untouched row is just an unused "Add station" click and is dropped without fuss.
+    if (form.kind === "train_operator") {
+      const incompleteStation = form.stationAddresses.find(
+        (station) =>
+          !station.locationId &&
+          (station.stationName.trim() || station.streetAddress.trim() || station.notes.trim()),
+      )
+      if (incompleteStation) {
+        toast.error("Pick a city for the station address row, or remove it.")
+        return
+      }
+    }
 
     // Rows with no city chosen are half-filled editor rows; the server would drop them anyway.
     const cleanedStationAddresses =
@@ -3556,6 +3663,7 @@ export function SupplierDetailView({
           website: form.website.trim(),
           location: form.location.trim(),
           locationDetail: form.locationDetail.trim(),
+          streetAddress: form.streetAddress.trim() || null,
           locationId: getSupplierLocationId(form),
           description: form.description.trim() || null,
           notes: form.notes.trim(),
@@ -3738,7 +3846,38 @@ export function SupplierDetailView({
     }
   }
 
-  if (isLoading || hasLoadError) {
+  if (hasLoadError) {
+    const isNotFound = (error as { status?: number } | undefined)?.status === 404
+    return (
+      <div className={getContainerClass(presentation)}>
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>{isNotFound ? "Supplier not found" : "Could not load supplier"}</AlertTitle>
+          <AlertDescription>
+            {isNotFound
+              ? "This supplier does not exist, or you no longer have access to it."
+              : error instanceof Error
+                ? error.message
+                : "Something went wrong loading this supplier."}{" "}
+            {presentation === "page" ? (
+              <>
+                <Link href="/app/suppliers" className="underline">
+                  Return to suppliers
+                </Link>
+                .
+              </>
+            ) : (
+              <Button variant="link" className="h-auto p-0 align-baseline" onClick={exitSupplierDetail}>
+                Close
+              </Button>
+            )}
+          </AlertDescription>
+        </Alert>
+      </div>
+    )
+  }
+
+  if (isLoading) {
     return <SupplierDetailSkeleton presentation={presentation} />
   }
 
@@ -3750,6 +3889,17 @@ export function SupplierDetailView({
   const isTrainOperatorForm = form.kind === "train_operator"
   const isTrainOperatorSupplier = supplier.kind === "train_operator"
   const routeRateGroup = form?.packages[0] ?? createRoutesRateGroup()
+  // Read off live form state, not the saved supplier, so adding a route immediately widens the
+  // station editor's city list without needing a save first.
+  const formRouteLocationIds = [
+    ...new Set(
+      routeRateGroup.routes.flatMap((route) =>
+        [route.originLocationId, route.destinationLocationId].filter(
+          (locationId): locationId is string => Boolean(locationId),
+        ),
+      ),
+    ),
+  ]
   const supplierRouteRatePackage: SupplierPackage = {
     id: "supplier-routes-and-rates",
     slug: "supplier-routes-and-rates",
@@ -4035,20 +4185,29 @@ export function SupplierDetailView({
                     </div>
                   )}
 
-                  <div className="space-y-2">
-                    <Label htmlFor="supplier-location-detail">Suburb / Area</Label>
-                    <BufferedInput
-                      id="supplier-location-detail"
-                      value={form.locationDetail}
-                      onValueChange={(value) => updateField("locationDetail", value)}
-                    />
-                  </div>
+                  {/* A train has no single street address -- it boards guests at a different
+                      station in every city, so the Station addresses section below covers it. */}
+                  {!isTrainOperatorForm && (
+                    <div className="space-y-2">
+                      <Label htmlFor="supplier-street-address">Street address</Label>
+                      <BufferedInput
+                        id="supplier-street-address"
+                        value={form.streetAddress}
+                        onValueChange={(value) => updateField("streetAddress", value)}
+                        placeholder="e.g. 4 Loop Street, Cape Town City Centre"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Printed on the voucher under the supplier name.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 {isTrainOperatorForm && (
                   <SupplierStationAddressEditor
                     stations={form.stationAddresses}
                     locations={locations}
+                    routeLocationIds={formRouteLocationIds}
                     onChange={(stationAddresses) => updateField("stationAddresses", stationAddresses)}
                     idPrefix="supplier-station"
                   />
@@ -4172,7 +4331,9 @@ export function SupplierDetailView({
                   <InfoItem label="Phone" value={supplier.phone} />
                   <InfoItem label="Website" value={supplier.website} />
                   <InfoItem label="Location" value={supplier.location} />
-                  <InfoItem label="Suburb / Area" value={supplier.locationDetail} />
+                  {!isTrainOperatorSupplier && (
+                    <InfoItem label="Street address" value={supplier.streetAddress} />
+                  )}
                   {!isTrainOperatorSupplier && (
                     <InfoItem
                       label="City"
@@ -4439,7 +4600,9 @@ export function SupplierDetailView({
                 </div>
               ) : null}
 
-              {form.kind === "hotel_property" || form.kind === "train_operator" ? (
+              {/* Trains carry their times per route (see RouteEditorRow) — a supplier-wide pair
+                  would claim every route departs at the same hour. */}
+              {form.kind === "hotel_property" ? (
                 <div className="rounded-lg border p-4">
                   {isEditing ? (
                     <div className="grid gap-3 sm:grid-cols-[minmax(0,10rem)_minmax(0,10rem)_1fr] sm:items-end">

@@ -46,6 +46,7 @@ const createSupplierSchema = z.object({
       message: "Location must be at least 2 characters",
     }),
   locationDetail: z.string().trim().max(255).nullable().optional(),
+  streetAddress: z.string().trim().max(255).nullable().optional(),
   notes: z.string().trim().max(5000),
   emails: z
     .array(
@@ -166,6 +167,7 @@ export async function POST(req: Request) {
       website: parsed.website.trim() || null,
       location: parsed.location.trim() || null,
       location_detail: parsed.locationDetail?.trim() || null,
+      street_address: parsed.streetAddress?.trim() || null,
       notes: parsed.notes.trim() || null,
       single_supplement_pct: 0,
       default_time_start: hotelDefaultTimes?.checkIn ?? null,

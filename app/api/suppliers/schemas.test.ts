@@ -300,6 +300,60 @@ describe("route durationDays", () => {
   })
 })
 
+describe("route departure/arrival times", () => {
+  function trainRouteWithTimes(times: Record<string, unknown>) {
+    return {
+      ...buildValidPayload(),
+      kind: "train_operator" as const,
+      routes: [
+        {
+          id: UUID_3,
+          name: "Pretoria ↔ Cape Town",
+          originLocationId: UUID_3,
+          destinationLocationId: UUID_4,
+          directionMode: "round_trip",
+          durationDays: 2,
+          active: true,
+          rateCards: [],
+          ...times,
+        },
+      ],
+    }
+  }
+
+  it("accepts an HH:MM pair on both legs", () => {
+    const result = supplierSaveSchema.safeParse(
+      trainRouteWithTimes({
+        departureTime: "08:30",
+        arrivalTime: "17:45",
+        returnDepartureTime: "10:15",
+        returnArrivalTime: "19:00",
+      }),
+    )
+    expect(result.success).toBe(true)
+  })
+
+  it("treats omitted times as unset", () => {
+    expect(supplierSaveSchema.safeParse(trainRouteWithTimes({})).success).toBe(true)
+  })
+
+  it("normalises a cleared time input to null", () => {
+    const result = supplierSaveSchema.safeParse(
+      trainRouteWithTimes({ departureTime: "", arrivalTime: null }),
+    )
+    expect(result.success).toBe(true)
+    if (!result.success) return
+    expect(result.data.routes[0].departureTime).toBeNull()
+    expect(result.data.routes[0].arrivalTime).toBeNull()
+  })
+
+  it.each(["8:30", "0830", "08:30:00", "25:00"])("rejects %s", (value) => {
+    expect(supplierSaveSchema.safeParse(trainRouteWithTimes({ departureTime: value })).success).toBe(
+      false,
+    )
+  })
+})
+
 describe("supplierDraftSaveSchema", () => {
   it("allows sparse payloads with defaults", () => {
     const parsed = supplierDraftSaveSchema.parse({ kind: "airline" })
