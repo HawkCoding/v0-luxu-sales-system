@@ -1776,26 +1776,30 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                     rate is converted into the quote's currency), so a typo here would mis-price
                     a booking rather than just look untidy. Changing it re-keys the rate period —
                     getRatePeriodKey includes the currency — which onUpdatePeriodField handles. */}
-                <CurrencySelect
-                  value={period.currency}
-                  onChange={(value) =>
-                    onUpdatePeriodField(
-                      packageIndex,
-                      selectedRouteId,
-                      period.key,
-                      "currency",
-                      value,
-                      selectedRateTypeId ?? "",
-                    )
-                  }
-                  className="space-y-2"
-                />
-                <div className="flex items-end">
+                {/* Currency and its remove button share the last two columns so the button sits
+                    beside the select instead of stranded in a column of its own. h-10 matches the
+                    DatePicker triggers, so all four controls share one baseline. */}
+                <div className="flex items-end gap-2 md:col-span-2">
+                  <CurrencySelect
+                    value={period.currency}
+                    onChange={(value) =>
+                      onUpdatePeriodField(
+                        packageIndex,
+                        selectedRouteId,
+                        period.key,
+                        "currency",
+                        value,
+                        selectedRateTypeId ?? "",
+                      )
+                    }
+                    className="min-w-0 flex-1 space-y-2"
+                    triggerClassName="h-10 w-full"
+                  />
                   <Button
                     type="button"
                     variant="outline"
-                    size="icon"
-                    className={REMOVE_ICON_BUTTON_CLASS}
+                    size="icon-lg"
+                    className={cn(REMOVE_ICON_BUTTON_CLASS, "shrink-0")}
                     aria-label="Remove period"
                     onClick={() =>
                       onRemovePeriod(packageIndex, selectedRouteId, period.key, selectedRateTypeId ?? "")
