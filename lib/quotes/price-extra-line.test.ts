@@ -82,7 +82,7 @@ function buildSupabase(
 
   function chain(result: { data: unknown; error: null }) {
     const self: Record<string, unknown> = {}
-    for (const method of ["select", "eq", "in", "order", "is"]) {
+    for (const method of ["select", "eq", "in", "order", "is", "or"]) {
       self[method] = () => self
     }
     self.single = async () => result

@@ -179,6 +179,15 @@ const styles = StyleSheet.create({
     marginTop: 2,
     paddingLeft: 10,
   },
+  // A subheading inside the bullet list: bold and undashed, with extra air above it so it reads
+  // as a section break rather than another inclusion.
+  itineraryDetailHeading: {
+    fontSize: 9,
+    fontFamily: "Helvetica-Bold",
+    color: "#312b24",
+    marginTop: 6,
+    paddingLeft: 10,
+  },
   excludesSection: {
     marginTop: 14,
   },
@@ -322,8 +331,13 @@ export function QuoteDocument({
                 </Text>
                 <Text style={styles.itineraryText}>{line.text}</Text>
                 {line.bullets.map((bullet, bulletIndex) => (
-                  <Text key={bulletIndex} style={styles.itineraryDetail}>
-                    {`- ${bullet}`}
+                  <Text
+                    key={bulletIndex}
+                    style={
+                      bullet.kind === "heading" ? styles.itineraryDetailHeading : styles.itineraryDetail
+                    }
+                  >
+                    {bullet.kind === "heading" ? bullet.text : `- ${bullet.text}`}
                   </Text>
                 ))}
               </View>

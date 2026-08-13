@@ -35,6 +35,8 @@ interface CancelBookingDialogProps {
   sourceStage: PipelineStage
   outcomeReasons?: OutcomeReason[]
   suggestedRefund?: number | null
+  /** Total already paid on the booking — a refund can never exceed it. */
+  maxRefund?: number | null
   onCancelled: () => void
 }
 
@@ -46,6 +48,7 @@ export function CancelBookingDialog({
   sourceStage,
   outcomeReasons = [],
   suggestedRefund,
+  maxRefund,
   onCancelled,
 }: CancelBookingDialogProps) {
   const [reasonId, setReasonId] = useState("")
@@ -58,6 +61,16 @@ export function CancelBookingDialog({
   const [refundedAt, setRefundedAt] = useState("")
   const [loading, setLoading] = useState(false)
   const requiresRefundCapture = ["deposit_paid", "final_paid", "voucher_sent", "closed", "trip_active"].includes(sourceStage)
+
+  // The API rejects an over-refund with a 400; catch it here so the user sees why
+  // before submitting.
+  const refundExceedsPaid =
+    refundStatus === "refunded" &&
+    maxRefund !== null &&
+    maxRefund !== undefined &&
+    refundAmount.trim() !== "" &&
+    Number.isFinite(Number(refundAmount)) &&
+    Number(refundAmount) > maxRefund
 
   const cancelReasons = outcomeReasons.filter(
     (r) => r.active && (r.appliesTo === "Cancelled" || r.appliesTo === "Both"),
@@ -93,6 +106,7 @@ export function CancelBookingDialog({
     ) {
       return
     }
+    if (refundExceedsPaid) return
     setLoading(true)
     try {
       const res = await fetch(`/api/jobs/${bookingId}/cancel`, {
@@ -233,10 +247,18 @@ export function CancelBookingDialog({
                       id="refund-amount"
                       type="number"
                       min="0"
+                      max={maxRefund ?? undefined}
                       step="0.01"
                       value={refundAmount}
                       onChange={(event) => setRefundAmount(event.target.value)}
+                      aria-invalid={refundExceedsPaid}
+                      aria-describedby={refundExceedsPaid ? "refund-amount-error" : undefined}
                     />
+                    {refundExceedsPaid && (
+                      <p id="refund-amount-error" className="text-xs text-destructive">
+                        Cannot exceed the {maxRefund?.toFixed(2)} already paid.
+                      </p>
+                    )}
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="refund-date">Refunded at</Label>
@@ -275,7 +297,8 @@ export function CancelBookingDialog({
               (requiresRefundCapture && !refundStatus) ||
               (requiresRefundCapture &&
                 refundStatus === "refunded" &&
-                (!refundAmount.trim() || !refundReference.trim() || !refundedAt))
+                (!refundAmount.trim() || !refundReference.trim() || !refundedAt)) ||
+              refundExceedsPaid
             }
           >
             {loading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <XCircle className="w-4 h-4 mr-1" />}

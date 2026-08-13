@@ -28,6 +28,9 @@ import { CONSULTANTS } from "@/lib/types"
 import type { PipelineStage } from "@/lib/types"
 import { extractRoleFromJwt } from "@/lib/role-utils"
 import { applyTransition, StaleTransitionError } from "@/lib/pipeline/apply-transition"
+import { calculateRefund } from "@/lib/invoices/calculate-refund"
+import { resolveDepositAmount } from "@/lib/invoices/resolve-deposit-amount"
+import { getDepositRefundable } from "@/lib/settings-access"
 import type { PostgrestError } from "@supabase/supabase-js"
 
 function isPostgrestError(error: unknown): error is PostgrestError {
@@ -506,10 +509,31 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     createdAtDisplay: formatDisplayDateTime(a.created_at),
   }))
 
-  const depositInvoice = (invoicesData ?? []).find((inv) => inv.kind === "deposit")
+  // Mirror app/api/jobs/[id]/cancel: same invoice filter, same deposit basis and
+  // the same calculateRefund, so the amount prefilled in the cancel dialog is the
+  // amount the cancel route would calculate for itself.
+  const latestActiveInvoice = (kind: string) =>
+    (invoicesData ?? [])
+      .filter(
+        (inv) => inv.kind === kind && ["draft", "sent", "paid"].includes(inv.status ?? ""),
+      )
+      .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))[0]
+
+  const depositInvoice = latestActiveInvoice("deposit")
+  const fullInvoice = latestActiveInvoice("full")
   const totalPaid = (paymentsData ?? []).reduce((sum, p) => sum + Number(p.amount), 0)
-  if (depositInvoice !== undefined) {
-    job.suggestedRefund = Math.max(0, totalPaid - Number(depositInvoice.amount))
+
+  if (depositInvoice !== undefined || fullInvoice !== undefined) {
+    const [depositRefundable, defaultDepositPercentage] = await Promise.all([
+      getDepositRefundable(supabase),
+      getDefaultDepositPercentage(supabase),
+    ])
+    const depositAmount = resolveDepositAmount(
+      depositInvoice ? Number(depositInvoice.amount) : null,
+      fullInvoice ? Number(fullInvoice.amount) : null,
+      defaultDepositPercentage,
+    )
+    job.suggestedRefund = calculateRefund(totalPaid, depositAmount, depositRefundable).suggestedRefund
   }
 
   return NextResponse.json({

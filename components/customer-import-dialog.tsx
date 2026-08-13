@@ -17,7 +17,7 @@ import {
   ImportConflictResolutionModal,
   type ImportConflictGroup,
 } from "@/components/import-conflict-resolution-modal"
-import { useActiveSuppliers } from "@/lib/use-data"
+import { useActiveSuppliers, useSupplierDetail } from "@/lib/use-data"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { mutate } from "swr"
@@ -26,6 +26,8 @@ const SUPPLIER_NONE_VALUE = "__none_supplier__"
 const ROUTE_NONE_VALUE = "__none_route__"
 const CHUNK_SIZE = 500
 const AUTO_RETRY_ATTEMPTS = 1
+/** A 500-row file can fail wholesale; list enough rows to act on, not enough to bury the panel. */
+const INVALID_ROW_MESSAGE_LIMIT = 10
 
 /** Opaque tint matching former `bg-amber-500/10` / hover `15%` over `--background` (sticky cells cannot use alpha or scroll bleeds through). */
 const IMPORT_CONFLICT_ROW_TINT =
@@ -51,6 +53,8 @@ interface ImportResult {
   enrichedProfiles: number
   conflictEmails: string[]
   skippedInvalid: number
+  /** One "<file> row N — <what is wrong>" line per row the import dropped. */
+  skippedInvalidLabels: string[]
   failedChunks: number
   successfulChunks: number
   totalChunks: number
@@ -236,8 +240,49 @@ function getUniqueCustomerCount(rows: EditableImportRow[]): number {
   return new Set(rows.map((row) => normalizeEmail(row.email))).size
 }
 
+export type ImportRowField = "first_name" | "last_name" | "email"
+
+export interface ImportRowIssue {
+  field: ImportRowField
+  message: string
+}
+
+/**
+ * Why a row cannot be imported, named by column. A red cell border alone leaves the
+ * user hunting through a 500-row file for what is wrong with it.
+ */
+export function getRowIssues(row: Pick<EditableImportRow, "first_name" | "last_name" | "email">): ImportRowIssue[] {
+  const issues: ImportRowIssue[] = []
+
+  if (row.first_name.trim().length === 0) {
+    issues.push({ field: "first_name", message: "First name is required" })
+  }
+  if (row.last_name.trim().length === 0) {
+    issues.push({ field: "last_name", message: "Last name is required" })
+  }
+  if (row.email.trim().length === 0) {
+    issues.push({ field: "email", message: "Email is required" })
+  } else if (!isEmail(row.email)) {
+    issues.push({ field: "email", message: `Email "${row.email.trim()}" is not a valid address` })
+  }
+
+  return issues
+}
+
+function getIssueForField(issues: ImportRowIssue[], field: ImportRowField): ImportRowIssue | undefined {
+  return issues.find((issue) => issue.field === field)
+}
+
+/** "customers.csv row 12 — Last name is required; Email "bob@" is not a valid address" */
+export function describeRowIssues(
+  row: Pick<EditableImportRow, "first_name" | "last_name" | "email" | "sourceLabel">,
+): string {
+  const messages = getRowIssues(row).map((issue) => issue.message)
+  return messages.length > 0 ? `${row.sourceLabel} — ${messages.join("; ")}` : row.sourceLabel
+}
+
 function isRowValid(row: EditableImportRow): boolean {
-  return row.first_name.trim().length > 0 && row.last_name.trim().length > 0 && isEmail(row.email)
+  return getRowIssues(row).length === 0
 }
 
 function newRowId(): string {
@@ -330,12 +375,29 @@ export function CustomerBulkImportPanel() {
   const importRunConfigRef = useRef<ImportRunConfig | null>(null)
   const frozenPreImportCheckRef = useRef<PreImportCheckSummary | null>(null)
 
+  // The route drives the duplicate-booking check on the server (a customer who already
+  // has a closed historical booking on this route is skipped), so the list has to come
+  // from the supplier the file is being imported against.
+  const selectedSupplierSlug = useMemo(
+    () => suppliers.find((supplier) => supplier.id === selectedSupplierId)?.slug ?? "",
+    [suppliers, selectedSupplierId],
+  )
+  const { data: supplierDetail, isLoading: isLoadingRoutes } = useSupplierDetail(selectedSupplierSlug)
+
   const routeOptions = useMemo<Array<{ id: string; label: string }>>(() => {
-    return []
-  }, [])
+    if (!supplierDetail || "error" in supplierDetail) return []
+    return supplierDetail.routes
+      .filter((route) => route.active)
+      .map((route) => ({ id: route.id, label: route.name }))
+  }, [supplierDetail])
 
   const selectedValidRows = useMemo(() => rows.filter((row) => row.selected && isRowValid(row)), [rows])
-  const selectedInvalidCount = useMemo(() => rows.filter((row) => row.selected && !isRowValid(row)).length, [rows])
+  const selectedInvalidRows = useMemo(() => rows.filter((row) => row.selected && !isRowValid(row)), [rows])
+  const selectedInvalidCount = selectedInvalidRows.length
+  const selectedInvalidLabels = useMemo(
+    () => selectedInvalidRows.map((row) => describeRowIssues(row)),
+    [selectedInvalidRows],
+  )
   const selectedConflictGroups = useMemo(() => getConflictGroups(selectedValidRows), [selectedValidRows])
   const selectedConflictEmailSet = useMemo(
     () => new Set(selectedConflictGroups.map((group) => group.email)),
@@ -354,6 +416,14 @@ export function CustomerBulkImportPanel() {
   const displayPreImportCheckSummary =
     (isSubmitting || result) ? (frozenPreImportCheckRef.current ?? preImportCheckSummary) : preImportCheckSummary
   const preImportSummaryIsFrozen = (isSubmitting || Boolean(result)) && Boolean(displayPreImportCheckSummary)
+
+  const routePlaceholder = !selectedSupplierId
+    ? "Select supplier first"
+    : isLoadingRoutes
+      ? "Loading routes…"
+      : routeOptions.length === 0
+        ? "No routes on this supplier"
+        : "Select route"
 
   const handleSupplierChange = (value: string) => {
     const nextSupplierId = value === SUPPLIER_NONE_VALUE ? null : value
@@ -627,7 +697,7 @@ export function CustomerBulkImportPanel() {
   const runChunkImport = async (
     rowsToImport: EditableImportRow[],
     conflictEmailsFromPrescan: string[],
-    invalidSkipped: number,
+    invalidSkippedLabels: string[],
   ) => {
     frozenPreImportCheckRef.current = preImportCheckSummary
     const runConfig: ImportRunConfig = {
@@ -707,7 +777,8 @@ export function CustomerBulkImportPanel() {
         skippedDuplicates,
         enrichedProfiles,
         conflictEmails,
-        skippedInvalid: invalidSkipped,
+        skippedInvalid: invalidSkippedLabels.length,
+        skippedInvalidLabels: invalidSkippedLabels,
         failedChunks: failed.length,
         successfulChunks: chunks.length - failed.length,
         totalChunks: chunks.length,
@@ -863,7 +934,7 @@ export function CustomerBulkImportPanel() {
       return
     }
 
-    await runChunkImport(selectedValidRows, [], selectedInvalidCount)
+    await runChunkImport(selectedValidRows, [], selectedInvalidLabels)
   }
 
   const handleConflictModalOpenChange = (open: boolean) => {
@@ -910,7 +981,7 @@ export function CustomerBulkImportPanel() {
     setPendingRowsForImport(null)
     setPendingConflicts([])
 
-    await runChunkImport(resolvedRowsForImport, conflictEmails, selectedInvalidCount)
+    await runChunkImport(resolvedRowsForImport, conflictEmails, selectedInvalidLabels)
   }
 
   return (
@@ -963,10 +1034,10 @@ export function CustomerBulkImportPanel() {
           <Select
             value={selectedRouteId ?? ROUTE_NONE_VALUE}
             onValueChange={handleRouteChange}
-            disabled={!selectedSupplierId}
+            disabled={!selectedSupplierId || isLoadingRoutes || routeOptions.length === 0}
           >
             <SelectTrigger>
-              <SelectValue placeholder={selectedSupplierId ? "Select route" : "Select supplier first"} />
+              <SelectValue placeholder={routePlaceholder} />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={ROUTE_NONE_VALUE}>No route selected</SelectItem>
@@ -1056,6 +1127,29 @@ export function CustomerBulkImportPanel() {
             </p>
           </div>
 
+          {selectedInvalidCount > 0 ? (
+            <Alert className="border-destructive/30 bg-destructive/10">
+              <AlertCircle className="h-4 w-4 text-destructive" />
+              <AlertTitle>
+                {selectedInvalidCount} selected row{selectedInvalidCount === 1 ? "" : "s"} cannot be imported
+              </AlertTitle>
+              <AlertDescription>
+                <ul className="space-y-0.5">
+                  {selectedInvalidLabels.slice(0, INVALID_ROW_MESSAGE_LIMIT).map((label) => (
+                    <li key={label}>{label}</li>
+                  ))}
+                </ul>
+                {selectedInvalidCount > INVALID_ROW_MESSAGE_LIMIT ? (
+                  <p className="mt-1">
+                    …and {selectedInvalidCount - INVALID_ROW_MESSAGE_LIMIT} more row
+                    {selectedInvalidCount - INVALID_ROW_MESSAGE_LIMIT === 1 ? "" : "s"}.
+                  </p>
+                ) : null}
+                <p className="mt-1">Fix them in the table below, or clear their checkbox to skip them.</p>
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
           {selectedConflictGroups.length > 0 ? (
             <Alert className="border-amber-500/30 bg-amber-500/10">
               <AlertCircle className="h-4 w-4 text-amber-600" />
@@ -1086,7 +1180,11 @@ export function CustomerBulkImportPanel() {
               </TableHeader>
               <TableBody>
                 {rows.map((row) => {
-                  const valid = isRowValid(row)
+                  const issues = getRowIssues(row)
+                  const valid = issues.length === 0
+                  const firstNameIssue = getIssueForField(issues, "first_name")
+                  const lastNameIssue = getIssueForField(issues, "last_name")
+                  const emailIssue = getIssueForField(issues, "email")
                   const hasConflict = row.selected && selectedConflictEmailSet.has(normalizeEmail(row.email))
                   // Sticky cells must use opaque backgrounds so horizontally scrolled content does not show through.
                   const stickyFrozenBg = !valid
@@ -1132,7 +1230,9 @@ export function CustomerBulkImportPanel() {
                         <Input
                           value={row.first_name}
                           onChange={(e) => updateRow(row.id, { first_name: e.target.value })}
-                          className={cn("h-8 w-full", row.first_name.trim().length > 0 ? "" : "border-destructive")}
+                          className={cn("h-8 w-full", firstNameIssue ? "border-destructive" : "")}
+                          aria-invalid={Boolean(firstNameIssue)}
+                          title={firstNameIssue ? `${row.sourceLabel}: ${firstNameIssue.message}` : undefined}
                         />
                       </TableCell>
                       <TableCell
@@ -1144,14 +1244,18 @@ export function CustomerBulkImportPanel() {
                         <Input
                           value={row.last_name}
                           onChange={(e) => updateRow(row.id, { last_name: e.target.value })}
-                          className={cn("h-8 w-full", row.last_name.trim().length > 0 ? "" : "border-destructive")}
+                          className={cn("h-8 w-full", lastNameIssue ? "border-destructive" : "")}
+                          aria-invalid={Boolean(lastNameIssue)}
+                          title={lastNameIssue ? `${row.sourceLabel}: ${lastNameIssue.message}` : undefined}
                         />
                       </TableCell>
                       <TableCell className="w-72">
                         <Input
                           value={row.email}
                           onChange={(e) => updateRow(row.id, { email: e.target.value.toLowerCase() })}
-                          className={cn("h-8 w-full", isEmail(row.email) ? "" : "border-destructive")}
+                          className={cn("h-8 w-full", emailIssue ? "border-destructive" : "")}
+                          aria-invalid={Boolean(emailIssue)}
+                          title={emailIssue ? `${row.sourceLabel}: ${emailIssue.message}` : undefined}
                         />
                       </TableCell>
                       <TableCell className="w-40">
@@ -1247,6 +1351,25 @@ export function CustomerBulkImportPanel() {
           <p className="text-xs text-muted-foreground">
             Chunks succeeded: {result.successfulChunks}/{result.totalChunks}
           </p>
+
+          {result.skippedInvalidLabels.length > 0 ? (
+            <div className="space-y-1 rounded border border-destructive/20 bg-destructive/5 p-2">
+              <p className="text-xs font-medium text-destructive">
+                Skipped {result.skippedInvalidLabels.length} invalid row
+                {result.skippedInvalidLabels.length === 1 ? "" : "s"}:
+              </p>
+              {result.skippedInvalidLabels.slice(0, INVALID_ROW_MESSAGE_LIMIT).map((label) => (
+                <p key={label} className="text-xs text-destructive">
+                  {label}
+                </p>
+              ))}
+              {result.skippedInvalidLabels.length > INVALID_ROW_MESSAGE_LIMIT ? (
+                <p className="text-xs text-destructive">
+                  …and {result.skippedInvalidLabels.length - INVALID_ROW_MESSAGE_LIMIT} more.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
 
           {result.conflictEmails.length > 0 ? (
             <div className="space-y-1">

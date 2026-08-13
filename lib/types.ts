@@ -457,6 +457,16 @@ export function isTransportSupplier(kind: SupplierKind): boolean {
   return kind === "transfers" || kind === "vehicle_rental"
 }
 
+/**
+ * True for suppliers whose price hangs off the type alone (a tour operator sells a tour type at one
+ * price, whatever itinerary it is described by), so their rate cards carry no route and their
+ * routes are descriptive instead: one itinerary belongs to one tour type and holds its own copy.
+ * Every other kind prices route x type, where the route genuinely changes the fare.
+ */
+export function isTypePricedSupplier(kind: SupplierKind): boolean {
+  return kind === "tour_operator"
+}
+
 export function isOptionalPackageLegKind(kind: SupplierKind): boolean {
   return kind !== "train_operator"
 }
@@ -527,6 +537,12 @@ export interface SupplierRoute {
    * travelling in reverse (`route_reversed`) renders these instead; null on one-way routes. */
   returnDepartureTime?: string | null
   returnArrivalTime?: string | null
+  /** Tour operators only: the tour type this itinerary belongs to. Itineraries describe a tour
+   * type, they never price it — the rate card hangs off the tour type itself. Null on every
+   * other supplier kind, whose routes are a pricing dimension rather than a description. */
+  suiteTypeId?: string | null
+  /** Tour operators only: what this itinerary covers, printed on quotes and vouchers. */
+  description?: string | null
   active: boolean
   createdAt: string
   createdAtDisplay?: string
@@ -582,7 +598,8 @@ export interface SupplierSuiteType {
 
 export interface SupplierRateCard {
   id: string
-  routeId: string
+  /** Null on a tour operator's card: it prices the tour type across every itinerary. */
+  routeId: string | null
   suiteTypeId: string
   rateTypeId: string
   pricePerPerson: number

@@ -84,9 +84,15 @@ export async function loadBookingServicesPackageDetail(
   const suiteTypes = suiteTypesResult.data ?? []
   const routeIds = routes.map((route) => route.id)
 
-  const [rateCardsResult, vehicleRentalDetailsResult] = await Promise.all([
+  // Tour-operator cards price the tour type and carry no route, so they are only reachable via
+  // their suite type -- see lib/rate-cards/resolve.ts.
+  const suiteTypeIds = suiteTypes.map((suiteType) => suiteType.id)
+  const [routedRateCardsResult, typeRateCardsResult, vehicleRentalDetailsResult] = await Promise.all([
     routeIds.length > 0
       ? supabase.from("rate_cards").select("*").in("route_id", routeIds)
+      : Promise.resolve({ data: [] }),
+    suiteTypeIds.length > 0
+      ? supabase.from("rate_cards").select("*").is("route_id", null).in("suite_type_id", suiteTypeIds)
       : Promise.resolve({ data: [] }),
     routeIds.length > 0
       ? supabase.from("vehicle_rental_route_details").select("*").in("route_id", routeIds)
@@ -167,7 +173,7 @@ export async function loadBookingServicesPackageDetail(
     legs,
     routes,
     packageLegRoutes,
-    rateCardsResult.data ?? [],
+    [...(routedRateCardsResult.data ?? []), ...(typeRateCardsResult.data ?? [])],
     suiteTypes,
     vehicleRentalDetailsResult.data ?? [],
     locationNameById,

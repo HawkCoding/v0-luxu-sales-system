@@ -354,6 +354,95 @@ describe("route departure/arrival times", () => {
   })
 })
 
+describe("supplierSaveSchema — tour operators price the tour type", () => {
+  const RATE_TYPE = "00000000-0000-4000-8000-00000000000a"
+
+  function tourPayload(overrides: Record<string, unknown> = {}) {
+    return {
+      ...buildValidPayload(),
+      kind: "tour_operator" as const,
+      suiteTypes: [{ id: UUID_2, name: "Classic Hop-on-Hop-off Ticket", active: true }],
+      routes: [{ id: UUID_3, name: "Cape Town - One Day Pass", suiteTypeId: UUID_2, active: true }],
+      ...overrides,
+    }
+  }
+
+  const typeRateCard = {
+    suiteTypeId: UUID_2,
+    rateTypeId: RATE_TYPE,
+    pricePerPerson: 850,
+    childPrice: null,
+    infantPrice: null,
+    currency: "ZAR",
+    validFrom: "2026-01-01",
+    validTo: null,
+  }
+
+  it("accepts an itinerary linked to a tour type plus a route-agnostic rate card", () => {
+    const result = supplierSaveSchema.safeParse(tourPayload({ rateCards: [typeRateCard] }))
+    expect(result.success).toBe(true)
+    if (!result.success) return
+    expect(result.data.routes[0].suiteTypeId).toBe(UUID_2)
+    expect(result.data.rateCards).toHaveLength(1)
+  })
+
+  it("keeps an itinerary description", () => {
+    const result = supplierSaveSchema.safeParse(
+      tourPayload({
+        routes: [
+          { id: UUID_3, name: "Scuba dive", suiteTypeId: UUID_2, description: "Two dives", active: true },
+        ],
+      }),
+    )
+    expect(result.success).toBe(true)
+    if (!result.success) return
+    expect(result.data.routes[0].description).toBe("Two dives")
+  })
+
+  it("rejects an itinerary with no tour type", () => {
+    const result = supplierSaveSchema.safeParse(
+      tourPayload({ routes: [{ id: UUID_3, name: "Cape Town - One Day Pass", active: true }] }),
+    )
+    expect(result.success).toBe(false)
+    if (result.success) return
+    expect(result.error.issues[0].message).toMatch(/must belong to a tour type/)
+  })
+
+  it("rejects an itinerary pointing at another supplier's tour type", () => {
+    const result = supplierSaveSchema.safeParse(
+      tourPayload({
+        routes: [{ id: UUID_3, name: "Cape Town - One Day Pass", suiteTypeId: UUID_4, active: true }],
+      }),
+    )
+    expect(result.success).toBe(false)
+  })
+
+  it("rejects rates hung off the itinerary", () => {
+    const result = supplierSaveSchema.safeParse(
+      tourPayload({
+        routes: [
+          {
+            id: UUID_3,
+            name: "Cape Town - One Day Pass",
+            suiteTypeId: UUID_2,
+            active: true,
+            rateCards: [{ ...typeRateCard, routeId: UUID_3 }],
+          },
+        ],
+      }),
+    )
+    expect(result.success).toBe(false)
+  })
+
+  it("rejects route-agnostic rate cards on every other supplier kind", () => {
+    const result = supplierSaveSchema.safeParse({
+      ...buildValidPayload(),
+      rateCards: [typeRateCard],
+    })
+    expect(result.success).toBe(false)
+  })
+})
+
 describe("supplierDraftSaveSchema", () => {
   it("allows sparse payloads with defaults", () => {
     const parsed = supplierDraftSaveSchema.parse({ kind: "airline" })

@@ -317,6 +317,39 @@ describe("buildPackageQuoteLineItems", () => {
     expect(lineItems.every((li) => li.qty === 3 && li.unitPrice === 1200)).toBe(true)
   })
 
+  it("prices a tour leg off the tour type's route-agnostic card, whichever itinerary was booked", async () => {
+    const tourLeg = leg({
+      id: "leg-tour",
+      supplierKind: "tour_operator",
+      routes: [
+        route("route-day-pass", "supplier-leg-tour", "Cape Town - One Day Pass"),
+        route("route-scuba", "supplier-leg-tour", "Scuba dive"),
+      ],
+      suiteTypes: [suiteType("tour-classic", "supplier-leg-tour", "Classic Hop-on-Hop-off Ticket")],
+      // No routeId: a tour operator prices the tour type across every itinerary.
+      rateCards: [rateCard({ id: "rc-classic", routeId: null, suiteTypeId: "tour-classic", pricePerPerson: 850 })],
+    })
+
+    for (const routeId of ["route-day-pass", "route-scuba"]) {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase(),
+        packageDetail: detail([tourLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          {
+            legId: "leg-tour",
+            selected: true,
+            routeId,
+            units: [{ suiteTypeId: "tour-classic", adultCount: 2, childCount: 1, infantCount: 0 }],
+          },
+        ],
+      })
+
+      expect(lineItems.every((li) => li.unitPrice === 850)).toBe(true)
+    }
+  })
+
   it("rejects hotel legs without units (the old dialog payload shape)", async () => {
     const hotelLeg = leg({
       id: "leg-hotel",

@@ -58,6 +58,8 @@ export interface VoucherServiceBlockData {
   pickup?: string | null
   dropoff?: string | null
   itinerary?: string | null
+  /** Tour-only: what the booked itinerary covers, captured on the supplier's itinerary. */
+  itineraryDescription?: string | null
   cabin?: string | null
   flightNumber?: string | null
   durationDays?: number | null

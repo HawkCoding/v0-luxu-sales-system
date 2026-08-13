@@ -874,6 +874,13 @@ update public.routes set departure_time = '08:30', arrival_time = '16:00', retur
 update public.routes set departure_time = '09:00', arrival_time = '15:00'
   where id = 'fc389376-c2fe-4e1a-8138-1ffad4b27271';
 
+-- A tour operator's itinerary belongs to one tour type and carries the copy the client reads;
+-- the price sits on the tour type itself.
+update public.routes
+  set suite_type_id = '38f93cb6-c7b0-4fe1-b342-5a3b07ab3fc1',
+      description = 'Red route day pass — hop on and off at any of the 15 city stops, with audio commentary on board.'
+  where id = '635df36f-b0b9-4199-bec7-4e6d8bf00332';
+
 insert into public.rate_cards (id,route_id,suite_type_id,rate_type_id,price_per_person,currency,valid_from,valid_to,created_at,child_price,infant_price) values
   ('506e89e2-b2e9-434a-af83-194d083b6828','4cbf3ae9-3cf6-4142-8b69-2bd5ddf7a58f','48a4d650-4b0b-422e-ac5a-13f95437d342',(select id from public.rate_types where code='STO'),3575,'ZAR','2026-07-01','2026-08-31','2026-07-06T09:59:14.602+00:00',null,null),
   ('e9be597c-0fde-4e24-b32a-cb437eb5bdc6','4cbf3ae9-3cf6-4142-8b69-2bd5ddf7a58f','116b14f6-0ffe-4413-ab84-2da025794a5c',(select id from public.rate_types where code='STO'),3425,'ZAR','2026-07-01','2026-08-31','2026-07-06T09:59:14.602+00:00',null,null),
@@ -1055,8 +1062,9 @@ insert into public.rate_cards (id,route_id,suite_type_id,rate_type_id,price_per_
   ('5d30eebf-7851-4ac2-80de-00896c88be6a','dc3fef89-4409-49fc-8bf3-880c90a07f8c','1be89798-a43a-40ad-bcb6-8a731fd38596',(select id from public.rate_types where code='STO'),6042,'ZAR','2026-07-01','2027-02-28','2026-07-01T08:22:50.321+00:00',null,null),
   ('634ec1a5-2201-4c1d-85ec-b934e12f960a','dc3fef89-4409-49fc-8bf3-880c90a07f8c','61012de5-914d-40e6-ad12-d4b21bbbe175',(select id from public.rate_types where code='STO'),7000,'ZAR','2026-07-01','2027-02-28','2026-07-01T08:22:50.321+00:00',null,null),
   ('71e902e5-0251-42cf-bc11-6cfc2908f9f6','01daf8fe-e566-48e2-abbc-8fe79cea3c53','0e68be05-16cb-491c-a43e-1f3dbbe3f59d',(select id from public.rate_types where code='STO'),22390,'ZAR','2027-01-01','2027-12-31','2026-07-07T08:24:46.46+00:00',null,null),
-  ('652c09b0-5aee-40f9-b031-6864b4dcb3e5','635df36f-b0b9-4199-bec7-4e6d8bf00332','38f93cb6-c7b0-4fe1-b342-5a3b07ab3fc1',(select id from public.rate_types where code='STO'),320,'ZAR','2026-07-01','2026-09-30','2026-07-01T08:38:39.525+00:00',170,null),
-  ('5a892769-244c-440f-ba5c-ddd19943f959','635df36f-b0b9-4199-bec7-4e6d8bf00332','38f93cb6-c7b0-4fe1-b342-5a3b07ab3fc1',(select id from public.rate_types where code='STO'),330,'ZAR','2026-10-01',null,'2026-07-01T08:38:39.525+00:00',200,null),
+  -- Tour operators price the tour type, not the itinerary, so these carry no route_id.
+  ('652c09b0-5aee-40f9-b031-6864b4dcb3e5',null,'38f93cb6-c7b0-4fe1-b342-5a3b07ab3fc1',(select id from public.rate_types where code='STO'),320,'ZAR','2026-07-01','2026-09-30','2026-07-01T08:38:39.525+00:00',170,null),
+  ('5a892769-244c-440f-ba5c-ddd19943f959',null,'38f93cb6-c7b0-4fe1-b342-5a3b07ab3fc1',(select id from public.rate_types where code='STO'),330,'ZAR','2026-10-01',null,'2026-07-01T08:38:39.525+00:00',200,null),
   ('3b136623-f93b-4252-b592-f76eaa048019','fdd66479-3d2c-4b75-b7d2-23743d12203e','42f04b04-afa7-41e5-8b6a-d312ff759dfe',(select id from public.rate_types where code='RAC'),2000,'ZAR','2026-07-01',null,'2026-07-01T09:36:05.832+00:00',2000,500),
   ('c2064b1e-9d13-4805-becc-9127249afcfa','fdd66479-3d2c-4b75-b7d2-23743d12203e','6eccbfe5-3488-47d2-adcc-9196090c6b07',(select id from public.rate_types where code='RAC'),0,'ZAR','2026-07-01',null,'2026-07-01T09:36:05.832+00:00',null,null),
   ('fda3640e-0a92-4728-8af0-f8831ce3f5d0','fdd66479-3d2c-4b75-b7d2-23743d12203e','9e2dd30b-0cbd-4ed1-b748-529da7db3e8b',(select id from public.rate_types where code='RAC'),0,'ZAR','2026-07-01',null,'2026-07-01T09:36:05.832+00:00',null,null),

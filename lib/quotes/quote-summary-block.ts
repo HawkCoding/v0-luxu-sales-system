@@ -77,6 +77,10 @@ const itineraryTitle = "margin:0 0 2px;color:#172018;font-size:13px;font-weight:
 const itineraryText = "margin:0 0 3px;color:#312b24;font-size:13px;line-height:19px;"
 const itineraryDetail =
   "margin:0 0 2px;padding-left:12px;color:#554c42;font-size:12px;line-height:17px;"
+// A subheading inside the bullet list: bold and undashed, with a little air above it so it reads
+// as a section break rather than another inclusion.
+const itineraryDetailHeading =
+  "margin:6px 0 2px;padding-left:12px;color:#312b24;font-size:12px;font-weight:700;line-height:17px;"
 const excludesItem = "margin:0 0 4px;color:#554c42;font-size:12px;line-height:18px;"
 
 const DEFAULT_INCLUDES_HEADING = "Your Package Includes"
@@ -126,7 +130,11 @@ export function buildQuoteSummaryBlock(input: QuoteSummaryInput): string {
           ? formatDisplayDateLong(line.dateISO) || "Date to be confirmed"
           : "Date to be confirmed"
         const bullets = line.bullets
-          .map((bullet) => `<p style="${itineraryDetail}">- ${escapeHtml(bullet)}</p>`)
+          .map((bullet) =>
+            bullet.kind === "heading"
+              ? `<p style="${itineraryDetailHeading}">${escapeHtml(bullet.text)}</p>`
+              : `<p style="${itineraryDetail}">- ${escapeHtml(bullet.text)}</p>`,
+          )
           .join("")
         return (
           `<div style="margin:0 0 10px;">` +

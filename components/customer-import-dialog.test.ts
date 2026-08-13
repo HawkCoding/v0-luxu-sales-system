@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { readCsvText } from "./customer-import-dialog"
+import { describeRowIssues, getRowIssues, readCsvText } from "./customer-import-dialog"
 
 const HEADER_ROW = "title,first_name,last_name,email,phone,country\n"
 const DATA_ROW = "Mr,Clean,Import,clean@luxusqa.test,+27 82 100 0003,South Africa\n"
@@ -49,5 +49,59 @@ describe("readCsvText", () => {
     await expect(readCsvText(toFile(utf16le(CSV, false), "supplier-leads.csv"))).rejects.toThrow(
       /supplier-leads\.csv is not a UTF-8 CSV/,
     )
+  })
+})
+
+// F05-6: a dropped row used to be identifiable only by a red cell border, with no
+// message naming the row or the column that failed.
+describe("getRowIssues", () => {
+  const validRow = {
+    first_name: "Clean",
+    last_name: "Import",
+    email: "clean@luxusqa.test",
+    sourceLabel: "customers.csv row 2",
+  }
+
+  it("returns nothing for a valid row", () => {
+    expect(getRowIssues(validRow)).toEqual([])
+  })
+
+  it("names a missing first name", () => {
+    expect(getRowIssues({ ...validRow, first_name: "   " })).toEqual([
+      { field: "first_name", message: "First name is required" },
+    ])
+  })
+
+  it("names a missing last name", () => {
+    expect(getRowIssues({ ...validRow, last_name: "" })).toEqual([
+      { field: "last_name", message: "Last name is required" },
+    ])
+  })
+
+  it("distinguishes a blank email from a malformed one", () => {
+    expect(getRowIssues({ ...validRow, email: "" })).toEqual([
+      { field: "email", message: "Email is required" },
+    ])
+    expect(getRowIssues({ ...validRow, email: "not-an-email" })).toEqual([
+      { field: "email", message: 'Email "not-an-email" is not a valid address' },
+    ])
+  })
+
+  it("reports every failing column on a short row", () => {
+    const issues = getRowIssues({ ...validRow, last_name: "", email: "nope" })
+    expect(issues.map((issue) => issue.field)).toEqual(["last_name", "email"])
+  })
+})
+
+describe("describeRowIssues", () => {
+  it("names the row and every problem with it", () => {
+    expect(
+      describeRowIssues({
+        first_name: "",
+        last_name: "Import",
+        email: "bob@",
+        sourceLabel: "customers.csv row 12",
+      }),
+    ).toBe('customers.csv row 12 — First name is required; Email "bob@" is not a valid address')
   })
 })

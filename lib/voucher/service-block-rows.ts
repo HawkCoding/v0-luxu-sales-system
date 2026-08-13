@@ -1,5 +1,6 @@
 import type { VoucherServiceBlock, VoucherServiceBlockContact } from "@/lib/generate-voucher"
 import { formatDisplayDateLong } from "@/lib/date-format"
+import { formatBulletLinesInline } from "@/lib/inclusions/bullet-lines"
 
 export interface VoucherRowCell {
   label: string
@@ -67,7 +68,10 @@ export function voucherRowsForBlock(block: VoucherServiceBlock): VoucherRow[] {
     if (d.suiteType) rows.push(suiteRow("Suite Type", d.suiteType, d.numberOfSuites))
     if (d.guestBreakdown) rows.push(guestsRow(d.guestBreakdown))
     if (d.mealPlan) rows.push({ label: "Meal Basis", value: d.mealPlan })
-    if (d.inclusions && d.inclusions.length > 0) rows.push({ label: "Included", value: d.inclusions.join(", ") })
+    // Subheadings can't have their own line in a single-value row, so their items are grouped
+    // behind them: "Onboard: a, b; Off-train: c".
+    const included = formatBulletLinesInline(d.inclusions)
+    if (included) rows.push({ label: "Included", value: included })
     if (d.requestsLine) rows.push({ label: "Requests", value: d.requestsLine })
     if (d.occasion) rows.push({ label: "Occasion", value: d.occasion })
     if (d.excursions && d.excursions.length > 0) rows.push({ label: "Excursion", value: d.excursions.join("; ") })
@@ -78,7 +82,10 @@ export function voucherRowsForBlock(block: VoucherServiceBlock): VoucherRow[] {
     if (d.mealPlan) rows.push({ label: "Meal Plan", value: d.mealPlan })
     if (departureDate) rows.push({ label: "Check-In", value: fmtWithTime(departureDate, d.startTime) ?? departureDate })
     if (arrivalDate) rows.push({ label: "Check-Out", value: fmtWithTime(arrivalDate, d.endTime) ?? arrivalDate })
-    if (d.inclusions && d.inclusions.length > 0) rows.push({ label: "Included", value: d.inclusions.join(", ") })
+    // Subheadings can't have their own line in a single-value row, so their items are grouped
+    // behind them: "Onboard: a, b; Off-train: c".
+    const included = formatBulletLinesInline(d.inclusions)
+    if (included) rows.push({ label: "Included", value: included })
     if (d.requestsLine) rows.push({ label: "Requests", value: d.requestsLine })
     if (d.occasion) rows.push({ label: "Occasion", value: d.occasion })
   } else if (block.serviceType === "transfer") {
@@ -92,7 +99,10 @@ export function voucherRowsForBlock(block: VoucherServiceBlock): VoucherRow[] {
       rows.push({ label: "Return", value: d.endTime ? `${arrivalDate} ${d.endTime}` : arrivalDate })
     }
   } else if (block.serviceType === "tour") {
+    // The tour type is what was booked and priced; the itinerary (and its copy) describes it.
+    if (d.suiteType) rows.push({ label: "Tour", value: d.suiteType })
     if (d.itinerary) rows.push({ label: "Itinerary", value: d.itinerary })
+    if (d.itineraryDescription) rows.push({ label: "Details", value: d.itineraryDescription })
     if (departureDate) rows.push({ label: "Start Date", value: departureDate })
     if (arrivalDate) rows.push({ label: "End Date", value: arrivalDate })
   } else if (block.serviceType === "airline") {

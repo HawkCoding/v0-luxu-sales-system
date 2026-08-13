@@ -1139,6 +1139,10 @@ export default function JobDetailPage() {
         sourceStage={job.stage}
         outcomeReasons={outcomeReasons as OutcomeReason[]}
         suggestedRefund={job.suggestedRefund ?? null}
+        maxRefund={(payments as { amount?: number | string | null }[]).reduce(
+          (sum: number, payment) => sum + Number(payment.amount ?? 0),
+          0,
+        )}
         onCancelled={() => router.push("/app/pipeline")}
       />
 

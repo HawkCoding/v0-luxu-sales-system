@@ -1,5 +1,7 @@
 export interface RateCardWindow {
-  routeId: string
+  /** NULL on a route-agnostic card — a tour operator prices the tour type, not the itinerary, so
+   * one card covers every itinerary of that supplier. Every other kind always carries a route. */
+  routeId: string | null
   suiteTypeId: string
   rateTypeId: string
   validFrom: string
@@ -18,6 +20,11 @@ export function isRateCardValidOn(card: Pick<RateCardWindow, "validFrom" | "vali
   return isOngoingRateCard(card.validTo) || (card.validTo ?? "") >= pricingDate
 }
 
+/** A card with no route of its own applies to whichever route was asked for — see RateCardWindow. */
+function coversRoute(card: Pick<RateCardWindow, "routeId">, routeId: string): boolean {
+  return card.routeId === null || card.routeId === routeId
+}
+
 export function findRateCardCandidates<T extends RateCardWindow>(
   cards: readonly T[],
   routeId: string,
@@ -26,7 +33,7 @@ export function findRateCardCandidates<T extends RateCardWindow>(
 ): T[] {
   return cards.filter(
     (card) =>
-      card.routeId === routeId &&
+      coversRoute(card, routeId) &&
       card.suiteTypeId === suiteTypeId &&
       isRateCardValidOn(card, pricingDate),
   )
@@ -38,7 +45,7 @@ export function hasAnyRateCardFor(
   routeId: string,
   suiteTypeId: string,
 ): boolean {
-  return cards.some((card) => card.routeId === routeId && card.suiteTypeId === suiteTypeId)
+  return cards.some((card) => coversRoute(card, routeId) && card.suiteTypeId === suiteTypeId)
 }
 
 /** Ignores dates, scoped to one rate type: separates "this rate expired here" from "this rate was
@@ -51,7 +58,9 @@ export function hasAnyRateCardForRateType(
 ): boolean {
   return cards.some(
     (card) =>
-      card.routeId === routeId && card.suiteTypeId === suiteTypeId && card.rateTypeId === rateTypeId,
+      coversRoute(card, routeId) &&
+      card.suiteTypeId === suiteTypeId &&
+      card.rateTypeId === rateTypeId,
   )
 }
 

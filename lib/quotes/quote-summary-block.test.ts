@@ -76,6 +76,25 @@ describe("buildQuoteSummaryBlock", () => {
     expect(html).toContain("TOTAL for 2 Adults + 1 Child:")
   })
 
+  it("prints a `#` inclusion as a bold undashed subheading, its items still dashed", () => {
+    const html = buildQuoteSummaryBlock({
+      ...base,
+      itineraryBlocks: [
+        {
+          ...itineraryBlocks[0],
+          serviceData: {
+            ...itineraryBlocks[0].serviceData,
+            inclusions: ["# Onboard", "High Tea"],
+          },
+        },
+      ],
+    })
+    expect(html).toContain("font-weight:700;line-height:17px;\">Onboard</p>")
+    expect(html).not.toContain("- Onboard")
+    expect(html).not.toContain("# Onboard")
+    expect(html).toContain(">- High Tea</p>")
+  })
+
   it("does not render item prices, subtotal/VAT rows, or the inclusions table", () => {
     const html = buildQuoteSummaryBlock(base)
     expect(html).not.toContain("Unit price")

@@ -193,6 +193,8 @@ export function mapSupplierRoute(
     arrivalTime: toHoursMinutes(row.arrival_time),
     returnDepartureTime: toHoursMinutes(row.return_departure_time),
     returnArrivalTime: toHoursMinutes(row.return_arrival_time),
+    suiteTypeId: row.suite_type_id ?? null,
+    description: row.description ?? null,
     active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

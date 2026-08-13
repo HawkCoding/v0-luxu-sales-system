@@ -19,7 +19,12 @@ import {
   type SupplierDraftSaveInput,
   type SupplierSaveInput,
 } from "../schemas"
-import { getSupplierVocabulary, isTransportSupplier, type SupplierKind } from "@/lib/types"
+import {
+  getSupplierVocabulary,
+  isTransportSupplier,
+  isTypePricedSupplier,
+  type SupplierKind,
+} from "@/lib/types"
 import { buildRouteName } from "@/lib/routes/route-name"
 import { areRateCardDateRangesOverlapping, checkRateCardOverlaps } from "@/lib/rate-cards/overlap"
 
@@ -37,6 +42,9 @@ interface NormalizedRoute {
   arrival_time: string | null
   return_departure_time: string | null
   return_arrival_time: string | null
+  /** Tour operators only: the tour type this itinerary describes. */
+  suite_type_id: string | null
+  description: string | null
   active: boolean
   created_at: string
   updated_at: string
@@ -54,7 +62,8 @@ interface NormalizedVehicleRentalRouteDetails {
 
 interface NormalizedRateCard {
   id: string
-  route_id: string
+  /** Null on a tour operator's card: the tour type is priced across every itinerary. */
+  route_id: string | null
   suite_type_id: string
   rate_type_id: string
   price_per_person: number
@@ -91,12 +100,19 @@ async function hasSupplierWriteAccess(
 }
 
 function getRateCardBusinessKey(rateCard: {
-  route_id: string
+  route_id: string | null
   suite_type_id: string
   rate_type_id: string
   valid_from: string
 }) {
-  return [rateCard.rate_type_id, rateCard.route_id, rateCard.suite_type_id, rateCard.valid_from].join("|")
+  return [
+    rateCard.rate_type_id,
+    // Route-agnostic (tour operator) cards share one key space, mirroring the COALESCE in the
+    // rate_cards unique index and overlap constraint.
+    rateCard.route_id ?? "__any_route__",
+    rateCard.suite_type_id,
+    rateCard.valid_from,
+  ].join("|")
 }
 
 function normalizeOptionalText(value: string | null | undefined): string | null {
@@ -337,6 +353,8 @@ export async function PATCH(
 
   const now = new Date().toISOString()
   const isTransport = isTransportSupplier(parsed.kind)
+  // Tour operators: rate cards price the tour type (no route), routes describe it.
+  const isItineraryKind = isTypePricedSupplier(parsed.kind)
   const normalizedSuiteTypes = parsed.suiteTypes
     .map((suiteType, index) => ({
       id: suiteType.id ?? makeUuid(),
@@ -452,6 +470,10 @@ export async function PATCH(
           routeUsesSchedule && directionMode === "round_trip" ? route.returnDepartureTime ?? null : null,
         return_arrival_time:
           routeUsesSchedule && directionMode === "round_trip" ? route.returnArrivalTime ?? null : null,
+        // Only tour operators hang an itinerary off a tour type; for every other kind the route is
+        // a pricing dimension, so a stray link would be meaningless.
+        suite_type_id: isItineraryKind ? normalizeOptionalUuid(route.suiteTypeId) : null,
+        description: isItineraryKind ? normalizeOptionalText(route.description) : null,
         active: route.active,
         created_at: now,
         updated_at: now,
@@ -518,7 +540,10 @@ export async function PATCH(
     existingDetail.rateCards.map((rateCard) => [getRateCardBusinessKey(rateCard), rateCard]),
   )
   const clientProvidedRateCardIds = new Set(
-    parsed.routes.flatMap((route) => route.rateCards.flatMap((rateCard) => (rateCard.id ? [rateCard.id] : []))),
+    [
+      ...parsed.routes.flatMap((route) => route.rateCards),
+      ...parsed.rateCards,
+    ].flatMap((rateCard) => (rateCard.id ? [rateCard.id] : [])),
   )
   const incomingRateCardKeys = new Set<string>()
 
@@ -533,50 +558,68 @@ export async function PATCH(
       throw new Error(`Duplicate route name "${duplicateRouteName}". Rename one and try again.`)
     }
 
+    const normalizeRateCard = (
+      rateCard: {
+        id?: string
+        suiteTypeId: string
+        rateTypeId?: string
+        pricePerPerson: number
+        childPrice: number | null
+        infantPrice: number | null
+        currency: string
+        validFrom: string
+        validTo: string | null
+      },
+      routeId: string | null,
+    ): NormalizedRateCard => {
+      const requestedRateTypeId =
+        "rateTypeId" in rateCard && typeof rateCard.rateTypeId === "string" && rateCard.rateTypeId.length > 0
+          ? rateCard.rateTypeId
+          : null
+      const resolvedRateTypeId = requestedRateTypeId ?? defaultRateTypeId ?? ""
+      return {
+        id: rateCard.id ?? makeUuid(),
+        route_id: routeId,
+        suite_type_id: rateCard.suiteTypeId,
+        rate_type_id: resolvedRateTypeId,
+        price_per_person: rateCard.pricePerPerson,
+        child_price: isTransport ? null : rateCard.childPrice,
+        infant_price: isTransport ? null : rateCard.infantPrice,
+        currency: rateCard.currency.trim().toUpperCase() || "ZAR",
+        valid_from: rateCard.validFrom,
+        valid_to: normalizeNullableDate(rateCard.validTo),
+        created_at: now,
+      }
+    }
+
+    // A draft may still be missing the pieces a card needs to mean anything; a full save has
+    // already been through the schema, so nothing is dropped there.
+    const keepOnDraftSave = (rateCard: NormalizedRateCard) =>
+      !isDraftSave ||
+      ((rateCard.route_id === null || routeIds.has(rateCard.route_id)) &&
+        suiteTypeIds.has(rateCard.suite_type_id) &&
+        rateCard.valid_from.length > 0)
+
     // Manual suppliers never touch rate_cards through this route -- see isManualPricingSupplier
-    // above. Whatever the client sent for route.rateCards is ignored outright, existing rows
+    // above. Whatever the client sent for rate cards is ignored outright, existing rows
     // included, rather than diffed/validated against.
     normalizedRateCards = isManualPricingSupplier
       ? []
-      : parsed.routes.flatMap((route) => {
-          const routeId = route.id ?? normalizedRoutes.find((candidate) => candidate.name === route.name.trim())?.id
-          if (!routeId || !routeIds.has(routeId)) {
-            return []
-          }
-
-          return route.rateCards
-            .map((rateCard) => {
-              const requestedRateTypeId =
-                "rateTypeId" in rateCard && typeof rateCard.rateTypeId === "string" && rateCard.rateTypeId.length > 0
-                  ? rateCard.rateTypeId
-                  : null
-              const resolvedRateTypeId = requestedRateTypeId ?? defaultRateTypeId ?? ""
-              return {
-                id: rateCard.id ?? makeUuid(),
-                route_id: routeId,
-                suite_type_id: rateCard.suiteTypeId,
-                rate_type_id: resolvedRateTypeId,
-                price_per_person: rateCard.pricePerPerson,
-                child_price: isTransport ? null : rateCard.childPrice,
-                infant_price: isTransport ? null : rateCard.infantPrice,
-                currency: rateCard.currency.trim().toUpperCase() || "ZAR",
-                valid_from: rateCard.validFrom,
-                valid_to: normalizeNullableDate(rateCard.validTo),
-                created_at: now,
+      : isItineraryKind
+        ? // Tour operators price the tour type: one card per type, no itinerary attached.
+          parsed.rateCards.map((rateCard) => normalizeRateCard(rateCard, null)).filter(keepOnDraftSave)
+        : parsed.routes
+            .flatMap((route) => {
+              const routeId = route.id ?? normalizedRoutes.find((candidate) => candidate.name === route.name.trim())?.id
+              if (!routeId || !routeIds.has(routeId)) {
+                return []
               }
+              return route.rateCards.map((rateCard) => normalizeRateCard(rateCard, routeId))
             })
-            .filter((rateCard) => {
-              if (!isDraftSave) return true
-              return (
-                routeIds.has(rateCard.route_id) &&
-                suiteTypeIds.has(rateCard.suite_type_id) &&
-                rateCard.valid_from.length > 0
-              )
-            })
-        })
+            .filter(keepOnDraftSave)
 
     normalizedRateCards = normalizedRateCards.map((rateCard) => {
-      if (!routeIds.has(rateCard.route_id)) {
+      if (rateCard.route_id !== null && !routeIds.has(rateCard.route_id)) {
         throw new Error("Each rate card must reference a route from this supplier.")
       }
       if (!suiteTypeIds.has(rateCard.suite_type_id)) {
@@ -645,16 +688,16 @@ export async function PATCH(
   // Manual suppliers keep their untouched rate_cards rows regardless of what the diff would
   // otherwise flag as "no longer incoming" -- the only exception is a route actually being
   // deleted, whose rate cards must go too (rate_cards.route_id has no ON DELETE CASCADE).
+  // A route-agnostic card outlives any single route, so only routed cards follow a deleted route.
+  const followsDeletedRoute = (rateCard: { route_id: string | null }) =>
+    rateCard.route_id !== null && routeIdsToDeleteSet.has(rateCard.route_id)
   const rateCardIdsToDelete = isManualPricingSupplier
-    ? existingDetail.rateCards
-        .filter((rateCard) => routeIdsToDeleteSet.has(rateCard.route_id))
-        .map((rateCard) => rateCard.id)
+    ? existingDetail.rateCards.filter(followsDeletedRoute).map((rateCard) => rateCard.id)
     : Array.from(
         new Set(
           existingDetail.rateCards
             .filter(
-              (rateCard) =>
-                !incomingRateCardIds.has(rateCard.id) || routeIdsToDeleteSet.has(rateCard.route_id),
+              (rateCard) => !incomingRateCardIds.has(rateCard.id) || followsDeletedRoute(rateCard),
             )
             .map((rateCard) => rateCard.id),
         ),

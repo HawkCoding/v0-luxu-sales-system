@@ -17,7 +17,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import type { HotelDateAnchor, PackageLeg, RateType } from "@/lib/types"
-import { getSupplierVocabulary, isOptionalPackageLegKind } from "@/lib/types"
+import {
+  getSupplierVocabulary,
+  isOptionalPackageLegKind,
+  isTypePricedSupplier,
+} from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { formatDisplayDate } from "@/lib/date-format"
 import { distributePassengerTotals, type PassengerTotals } from "@/lib/packages/passenger-totals"
@@ -66,6 +70,7 @@ export function SuiteLegEditor({
   const vocab = getSupplierVocabulary(leg.supplierKind)
   const optional = isOptionalPackageLegKind(leg.supplierKind)
   const showPassengerSplit = PASSENGER_SPLIT_SUPPLIER_KINDS.has(leg.supplierKind)
+  const pricesByTypeOnly = isTypePricedSupplier(leg.supplierKind)
   const activeSuiteTypes = leg.suiteTypes.filter((suiteType) => suiteType.active)
 
   const selectedRoute = leg.routes.find((route) => route.id === value.routeId)
@@ -80,21 +85,29 @@ export function SuiteLegEditor({
       : null
 
   function updateUnit(id: string, patch: Partial<SuiteUnitState>) {
-    onChange({
-      ...value,
-      units: value.units.map((unit) =>
-        unit.id === id
-          ? {
-              ...unit,
-              ...patch,
-              // Bed/layout/bathroom choices only make sense for the currently selected suite type.
-              ...(patch.suiteTypeId !== undefined
-                ? { bedroomTypeId: null, bedroomLayoutId: null, bathroomTypeId: null }
-                : {}),
-            }
-          : unit,
-      ),
-    })
+    const units = value.units.map((unit) =>
+      unit.id === id
+        ? {
+            ...unit,
+            ...patch,
+            // Bed/layout/bathroom choices only make sense for the currently selected suite type.
+            ...(patch.suiteTypeId !== undefined
+              ? { bedroomTypeId: null, bedroomLayoutId: null, bathroomTypeId: null }
+              : {}),
+          }
+        : unit,
+    )
+
+    // An itinerary belongs to one tour type, so changing the type strands the chosen itinerary.
+    const nextSuiteTypeIds = new Set(units.flatMap((unit) => (unit.suiteTypeId ? [unit.suiteTypeId] : [])))
+    const chosenRoute = leg.routes.find((route) => route.id === value.routeId)
+    const routeStranded =
+      pricesByTypeOnly &&
+      patch.suiteTypeId !== undefined &&
+      Boolean(chosenRoute) &&
+      (!chosenRoute?.suiteTypeId || !nextSuiteTypeIds.has(chosenRoute.suiteTypeId))
+
+    onChange({ ...value, units, ...(routeStranded ? { routeId: null } : {}) })
   }
 
   const splitSummed = value.units.reduce(
@@ -140,6 +153,108 @@ export function SuiteLegEditor({
       units: value.units.map((unit, index) => ({ ...unit, ...split[index] })),
     })
   }
+
+  // A tour operator prices the tour type, so the type (picked per unit below) comes first and the
+  // itinerary — description only — is chosen from the ones belonging to it.
+  const chosenSuiteTypeIds = new Set(
+    value.units.flatMap((unit) => (unit.suiteTypeId ? [unit.suiteTypeId] : [])),
+  )
+  const routeOptions =
+    pricesByTypeOnly && chosenSuiteTypeIds.size > 0
+      ? leg.routes.filter((route) => route.suiteTypeId && chosenSuiteTypeIds.has(route.suiteTypeId))
+      : leg.routes
+  const routePlaceholder = pricesByTypeOnly
+    ? chosenSuiteTypeIds.size === 0
+      ? `Pick a ${vocab.suiteType.toLowerCase()} first`
+      : routeOptions.length === 0
+        ? `No ${vocab.routePlural.toLowerCase()} for this ${vocab.suiteType.toLowerCase()}`
+        : `Select ${vocab.route.toLowerCase()}`
+    : leg.routes.length === 0
+      ? isHotel
+        ? "No meal plans configured"
+        : "No routes configured"
+      : isHotel
+        ? "Select meal plan"
+        : "Select route"
+
+  const legFields = (
+    <div className="grid gap-3 md:grid-cols-2">
+      <div className="space-y-1.5">
+        <Label>{isHotel ? "Meal plan" : vocab.route}</Label>
+        <div className="flex items-center gap-2">
+          <Select
+            value={value.routeId ?? ""}
+            disabled={routeOptions.length === 0}
+            onValueChange={(routeId) =>
+              onChange({
+                ...value,
+                routeId,
+                reversed: isRouteReversible(leg, routeId) ? value.reversed : false,
+              })
+            }
+          >
+            <SelectTrigger>
+              <SelectValue placeholder={routePlaceholder} />
+            </SelectTrigger>
+            <SelectContent>
+              {routeOptions.map((route) => (
+                <SelectItem key={route.id} value={route.id}>
+                  {route.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {canFlipDirection ? (
+            <Button
+              type="button"
+              size="icon"
+              variant={value.reversed ? "default" : "outline"}
+              className="h-9 w-9 shrink-0"
+              aria-pressed={value.reversed}
+              aria-label="Flip travel direction"
+              title="Flip travel direction"
+              onClick={() => onChange({ ...value, reversed: !value.reversed })}
+            >
+              <ArrowLeftRight className="h-4 w-4" />
+            </Button>
+          ) : null}
+        </div>
+        {directedRouteLabel ? (
+          <p className="text-xs text-muted-foreground">{directedRouteLabel}</p>
+        ) : null}
+        {pricesByTypeOnly && selectedRoute?.description ? (
+          <p className="text-xs text-muted-foreground">{selectedRoute.description}</p>
+        ) : null}
+      </div>
+
+      {isHotel ? (
+        <div className="space-y-1.5">
+          <Label htmlFor={`nights-${leg.id}`}>Nights</Label>
+          <Input
+            id={`nights-${leg.id}`}
+            type="number"
+            min={1}
+            value={value.nights ?? 1}
+            onChange={(event) =>
+              onChange({ ...value, nights: Math.max(1, Math.floor(Number(event.target.value) || 1)) })
+            }
+          />
+        </div>
+      ) : null}
+
+      <RateTypeSelect
+        rateTypes={rateTypes}
+        value={value.rateTypeId}
+        onChange={(rateTypeId) => onChange({ ...value, rateTypeId })}
+        id={`rate-type-${leg.id}`}
+        inheritLabel={
+          leg.inheritedRateTypeName
+            ? `Supplier default (${leg.inheritedRateTypeName})`
+            : "Supplier default"
+        }
+      />
+    </div>
+  )
 
   return (
     <div className="space-y-3 rounded-md border p-3">
@@ -245,89 +360,7 @@ export function SuiteLegEditor({
             </div>
           ) : null}
 
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label>{isHotel ? "Meal plan" : "Route"}</Label>
-              <div className="flex items-center gap-2">
-                <Select
-                  value={value.routeId ?? ""}
-                  disabled={leg.routes.length === 0}
-                  onValueChange={(routeId) =>
-                    onChange({
-                      ...value,
-                      routeId,
-                      reversed: isRouteReversible(leg, routeId) ? value.reversed : false,
-                    })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue
-                      placeholder={
-                        leg.routes.length === 0
-                          ? isHotel
-                            ? "No meal plans configured"
-                            : "No routes configured"
-                          : isHotel
-                            ? "Select meal plan"
-                            : "Select route"
-                      }
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {leg.routes.map((route) => (
-                      <SelectItem key={route.id} value={route.id}>
-                        {route.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {canFlipDirection ? (
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant={value.reversed ? "default" : "outline"}
-                    className="h-9 w-9 shrink-0"
-                    aria-pressed={value.reversed}
-                    aria-label="Flip travel direction"
-                    title="Flip travel direction"
-                    onClick={() => onChange({ ...value, reversed: !value.reversed })}
-                  >
-                    <ArrowLeftRight className="h-4 w-4" />
-                  </Button>
-                ) : null}
-              </div>
-              {directedRouteLabel ? (
-                <p className="text-xs text-muted-foreground">{directedRouteLabel}</p>
-              ) : null}
-            </div>
-
-            {isHotel ? (
-              <div className="space-y-1.5">
-                <Label htmlFor={`nights-${leg.id}`}>Nights</Label>
-                <Input
-                  id={`nights-${leg.id}`}
-                  type="number"
-                  min={1}
-                  value={value.nights ?? 1}
-                  onChange={(event) =>
-                    onChange({ ...value, nights: Math.max(1, Math.floor(Number(event.target.value) || 1)) })
-                  }
-                />
-              </div>
-            ) : null}
-
-            <RateTypeSelect
-              rateTypes={rateTypes}
-              value={value.rateTypeId}
-              onChange={(rateTypeId) => onChange({ ...value, rateTypeId })}
-              id={`rate-type-${leg.id}`}
-              inheritLabel={
-                leg.inheritedRateTypeName
-                  ? `Supplier default (${leg.inheritedRateTypeName})`
-                  : "Supplier default"
-              }
-            />
-          </div>
+          {pricesByTypeOnly ? null : legFields}
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs font-medium text-muted-foreground">
@@ -394,10 +427,12 @@ export function SuiteLegEditor({
                   </Select>
                   {leg.pricingMode !== "manual" &&
                   unit.suiteTypeId &&
-                  value.routeId &&
-                  !hasAnyRateCardFor(leg.rateCards, value.routeId, unit.suiteTypeId) ? (
+                  (pricesByTypeOnly || value.routeId) &&
+                  !hasAnyRateCardFor(leg.rateCards, value.routeId ?? "", unit.suiteTypeId) ? (
                     <p className="text-xs text-amber-600 dark:text-amber-500">
-                      No rate card for this type on the selected route
+                      {pricesByTypeOnly
+                        ? `No rate card for this ${vocab.suiteType.toLowerCase()}`
+                        : "No rate card for this type on the selected route"}
                     </p>
                   ) : null}
                 </div>
@@ -570,6 +605,8 @@ export function SuiteLegEditor({
               </div>
             )
           })}
+
+          {pricesByTypeOnly ? legFields : null}
 
           <div className="space-y-1.5">
             <Label>Special requests / allergies</Label>

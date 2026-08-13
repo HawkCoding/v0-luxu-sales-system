@@ -5,7 +5,8 @@ import { createSessionClient } from "@/lib/supabase/server"
 import { extractRoleFromJwt, isRole } from "@/lib/role-utils"
 import { writeAuditLog } from "@/lib/audit-write"
 import { calculateRefund } from "@/lib/invoices/calculate-refund"
-import { calculateDepositAmount, getDefaultDepositPercentage } from "@/lib/pipeline/constants"
+import { resolveDepositAmount } from "@/lib/invoices/resolve-deposit-amount"
+import { getDefaultDepositPercentage } from "@/lib/pipeline/constants"
 import { getDepositRefundable } from "@/lib/settings-access"
 import { syncBookingPaymentState } from "@/lib/invoices/sync-booking-payment-state"
 
@@ -126,11 +127,21 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       ])
 
     const totalPaid = (paymentsData ?? []).reduce((sum, p) => sum + Number(p.amount ?? 0), 0)
-    const depositAmount = depositInvoice
-      ? Number(depositInvoice.amount)
-      : fullInvoice
-        ? calculateDepositAmount(Number(fullInvoice.amount), defaultDepositPercentage)
-        : 0
+
+    // A refund can never return more than the client actually paid — otherwise
+    // the negative payment row below pushes invoice_balance above the quote total.
+    if (body.refundAmount != null && body.refundAmount > totalPaid) {
+      return NextResponse.json(
+        { error: "Refund amount cannot exceed the total paid" },
+        { status: 400 },
+      )
+    }
+
+    const depositAmount = resolveDepositAmount(
+      depositInvoice ? Number(depositInvoice.amount) : null,
+      fullInvoice ? Number(fullInvoice.amount) : null,
+      defaultDepositPercentage,
+    )
 
     const calc = calculateRefund(totalPaid, depositAmount, depositRefundable)
     cancellationFee = calc.cancellationFee

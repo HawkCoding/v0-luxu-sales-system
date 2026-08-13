@@ -7,7 +7,8 @@ export interface RateCardDateRange {
 
 export interface RateCardGroupKey {
   rateTypeId: string
-  routeId: string
+  /** NULL on route-agnostic (tour operator) cards — they all share one group. */
+  routeId: string | null
   suiteTypeId: string
 }
 
@@ -28,7 +29,11 @@ export function checkRateCardOverlaps(
   const groupedRateCards = new Map<string, Array<RateCardGroupKey & RateCardDateRange>>()
 
   for (const rateCard of rateCards) {
-    const groupKey = [rateCard.rateTypeId, rateCard.routeId, rateCard.suiteTypeId].join("|")
+    const groupKey = [
+      rateCard.rateTypeId,
+      rateCard.routeId ?? "__any_route__",
+      rateCard.suiteTypeId,
+    ].join("|")
     const nextGroup = groupedRateCards.get(groupKey) ?? []
     nextGroup.push(rateCard)
     groupedRateCards.set(groupKey, nextGroup)

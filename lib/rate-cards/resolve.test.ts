@@ -82,6 +82,20 @@ describe("findRateCardCandidates", () => {
     const cards = [card({ suiteTypeId: "suite-pullman" })]
     expect(findRateCardCandidates(cards, ROUTE, SUITE, "2026-11-20")).toEqual([])
   })
+
+  it("matches a route-agnostic card on any route — a tour type is priced once", () => {
+    const cards = [card({ routeId: null })]
+    expect(findRateCardCandidates(cards, ROUTE, SUITE, "2026-11-20")).toEqual(cards)
+    expect(findRateCardCandidates(cards, "route-anything-else", SUITE, "2026-11-20")).toEqual(cards)
+  })
+
+  it("still honours the suite type and dates on a route-agnostic card", () => {
+    const cards = [
+      card({ routeId: null, suiteTypeId: "suite-pullman" }),
+      card({ routeId: null, validFrom: "2027-01-01" }),
+    ]
+    expect(findRateCardCandidates(cards, ROUTE, SUITE, "2026-11-20")).toEqual([])
+  })
 })
 
 describe("hasAnyRateCardFor", () => {
@@ -94,6 +108,11 @@ describe("hasAnyRateCardFor", () => {
     const cards = [card({ suiteTypeId: "suite-pullman" })]
     expect(hasAnyRateCardFor(cards, ROUTE, SUITE)).toBe(false)
   })
+
+  it("counts a route-agnostic card as pricing every route", () => {
+    const cards = [card({ routeId: null })]
+    expect(hasAnyRateCardFor(cards, "route-anything-else", SUITE)).toBe(true)
+  })
 })
 
 describe("hasAnyRateCardForRateType", () => {
@@ -105,6 +124,12 @@ describe("hasAnyRateCardForRateType", () => {
   it("is false when the route+suite is priced, but never under that rate type", () => {
     const cards = [card({ rateTypeId: RAC })]
     expect(hasAnyRateCardForRateType(cards, ROUTE, SUITE, STO)).toBe(false)
+  })
+
+  it("reads a route-agnostic card as covering the asked-for route", () => {
+    const cards = [card({ routeId: null, rateTypeId: STO })]
+    expect(hasAnyRateCardForRateType(cards, ROUTE, SUITE, STO)).toBe(true)
+    expect(hasAnyRateCardForRateType(cards, ROUTE, SUITE, RAC)).toBe(false)
   })
 })
 

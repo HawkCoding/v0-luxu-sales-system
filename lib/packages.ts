@@ -114,6 +114,8 @@ export function mapPackageRoute(
     arrivalTime: toHoursMinutes(row.arrival_time),
     returnDepartureTime: toHoursMinutes(row.return_departure_time),
     returnArrivalTime: toHoursMinutes(row.return_arrival_time),
+    suiteTypeId: row.suite_type_id ?? null,
+    description: row.description ?? null,
     active: row.active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -199,7 +201,9 @@ export function mapPackageLeg(
       mapPackageRoute(route, detailsByRouteId.get(route.id), locationNameById),
     ),
     rateCards: rateCards
-      .filter((rateCard) => legRouteIds.has(rateCard.route_id))
+      // A route-agnostic card (tour operators) prices the suite type on every route this leg
+      // offers, so it belongs to the leg regardless of which routes are linked.
+      .filter((rateCard) => rateCard.route_id === null || legRouteIds.has(rateCard.route_id))
       .map(mapPackageRateCard),
     suiteTypes: suiteTypes.map(mapPackageSuiteType),
   }
