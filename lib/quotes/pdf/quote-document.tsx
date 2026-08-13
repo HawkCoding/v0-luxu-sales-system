@@ -4,6 +4,7 @@ import { QUOTE_REFERENCE_ENABLED, QUOTE_VALIDITY_ENABLED } from "@/lib/feature-f
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
 import { BrandBlock } from "@/lib/pdf/brand-block"
+import { formatMoney } from "@/lib/money"
 import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
 import {
   buildQuoteItineraryLines,
@@ -43,18 +44,6 @@ export interface QuotePdfData {
   brand?: DocumentBrand
   brandPosition?: BrandBlockPosition
   brandLogo?: BrandLogoImage | null
-}
-
-function formatMoney(amount: number, currency = "ZAR"): string {
-  try {
-    return new Intl.NumberFormat("en-ZA", {
-      style: "currency",
-      currency,
-      maximumFractionDigits: 2,
-    }).format(amount)
-  } catch {
-    return `${currency} ${amount.toFixed(2)}`
-  }
 }
 
 function formatDate(value: string | null): string {

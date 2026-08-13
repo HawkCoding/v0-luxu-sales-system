@@ -18,6 +18,7 @@ import {
   Trash2,
 } from "lucide-react"
 import { SortableList } from "@/components/ui/sortable-list"
+import { BulletLineList } from "@/components/supplier/bullet-line-list"
 import { InclusionPreview } from "@/components/supplier/inclusion-preview"
 import { splitBulletLines } from "@/lib/inclusions/bullet-lines"
 import { isOngoingRateCard } from "@/lib/rate-cards/resolve"
@@ -41,6 +42,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { BufferedInput } from "@/components/ui/buffered-input"
+import { CurrencySelect } from "@/components/currency-select"
+import { formatMoney as formatCurrency } from "@/lib/money"
 import { BufferedTextarea } from "@/components/ui/buffered-textarea"
 import { ContentTransition } from "@/components/ui/content-transition"
 import { getMinSelectableRateYear } from "@/components/ui/calendar"
@@ -503,18 +506,6 @@ function getSupplierLocationId(form: SupplierFormState): string | null {
   return form.kind === "train_operator" ? null : form.locationId ?? null
 }
 
-
-function formatCurrency(amount: number, currency: string) {
-  try {
-    return new Intl.NumberFormat("en-ZA", {
-      style: "currency",
-      currency,
-      maximumFractionDigits: 2,
-    }).format(amount)
-  } catch {
-    return `${currency} ${amount.toFixed(2)}`
-  }
-}
 
 function getRatePeriodKey(
   validFrom: string,
@@ -1781,23 +1772,24 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                     />
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>Currency</Label>
-                  <BufferedInput
-                    maxLength={10}
-                    value={period.currency}
-                    onValueChange={(value) =>
-                      onUpdatePeriodField(
-                        packageIndex,
-                        selectedRouteId,
-                        period.key,
-                        "currency",
-                        value.toUpperCase(),
-                        selectedRateTypeId ?? "",
-                      )
-                    }
-                  />
-                </div>
+                {/* A dropdown, not free text: this value now drives real arithmetic (a foreign
+                    rate is converted into the quote's currency), so a typo here would mis-price
+                    a booking rather than just look untidy. Changing it re-keys the rate period —
+                    getRatePeriodKey includes the currency — which onUpdatePeriodField handles. */}
+                <CurrencySelect
+                  value={period.currency}
+                  onChange={(value) =>
+                    onUpdatePeriodField(
+                      packageIndex,
+                      selectedRouteId,
+                      period.key,
+                      "currency",
+                      value,
+                      selectedRateTypeId ?? "",
+                    )
+                  }
+                  className="space-y-2"
+                />
                 <div className="flex items-end">
                   <Button
                     type="button"
@@ -4881,11 +4873,7 @@ export function SupplierDetailView({
                         </span>
                       </div>
                       {supplier.inclusions.length > 0 ? (
-                        <ul className="list-disc space-y-1 pl-4 text-sm text-muted-foreground">
-                          {supplier.inclusions.map((item, index) => (
-                            <li key={index}>{item}</li>
-                          ))}
-                        </ul>
+                        <BulletLineList values={supplier.inclusions} />
                       ) : (
                         <p className="text-sm text-muted-foreground">Nothing listed.</p>
                       )}
@@ -4898,11 +4886,7 @@ export function SupplierDetailView({
                         </span>
                       </div>
                       {supplier.exclusions.length > 0 ? (
-                        <ul className="list-disc space-y-1 pl-4 text-sm text-muted-foreground">
-                          {supplier.exclusions.map((item, index) => (
-                            <li key={index}>{item}</li>
-                          ))}
-                        </ul>
+                        <BulletLineList values={supplier.exclusions} flatten />
                       ) : (
                         <p className="text-sm text-muted-foreground">Nothing listed.</p>
                       )}

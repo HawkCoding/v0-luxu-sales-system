@@ -21,6 +21,8 @@ export const runtime = "nodejs"
  * hydrateFromSaved, SavedPackageState) are shared unmodified between both flows.
  */
 
+import { SUPPORTED_CURRENCY_VALUES } from "@/lib/types"
+
 const datePattern = /^\d{4}-\d{2}-\d{2}$/
 
 const PASSENGER_SPLIT_SUPPLIER_KINDS = new Set(["train_operator", "tour_operator", "airline"])
@@ -57,6 +59,9 @@ const updateServiceSchema = z.object({
   dateAnchor: z.enum(["pre", "post", "custom"]).nullable().optional(),
   rateTypeId: z.string().uuid().nullable().optional(),
   notes: z.string().nullable().optional(),
+  /** The currency this leg's hand-typed prices are in — manual-pricing fares and transfer/
+   * rental overrides. Rate-card legs price off the card's own currency and ignore this. */
+  priceCurrency: z.enum(SUPPORTED_CURRENCY_VALUES).optional(),
   units: z.array(selectionUnitSchema).optional(),
 })
 
@@ -72,7 +77,7 @@ type BookingServiceUpdate = Database["public"]["Tables"]["booking_services"]["Up
 type BookingServiceUnitInsert = Database["public"]["Tables"]["booking_service_units"]["Insert"]
 
 const SERVICES_WITH_UNITS_SELECT =
-  "id, booking_id, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, date_anchor, rate_type_id, notes, selected, origin, " +
+  "id, booking_id, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, date_anchor, rate_type_id, notes, selected, origin, price_currency, " +
   "units:booking_service_units(id, suite_type_id, bedroom_type_id, bedroom_layout_id, bathroom_type_id, adult_count, child_count, infant_count, sort_order, manual_adult_price, manual_child_price, manual_infant_price)"
 
 interface ServiceUnitRow {
@@ -104,6 +109,7 @@ interface ServiceWithUnitsRow {
   notes: string | null
   selected: boolean
   origin: "auto" | "consultant"
+  price_currency: string
   units: ServiceUnitRow[]
 }
 
@@ -258,6 +264,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     if (selection.dateAnchor !== undefined) updatePayload.date_anchor = selection.dateAnchor
     if (selection.rateTypeId !== undefined) updatePayload.rate_type_id = selection.rateTypeId
     if (selection.notes !== undefined) updatePayload.notes = selection.notes
+    if (selection.priceCurrency !== undefined) updatePayload.price_currency = selection.priceCurrency
 
     // Origin flips to 'consultant' the moment a human writes to this row, mirroring the
     // FieldFlags/editedAxes convention: an auto-filled value stops being auto-filled on edit.

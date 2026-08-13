@@ -16,7 +16,7 @@ import { useState } from "react"
 import { toast } from "sonner"
 import { useAuth } from "@/lib/auth-context"
 import { formatDisplayDate } from "@/lib/date-format"
-import { formatCurrency } from "@/lib/utils"
+import { BASE_CURRENCY, formatMoney } from "@/lib/money"
 import { getPipelineStageLabel } from "@/lib/types"
 
 export default function PaymentsPage() {
@@ -159,8 +159,11 @@ export default function PaymentsPage() {
         <div>
           <h1 className="text-3xl font-semibold text-foreground tracking-tight">Payments Received</h1>
           <p className="text-base text-muted-foreground mt-2">
-            {filtered.length} transactions • Net: <span className={total >= 0 ? "text-payment-green" : "text-payment-red"}>R {formatCurrency(total)}</span>
+            {filtered.length} transactions • Net: <span className={total >= 0 ? "text-payment-green" : "text-payment-red"}>{formatMoney(total)}</span>
           </p>
+          {/* This list spans every booking, so it can't show each one's own currency without the
+              totals becoming a meaningless sum. Stated in the base currency instead. */}
+          <p className="text-xs text-muted-foreground mt-1">All amounts in {BASE_CURRENCY}</p>
         </div>
         <div className="flex items-center gap-2">
           <Dialog open={addOpen} onOpenChange={setAddOpen}>
@@ -267,7 +270,7 @@ export default function PaymentsPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 mb-1">
                         <span className={`text-lg font-bold ${p.amount >= 0 ? "text-payment-green" : "text-payment-red"}`}>
-                          {p.amount >= 0 ? "+" : ""}R {formatCurrency(Math.abs(p.amount))}
+                          {p.amount >= 0 ? "+" : ""}{formatMoney(Math.abs(p.amount))}
                         </span>
                         <Badge variant="secondary" className="text-xs">{p.method}</Badge>
                         <Badge variant="outline" className="text-xs">Ref: {p.reference}</Badge>
@@ -285,7 +288,7 @@ export default function PaymentsPage() {
                           </Link>
                           <div className="flex items-center gap-3 text-xs text-muted-foreground">
                             {p.totalQuote > 0 && (
-                              <span>Total Due: R {formatCurrency(p.totalQuote)}</span>
+                              <span>Total Due: {formatMoney(p.totalQuote)}</span>
                             )}
                             {p.customerEmail && (
                               <span>• {p.customerEmail}</span>
@@ -345,7 +348,7 @@ export default function PaymentsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium">Payment Amount</p>
-                  <p className="text-2xl font-bold text-payment-green">R {formatCurrency(allocatingPayment.amount)}</p>
+                  <p className="text-2xl font-bold text-payment-green">{formatMoney(allocatingPayment.amount)}</p>
                 </div>
                 <div className="text-right">
                   <p className="text-xs text-muted-foreground">Reference</p>
@@ -393,7 +396,7 @@ export default function PaymentsPage() {
                     {j.totalQuote > 0 && (
                       <div className="text-right">
                         <p className="text-xs text-muted-foreground">Total Quote</p>
-                        <p className="text-sm font-semibold text-foreground">R {formatCurrency(j.totalQuote)}</p>
+                        <p className="text-sm font-semibold text-foreground">{formatMoney(j.totalQuote)}</p>
                       </div>
                     )}
                   </div>

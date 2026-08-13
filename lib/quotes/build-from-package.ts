@@ -18,6 +18,8 @@ import {
   selectRateCard,
 } from "@/lib/rate-cards/resolve"
 import { applyCommissionBonus } from "@/lib/quotes/apply-commission-bonus"
+import { convertAmount, type FxRateMap } from "@/lib/pricing/convert-currency"
+import { BASE_CURRENCY, normaliseCurrency } from "@/lib/money"
 
 /** One independent suite/room booked on a hotel or train/tour/airline leg — its own suite type,
  * bedroom/bathroom configuration, and (train/tour/airline only) its own passenger split. */
@@ -54,6 +56,9 @@ export interface PackageLegSelection {
   /** Hotel legs only: number of nights stayed (default 1). Independent of journey duration, and
    * shared across all units on the leg — a stay's night count doesn't split per room. */
   nights?: number
+  /** Manual-pricing legs and transfer/rental price overrides only: the currency the typed fares
+   * on this leg are denominated in. Rate-card legs take their currency from the card instead. */
+  priceCurrency?: string | null
   commissionOverride?: {
     type: CommissionKind
     value: number
@@ -93,6 +98,14 @@ interface BuildPackageQuoteLineItemsInput {
   /** Flat manual top-up (quotes.commission_bonus) re-folded into the rebuilt Commission line,
    * so re-pricing an existing quote doesn't silently drop it. */
   commissionBonus?: number
+  /** The single currency this quote is denominated in. Supplier rates in anything else are
+   * converted into it here, and the rate used is stamped onto each line's pricing snapshot. */
+  quoteCurrency?: string
+  /** Base-currency rates keyed by currency code (see lib/fx/rates.ts). Only consulted when a
+   * supplier's currency differs from quoteCurrency, so an all-ZAR quote needs nothing here. */
+  fxRates?: FxRateMap
+  /** The FX publication date stamped onto converted lines, for the internal provenance note. */
+  fxRateAsOf?: string | null
 }
 
 interface BuildPackageQuoteLineItemsResult {
@@ -108,7 +121,11 @@ export async function buildPackageQuoteLineItems({
   fallbackRateTypeId = null,
   rateTypes = [],
   commissionBonus = 0,
+  quoteCurrency = BASE_CURRENCY,
+  fxRates = { [BASE_CURRENCY]: 1 },
+  fxRateAsOf = null,
 }: BuildPackageQuoteLineItemsInput): Promise<BuildPackageQuoteLineItemsResult> {
+  const targetCurrency = normaliseCurrency(quoteCurrency)
   const { data: job, error: jobError } = await supabase
     .from("bookings")
     .select("id, no_of_adults, no_of_children, no_of_suites, child_ages, departure_date")
@@ -359,6 +376,9 @@ export async function buildPackageQuoteLineItems({
     hideRoomConfig?: boolean
     /** 'manual' for a line priced off a typed fare rather than a rate card (see PackageLeg.pricingMode). */
     pricingMode?: "rate_card" | "manual"
+    /** The currency `unitPrice` is expressed in — the rate card's own, or the leg's for typed
+     * fares. Converted into the quote currency before anything else touches the number. */
+    sourceCurrency?: string | null
   }
 
   function formatSingleSupplementSuffix(pct: number): string {
@@ -381,8 +401,17 @@ export async function buildPackageQuoteLineItems({
     hideVariantSuffix,
     hideRoomConfig,
     pricingMode: linePricingMode = "rate_card",
+    sourceCurrency,
   }: AddLineItemOptions) {
     if (qty <= 0) return
+
+    // Convert first: the single supplement, the line total and the commission that sums these
+    // lines all have to work off a price already in the quote's currency.
+    const lineSourceCurrency = normaliseCurrency(sourceCurrency ?? targetCurrency)
+    const converted = convertAmount(unitPrice, lineSourceCurrency, targetCurrency, fxRates)
+    const sourceUnitPrice = unitPrice
+    const convertedUnitPrice = converted.amount
+    const wasConverted = lineSourceCurrency !== targetCurrency
 
     const variantValues = hideRoomConfig
       ? ""
@@ -395,8 +424,8 @@ export async function buildPackageQuoteLineItems({
     const variantSuffix = variantSuffixBody ? ` — ${variantSuffixBody}` : ""
     const suiteVariants = suiteTypeId ? variantSnapshotBySuiteTypeId.get(suiteTypeId) : undefined
     const effectiveUnitPrice = singleSupplementPct
-      ? Math.round(unitPrice * (1 + singleSupplementPct / 100) * 100) / 100
-      : unitPrice
+      ? Math.round(convertedUnitPrice * (1 + singleSupplementPct / 100) * 100) / 100
+      : convertedUnitPrice
     const total = Math.round(effectiveUnitPrice * qty * 100) / 100
     const supplementSuffix = singleSupplementPct ? formatSingleSupplementSuffix(singleSupplementPct) : ""
     const passengerSuffix = passengerLabel ? ` - ${passengerLabel}` : ""
@@ -434,9 +463,17 @@ export async function buildPackageQuoteLineItems({
         rateTypeInherited: activeRateCard ? activeRateCardInherited : null,
         travelDate: activePricingDate,
         passengerKind: "adult",
-        baseUnitPrice: unitPrice,
+        // Already in the quote's currency, so downstream maths (markup, commission) never has to
+        // know a conversion happened; the pre-conversion figure lives in sourceUnitPrice below.
+        baseUnitPrice: convertedUnitPrice,
         markupPct: 0,
         singleSupplementPct: singleSupplementPct ?? null,
+        // Only stamped when the supplier's currency actually differed — an all-ZAR quote's
+        // snapshots stay exactly as they were, so nothing renders a pointless "converted" note.
+        sourceCurrency: wasConverted ? lineSourceCurrency : null,
+        sourceUnitPrice: wasConverted ? sourceUnitPrice : null,
+        fxRate: wasConverted ? converted.rate : null,
+        fxRateAsOf: wasConverted ? fxRateAsOf : null,
         serviceType:
           activeLeg?.supplierKind === "transfers"
             ? "transfer"
@@ -580,6 +617,7 @@ export async function buildPackageQuoteLineItems({
       qty: travellerCount,
       unitPrice: packageDetail.fixedPricePerPerson,
       unit: "per person",
+      sourceCurrency: packageDetail.currency,
     })
   } else {
     for (const leg of packageDetail.legs) {
@@ -696,6 +734,7 @@ export async function buildPackageQuoteLineItems({
             selectedVariantGroups: specificUnitVariantGroups(unitSelection),
             unit,
             hideRoomConfig: true,
+            sourceCurrency: validRateCard.currency,
           })
         }
       } else if (isTransfer || isVehicleRental) {
@@ -732,16 +771,22 @@ export async function buildPackageQuoteLineItems({
             ? description
             : [description, pointLabel].filter(Boolean).join(" - ")
 
+          // A per-request price override beats the rate card (odd trips, after-hours, etc.).
+          // It is a hand-typed figure, so it carries the LEG's currency rather than the card's.
+          const hasOverride = transportRequest?.price_override != null
+
           addLineItem({
             description: transportDescription,
             qty: isVehicleRental ? getBillableRentalDays(transportRequest) : 1,
-            // A per-request price override beats the rate card (odd trips, after-hours, etc.).
             unitPrice: transportRequest?.price_override ?? validRateCard.pricePerPerson,
             supplierDescription,
             suiteTypeId,
             suiteTypeName,
             unit,
             hideVariantSuffix: isTransfer,
+            sourceCurrency: hasOverride
+              ? (selection.priceCurrency ?? targetCurrency)
+              : validRateCard.currency,
           })
         }
       } else {
@@ -805,6 +850,8 @@ export async function buildPackageQuoteLineItems({
             label: string
             unitPrice: number
           }[]
+          // Typed fares carry the leg's own currency; rate-card fares carry the card's.
+          let lineSourceCurrency: string
 
           if (isManualPricing) {
             const resolved = resolveManualUnit(suiteTypeId)
@@ -822,6 +869,7 @@ export async function buildPackageQuoteLineItems({
               { key: "childCount", label: "Child", unitPrice: childPrice },
               { key: "infantCount", label: "Infant", unitPrice: infantPrice },
             ]
+            lineSourceCurrency = selection.priceCurrency ?? targetCurrency
           } else {
             const resolved = resolveUnit(suiteTypeId)
             description = resolved.description
@@ -838,6 +886,7 @@ export async function buildPackageQuoteLineItems({
                 unitPrice: validRateCard.infantPrice ?? validRateCard.childPrice ?? validRateCard.pricePerPerson,
               },
             ]
+            lineSourceCurrency = validRateCard.currency
           }
 
           for (const { key, label, unitPrice } of passengerKinds) {
@@ -901,6 +950,7 @@ export async function buildPackageQuoteLineItems({
                   unit,
                   pricingMode: isManualPricing ? "manual" : "rate_card",
                   singleSupplementPct: isSolo ? packageDetail.singleSupplementPct : null,
+                  sourceCurrency: lineSourceCurrency,
                 })
               }
             }
@@ -914,6 +964,9 @@ export async function buildPackageQuoteLineItems({
   // it once), so it's priced once here against the booking's total — never per line. Applying it
   // per line double- (or triple-, quadruple-...) counts a fixed per-person value across every
   // room/transfer/supplement line, since each carries its own unrelated qty (nights, vehicles, pax).
+  // Commission is typed by the salesperson in the quote's own currency (a percent is
+  // currency-neutral anyway), and it prices off a subtotal whose lines have already been
+  // converted — so it needs no conversion of its own.
   const commissionOverride = selections.find((s) => s.commissionOverride)?.commissionOverride ?? null
   const resolvedCommission = resolveCommission({ lineOverride: commissionOverride })
   if (resolvedCommission.type !== null) {

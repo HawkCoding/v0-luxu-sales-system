@@ -1,5 +1,6 @@
 import { Document, Image, Page, StyleSheet, Text, View } from "@react-pdf/renderer"
 import { formatDisplayDate } from "@/lib/date-format"
+import { BASE_CURRENCY, formatMoney as formatSharedMoney } from "@/lib/money"
 import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
 import type { DocumentBrand } from "@/lib/settings-access"
 
@@ -91,17 +92,11 @@ function dateOrDash(value: string | null | undefined): string {
   return formatDisplayDate(value.slice(0, 10)) || EMPTY
 }
 
+/** The worksheet is an internal ops document covering payable/receivable across suppliers, so it
+ *  stays in the base currency rather than mixing per-supplier ones into one gross-profit figure. */
 function formatMoney(amount: number | null | undefined): string {
   if (amount === null || amount === undefined) return EMPTY
-  try {
-    return new Intl.NumberFormat("en-ZA", {
-      style: "currency",
-      currency: "ZAR",
-      maximumFractionDigits: 2,
-    }).format(amount)
-  } catch {
-    return `R ${amount.toFixed(2)}`
-  }
+  return formatSharedMoney(amount, BASE_CURRENCY)
 }
 
 const styles = StyleSheet.create({

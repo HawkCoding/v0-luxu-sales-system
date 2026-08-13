@@ -1,4 +1,16 @@
 import { z } from "zod"
+import { SUPPORTED_CURRENCY_VALUES } from "@/lib/types"
+
+/**
+ * Rate-card currencies were free text (any string up to 10 chars) until the value started
+ * driving conversion arithmetic. Uppercased first so a lowercase "usd" from an older client is
+ * accepted rather than 400'd on a formatting difference.
+ */
+const currencySchema = z
+  .string()
+  .trim()
+  .transform((value) => value.toUpperCase())
+  .pipe(z.enum(SUPPORTED_CURRENCY_VALUES))
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const PHONE_PATTERN = /^[+\d\s()-]*$/
@@ -53,7 +65,9 @@ export const rateCardSchema = z.object({
   pricePerPerson: z.number().finite().nonnegative(),
   childPrice: z.number().finite().nonnegative().nullable(),
   infantPrice: z.number().finite().nonnegative().nullable(),
-  currency: z.string().trim().min(1).max(10),
+  // An allowlist, not free text: this value now drives conversion arithmetic, so an unrecognised
+  // code has to be rejected at the boundary rather than silently priced as-is.
+  currency: currencySchema,
   validFrom: dateSchema,
   validTo: z.union([dateSchema, z.literal(""), z.null()]),
 })
@@ -428,7 +442,9 @@ export const draftRateCardSchema = z.object({
   pricePerPerson: z.number().finite().nonnegative().default(0),
   childPrice: z.number().finite().nonnegative().nullable().default(null),
   infantPrice: z.number().finite().nonnegative().nullable().default(null),
-  currency: z.string().trim().max(10).default("ZAR"),
+  // A draft save happens mid-edit, so an empty currency is normal here — it falls back to the
+  // base currency rather than blocking the save. A full save still requires a real code.
+  currency: z.union([currencySchema, z.literal("")]).default("ZAR").catch("ZAR"),
   validFrom: z.union([dateSchema, z.literal("")]).default(""),
   validTo: z.union([dateSchema, z.literal(""), z.null()]).default(""),
 })

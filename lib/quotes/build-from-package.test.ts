@@ -1258,4 +1258,163 @@ describe("buildPackageQuoteLineItems", () => {
       })
     })
   })
+
+  describe("currency conversion", () => {
+    const FX = { ZAR: 1, USD: 17.25 }
+
+    /** A USD-priced train leg: the case the screenshot came from. */
+    function usdTrainLeg(currency = "USD") {
+      return leg({
+        id: "leg-usd",
+        supplierKind: "train_operator",
+        routes: [route("route-usd", "supplier-leg-usd", "Cape Town Explorer")],
+        suiteTypes: [suiteType("suite-lux", "supplier-leg-usd", "Luxury Suite")],
+        rateCards: [
+          rateCard({
+            id: "rc-usd",
+            routeId: "route-usd",
+            suiteTypeId: "suite-lux",
+            pricePerPerson: 6400,
+            childPrice: 3200,
+            currency,
+          }),
+        ],
+      })
+    }
+
+    const selections = [
+      {
+        legId: "leg-usd",
+        selected: true,
+        routeId: "route-usd",
+        units: [
+          {
+            suiteTypeId: "suite-lux",
+            adultCount: 2,
+            childCount: 1,
+            infantCount: 0,
+          },
+        ],
+      },
+    ]
+
+    it("converts a foreign rate card into the quote's currency", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase(),
+        packageDetail: detail([usdTrainLeg()]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections,
+        quoteCurrency: "ZAR",
+        fxRates: FX,
+        fxRateAsOf: "2026-08-13",
+      })
+
+      const adultLine = lineItems.find((li) => li.description.includes("Adult"))
+      expect(adultLine?.unitPrice).toBe(110400)
+      // qty x unitPrice must still equal total after conversion.
+      expect(adultLine?.total).toBe(220800)
+    })
+
+    it("stamps the conversion chain onto the snapshot so a sent quote never reprices", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase(),
+        packageDetail: detail([usdTrainLeg()]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections,
+        quoteCurrency: "ZAR",
+        fxRates: FX,
+        fxRateAsOf: "2026-08-13",
+      })
+
+      const snapshot = lineItems.find((li) => li.description.includes("Adult"))?.pricingSnapshot
+      expect(snapshot?.sourceCurrency).toBe("USD")
+      expect(snapshot?.sourceUnitPrice).toBe(6400)
+      expect(snapshot?.fxRate).toBe(17.25)
+      expect(snapshot?.fxRateAsOf).toBe("2026-08-13")
+      // baseUnitPrice is post-conversion so downstream maths never has to know a conversion
+      // happened; the pre-conversion figure lives in sourceUnitPrice.
+      expect(snapshot?.baseUnitPrice).toBe(110400)
+    })
+
+    it("converts the child rate off its own card price, not the adult's", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase(),
+        packageDetail: detail([usdTrainLeg()]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections,
+        quoteCurrency: "ZAR",
+        fxRates: FX,
+      })
+
+      const childLine = lineItems.find((li) => li.description.includes("Child"))
+      expect(childLine?.unitPrice).toBe(55200)
+      expect(childLine?.pricingSnapshot?.sourceUnitPrice).toBe(3200)
+    })
+
+    it("leaves a native line untouched and stamps no FX fields on it", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase(),
+        packageDetail: detail([usdTrainLeg("ZAR")]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections,
+        quoteCurrency: "ZAR",
+        fxRates: FX,
+        fxRateAsOf: "2026-08-13",
+      })
+
+      const snapshot = lineItems.find((li) => li.description.includes("Adult"))?.pricingSnapshot
+      expect(snapshot?.sourceCurrency).toBeNull()
+      expect(snapshot?.sourceUnitPrice).toBeNull()
+      expect(snapshot?.fxRate).toBeNull()
+    })
+
+    it("defaults to no conversion when no currency or rates are supplied", async () => {
+      // Every pre-existing caller relied on this; a ZAR-only build must behave exactly as before.
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase(),
+        packageDetail: detail([usdTrainLeg("ZAR")]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections,
+      })
+
+      expect(lineItems.find((li) => li.description.includes("Adult"))?.unitPrice).toBe(6400)
+    })
+
+    it("refuses to price a foreign card when its rate is missing", async () => {
+      await expect(
+        buildPackageQuoteLineItems({
+          supabase: buildSupabase(),
+          packageDetail: detail([usdTrainLeg()]),
+          jobId: JOB_ID,
+          travelDate: "2026-09-01",
+          selections,
+          quoteCurrency: "ZAR",
+          fxRates: { ZAR: 1 },
+        }),
+      ).rejects.toThrow(/exchange rate/i)
+    })
+
+    it("prices commission off the converted subtotal, not the foreign one", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase(),
+        packageDetail: detail([usdTrainLeg()]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [{ ...selections[0], commissionOverride: { type: "percent" as const, value: 10 } }],
+        quoteCurrency: "ZAR",
+        fxRates: FX,
+      })
+
+      const converted = lineItems
+        .filter((li) => li.description !== "Commission")
+        .reduce((sum, li) => sum + li.total, 0)
+      const commission = lineItems.find((li) => li.description === "Commission")
+      expect(commission?.total).toBe(Math.round(converted * 0.1 * 100) / 100)
+    })
+  })
 })

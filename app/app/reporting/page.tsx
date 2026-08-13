@@ -22,7 +22,7 @@ import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Button } from "@/components/ui/button"
 import { Download } from "lucide-react"
-import { formatCurrency } from "@/lib/utils"
+import { BASE_CURRENCY, formatMoney } from "@/lib/money"
 import type { SalesPerSalespersonRow } from "@/lib/reports/sales-per-salesperson"
 import type { ConversionRateResult } from "@/lib/reports/conversion-rate"
 import type { RevenuePerProductRow } from "@/lib/reports/revenue-per-product"
@@ -53,9 +53,13 @@ const UPCOMING_DEPARTURE_WINDOW_DAYS = 30
 
 const jsonFetcher = (url: string) => fetch(url).then((r) => r.json())
 
-// Whole-rand formatting for management reporting (avoids stray half-cents like "R 590,817.5").
+/**
+ * Reporting aggregates across every booking, so it is deliberately single-currency: summing a
+ * USD quote and a ZAR one into a "total" would be meaningless. Everything here is stated in the
+ * base currency, and the page says so.
+ */
 function formatRand(amount: number): string {
-  return `R ${formatCurrency(amount)}`
+  return formatMoney(amount, BASE_CURRENCY)
 }
 
 export default function ReportingPage() {
@@ -242,7 +246,9 @@ export default function ReportingPage() {
     <div className="p-6 space-y-6 max-w-6xl mx-auto">
       <div>
         <h1 className="text-3xl font-semibold text-foreground tracking-tight">Reporting</h1>
-        <p className="text-base text-muted-foreground mt-2">Sales performance overview</p>
+        <p className="text-base text-muted-foreground mt-2">
+          Sales performance overview · all amounts in {BASE_CURRENCY}
+        </p>
       </div>
 
       {/* KPIs */}

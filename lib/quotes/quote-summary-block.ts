@@ -7,6 +7,7 @@
 // editor can show a readable name on its locked placeholder card.
 
 import { formatDisplayDate, formatDisplayDateLong } from "@/lib/date-format"
+import { formatMoney } from "@/lib/money"
 import { QUOTE_REFERENCE_ENABLED, QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
@@ -31,6 +32,8 @@ export interface QuoteSummaryInput {
   children: number
   /** VAT-inclusive grand total (quotes.total). */
   total: number
+  /** The quote's currency (quotes.currency). Every amount in the block is in it. */
+  currency?: string
   /** Package itinerary; empty array omits the section entirely. */
   itineraryBlocks: VoucherServiceBlock[]
   /** Heading for the itinerary section (document-text setting). */
@@ -41,14 +44,6 @@ export interface QuoteSummaryInput {
   packageExcludesDefault?: string
   /** Highest priced adult flight fare on the quote; null/absent omits the capped-fare bullet. */
   flightCapPerPerson?: number | null
-}
-
-export function formatMoney(amount: number): string {
-  return new Intl.NumberFormat("en-ZA", {
-    style: "currency",
-    currency: "ZAR",
-    maximumFractionDigits: 2,
-  }).format(amount)
 }
 
 export function formatQuoteDate(value: string | null): string {
@@ -108,19 +103,24 @@ export function buildQuoteSummaryBlock(input: QuoteSummaryInput): string {
     metaLines.push(`<p style="${summaryLine}"><strong>Guests:</strong> ${escapeHtml(paxLabel)}</p>`)
   }
 
+  // formatMoney emits the currency symbol itself. Never prefix a literal "R" around these
+  // tokens: two migrations exist purely to undo that mistake in stored template bodies
+  // (20260723130000_fix_double_rand_templates.sql and its all-rows follow-up).
+  const money = (amount: number) => formatMoney(amount, input.currency)
+
   const pricing =
     `<div style="${pricingBox}" data-label="Total price">` +
     (perPersonRate !== null
-      ? `<p style="${perPersonLine}">${escapeHtml(paxLabel)} x ${formatMoney(perPersonRate)} per person</p>`
+      ? `<p style="${perPersonLine}">${escapeHtml(paxLabel)} x ${money(perPersonRate)} per person</p>`
       : "") +
-    `<p style="${totalLine}">${escapeHtml(formatTotalLabel(pax))}: ${formatMoney(input.total)} ${escapeHtml(VAT_INCLUSIVE_SUFFIX)}</p>` +
+    `<p style="${totalLine}">${escapeHtml(formatTotalLabel(pax))}: ${money(input.total)} ${escapeHtml(VAT_INCLUSIVE_SUFFIX)}</p>` +
     `</div>`
 
   const sortedBlocks = sortItineraryBlocksChronologically(input.itineraryBlocks)
 
   let itinerary = ""
   const flightCapBullet =
-    input.flightCapPerPerson != null ? formatFlightCapLine(formatMoney, input.flightCapPerPerson) : null
+    input.flightCapPerPerson != null ? formatFlightCapLine(money, input.flightCapPerPerson) : null
   const itineraryLines = buildQuoteItineraryLines(sortedBlocks, flightCapBullet)
   if (itineraryLines.length > 0) {
     const heading = input.packageIncludesHeading || DEFAULT_INCLUDES_HEADING

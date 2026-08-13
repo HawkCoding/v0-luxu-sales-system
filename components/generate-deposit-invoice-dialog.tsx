@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { PreviewAndSendDialog } from "@/components/preview-and-send-dialog"
 import type { Invoice, Quote } from "@/lib/types"
+import { formatMoney } from "@/lib/money"
 
 interface GenerateDepositInvoiceDialogProps {
   open?: boolean
@@ -71,14 +72,6 @@ interface GenerateDepositInvoiceResponse {
     contentType?: string
   }
   error?: string
-}
-
-function formatMoney(amount: number): string {
-  return new Intl.NumberFormat("en-ZA", {
-    style: "currency",
-    currency: "ZAR",
-    maximumFractionDigits: 2,
-  }).format(amount)
 }
 
 function latestPricedQuote(quotes: Quote[]): Quote | null {
@@ -341,7 +334,7 @@ export function GenerateDepositInvoiceDialog({
                       {resumingFull ? "Full amount" : `Deposit (${draftInvoice?.depositPercentage ?? "-"}%)`}
                     </span>
                     <span className="font-semibold">
-                      {draftInvoice ? formatMoney(draftInvoice.amount) : "-"}
+                      {draftInvoice ? formatMoney(draftInvoice.amount, draftInvoice.currency) : "-"}
                     </span>
                   </div>
                 </>
@@ -349,12 +342,12 @@ export function GenerateDepositInvoiceDialog({
                 <>
                   <div className="mt-2 flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">Quote total</span>
-                    <span className="font-medium">{quote ? formatMoney(quote.total) : "-"}</span>
+                    <span className="font-medium">{quote ? formatMoney(quote.total, quote.currency) : "-"}</span>
                   </div>
                   <div className="mt-2 flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">{payInFull ? "Full amount" : "Deposit amount"}</span>
                     <span className="font-semibold">
-                      {quote ? formatMoney(payInFull ? quote.total : amountPreview) : "-"}
+                      {quote ? formatMoney(payInFull ? quote.total : amountPreview, quote.currency) : "-"}
                     </span>
                   </div>
                 </>

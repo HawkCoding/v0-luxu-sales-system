@@ -9,6 +9,7 @@ import type {
 import type { PassengerTotals } from "@/lib/packages/passenger-totals"
 import { findAnchorTrainLeg, resolveHotelStayDates } from "@/lib/packages/hotel-dates"
 import { dateOnly } from "@/lib/packages/trip-date-range"
+import { BASE_CURRENCY } from "@/lib/money"
 import {
   findRateCardCandidates,
   hasAnyRateCardFor,
@@ -69,6 +70,9 @@ export interface SuiteLegState {
   notes: string | null
   /** Explicit per-leg rate type; null inherits the supplier's quoted rate at pricing time. */
   rateTypeId: string | null
+  /** The currency this leg's hand-typed fares are in (manual-pricing legs only). Rate-card legs
+   *  ignore it and price off the card's own currency. */
+  priceCurrency: string
   units: SuiteUnitState[]
   /** 'auto' drives the "Auto-filled" chip — cleared (by the caller, in updateLegState) the
    *  moment any field on this leg is edited, mirroring FieldFlags' dirty-suppresses-badge rule. */
@@ -83,6 +87,9 @@ export interface TransportLegState {
   routeId: string | null
   /** Explicit per-leg rate type; null inherits the supplier's quoted rate at pricing time. */
   rateTypeId: string | null
+  /** The currency a request's priceOverride is typed in. Requests with no override price off
+   *  the rate card and ignore it. */
+  priceCurrency: string
   requests: BookingTransportRequest[]
   origin: "auto" | "consultant"
 }
@@ -118,6 +125,8 @@ export interface SavedSelectionRow {
   date_anchor: string | null
   rate_type_id: string | null
   notes: string | null
+  /** Absent on a catalogue selection row; present on a booking_services row. */
+  price_currency?: string | null
   units: SavedSelectionUnitRow[]
   /** Absent for a catalogue selection row (which has no such concept); present for a
    *  booking_services row. Missing/undefined is treated as 'consultant' -- never surface a chip
@@ -200,6 +209,8 @@ export interface BuildDefaultLegStatesOptions {
   tripStartDate: string | null
   /** Booking-level totals per supplier — seeds the first unit's passenger split on split legs. */
   totalsBySupplierId?: Record<string, PassengerTotals>
+  /** The quote's currency, used as the default for a new leg's hand-typed prices. */
+  quoteCurrency?: string
 }
 
 export function buildDefaultLegStates(
@@ -222,6 +233,9 @@ function buildRawDefaultLegStates(
         selected: leg.supplierKind === "train_operator",
         routeId: defaultRouteId(leg),
         rateTypeId: null,
+        // A new leg types its prices in whatever the quote is denominated in; changing it is an
+        // explicit act (the leg's currency dropdown), never a default.
+        priceCurrency: options.quoteCurrency ?? BASE_CURRENCY,
         requests: [createDraftTransportRequest(leg)],
         origin: "consultant",
       } satisfies TransportLegState
@@ -246,6 +260,7 @@ function buildRawDefaultLegStates(
       dateAnchor: isHotel ? leg.dateAnchor ?? "custom" : null,
       notes: null,
       rateTypeId: null,
+      priceCurrency: options.quoteCurrency ?? BASE_CURRENCY,
       units: [createDraftUnit(totals)],
       origin: "consultant",
     } satisfies SuiteLegState
@@ -348,6 +363,7 @@ export function hydrateFromSaved(
         selected: row?.selected ?? fallback.selected,
         routeId: row?.route_id ?? fallback.routeId,
         rateTypeId: row?.rate_type_id ?? fallback.rateTypeId,
+        priceCurrency: row?.price_currency ?? fallback.priceCurrency,
         requests: legRequests.length > 0 ? legRequests : fallback.requests,
         origin: row?.origin ?? fallback.origin,
       } satisfies TransportLegState
@@ -388,6 +404,7 @@ export function hydrateFromSaved(
       dateAnchor: isHotel ? normalizeSavedAnchor(row.date_anchor) ?? fallback.dateAnchor : null,
       notes: row.notes,
       rateTypeId: row.rate_type_id ?? fallback.rateTypeId,
+      priceCurrency: row.price_currency ?? fallback.priceCurrency,
       units: units.length > 0 ? units : fallback.units,
       origin: row.origin ?? fallback.origin,
     } satisfies SuiteLegState
@@ -407,6 +424,7 @@ export interface PackageSelectionsPatchBody {
     nights?: number | null
     dateAnchor?: HotelDateAnchor | null
     rateTypeId?: string | null
+    priceCurrency?: string
     notes?: string | null
     units?: Array<{
       id?: string
@@ -434,6 +452,7 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
           selected: state.selected,
           routeId: state.routeId,
           rateTypeId: state.rateTypeId,
+          priceCurrency: state.priceCurrency,
         }
       }
       return {
@@ -445,6 +464,7 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
         nights: state.supplierKind === "hotel_property" ? Math.max(1, state.nights ?? 1) : null,
         dateAnchor: state.supplierKind === "hotel_property" ? state.dateAnchor : null,
         rateTypeId: state.rateTypeId,
+        priceCurrency: state.priceCurrency,
         notes: state.notes,
         units: state.units.map((unit, index) => ({
           id: unit.id.startsWith("draft-") ? undefined : unit.id,
@@ -557,6 +577,9 @@ export interface ApplyLegSelectionPayload {
   nights?: number
   /** Per-leg rate type override; omitted falls back to the system default. */
   rateTypeId?: string
+  /** The currency this leg's hand-typed prices are in; converted into the quote currency at
+   *  pricing time. Ignored by rate-card legs, which use the card's own currency. */
+  priceCurrency?: string
   commissionOverride?: ApplyCommissionOverride | null
 }
 
@@ -577,6 +600,7 @@ export function toApplySelections(
         routeId: state.routeId ?? undefined,
         suiteTypeId: fallbackSuiteTypeId ?? undefined,
         rateTypeId: state.rateTypeId ?? undefined,
+        priceCurrency: state.priceCurrency,
         commissionOverride,
       }
     }
@@ -604,6 +628,7 @@ export function toApplySelections(
       nights:
         state.supplierKind === "hotel_property" ? Math.max(1, state.nights ?? 1) : undefined,
       rateTypeId: state.rateTypeId ?? undefined,
+      priceCurrency: state.priceCurrency,
       commissionOverride,
     }
   })

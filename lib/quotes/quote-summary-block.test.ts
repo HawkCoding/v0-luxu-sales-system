@@ -76,6 +76,27 @@ describe("buildQuoteSummaryBlock", () => {
     expect(html).toContain("TOTAL for 2 Adults + 1 Child:")
   })
 
+  describe("currency", () => {
+    it("defaults to the base currency", () => {
+      expect(buildQuoteSummaryBlock(base)).toContain("R")
+    })
+
+    it("renders a foreign-currency quote in its own currency", () => {
+      const html = buildQuoteSummaryBlock({ ...base, total: 5000, currency: "USD" })
+      expect(html).toContain("$")
+      // The client sees one currency only: a converted USD quote must not also show rand.
+      expect(html).not.toMatch(/R\s?5\s?000/)
+    })
+
+    it("never emits a doubled currency symbol", () => {
+      // Two migrations exist purely to strip a literal "R" typed in front of a token that
+      // already carried one (20260810120000_fix_double_rand_templates_all_rows.sql).
+      const html = buildQuoteSummaryBlock({ ...base, currency: "USD" })
+      expect(html).not.toContain("R$")
+      expect(html).not.toContain("$$")
+    })
+  })
+
   it("prints a `#` inclusion as a bold undashed subheading, its items still dashed", () => {
     const html = buildQuoteSummaryBlock({
       ...base,

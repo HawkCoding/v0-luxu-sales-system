@@ -4,9 +4,10 @@ import type { InvoiceBalance } from "./calculate-balance"
 
 function makeBalance(overrides: Partial<InvoiceBalance> = {}): InvoiceBalance {
   return {
-    quote: { id: "q1", subtotal: 10000, total: 10000, status: "accepted", created_at: "2026-07-01T00:00:00Z" },
+    quote: { id: "q1", subtotal: 10000, total: 10000, currency: "ZAR", status: "accepted", created_at: "2026-07-01T00:00:00Z" },
     quoteTotal: 10000,
     quoteSubtotal: 10000,
+    currency: "ZAR",
     totalPaid: 0,
     lastPaymentAt: null,
     balance: 10000,

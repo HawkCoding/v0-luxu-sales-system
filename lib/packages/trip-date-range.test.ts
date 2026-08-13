@@ -130,6 +130,7 @@ function suiteState(overrides: Partial<SuiteLegState> & { legId: string }): Suit
     dateAnchor: null,
     notes: null,
     rateTypeId: null,
+    priceCurrency: "ZAR",
     units: [],
     origin: "consultant",
     ...overrides,
@@ -149,6 +150,7 @@ describe("deriveTripDateRangeFromStates", () => {
         selected: true,
         routeId: null,
         rateTypeId: null,
+        priceCurrency: "ZAR",
         requests: [
           {
             pickupAt: "2026-07-20T09:00:00+00:00",

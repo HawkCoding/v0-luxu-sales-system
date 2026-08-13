@@ -5,7 +5,8 @@ import { formatDisplayDateLong } from "@/lib/date-format"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { buildSuiteTokens, suiteSelectionsFromSnapshots } from "@/lib/templates/suite-description"
-import { buildQuoteSummaryBlock, formatMoney } from "@/lib/quotes/quote-summary-block"
+import { buildQuoteSummaryBlock } from "@/lib/quotes/quote-summary-block"
+import { formatMoney } from "@/lib/money"
 import { deriveFlightCapPerPerson, deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
 import { resolvePrimaryRoute, resolvePrimarySupplierId } from "@/lib/quotes/resolve-primary-route"
 import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
@@ -49,7 +50,7 @@ export async function POST(req: Request, { params }: RouteParams) {
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, booking_id, quote_number, validity_until, subtotal, total, created_at, booking:bookings(booking_number, no_of_adults, no_of_children, assigned_salesperson_id, route:routes(name, supplier:suppliers(name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(name), customer:customers(title, first_name, last_name))",
+      "id, booking_id, quote_number, validity_until, subtotal, total, currency, created_at, booking:bookings(booking_number, no_of_adults, no_of_children, assigned_salesperson_id, route:routes(name, supplier:suppliers(name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(name), customer:customers(title, first_name, last_name))",
     )
     .eq("id", id)
     .single()
@@ -141,6 +142,7 @@ export async function POST(req: Request, { params }: RouteParams) {
     adults: booking?.no_of_adults ?? 0,
     children: booking?.no_of_children ?? 0,
     total: quote.total,
+    currency: quote.currency,
     itineraryBlocks,
     packageIncludesHeading: documentText.quote_doc_includes_heading,
     packageExcludesHeading: documentText.quote_doc_excludes_heading,
@@ -167,7 +169,7 @@ export async function POST(req: Request, { params }: RouteParams) {
       direction: quotedRouteName ?? route?.name ?? "your journey",
       supplierName,
       clientSurname,
-      total: formatMoney(quote.total),
+      total: formatMoney(quote.total, quote.currency),
       ...buildSuiteTokens(
         suiteSelectionsFromSnapshots(
           lineItems.map((li) => li.pricing_snapshot as PricingSnapshot | null),

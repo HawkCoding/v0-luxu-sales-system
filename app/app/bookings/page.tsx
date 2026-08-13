@@ -14,7 +14,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar"
 import { formatDisplayDate } from "@/lib/date-format"
 import { isVisibleInBookings } from "@/lib/booking-visibility"
-import { formatCurrency } from "@/lib/utils"
+import { BASE_CURRENCY, formatMoney } from "@/lib/money"
 
 export default function BookingsPage() {
   const { data, isLoading, error, mutate } = useData(["bookings", "customers", "payments", "quotes"])
@@ -168,6 +168,9 @@ export default function BookingsPage() {
           <p className="text-base text-muted-foreground mt-2">
             Jobs from quote sent onward, excluding open enquiries and lost jobs
           </p>
+          {/* Spans every booking, so per-booking currencies can't be shown without the column
+              becoming an apples-to-oranges mix. Stated in the base currency instead. */}
+          <p className="text-xs text-muted-foreground mt-1">All amounts in {BASE_CURRENCY}</p>
         </div>
       </div>
 
@@ -395,10 +398,10 @@ export default function BookingsPage() {
                   </div>
                   <div className="flex flex-col items-end gap-1 flex-shrink-0">
                     <p className="text-sm font-semibold text-foreground">
-                      R {formatCurrency(booking.totalPaid)}
+                      {formatMoney(booking.totalPaid)}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      of R {formatCurrency(booking.totalQuote)}
+                      of {formatMoney(booking.totalQuote)}
                     </p>
                     <p className="text-xs text-muted-foreground mt-1">
                       Created {formatDisplayDate(booking.createdAt)}

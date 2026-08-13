@@ -5,6 +5,10 @@ import { buildPackageQuoteLineItems } from "@/lib/quotes/build-from-package"
 import { priceExtraLineItems } from "@/lib/quotes/price-extra-line"
 import { loadBookingServicesPackageDetail } from "@/lib/quotes/adapters/from-booking-services"
 import { safeSupabaseError } from "@/lib/api/responses"
+import { getCachedRates } from "@/lib/fx/rates"
+import { BASE_CURRENCY, normaliseCurrency } from "@/lib/money"
+import { MissingFxRateError } from "@/lib/pricing/convert-currency"
+import { SUPPORTED_CURRENCY_VALUES } from "@/lib/types"
 
 /**
  * Build Booking's equivalent of POST /api/packages/[slug]/apply: prices booking_services instead
@@ -59,11 +63,23 @@ const applyServicesSchema = z.object({
         units: z.array(unitSelectionSchema).optional(),
         nights: z.number().int().positive().optional(),
         rateTypeId: z.string().uuid().optional(),
+        /** Manual-pricing legs and transfer/rental overrides: the currency the typed fares on
+         * this leg are in. Rate-card legs ignore it and use the card's own currency. */
+        priceCurrency: z.enum(SUPPORTED_CURRENCY_VALUES).optional(),
         commissionOverride: commissionOverrideSchema,
       }),
     )
     .default([]),
   extras: z.array(extraSchema).default([]),
+  /**
+   * Rates the salesperson had on screen, keyed by currency (1 unit = N base units). Merged over
+   * the server's cache so a hand-nudged rate is the one the quote is actually priced at —
+   * otherwise the preview and the saved lines would disagree.
+   *
+   * Bounded rather than free: a fat-fingered decimal point would otherwise mis-price a booking
+   * by an order of magnitude with no other guard in the path.
+   */
+  fxRates: z.record(z.enum(SUPPORTED_CURRENCY_VALUES), z.number().positive().max(10_000)).optional(),
 })
 
 interface RouteParams {
@@ -93,8 +109,6 @@ export async function POST(req: Request, { params }: RouteParams) {
   if (bookingError) return safeSupabaseError("services-apply:load-booking", bookingError)
   if (!booking) return NextResponse.json({ error: "Booking not found" }, { status: 404 })
 
-  const { detail } = await loadBookingServicesPackageDetail(supabase, id, booking.booking_number)
-
   const { data: rateTypeRows } = await supabase
     .from("rate_types")
     .select("id, code, name, is_default")
@@ -103,12 +117,28 @@ export async function POST(req: Request, { params }: RouteParams) {
   const rateTypes = (rateTypeRows ?? []).map((rt) => ({ id: rt.id, code: rt.code, name: rt.name }))
   const fallbackRateTypeId = (rateTypeRows ?? []).find((rt) => rt.is_default)?.id ?? null
 
-  // Carried through so re-pricing keeps the manual commission top-up the salesperson added.
+  // Carried through so re-pricing keeps the manual commission top-up the salesperson added,
+  // and so foreign supplier rates convert into the currency this quote is already denominated in.
   const { data: quoteRow } = await supabase
     .from("quotes")
-    .select("commission_bonus")
+    .select("commission_bonus, currency")
     .eq("id", parsed.quoteId)
     .maybeSingle()
+
+  const quoteCurrency = normaliseCurrency(quoteRow?.currency)
+  // Cached only: a slow or unreachable FX provider must not add latency to Build Booking. The
+  // dialog refreshes rates explicitly through /api/fx/rates instead.
+  const fx = await getCachedRates(supabase)
+  // What the salesperson saw wins over the cache, so the preview they approved is the price that
+  // gets saved. The base currency is pinned to 1 regardless of what the client sent.
+  const effectiveRates = { ...fx.rates, ...(parsed.fxRates ?? {}), [BASE_CURRENCY]: 1 }
+
+  const { detail } = await loadBookingServicesPackageDetail(
+    supabase,
+    id,
+    booking.booking_number,
+    quoteCurrency,
+  )
 
   try {
     const { lineItems } = await buildPackageQuoteLineItems({
@@ -120,6 +150,9 @@ export async function POST(req: Request, { params }: RouteParams) {
       fallbackRateTypeId,
       rateTypes,
       commissionBonus: Number(quoteRow?.commission_bonus ?? 0),
+      quoteCurrency,
+      fxRates: effectiveRates,
+      fxRateAsOf: fx.rows[0]?.asOf ?? null,
     })
 
     const extraLineItems = (
@@ -130,14 +163,27 @@ export async function POST(req: Request, { params }: RouteParams) {
             jobId: parsed.jobId,
             travelDate: parsed.travelDate,
             fallbackRateTypeId,
+            quoteCurrency,
+            fxRates: effectiveRates,
+            fxRateAsOf: fx.rows[0]?.asOf ?? null,
             ...extra,
           }),
         ),
       )
     ).flatMap((result) => result.lineItems)
 
-    return NextResponse.json({ lineItems: [...lineItems, ...extraLineItems] })
+    return NextResponse.json({
+      lineItems: [...lineItems, ...extraLineItems],
+      currency: quoteCurrency,
+      // Let the dialog render its mixed-currency banner without a second round trip.
+      fx: { rates: effectiveRates, asOf: fx.rows[0]?.asOf ?? null, stale: fx.stale },
+    })
   } catch (error) {
+    // A missing rate is the salesperson's problem to fix (refresh or type one), not a server
+    // fault -- surface it the same way an unpriced rate card is surfaced.
+    if (error instanceof MissingFxRateError) {
+      return NextResponse.json({ error: error.message }, { status: 400 })
+    }
     const message = error instanceof Error ? error.message : "Failed to build service line items"
     const status = message === "Job not found" ? 404 : 400
 

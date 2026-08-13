@@ -4,6 +4,7 @@ import {
   FOOTER_BRAND_PRODUCT_LINE,
 } from "@/lib/assets/footer-brand"
 import { formatDisplayDate } from "@/lib/date-format"
+import { formatMoney } from "@/lib/money"
 import { BrandBlock } from "@/lib/pdf/brand-block"
 import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
 import { registerDocumentFonts } from "@/lib/pdf/document-fonts"
@@ -98,17 +99,6 @@ export interface InvoicePdfData {
   brandLogo?: BrandLogoImage | null
 }
 
-function formatMoney(amount: number, currency = "ZAR"): string {
-  try {
-    return new Intl.NumberFormat("en-ZA", {
-      style: "currency",
-      currency,
-      maximumFractionDigits: 2,
-    }).format(amount)
-  } catch {
-    return `${currency} ${amount.toFixed(2)}`
-  }
-}
 
 function formatDate(value: string | null | undefined): string {
   return formatDisplayDate(value?.slice(0, 10)) || "To be confirmed"

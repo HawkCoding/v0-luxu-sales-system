@@ -21,7 +21,8 @@ import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
 import { buildGuestInfoBlock } from "@/lib/templates/guest-info-block"
 import { buildSuiteTokens } from "@/lib/templates/suite-description"
 import { loadSuiteSelections } from "@/lib/templates/suite-selections"
-import { buildQuoteSummaryBlock, formatMoney } from "@/lib/quotes/quote-summary-block"
+import { buildQuoteSummaryBlock } from "@/lib/quotes/quote-summary-block"
+import { formatMoney, normaliseCurrency } from "@/lib/money"
 import { deriveFlightCapPerPerson, deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
 import { legIdsFromLineItems } from "@/lib/quotes/accepted-quote-scope"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
@@ -55,14 +56,6 @@ function quoteForTokens<T extends { created_at: string | null; status: string | 
   return latestByCreatedAt((rows ?? []).filter((row) => row.status === "accepted")) ?? latestByCreatedAt(rows)
 }
 
-/** Invoice amounts carry their own currency, unlike the always-ZAR quote total. */
-function formatCurrency(amount: number, currency = "ZAR"): string {
-  try {
-    return new Intl.NumberFormat("en-ZA", { style: "currency", currency, maximumFractionDigits: 2 }).format(amount)
-  } catch {
-    return `${currency} ${amount.toFixed(2)}`
-  }
-}
 
 /**
  * This resolver is best-effort enrichment layered under the route's own
@@ -121,6 +114,7 @@ interface QuoteRow {
   quote_number: string | null
   validity_until: string | null
   total: number | null
+  currency: string | null
   created_at: string | null
   status: string | null
 }
@@ -171,7 +165,7 @@ export async function resolveSharedEmailTokens(
       safeQuery<QuoteRow[]>(() =>
         supabase
           .from("quotes")
-          .select("id, quote_number, validity_until, total, created_at, status")
+          .select("id, quote_number, validity_until, total, currency, created_at, status")
           .eq("booking_id", bookingId),
       ),
       safeQuery<InvoiceRow[]>(() =>
@@ -234,6 +228,9 @@ export async function resolveSharedEmailTokens(
     .filter((inv) => inv.kind === "deposit")
     .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))[0]
   const latestVoucher = latestByCreatedAt(vouchers)
+  // Every money token below is denominated in the quote's currency — the invoice is always
+  // raised in it (see lib/invoices/calculate-balance.ts), so one code covers the whole ladder.
+  const quoteCurrency = normaliseCurrency(latestQuote?.currency)
 
   let quoteSummaryTable = PLACEHOLDER
   if (latestQuote) {
@@ -263,6 +260,7 @@ export async function resolveSharedEmailTokens(
         adults: booking?.no_of_adults ?? 0,
         children: booking?.no_of_children ?? 0,
         total: latestQuote.total ?? 0,
+        currency: quoteCurrency,
         itineraryBlocks,
         packageIncludesHeading: documentText.quote_doc_includes_heading,
         packageExcludesHeading: documentText.quote_doc_excludes_heading,
@@ -291,9 +289,9 @@ export async function resolveSharedEmailTokens(
       depositPercentage: latestDepositInvoice?.deposit_percentage ?? null,
       depositAmount: latestDepositInvoice?.amount ?? null,
     })
-    receivedAmount = formatMoney(totals.amountReceived)
-    outstandingAmount = formatMoney(totals.outstanding)
-    finalAmount = formatMoney(totals.finalAmount)
+    receivedAmount = formatMoney(totals.amountReceived, balance.currency)
+    outstandingAmount = formatMoney(totals.outstanding, balance.currency)
+    finalAmount = formatMoney(totals.finalAmount, balance.currency)
     finalDueDate = totals.finalDueDate ? formatDisplayDateLong(totals.finalDueDate) : "Now"
   } catch {
     // No accepted quote yet — leave the payment-ladder tokens as placeholders.
@@ -325,12 +323,12 @@ export async function resolveSharedEmailTokens(
     quoteNumber: orPlaceholder(latestQuote?.quote_number),
     quoteDate: orPlaceholder(latestQuote ? formatDisplayDateLong(latestQuote.created_at?.slice(0, 10) ?? null) : null),
     validityDate: orPlaceholder(latestQuote ? formatDisplayDateLong(latestQuote.validity_until) : null),
-    total: orPlaceholder(latestQuote ? formatMoney(latestQuote.total ?? 0) : null),
+    total: orPlaceholder(latestQuote ? formatMoney(latestQuote.total ?? 0, quoteCurrency) : null),
     invoiceNumber: orPlaceholder(booking?.booking_number ? clientInvoiceNumber(booking) : null),
-    amountDue: orPlaceholder(latestInvoice ? formatCurrency(latestInvoice.amount, latestInvoice.currency) : null),
+    amountDue: orPlaceholder(latestInvoice ? formatMoney(latestInvoice.amount, latestInvoice.currency) : null),
     dueDate: orPlaceholder(latestInvoice ? formatDisplayDateLong(latestInvoice.due_date) : null),
     depositAmount: orPlaceholder(
-      latestDepositInvoice ? formatCurrency(latestDepositInvoice.amount, latestDepositInvoice.currency) : null,
+      latestDepositInvoice ? formatMoney(latestDepositInvoice.amount, latestDepositInvoice.currency) : null,
     ),
     depositPercentage: orPlaceholder(
       latestDepositInvoice?.deposit_percentage != null ? String(latestDepositInvoice.deposit_percentage) : null,

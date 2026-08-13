@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
+import { formatMoney } from "@/lib/money"
 import { formatDisplayDate, formatDisplayDateLong } from "@/lib/date-format"
 import { calculateDepositAmount, normalizeDepositPercentage } from "@/lib/pipeline/constants"
 import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
@@ -30,18 +31,6 @@ const updateDepositInvoiceSchema = z.object({
   /** `void` discards an unsent draft so the amount can be decided again. */
   status: z.enum(["sent", "void"]),
 })
-
-function formatMoney(amount: number, currency = "ZAR"): string {
-  try {
-    return new Intl.NumberFormat("en-ZA", {
-      style: "currency",
-      currency,
-      maximumFractionDigits: 2,
-    }).format(amount)
-  } catch {
-    return `${currency} ${amount.toFixed(2)}`
-  }
-}
 
 function addDays(date: Date, days: number): string {
   const next = new Date(date)
@@ -155,6 +144,9 @@ export async function POST(req: Request) {
           quote_id: quote.id,
           deposit_percentage: isFullPayment ? null : depositPercentage,
           amount,
+          // Re-stamped alongside the amount: a revision could have landed the booking on a
+          // quote priced in another currency, and the two must never disagree.
+          currency: balance.currency,
           due_date: dueDate,
           updated_at: new Date().toISOString(),
         })
@@ -185,7 +177,9 @@ export async function POST(req: Request) {
         invoice_number: invoiceNumber,
         deposit_percentage: isFullPayment ? null : depositPercentage,
         amount,
-        currency: "ZAR",
+        // An invoice is always raised in the currency of the quote it bills, so the client is
+        // never asked to pay in a currency they didn't accept.
+        currency: balance.currency,
         due_date: dueDate,
         created_by: user.id,
       })

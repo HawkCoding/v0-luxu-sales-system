@@ -37,6 +37,7 @@ function makeLegState(units: SuiteLegState["units"]): SuiteLegState {
     dateAnchor: null,
     notes: null,
     rateTypeId: null,
+    priceCurrency: "ZAR",
     units,
     origin: "consultant",
   }

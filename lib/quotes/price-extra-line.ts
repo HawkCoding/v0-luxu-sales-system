@@ -18,6 +18,8 @@ import {
   calculateCommissionAmount,
   resolveCommission,
 } from "@/lib/pricing/commission"
+import { convertAmount, type FxRateMap } from "@/lib/pricing/convert-currency"
+import { BASE_CURRENCY, normaliseCurrency } from "@/lib/money"
 
 export interface ExtraLineSelection {
   supplierId: string
@@ -34,6 +36,10 @@ export interface PriceExtraLineItemsInput extends ExtraLineSelection {
   jobId: string
   travelDate: string
   fallbackRateTypeId?: string | null
+  /** The currency the quote is denominated in; a rate card in anything else converts into it. */
+  quoteCurrency?: string
+  fxRates?: FxRateMap
+  fxRateAsOf?: string | null
 }
 
 async function loadVariantGroups(
@@ -93,7 +99,12 @@ export async function priceExtraLineItems(
     rateTypeId = null,
     fallbackRateTypeId = null,
     commissionOverride = null,
+    quoteCurrency = BASE_CURRENCY,
+    fxRates = { [BASE_CURRENCY]: 1 },
+    fxRateAsOf = null,
   } = input
+
+  const targetCurrency = normaliseCurrency(quoteCurrency)
 
   const { data: job, error: jobError } = await supabase
     .from("bookings")
@@ -139,7 +150,7 @@ export async function priceExtraLineItems(
   // match those as well as cards written against this route (see lib/rate-cards/resolve.ts).
   const { data: rateCards } = await supabase
     .from("rate_cards")
-    .select("id, rate_type_id, price_per_person, child_price, infant_price, valid_from, valid_to")
+    .select("id, rate_type_id, price_per_person, child_price, infant_price, currency, valid_from, valid_to")
     .or(`route_id.eq.${routeId},route_id.is.null`)
     .eq("suite_type_id", suiteTypeId)
     .order("valid_from", { ascending: true })
@@ -222,13 +233,20 @@ export async function priceExtraLineItems(
   const description = [supplierRow.name, suiteRow.name, routeRow.name].filter(Boolean).join(" - ")
   const lineItems: QuoteLineItem[] = []
 
+  const cardCurrency = normaliseCurrency(card.currency)
+  const wasConverted = cardCurrency !== targetCurrency
+
   function addLine(
     lineDescription: string,
     qty: number,
-    unitPrice: number,
+    sourceUnitPrice: number,
     passengerKind: PricingSnapshot["passengerKind"],
   ) {
     if (qty <= 0) return
+    // Convert before the line subtotal and its commission, so both are already in the quote's
+    // currency -- same ordering the package pricing engine uses.
+    const converted = convertAmount(sourceUnitPrice, cardCurrency, targetCurrency, fxRates)
+    const unitPrice = converted.amount
     const lineSubtotal = Math.round(unitPrice * qty * 100) / 100
 
     let commissionBreakdown: CommissionBreakdown | null = null
@@ -274,6 +292,10 @@ export async function priceExtraLineItems(
         baseUnitPrice: unitPrice,
         markupPct: 0,
         singleSupplementPct: null,
+        sourceCurrency: wasConverted ? cardCurrency : null,
+        sourceUnitPrice: wasConverted ? sourceUnitPrice : null,
+        fxRate: wasConverted ? converted.rate : null,
+        fxRateAsOf: wasConverted ? fxRateAsOf : null,
         serviceType: kind === "transfers" ? "transfer" : kind === "vehicle_rental" ? "rental" : null,
         suiteVariants: variantGroups.length > 0 ? variantGroups : undefined,
         commission: commissionBreakdown,
