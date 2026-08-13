@@ -861,6 +861,27 @@ export async function PATCH(
     )
   }
 
+  // Outgoing email rows go first, before the upsert that replaces them. Deleting afterwards meant
+  // that dropping a row and re-adding the same address in one save collided with
+  // supplier_emails_supplier_id_email_unique_idx (supplier_id, lower(email)) while the old row was
+  // still there -- a 500 raised *after* the suppliers row above had already been written. Nothing
+  // references supplier_emails, so delete-then-insert is safe.
+  if (emailIdsToDelete.length > 0) {
+    const { error: deleteEmailsError } = await deleteInChunks(
+      supabase,
+      "supplier_emails",
+      emailIdsToDelete,
+    )
+
+    if (deleteEmailsError) {
+      logSupplierMutationError("supplier-emails-delete", supplierId, deleteEmailsError)
+      return NextResponse.json(
+        { error: "Failed to remove old supplier emails" },
+        { status: 500 },
+      )
+    }
+  }
+
   if (normalizedEmails.length > 0) {
     const { error: supplierEmailsUpsertError } = await supabase
       .from("supplier_emails")
@@ -868,6 +889,18 @@ export async function PATCH(
 
     if (supplierEmailsUpsertError) {
       logSupplierMutationError("supplier-emails-upsert", supplierId, supplierEmailsUpsertError)
+      // A duplicate address that survived the payload dedupe above is the user's mistake, not a
+      // server fault -- name it instead of leaking a raw Postgres conflict as a 500, the same way
+      // the rate-card upsert below maps its own 23505.
+      if (supplierEmailsUpsertError.code === "23505") {
+        return NextResponse.json(
+          {
+            error:
+              "That email address is already listed on this supplier. Remove the duplicate row and save again.",
+          },
+          { status: 409 },
+        )
+      }
       return NextResponse.json(
         { error: "Failed to update supplier emails" },
         { status: 500 },
@@ -1208,22 +1241,6 @@ export async function PATCH(
       logSupplierMutationError("suite-types-delete", supplierId, deleteSuiteTypesError)
       return NextResponse.json(
         { error: "Failed to remove old supplier suite types" },
-        { status: 500 },
-      )
-    }
-  }
-
-  if (emailIdsToDelete.length > 0) {
-    const { error: deleteEmailsError } = await deleteInChunks(
-      supabase,
-      "supplier_emails",
-      emailIdsToDelete,
-    )
-
-    if (deleteEmailsError) {
-      logSupplierMutationError("supplier-emails-delete", supplierId, deleteEmailsError)
-      return NextResponse.json(
-        { error: "Failed to remove old supplier emails" },
         { status: 500 },
       )
     }

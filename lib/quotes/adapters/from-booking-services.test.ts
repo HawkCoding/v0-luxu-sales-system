@@ -25,6 +25,7 @@ function service(partial: Partial<BookingServiceRow> & Pick<BookingServiceRow, "
     voucher_footnote: null,
     excursions: null,
     origin: "consultant",
+    price_currency: "ZAR",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     ...partial,

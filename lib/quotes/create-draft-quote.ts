@@ -6,6 +6,8 @@ import { buildQuoteNumber } from "@/lib/quotes/quote-number"
 import { bookingServicesToLegSelections, loadBookingServicesPackageDetail } from "@/lib/quotes/adapters/from-booking-services"
 import { getDefaultCommission } from "@/lib/pricing/default-commission"
 import { isoDateDaysFromNow, resolveValidityDays } from "@/lib/quotes/quote-validity"
+import { getCachedRates } from "@/lib/fx/rates"
+import { BASE_CURRENCY } from "@/lib/money"
 
 type ServiceClient = SupabaseClient<Database>
 
@@ -76,6 +78,11 @@ export async function createDraftQuoteForBooking({
         selections[0] = { ...selections[0], commissionOverride: defaultCommission }
       }
       const { rateTypes, fallbackRateTypeId } = await resolveRateTypes(supabase)
+      // Auto-drafted quotes are always in the base currency -- there is no salesperson here to
+      // pick one. A foreign supplier's rate still has to be converted into it, so the cached
+      // rates come along; getCachedRates never calls out, keeping intake off a third party's
+      // latency.
+      const fx = await getCachedRates(supabase)
 
       const built = await buildPackageQuoteLineItems({
         supabase,
@@ -85,6 +92,9 @@ export async function createDraftQuoteForBooking({
         selections,
         fallbackRateTypeId,
         rateTypes,
+        quoteCurrency: BASE_CURRENCY,
+        fxRates: fx.rates,
+        fxRateAsOf: fx.rows[0]?.asOf ?? null,
       })
       lineItems = built.lineItems
       // A flight leg with no fare typed in yet still counts as "not fully priced" -- same bar as
@@ -103,6 +113,7 @@ export async function createDraftQuoteForBooking({
     .insert({
       booking_id: bookingId,
       status,
+      currency: BASE_CURRENCY,
       validity_until: validityUntil,
       subtotal: totals.subtotal,
       total: totals.total,

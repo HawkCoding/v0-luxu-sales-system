@@ -90,7 +90,9 @@ export const itineraries: Itinerary[] = [
   { id: "it19", jobId: "j23", name: "Swakopmund to Pretoria - Paid", notes: "Fully paid solo traveller reservation", acceptedAt: "2025-11-25T11:00:00Z" },
 ]
 
-export const quotes: Quote[] = [
+/** Demo fixtures predate multi-currency and are all rand; currency is stamped on below rather
+ *  than repeated on every row. */
+const seedQuotes: Omit<Quote, "currency">[] = [
   { id: "q1", itineraryId: "it1", jobId: "j2", status: "pricing_incomplete", validityUntil: "2025-12-31", lineItems: [{ description: "Pullman Twin Suite (2 pax)", qty: 1, unitPrice: 24900, total: 24900 }, { description: "Pullman Double Suite (1 pax)", qty: 1, unitPrice: 0, total: 0 }], subtotal: 24900, total: 24900 },
   { id: "q2", itineraryId: "it2", jobId: "j3", status: "sent", validityUntil: "2025-12-15", lineItems: [{ description: "Royal Double Suite (2 pax)", qty: 1, unitPrice: 62000, total: 62000 }, { description: "Victoria Falls Hotel (2 nights)", qty: 1, unitPrice: 8500, total: 8500 }, { description: "Sunset Cruise", qty: 2, unitPrice: 1200, total: 2400 }], subtotal: 72900, total: 72900, lastSentAt: "2025-09-15T09:30:00Z" },
   { id: "q3", itineraryId: "it5", jobId: "j7", status: "accepted", validityUntil: "2025-11-30", lineItems: [{ description: "Deluxe Double Suite (2 pax)", qty: 1, unitPrice: 38500, total: 38500 }, { description: "Swakopmund excursion package", qty: 2, unitPrice: 3500, total: 7000 }], subtotal: 45500, total: 45500, lastSentAt: "2025-10-12T14:00:00Z", overridePin: "1234", overrideReason: "Supplier special case" },
@@ -108,6 +110,8 @@ export const quotes: Quote[] = [
   { id: "q15", itineraryId: "it18", jobId: "j22", status: "accepted", validityUntil: "2026-05-31", lineItems: [{ description: "Deluxe Twin Suite (2 pax)", qty: 1, unitPrice: 97000, total: 97000 }], subtotal: 97000, total: 97000, lastSentAt: "2025-11-24T09:30:00Z" },
   { id: "q16", itineraryId: "it19", jobId: "j23", status: "accepted", validityUntil: "2026-06-15", lineItems: [{ description: "Pullman Twin Suite (1 pax)", qty: 1, unitPrice: 55000, total: 55000 }], subtotal: 55000, total: 55000, lastSentAt: "2025-11-25T09:30:00Z" },
 ]
+
+export const quotes: Quote[] = seedQuotes.map((quote) => ({ ...quote, currency: "ZAR" }))
 
 export const payments: Payment[] = [
   { id: "p1", jobId: "j6", amount: 10000, receivedAt: "2025-10-08T10:00:00Z", method: "EFT", reference: "REF-PRN-001", notes: "Deposit payment - 25% of total" },

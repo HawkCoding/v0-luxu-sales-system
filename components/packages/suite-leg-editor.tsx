@@ -37,8 +37,67 @@ import {
 import { resolveDirectedRouteName } from "@/lib/routes/route-name"
 import { hasAnyRateCardFor } from "@/lib/rate-cards/resolve"
 import { RateTypeSelect } from "@/components/rate-type-select"
+import { CurrencySelect } from "@/components/currency-select"
+import { formatMoney, BASE_CURRENCY } from "@/lib/money"
+import { convertAmount, type FxRateMap } from "@/lib/pricing/convert-currency"
 
 const NONE_VALUE = "__none"
+
+interface ConvertedFareHintProps {
+  adultPrice: number | null
+  childPrice: number | null
+  infantPrice: number | null
+  from: string
+  to: string
+  rates: FxRateMap
+}
+
+/**
+ * Shows what a typed foreign fare becomes in the quote's currency, as it is typed. Purely a
+ * preview — the conversion that ends up on the quote is done server-side at pricing time, so a
+ * missing rate here silently renders nothing rather than blocking the field.
+ */
+function ConvertedFareHint({
+  adultPrice,
+  childPrice,
+  infantPrice,
+  from,
+  to,
+  rates,
+}: ConvertedFareHintProps) {
+  if (from === to) return null
+
+  const entries = [
+    { label: "Adult", amount: adultPrice },
+    { label: "Child", amount: childPrice },
+    { label: "Infant", amount: infantPrice },
+  ].filter((entry): entry is { label: string; amount: number } => typeof entry.amount === "number")
+
+  if (entries.length === 0) return null
+
+  let rate: number
+  let converted: { label: string; value: string }[]
+  try {
+    rate = convertAmount(1, from, to, rates).rate
+    converted = entries.map((entry) => ({
+      label: entry.label,
+      value: formatMoney(convertAmount(entry.amount, from, to, rates).amount, to),
+    }))
+  } catch {
+    // No rate for this pair yet. The apply step will say so properly; a half-rendered hint here
+    // would just be noise.
+    return null
+  }
+
+  return (
+    <p className="w-full text-xs text-muted-foreground">
+      {converted.map((entry) => `${entry.label} ${entry.value}`).join(" · ")}
+      <span className="ml-1.5 opacity-70">
+        @ {rate.toLocaleString("en-ZA", { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
+      </span>
+    </p>
+  )
+}
 
 interface SuiteLegEditorProps {
   leg: PackageLeg
@@ -50,6 +109,11 @@ interface SuiteLegEditorProps {
   anchorContext?: HotelAnchorContext | null
   /** Active (non-archived) rate types — shows the per-leg rate type selector when non-empty. */
   rateTypes?: RateType[]
+  /** The quote's currency. Typed fares in another currency are previewed converted into it. */
+  quoteCurrency?: string
+  /** Base-currency rates, used only for the live "↳ R x @ rate" preview under a typed fare. The
+   *  authoritative conversion happens server-side at pricing time. */
+  fxRates?: FxRateMap
 }
 
 const ANCHOR_OPTIONS: { value: HotelDateAnchor; label: string; hint: string }[] = [
@@ -65,6 +129,8 @@ export function SuiteLegEditor({
   expectedTotals,
   anchorContext,
   rateTypes = [],
+  quoteCurrency = BASE_CURRENCY,
+  fxRates = { [BASE_CURRENCY]: 1 },
 }: SuiteLegEditorProps) {
   const isHotel = leg.supplierKind === "hotel_property"
   const vocab = getSupplierVocabulary(leg.supplierKind)
@@ -253,6 +319,17 @@ export function SuiteLegEditor({
             : "Supplier default"
         }
       />
+
+      {/* Only manual-pricing legs have a fare typed by hand, so only they need to say which
+          currency it is in. A rate-card leg carries the card's own currency instead. */}
+      {leg.pricingMode === "manual" ? (
+        <CurrencySelect
+          id={`price-currency-${leg.id}`}
+          label="Fare currency"
+          value={value.priceCurrency}
+          onChange={(priceCurrency) => onChange({ ...value, priceCurrency })}
+        />
+      ) : null}
     </div>
   )
 
@@ -584,6 +661,14 @@ export function SuiteLegEditor({
                         Fare required — the quote will flag this line until it's priced.
                       </p>
                     ) : null}
+                    <ConvertedFareHint
+                      adultPrice={unit.manualAdultPrice}
+                      childPrice={unit.manualChildPrice}
+                      infantPrice={unit.manualInfantPrice}
+                      from={value.priceCurrency}
+                      to={quoteCurrency}
+                      rates={fxRates}
+                    />
                   </div>
                 ) : null}
 

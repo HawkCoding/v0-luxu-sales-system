@@ -1,4 +1,5 @@
 import type { CommissionBreakdown } from "@/lib/types"
+import { BASE_CURRENCY, formatMoney } from "@/lib/money"
 
 interface CommissionBadgeProps {
   commission: CommissionBreakdown | null | undefined
@@ -8,25 +9,13 @@ interface CommissionBadgeProps {
 
 function formatValue(commission: CommissionBreakdown, currency: string): string {
   if (commission.type === "percent") return `${commission.value.toFixed(2)}%`
-  if (commission.type === "fixed") return `${currency} ${commission.value.toFixed(2)} total`
-  return `${currency} ${commission.value.toFixed(2)} / pax`
-}
-
-function formatAmount(amount: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat("en-ZA", {
-      style: "currency",
-      currency,
-      maximumFractionDigits: 2,
-    }).format(amount)
-  } catch {
-    return `${currency} ${amount.toFixed(2)}`
-  }
+  if (commission.type === "fixed") return `${formatMoney(commission.value, currency)} total`
+  return `${formatMoney(commission.value, currency)} / pax`
 }
 
 export function CommissionBadge({
   commission,
-  currency = "ZAR",
+  currency = BASE_CURRENCY,
   className,
 }: CommissionBadgeProps) {
   if (!commission || commission.type === null) return null
@@ -35,7 +24,7 @@ export function CommissionBadge({
     <span
       className={`inline-flex items-center gap-1 rounded-full bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground tabular-nums ${className ?? ""}`}
       aria-label={`Commission ${formatValue(commission, currency)}`}
-      title={`Commission amount: ${formatAmount(commission.amount, currency)}`}
+      title={`Commission amount: ${formatMoney(commission.amount, currency)}`}
     >
       <span>Commission:</span>
       <span className="text-foreground">{formatValue(commission, currency)}</span>

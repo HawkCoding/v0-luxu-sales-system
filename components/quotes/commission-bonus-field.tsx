@@ -5,7 +5,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { formatCurrency } from "@/lib/utils"
+import { currencySymbol, formatMoney } from "@/lib/money"
 import { Loader2 } from "lucide-react"
 import type { Quote } from "@/lib/types"
 
@@ -25,9 +25,9 @@ function parseAmount(raw: string): number | null {
 }
 
 /**
- * A flat rand amount (positive or negative) the salesperson adjusts on top of the calculated
- * commission. It is folded into the quote's existing Commission line rather than added as a
- * new one, so the client never sees the split.
+ * A flat amount (positive or negative), in the quote's own currency, that the salesperson
+ * adjusts on top of the calculated commission. It is folded into the quote's existing Commission
+ * line rather than added as a new one, so the client never sees the split.
  */
 export function CommissionBonusField({ quote, editable, onSaved }: CommissionBonusFieldProps) {
   const saved = quote.commissionBonus ?? 0
@@ -43,7 +43,9 @@ export function CommissionBonusField({ quote, editable, onSaved }: CommissionBon
     return (
       <div className="flex justify-end gap-8 text-xs">
         <span className="text-muted-foreground">Rounding</span>
-        <span className="text-foreground font-medium w-24 text-right">R {formatCurrency(saved)}</span>
+        <span className="text-foreground font-medium w-28 text-right">
+          {formatMoney(saved, quote.currency)}
+        </span>
       </div>
     )
   }
@@ -82,7 +84,7 @@ export function CommissionBonusField({ quote, editable, onSaved }: CommissionBon
         Rounding
       </Label>
       <div className="flex items-center gap-1.5">
-        <span className="text-xs text-muted-foreground">R</span>
+        <span className="text-xs text-muted-foreground">{currencySymbol(quote.currency)}</span>
         <Input
           id={inputId}
           inputMode="decimal"

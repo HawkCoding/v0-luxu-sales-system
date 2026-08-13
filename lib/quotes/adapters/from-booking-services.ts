@@ -10,6 +10,7 @@ import { attachSuiteVariantVocab } from "@/lib/packages/suite-variant-vocab"
 import { loadSupplierRateTiersResolver } from "@/lib/rate-types/load-supplier-rate-tiers"
 import type { PackageDetail, SupplierKind } from "@/lib/types"
 import type { PackageLegSelection, PackageUnitSelection } from "@/lib/quotes/build-from-package"
+import { BASE_CURRENCY, normaliseCurrency } from "@/lib/money"
 
 type BookingServiceRow = Database["public"]["Tables"]["booking_services"]["Row"]
 type BookingServiceUnitRow = Database["public"]["Tables"]["booking_service_units"]["Row"]
@@ -53,6 +54,10 @@ export async function loadBookingServicesPackageDetail(
   supabase: SupabaseClient<Database>,
   bookingId: string,
   bookingNumber: string,
+  /** The currency the booking's quote is denominated in — carried onto the synthetic package so
+   *  display-only consumers (e.g. the commission badge) render the right symbol. Supplier rates
+   *  in other currencies still convert per line; this is not a pricing input. */
+  quoteCurrency: string = BASE_CURRENCY,
 ): Promise<BookingServicesData> {
   const [{ data: serviceRows }, resolveSupplierRateTiers] = await Promise.all([
     supabase
@@ -162,7 +167,7 @@ export async function loadBookingServicesPackageDetail(
     // (app/api/jobs/[id]/build-booking/route.ts).
     single_supplement_pct: 50,
     fixed_price_per_person: null,
-    currency: "ZAR",
+    currency: normaliseCurrency(quoteCurrency),
     active: false,
     created_at: services[0]?.created_at ?? new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -233,6 +238,9 @@ export function bookingServicesToLegSelections(
       routeReversed: service.route_reversed,
       units: unitSelections,
       nights: service.nights ?? undefined,
+      // Only meaningful for manual-pricing legs and transfer/rental price overrides; a
+      // rate-card leg takes its currency from the card instead and ignores this.
+      priceCurrency: service.price_currency,
     }
     return selection
   })

@@ -67,7 +67,7 @@ export async function ensureQuotePdf(
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, booking_id, quote_number, status, validity_until, subtotal, total, created_at, pdf_document_id, booking:bookings(id, booking_number, no_of_adults, no_of_children, customer:customers(title, first_name, last_name))",
+      "id, booking_id, quote_number, status, validity_until, subtotal, total, currency, created_at, pdf_document_id, booking:bookings(id, booking_number, no_of_adults, no_of_children, customer:customers(title, first_name, last_name))",
     )
     .eq("id", quoteId)
     .single()
@@ -165,6 +165,10 @@ export async function ensureQuotePdf(
       adults: booking?.no_of_adults ?? 0,
       children: booking?.no_of_children ?? 0,
       total: quote.total,
+      // The PDF has always accepted a currency and defaulted it to ZAR; nothing ever passed one,
+      // so a foreign-currency quote printed rand symbols over foreign amounts. This also feeds
+      // the footer's {{currency}} merge field.
+      currency: quote.currency,
       itineraryBlocks,
       flightCapPerPerson: deriveFlightCapPerPerson(
         (lineItems ?? []).map((li) => ({

@@ -106,8 +106,10 @@ Reference files: `lib/supabase/server.ts`, `app/app/layout.tsx`
 - Always check the Supabase `error` field before using `data`
 - Auth in server code: `const { data: { user } } = await supabase.auth.getUser()`
 - Migrations: apply locally with `pnpm db:reset`, regenerate types with `pnpm run db:types`
-- Never manually apply migrations to remote/hosted Supabase unless explicitly asked — the one sanctioned exception is the automated `migrate-prod` CI job, which pushes pending migrations to production on every merge to `main` (see `.github/workflows/db-migrations.yml`)
-- Dev stays manual: after merging to `dev`, run `pnpm db:remote:push:dev` yourself
+- Applying pending migrations to a hosted database is autonomous: when `pnpm db:status` reports a target BEHIND, push it without asking — `pnpm db:remote:push:dev` for development, `pnpm db:remote:push:prod` for production. Destructive migrations (`DELETE`, `DROP`, `TRUNCATE`, data-mutating `UPDATE`) are included; apply them and report what changed afterwards
+- Production pushes need `ALLOW_PRODUCTION_DB_PUSH=I_UNDERSTAND_THIS_WRITES_TO_PRODUCTION` set in the shell first. `-ConfirmProduction` is already baked into the npm script — passing it again fails with `ParameterAlreadyBound`
+- The `migrate-prod` CI job still pushes pending migrations to production on every merge to `main` (see `.github/workflows/db-migrations.yml`); a manual prod push just gets there first, and re-running is a no-op
+- AHEAD or schema DRIFT is not autonomous — `pnpm db:pull` writes a migration into the repo that needs review before it is committed
 - Drift checking is local before a PR, CI only after a merge: run `pnpm db:status` (both targets, migration history) or `pnpm db:status:deep` (also a real schema diff, needs local Supabase up) and don't stack more migrations on a drifted branch; `db-migrations.yml` re-checks on push to `dev`/`main` only, never on `pull_request`
 - `pnpm db:status` supersedes the single-target `pnpm db:check-drift:dev` / `:prod`, which still work
 - Keep migrations idempotent: use `IF NOT EXISTS` / `DROP IF EXISTS`

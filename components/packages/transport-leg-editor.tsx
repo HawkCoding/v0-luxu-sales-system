@@ -22,6 +22,7 @@ import {
   type TransportLegState,
 } from "@/lib/packages/apply-dialog-state"
 import { RateTypeSelect } from "@/components/rate-type-select"
+import { CurrencySelect } from "@/components/currency-select"
 
 const NONE_VALUE = "__none"
 
@@ -146,18 +147,31 @@ export function TransportLegEditor({ leg, value, onChange, rateTypes = [] }: Tra
       ) : null}
 
       {value.selected ? (
-        <RateTypeSelect
-          rateTypes={rateTypes}
-          value={value.rateTypeId}
-          onChange={(rateTypeId) => onChange({ ...value, rateTypeId })}
-          id={`rate-type-${leg.id}`}
-          className="max-w-[280px]"
-          inheritLabel={
-            leg.inheritedRateTypeName
-              ? `Supplier default (${leg.inheritedRateTypeName})`
-              : "Supplier default"
-          }
-        />
+        <div className="flex flex-wrap items-end gap-3">
+          <RateTypeSelect
+            rateTypes={rateTypes}
+            value={value.rateTypeId}
+            onChange={(rateTypeId) => onChange({ ...value, rateTypeId })}
+            id={`rate-type-${leg.id}`}
+            className="max-w-[280px] flex-1"
+            inheritLabel={
+              leg.inheritedRateTypeName
+                ? `Supplier default (${leg.inheritedRateTypeName})`
+                : "Supplier default"
+            }
+          />
+          {/* Only a price override is typed by hand here — a request with none prices off the
+              rate card and takes the card's currency instead. */}
+          {value.requests.some((request) => request.priceOverride != null) ? (
+            <CurrencySelect
+              id={`price-currency-${leg.id}`}
+              label="Override currency"
+              value={value.priceCurrency}
+              onChange={(priceCurrency) => onChange({ ...value, priceCurrency })}
+              className="w-40"
+            />
+          ) : null}
+        </div>
       ) : null}
 
       {value.selected

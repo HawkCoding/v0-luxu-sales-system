@@ -16,7 +16,7 @@ import { useRole } from "@/lib/role-context"
 import { useState } from "react"
 import { Plus } from "lucide-react"
 import { formatDisplayDate } from "@/lib/date-format"
-import { formatCurrency } from "@/lib/utils"
+import { BASE_CURRENCY, formatMoney } from "@/lib/money"
 import { toast } from "sonner"
 
 const PAYMENT_ENABLED_STAGES: ReadonlySet<PipelineStage> = new Set([
@@ -34,9 +34,12 @@ interface JobPaymentsTabProps {
   jobId: string
   mutate: () => void
   stage?: PipelineStage
+  /** The booking's billing currency — an invoice is always raised in its quote's currency, and
+   *  a payment is always made in its invoice's, so one code covers the whole tab. */
+  currency?: string
 }
 
-export function JobPaymentsTab({ payments, jobId, mutate, stage }: JobPaymentsTabProps) {
+export function JobPaymentsTab({ payments, jobId, mutate, stage, currency = BASE_CURRENCY }: JobPaymentsTabProps) {
   const { can } = useRole()
   const [open, setOpen] = useState(false)
   const todayLocal = new Date().toISOString().slice(0, 10)
@@ -90,7 +93,10 @@ export function JobPaymentsTab({ payments, jobId, mutate, stage }: JobPaymentsTa
       <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-medium text-foreground">
-            Total Received: <span className={totalPaid >= 0 ? "text-payment-green" : "text-payment-red"}>R {formatCurrency(totalPaid)}</span>
+            Total Received:{" "}
+            <span className={totalPaid >= 0 ? "text-payment-green" : "text-payment-red"}>
+              {formatMoney(totalPaid, currency)}
+            </span>
           </p>
         </div>
         {canRecordPayment && (
@@ -122,7 +128,7 @@ export function JobPaymentsTab({ payments, jobId, mutate, stage }: JobPaymentsTa
                   <DatePicker value={form.paymentDate} onChange={(value) => setForm(f => ({ ...f, paymentDate: value ?? "" }))} className="mt-1" aria-label="Payment date" />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground">Amount (ZAR)</label>
+                  <label className="text-xs font-medium text-muted-foreground">Amount ({currency})</label>
                   <Input type="number" value={form.amount} onChange={(e) => setForm(f => ({ ...f, amount: e.target.value }))} placeholder="0" className="mt-1" />
                 </div>
                 <div>
@@ -166,7 +172,7 @@ export function JobPaymentsTab({ payments, jobId, mutate, stage }: JobPaymentsTa
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className={`text-sm font-semibold ${p.amount >= 0 ? "text-payment-green" : "text-payment-red"}`}>
-                      {p.amount >= 0 ? "+" : ""}R {formatCurrency(p.amount)}
+                      {p.amount >= 0 ? "+" : ""}{formatMoney(p.amount, currency)}
                     </span>
                     <Badge variant="secondary" className="text-[10px]">{p.method}</Badge>
                   </div>

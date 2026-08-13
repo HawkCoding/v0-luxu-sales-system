@@ -239,12 +239,21 @@ export type SupplierStatus = "draft" | "active" | "inactive" | "temporary"
 export type TransportRequestServiceType = "transfer" | "rental"
 export type TransportServiceType = TransportRequestServiceType
 
-export const CURRENCIES: { value: string; label: string }[] = [
+/** Every currency a supplier rate or a quote may be denominated in. ZAR is the base: foreign
+ *  rates convert into the quote's currency at build time. Adding one here is enough for the
+ *  supplier and quote dropdowns; `lib/fx/rates.ts` fetches whatever this list contains. */
+export const CURRENCIES = [
   { value: "ZAR", label: "ZAR — South African Rand" },
   { value: "USD", label: "USD — US Dollar" },
   { value: "EUR", label: "EUR — Euro" },
   { value: "GBP", label: "GBP — British Pound" },
-  { value: "AUD", label: "AUD — Australian Dollar" },
+] as const satisfies readonly { value: string; label: string }[]
+
+export type SupportedCurrency = (typeof CURRENCIES)[number]["value"]
+
+export const SUPPORTED_CURRENCY_VALUES = CURRENCIES.map((entry) => entry.value) as [
+  SupportedCurrency,
+  ...SupportedCurrency[],
 ]
 
 export const SUPPLIER_KIND_LABELS: Record<SupplierKind, string> = {
@@ -662,6 +671,17 @@ export interface PricingSnapshot {
    *  line covers multiple rooms whose configs weren't confirmed identical. */
   selectedVariants?: { label: string; values: string[] }[]
   markupAmount?: number | null
+  /** The supplier's own currency, when it differed from the quote's and this line was converted.
+   *  Absent or equal to the quote currency means the price is native — no conversion happened. */
+  sourceCurrency?: string | null
+  /** The pre-conversion unit price, in sourceCurrency. Kept so the internal provenance note can
+   *  show what the supplier actually charges, not just the converted figure. */
+  sourceUnitPrice?: number | null
+  /** The multiplier applied: unitPrice = roundMoney(sourceUnitPrice * fxRate). Stamped here so a
+   *  sent quote never reprices itself when the market moves. */
+  fxRate?: number | null
+  /** The rate's publication date, so a stale conversion is visible internally. */
+  fxRateAsOf?: string | null
   commission?: CommissionBreakdown | null
   /** True when this line was added as an ad-hoc extra (not part of an applied package). */
   isExtra?: boolean
@@ -1057,6 +1077,9 @@ export interface Quote {
   lineItems: QuoteLineItem[]
   subtotal: number
   total: number
+  /** The single currency this quote — every line, the subtotal and the total — is denominated in.
+   *  Foreign supplier rates are converted into it when the quote is priced. */
+  currency: string
   /** Flat manual amount folded into the Commission line. Already included in subtotal/total. */
   commissionBonus?: number
   lastSentAt?: string

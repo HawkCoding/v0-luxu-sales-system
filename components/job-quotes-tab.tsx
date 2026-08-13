@@ -10,7 +10,9 @@ import type { Quote } from "@/lib/types"
 import { isMissingPricing } from "@/lib/quotes/pricing-engine"
 import { useRole } from "@/lib/role-context"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
-import { formatCurrency } from "@/lib/utils"
+import { formatMoney } from "@/lib/money"
+import { ConvertQuoteCurrencyDialog } from "@/components/quotes/convert-quote-currency-dialog"
+import { FxProvenanceNote } from "@/components/quotes/fx-provenance-note"
 import { QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 import { BuildBookingDialog } from "@/components/build-booking-dialog"
 import { CreateQuoteDialog } from "@/components/create-quote-dialog"
@@ -215,6 +217,16 @@ export function JobQuotesTab({
                           onRevised={mutate}
                         />
                       )}
+                      {!["cancelled", "superseded", "expired"].includes(q.status) && (
+                        <ConvertQuoteCurrencyDialog
+                          quoteId={q.id}
+                          currency={q.currency}
+                          lineItems={q.lineItems}
+                          total={q.total}
+                          requiresRevision={!["draft", "pricing_incomplete"].includes(q.status)}
+                          onConverted={mutate}
+                        />
+                      )}
                       {["draft", "pricing_incomplete", "ready", "sent"].includes(q.status) && (
                         <Button
                           size="sm"
@@ -247,6 +259,7 @@ export function JobQuotesTab({
                         <BuildBookingDialog
                           jobId={jobId}
                           quoteId={q.id}
+                          quoteCurrency={q.currency}
                           travelDate={travelDate}
                           existingLineItemCount={q.lineItems.length}
                           existingLineItems={q.lineItems}
@@ -291,9 +304,13 @@ export function JobQuotesTab({
                             // Internal-only split. The stored description stays plain "Commission"
                             // so the client-facing invoice line doesn't expose the top-up.
                             <div className="text-[10px] text-muted-foreground">
-                              R {formatCurrency(li.total - lineBonus)} calculated + R {formatCurrency(lineBonus)} added
+                              {formatMoney(li.total - lineBonus, q.currency)} calculated +{" "}
+                              {formatMoney(lineBonus, q.currency)} added
                             </div>
                           ) : null}
+                          {/* Internal only — the client's PDF and email show the converted
+                              figure alone. See components/quotes/fx-provenance-note.tsx. */}
+                          <FxProvenanceNote snapshot={li.pricingSnapshot ?? null} />
                         </td>
                         <td className="py-2 pl-4 text-xs text-right text-muted-foreground">
                           <div>{li.qty}</div>
@@ -306,9 +323,11 @@ export function JobQuotesTab({
                             ? isMissingPricing(li)
                               ? "TBD"
                               : "Included"
-                            : `R ${formatCurrency(li.unitPrice)}`}
+                            : formatMoney(li.unitPrice, q.currency)}
                         </td>
-                        <td className="py-2 pl-6 text-xs text-right text-foreground font-medium">R {formatCurrency(li.total)}</td>
+                        <td className="py-2 pl-6 text-xs text-right text-foreground font-medium">
+                          {formatMoney(li.total, q.currency)}
+                        </td>
                         {canEditLines && (
                           <td className="py-2 text-right">
                             <button
@@ -341,11 +360,13 @@ export function JobQuotesTab({
               <div className="space-y-1 text-right">
                 <div className="flex justify-end gap-8 text-xs">
                   <span className="text-muted-foreground">Subtotal</span>
-                  <span className="text-foreground font-medium w-24">R {formatCurrency(q.subtotal)}</span>
+                  <span className="text-foreground font-medium w-28">
+                    {formatMoney(q.subtotal, q.currency)}
+                  </span>
                 </div>
                 <div className="flex justify-end gap-8 text-sm font-semibold">
                   <span className="text-foreground">Total</span>
-                  <span className="text-foreground w-24">R {formatCurrency(q.total)}</span>
+                  <span className="text-foreground w-28">{formatMoney(q.total, q.currency)}</span>
                 </div>
               </div>
               {q.overrideReason && (

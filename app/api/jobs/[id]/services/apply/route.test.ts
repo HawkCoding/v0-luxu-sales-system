@@ -154,10 +154,18 @@ function createSupabaseMock(bookingExists = true) {
         return {
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
-              maybeSingle: vi.fn(async () => ({ data: { commission_bonus: 0 }, error: null })),
+              maybeSingle: vi.fn(async () => ({
+                data: { commission_bonus: 0, currency: "ZAR" },
+                error: null,
+              })),
             })),
           })),
         }
+      }
+      // The route reads the FX cache before pricing so a foreign supplier rate can be converted
+      // into the quote's currency. Empty is the all-ZAR case, which needs no rate at all.
+      if (table === "fx_rates") {
+        return { select: vi.fn(() => ({ eq: vi.fn(async () => ({ data: [], error: null })) })) }
       }
       throw new Error(`Unexpected table ${table}`)
     }),
@@ -245,6 +253,9 @@ describe("POST /api/jobs/[id]/services/apply", () => {
       expect.anything(),
       JOB_ID,
       "BT-2026-0001",
+      // The synthetic package carries the quote's currency so display-only consumers (the
+      // commission badge) render the right symbol.
+      "ZAR",
     )
   })
 

@@ -1,5 +1,6 @@
 "use client"
 
+import { BulletLineList } from "@/components/supplier/bullet-line-list"
 import { parseBulletLines, splitBulletLines } from "@/lib/inclusions/bullet-lines"
 
 interface InclusionPreviewProps {
@@ -13,28 +14,15 @@ interface InclusionPreviewProps {
  * actually used — a plain dash list needs no preview.
  */
 export function InclusionPreview({ value }: InclusionPreviewProps) {
-  const lines = parseBulletLines(splitBulletLines(value))
-  if (!lines.some((line) => line.kind === "heading")) return null
+  const stored = splitBulletLines(value)
+  if (!parseBulletLines(stored).some((line) => line.kind === "heading")) return null
 
   return (
     <div className="rounded-md border border-dashed bg-muted/40 p-3">
       <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
         Quote itinerary preview
       </p>
-      <ul className="space-y-0.5">
-        {lines.map((line, index) => (
-          <li
-            key={index}
-            className={
-              line.kind === "heading"
-                ? "mt-1.5 text-xs font-semibold text-foreground first:mt-0"
-                : "text-xs text-muted-foreground"
-            }
-          >
-            {line.kind === "heading" ? line.text : `- ${line.text}`}
-          </li>
-        ))}
-      </ul>
+      <BulletLineList values={stored} className="space-y-0.5 text-xs" />
     </div>
   )
 }

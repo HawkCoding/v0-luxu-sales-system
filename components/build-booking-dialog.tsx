@@ -25,7 +25,6 @@ import { useActiveSuppliers, useRateTypes } from "@/lib/use-data"
 import type { BookingTransportRequest, CommissionKind, PackageDetail, QuoteLineItem, SupplierKind } from "@/lib/types"
 import { SUPPLIER_KIND_LABELS } from "@/lib/types"
 import { PresenceAvatars } from "@/components/presence-avatars"
-import { formatCurrency } from "@/lib/utils"
 import { isMissingPricing } from "@/lib/quotes/pricing-engine"
 import { useRecordPresence } from "@/hooks/use-record-presence"
 import { useVersionedSave } from "@/hooks/use-versioned-save"
@@ -33,6 +32,10 @@ import { CommissionControl, type CommissionControlValue } from "@/components/sup
 import { CommissionBadge } from "@/components/quotes/commission-badge"
 import { SuiteLegEditor } from "@/components/packages/suite-leg-editor"
 import { TransportLegEditor } from "@/components/packages/transport-leg-editor"
+import { FxRateBanner } from "@/components/quotes/fx-rate-banner"
+import { FxProvenanceNote } from "@/components/quotes/fx-provenance-note"
+import { useFxRates } from "@/lib/fx/use-fx-rates"
+import { BASE_CURRENCY, formatMoney } from "@/lib/money"
 import { TripDateSummary } from "@/components/packages/trip-date-summary"
 import { TravellerCountsEditor, type TravellerCounts } from "@/components/bookings/traveller-counts-editor"
 import { resolveAdultsOnlyDelta, type PassengerTotals } from "@/lib/packages/passenger-totals"
@@ -57,6 +60,8 @@ import {
 interface BuildBookingDialogProps {
   jobId: string
   quoteId: string
+  /** The currency this quote is denominated in. Foreign supplier rates convert into it. */
+  quoteCurrency?: string
   travelDate: string | null
   existingLineItemCount: number
   /** Existing quote lines — manual/extra lines (snapshot.isExtra) are preserved across re-apply. */
@@ -107,6 +112,7 @@ function resolveCommissionValue(value: CommissionControlValue): ApplyCommissionO
 export function BuildBookingDialog({
   jobId,
   quoteId,
+  quoteCurrency = BASE_CURRENCY,
   travelDate,
   existingLineItemCount,
   existingLineItems = [],
@@ -136,6 +142,8 @@ export function BuildBookingDialog({
   const [bookingCounts, setBookingCounts] = useState<TravellerCounts | null>(null)
   const [commission, setCommission] = useState<CommissionControlValue>(EMPTY_COMMISSION)
   const [previewLineItems, setPreviewLineItems] = useState<QuoteLineItem[]>([])
+  const { rates: fxRates, asOf: fxAsOf, stale: fxStale, refresh: refreshFxRates, setRate: setFxRate } =
+    useFxRates(open)
   const [validating, setValidating] = useState(false)
   const [buildError, setBuildError] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<string[]>([])
@@ -284,6 +292,36 @@ export function BuildBookingDialog({
     [packageDetail],
   )
 
+  /**
+   * Currencies in play on this build that are not the quote's — i.e. the ones that will be
+   * converted. Empty means every price is already native and the FX banner stays hidden, which
+   * is the common case and must not cost the salesperson any screen space.
+   *
+   * Rate-card legs contribute their cards' currencies; manual-pricing legs contribute the
+   * currency chosen on the leg itself.
+   */
+  const foreignCurrencies = useMemo(() => {
+    const legById = new Map(sortedLegs.map((leg) => [leg.id, leg]))
+    const found = new Set<string>()
+
+    for (const state of legStates) {
+      if (!state.selected) continue
+      const leg = legById.get(state.legId)
+      if (!leg) continue
+
+      if (leg.pricingMode === "manual") {
+        found.add(state.priceCurrency)
+        continue
+      }
+      for (const card of leg.rateCards) {
+        found.add((card.currency ?? "").trim().toUpperCase() || BASE_CURRENCY)
+      }
+    }
+
+    found.delete(quoteCurrency)
+    return Array.from(found).sort()
+  }, [sortedLegs, legStates, quoteCurrency])
+
   // Surfaced next to the blocking validation error too — hitting Next with a stale booking total
   // shouldn't be a dead end; the fix is one click away right where the error is shown.
   const mismatchedSplitLegs = useMemo(() => {
@@ -393,6 +431,8 @@ export function BuildBookingDialog({
       const stateOptions = {
         tripStartDate: savedState?.tripStartDate ?? travelDate ?? null,
         totalsBySupplierId: totals,
+        // A new leg types its fares in the quote's own currency until told otherwise.
+        quoteCurrency,
       }
       const savedLegIds = new Set((savedState?.selections ?? []).map((row) => row.package_leg_id))
       const states =
@@ -595,6 +635,9 @@ export function BuildBookingDialog({
           quoteId,
           travelDate: derivedRange.start,
           selections: toApplySelections(legStates, commissionOverrides),
+          // Send the rates that were on screen so a hand-nudged rate prices the quote, rather
+          // than the server silently re-deriving a different one from its cache.
+          fxRates,
         }),
       })
       const payload = await res.json()
@@ -750,6 +793,16 @@ export function BuildBookingDialog({
 
             <TripDateSummary detail={packageDetail} states={legStates} />
 
+            <FxRateBanner
+              foreignCurrencies={foreignCurrencies}
+              quoteCurrency={quoteCurrency}
+              rates={fxRates}
+              asOf={fxAsOf}
+              stale={fxStale}
+              onRefresh={refreshFxRates}
+              onRateChange={setFxRate}
+            />
+
             {hasAutoFilledServices && (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3">
                 <p className="text-sm">
@@ -778,6 +831,8 @@ export function BuildBookingDialog({
                         expectedTotals={totalsBySupplierId[leg.supplierId] ?? null}
                         anchorContext={hotelAnchorContext(leg.id)}
                         rateTypes={rateTypes}
+                        quoteCurrency={quoteCurrency}
+                        fxRates={fxRates}
                       />
                     )}
                   </div>
@@ -962,9 +1017,10 @@ export function BuildBookingDialog({
                             {li.pricingSnapshot.rateTypeInherited ? " (default)" : ""}
                           </span>
                         )}
+                        <FxProvenanceNote snapshot={li.pricingSnapshot ?? null} />
                         <CommissionBadge
                           commission={li.pricingSnapshot?.commission ?? null}
-                          currency={packageDetail?.currency ?? "ZAR"}
+                          currency={quoteCurrency}
                         />
                       </td>
                       <td className="px-3 py-2 text-right text-xs text-muted-foreground">
@@ -973,8 +1029,8 @@ export function BuildBookingDialog({
                           <div className="text-[11px] text-muted-foreground">{li.pricingSnapshot.unit}</div>
                         ) : null}
                       </td>
-                      <td className="px-3 py-2 text-right text-xs whitespace-nowrap">R {formatCurrency(li.unitPrice)}</td>
-                      <td className="px-3 py-2 text-right text-xs font-medium whitespace-nowrap">R {formatCurrency(li.total)}</td>
+                      <td className="px-3 py-2 text-right text-xs whitespace-nowrap">{formatMoney(li.unitPrice, quoteCurrency)}</td>
+                      <td className="px-3 py-2 text-right text-xs font-medium whitespace-nowrap">{formatMoney(li.total, quoteCurrency)}</td>
                     </tr>
                   ))}
                 </tbody>

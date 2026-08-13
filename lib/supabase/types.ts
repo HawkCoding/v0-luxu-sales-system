@@ -1,4 +1,4 @@
-export type Json =
+﻿export type Json =
   | string
   | number
   | boolean
@@ -552,6 +552,7 @@ export type Database = {
           nights: number | null
           notes: string | null
           origin: Database["public"]["Enums"]["service_origin"]
+          price_currency: string
           rate_type_id: string | null
           route_id: string | null
           route_reversed: boolean
@@ -575,6 +576,7 @@ export type Database = {
           nights?: number | null
           notes?: string | null
           origin?: Database["public"]["Enums"]["service_origin"]
+          price_currency?: string
           rate_type_id?: string | null
           route_id?: string | null
           route_reversed?: boolean
@@ -598,6 +600,7 @@ export type Database = {
           nights?: number | null
           notes?: string | null
           origin?: Database["public"]["Enums"]["service_origin"]
+          price_currency?: string
           rate_type_id?: string | null
           route_id?: string | null
           route_reversed?: boolean
@@ -1651,6 +1654,33 @@ export type Database = {
         }
         Relationships: []
       }
+      fx_rates: {
+        Row: {
+          as_of: string
+          base_currency: string
+          fetched_at: string
+          quote_currency: string
+          rate: number
+          source: string
+        }
+        Insert: {
+          as_of: string
+          base_currency?: string
+          fetched_at?: string
+          quote_currency: string
+          rate: number
+          source?: string
+        }
+        Update: {
+          as_of?: string
+          base_currency?: string
+          fetched_at?: string
+          quote_currency?: string
+          rate?: number
+          source?: string
+        }
+        Relationships: []
+      }
       gravity_forms_submissions: {
         Row: {
           form_id: string | null
@@ -2394,6 +2424,7 @@ export type Database = {
           booking_id: string
           commission_bonus: number
           created_at: string
+          currency: string
           follow_ups_disabled: boolean
           id: string
           itinerary_id: string | null
@@ -2416,6 +2447,7 @@ export type Database = {
           booking_id: string
           commission_bonus?: number
           created_at?: string
+          currency?: string
           follow_ups_disabled?: boolean
           id?: string
           itinerary_id?: string | null
@@ -2438,6 +2470,7 @@ export type Database = {
           booking_id?: string
           commission_bonus?: number
           created_at?: string
+          currency?: string
           follow_ups_disabled?: boolean
           id?: string
           itinerary_id?: string | null

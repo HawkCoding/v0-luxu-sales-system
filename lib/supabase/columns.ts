@@ -29,7 +29,7 @@ export const PAYMENT_COLUMNS =
   "id, booking_id, amount, received_at, method, reference, notes, created_at"
 
 export const QUOTE_COLUMNS =
-  "id, booking_id, itinerary_id, status, quote_number, parent_quote_id, validity_until, subtotal, total, commission_bonus, last_sent_at, override_pin, override_reason, created_at, updated_at"
+  "id, booking_id, itinerary_id, status, quote_number, parent_quote_id, validity_until, subtotal, total, currency, commission_bonus, last_sent_at, override_pin, override_reason, created_at, updated_at"
 
 export const QUOTE_LINE_ITEM_COLUMNS =
   "id, quote_id, description, supplier_description, pricing_snapshot, qty, unit_price, total, sort_order"

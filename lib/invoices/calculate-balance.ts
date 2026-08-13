@@ -3,7 +3,7 @@ import type { Database } from "@/lib/supabase/types"
 
 type QuoteBalanceRow = Pick<
   Database["public"]["Tables"]["quotes"]["Row"],
-  "id" | "subtotal" | "total" | "status" | "created_at"
+  "id" | "subtotal" | "total" | "currency" | "status" | "created_at"
 >
 
 export interface InvoiceBalance {
@@ -11,6 +11,9 @@ export interface InvoiceBalance {
   quoteTotal: number
   /** VAT-exclusive value of the supply, for the tax-invoice breakdown. */
   quoteSubtotal: number
+  /** The accepted quote's currency — an invoice is always raised in it, so the client is billed
+   *  in the same currency they accepted. */
+  currency: string
   totalPaid: number
   /** Date of the most recent payment, or null when nothing is paid yet. */
   lastPaymentAt: string | null
@@ -25,7 +28,7 @@ export async function calculateInvoiceBalance(
     await Promise.all([
       supabase
         .from("quotes")
-        .select("id, subtotal, total, status, created_at")
+        .select("id, subtotal, total, currency, status, created_at")
         .eq("booking_id", bookingId)
         .eq("status", "accepted")
         .order("created_at", { ascending: false })
@@ -52,6 +55,7 @@ export async function calculateInvoiceBalance(
     quote,
     quoteTotal: Number(quote.total),
     quoteSubtotal: Number(quote.subtotal),
+    currency: quote.currency,
     totalPaid,
     lastPaymentAt,
     balance,

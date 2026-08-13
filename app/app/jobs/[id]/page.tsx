@@ -333,6 +333,12 @@ export default function JobDetailPage() {
     outcomeReasons = [],
     settings,
   } = data
+  // The booking's billing currency: whatever the accepted quote is priced in, since invoices
+  // and payments both inherit it. Falls back to the newest quote before one is accepted.
+  const billingCurrency: string =
+    quotes.find((quote: { status: string }) => quote.status === "accepted")?.currency ??
+    quotes[quotes.length - 1]?.currency ??
+    "ZAR"
   const currentStage = getCanonicalPipelineStage(job.stage as PipelineStage)
   const currentStageIdx = PIPELINE_STAGES.findIndex(s => s.key === currentStage)
   const forwardTargetStage = currentStageIdx >= 0 ? PIPELINE_STAGES[currentStageIdx + 1]?.key ?? null : null
@@ -1022,6 +1028,7 @@ export default function JobDetailPage() {
             jobId={id}
             mutate={mutate}
             stage={currentStage}
+            currency={billingCurrency}
           />
         </TabsContent>
         <TabsContent value="correspondence">

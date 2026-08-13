@@ -401,7 +401,10 @@ function Get-SchemaDrift {
 
   [System.IO.File]::WriteAllText($driftFile, $sql, $utf8NoBom)
 
-  $statements = Split-DiffStatements -Sql $sql
+  # Wrap before counting: PS 5.1 unwraps a single-element array to the bare
+  # element, so a one-statement diff arrives as a string and StrictMode throws
+  # on .Count. @() puts it back into an array without touching the other cases.
+  $statements = @(Split-DiffStatements -Sql $sql)
   if ($statements.Count -eq 0) {
     return $null
   }
