@@ -8,6 +8,7 @@ import type {
   ResolvedCommission,
   SupplierKind,
 } from "@/lib/types"
+import { isTypePricedSupplier } from "@/lib/types"
 import { fetchDefaultAgeBuckets, resolveAgeBuckets } from "@/lib/pricing/age-buckets"
 import { projectPassengerTotals } from "@/lib/packages/passenger-totals"
 import { isRateCardValidOn, selectRateCard } from "@/lib/rate-cards/resolve"
@@ -134,20 +135,27 @@ export async function priceExtraLineItems(
   if (suiteTypeError || !suiteType) throw new Error("Type not found")
   if (suiteType.supplier_id !== supplierId) throw new Error("Type does not belong to this supplier")
 
+  // A tour operator prices the type across every itinerary, so its cards carry no route id —
+  // match those as well as cards written against this route (see lib/rate-cards/resolve.ts).
   const { data: rateCards } = await supabase
     .from("rate_cards")
     .select("id, rate_type_id, price_per_person, child_price, infant_price, valid_from, valid_to")
-    .eq("route_id", routeId)
+    .or(`route_id.eq.${routeId},route_id.is.null`)
     .eq("suite_type_id", suiteTypeId)
     .order("valid_from", { ascending: true })
 
   const validCards = (rateCards ?? []).filter((card) =>
     isRateCardValidOn({ validFrom: card.valid_from, validTo: card.valid_to }, travelDate),
   )
+  // Naming the itinerary in a tour operator's error would send the user hunting for a price that
+  // was never keyed to it.
+  const where = isTypePricedSupplier(supplier.kind)
+    ? `"${suiteType.name}" (${supplier.name})`
+    : `"${suiteType.name}" on "${route.name}" (${supplier.name})`
+
   if (validCards.length === 0) {
     // The query above is already scoped to this route + type, so a non-empty `rateCards` means
     // cards exist and the date is what missed — otherwise the pair was never priced at all.
-    const where = `"${suiteType.name}" on "${route.name}" (${supplier.name})`
     throw new Error(
       (rateCards ?? []).length > 0
         ? `No rate card covers ${travelDate} for ${where}. Extend the validity period or add a new one.`
@@ -174,12 +182,11 @@ export async function priceExtraLineItems(
     fallbackRateTypeId,
   )
   if (!selected) {
-    throw new Error(`No rate card covers ${travelDate} for "${suiteType.name}" on "${route.name}" (${supplier.name}).`)
+    throw new Error(`No rate card covers ${travelDate} for ${where}.`)
   }
   if (!selected.ok) {
     // Cards exist on this date, just not for the requested rate type. Pricing off a different
     // rate's card would quote a price nobody chose, so this fails instead.
-    const where = `"${suiteType.name}" on "${route.name}" (${supplier.name})`
     const label = rateTypeLabel(selected.requestedRateTypeId)
     throw new Error(
       (rateCards ?? []).some((c) => c.rate_type_id === selected.requestedRateTypeId)

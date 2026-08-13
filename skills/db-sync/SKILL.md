@@ -26,7 +26,9 @@ to keep `tmp-db-sync/` when clean.
 1. Run `pnpm db:status` first. If the user asked about schema drift or dashboard edits,
    or migrations look in sync but something is still wrong, run `pnpm db:status:deep`.
 2. `-Deep` needs the local stack running. If it reports `SKIPPED`, run `pnpm db:start`
-   and retry — don't report a skipped check as clean.
+   and retry — don't report a skipped check as clean. The same applies to any error:
+   the script fails loudly rather than reporting "in sync", and a run that threw has
+   told you nothing about the databases.
 3. On drift, read the generated `tmp-db-sync/status-*/<target>/remote-to-local.sql`
    and summarise the actual objects that differ. Never just relay the line count.
 
@@ -47,9 +49,23 @@ The diff direction is `--from <remote> --to local`, so the SQL shown is *what wo
 have to run against the remote to make it match local*. A `CREATE OR REPLACE FUNCTION`
 in the output means the remote's version of that function differs from local's.
 
-Two lines are filtered out as known noise and are never drift:
-`SET check_function_bodies = false;` (diff preamble) and `DROP EVENT TRIGGER ensure_rls;`
-(a platform-managed trigger that exists on hosted Supabase but never locally).
+Drift is counted in **statements**, not lines, and the report groups them by kind
+(`4 x CREATE OR REPLACE FUNCTION`) so you can see what sort of objects differ before
+opening the file. Still open it and name the objects.
+
+When a target is BEHIND, the schema check will also report drift — the unapplied
+migrations are the schema gap. The report says so; push the migrations and re-check
+rather than hunting a dashboard edit.
+
+Filtered out as known noise, never drift:
+
+- `SET check_function_bodies = false;` — diff preamble.
+- `DROP EVENT TRIGGER ensure_rls;` — platform-managed, exists on hosted Supabase, never locally.
+- Functions whose stored body matches local once CR bytes are stripped. A migration
+  checked out with CRLF stores CR inside `prosrc`; applied elsewhere with LF it does
+  not, and the diff engine calls the function changed when the code is identical.
+  The script compares `md5(replace(prosrc, chr(13), ''))` on both sides and reports
+  how many functions it ignored on that basis.
 
 ## Rules
 

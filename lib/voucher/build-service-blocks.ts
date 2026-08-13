@@ -90,6 +90,8 @@ interface SupplierJoin {
 
 interface RouteJoin {
   name: string | null
+  /** Tour operators only: what this itinerary covers. */
+  description: string | null
   duration_days: number | null
   direction_mode: string | null
   departure_time: string | null
@@ -501,7 +503,7 @@ export async function buildVoucherServiceBlocks(
     .select(
       `id, label, sort_order, selected, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, notes, supplier_reference, supplier_contact_name, voucher_footnote, excursions,
        suppliers(name, phone, email, website, location, description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions, station_addresses:supplier_station_addresses(location_id, station_name, street_address)),
-       routes(name, duration_days, direction_mode, departure_time, arrival_time, return_departure_time, return_arrival_time, default_excursions, origin:locations!routes_origin_location_id_fkey(id, name), destination:locations!routes_destination_location_id_fkey(id, name)),
+       routes(name, description, duration_days, direction_mode, departure_time, arrival_time, return_departure_time, return_arrival_time, default_excursions, origin:locations!routes_origin_location_id_fkey(id, name), destination:locations!routes_destination_location_id_fkey(id, name)),
        suite_types(name),
        units:booking_service_units(suite_type_id, sort_order, adult_count, child_count, infant_count, suite_types(name), bedroom_types(name), bedroom_layouts(name), bathroom_types(name))`,
     )
@@ -654,6 +656,9 @@ export async function buildVoucherServiceBlocks(
       // A leg's own excursions override the route's defaults; only trains carry the concept today.
       excursions: isTrain ? (row.excursions?.length ? cleanList(row.excursions) : cleanList(route?.default_excursions)) : undefined,
       itinerary: serviceType === "tour" ? directedRouteName || row.notes || null : null,
+      // The itinerary's own copy, written on the supplier's itinerary — the tour type is priced,
+      // the itinerary is what the client reads.
+      itineraryDescription: serviceType === "tour" ? route?.description ?? null : null,
     }
 
     return [

@@ -313,12 +313,23 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
   }
 
   const routeIds = (routes ?? []).map((route) => route.id)
-  const [rateCardResult, vehicleRentalDetailsResult] = await Promise.all([
+  // A tour operator's cards carry no route (they price the tour type across every itinerary), so
+  // they are only reachable through their suite type -- rate_cards has no supplier_id of its own.
+  const suiteTypeIds = (suiteTypes ?? []).map((suiteType) => suiteType.id)
+  const [routedRateCardResult, typeRateCardResult, vehicleRentalDetailsResult] = await Promise.all([
     routeIds.length > 0
       ? supabase
           .from("rate_cards")
           .select("*")
           .in("route_id", routeIds)
+          .order("valid_from", { ascending: true })
+      : Promise.resolve({ data: [], error: null }),
+    suiteTypeIds.length > 0
+      ? supabase
+          .from("rate_cards")
+          .select("*")
+          .is("route_id", null)
+          .in("suite_type_id", suiteTypeIds)
           .order("valid_from", { ascending: true })
       : Promise.resolve({ data: [], error: null }),
     routeIds.length > 0
@@ -329,7 +340,10 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
       : Promise.resolve({ data: [], error: null }),
   ])
 
-  const { data: rateCards, error: rateCardsError } = rateCardResult
+  const rateCardsError = routedRateCardResult.error ?? typeRateCardResult.error
+  const rateCards = [...(routedRateCardResult.data ?? []), ...(typeRateCardResult.data ?? [])].sort(
+    (a, b) => a.valid_from.localeCompare(b.valid_from),
+  )
   const { data: vehicleRentalRouteDetails, error: vehicleRentalRouteDetailsError } =
     vehicleRentalDetailsResult
   if (rateCardsError) {
@@ -445,7 +459,6 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     }
   }
 
-  const suiteTypeIds = (suiteTypes ?? []).map((row) => row.id)
   const [
     bedroomTypesResult,
     bedroomLayoutsResult,

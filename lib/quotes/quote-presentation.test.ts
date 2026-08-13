@@ -182,12 +182,34 @@ describe("buildQuoteItineraryLines", () => {
     expect(boarding.text).toBe(
       "Two nights on the Blue Train in a Deluxe Suite on an all-inclusive basis — Pretoria to Cape Town | Departs at 12h00",
     )
-    expect(boarding.bullets).toEqual(["High Tea", "Wi-Fi"])
+    expect(boarding.bullets).toEqual([
+      { kind: "item", text: "High Tea" },
+      { kind: "item", text: "Wi-Fi" },
+    ])
     expect(arrival).toEqual({
       dateISO: "2026-07-22",
       text: "Arrival at Cape Town station at 18h00",
-      bullets: ["Train arrival times cannot be guaranteed"],
+      bullets: [{ kind: "item", text: "Train arrival times cannot be guaranteed" }],
     })
+  })
+
+  it("marks a `#` inclusion as a subheading and strips the marker", () => {
+    const [boarding] = buildQuoteItineraryLines([
+      {
+        ...trainBlock,
+        serviceData: {
+          ...trainBlock.serviceData,
+          inclusions: ["# Onboard", "High Tea", "# Off-train", "Vehicle transfer"],
+        },
+      },
+    ])
+
+    expect(boarding.bullets).toEqual([
+      { kind: "heading", text: "Onboard" },
+      { kind: "item", text: "High Tea" },
+      { kind: "heading", text: "Off-train" },
+      { kind: "item", text: "Vehicle transfer" },
+    ])
   })
 
   it("interleaves lines from different blocks by date", () => {
@@ -206,6 +228,33 @@ describe("buildQuoteItineraryLines", () => {
       },
     ])
     expect(line.text).toBe("Transfer from the hotel to the station | at 10h00")
+  })
+
+  it("names the booked itinerary on a tour and leads its bullets with the itinerary's copy", () => {
+    const [line] = buildQuoteItineraryLines([
+      {
+        serviceType: "tour",
+        title: "City Sightseeing",
+        contactDetails: { name: "City Sightseeing", location: "Cape Town" },
+        serviceData: {
+          departureDate: "2026-07-19",
+          startTime: "09:00",
+          suiteType: "Classic Hop-on-Hop-off Ticket",
+          itinerary: "Cape Town - One Day Pass",
+          itineraryDescription: "Red route, 15 stops, hop off as often as you like.",
+          inclusions: ["Audio guide"],
+        },
+        displayOrder: 1,
+      },
+    ])
+
+    expect(line.text).toBe(
+      "City Sightseeing in Cape Town — Cape Town - One Day Pass | at 09h00",
+    )
+    expect(line.bullets).toEqual([
+      { kind: "item", text: "Red route, 15 stops, hop off as often as you like." },
+      { kind: "item", text: "Audio guide" },
+    ])
   })
 
   it("omits the closing line when there is no end date", () => {
@@ -237,8 +286,9 @@ describe("buildQuoteItineraryLines — flight cap bullet", () => {
       "Flights are capped at R2 000 pp — incl. baggage & fees",
     )
     const flightLines = lines.filter((line) => line.text.startsWith("Flight"))
-    expect(flightLines[0].bullets).toContain("Flights are capped at R2 000 pp — incl. baggage & fees")
-    expect(flightLines[1].bullets).not.toContain("Flights are capped at R2 000 pp — incl. baggage & fees")
+    const capBullet = { kind: "item", text: "Flights are capped at R2 000 pp — incl. baggage & fees" }
+    expect(flightLines[0].bullets).toContainEqual(capBullet)
+    expect(flightLines[1].bullets).not.toContainEqual(capBullet)
   })
 
   it("adds no bullet when the cap is null", () => {
@@ -311,6 +361,19 @@ describe("collectQuoteExclusions", () => {
       "French Champagne, caviar, and gratuities",
       "Services not mentioned.",
     ])
+  })
+
+  it("keeps a `#` line as a plain exclusion — pooling leaves no room for subheadings", () => {
+    const exclusions = collectQuoteExclusions(
+      [
+        {
+          ...trainBlock,
+          serviceData: { ...trainBlock.serviceData, exclusions: ["# Onboard", "Gratuities"] },
+        },
+      ],
+      null,
+    )
+    expect(exclusions).toEqual(["Onboard", "Gratuities"])
   })
 
   it("omits the standing exclusion when it is empty", () => {

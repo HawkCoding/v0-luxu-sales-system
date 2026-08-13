@@ -4,7 +4,11 @@
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { voucherServiceTypeLabel } from "@/lib/generate-voucher"
 import { LONG_MONTH_NAMES, formatDayOfMonth, formatDisplayDateLong } from "@/lib/date-format"
+import type { BulletLine } from "@/lib/inclusions/bullet-lines"
+import { parseBulletLines, stripBulletMarker } from "@/lib/inclusions/bullet-lines"
 import type { QuoteLineItem } from "@/lib/types"
+
+export type { BulletLine } from "@/lib/inclusions/bullet-lines"
 
 export interface QuotePax {
   adults: number
@@ -20,8 +24,12 @@ export interface QuoteItineraryLine {
   dateISO: string | null
   /** One prose sentence, e.g. "Two nights at Irene Country Lodge … | Check in from 14h00". */
   text: string
-  /** Supplier inclusions rendered as sub-bullets beneath the line. */
-  bullets: string[]
+  /**
+   * Supplier inclusions rendered beneath the line: `item` bullets get a dash, `heading` bullets
+   * print bold and undashed so a long list can be broken into sections. See
+   * @/lib/inclusions/bullet-lines.
+   */
+  bullets: BulletLine[]
 }
 
 const DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})/
@@ -224,8 +232,15 @@ function describeBlock(block: VoucherServiceBlock): string {
       const title = block.title?.trim() || supplier || "Excursion"
       // Leg labels are often already written as "Excursion in Kimberley" — don't say it twice.
       const namesLocation = location ? title.toLowerCase().includes(location.toLowerCase()) : true
+      // The booked itinerary names the day; the tour type it belongs to is what was priced.
+      const itinerary = d.itinerary?.trim() || null
+      const namesItinerary = itinerary ? title.toLowerCase().includes(itinerary.toLowerCase()) : true
       return joinSentence(
-        [title, namesLocation ? null : `in ${location}`],
+        [
+          title,
+          namesLocation ? null : `in ${location}`,
+          namesItinerary ? null : `— ${itinerary}`,
+        ],
         [start ? `at ${start}` : null],
       )
     }
@@ -265,7 +280,7 @@ function describeEndLine(block: VoucherServiceBlock): QuoteItineraryLine | null 
       text: end
         ? `Arrival${where ? ` at ${where} station` : ""} at ${end}`
         : `Arrival${where ? ` at ${where} station` : ""}`,
-      bullets: ["Train arrival times cannot be guaranteed"],
+      bullets: [{ kind: "item", text: "Train arrival times cannot be guaranteed" }],
     }
   }
   return null
@@ -288,10 +303,15 @@ export function buildQuoteItineraryLines(
 
   blocks.forEach((block) => {
     const d = block.serviceData
-    const bullets = [...(d.inclusions ?? [])]
-    if (d.notes?.trim()) bullets.push(d.notes.trim())
+    const bullets = parseBulletLines(d.inclusions)
+    // What the booked itinerary covers, straight off the supplier's itinerary — leads the
+    // supplier's standing inclusions because it is specific to this day.
+    if (block.serviceType === "tour" && d.itineraryDescription?.trim()) {
+      bullets.unshift({ kind: "item", text: d.itineraryDescription.trim() })
+    }
+    if (d.notes?.trim()) bullets.push({ kind: "item", text: d.notes.trim() })
     if (flightCapBullet && !flightCapAttached && block.serviceType === "airline") {
-      bullets.push(flightCapBullet)
+      bullets.push({ kind: "item", text: flightCapBullet })
       flightCapAttached = true
     }
 
@@ -313,7 +333,11 @@ export function buildQuoteItineraryLines(
     .map((entry) => entry.line)
 }
 
-/** Every supplier exclusion on the quote, de-duplicated, with the standing exclusion last. */
+/**
+ * Every supplier exclusion on the quote, de-duplicated, with the standing exclusion last.
+ * Exclusions are pooled across suppliers, so a subheading typed here would be orphaned from
+ * the lines it introduced: the `#` marker is stripped and the line kept as a plain exclusion.
+ */
 export function collectQuoteExclusions(
   blocks: VoucherServiceBlock[],
   defaultExclusion?: string | null,
@@ -323,7 +347,7 @@ export function collectQuoteExclusions(
 
   for (const block of blocks) {
     for (const raw of block.serviceData.exclusions ?? []) {
-      const value = raw.trim()
+      const value = stripBulletMarker(raw)
       if (!value || seen.has(value.toLowerCase())) continue
       seen.add(value.toLowerCase())
       exclusions.push(value)

@@ -3,6 +3,7 @@ import { z } from "zod"
 import { mapSupplier } from "@/lib/suppliers"
 import { getHotelDefaultTimes } from "@/lib/suppliers/hotel-default-times"
 import { buildRouteName } from "@/lib/routes/route-name"
+import { isTypePricedSupplier } from "@/lib/types"
 import { requireAuthenticatedUser, resolveUniqueSupplierSlug } from "../helpers"
 import { createServiceClient } from "@/lib/supabase/server"
 
@@ -123,6 +124,9 @@ export async function POST(req: Request) {
   const isTransport = parsed.kind === "transfers" || parsed.kind === "vehicle_rental"
   const needsLocations = parsed.kind === "train_operator" || parsed.kind === "airline"
   const autoDeriveName = parsed.kind === "train_operator"
+  // Tour operators price the tour type, so the route created here is the itinerary that describes
+  // it and the rate card hangs off the type alone.
+  const isItineraryKind = isTypePricedSupplier(parsed.kind)
 
   // Resolve location names needed for supplier.location and auto-derived route name.
   const locationIdsToFetch = Array.from(
@@ -206,11 +210,28 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Failed to create supplier" }, { status: 500 })
   }
 
+  // Insert suite type first: a tour operator's route links back to it.
+  const { error: suiteError } = await adminSupabase.from("suite_types").insert({
+    id: suiteTypeId,
+    supplier_id: supplier.id,
+    name: parsed.suiteTypeName.trim(),
+    active: true,
+    sort_order: 0,
+    created_at: now,
+    updated_at: now,
+  })
+
+  if (suiteError) {
+    await adminSupabase.from("suppliers").delete().eq("id", supplier.id)
+    return NextResponse.json({ error: "Failed to create suite type" }, { status: 500 })
+  }
+
   // Insert route.
   const { error: routeError } = await adminSupabase.from("routes").insert({
     id: routeId,
     supplier_id: supplier.id,
     name: effectiveRouteName,
+    suite_type_id: isItineraryKind ? suiteTypeId : null,
     origin_location_id: needsLocations ? (parsed.originLocationId ?? null) : null,
     destination_location_id: needsLocations ? (parsed.destinationLocationId ?? null) : null,
     pickup_point: isTransport ? parsed.pickupPoint.trim() : null,
@@ -228,25 +249,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Failed to create supplier route" }, { status: 500 })
   }
 
-  // Insert suite type.
-  const { error: suiteError } = await adminSupabase.from("suite_types").insert({
-    id: suiteTypeId,
-    supplier_id: supplier.id,
-    name: parsed.suiteTypeName.trim(),
-    active: true,
-    sort_order: 0,
-    created_at: now,
-    updated_at: now,
-  })
-
-  if (suiteError) {
-    await adminSupabase.from("suppliers").delete().eq("id", supplier.id)
-    return NextResponse.json({ error: "Failed to create suite type" }, { status: 500 })
-  }
-
-  // Insert rate card.
+  // Insert rate card. Tour operators price the tour type, so the card carries no itinerary.
   const { error: rateError } = await adminSupabase.from("rate_cards").insert({
-    route_id: routeId,
+    route_id: isItineraryKind ? null : routeId,
     suite_type_id: suiteTypeId,
     price_per_person: parsed.price,
     child_price: null,

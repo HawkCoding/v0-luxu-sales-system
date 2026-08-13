@@ -328,6 +328,27 @@ describe("voucherRowsForBlock", () => {
     expect(labels(rows)).toEqual(["Your Reference", "Itinerary", "Start Date"])
   })
 
+  it("tour block: names the priced tour type and the itinerary's own copy", () => {
+    const rows = voucherRowsForBlock(
+      block({
+        serviceType: "tour",
+        serviceData: {
+          suiteType: "Classic Hop-on-Hop-off Ticket",
+          itinerary: "Cape Town - One Day Pass",
+          itineraryDescription: "Red route, 15 stops, hop off as often as you like.",
+          departureDate: "2026-09-08",
+        },
+      }),
+    )
+    expect(labels(rows)).toEqual([
+      "Your Reference",
+      "Tour",
+      "Itinerary",
+      "Details",
+      "Start Date",
+    ])
+  })
+
   it("airline block: route, cabin, flight, departure, arrival", () => {
     const rows = voucherRowsForBlock(
       block({

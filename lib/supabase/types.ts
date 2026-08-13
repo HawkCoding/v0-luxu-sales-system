@@ -2495,7 +2495,7 @@ export type Database = {
           infant_price: number | null
           price_per_person: number
           rate_type_id: string
-          route_id: string
+          route_id: string | null
           suite_type_id: string
           valid_from: string
           valid_to: string | null
@@ -2508,7 +2508,7 @@ export type Database = {
           infant_price?: number | null
           price_per_person: number
           rate_type_id?: string
-          route_id: string
+          route_id?: string | null
           suite_type_id: string
           valid_from?: string
           valid_to?: string | null
@@ -2521,7 +2521,7 @@ export type Database = {
           infant_price?: number | null
           price_per_person?: number
           rate_type_id?: string
-          route_id?: string
+          route_id?: string | null
           suite_type_id?: string
           valid_from?: string
           valid_to?: string | null
@@ -2617,6 +2617,7 @@ export type Database = {
           created_at: string
           default_excursions: string[]
           departure_time: string | null
+          description: string | null
           destination_location_id: string | null
           direction_mode: Database["public"]["Enums"]["route_direction_mode"]
           dropoff_point: string | null
@@ -2631,6 +2632,7 @@ export type Database = {
           return_arrival_time: string | null
           return_departure_time: string | null
           security_deposit: number | null
+          suite_type_id: string | null
           supplier_id: string
           transport_service_type: string | null
           updated_at: string
@@ -2641,6 +2643,7 @@ export type Database = {
           created_at?: string
           default_excursions?: string[]
           departure_time?: string | null
+          description?: string | null
           destination_location_id?: string | null
           direction_mode?: Database["public"]["Enums"]["route_direction_mode"]
           dropoff_point?: string | null
@@ -2655,6 +2658,7 @@ export type Database = {
           return_arrival_time?: string | null
           return_departure_time?: string | null
           security_deposit?: number | null
+          suite_type_id?: string | null
           supplier_id: string
           transport_service_type?: string | null
           updated_at?: string
@@ -2665,6 +2669,7 @@ export type Database = {
           created_at?: string
           default_excursions?: string[]
           departure_time?: string | null
+          description?: string | null
           destination_location_id?: string | null
           direction_mode?: Database["public"]["Enums"]["route_direction_mode"]
           dropoff_point?: string | null
@@ -2679,6 +2684,7 @@ export type Database = {
           return_arrival_time?: string | null
           return_departure_time?: string | null
           security_deposit?: number | null
+          suite_type_id?: string | null
           supplier_id?: string
           transport_service_type?: string | null
           updated_at?: string
@@ -2696,6 +2702,13 @@ export type Database = {
             columns: ["origin_location_id"]
             isOneToOne: false
             referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "routes_suite_type_id_fkey"
+            columns: ["suite_type_id"]
+            isOneToOne: false
+            referencedRelation: "suite_types"
             referencedColumns: ["id"]
           },
           {

@@ -58,6 +58,13 @@ export const rateCardSchema = z.object({
   validTo: z.union([dateSchema, z.literal(""), z.null()]),
 })
 
+/**
+ * A tour operator prices the tour type, not the itinerary, so its cards arrive at the top level of
+ * the payload with no route of their own and are stored with `route_id = NULL`. Every other kind
+ * keeps posting cards nested under the route they price.
+ */
+export const supplierRateCardSchema = rateCardSchema.omit({ routeId: true })
+
 const supplierKindSchema = z.enum([
   "train_operator",
   "hotel_property",
@@ -183,9 +190,67 @@ function checkStationAddresses(
   }
 }
 
+/**
+ * Tour operators split the two concepts this endpoint used to conflate: the tour type carries the
+ * price (top-level `rateCards`, no route id) and the itinerary carries the description (a route
+ * that must name its tour type). Enforced here so neither half can be posted the old way.
+ */
+function checkTourOperatorItineraries(
+  value: {
+    kind: string
+    suiteTypes: { id?: string }[]
+    routes: { suiteTypeId?: string | null; rateCards: unknown[] }[]
+    rateCards: unknown[]
+  },
+  ctx: z.RefinementCtx,
+) {
+  if (value.kind !== "tour_operator") {
+    if (value.rateCards.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["rateCards"],
+        message: "Only tour operators price without an itinerary",
+      })
+    }
+    return
+  }
+
+  const suiteTypeIds = new Set(
+    value.suiteTypes.flatMap((suiteType) => (suiteType.id ? [suiteType.id] : [])),
+  )
+
+  for (const [index, route] of value.routes.entries()) {
+    if (!route.suiteTypeId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["routes", index, "suiteTypeId"],
+        message: "Each itinerary must belong to a tour type",
+      })
+    } else if (suiteTypeIds.size > 0 && !suiteTypeIds.has(route.suiteTypeId)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["routes", index, "suiteTypeId"],
+        message: "The tour type must be one of this supplier's tour types",
+      })
+    }
+
+    if (route.rateCards.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["routes", index, "rateCards"],
+        message: "Tour operator rates belong to the tour type, not the itinerary",
+      })
+    }
+  }
+}
+
 export const routeSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().trim().min(1, "Route name is required"),
+  /** Tour operators only: the tour type this itinerary describes. Required for that kind, see
+   * `checkTourOperatorItineraries`. */
+  suiteTypeId: z.string().uuid().nullable().optional(),
+  description: z.string().trim().max(2000).nullable().optional(),
   originLocationId: z.string().uuid().nullable().optional(),
   destinationLocationId: z.string().uuid().nullable().optional(),
   pickupPoint: z.string().trim().max(500).nullable().optional(),
@@ -279,6 +344,8 @@ export const supplierSaveSchema = z.object({
   emails: z.array(supplierEmailSchema).default([]),
   suiteTypes: z.array(suiteTypeSchema),
   routes: z.array(routeSchema).default([]),
+  /** Tour operators only -- rates that price a tour type across every itinerary. */
+  rateCards: z.array(supplierRateCardSchema).default([]),
   stationAddresses: z.array(stationAddressSchema).default([]),
   bedroomTypes: z.array(variantValueSchema).default([]),
   bedroomLayouts: z.array(variantValueSchema).default([]),
@@ -290,6 +357,7 @@ export const supplierSaveSchema = z.object({
 }).superRefine((value, ctx) => {
   checkRateAdjustments(value, ctx)
   checkStationAddresses(value, ctx)
+  checkTourOperatorItineraries(value, ctx)
 
   for (const [index, route] of value.routes.entries()) {
     if (value.kind === "transfers" || value.kind === "vehicle_rental") {
@@ -368,6 +436,9 @@ export const draftRateCardSchema = z.object({
 export const draftRouteSchema = z.object({
   id: z.string().uuid().optional(),
   name: z.string().trim().max(200).default(""),
+  // Drafts may still be missing their tour type -- the required check lives on the full save.
+  suiteTypeId: z.union([z.string().uuid(), z.literal(""), z.null()]).default(null),
+  description: z.string().trim().max(2000).nullable().default(null),
   originLocationId: z.union([z.string().uuid(), z.literal(""), z.null()]).default(""),
   destinationLocationId: z.union([z.string().uuid(), z.literal(""), z.null()]).default(""),
   pickupPoint: z.string().trim().max(500).nullable().default(null),
@@ -428,6 +499,7 @@ export const supplierDraftSaveSchema = z.object({
   emails: z.array(draftSupplierEmailSchema).default([]),
   suiteTypes: z.array(draftSuiteTypeSchema).default([]),
   routes: z.array(draftRouteSchema).default([]),
+  rateCards: z.array(draftRateCardSchema.omit({ routeId: true })).default([]),
   stationAddresses: z.array(draftStationAddressSchema).default([]),
   bedroomTypes: z.array(draftVariantValueSchema).default([]),
   bedroomLayouts: z.array(draftVariantValueSchema).default([]),

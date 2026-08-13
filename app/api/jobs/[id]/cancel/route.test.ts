@@ -296,7 +296,7 @@ describe("POST /api/jobs/[id]/cancel", () => {
   })
 
   it("returns 200 with full refund fields persisted for deposit_paid stage", async () => {
-    createSupabaseMock({ role: "manager", bookingStage: "deposit_paid" })
+    createSupabaseMock({ role: "manager", bookingStage: "deposit_paid", totalPaid: 500 })
     const res = await POST(
       postJson({
         outcomeReasonId: REASON_ID,
@@ -403,5 +403,53 @@ describe("POST /api/jobs/[id]/cancel", () => {
       BOOKING_ID,
       expect.objectContaining({ actorUserId: USER_ID }),
     )
+  })
+
+  it("returns 400 when the refundAmount override exceeds the total paid", async () => {
+    createSupabaseMock({
+      role: "manager",
+      bookingStage: "deposit_paid",
+      totalPaid: 2000,
+      depositInvoiceAmount: 2000,
+      depositRefundable: true,
+    })
+
+    const res = await POST(
+      postJson({
+        outcomeReasonId: REASON_ID,
+        refundStatus: "refunded",
+        refundAmount: 2500,
+        refundReference: "REF-002",
+        refundedAt: "2026-05-17",
+      }),
+      makeParams(),
+    )
+    const body = (await res.json()) as { error: string }
+    expect(res.status).toBe(400)
+    expect(body.error).toMatch(/cannot exceed the total paid/i)
+    expect(vi.mocked(syncBookingPaymentState)).not.toHaveBeenCalled()
+  })
+
+  it("allows a refundAmount exactly equal to the total paid", async () => {
+    createSupabaseMock({
+      role: "manager",
+      bookingStage: "final_paid",
+      totalPaid: 2000,
+      depositInvoiceAmount: 2000,
+      depositRefundable: true,
+    })
+
+    const res = await POST(
+      postJson({
+        outcomeReasonId: REASON_ID,
+        refundStatus: "refunded",
+        refundAmount: 2000,
+        refundReference: "REF-003",
+        refundedAt: "2026-05-17",
+      }),
+      makeParams(),
+    )
+    expect(res.status).toBe(200)
+    expect(vi.mocked(syncBookingPaymentState)).toHaveBeenCalled()
   })
 })

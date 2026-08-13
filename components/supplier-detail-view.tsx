@@ -18,6 +18,8 @@ import {
   Trash2,
 } from "lucide-react"
 import { SortableList } from "@/components/ui/sortable-list"
+import { InclusionPreview } from "@/components/supplier/inclusion-preview"
+import { splitBulletLines } from "@/lib/inclusions/bullet-lines"
 import { isOngoingRateCard } from "@/lib/rate-cards/resolve"
 import { SuiteVocabularyCard, type EditableVocabularyValue } from "@/components/supplier/suite-vocabulary-card"
 import { ApplicableRatesCard } from "@/components/supplier/applicable-rates-card"
@@ -103,12 +105,14 @@ import { routeHasReturnLeg } from "@/lib/routes/route-schedule"
 import {
   getSupplierVocabulary,
   isTransportSupplier,
+  isTypePricedSupplier,
   SUPPLIER_KIND_LABELS,
   type Location,
   type SupplierDetail,
   type SupplierKind,
   type SupplierPackage,
   type SupplierRateCard,
+  type SupplierRoute,
   type SupplierSuiteType,
   type SupplierVocabulary,
   type RouteDirectionMode,
@@ -118,14 +122,6 @@ import {
 } from "@/lib/types"
 
 const DESCRIPTION_SOFT_LIMIT = 500
-
-/** Inclusion/exclusion bullets are edited as one-per-line text and stored as a string[]. */
-function splitBulletLines(value: string): string[] {
-  return value
-    .split("\n")
-    .map((line) => line.replace(/^[-•*]\s*/, "").trim())
-    .filter(Boolean)
-}
 
 type Presentation = "page" | "modal"
 
@@ -139,6 +135,10 @@ interface SupplierDetailViewProps {
 interface EditableRoute {
   id: string
   name: string
+  /** Tour operators only: the tour type this itinerary describes. */
+  suiteTypeId: string | null
+  /** Tour operators only: what the itinerary covers, printed on quotes and vouchers. */
+  description: string
   originLocationId: string | null
   destinationLocationId: string | null
   pickupPoint: string | null
@@ -169,7 +169,8 @@ interface EditableSuiteType {
 
 interface EditableRateCard {
   id: string
-  routeId: string
+  /** Null on a tour operator's card — it prices the tour type across every itinerary. */
+  routeId: string | null
   suiteTypeId: string
   rateTypeId: string
   pricePerPerson: number
@@ -263,7 +264,8 @@ interface RateCardConflict {
   packageName: string
   suiteTypeId: string
   suiteTypeName: string
-  routeId: string
+  /** Null when the clashing cards price the type across every route. */
+  routeId: string | null
   routeName: string
   validFrom: string
 }
@@ -278,7 +280,8 @@ interface RateCardOverlapConflict {
   packageName: string
   suiteTypeId: string
   suiteTypeName: string
-  routeId: string
+  /** Null when the overlapping cards price the type across every route. */
+  routeId: string | null
   routeName: string
   firstPeriodKey: string
   secondPeriodKey: string
@@ -312,6 +315,8 @@ function createEmptyRoute(kind: SupplierKind): EditableRoute {
   return {
     id: makeClientId(),
     name: "",
+    suiteTypeId: null,
+    description: "",
     originLocationId: null,
     destinationLocationId: null,
     pickupPoint: "",
@@ -455,6 +460,8 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
         routes: supplier.routes.map((route) => ({
           id: route.id,
           name: route.name,
+          suiteTypeId: route.suiteTypeId ?? null,
+          description: route.description ?? "",
           originLocationId: route.originLocationId,
           destinationLocationId: route.destinationLocationId,
           pickupPoint: route.pickupPoint ?? null,
@@ -546,12 +553,13 @@ function updateRateCardPeriodDateValues(
   rateCards: EditableRateCard[],
   periodKey: string,
   updates: Partial<Pick<EditableRateCard, "validFrom" | "validTo">>,
-  routeId?: string,
+  /** `undefined` means "every route"; `null` targets the route-agnostic cards specifically. */
+  routeId?: string | null,
   rateTypeId?: string,
 ): EditableRateCard[] {
   return rateCards.map((rateCard) =>
     getRatePeriodKey(rateCard.validFrom, rateCard.validTo, rateCard.currency) === periodKey &&
-    (!routeId || rateCard.routeId === routeId) &&
+    (routeId === undefined || rateCard.routeId === routeId) &&
     (!rateTypeId || rateCard.rateTypeId === rateTypeId)
       ? { ...rateCard, ...updates }
       : rateCard,
@@ -634,7 +642,8 @@ function getNextRateCardPeriodStart(pkg: EditablePackage): {
 
 function buildRateCardBusinessKey(rateCard: {
   suiteTypeId: string
-  routeId: string
+  /** Null on the route-agnostic (tour operator) cards, which share one key space. */
+  routeId: string | null
   rateTypeId?: string
   validFrom: string
 }) {
@@ -769,7 +778,7 @@ function findPackageRateCardOverlapConflicts(
     string,
     Array<{
       suiteTypeId: string
-  routeId: string
+      routeId: string | null
       periodKey: string
       validFrom: string
       validTo: string | null
@@ -1032,6 +1041,7 @@ function PackageRateCardMatrix({
   baseRateTypeId,
   locationsById,
   vocabulary,
+  supplierKind,
 }: {
   pkg: SupplierPackage
   suiteTypes: SupplierSuiteType[]
@@ -1039,7 +1049,10 @@ function PackageRateCardMatrix({
   baseRateTypeId: string | null
   locationsById: Record<string, Location>
   vocabulary: SupplierVocabulary
+  supplierKind: SupplierKind
 }) {
+  // Mirrors RateCardMatrixEditor: a type-priced supplier shows one price column, no itineraries.
+  const pricesByTypeOnly = isTypePricedSupplier(supplierKind)
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null)
   const [selectedRateTypeId, setSelectedRateTypeId] = useState<string | null>(null)
 
@@ -1052,12 +1065,13 @@ function PackageRateCardMatrix({
       ? selectedRateTypeId
       : defaultRateTypePillId
 
-  const effectiveSelectedRouteId =
-    selectedRouteId && pkg.routes.some((route) => route.id === selectedRouteId)
+  const effectiveSelectedRouteId = pricesByTypeOnly
+    ? null
+    : selectedRouteId && pkg.routes.some((route) => route.id === selectedRouteId)
       ? selectedRouteId
       : pkg.routes[0]?.id ?? null
 
-  if (pkg.routes.length === 0) {
+  if (!pricesByTypeOnly && pkg.routes.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
         {`No ${vocabulary.routePlural.toLowerCase()} have been configured for this supplier yet.`}
@@ -1065,11 +1079,17 @@ function PackageRateCardMatrix({
     )
   }
 
-  const routeColumns = effectiveSelectedRouteId
-    ? pkg.routes.filter((route) => route.id === effectiveSelectedRouteId)
-    : pkg.routes
+  const priceColumns: { id: string | null; label: string }[] = pricesByTypeOnly
+    ? [{ id: null, label: "Price" }]
+    : (effectiveSelectedRouteId
+        ? pkg.routes.filter((route) => route.id === effectiveSelectedRouteId)
+        : pkg.routes
+      ).map((route) => ({ id: route.id, label: getRouteLabel(route, locationsById, vocabulary) }))
   const visibleRateCards = pkg.rateCards.filter((rateCard) => {
-    if (effectiveSelectedRouteId && rateCard.routeId !== effectiveSelectedRouteId) {
+    if (rateCard.routeId !== effectiveSelectedRouteId && effectiveSelectedRouteId !== null) {
+      return false
+    }
+    if (pricesByTypeOnly && rateCard.routeId !== null) {
       return false
     }
     if (
@@ -1111,7 +1131,7 @@ function PackageRateCardMatrix({
         </div>
       ) : null}
 
-      {pkg.routes.length > 1 ? (
+      {!pricesByTypeOnly && pkg.routes.length > 1 ? (
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             {vocabulary.routePlural}
@@ -1168,12 +1188,12 @@ function PackageRateCardMatrix({
                       <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         {vocabulary.suiteType}
                       </th>
-                      {routeColumns.map((route) => (
+                      {priceColumns.map((column) => (
                         <th
-                          key={route.id}
+                          key={column.id ?? "price"}
                           className="whitespace-nowrap px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
                         >
-                          {getRouteLabel(route, locationsById, vocabulary)}
+                          {column.label}
                         </th>
                       ))}
                     </tr>
@@ -1182,16 +1202,16 @@ function PackageRateCardMatrix({
                     {suiteTypes.map((suiteType) => (
                       <tr key={suiteType.id} className="border-b last:border-0">
                         <td className="px-4 py-3 font-medium text-foreground">{suiteType.name}</td>
-                        {routeColumns.map((route) => {
+                        {priceColumns.map((column) => {
                           const match =
                             period.items.find(
                               (item) =>
-                                item.suiteTypeId === suiteType.id && item.routeId === route.id,
+                                item.suiteTypeId === suiteType.id && item.routeId === column.id,
                             )
 
                           return (
                             <td
-                              key={`${suiteType.id}-${route.id}`}
+                              key={`${suiteType.id}-${column.id ?? "price"}`}
                               className="px-4 py-3 text-muted-foreground"
                             >
                               {match ? (
@@ -1248,16 +1268,21 @@ interface RateCardMatrixEditorProps {
   onAddRate: (rateTypeId: string) => void
   onApplyMarkdown: (
     packageIndex: number,
-    routeId: string,
+    routeId: string | null,
     periodKey: string,
     rateTypeId: string,
     discountPct: number,
   ) => void
-  onAddPeriod: (packageIndex: number, routeId: string, rateTypeId: string) => void
-  onRemovePeriod: (packageIndex: number, routeId: string, periodKey: string, rateTypeId: string) => void
+  onAddPeriod: (packageIndex: number, routeId: string | null, rateTypeId: string) => void
+  onRemovePeriod: (
+    packageIndex: number,
+    routeId: string | null,
+    periodKey: string,
+    rateTypeId: string,
+  ) => void
   onUpdatePeriodField: (
     packageIndex: number,
-    routeId: string,
+    routeId: string | null,
     periodKey: string,
     key: "validFrom" | "validTo" | "currency",
     value: string | null,
@@ -1278,7 +1303,7 @@ interface RateCardMatrixEditorProps {
     packageIndex: number,
     periodKey: string,
     suiteTypeId: string,
-    routeId: string,
+    routeId: string | null,
     enabled: boolean,
     rateTypeId: string,
   ) => void
@@ -1491,7 +1516,12 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
   onToggleCell,
   periodFieldErrors,
 }: RateCardMatrixEditorProps) {
-  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(routes[0]?.id ?? null)
+  // Tour operators price the type alone: no itinerary picker, no per-itinerary column, and every
+  // card is stored route-agnostic (routeId null).
+  const pricesByTypeOnly = isTypePricedSupplier(supplierKind)
+  const [selectedRouteId, setSelectedRouteId] = useState<string | null>(
+    pricesByTypeOnly ? null : routes[0]?.id ?? null,
+  )
   const activeRateTypes = useMemo(() => rateTypes.filter((rt) => !rt.archivedAt), [rateTypes])
   const effectiveBaseRateTypeId =
     (baseRateTypeId && activeRateTypes.some((rt) => rt.id === baseRateTypeId)
@@ -1527,17 +1557,23 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
   const periodGroups = useMemo(
     () =>
       groupEditableRateCardsByPeriod(
-        selectedRouteId && selectedRateTypeId
+        (pricesByTypeOnly || selectedRouteId) && selectedRateTypeId
           ? rateCards.filter(
               (rateCard) =>
                 rateCard.routeId === selectedRouteId && rateCard.rateTypeId === selectedRateTypeId,
             )
           : [],
       ),
-    [rateCards, selectedRouteId, selectedRateTypeId],
+    [pricesByTypeOnly, rateCards, selectedRouteId, selectedRateTypeId],
   )
 
   useEffect(() => {
+    // A type-priced supplier has no route selection to keep in sync — its cards are route-agnostic.
+    if (pricesByTypeOnly) {
+      if (selectedRouteId !== null) setSelectedRouteId(null)
+      return
+    }
+
     if (routes.length === 0) {
       if (selectedRouteId !== null) {
         setSelectedRouteId(null)
@@ -1548,7 +1584,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
     if (!selectedRouteId || !routes.some((route) => route.id === selectedRouteId)) {
       setSelectedRouteId(routes[0].id)
     }
-  }, [routes, selectedRouteId])
+  }, [pricesByTypeOnly, routes, selectedRouteId])
 
   useEffect(() => {
     if (visibleRateTypes.length === 0) {
@@ -1577,11 +1613,11 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
           size="sm"
           variant="outline"
           onClick={() => {
-            if (selectedRouteId && selectedRateTypeId) {
+            if ((pricesByTypeOnly || selectedRouteId) && selectedRateTypeId) {
               onAddPeriod(packageIndex, selectedRouteId, selectedRateTypeId)
             }
           }}
-          disabled={!selectedRouteId || !selectedRateTypeId}
+          disabled={(!pricesByTypeOnly && !selectedRouteId) || !selectedRateTypeId}
         >
           <Plus className="mr-2 h-4 w-4" />
           Add pricing period
@@ -1645,7 +1681,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
         </div>
       )}
 
-      {routes.length > 1 ? (
+      {!pricesByTypeOnly && routes.length > 1 ? (
         <div className="space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             {vocabulary.routePlural}
@@ -1674,12 +1710,19 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
 
       {periodGroups.length > 0 ? (
         periodGroups.map((period) => {
-          const routeColumns =
-            routes.length === 0
-              ? []
-              : selectedRouteId
-                ? routes.filter((route) => route.id === selectedRouteId)
-                : routes
+          // One column per itinerary normally; a single price column when the type carries the
+          // price on its own, so the matrix reads "tour type -> price".
+          const priceColumns: { id: string | null; label: string }[] = pricesByTypeOnly
+            ? [{ id: null, label: "Price" }]
+            : (routes.length === 0
+                ? []
+                : selectedRouteId
+                  ? routes.filter((route) => route.id === selectedRouteId)
+                  : routes
+              ).map((route) => ({
+                id: route.id,
+                label: getRouteLabel(route, locationsById, vocabulary),
+              }))
 
           return (
             <div key={period.key} className="rounded-lg border overflow-hidden">
@@ -1697,7 +1740,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                     onChange={(value) =>
                       onUpdatePeriodField(
                         packageIndex,
-                        selectedRouteId ?? "",
+                        selectedRouteId,
                         period.key,
                         "validFrom",
                         value ?? "",
@@ -1728,7 +1771,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                       onChange={(value) =>
                         onUpdatePeriodField(
                           packageIndex,
-                          selectedRouteId ?? "",
+                          selectedRouteId,
                           period.key,
                           "validTo",
                           value || null,
@@ -1746,7 +1789,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                     onValueChange={(value) =>
                       onUpdatePeriodField(
                         packageIndex,
-                        selectedRouteId ?? "",
+                        selectedRouteId,
                         period.key,
                         "currency",
                         value.toUpperCase(),
@@ -1762,7 +1805,9 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                     size="icon"
                     className={REMOVE_ICON_BUTTON_CLASS}
                     aria-label="Remove period"
-                    onClick={() => onRemovePeriod(packageIndex, selectedRouteId ?? "", period.key, selectedRateTypeId ?? "")}
+                    onClick={() =>
+                      onRemovePeriod(packageIndex, selectedRouteId, period.key, selectedRateTypeId ?? "")
+                    }
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
@@ -1784,7 +1829,7 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                     onClick={() =>
                       onApplyMarkdown(
                         packageIndex,
-                        selectedRouteId ?? "",
+                        selectedRouteId,
                         period.key,
                         selectedRateTypeId,
                         selectedDiscountPct ?? 0,
@@ -1803,12 +1848,12 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                       <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         {vocabulary.suiteType}
                       </th>
-                      {routeColumns.map((route) => (
+                      {priceColumns.map((column) => (
                         <th
-                          key={route.id}
+                          key={column.id ?? "price"}
                           className="whitespace-nowrap px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground"
                         >
-                          {getRouteLabel(route, locationsById, vocabulary)}
+                          {column.label}
                         </th>
                       ))}
                     </tr>
@@ -1817,15 +1862,15 @@ const RateCardMatrixEditor = memo(function RateCardMatrixEditor({
                     {suiteTypes.map((suiteType) => (
                       <tr key={suiteType.id} className="border-b last:border-0">
                         <td className="px-4 py-3 font-medium text-foreground">{suiteType.name}</td>
-                        {routeColumns.map((route) => {
-                          const routeId = route.id
+                        {priceColumns.map((column) => {
+                          const routeId = column.id
                           const match = period.items.find(
                             (item) =>
                               item.suiteTypeId === suiteType.id && item.routeId === routeId,
                           )
 
                           return (
-                            <td key={`${suiteType.id}-${routeId}`} className="px-4 py-3">
+                            <td key={`${suiteType.id}-${routeId ?? "price"}`} className="px-4 py-3">
                               {match ? (
                                 <div className="flex flex-col gap-1.5">
                                   <RateCardPricingCell
@@ -2507,6 +2552,268 @@ const RouteEditorRow = memo(function RouteEditorRow({
   )
 })
 
+interface ItineraryEditorRowProps {
+  route: EditableRoute
+  routeIndex: number
+  packageIndex: number
+  vocabulary: SupplierVocabulary
+  suiteTypes: { id: string; name: string }[]
+  onUpdateRoute: (
+    packageIndex: number,
+    routeIndex: number,
+    key: keyof EditableRoute,
+    value: EditableRoute[keyof EditableRoute],
+  ) => void
+  onRemoveRoute: (packageIndex: number, routeIndex: number) => void
+}
+
+/**
+ * A tour operator's itinerary: a name, the copy that describes it, and the tour type it belongs
+ * to. Deliberately simpler than RouteEditorRow — nothing here touches pricing, which lives on the
+ * tour type.
+ */
+const ItineraryEditorRow = memo(function ItineraryEditorRow({
+  route,
+  routeIndex,
+  packageIndex,
+  vocabulary,
+  suiteTypes,
+  onUpdateRoute,
+  onRemoveRoute,
+}: ItineraryEditorRowProps) {
+  const typeLabel = vocabulary.suiteType
+  return (
+    <div className="space-y-3 rounded-lg border p-3">
+      <div className="grid gap-3 md:grid-cols-[1fr_14rem]">
+        <div className="min-w-0 space-y-1.5">
+          <Label htmlFor={`${route.id}-name`}>{`${vocabulary.route} name`}</Label>
+          {/* Itinerary names can run long — wrap down instead of scrolling sideways. */}
+          <BufferedTextarea
+            id={`${route.id}-name`}
+            rows={2}
+            className="resize-none"
+            value={route.name}
+            onValueChange={(value) => onUpdateRoute(packageIndex, routeIndex, "name", value)}
+          />
+        </div>
+        <div className="min-w-0 space-y-1.5">
+          <Label htmlFor={`${route.id}-suite-type`}>{typeLabel}</Label>
+          <Select
+            value={route.suiteTypeId ?? ""}
+            onValueChange={(value) =>
+              onUpdateRoute(packageIndex, routeIndex, "suiteTypeId", value)
+            }
+          >
+            <SelectTrigger id={`${route.id}-suite-type`} className="max-w-full">
+              <SelectValue placeholder={`Select ${typeLabel.toLowerCase()}`} />
+            </SelectTrigger>
+            <SelectContent>
+              {suiteTypes.map((suiteType) => (
+                <SelectItem key={suiteType.id} value={suiteType.id}>
+                  {suiteType.name.trim() || `Unnamed ${typeLabel.toLowerCase()}`}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="min-w-0 space-y-1.5">
+        <Label htmlFor={`${route.id}-description`}>Description</Label>
+        <BufferedTextarea
+          id={`${route.id}-description`}
+          rows={3}
+          value={route.description}
+          onValueChange={(value) => onUpdateRoute(packageIndex, routeIndex, "description", value)}
+        />
+        <p className="text-xs text-muted-foreground">
+          {`Printed on the quote and voucher when this ${vocabulary.route.toLowerCase()} is booked.`}
+        </p>
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Switch
+            id={`${route.id}-active`}
+            checked={route.active}
+            onCheckedChange={(checked) => onUpdateRoute(packageIndex, routeIndex, "active", checked)}
+          />
+          <Label htmlFor={`${route.id}-active`} className="text-sm text-muted-foreground">
+            Active
+          </Label>
+        </div>
+        <Button
+          type="button"
+          size="icon"
+          variant="outline"
+          className={REMOVE_ICON_BUTTON_CLASS}
+          aria-label={`Remove ${route.name.trim() || vocabulary.route.toLowerCase()}`}
+          onClick={() => onRemoveRoute(packageIndex, routeIndex)}
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  )
+})
+
+interface ItinerariesByTourTypeProps {
+  isEditing: boolean
+  vocabulary: SupplierVocabulary
+  suiteTypes: { id: string; name: string }[]
+  editableRoutes: EditableRoute[]
+  savedRoutes: SupplierRoute[]
+  onAddRoute: (packageIndex: number, suiteTypeId?: string) => void
+  onUpdateRoute: (
+    packageIndex: number,
+    routeIndex: number,
+    key: keyof EditableRoute,
+    value: EditableRoute[keyof EditableRoute],
+  ) => void
+  onRemoveRoute: (packageIndex: number, routeIndex: number) => void
+}
+
+/**
+ * Tour operators only. Itineraries are listed under the tour type they belong to, so the hierarchy
+ * (type is priced, itineraries describe it) is visible at a glance. Rows written before the link
+ * existed collect in a trailing "Unassigned" group until a manager files them.
+ */
+function ItinerariesByTourType({
+  isEditing,
+  vocabulary,
+  suiteTypes,
+  editableRoutes,
+  savedRoutes,
+  onAddRoute,
+  onUpdateRoute,
+  onRemoveRoute,
+}: ItinerariesByTourTypeProps) {
+  const typeLabel = vocabulary.suiteType.toLowerCase()
+  const routeLabel = vocabulary.route.toLowerCase()
+  const routesLabel = vocabulary.routePlural.toLowerCase()
+
+  if (suiteTypes.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+        {`Add a ${typeLabel} first — every ${routeLabel} belongs to one.`}
+      </div>
+    )
+  }
+
+  if (isEditing) {
+    // Indices address the form array, so they are captured before grouping.
+    const indexedRoutes = editableRoutes.map((route, index) => ({ route, index }))
+    const groups = suiteTypes.map((suiteType) => ({
+      id: suiteType.id as string | null,
+      name: suiteType.name.trim() || `Unnamed ${typeLabel}`,
+      entries: indexedRoutes.filter((entry) => entry.route.suiteTypeId === suiteType.id),
+    }))
+    const knownIds = new Set(suiteTypes.map((suiteType) => suiteType.id))
+    const unassigned = indexedRoutes.filter(
+      (entry) => !entry.route.suiteTypeId || !knownIds.has(entry.route.suiteTypeId),
+    )
+
+    return (
+      <div className="space-y-4">
+        {groups.map((group) => (
+          <div key={group.id ?? "unassigned"} className="space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {group.name}
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 text-xs"
+                onClick={() => onAddRoute(0, group.id ?? undefined)}
+              >
+                <Plus className="mr-1 h-3.5 w-3.5" />
+                {`Add ${routeLabel}`}
+              </Button>
+            </div>
+            {group.entries.length > 0 ? (
+              group.entries.map((entry) => (
+                <ItineraryEditorRow
+                  key={entry.route.id}
+                  route={entry.route}
+                  routeIndex={entry.index}
+                  packageIndex={0}
+                  vocabulary={vocabulary}
+                  suiteTypes={suiteTypes}
+                  onUpdateRoute={onUpdateRoute}
+                  onRemoveRoute={onRemoveRoute}
+                />
+              ))
+            ) : (
+              <div className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+                {`No ${routesLabel} for this ${typeLabel} yet.`}
+              </div>
+            )}
+          </div>
+        ))}
+
+        {unassigned.length > 0 ? (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-destructive">
+              {`Unassigned — pick a ${typeLabel}`}
+            </p>
+            {unassigned.map((entry) => (
+              <ItineraryEditorRow
+                key={entry.route.id}
+                route={entry.route}
+                routeIndex={entry.index}
+                packageIndex={0}
+                vocabulary={vocabulary}
+                suiteTypes={suiteTypes}
+                onUpdateRoute={onUpdateRoute}
+                onRemoveRoute={onRemoveRoute}
+              />
+            ))}
+          </div>
+        ) : null}
+      </div>
+    )
+  }
+
+  if (savedRoutes.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+        {`No ${routesLabel} configured.`}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      {suiteTypes.map((suiteType) => {
+        const grouped = savedRoutes.filter((route) => route.suiteTypeId === suiteType.id)
+        if (grouped.length === 0) return null
+        return (
+          <div key={suiteType.id} className="space-y-1.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {suiteType.name}
+            </p>
+            <ul className="space-y-1.5">
+              {grouped.map((route) => (
+                <li key={route.id} className="flex flex-wrap items-baseline gap-2">
+                  <Badge variant="outline">{route.name}</Badge>
+                  {route.active ? null : (
+                    <span className="text-xs text-muted-foreground">Inactive</span>
+                  )}
+                  {route.description ? (
+                    <span className="text-sm text-muted-foreground">{route.description}</span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 export function SupplierDetailSkeleton({
   presentation = "page",
 }: SupplierDetailSkeletonProps) {
@@ -2827,6 +3134,27 @@ export function SupplierDetailView({
   )
 
   const removeSuiteType = useCallback((suiteTypeIndex: number) => {
+    const currentForm = formRef.current
+    // An itinerary belongs to exactly one tour type, so deleting the type would orphan it. Say
+    // which ones and let the manager reassign rather than silently unlinking them.
+    if (currentForm && isTypePricedSupplier(currentForm.kind)) {
+      const suiteType = currentForm.suiteTypes[suiteTypeIndex]
+      const vocabulary = getSupplierVocabulary(currentForm.kind)
+      const linkedItineraries = currentForm.packages
+        .flatMap((pkg) => pkg.routes)
+        .filter((route) => suiteType && route.suiteTypeId === suiteType.id)
+      if (linkedItineraries.length > 0) {
+        const names = linkedItineraries
+          .map((route) => route.name.trim() || `Unnamed ${vocabulary.route.toLowerCase()}`)
+          .join(", ")
+        toast.error(
+          `Move or remove ${linkedItineraries.length === 1 ? "the" : "these"} ${vocabulary.routePlural.toLowerCase()} first: ${names}.`,
+          { id: "suite-type-has-itineraries" },
+        )
+        return
+      }
+    }
+
     setForm((current) => {
       if (!current) return current
       const suiteTypeId = current.suiteTypes[suiteTypeIndex]?.id
@@ -2952,13 +3280,17 @@ export function SupplierDetailView({
   )
 
   const addRoute = useCallback(
-    (packageIndex: number) => {
+    /** `suiteTypeId` pre-fills the tour type when an itinerary is added inside its own group. */
+    (packageIndex: number, suiteTypeId?: string) => {
       const currentForm = formRef.current
       if (!currentForm) return
 
       updatePackage(packageIndex, (pkg) => ({
         ...pkg,
-        routes: [...pkg.routes, createEmptyRoute(currentForm.kind)],
+        routes: [
+          ...pkg.routes,
+          { ...createEmptyRoute(currentForm.kind), suiteTypeId: suiteTypeId ?? null },
+        ],
       }))
     },
     [locations, updatePackage],
@@ -3025,8 +3357,10 @@ export function SupplierDetailView({
     [updatePackage],
   )
 
+  // `routeId` is null for tour operators: their periods price the tour type across every
+  // itinerary, so there is no route to scope the period to.
   const addRateCardPeriod = useCallback(
-    (packageIndex: number, routeId: string, rateTypeId: string) => {
+    (packageIndex: number, routeId: string | null, rateTypeId: string) => {
       updatePackage(packageIndex, (pkg) => {
         const currentForm = formRef.current
         if (!currentForm) return pkg
@@ -3042,8 +3376,7 @@ export function SupplierDetailView({
         }
 
         const currency = pkg.currency.trim().toUpperCase() || "ZAR"
-        const route = pkg.routes.find((candidate) => candidate.id === routeId)
-        if (!route) {
+        if (routeId !== null && !pkg.routes.some((candidate) => candidate.id === routeId)) {
           toast.error(
             `Add at least one ${vocabulary.route.toLowerCase()} before creating a pricing period.`,
             { id: "rate-card-no-route" },
@@ -3053,7 +3386,7 @@ export function SupplierDetailView({
         const { nextValidFrom, previousPeriodKey } = getNextRateCardPeriodStart({
           ...pkg,
           rateCards: pkg.rateCards.filter(
-            (rateCard) => rateCard.routeId === route.id && rateCard.rateTypeId === rateTypeId,
+            (rateCard) => rateCard.routeId === routeId && rateCard.rateTypeId === rateTypeId,
           ),
         })
         const linkedPreviousValidTo = addIsoDays(nextValidFrom, -1)
@@ -3061,12 +3394,12 @@ export function SupplierDetailView({
           previousPeriodKey && linkedPreviousValidTo
             ? updateRateCardPeriodDateValues(pkg.rateCards, previousPeriodKey, {
                 validTo: linkedPreviousValidTo,
-              }, route.id, rateTypeId)
+              }, routeId, rateTypeId)
             : pkg.rateCards
 
         const newRateCards = availableSuiteTypes.map((suiteType) => ({
             id: makeClientId(),
-            routeId: route.id,
+            routeId,
             suiteTypeId: suiteType.id,
             rateTypeId,
             pricePerPerson: 0,
@@ -3097,7 +3430,7 @@ export function SupplierDetailView({
   const updateRateCardPeriodField = useCallback(
     (
       packageIndex: number,
-      routeId: string,
+      routeId: string | null,
       periodKey: string,
       key: "validFrom" | "validTo" | "currency",
       value: string | null,
@@ -3182,7 +3515,7 @@ export function SupplierDetailView({
   )
 
   const removeRateCardPeriod = useCallback(
-    (packageIndex: number, routeId: string, periodKey: string, rateTypeId: string) => {
+    (packageIndex: number, routeId: string | null, periodKey: string, rateTypeId: string) => {
       updatePackage(packageIndex, (pkg) => ({
         ...pkg,
         rateCards: pkg.rateCards.filter((rateCard) => {
@@ -3231,7 +3564,7 @@ export function SupplierDetailView({
       packageIndex: number,
       periodKey: string,
       suiteTypeId: string,
-      routeId: string,
+      routeId: string | null,
       enabled: boolean,
       rateTypeId: string,
     ) => {
@@ -3334,7 +3667,7 @@ export function SupplierDetailView({
   const handleApplyRateMarkdown = useCallback(
     (
       packageIndex: number,
-      routeId: string,
+      routeId: string | null,
       periodKey: string,
       rateTypeId: string,
       discountPct: number,
@@ -3666,11 +3999,27 @@ export function SupplierDetailView({
       return
     }
 
+    const isItineraryKind = isTypePricedSupplier(form.kind)
+
+    if (isItineraryKind) {
+      const unassignedItinerary = routeRateGroup.routes.find(
+        (route) => route.name.trim() && !route.suiteTypeId,
+      )
+      if (unassignedItinerary) {
+        toast.error(
+          `Pick a ${vocabulary.suiteType.toLowerCase()} for "${unassignedItinerary.name.trim()}" — every ${vocabulary.route.toLowerCase()} belongs to one.`,
+        )
+        return
+      }
+    }
+
     const cleanedRoutes = routeRateGroup.routes
       .filter((route) => route.name.trim())
       .map((route) => ({
         id: route.id,
         name: route.name.trim(),
+        suiteTypeId: isItineraryKind ? route.suiteTypeId : null,
+        description: isItineraryKind ? route.description.trim() || null : null,
         originLocationId: route.originLocationId,
         destinationLocationId: route.destinationLocationId,
         pickupPoint: isTransportSupplier(form.kind) ? route.pickupPoint?.trim() ?? "" : null,
@@ -3691,21 +4040,39 @@ export function SupplierDetailView({
         returnDepartureTime: route.returnDepartureTime || null,
         returnArrivalTime: route.returnArrivalTime || null,
         active: route.active,
-        rateCards: activeRateCards
-          .filter((rateCard) => rateCard.routeId === route.id)
-          .map((rateCard) => ({
-            id: rateCard.id,
-            routeId: rateCard.routeId,
-            suiteTypeId: rateCard.suiteTypeId,
-            rateTypeId: rateCard.rateTypeId,
-            pricePerPerson: rateCard.pricePerPerson,
-            childPrice: isTransportSupplier(form.kind) ? null : rateCard.childPrice,
-            infantPrice: isTransportSupplier(form.kind) ? null : rateCard.infantPrice,
-            currency: rateCard.currency.trim().toUpperCase() || "ZAR",
-            validFrom: rateCard.validFrom,
-            validTo: rateCard.validTo ?? "",
-          })),
+        // A tour operator's rates hang off the tour type instead, and travel in `rateCards` below.
+        rateCards: isItineraryKind
+          ? []
+          : activeRateCards
+              .filter((rateCard) => rateCard.routeId === route.id)
+              .map((rateCard) => ({
+                id: rateCard.id,
+                routeId: rateCard.routeId,
+                suiteTypeId: rateCard.suiteTypeId,
+                rateTypeId: rateCard.rateTypeId,
+                pricePerPerson: rateCard.pricePerPerson,
+                childPrice: isTransportSupplier(form.kind) ? null : rateCard.childPrice,
+                infantPrice: isTransportSupplier(form.kind) ? null : rateCard.infantPrice,
+                currency: rateCard.currency.trim().toUpperCase() || "ZAR",
+                validFrom: rateCard.validFrom,
+                validTo: rateCard.validTo ?? "",
+              })),
       }))
+
+    /** Tour operators only: the cards that price a tour type across every itinerary. */
+    const cleanedTypeRateCards = isItineraryKind
+      ? activeRateCards.map((rateCard) => ({
+          id: rateCard.id,
+          suiteTypeId: rateCard.suiteTypeId,
+          rateTypeId: rateCard.rateTypeId,
+          pricePerPerson: rateCard.pricePerPerson,
+          childPrice: rateCard.childPrice,
+          infantPrice: rateCard.infantPrice,
+          currency: rateCard.currency.trim().toUpperCase() || "ZAR",
+          validFrom: rateCard.validFrom,
+          validTo: rateCard.validTo ?? "",
+        }))
+      : []
 
     // A row where something was typed but no city was picked can't be stored (location_id is the
     // key the voucher resolves a boarding point by), and dropping it quietly loses the typing.
@@ -3774,6 +4141,7 @@ export function SupplierDetailView({
           quoteRateTypeId: form.quoteRateTypeId,
           suiteTypes: cleanedSuiteTypes,
           routes: cleanedRoutes,
+          rateCards: cleanedTypeRateCards,
           stationAddresses: cleanedStationAddresses,
           bedroomTypes: cleanedBedroomTypes,
           bedroomLayouts: cleanedBedroomLayouts,
@@ -3983,6 +4351,8 @@ export function SupplierDetailView({
   const activeVocabulary = getSupplierVocabulary(isEditing ? form.kind : supplier.kind)
   const isTrainOperatorForm = form.kind === "train_operator"
   const isTrainOperatorSupplier = supplier.kind === "train_operator"
+  // Tour operators: the type is priced, the itinerary describes it.
+  const isItineraryKind = isTypePricedSupplier(isEditing ? form.kind : supplier.kind)
   const routeRateGroup = form?.packages[0] ?? createRoutesRateGroup()
   // Read off live form state, not the saved supplier, so adding a route immediately widens the
   // station editor's city list without needing a save first.
@@ -4349,15 +4719,20 @@ export function SupplierDetailView({
                       </span>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      One per line. Listed under this supplier in the quote itinerary.
+                      One per line. Listed under this supplier in the quote itinerary. Start a line
+                      with <span className="font-mono font-semibold">#</span> to make it a
+                      subheading instead of a bullet.
                     </p>
                     <BufferedTextarea
                       id="supplier-inclusions"
                       value={form.inclusions}
                       onValueChange={(value) => updateField("inclusions", value)}
                       rows={5}
-                      placeholder={"High Tea\n24-hour Butler service\nWi-Fi"}
+                      placeholder={
+                        "# Onboard\nHigh Tea\n24-hour Butler service\nWi-Fi\n# Off-train\nVehicle transfer between the Hotel and Station"
+                      }
                     />
+                    <InclusionPreview value={form.inclusions} />
                   </div>
 
                   <div className="space-y-2">
@@ -4740,7 +5115,11 @@ export function SupplierDetailView({
                     <p className="text-sm font-semibold text-foreground">
                       {`Supplier ${activeVocabulary.suiteTypePlural.toLowerCase()}`}
                     </p>
-                    <p className="text-xs text-muted-foreground">Used by all route rate cards.</p>
+                    <p className="text-xs text-muted-foreground">
+                      {isItineraryKind
+                        ? `Each ${activeVocabulary.suiteType.toLowerCase()} carries its own pricing.`
+                        : "Used by all route rate cards."}
+                    </p>
                   </div>
                   {isEditing && (
                     <Button type="button" size="sm" variant="outline" onClick={addSuiteType}>
@@ -4807,9 +5186,16 @@ export function SupplierDetailView({
 
               <div className="rounded-lg border p-4 space-y-3">
                 <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm font-semibold text-foreground">
-                    {activeVocabulary.routePlural}
-                  </p>
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">
+                      {activeVocabulary.routePlural}
+                    </p>
+                    {isItineraryKind ? (
+                      <p className="text-xs text-muted-foreground">
+                        {`Each ${activeVocabulary.route.toLowerCase()} describes one ${activeVocabulary.suiteType.toLowerCase()}. Pricing lives on the ${activeVocabulary.suiteType.toLowerCase()}.`}
+                      </p>
+                    ) : null}
+                  </div>
                   {isEditing && (
                     <Button type="button" size="sm" variant="outline" onClick={() => addRoute(0)}>
                       <Plus className="mr-2 h-4 w-4" />
@@ -4818,7 +5204,18 @@ export function SupplierDetailView({
                   )}
                 </div>
 
-                {isEditing ? (
+                {isItineraryKind ? (
+                  <ItinerariesByTourType
+                    isEditing={isEditing}
+                    vocabulary={activeVocabulary}
+                    suiteTypes={isEditing ? form.suiteTypes : supplier.suiteTypes}
+                    editableRoutes={routeRateGroup.routes}
+                    savedRoutes={supplier.routes}
+                    onAddRoute={addRoute}
+                    onUpdateRoute={updateRoute}
+                    onRemoveRoute={removeRoute}
+                  />
+                ) : isEditing ? (
                   routeRateGroup.routes.length > 0 ? (
                     routeRateGroup.routes.map((route, routeIndex) => (
                       <RouteEditorRow
@@ -4942,6 +5339,7 @@ export function SupplierDetailView({
                   baseRateTypeId={effectiveBaseRateTypeId}
                   locationsById={locationsById}
                   vocabulary={activeVocabulary}
+                  supplierKind={supplier.kind}
                 />
               )}
 

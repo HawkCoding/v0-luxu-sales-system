@@ -65,6 +65,8 @@ const routeRow: RouteRow = {
   arrival_time: "17:45:00",
   return_departure_time: null,
   return_arrival_time: null,
+  suite_type_id: null,
+  description: null,
   transport_service_type: null,
   included_km_per_day: null,
   extra_km_price: null,
