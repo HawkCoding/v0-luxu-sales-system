@@ -888,7 +888,7 @@ export function CustomerDetailView({
               <div className="flex flex-row items-center justify-between gap-3">
                 <AccordionTrigger className="py-0 hover:no-underline">
                   <div className="flex items-center gap-2">
-                    <CardTitle>Linked Accounts</CardTitle>
+                    <CardTitle>Linked Accounts (internal)</CardTitle>
                     <Badge variant="secondary" className="min-w-6 justify-center px-2 text-xs tabular-nums">
                       {linkedAccountsCount}
                     </Badge>
@@ -919,6 +919,13 @@ export function CustomerDetailView({
             </CardHeader>
             <AccordionContent className="px-6 pb-6">
               <CardContent className="space-y-3 p-0">
+                {/* Linked accounts are a CRM-only relationship: nothing downstream reads
+                    customer_linked_accounts, so say so rather than letting the section
+                    imply a partner will show up on client documents. */}
+                <p className="text-xs text-muted-foreground">
+                  Recorded for reference only — linked people do not appear on quotes, invoices or vouchers.
+                </p>
+
                 {isAddingLinkedAccount ? (
                   <LinkedAccountForm
                     currentCustomerId={customerId}

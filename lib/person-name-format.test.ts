@@ -20,6 +20,30 @@ describe("normalizeFirstName", () => {
   it("keeps given-name tokens title-cased instead of particle lower-casing", () => {
     expect(normalizeFirstName("VAN HELSING")).toBe("Van Helsing")
   })
+
+  // F05-8: every token used to be lower-cased before capitalising, so an acronym
+  // or an internal capital reached client-facing documents as "Qa" / "Macleod".
+  it("keeps acronyms and initials that the user capitalised", () => {
+    expect(normalizeFirstName("QA Suite")).toBe("QA Suite")
+    expect(normalizeFirstName("JP Morgan")).toBe("JP Morgan")
+  })
+
+  // A name that is nothing but capitals cannot be told apart from a shouted CSV
+  // row, so it is still re-cased. "JOHN" must win over a lone "JP".
+  it("re-cases a name that is only an acronym", () => {
+    expect(normalizeFirstName("JP")).toBe("Jp")
+  })
+
+  it("keeps internal capitals", () => {
+    expect(normalizeFirstName("MacLeod")).toBe("MacLeod")
+    expect(normalizeFirstName("DeVries")).toBe("DeVries")
+    expect(normalizeFirstName("O'Brien")).toBe("O'Brien")
+  })
+
+  it("still re-cases a name shouted in full", () => {
+    expect(normalizeFirstName("JOHN SMITH")).toBe("John Smith")
+    expect(normalizeFirstName("MARY-JANE")).toBe("Mary-Jane")
+  })
 })
 
 describe("formatCustomerSalutation", () => {
@@ -76,6 +100,13 @@ describe("normalizeLastName", () => {
   it("normalizes apostrophes and Mc prefixes", () => {
     expect(normalizeLastName("o'connor")).toBe("O'Connor")
     expect(normalizeLastName("mccarthy")).toBe("McCarthy")
+  })
+
+  // F05-8
+  it("keeps capitals the user typed deliberately", () => {
+    expect(normalizeLastName("MacLeod")).toBe("MacLeod")
+    expect(normalizeLastName("O'Sullivan")).toBe("O'Sullivan")
+    expect(normalizeLastName("Smith-JONES")).toBe("Smith-JONES")
   })
 
   it("normalizes Unicode composed characters", () => {

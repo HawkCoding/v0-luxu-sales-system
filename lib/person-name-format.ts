@@ -32,7 +32,37 @@ function capitalize(value: string): string {
   return `${first.toLocaleUpperCase()}${rest.join("")}`
 }
 
-function normalizeSubToken(value: string): string {
+/** Has capitals and no lower case at all — "SMITH", "QA", "JP". */
+function isAllCaps(value: string): boolean {
+  return value === value.toLocaleUpperCase() && value !== value.toLocaleLowerCase()
+}
+
+/**
+ * A capital followed later by lower case — "MacLeod", "O'Brien", "DeVries". Distinguishes
+ * a deliberately cased name from a shouted one, which never returns to lower case.
+ */
+function hasLowerCaseAfterCapital(value: string): boolean {
+  let seenCapital = false
+  for (const character of value) {
+    if (character !== character.toLocaleLowerCase()) {
+      seenCapital = true
+    } else if (seenCapital && character !== character.toLocaleUpperCase()) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Re-case a token only when the whole name was shouted — supplier CSVs arrive as
+ * "JOHN SMITH" and must be cleaned up. In any other name the capitals are the
+ * user's own, so acronyms ("QA", "JP") and internal capitals ("MacLeod") survive
+ * verbatim instead of collapsing to "Qa" / "Macleod" on client-facing documents.
+ */
+function normalizeSubToken(value: string, shouted: boolean): string {
+  if (!value) return ""
+  if (!shouted && (isAllCaps(value) || hasLowerCaseAfterCapital(value))) return value
+
   const lower = value.toLocaleLowerCase()
   if (!lower) return ""
 
@@ -50,20 +80,26 @@ function normalizeSubToken(value: string): string {
     .join("'")
 }
 
-function normalizeToken(value: string): string {
+function normalizeToken(value: string, shouted: boolean): string {
   return value
     .split("-")
-    .map((part) => normalizeSubToken(part))
+    .map((part) => normalizeSubToken(part, shouted))
     .join("-")
+}
+
+/** True when the name carries capitals but no lower case anywhere — a shouted CSV row. */
+function isShoutedName(value: string): boolean {
+  return isAllCaps(value)
 }
 
 export function normalizeFirstName(value: string): string {
   const compact = normalizeWhitespace(value).normalize("NFC")
   if (!compact) return ""
 
+  const shouted = isShoutedName(compact)
   return compact
     .split(" ")
-    .map((token) => normalizeToken(token))
+    .map((token) => normalizeToken(token, shouted))
     .join(" ")
 }
 
@@ -95,12 +131,13 @@ export function normalizeLastName(value: string): string {
 
   const tokens = compact.split(" ")
   const lastIndex = tokens.length - 1
+  const shouted = isShoutedName(compact)
 
   return tokens
     .map((token, index) => {
       const lower = token.toLocaleLowerCase()
       if (index < lastIndex && SURNAME_PARTICLES.has(lower)) return lower
-      return normalizeToken(token)
+      return normalizeToken(token, shouted)
     })
     .join(" ")
 }

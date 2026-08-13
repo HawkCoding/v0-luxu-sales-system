@@ -22,12 +22,14 @@ const repoRoot = path.resolve(__dirname, "..")
 
 const QA_EMAIL_PATTERN = "%@luxusqa.test"
 /**
- * QA anchor customer + its linked partner. Prompts 06-15 read these, and their
- * emails match the fixture pattern, so they must be excluded by id.
- * Re-created 2026-08-12 after a local db reset; the first pair is the original
- * anchor from qa/reports/system-qa/2026-08-12-05-customers.md.
+ * QA anchor customer. Prompts 06-15 read it, and its email matches the fixture
+ * pattern, so it must be excluded by id. Current anchor is from the QA 05 re-run
+ * in qa/reports/system-qa/2026-08-13-05-customers.md; the earlier ids belonged to
+ * anchors from previous passes and no longer exist after a local db reset. They
+ * cost nothing to keep listed and save re-deleting a resurrected fixture by hand.
  */
 const KEEP_CUSTOMER_IDS = [
+  "6f3ffe42-4d72-45db-a9b1-c4f810512822",
   "120ebecd-db15-44d6-87fd-dca88e104f8f",
   "91b32a6c-412b-4257-8d18-1cf3b8561c57",
   "9d9f0521-7bff-471f-9db4-77358b8fadd9",
