@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { findMatchingInboundSubjectRule, matchesInboundSubjectRule } from "@/lib/inbound-email/rules"
+import {
+  findMatchingInboundSubjectRule,
+  isValidSubjectPattern,
+  matchesInboundSubjectRule,
+} from "@/lib/inbound-email/rules"
 
 describe("inbound subject rules", () => {
   it("matches contains, exact, and regex rules", () => {
@@ -53,5 +57,22 @@ describe("inbound subject rules", () => {
     ])
 
     expect(match?.id).toBe("2")
+  })
+})
+
+describe("isValidSubjectPattern", () => {
+  it("accepts anything for contains and exact", () => {
+    expect(isValidSubjectPattern("New enquiry [unclosed(", "contains")).toBe(true)
+    expect(isValidSubjectPattern("New enquiry [unclosed(", "exact")).toBe(true)
+  })
+
+  it("accepts a compilable regex", () => {
+    expect(isValidSubjectPattern("^New submission from (Blue Train|Rovos)", "regex")).toBe(true)
+  })
+
+  it("rejects a regex that does not compile", () => {
+    // Saved as-is, such a rule matched nothing at all -- not even its own literal text -- and told
+    // the admin who wrote it nothing.
+    expect(isValidSubjectPattern("New enquiry [unclosed(", "regex")).toBe(false)
   })
 })

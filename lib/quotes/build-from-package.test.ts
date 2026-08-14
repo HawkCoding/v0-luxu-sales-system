@@ -75,6 +75,7 @@ function leg(partial: Partial<PackageLeg> & { id: string; supplierKind: Supplier
     baseRateTypeId: null,
     quoteRateTypeId: null,
     inheritedRateTypeName: null,
+    applicableRateTypeIds: null,
     label: null,
     sortOrder: 0,
     dateAnchor: null,
@@ -243,6 +244,86 @@ describe("buildPackageQuoteLineItems", () => {
     expect(lineItems[1].unitPrice).toBe(500)
   })
 
+  it("lets an override price a transfer no rate card covers", async () => {
+    const transferLeg = leg({
+      id: "leg-transfer",
+      supplierKind: "transfers",
+      routes: [route("route-t", "supplier-leg-transfer", "Airport transfers")],
+      suiteTypes: [suiteType("vehicle-sedan", "supplier-leg-transfer", "Sedan")],
+      rateCards: [],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({
+        transportRequests: [
+          {
+            service_type: "transfer",
+            route_id: null,
+            suite_type_id: "vehicle-sedan",
+            service_id: "leg-transfer",
+            pickup_point: "Airport",
+            dropoff_point: "Private villa, Bantry Bay",
+            pickup_at: null,
+            price_override: 1850,
+            price_override_set_at: "2026-08-14T09:00:00Z",
+            price_override_set_by: null,
+            rental_details: null,
+          },
+        ],
+      }),
+      packageDetail: detail([transferLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [{ legId: "leg-transfer", selected: true, suiteTypeId: "vehicle-sedan", priceCurrency: "ZAR" }],
+    })
+
+    expect(lineItems).toHaveLength(1)
+    expect(lineItems[0].unitPrice).toBe(1850)
+    expect(lineItems[0].pricingSnapshot?.manualTransportPriceBase).toBeNull()
+    expect(lineItems[0].pricingSnapshot?.manualTransportPriceSetAt).toBe("2026-08-14T09:00:00Z")
+  })
+
+  it("prices a vehicle rental override per day, using the billable day count", async () => {
+    const rentalLeg = leg({
+      id: "leg-rental",
+      supplierKind: "vehicle_rental",
+      routes: [route("route-r", "supplier-leg-rental", "Self-drive")],
+      suiteTypes: [suiteType("vehicle-suv", "supplier-leg-rental", "SUV")],
+      rateCards: [rateCard({ id: "rc-suv", routeId: "route-r", suiteTypeId: "vehicle-suv", pricePerPerson: 700 })],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({
+        transportRequests: [
+          {
+            service_type: "rental",
+            route_id: null,
+            suite_type_id: "vehicle-suv",
+            service_id: "leg-rental",
+            pickup_point: "Cape Town Airport",
+            dropoff_point: "Cape Town Airport",
+            pickup_at: "2026-09-01T08:00:00Z",
+            price_override: 900,
+            price_override_set_at: null,
+            price_override_set_by: null,
+            rental_details: { return_at: "2026-09-04T08:00:00Z" },
+          },
+        ],
+      }),
+      packageDetail: detail([rentalLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [{ legId: "leg-rental", selected: true, suiteTypeId: "vehicle-suv", priceCurrency: "ZAR" }],
+    })
+
+    expect(lineItems).toHaveLength(1)
+    expect(lineItems[0].qty).toBe(3)
+    expect(lineItems[0].unitPrice).toBe(900)
+    expect(lineItems[0].total).toBe(2700)
+    expect(lineItems[0].pricingSnapshot?.manualTransportPrice).toBe(900)
+    expect(lineItems[0].pricingSnapshot?.manualTransportPriceBase).toBe(700)
+  })
+
   it("marks fixed-price package legs as inclusions so they aren't read as unpriced", async () => {
     const trainLeg = leg({ id: "leg-train", supplierKind: "train_operator", label: "The Blue Train" })
     const packageDetail = { ...detail([trainLeg]), fixedPricePerPerson: 24800 }
@@ -315,6 +396,114 @@ describe("buildPackageQuoteLineItems", () => {
 
     expect(lineItems).toHaveLength(2)
     expect(lineItems.every((li) => li.qty === 3 && li.unitPrice === 1200)).toBe(true)
+  })
+
+  it("prices a hotel room off its typed override instead of the rate card, and says so internally", async () => {
+    const hotelLeg = leg({
+      id: "leg-hotel",
+      supplierKind: "hotel_property",
+      routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+      suiteTypes: [suiteType("room-std", "supplier-leg-hotel", "Standard")],
+      rateCards: [rateCard({ id: "rc-room", routeId: "route-bb", suiteTypeId: "room-std", pricePerPerson: 4000 })],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase(),
+      packageDetail: detail([hotelLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-hotel",
+          selected: true,
+          routeId: "route-bb",
+          nights: 3,
+          units: [
+            {
+              suiteTypeId: "room-std",
+              manualRoomPrice: 3600,
+              manualRoomPriceSetAt: "2026-08-14T09:00:00Z",
+              manualRoomPriceSetByName: "Carmen de Jager",
+            },
+            // Second room keeps the card price: the override is per room, not per leg.
+            { suiteTypeId: "room-std" },
+          ],
+        },
+      ],
+    })
+
+    const [overridden, standard] = lineItems
+    expect(overridden.qty).toBe(3)
+    expect(overridden.unitPrice).toBe(3600)
+    expect(overridden.total).toBe(10800)
+    expect(overridden.pricingSnapshot?.manualRoomPrice).toBe(3600)
+    expect(overridden.pricingSnapshot?.manualRoomPriceBase).toBe(4000)
+    expect(overridden.pricingSnapshot?.manualRoomPriceSetByName).toBe("Carmen de Jager")
+    // The client-facing description must stay exactly what an un-overridden room shows.
+    expect(overridden.description).toBe(standard.description)
+
+    expect(standard.unitPrice).toBe(4000)
+    expect(standard.pricingSnapshot?.manualRoomPrice).toBeUndefined()
+  })
+
+  it("lets an override price a hotel room no rate card covers", async () => {
+    const hotelLeg = leg({
+      id: "leg-hotel",
+      supplierKind: "hotel_property",
+      routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+      suiteTypes: [suiteType("room-std", "supplier-leg-hotel", "Standard")],
+      rateCards: [],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase(),
+      packageDetail: detail([hotelLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-hotel",
+          selected: true,
+          routeId: "route-bb",
+          nights: 2,
+          priceCurrency: "ZAR",
+          units: [{ suiteTypeId: "room-std", manualRoomPrice: 5000 }],
+        },
+      ],
+    })
+
+    expect(lineItems).toHaveLength(1)
+    expect(lineItems[0].total).toBe(10000)
+    expect(lineItems[0].pricingSnapshot?.manualRoomPriceBase).toBeNull()
+  })
+
+  it("treats a zero override as a real price (a comped room), not as 'no override'", async () => {
+    const hotelLeg = leg({
+      id: "leg-hotel",
+      supplierKind: "hotel_property",
+      routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+      suiteTypes: [suiteType("room-std", "supplier-leg-hotel", "Standard")],
+      rateCards: [rateCard({ id: "rc-room", routeId: "route-bb", suiteTypeId: "room-std", pricePerPerson: 4000 })],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase(),
+      packageDetail: detail([hotelLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-hotel",
+          selected: true,
+          routeId: "route-bb",
+          nights: 2,
+          units: [{ suiteTypeId: "room-std", manualRoomPrice: 0 }],
+        },
+      ],
+    })
+
+    expect(lineItems[0].unitPrice).toBe(0)
+    expect(lineItems[0].pricingSnapshot?.manualRoomPrice).toBe(0)
   })
 
   it("prices a tour leg off the tour type's route-agnostic card, whichever itinerary was booked", async () => {

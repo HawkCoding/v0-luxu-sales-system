@@ -146,6 +146,7 @@ export function mapSupplier(row: SupplierRow): Supplier {
     streetAddress: row.street_address ?? null,
     emergencyPhone: row.emergency_phone ?? null,
     defaultContactName: row.default_contact_name ?? null,
+    parentSupplierId: row.parent_supplier_id ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     createdAtDisplay: formatDisplayDateTime(row.created_at),
@@ -290,6 +291,7 @@ export function mapBookingTransportRequest(row: BookingTransportRequestWithRenta
     luggageCount: row.luggage_count ?? null,
     flightNumber: row.flight_number ?? null,
     priceOverride: row.price_override ?? null,
+    priceOverrideSetAt: row.price_override_set_at ?? null,
     notes: row.notes ?? null,
     supplierReference: row.supplier_reference ?? null,
     sortOrder: row.sort_order,
@@ -397,6 +399,8 @@ export interface SupplierDetailMapInput {
   rateAdjustments?: SupplierRateAdjustmentRow[]
   suiteAliases?: SuiteVocabAliasRow[]
   stationAddresses?: SupplierStationAddressRow[]
+  /** The sibling record this supplier inherits its contacts from, when parent_supplier_id is set. */
+  parentSupplier?: { name: string; kind: SupplierKind; slug: string } | null
 }
 
 type SuiteVocabAliasRow = {
@@ -517,6 +521,9 @@ export function mapSupplierDetail(
 
   return {
     ...mapped,
+    parentSupplierName: variants.parentSupplier?.name ?? null,
+    parentSupplierKind: variants.parentSupplier?.kind ?? null,
+    parentSupplierSlug: variants.parentSupplier?.slug ?? null,
     emails: emails.map(mapSupplierEmail),
     suiteTypes: sortedSuiteTypes.map((row) => mapSupplierSuiteType(row, memberships)),
     routes: routes.map((route) =>

@@ -16,6 +16,7 @@ const leg: PackageLeg = {
   baseRateTypeId: null,
   quoteRateTypeId: null,
   inheritedRateTypeName: null,
+  applicableRateTypeIds: null,
   label: "The Blue Train",
   sortOrder: 0,
   dateAnchor: null,
@@ -56,6 +57,7 @@ const mismatchedUnits: SuiteLegState["units"] = [
     manualAdultPrice: null,
     manualChildPrice: null,
     manualInfantPrice: null,
+    manualRoomPrice: null,
   },
 ]
 
@@ -103,5 +105,121 @@ describe("SuiteLegEditor passenger split chip", () => {
       />,
     )
     expect(screen.queryByRole("button", { name: /spread evenly/i })).not.toBeInTheDocument()
+  })
+})
+
+const hotelLeg: PackageLeg = {
+  ...leg,
+  id: "leg-hotel",
+  supplierId: "supplier-hotel",
+  supplierName: "Table Bay Hotel",
+  supplierKind: "hotel_property",
+  label: "Table Bay Hotel",
+  baseRateTypeId: "rate-1",
+  dateAnchor: "pre",
+  routes: [
+    {
+      id: "route-1",
+      supplierId: "supplier-hotel",
+      name: "Bed & breakfast",
+      originLocationId: null,
+      destinationLocationId: null,
+      active: true,
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    },
+  ],
+  suiteTypes: [
+    {
+      id: "suite-1",
+      supplierId: "supplier-hotel",
+      name: "Luxury Room",
+      active: true,
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    },
+  ],
+  rateCards: [
+    {
+      id: "card-1",
+      routeId: "route-1",
+      suiteTypeId: "suite-1",
+      rateTypeId: "rate-1",
+      pricePerPerson: 4250,
+      childPrice: null,
+      infantPrice: null,
+      currency: "ZAR",
+      validFrom: "2026-01-01",
+      validTo: null,
+      createdAt: "2026-01-01T00:00:00Z",
+    },
+  ],
+}
+
+function makeHotelState(overrides: Partial<SuiteLegState["units"][number]> = {}): SuiteLegState {
+  return {
+    kind: "suite",
+    legId: "leg-hotel",
+    supplierKind: "hotel_property",
+    selected: true,
+    routeId: "route-1",
+    reversed: false,
+    serviceDate: "2026-09-24",
+    nights: 3,
+    dateAnchor: "custom",
+    notes: null,
+    rateTypeId: null,
+    priceCurrency: "ZAR",
+    units: [{ ...mismatchedUnits[0], suiteTypeId: "suite-1", adultCount: 2, ...overrides }],
+    origin: "consultant",
+  }
+}
+
+describe("SuiteLegEditor room price override", () => {
+  it("stays collapsed on a room with no override, showing the rate card it prices off", () => {
+    render(<SuiteLegEditor leg={hotelLeg} value={makeHotelState()} onChange={vi.fn()} />)
+
+    expect(screen.getByText(/rate card/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText(/price override for room 1/i)).not.toBeInTheDocument()
+  })
+
+  it("reveals the field when the consultant asks to override", () => {
+    render(<SuiteLegEditor leg={hotelLeg} value={makeHotelState()} onChange={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /override price/i }))
+    expect(screen.getByLabelText(/price override for room 1/i)).toBeInTheDocument()
+  })
+
+  it("opens expanded when the room already carries a saved override", () => {
+    render(
+      <SuiteLegEditor leg={hotelLeg} value={makeHotelState({ manualRoomPrice: 4500 })} onChange={vi.fn()} />,
+    )
+
+    expect(screen.getByLabelText(/price override for room 1/i)).toHaveValue(4500)
+    expect(screen.getByText("Overridden")).toBeInTheDocument()
+  })
+
+  it("treats a zero price as a real override rather than an empty field", () => {
+    // A comped room is priced at 0 — collapsing it would silently re-price the room off the card.
+    render(
+      <SuiteLegEditor leg={hotelLeg} value={makeHotelState({ manualRoomPrice: 0 })} onChange={vi.fn()} />,
+    )
+
+    expect(screen.getByLabelText(/price override for room 1/i)).toBeInTheDocument()
+    expect(screen.getByText("Overridden")).toBeInTheDocument()
+  })
+
+  it("clears the override and collapses on Revert", () => {
+    const onChange = vi.fn()
+    render(
+      <SuiteLegEditor leg={hotelLeg} value={makeHotelState({ manualRoomPrice: 4500 })} onChange={onChange} />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /revert/i }))
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        units: [expect.objectContaining({ manualRoomPrice: null })],
+      }),
+    )
   })
 })

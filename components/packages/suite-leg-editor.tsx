@@ -1,6 +1,7 @@
 ﻿"use client"
 
-import { ArrowLeftRight, Plus, Trash2 } from "lucide-react"
+import { useState } from "react"
+import { ArrowLeftRight, Info, Plus, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -9,6 +10,8 @@ import { DatePicker } from "@/components/ui/date-picker"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { NumericInput } from "@/components/ui/numeric-input"
+import { InputGroup, InputGroupAddon, InputGroupText } from "@/components/ui/input-group"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Select,
   SelectContent,
@@ -16,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { HotelDateAnchor, PackageLeg, RateType } from "@/lib/types"
+import type { HotelDateAnchor, PackageLeg, RateType, SupplierRateCard } from "@/lib/types"
 import {
   getSupplierVocabulary,
   isOptionalPackageLegKind,
@@ -35,7 +38,7 @@ import {
   type SuiteUnitState,
 } from "@/lib/packages/apply-dialog-state"
 import { resolveDirectedRouteName } from "@/lib/routes/route-name"
-import { hasAnyRateCardFor } from "@/lib/rate-cards/resolve"
+import { findRateCardCandidates, hasAnyRateCardFor, selectRateCard } from "@/lib/rate-cards/resolve"
 import { RateTypeSelect } from "@/components/rate-type-select"
 import { CurrencySelect } from "@/components/currency-select"
 import { formatMoney, BASE_CURRENCY } from "@/lib/money"
@@ -99,6 +102,176 @@ function ConvertedFareHint({
   )
 }
 
+interface RoomPriceOverrideProps {
+  unit: SuiteUnitState
+  index: number
+  nights: number
+  /** The card this room would otherwise price off, or null when none covers it. */
+  baseRateCard: SupplierRateCard | null
+  /** Used for the override's currency when no rate card covers the room. */
+  fallbackCurrency: string
+  quoteCurrency: string
+  formatInQuoteCurrency: (amount: number, from: string) => string | null
+  onChange: (next: number | null) => void
+}
+
+/**
+ * A hotel charges what it charges for a given room — single occupancy above all, which can be
+ * 100% of the double rate at one property, 90% at the next and a flat amount at a third, varying
+ * by season. Rather than model those rules, the consultant types the amount the hotel quoted for
+ * this specific room and it carries straight through to the quote.
+ *
+ * The typed figure is deliberately not validated against the rate card: the card is shown beside
+ * it so a mistake is visible, but the number that goes out is the one that was typed. It applies
+ * to this booking only and is never read back as a rate for a later one.
+ */
+function RoomPriceOverride({
+  unit,
+  index,
+  nights,
+  baseRateCard,
+  fallbackCurrency,
+  quoteCurrency,
+  formatInQuoteCurrency,
+  onChange,
+}: RoomPriceOverrideProps) {
+  const currency = baseRateCard?.currency ?? fallbackCurrency
+  // 0 is a real price (a comped room), so this is a null check, not a truthiness one.
+  const overridden = unit.manualRoomPrice !== null && unit.manualRoomPrice !== undefined
+  // Derived rather than synced: a leg loaded with a saved override opens expanded on first paint,
+  // and reverting collapses it again, so the two can never drift apart.
+  const [requested, setRequested] = useState(false)
+  const expanded = requested || overridden
+
+  const price = unit.manualRoomPrice ?? 0
+  const stayTotal = Math.round(price * nights * 100) / 100
+  const convertedStayTotal = formatInQuoteCurrency(stayTotal, currency)
+  const nightLabel = `${nights} ${nights === 1 ? "night" : "nights"}`
+
+  if (!expanded) {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3 md:col-span-2 xl:col-span-3">
+        <span className="text-xs text-muted-foreground">
+          {baseRateCard ? (
+            <>
+              Rate card{" "}
+              <span className="font-medium tabular-nums text-foreground">
+                {formatMoney(baseRateCard.pricePerPerson, baseRateCard.currency)}
+              </span>{" "}
+              per room per night
+            </>
+          ) : (
+            "No rate card price for this room yet"
+          )}
+        </span>
+        <Button
+          type="button"
+          size="sm"
+          variant="link"
+          className="h-auto p-0 text-xs"
+          onClick={() => setRequested(true)}
+        >
+          Override price
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3 rounded-md border bg-muted/40 p-3 md:col-span-2 xl:col-span-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <Label>Price override</Label>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label="About price overrides"
+                className="text-muted-foreground transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 rounded-sm"
+              >
+                <Info className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-64">
+              The client sees only the amount. This price applies to this booking alone and is never
+              saved as a rate.
+              {unit.manualRoomPriceSetAt
+                ? ` Last set ${formatDisplayDate(unit.manualRoomPriceSetAt)}.`
+                : ""}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+        {overridden ? (
+          <Badge variant="secondary" className="h-5 text-[10px]">
+            Overridden
+          </Badge>
+        ) : null}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <InputGroup className="w-full sm:w-64">
+          <InputGroupAddon align="inline-start">
+            <InputGroupText className="text-xs font-medium">{currency}</InputGroupText>
+          </InputGroupAddon>
+          <NumericInput
+            min="0"
+            step="0.01"
+            nullable
+            data-slot="input-group-control"
+            className="flex-1 rounded-none border-0 bg-transparent text-right tabular-nums shadow-none focus-visible:ring-0 dark:bg-transparent [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+            placeholder={
+              baseRateCard
+                ? baseRateCard.pricePerPerson.toLocaleString("en-ZA", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })
+                : "Rate card price"
+            }
+            aria-label={`Price override for room ${index + 1}`}
+            value={unit.manualRoomPrice ?? null}
+            onValueChange={onChange}
+          />
+          <InputGroupAddon align="inline-end">
+            <InputGroupText className="text-xs">/ night</InputGroupText>
+          </InputGroupAddon>
+        </InputGroup>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-8 px-2 text-xs"
+          onClick={() => {
+            setRequested(false)
+            onChange(null)
+          }}
+        >
+          Revert
+        </Button>
+      </div>
+
+      {overridden ? (
+        <div className="space-y-1">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs text-muted-foreground">
+            <span className="font-medium tabular-nums text-foreground">
+              {formatMoney(stayTotal, currency)} for {nightLabel}
+            </span>
+            {convertedStayTotal ? <span className="tabular-nums">≈ {convertedStayTotal}</span> : null}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {baseRateCard
+              ? `Replaces the rate card's ${formatMoney(baseRateCard.pricePerPerson, baseRateCard.currency)} per night.`
+              : "No rate card covers this room, so nothing is being replaced."}
+          </p>
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Leave blank to keep pricing this room off the rate card.
+        </p>
+      )}
+    </div>
+  )
+}
+
 interface SuiteLegEditorProps {
   leg: PackageLeg
   value: SuiteLegState
@@ -135,6 +308,8 @@ export function SuiteLegEditor({
   const isHotel = leg.supplierKind === "hotel_property"
   const vocab = getSupplierVocabulary(leg.supplierKind)
   const optional = isOptionalPackageLegKind(leg.supplierKind)
+  // A non-optional leg is always part of the booking, whatever a legacy row has stored.
+  const included = optional ? value.selected : true
   const showPassengerSplit = PASSENGER_SPLIT_SUPPLIER_KINDS.has(leg.supplierKind)
   const pricesByTypeOnly = isTypePricedSupplier(leg.supplierKind)
   const activeSuiteTypes = leg.suiteTypes.filter((suiteType) => suiteType.active)
@@ -243,6 +418,38 @@ export function SuiteLegEditor({
         ? "Select meal plan"
         : "Select route"
 
+  /**
+   * The card this room would price off today — shown next to a typed override so the consultant
+   * can see what they are replacing, and read for the override's currency (a typed price is in
+   * the same money as the rate it stands in for). Null when nothing covers the room, which is a
+   * legitimate reason to type a price rather than a blocker.
+   *
+   * The system-default rate type isn't loaded client-side, so the last inherited tier is skipped
+   * here; a room that only prices off the system default shows no base rate and still overrides
+   * correctly — the server resolves the real card when it stamps the snapshot.
+   */
+  function resolveRoomRateCard(suiteTypeId: string | null) {
+    if (!isHotel || !suiteTypeId || !value.serviceDate) return null
+    const candidates = findRateCardCandidates(
+      leg.rateCards,
+      value.routeId ?? "",
+      suiteTypeId,
+      value.serviceDate,
+    )
+    const selected = selectRateCard(candidates, value.rateTypeId, leg.quoteRateTypeId, leg.baseRateTypeId, null)
+    return selected?.ok ? selected.card : null
+  }
+
+  /** Same preview-only contract as ConvertedFareHint: no rate for the pair renders nothing. */
+  function formatInQuoteCurrency(amount: number, from: string): string | null {
+    if (from === quoteCurrency) return null
+    try {
+      return formatMoney(convertAmount(amount, from, quoteCurrency, fxRates).amount, quoteCurrency)
+    } catch {
+      return null
+    }
+  }
+
   const legFields = (
     <div className="grid gap-3 md:grid-cols-2">
       <div className="space-y-1.5">
@@ -310,6 +517,7 @@ export function SuiteLegEditor({
 
       <RateTypeSelect
         rateTypes={rateTypes}
+        allowedRateTypeIds={leg.applicableRateTypeIds}
         value={value.rateTypeId}
         onChange={(rateTypeId) => onChange({ ...value, rateTypeId })}
         id={`rate-type-${leg.id}`}
@@ -363,16 +571,25 @@ export function SuiteLegEditor({
             />
           </div>
         )}
-        <label className="flex items-center gap-1.5 text-xs">
+        {/* A non-optional leg is priced into the quote whether or not it is ticked, so letting it
+            be unticked only ever produced a voucher missing the journey the customer paid for. */}
+        <label
+          className="flex items-center gap-1.5 text-xs"
+          title={optional ? undefined : "The train journey is part of every booking."}
+        >
           <Checkbox
-            checked={value.selected}
-            onCheckedChange={(checked) => onChange({ ...value, selected: checked === true })}
+            checked={optional ? value.selected : true}
+            disabled={!optional}
+            onCheckedChange={(checked) => {
+              if (!optional) return
+              onChange({ ...value, selected: checked === true })
+            }}
           />
-          {optional ? "Include in quote & voucher" : "Include in voucher"}
+          {optional ? "Include in quote & voucher" : "Always included"}
         </label>
       </div>
 
-      {value.selected ? (
+      {included ? (
         <>
           {isHotel ? (
             <div className="space-y-2 rounded-md border bg-muted/40 p-3">
@@ -616,6 +833,19 @@ export function SuiteLegEditor({
                       />
                     </div>
                   </div>
+                ) : null}
+
+                {isHotel ? (
+                  <RoomPriceOverride
+                    unit={unit}
+                    index={index}
+                    nights={nights}
+                    baseRateCard={resolveRoomRateCard(unit.suiteTypeId)}
+                    fallbackCurrency={value.priceCurrency}
+                    quoteCurrency={quoteCurrency}
+                    formatInQuoteCurrency={formatInQuoteCurrency}
+                    onChange={(next) => updateUnit(unit.id, { manualRoomPrice: next })}
+                  />
                 ) : null}
 
                 {leg.pricingMode === "manual" ? (

@@ -426,7 +426,7 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
     routeHasDirection: false,
     routeHasDuration: false,
     routeHasSchedule: false,
-    routeNameAutoDerived: false,
+    routeNameAutoDerived: true,
     showSingleSupplement: true,
     showDurationNights: true,
     originLabel: "Origin",
@@ -685,6 +685,23 @@ export interface PricingSnapshot {
   commission?: CommissionBreakdown | null
   /** True when this line was added as an ad-hoc extra (not part of an applied package). */
   isExtra?: boolean
+  /** Hotel legs only: the consultant-typed per-room-per-night price that replaced the rate card
+   *  for this room, in sourceCurrency (the card's own currency). Internal-only — the client sees
+   *  the resulting amount and nothing about the override. */
+  manualRoomPrice?: number | null
+  /** The rate card price the override replaced, in the same currency. Null when the room had no
+   *  valid card at all (an override is allowed to price a room the rate cards don't cover). */
+  manualRoomPriceBase?: number | null
+  manualRoomPriceSetAt?: string | null
+  manualRoomPriceSetByName?: string | null
+  /** Transfer/rental legs only: the consultant-typed price that replaced the rate card for this
+   *  request, in sourceCurrency. Internal-only, same posture as manualRoomPrice. */
+  manualTransportPrice?: number | null
+  /** The rate card price the override replaced, in the same currency. Null when the request had
+   *  no valid card at all (an override is allowed to price a trip the rate cards don't cover). */
+  manualTransportPriceBase?: number | null
+  manualTransportPriceSetAt?: string | null
+  manualTransportPriceSetByName?: string | null
   /** Display-only quantity basis shown next to the qty (e.g. "per person", "per room per night"). */
   unit?: string | null
 }
@@ -736,6 +753,12 @@ export interface PackageLeg {
   quoteRateTypeId: string | null
   /** Display name of the rate type a leg with no explicit choice will price at. */
   inheritedRateTypeName: string | null
+  /**
+   * The rate types this supplier prices at -- its base rate plus the ones on its Applicable Rates
+   * card. The per-leg rate picker lists only these. Null means the set was never loaded, so the
+   * picker falls back to showing every active rate rather than hiding valid choices.
+   */
+  applicableRateTypeIds: string[] | null
   routes: SupplierRoute[]
   rateCards: SupplierRateCard[]
   suiteTypes: SupplierSuiteType[]
@@ -822,6 +845,15 @@ export interface Supplier {
   /** Default named contact for this supplier's vouchers (e.g. "Carla") -- prefills a leg's own
    * supplierContactName at capture time, which can then be overridden per booking. */
   defaultContactName: string | null
+  /**
+   * Set when this record inherits its contact details from a sibling record for the same company
+   * in a different category -- e.g. "Toyota (Transfers)" reusing "Toyota (Hotel)"'s phone, website
+   * and email list. Non-null *is* the "Linked" checkbox; there is no separate boolean.
+   *
+   * The inherited values are physically mirrored onto this row by database triggers, so every
+   * reader (vouchers, backups) sees real values. Only the editor treats them as read-only.
+   */
+  parentSupplierId: string | null
   createdAt: string
   createdAtDisplay?: string
   updatedAt: string
@@ -839,6 +871,11 @@ export interface SupplierRateAdjustment {
 }
 
 export interface SupplierDetail extends Supplier {
+  /** Populated alongside `parentSupplierId` so the editor can say "Inherited from Toyota (Hotel)"
+   * and link through to it, without a second round trip. */
+  parentSupplierName: string | null
+  parentSupplierKind: SupplierKind | null
+  parentSupplierSlug: string | null
   emails: SupplierEmail[]
   suiteTypes: SupplierSuiteType[]
   routes: SupplierRoute[]
@@ -888,6 +925,8 @@ export interface BookingTransportRequest {
   flightNumber: string | null
   /** When set, the quote line for this request uses this price instead of the rate card. */
   priceOverride: number | null
+  /** When priceOverride was last set, server-stamped. Null when there is no override. */
+  priceOverrideSetAt: string | null
   notes: string | null
   supplierReference: string | null
   sortOrder: number

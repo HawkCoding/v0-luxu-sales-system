@@ -1,3 +1,4 @@
+import { REVIEW_REASON } from "@/lib/inbound-email/review-reasons"
 import type { DraftSuiteUnit } from "@/lib/suites/draft-suite-unit"
 
 export interface ParsedDraft {
@@ -82,7 +83,31 @@ export interface ParsedDraft {
   }
   rawText: string
   linkedCustomerId?: string
+  /**
+   * Lead source chosen by the consultant when they captured the enquiry themselves. Only set on
+   * the manual-entry path -- a pasted email is recorded as paste_import by the API, which ignores
+   * this field, and the public web form never reaches this type at all.
+   */
+  source?: StaffLeadSource
 }
+
+/** Lead sources a consultant may pick. Mirrors STAFF_SELECTABLE_SOURCES in app/api/enquiries/route.ts. */
+export type StaffLeadSource =
+  | "phone_call"
+  | "walk_in"
+  | "referral"
+  | "advertisement"
+  | "social_media"
+  | "travel_agent"
+
+export const STAFF_LEAD_SOURCE_OPTIONS: readonly { value: StaffLeadSource; label: string }[] = [
+  { value: "phone_call", label: "Phone call" },
+  { value: "walk_in", label: "Walk-in" },
+  { value: "referral", label: "Referral" },
+  { value: "advertisement", label: "Advertisement" },
+  { value: "social_media", label: "Social media" },
+  { value: "travel_agent", label: "Travel agent" },
+]
 
 export interface ValidationResult {
   isValid: boolean
@@ -102,6 +127,19 @@ export interface ParseEmailDraftOptions {
 }
 
 const DEFAULT_TRAIN_OPERATOR_NAMES = ['Rovos Rail', 'Blue Train']
+
+/**
+ * Word-boundary matcher for an operator name that treats a leading definite article as optional on
+ * both sides: the supplier row reads "The Blue Train" but every Blue Train enquiry writes plain
+ * "Blue Train", and an exact `\bThe Blue Train\b` scan matched none of them -- a whole operator's
+ * traffic landed in Needs Review for a supplier this parser could already name. The article is the
+ * only tolerance allowed here; anything looser starts guessing between operators.
+ */
+function buildOperatorPattern(name: string): RegExp {
+  const bare = name.trim().replace(/^the\s+/i, '')
+  const escaped = bare.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`\\b(?:the\\s+)?${escaped}\\b`, 'i')
+}
 
 export interface ValidateDraftOptions {
   /**
@@ -393,6 +431,79 @@ function extractSuitePhrases(text: string): string[] {
   return []
 }
 
+/**
+ * Words that cannot be part of a place name. An "X to Y" hit containing any of them caught prose
+ * rather than a route -- "...their daughter and would love to do the Rovos Rail trip from Pretoria
+ * to Cape Town" used to resolve to "Daughter And Would Love To Do The Rovos Rail", presented to the
+ * consultant as a high-confidence route with no warning.
+ */
+const ROUTE_PROSE_STOPWORDS = new Set([
+  'a', 'an', 'the', 'and', 'or', 'we', 'i', 'us', 'my', 'our', 'they', 'their', 'you', 'your',
+  'is', 'are', 'am', 'be', 'been', 'was', 'were', 'do', 'does', 'did', 'go', 'going', 'goes',
+  'get', 'see', 'have', 'has', 'had', 'would', 'will', 'want', 'wants', 'like', 'love', 'need',
+  'needs', 'please', 'trip', 'journey', 'travel', 'travelling', 'traveling', 'book', 'booking',
+  'quote', 'enquiry', 'enquire', 'rail', 'train', 'looking', 'forward', 'take', 'taking', 'about',
+  'with', 'for', 'on', 'in', 'at', 'this', 'that', 'it', 'me', 'him', 'her', 'them', 'daughter',
+  'son', 'wife', 'husband', 'partner', 'family', 'friends',
+])
+
+function isPlaceWord(word: string): boolean {
+  return Boolean(word) && !ROUTE_PROSE_STOPWORDS.has(word.toLowerCase())
+}
+
+/**
+ * The origin sits at the END of the text before "to", so keep its longest clean suffix:
+ * "Enquiry for Pretoria" -> "Pretoria", "daughter and would love" -> '' (nothing survives).
+ */
+function placeSuffix(value: string): string {
+  const words = value.trim().split(/[ \t]+/)
+  let start = words.length
+  while (start > 0 && isPlaceWord(words[start - 1])) start -= 1
+  return words.slice(start).join(" ")
+}
+
+/**
+ * The destination sits at the START of the text after "to", so keep its longest clean prefix:
+ * "Cape Town in May" -> "Cape Town", "do the Rovos Rail" -> ''.
+ */
+function placePrefix(value: string): string {
+  const words = value.trim().split(/[ \t]+/)
+  let end = 0
+  while (end < words.length && isPlaceWord(words[end])) end += 1
+  return words.slice(0, end).join(" ")
+}
+
+// [ \t] rather than \s for the internal word joiner -- \s also matches newlines, which let this
+// cross a line break and swallow the next line's label (e.g. "Cape Town\nDeparture").
+const PLACE = String.raw`[A-Za-z][A-Za-z'-]*(?:[ \t]+[A-Za-z][A-Za-z'-]*){0,3}`
+const ROUTE_FROM_TO = new RegExp(String.raw`\bfrom[ \t]+(${PLACE})[ \t]+to[ \t]+(${PLACE})`, 'gi')
+const ROUTE_BETWEEN_AND = new RegExp(String.raw`\bbetween[ \t]+(${PLACE})[ \t]+and[ \t]+(${PLACE})`, 'gi')
+const ROUTE_BARE_TO = new RegExp(String.raw`(${PLACE})[ \t]+to[ \t]+(${PLACE})`, 'gi')
+
+/**
+ * Reads an "X to Y" route out of free prose, in descending order of how much the wording commits to
+ * being a route: an explicit "from X to Y" (or "between X and Y") first, a bare "X to Y" only as a
+ * last resort. Each endpoint is then trimmed back to the run of words that could actually be a
+ * place name, and the candidate is discarded when nothing survives on either side -- the bare match
+ * is the one that used to swallow half a sentence ("...daughter and would love to do the Rovos
+ * Rail"). Every occurrence is tried, not just the first, so a real route later in the sentence
+ * still wins over prose earlier in it.
+ *
+ * Returning '' is the correct answer for prose that names no route: it is then reported as a
+ * missing field rather than shown to the consultant as a confident guess.
+ */
+function extractProseRoute(text: string): string {
+  for (const pattern of [ROUTE_FROM_TO, ROUTE_BETWEEN_AND, ROUTE_BARE_TO]) {
+    pattern.lastIndex = 0
+    for (const match of text.matchAll(pattern)) {
+      const origin = placeSuffix(match[1])
+      const destination = placePrefix(match[2])
+      if (origin && destination) return titleCase(`${origin} to ${destination}`)
+    }
+  }
+  return ''
+}
+
 function titleCase(value: string): string {
   return value
     .replace(/\s+/g, ' ')
@@ -603,8 +714,11 @@ export function parseEmailDraft(text: string, options?: ParseEmailDraftOptions):
     ? options.trainOperatorNames
     : DEFAULT_TRAIN_OPERATOR_NAMES
   let supplier = ''
-  for (const name of [...trainOperatorNames].sort((a, b) => b.length - a.length)) {
-    const pattern = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i')
+  // Longest bare name first (article stripped, since it no longer participates in the match) so a
+  // longer operator name still wins over a shorter one it contains.
+  const bareLength = (name: string) => name.trim().replace(/^the\s+/i, '').length
+  for (const name of [...trainOperatorNames].sort((a, b) => bareLength(b) - bareLength(a))) {
+    const pattern = buildOperatorPattern(name)
     if (pattern.test(text)) {
       supplier = name
       confidence['trip.supplier'] = 'high'
@@ -623,13 +737,9 @@ export function parseEmailDraft(text: string, options?: ParseEmailDraftOptions):
     route = titleCase(directionLabelValue)
     confidence['trip.route'] = 'high'
   } else {
-    // [ \t] rather than \s for the internal word joiner -- \s also matches newlines, which let
-    // this cross a line break and swallow the next line's label (e.g. "Cape Town\nDeparture").
-    const proseMatch = text.match(
-      /\b([A-Za-z][A-Za-z'-]*(?:[ \t]+[A-Za-z][A-Za-z'-]*){0,3})[ \t]+to[ \t]+([A-Za-z][A-Za-z'-]*(?:[ \t]+[A-Za-z][A-Za-z'-]*){0,3})\b/i,
-    )
-    if (proseMatch) {
-      route = titleCase(`${proseMatch[1]} to ${proseMatch[2]}`)
+    const proseRoute = extractProseRoute(text)
+    if (proseRoute) {
+      route = proseRoute
       confidence['trip.route'] = 'high'
     }
   }
@@ -841,17 +951,17 @@ export function validateDraft(draft: ParsedDraft, options?: ValidateDraftOptions
   const warnings: string[] = []
 
   // Check required fields
-  if (!draft.customer.firstName) missingRequired.push('First name (Customer)')
-  if (!draft.customer.surname) missingRequired.push('Surname (Customer)')
-  if (!draft.customer.country) missingRequired.push('Country')
+  if (!draft.customer.firstName) missingRequired.push(REVIEW_REASON.firstName)
+  if (!draft.customer.surname) missingRequired.push(REVIEW_REASON.surname)
+  if (!draft.customer.country) missingRequired.push(REVIEW_REASON.country)
   if (!draft.customer.email && !draft.customer.phone) {
-    missingRequired.push('Email or Phone (Customer)')
+    missingRequired.push(REVIEW_REASON.contact)
   }
-  if (!hasSupplier(draft, options)) missingRequired.push('Supplier')
-  if (!draft.trip.route) missingRequired.push('Route / Direction')
-  if (!draft.trip.departureDate) missingRequired.push('Departure date')
-  if (!draft.guests.adults || draft.guests.adults < 1) missingRequired.push('Adults')
-  if (!draft.guests.suites || draft.guests.suites < 1) missingRequired.push('Suites')
+  if (!hasSupplier(draft, options)) missingRequired.push(REVIEW_REASON.supplier)
+  if (!draft.trip.route) missingRequired.push(REVIEW_REASON.route)
+  if (!draft.trip.departureDate) missingRequired.push(REVIEW_REASON.departureDate)
+  if (!draft.guests.adults || draft.guests.adults < 1) missingRequired.push(REVIEW_REASON.adults)
+  if (!draft.guests.suites || draft.guests.suites < 1) missingRequired.push(REVIEW_REASON.suites)
 
   // Suite type is reported but NOT required: an enquiry saves with it blank rather than being
   // blocked, and the hard gate stays where it already was -- quote build, which refuses to price

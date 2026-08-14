@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { parseEmailDraft } from "@/lib/import/parseEmailDraft"
+import { REVIEW_REASON } from "@/lib/inbound-email/review-reasons"
 
 const importBookingMocks = vi.hoisted(() => ({
   createServiceClient: vi.fn(),
@@ -541,6 +542,25 @@ describe("createEmailBookingFromParsedDraft duplicate detection", () => {
     )
   })
 
+  it("records the duplicate as a review reason so the banner can name it", async () => {
+    const state = createState({
+      existingCustomers: [
+        { id: "customer-existing", email: "jane@example.com", first_name: "Jane", last_name: "Doe" },
+      ],
+      duplicateBookingId: "booking-prior",
+    })
+
+    const result = await importFixture(state, "jane@example.com")
+
+    // The flag used to be raised by the duplicate alone while missing_fields stayed empty, which
+    // left the review banner with nothing to show but a placeholder.
+    expect(result.needsReview).toBe(true)
+    expect(result.missingFields).toContain(REVIEW_REASON.possibleDuplicate)
+    expect(state.bookingInsertRows[0].email_import_missing_fields).toContain(
+      REVIEW_REASON.possibleDuplicate,
+    )
+  })
+
   it("does not flag a duplicate when no recent matching booking exists", async () => {
     const state = createState({
       existingCustomers: [
@@ -595,6 +615,55 @@ describe("createEmailBookingFromParsedDraft resolution-failure review gate", () 
     expect(state.bookingInsertRows[0]?.email_import_missing_fields).not.toContain(
       "Train operator not matched to an active supplier",
     )
+  })
+})
+
+describe("createEmailBookingFromParsedDraft passenger counts", () => {
+  beforeEach(() => {
+    importBookingMocks.createServiceClient.mockReset()
+    importBookingMocks.bookingSequence = 0
+  })
+
+  it("stores 0 rather than inventing an adult and a suite the email never gave", async () => {
+    // The importer used to write `payload.noOfAdults || 1` / `noOfSuites || 1`, so an email with
+    // no pax detail was stored as 1 adult + 1 suite with zero booking_suites rows -- a booking
+    // claiming a suite it does not have, in an importer whose own parser refuses to guess.
+    const draft = parseEmailDraft(`
+Name
+Sarah
+Surname
+Jones
+Email
+sarah@example.com
+Country
+South Africa
+Rovos Rail
+Direction
+Pretoria to Cape Town
+Departure Date
+11 May 2026
+`)
+    expect(draft.guests.adults).toBe(0)
+    expect(draft.guests.suites).toBe(0)
+
+    const state = createState()
+    importBookingMocks.createServiceClient.mockReturnValue(createSupabase(state))
+    await createEmailBookingFromParsedDraft(draft, {
+      emailAccountId: "account-1",
+      mailboxEmail: "bookings@example.com",
+      subject: "Train enquiry",
+      receivedAt: "2026-05-17T10:00:00.000Z",
+      rawText: draft.rawText,
+      missingFields: ["Adults", "Suites"],
+      warnings: [],
+    })
+
+    const booking = state.bookingInsertRows[0]
+    expect(booking?.no_of_adults).toBe(0)
+    expect(booking?.no_of_suites).toBe(0)
+    expect(booking?.no_of_adults_original).toBe(0)
+    expect(booking?.email_import_needs_review).toBe(true)
+    expect(state.suiteInsertRows).toHaveLength(0)
   })
 })
 
@@ -687,13 +756,18 @@ Deluxe Twin with shower
     expect(await importRoute(reverseState, "Rovos Rail Information", "Durban to Pretoria")).toBeNull()
   })
 
-  it("tie-breaks an ambiguous city pair deterministically when the supplier is unknown", async () => {
-    // Both candidates are round_trip with no duration, so the name A-Z step decides: "Cape Town
-    // Journey" before "Pretoria to Cape Town". Leaving it unresolved would strand the booking
-    // with no route and no way to price a quote.
+  it("attaches no route when the supplier is unknown, and says why", async () => {
+    // An unresolved operator used to widen the search to every operator's routes and hand the
+    // booking whichever one sorted first -- an "Orient Express" enquiry came back carrying The
+    // Blue Train's Pretoria <-> Cape Town, flagged only for Supplier. Picking between operators
+    // is a guess, so nothing is attached and the gap is named on the booking.
     const state = createState({ trainSuppliers: [] })
-    expect(await importRoute(state, "Rovos Rail Information", "Pretoria to Cape Town")).toBe(
-      "route-rovos-pta-cpt",
+    expect(await importRoute(state, "Rovos Rail Information", "Pretoria to Cape Town")).toBeNull()
+
+    const booking = state.bookingInsertRows[0]
+    expect(booking?.email_import_needs_review).toBe(true)
+    expect(booking?.email_import_missing_fields).toContain(
+      "Route not resolved - no train operator matched",
     )
   })
 

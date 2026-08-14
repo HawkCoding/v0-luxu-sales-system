@@ -100,7 +100,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   if (!parsedResult.success) return jsonZodError(parsedResult.error, "Invalid transport request payload")
   const parsed = parsedResult.data
 
-  const { supabase } = auth.value
+  const { supabase, user } = auth.value
 
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
@@ -111,25 +111,48 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   if (bookingError) return safeSupabaseError("transport-requests:load-booking", bookingError, "Failed to validate booking")
   if (!booking) return jsonError("Booking not found", 404)
 
-  const rows = parsed.transportRequests.map((request, index) => ({
-    id: request.id ?? randomUUID(),
-    booking_id: id,
-    service_type: request.serviceType,
-    supplier_id: normalizeNullableUuid(request.supplierId),
-    route_id: normalizeNullableUuid(request.routeId),
-    suite_type_id: normalizeNullableUuid(request.suiteTypeId),
-    package_leg_id: normalizeNullableUuid(request.packageLegId),
-    service_id: normalizeNullableUuid(request.serviceId),
-    pickup_point: request.pickupPoint.trim(),
-    dropoff_point: request.dropoffPoint.trim(),
-    pickup_at: normalizeNullableDateTime(request.pickupAt),
-    passenger_count: request.passengerCount ?? null,
-    luggage_count: request.luggageCount ?? null,
-    flight_number: normalizeNullableText(request.flightNumber),
-    price_override: request.priceOverride ?? null,
-    notes: normalizeNullableText(request.notes),
-    sort_order: request.sortOrder ?? index,
-  }))
+  // Carries an override's audit stamp across the delete/reinsert cycle below: an unchanged amount
+  // keeps its original stamp, a changed or brand-new one gets a fresh one. Mirrors the hotel room
+  // override logic in app/api/jobs/[id]/services/route.ts.
+  const { data: existingRequests } = await supabase
+    .from("booking_transport_requests")
+    .select("id, price_override, price_override_set_at, price_override_set_by")
+    .eq("booking_id", id)
+  const existingProvenance = new Map(
+    (existingRequests ?? []).map((request) => [
+      request.id,
+      { price: request.price_override, setAt: request.price_override_set_at, setBy: request.price_override_set_by },
+    ]),
+  )
+  const savedAt = new Date().toISOString()
+
+  const rows = parsed.transportRequests.map((request, index) => {
+    const priceOverride = request.priceOverride ?? null
+    const previous = request.id ? existingProvenance.get(request.id) : undefined
+    const unchanged = priceOverride !== null && previous?.price === priceOverride
+
+    return {
+      id: request.id ?? randomUUID(),
+      booking_id: id,
+      service_type: request.serviceType,
+      supplier_id: normalizeNullableUuid(request.supplierId),
+      route_id: normalizeNullableUuid(request.routeId),
+      suite_type_id: normalizeNullableUuid(request.suiteTypeId),
+      package_leg_id: normalizeNullableUuid(request.packageLegId),
+      service_id: normalizeNullableUuid(request.serviceId),
+      pickup_point: request.pickupPoint.trim(),
+      dropoff_point: request.dropoffPoint.trim(),
+      pickup_at: normalizeNullableDateTime(request.pickupAt),
+      passenger_count: request.passengerCount ?? null,
+      luggage_count: request.luggageCount ?? null,
+      flight_number: normalizeNullableText(request.flightNumber),
+      price_override: priceOverride,
+      price_override_set_at: priceOverride === null ? null : unchanged ? previous?.setAt ?? savedAt : savedAt,
+      price_override_set_by: priceOverride === null ? null : unchanged ? previous?.setBy ?? user.id : user.id,
+      notes: normalizeNullableText(request.notes),
+      sort_order: request.sortOrder ?? index,
+    }
+  })
   const rentalRows = parsed.transportRequests.flatMap((request, index) => {
     if (request.serviceType !== "rental") return []
 

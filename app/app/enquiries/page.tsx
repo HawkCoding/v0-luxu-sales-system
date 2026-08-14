@@ -28,6 +28,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { toast } from "sonner"
 import { downloadAuditLog } from "@/lib/export-audit"
 import { formatDisplayDate } from "@/lib/date-format"
+import { describeReviewReasons, REVIEW_REASON } from "@/lib/inbound-email/review-reasons"
 import type { AuditLog } from "@/lib/types"
 
 const FILTER_CHIPS: { value: EnquiryFilter; label: string }[] = [
@@ -120,11 +121,18 @@ export default function EnquiriesPage() {
   }
 
   const handleResolveReview = async (enquiryId: string) => {
-    await fetch(`/api/jobs/${enquiryId}`, {
+    // The PATCH is manager/admin only. Without this check a consultant got a 403 and a success
+    // toast, and the badge silently stayed put.
+    const response = await fetch(`/api/jobs/${enquiryId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ resolveEmailImportReview: true }),
     })
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as { error?: string }
+      toast.error(body.error || "Failed to resolve review")
+      return
+    }
     refreshAll()
     toast.success("Import review resolved")
   }
@@ -300,9 +308,31 @@ export default function EnquiriesPage() {
                         <Alert className="mt-3 py-2 border-destructive/40">
                           <AlertCircle className="h-3 w-3" />
                           <AlertDescription className="text-xs">
-                            Needs Review:{" "}
-                            {[...(e.emailImportMissingFields || []), ...(e.emailImportWarnings || [])].join(", ") ||
-                              "Review parsed email fields"}
+                            <p className="font-medium">
+                              Needs review before this enquiry can move to Quote Sent
+                            </p>
+                            <ul className="mt-1.5 space-y-1">
+                              {describeReviewReasons(e.emailImportMissingFields, e.emailImportWarnings).map(
+                                (reason) => (
+                                  <li key={reason.reason}>
+                                    <span className="font-medium">{reason.label}</span>{" "}
+                                    <span className="text-muted-foreground">{reason.fixHint}</span>
+                                    {reason.reason === REVIEW_REASON.possibleDuplicate &&
+                                      e.emailImportDuplicateOfBookingId && (
+                                        <>
+                                          {" "}
+                                          <Link
+                                            href={`/app/bookings/${e.emailImportDuplicateOfBookingId}`}
+                                            className="underline underline-offset-2 hover:text-primary"
+                                          >
+                                            View possible duplicate
+                                          </Link>
+                                        </>
+                                      )}
+                                  </li>
+                                ),
+                              )}
+                            </ul>
                           </AlertDescription>
                         </Alert>
                       )}
@@ -326,15 +356,16 @@ export default function EnquiriesPage() {
                         Open Job
                       </Link>
                     </Button>
-                    {e.emailImportNeedsReview && (
+                    {e.emailImportNeedsReview && can("resolve:import_review") && (
                       <Button
                         size="sm"
                         variant="outline"
                         onClick={() => handleResolveReview(e.id)}
                         className="w-full"
+                        title="Clears the review flag so the booking can advance"
                       >
                         <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
-                        Resolve Review
+                        Mark reviewed
                       </Button>
                     )}
                     {e.source === "email" && (
@@ -350,13 +381,18 @@ export default function EnquiriesPage() {
                     )}
                   </div>
                 </div>
-                <button
-                  onClick={(ev) => handleDownloadAudit(ev, e)}
-                  className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-secondary rounded"
-                  title="Download audit log"
-                >
-                  <Download className="w-3.5 h-3.5 text-muted-foreground" />
-                </button>
+                {/* GET /api/audit is admin/manager only -- rendering this for a consultant just
+                    bought them a 403 and a failure toast. */}
+                {can("view:audit") && (
+                  <button
+                    onClick={(ev) => handleDownloadAudit(ev, e)}
+                    className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-secondary rounded"
+                    title="Download audit log"
+                    aria-label={`Download audit log for ${e.bookingNumber}`}
+                  >
+                    <Download className="w-3.5 h-3.5 text-muted-foreground" />
+                  </button>
+                )}
               </CardContent>
             </Card>
           )

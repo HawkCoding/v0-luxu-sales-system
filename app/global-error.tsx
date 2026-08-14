@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect } from "react"
+import { reportClientError } from "@/lib/report-client-error"
 
 /**
  * Last-resort boundary for render crashes that no segment error boundary
@@ -15,18 +16,7 @@ export default function GlobalError({
   reset: () => void
 }) {
   useEffect(() => {
-    void fetch("/api/client-errors", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message: error.message || "Unhandled render error",
-        stack: error.stack,
-        url: typeof window !== "undefined" ? window.location.href : undefined,
-      }),
-      keepalive: true,
-    }).catch(() => {
-      // Reporting must never mask the error the user is already seeing.
-    })
+    reportClientError(error)
   }, [error])
 
   return (

@@ -65,6 +65,8 @@ export interface PackageLegWithSupplier extends PackageLegRow {
   supplierQuoteRateTypeId: string | null
   /** Name of the rate type an un-chosen leg will inherit: the quoted rate, else the base rate. */
   supplierInheritedRateTypeName: string | null
+  /** Rate types this supplier prices at (base + its markdowns). Null when they weren't loaded. */
+  supplierApplicableRateTypeIds?: string[] | null
 }
 
 function mapVehicleRentalRouteDetails(
@@ -197,6 +199,7 @@ export function mapPackageLeg(
     baseRateTypeId: row.supplierBaseRateTypeId ?? null,
     quoteRateTypeId: row.supplierQuoteRateTypeId ?? null,
     inheritedRateTypeName: row.supplierInheritedRateTypeName ?? null,
+    applicableRateTypeIds: row.supplierApplicableRateTypeIds ?? null,
     routes: eligibleRoutes.map((route) =>
       mapPackageRoute(route, detailsByRouteId.get(route.id), locationNameById),
     ),

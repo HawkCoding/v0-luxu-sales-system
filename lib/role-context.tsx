@@ -47,6 +47,9 @@ export const permissions: Record<string, Role[]> = {
   "view:reporting": ["admin", "manager"],
   "export:reporting": ["admin", "manager"],
   "view:audit": ["admin", "manager"],
+  // Mirrors the manager/admin check on PATCH /api/jobs/[id] (resolveEmailImportReview) and
+  // POST /api/jobs/[id]/clear-import-review. Keep in sync or the button 403s for consultants.
+  "resolve:import_review": ["admin", "manager"],
   // Mirrors requireManagerSettingsAccess() in lib/settings-access.ts, which guards
   // /api/error-logs. Keep the two in sync or client fetches 403 in the background.
   "view:error_logs": ["admin", "manager"],

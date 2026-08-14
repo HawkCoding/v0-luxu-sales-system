@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { createSessionClient } from "@/lib/supabase/server"
 import { buildSupplierSlugBase } from "@/lib/suppliers"
+import { SUPPLIER_KIND_LABELS, type SupplierKind } from "@/lib/types"
 import type { Database } from "@/lib/supabase/types"
 
 export const allowedRoles = new Set(["admin", "manager"])
@@ -19,9 +20,15 @@ export type RefTableName =
   | "bedroom_layouts"
   | "bathroom_types"
 
+/**
+ * A company can hold one record per category, so the same name legitimately repeats. Falling
+ * straight to `toyota-2` would make those URLs meaningless, so the category is tried as the first
+ * tiebreaker: `toyota`, then `toyota-transfers`, and only then `toyota-transfers-2`.
+ */
 export async function resolveUniqueSupplierSlug(
   supabase: SessionClient,
   supplierName: string,
+  kind?: string,
 ): Promise<string> {
   const slugBase = buildSupplierSlugBase(supplierName)
 
@@ -39,12 +46,36 @@ export async function resolveUniqueSupplierSlug(
     return slugBase
   }
 
+  const kindSlug = kind ? buildSupplierSlugBase(kind) : null
+  const suffixedBase = kindSlug ? `${slugBase}-${kindSlug}` : slugBase
+  if (!usedSlugs.has(suffixedBase)) {
+    return suffixedBase
+  }
+
   let suffix = 2
-  while (usedSlugs.has(`${slugBase}-${suffix}`)) {
+  while (usedSlugs.has(`${suffixedBase}-${suffix}`)) {
     suffix += 1
   }
 
-  return `${slugBase}-${suffix}`
+  return `${suffixedBase}-${suffix}`
+}
+
+/**
+ * Suppliers are unique on name + category + location, so "already exists" has to name all three --
+ * "A supplier named Toyota already exists" is now actively misleading, since a second Toyota in a
+ * different category is exactly what the user is trying to create.
+ */
+export function supplierConflictMessage(
+  error: { message?: string } | null | undefined,
+  supplierName: string,
+  kind: string,
+): string {
+  if (error?.message?.includes("suppliers_slug")) {
+    return "That supplier web address is already taken. Try a slightly different name."
+  }
+
+  const kindLabel = SUPPLIER_KIND_LABELS[kind as SupplierKind] ?? "supplier"
+  return `A ${kindLabel} supplier named "${supplierName}" already exists at this location.`
 }
 
 export async function requireAuthenticatedUser() {
@@ -237,7 +268,9 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
       .from("supplier_emails")
       .select("*")
       .eq("supplier_id", supplierId)
-      .order("label", { ascending: true })
+      // The user's own order; the first row is the supplier's primary contact. `email` only breaks
+      // ties between rows that share a position (legacy rows saved before sort_order existed).
+      .order("sort_order", { ascending: true })
       .order("email", { ascending: true }),
     supabase
       .from("routes")
@@ -513,6 +546,27 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
       .eq("supplier_id", supplierId),
   ])
 
+  // Only fetched when this record inherits its contacts from a sibling, so the editor can name the
+  // source ("Inherited from Toyota (Hotel)") and link through to it.
+  const parentSupplierResult = supplier.parent_supplier_id
+    ? await supabase
+        .from("suppliers")
+        .select("name, kind, slug")
+        .eq("id", supplier.parent_supplier_id)
+        .single()
+    : { data: null, error: null }
+
+  if (parentSupplierResult.error && !isNoRowsError(parentSupplierResult.error)) {
+    console.error("Failed to load linked parent supplier", {
+      supplierId,
+      supplierSlug: slug,
+      error: parentSupplierResult.error,
+    })
+    return {
+      error: NextResponse.json({ error: "Failed to load supplier" }, { status: 500 }),
+    }
+  }
+
   const variantErrors = [
     bedroomTypesResult.error,
     bedroomLayoutsResult.error,
@@ -557,5 +611,6 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     rateTypes: rateTypesResult.data ?? [],
     rateAdjustments: rateAdjustmentsResult.data ?? [],
     suiteAliases: suiteAliasesResult.data ?? [],
+    parentSupplier: parentSupplierResult.data ?? null,
   }
 }

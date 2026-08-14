@@ -178,6 +178,12 @@ function toProseRoute(route: string): string {
   return route.replace(/\s*[→↔]\s*/g, " to ")
 }
 
+/** "Cape Town Station" → "the Cape Town Station" — skipped when the text already carries an
+ * article, so supplier-entered strings like "the hotel" never double up. */
+function withLeadingThe(value: string): string {
+  return /^the\s/i.test(value) ? value : `the ${value}`
+}
+
 function joinSentence(
   parts: Array<string | null | undefined>,
   suffixes: Array<string | null | undefined>,
@@ -199,7 +205,7 @@ function describeBlock(block: VoucherServiceBlock): string {
       const at = [supplier, location].filter(Boolean).join(", ")
       return joinSentence(
         [
-          `${stay} at ${at || "the hotel"}`,
+          `${stay} at ${at ? withLeadingThe(at) : "the hotel"}`,
           d.roomType ? `in a ${d.roomType}` : null,
           d.mealPlan ? `incl. ${d.mealPlan}` : null,
         ],
@@ -222,7 +228,12 @@ function describeBlock(block: VoucherServiceBlock): string {
     }
     case "transfer": {
       // Transfer/car-rental supplier identity is never shown to the client — always generic.
-      const leg = d.pickup && d.dropoff ? `from ${d.pickup} to ${d.dropoff}` : d.route ? `— ${d.route}` : null
+      const leg =
+        d.pickup && d.dropoff
+          ? `from ${withLeadingThe(d.pickup)} to ${withLeadingThe(d.dropoff)}`
+          : d.route
+            ? `— ${d.route}`
+            : null
       return joinSentence(
         ["Transfer", leg, d.vehicleType ? `(${d.vehicleType})` : null],
         [start ? `at ${start}` : null],

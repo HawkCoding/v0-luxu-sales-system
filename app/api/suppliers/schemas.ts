@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { SUPPORTED_CURRENCY_VALUES } from "@/lib/types"
+import { SUPPLIER_VOCABULARY, SUPPORTED_CURRENCY_VALUES } from "@/lib/types"
 
 /**
  * Rate-card currencies were free text (any string up to 10 chars) until the value started
@@ -205,6 +205,53 @@ function checkStationAddresses(
 }
 
 /**
+ * A route needs a name, but for kinds whose name is derived from origin -> destination the save
+ * handler already knows how to build one, and `POST /api/suppliers/quick` has always derived it.
+ * Rejecting an empty name at the schema meant that fallback could never run and the two create
+ * paths disagreed. Allow the blank only where it can actually be filled in -- the kind derives its
+ * names and both endpoints are present.
+ */
+function checkRouteNames(
+  value: {
+    kind: string
+    routes: {
+      name: string
+      originLocationId?: string | null
+      destinationLocationId?: string | null
+      suiteTypeId?: string | null
+    }[]
+  },
+  ctx: z.RefinementCtx,
+) {
+  const vocabulary = SUPPLIER_VOCABULARY[value.kind as keyof typeof SUPPLIER_VOCABULARY]
+  const canDeriveName = vocabulary?.routeNameAutoDerived ?? false
+
+  for (const [index, route] of value.routes.entries()) {
+    if (route.name.trim().length > 0) continue
+    if (!canDeriveName) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["routes", index, "name"],
+        message: "Route name is required",
+      })
+      continue
+    }
+    // Derivation source differs per kind: trains derive from origin/destination locations,
+    // tour operators derive from the tour type they're linked to.
+    if (value.kind === "tour_operator") {
+      if (route.suiteTypeId) continue
+    } else if (route.originLocationId && route.destinationLocationId) {
+      continue
+    }
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["routes", index, "name"],
+      message: "Route name is required",
+    })
+  }
+}
+
+/**
  * Tour operators split the two concepts this endpoint used to conflate: the tour type carries the
  * price (top-level `rateCards`, no route id) and the itinerary carries the description (a route
  * that must name its tour type). Enforced here so neither half can be posted the old way.
@@ -232,6 +279,10 @@ function checkTourOperatorItineraries(
   const suiteTypeIds = new Set(
     value.suiteTypes.flatMap((suiteType) => (suiteType.id ? [suiteType.id] : [])),
   )
+  // One itinerary per tour type: the itinerary's name is now derived straight from the tour
+  // type's name, so a second itinerary on the same type would collide on the DB unique-name
+  // constraint. Caught here with a readable message instead of a raw 500 at insert.
+  const seenSuiteTypeIds = new Set<string>()
 
   for (const [index, route] of value.routes.entries()) {
     if (!route.suiteTypeId) {
@@ -246,6 +297,14 @@ function checkTourOperatorItineraries(
         path: ["routes", index, "suiteTypeId"],
         message: "The tour type must be one of this supplier's tour types",
       })
+    } else if (seenSuiteTypeIds.has(route.suiteTypeId)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["routes", index, "suiteTypeId"],
+        message: "Each tour type can only have one itinerary",
+      })
+    } else {
+      seenSuiteTypeIds.add(route.suiteTypeId)
     }
 
     if (route.rateCards.length > 0) {
@@ -260,7 +319,10 @@ function checkTourOperatorItineraries(
 
 export const routeSchema = z.object({
   id: z.string().uuid().optional(),
-  name: z.string().trim().min(1, "Route name is required"),
+  /** Emptiness is judged per kind in `checkRouteNames` -- kinds whose route name is derived from
+   *  origin/destination may send "" and let the handler fill it in, the way the quick-create
+   *  endpoint already does. Every other kind still has to name its route. */
+  name: z.string().trim(),
   /** Tour operators only: the tour type this itinerary describes. Required for that kind, see
    * `checkTourOperatorItineraries`. */
   suiteTypeId: z.string().uuid().nullable().optional(),
@@ -290,6 +352,9 @@ export const supplierEmailSchema = z.object({
       message: "Enter a valid email (e.g. name@example.com)",
     }),
   label: z.string().trim().min(1, "Label is required").max(100),
+  /** Position in the supplier's email list; the first entry is the primary contact. Optional so a
+   *  caller that doesn't care about order falls back to array position. */
+  sortOrder: z.number().int().nonnegative().optional(),
 })
 
 export const draftSupplierEmailSchema = z.object({
@@ -303,6 +368,7 @@ export const draftSupplierEmailSchema = z.object({
     })
     .default(""),
   label: z.string().trim().max(100).default("General"),
+  sortOrder: z.number().int().nonnegative().optional(),
 })
 
 export const supplierSaveSchema = z.object({
@@ -355,6 +421,10 @@ export const supplierSaveSchema = z.object({
   inclusions: bulletListSchema,
   exclusions: bulletListSchema,
   active: z.boolean(),
+  /** The sibling record (same company, different category) this supplier inherits its contact
+   * details from. `null` unlinks and keeps the last mirrored values as this record's own. Omit the
+   * key entirely to leave the current link untouched. */
+  parentSupplierId: z.string().uuid().nullable().optional(),
   emails: z.array(supplierEmailSchema).default([]),
   suiteTypes: z.array(suiteTypeSchema),
   routes: z.array(routeSchema).default([]),
@@ -372,6 +442,7 @@ export const supplierSaveSchema = z.object({
   checkRateAdjustments(value, ctx)
   checkStationAddresses(value, ctx)
   checkTourOperatorItineraries(value, ctx)
+  checkRouteNames(value, ctx)
 
   for (const [index, route] of value.routes.entries()) {
     if (value.kind === "transfers" || value.kind === "vehicle_rental") {
@@ -512,6 +583,8 @@ export const supplierDraftSaveSchema = z.object({
   inclusions: bulletListSchema,
   exclusions: bulletListSchema,
   active: z.boolean().default(true),
+  /** See `parentSupplierId` on supplierSaveSchema. */
+  parentSupplierId: z.string().uuid().nullable().optional(),
   emails: z.array(draftSupplierEmailSchema).default([]),
   suiteTypes: z.array(draftSuiteTypeSchema).default([]),
   routes: z.array(draftRouteSchema).default([]),

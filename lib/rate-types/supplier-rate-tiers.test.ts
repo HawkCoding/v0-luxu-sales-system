@@ -55,7 +55,50 @@ describe("resolveSupplierRateTiers", () => {
         baseRateTypeId: null,
         quoteRateTypeId: null,
         inheritedRateTypeName: null,
+        applicableRateTypeIds: null,
       })
+    })
+  })
+
+  describe("applicableRateTypeIds", () => {
+    it("lists the base rate plus the supplier's own markdowns", () => {
+      expect(
+        resolveSupplierRateTiers(rateTypes, {
+          baseRateTypeId: "sto",
+          adjustmentRateTypeIds: ["sadc"],
+        }).applicableRateTypeIds,
+      ).toEqual(["sto", "sadc"])
+    })
+
+    it("always includes the base rate, even with no markdowns captured", () => {
+      expect(
+        resolveSupplierRateTiers(rateTypes, { baseRateTypeId: "sto", adjustmentRateTypeIds: [] })
+          .applicableRateTypeIds,
+      ).toEqual(["sto"])
+    })
+
+    it("never repeats the base rate when it also has a markdown row", () => {
+      expect(
+        resolveSupplierRateTiers(rateTypes, {
+          baseRateTypeId: "sto",
+          adjustmentRateTypeIds: ["sto", "sadc"],
+        }).applicableRateTypeIds,
+      ).toEqual(["sto", "sadc"])
+    })
+
+    it("drops markdowns pointing at an archived or unknown rate type", () => {
+      const withArchived = [...rateTypes, rateType("old", { archivedAt: "2026-02-01T00:00:00.000Z" })]
+      expect(
+        resolveSupplierRateTiers(withArchived, {
+          baseRateTypeId: "rac",
+          adjustmentRateTypeIds: ["old", "gone", "sadc"],
+        }).applicableRateTypeIds,
+      ).toEqual(["rac", "sadc"])
+    })
+
+    it("stays null when the caller never loaded the markdowns", () => {
+      // Null is "unknown", not "none" -- the picker must not hide valid rates on that basis.
+      expect(resolveSupplierRateTiers(rateTypes, { baseRateTypeId: "sto" }).applicableRateTypeIds).toBeNull()
     })
   })
 

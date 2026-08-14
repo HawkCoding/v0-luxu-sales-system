@@ -44,6 +44,8 @@ import type {
 } from "@/lib/types"
 import type { GateFailure } from "@/lib/pipeline/validate-transition"
 import { formatDisplayDate } from "@/lib/date-format"
+import { describeReviewReasons, REVIEW_REASON } from "@/lib/inbound-email/review-reasons"
+import Link from "next/link"
 import { Check, Pencil, Plus, Save, Trash2, TriangleAlert } from "lucide-react"
 import { EnquiryParsedFieldsEditor } from "@/components/enquiry-parsed-fields-editor"
 import { useEffect, useMemo, useState } from "react"
@@ -62,6 +64,8 @@ interface JobEnquiryTabProps {
   itineraries: Itinerary[]
   stage: PipelineStage
   hasDraftQuotes: boolean
+  /** Row version of the booking, so an edit here fails loudly instead of overwriting a sibling save. */
+  bookingUpdatedAt?: string
   onQuoteStarted?: (quoteId: string) => Promise<void> | void
   onTransportRequestsChange?: () => void
   onFieldsUpdated?: () => void | Promise<void>
@@ -85,6 +89,7 @@ function createEmptyTransportRequest(sortOrder: number): EditableTransportReques
     luggageCount: null,
     flightNumber: null,
     priceOverride: null,
+    priceOverrideSetAt: null,
     notes: null,
     supplierReference: null,
     sortOrder,
@@ -127,6 +132,7 @@ export function JobEnquiryTab({
   itineraries,
   stage,
   hasDraftQuotes,
+  bookingUpdatedAt,
   onQuoteStarted,
   onTransportRequestsChange,
   onFieldsUpdated,
@@ -536,10 +542,32 @@ export function JobEnquiryTab({
             </div>
             {enquiry.emailImportNeedsReview && (
               <div className="mt-4 rounded-md border border-destructive/40 p-3 text-sm">
-                <p className="font-medium text-destructive">Needs Review</p>
-                <p className="mt-1 text-muted-foreground">
-                  {[...(enquiry.emailImportMissingFields ?? []), ...(enquiry.emailImportWarnings ?? [])].join(", ") || "Review parsed fields."}
+                <p className="font-medium text-destructive">
+                  Needs review before this enquiry can move to Quote Sent
                 </p>
+                <ul className="mt-2 space-y-1.5">
+                  {describeReviewReasons(
+                    enquiry.emailImportMissingFields,
+                    enquiry.emailImportWarnings,
+                  ).map((reason) => (
+                    <li key={reason.reason} className="text-sm">
+                      <span className="font-medium">{reason.label}</span>{" "}
+                      <span className="text-muted-foreground">{reason.fixHint}</span>
+                      {reason.reason === REVIEW_REASON.possibleDuplicate &&
+                        enquiry.emailImportDuplicateOfBookingId && (
+                          <>
+                            {" "}
+                            <Link
+                              href={`/app/bookings/${enquiry.emailImportDuplicateOfBookingId}`}
+                              className="underline underline-offset-2 hover:text-primary"
+                            >
+                              View possible duplicate
+                            </Link>
+                          </>
+                        )}
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
           </CardContent>
@@ -562,9 +590,12 @@ export function JobEnquiryTab({
         </Card>
       )}
 
+      <CustomerContactCard enquiry={enquiry} />
+
       {/* Journey Details — editable at any stage; customer requests can change after the quote goes out */}
       <EnquiryParsedFieldsEditor
         bookingId={enquiry.jobId}
+        expectedUpdatedAt={bookingUpdatedAt}
         fields={{
           noOfAdults: enquiry.noOfAdults,
           noOfChildren: enquiry.noOfChildren,
@@ -979,6 +1010,51 @@ export function JobEnquiryTab({
   )
 }
 
+/**
+ * Contact fields the `customer_complete` gate in lib/pipeline/validate-transition.ts requires
+ * before a booking may leave enquiry. Kept in the same order and with the same "blank counts as
+ * missing" rule so the tab and the gate can't disagree about what is outstanding.
+ */
+const CUSTOMER_CONTACT_FIELDS: readonly { label: string; read: (enquiry: Enquiry) => string | undefined }[] = [
+  { label: "First Name", read: (e) => e.name },
+  { label: "Surname", read: (e) => e.surname },
+  { label: "Email", read: (e) => e.email },
+  { label: "Phone", read: (e) => e.contactNumber },
+  { label: "Country", read: (e) => e.country },
+]
+
+function CustomerContactCard({ enquiry }: { enquiry: Enquiry }) {
+  const fields = CUSTOMER_CONTACT_FIELDS.map(({ label, read }) => {
+    const value = read(enquiry)?.trim() ?? ""
+    return { label, value, missing: value.length === 0 }
+  })
+  const missingLabels = fields.filter((field) => field.missing).map((field) => field.label.toLowerCase())
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium">Customer Contact</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {missingLabels.length > 0 && (
+          <div className="mb-4 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
+            <TriangleAlert className="mt-0.5 w-4 h-4 shrink-0" aria-hidden="true" />
+            <p>
+              Missing {missingLabels.join(", ")}. This booking cannot move past enquiry until the
+              customer record is complete — open the customer to fill it in.
+            </p>
+          </div>
+        )}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          {fields.map(({ label, value, missing }) => (
+            <Field key={label} label={label} value={value} missing={missing} />
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 interface TransportRequestSummaryProps {
   request: EditableTransportRequest
   index: number
@@ -1340,6 +1416,7 @@ function Field({
   label,
   value,
   unresolved,
+  missing,
 }: {
   label: string
   value: string
@@ -1347,12 +1424,22 @@ function Field({
    * record (route, supplier, hotel) -- shown with a warning icon rather than as a plain value,
    * per CLAUDE.md's "never rely on color alone to convey state". */
   unresolved?: boolean
+  /** When true the value is absent and a stage gate depends on it -- labelled in words, not by
+   * colour alone, so it reads the same to a screen reader and in a high-contrast theme. */
+  missing?: boolean
 }) {
   return (
     <div>
       <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider" style={{ fontFamily: "var(--font-inter)" }}>{label}</p>
       <p className="text-sm text-foreground mt-0.5 flex items-center gap-1.5">
-        {value}
+        {missing ? (
+          <span className="inline-flex items-center gap-1.5 text-amber-600 dark:text-amber-500">
+            <TriangleAlert className="w-3.5 h-3.5" aria-hidden="true" />
+            Not provided
+          </span>
+        ) : (
+          value
+        )}
         {unresolved && (
           <span
             className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-500"

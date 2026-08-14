@@ -166,7 +166,7 @@ describe("buildQuoteItineraryLines", () => {
     expect(lines).toHaveLength(2)
     expect(lines[0]).toEqual({
       dateISO: "2026-07-18",
-      text: "Two nights at Irene Country Lodge, Pretoria in a Guest room with a lake view incl. breakfast | Check in from 14h00",
+      text: "Two nights at the Irene Country Lodge, Pretoria in a Guest room with a lake view incl. breakfast | Check in from 14h00",
       bullets: [],
     })
     expect(lines[1]).toEqual({

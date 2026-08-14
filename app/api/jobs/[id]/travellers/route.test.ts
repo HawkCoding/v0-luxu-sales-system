@@ -78,10 +78,13 @@ function buildSupabase(
             })),
           })),
           delete: vi.fn(() => ({
-            eq: vi.fn(async (_col: string, value: string) => {
-              deleteCalls.push(value)
-              return { error: null }
-            }),
+            // The route selects the cleared rows back so an empty payload can report the wipe.
+            eq: vi.fn((_col: string, value: string) => ({
+              select: vi.fn(async () => {
+                deleteCalls.push(value)
+                return { data: [{ id: TRAVELLER_ID }], error: null }
+              }),
+            })),
           })),
           insert: vi.fn(async (rows: unknown) => {
             insertCalls.push(rows)
@@ -94,11 +97,28 @@ function buildSupabase(
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
               maybeSingle: vi.fn(async () => ({
-                data: opts.bookingExists === false ? null : { id: BOOKING_ID, customer_id: customerId },
+                data:
+                  opts.bookingExists === false
+                    ? null
+                    : {
+                        id: BOOKING_ID,
+                        customer_id: customerId,
+                        // Read back by the roster/pax comparison attached to every response.
+                        no_of_adults: 2,
+                        no_of_children: 0,
+                        child_ages: [],
+                        trip_start_date: "2026-09-12",
+                        departure_date: "2026-09-12",
+                      },
                 error: null,
               })),
             })),
           })),
+        }
+      }
+      if (table === "app_settings") {
+        return {
+          select: vi.fn(() => ({ in: vi.fn(async () => ({ data: [], error: null })) })),
         }
       }
       if (table === "customers") {
@@ -265,6 +285,42 @@ describe("PUT /api/jobs/[id]/travellers", () => {
       supabase,
       expect.objectContaining({ action: "travellers_updated", entityId: BOOKING_ID }),
     )
+  })
+
+  it("warns when an empty payload wipes an existing roster (F10-6)", async () => {
+    const supabase = buildSupabase()
+    authMocks.requireRole.mockResolvedValue({ ok: true, value: buildAuthValue(supabase) })
+    const req = new Request("http://localhost", {
+      method: "PUT",
+      body: JSON.stringify({ travellers: [] }),
+      headers: { "Content-Type": "application/json" },
+    })
+
+    const res = await PUT(req, { params })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.removedCount).toBe(1)
+    expect(body.warning).toMatch(/dates of birth were deleted/)
+    expect(supabase.insertCalls).toHaveLength(0)
+  })
+
+  it("carries the roster/pax comparison on the response (F10-3)", async () => {
+    const supabase = buildSupabase()
+    authMocks.requireRole.mockResolvedValue({ ok: true, value: buildAuthValue(supabase) })
+    const req = new Request("http://localhost", {
+      method: "PUT",
+      body: JSON.stringify({
+        travellers: [{ firstName: "John", lastName: "Smith", idPassport: "A1234567", isChild: false }],
+      }),
+      headers: { "Content-Type": "application/json" },
+    })
+
+    const res = await PUT(req, { params })
+    const body = await res.json()
+    // The mocked reload returns one adult against a 2-adult booking.
+    expect(body.paxComparison.matches).toBe(false)
+    expect(body.paxComparison.roster.total).toBe(1)
+    expect(body.paxComparison.booking.total).toBe(2)
   })
 
   async function putPrimary(supabase: ReturnType<typeof buildSupabase>, traveller: Record<string, unknown>) {

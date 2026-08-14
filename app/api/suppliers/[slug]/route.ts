@@ -11,6 +11,7 @@ import {
   makeUuid,
   normalizeNullableDate,
   requireAuthenticatedUser,
+  supplierConflictMessage,
   type SessionClient,
 } from "../helpers"
 import {
@@ -172,6 +173,7 @@ export async function GET(
         rateTypes: detail.rateTypes,
         rateAdjustments: detail.rateAdjustments,
         stationAddresses: detail.stationAddresses,
+        parentSupplier: detail.parentSupplier,
       },
     ),
   )
@@ -320,11 +322,14 @@ export async function PATCH(
   }
 
   const parsedEmailRows = parsed.emails
-    .map((entry) => ({
+    .map((entry, index) => ({
       id: entry.id ?? makeUuid(),
       supplier_id: supplierId,
       email: entry.email.trim(),
       label: entry.label.trim() || "General",
+      // Array position is the order unless the client says otherwise; the first row becomes the
+      // supplier's primary contact (see `email:` on the update payload below).
+      sort_order: entry.sortOrder ?? index,
     }))
     .filter((entry) => entry.email.length > 0)
 
@@ -338,6 +343,7 @@ export async function PATCH(
             supplier_id: supplierId,
             email: fallbackEmail,
             label: "General",
+            sort_order: 0,
           },
         ]
 
@@ -420,10 +426,48 @@ export async function PATCH(
   const allowedBedroomLayoutIds = new Set(normalizedBedroomLayouts.map((row) => row.id))
   const allowedBathroomTypeIds = new Set(normalizedBathroomTypes.map((row) => row.id))
 
-  // Train routes auto-fill their name from origin/destination + direction only when the client
-  // sends an empty name; a user-provided name always wins. Other kinds keep their free-text name.
-  const autoDeriveRouteName = parsed.kind === "train_operator"
+  // Train routes auto-fill their name from origin/destination + direction, and tour operator
+  // itineraries auto-fill their name from their tour type -- both only when the client sends an
+  // empty name; a user-provided name always wins. Other kinds keep their free-text name.
+  const autoDeriveRouteName = parsed.kind === "train_operator" || parsed.kind === "tour_operator"
   const locationNameById = new Map(existingDetail.locations.map((location) => [location.id, location.name]))
+  // Derived from the same normalizedSuiteTypes being saved in this request, so renaming a tour
+  // type renames its itinerary in the same save rather than lagging until the next edit.
+  const suiteTypeNameById = new Map(normalizedSuiteTypes.map((suiteType) => [suiteType.id, suiteType.name]))
+
+  // `existingDetail.locations` only covers cities the supplier's *stored* routes and stations
+  // already reference, so a blank-named route pointing at a city this supplier has never used
+  // would have nothing to derive from. Fetch the missing names before normalising, and only when
+  // a name actually has to be derived.
+  if (parsed.kind === "train_operator") {
+    const missingLocationIds = [
+      ...new Set(
+        parsed.routes
+          .filter((route) => route.name.trim().length === 0)
+          .flatMap((route) => [route.originLocationId, route.destinationLocationId])
+          .flatMap((locationId) => {
+            const normalized = normalizeOptionalUuid(locationId)
+            return normalized && !locationNameById.has(normalized) ? [normalized] : []
+          }),
+      ),
+    ]
+
+    if (missingLocationIds.length > 0) {
+      const { data: extraLocations, error: extraLocationsError } = await supabase
+        .from("locations")
+        .select("id, name")
+        .in("id", missingLocationIds)
+
+      if (extraLocationsError) {
+        logSupplierMutationError("route-name-locations", supplierId, extraLocationsError)
+        return NextResponse.json({ error: "Failed to resolve route locations" }, { status: 500 })
+      }
+
+      for (const location of extraLocations ?? []) {
+        locationNameById.set(location.id, location.name)
+      }
+    }
+  }
 
   // Kinds whose route editor has no location fields (hotels, tour operators)
   // must never *acquire* location links — stray ids would invisibly block
@@ -449,8 +493,10 @@ export async function PATCH(
       const originName = originLocationId ? locationNameById.get(originLocationId) : undefined
       const destinationName = destinationLocationId ? locationNameById.get(destinationLocationId) : undefined
       const derivedName =
-        autoDeriveRouteName && originName && destinationName
-          ? buildRouteName(originName, destinationName, directionMode)
+        parsed.kind === "tour_operator"
+          ? (route.suiteTypeId ? suiteTypeNameById.get(route.suiteTypeId) : undefined) ?? null
+          : autoDeriveRouteName && originName && destinationName
+            ? buildRouteName(originName, destinationName, directionMode)
           : null
       return {
         id: route.id ?? makeUuid(),
@@ -488,6 +534,16 @@ export async function PATCH(
             : route.name.length > 0
         : true,
     )
+
+  // Last line of defence for the blank name the schema now lets through: if the derive above
+  // could not produce one (an endpoint that no longer exists, say), refuse the save rather than
+  // filing a nameless route that nothing can pick out of a list.
+  if (!isDraftSave && normalizedRoutes.some((route) => route.name.length === 0)) {
+    return NextResponse.json(
+      { error: "A route could not be named from its origin and destination. Give it a name." },
+      { status: 400 },
+    )
+  }
 
   const routeIds = new Set(normalizedRoutes.map((route) => route.id))
   const normalizedVehicleRentalDetails: NormalizedVehicleRentalRouteDetails[] =
@@ -802,12 +858,85 @@ export async function PATCH(
     }
   }
 
+  // Omitting the key leaves the current link alone; sending null unlinks and keeps the last
+  // mirrored contacts as this record's own.
+  const nextParentSupplierId =
+    parsed.parentSupplierId === undefined
+      ? existingDetail.supplier.parent_supplier_id
+      : parsed.parentSupplierId
+
+  if (nextParentSupplierId) {
+    if (nextParentSupplierId === supplierId) {
+      return NextResponse.json(
+        { error: "A supplier cannot inherit its contacts from itself." },
+        { status: 400 },
+      )
+    }
+
+    const { data: parentSupplier, error: parentError } = await supabase
+      .from("suppliers")
+      .select("id, name, kind, parent_supplier_id")
+      .eq("id", nextParentSupplierId)
+      .maybeSingle()
+
+    if (parentError) {
+      return NextResponse.json({ error: "Failed to update supplier" }, { status: 500 })
+    }
+    if (!parentSupplier) {
+      return NextResponse.json(
+        { error: "The supplier you linked to no longer exists." },
+        { status: 400 },
+      )
+    }
+    if (parentSupplier.parent_supplier_id) {
+      return NextResponse.json(
+        { error: `${parentSupplier.name} already inherits its contacts from another supplier.` },
+        { status: 400 },
+      )
+    }
+    if (parentSupplier.kind === parsed.kind) {
+      return NextResponse.json(
+        { error: "Link a supplier to a record in a different category." },
+        { status: 400 },
+      )
+    }
+  }
+
+  // While linked, contacts are a mirror of the parent's -- the database trigger overwrites them on
+  // every write. The editor sends the inherited values straight back, which is fine; only a genuine
+  // change is rejected, so the user is told rather than having their edit silently discarded.
+  const isLinked = Boolean(nextParentSupplierId)
+  const wasAlreadyLinked = existingDetail.supplier.parent_supplier_id === nextParentSupplierId
+  if (isLinked && wasAlreadyLinked) {
+    const submittedEmails = normalizedEmails.map((row) => `${row.label}:${row.email.toLowerCase()}`)
+    const inheritedEmails = existingDetail.emails.map(
+      (row) => `${row.label}:${row.email.toLowerCase()}`,
+    )
+    const contactChanged =
+      (parsed.phone || null) !== existingDetail.supplier.phone ||
+      (parsed.website || null) !== existingDetail.supplier.website ||
+      submittedEmails.join("|") !== inheritedEmails.join("|")
+
+    if (contactChanged) {
+      return NextResponse.json(
+        {
+          error:
+            "These contact details are inherited from a linked supplier. Edit them on that supplier, or unlink this one first.",
+        },
+        { status: 400 },
+      )
+    }
+  }
+
   const nextActive = isDraftSave ? false : parsed.active
   const nextStatus = isDraftSave ? "draft" : nextActive ? "active" : "inactive"
   const supplierUpdatePayload = {
     name: parsed.name.trim(),
     kind: parsed.kind,
     pricing_mode: parsed.pricingMode,
+    parent_supplier_id: nextParentSupplierId,
+    // Written for unlinked records only -- for a linked one the trigger replaces these with the
+    // parent's values, so submitting them here would be theatre.
     email: normalizedEmails[0]?.email ?? null,
     phone: parsed.phone || null,
     website: parsed.website || null,
@@ -842,6 +971,14 @@ export async function PATCH(
 
   if (supplierUpdateError) {
     logSupplierMutationError("supplier-update", supplierId, supplierUpdateError)
+    // Renaming into an existing name+category+location now collides on the composite index; say so
+    // rather than leaking a raw conflict.
+    if (supplierUpdateError.code === "23505") {
+      return NextResponse.json(
+        { error: supplierConflictMessage(supplierUpdateError, parsed.name.trim(), parsed.kind) },
+        { status: 409 },
+      )
+    }
     return (
       mapPostgrestError("suppliers/[slug]", supplierUpdateError) ??
       safeSupabaseError("suppliers/[slug]", supplierUpdateError, "Failed to update supplier")
@@ -866,7 +1003,9 @@ export async function PATCH(
   // supplier_emails_supplier_id_email_unique_idx (supplier_id, lower(email)) while the old row was
   // still there -- a 500 raised *after* the suppliers row above had already been written. Nothing
   // references supplier_emails, so delete-then-insert is safe.
-  if (emailIdsToDelete.length > 0) {
+  // A linked record's email rows are maintained by the parent-propagation trigger, so this route
+  // leaves them alone entirely -- writing here would only be overwritten on the next parent save.
+  if (!isLinked && emailIdsToDelete.length > 0) {
     const { error: deleteEmailsError } = await deleteInChunks(
       supabase,
       "supplier_emails",
@@ -882,7 +1021,7 @@ export async function PATCH(
     }
   }
 
-  if (normalizedEmails.length > 0) {
+  if (!isLinked && normalizedEmails.length > 0) {
     const { error: supplierEmailsUpsertError } = await supabase
       .from("supplier_emails")
       .upsert(normalizedEmails, { onConflict: "id" })
@@ -1378,6 +1517,7 @@ export async function PATCH(
         rateTypes: updatedDetail.rateTypes,
         rateAdjustments: updatedDetail.rateAdjustments,
         stationAddresses: updatedDetail.stationAddresses,
+        parentSupplier: updatedDetail.parentSupplier,
       },
     ),
   )

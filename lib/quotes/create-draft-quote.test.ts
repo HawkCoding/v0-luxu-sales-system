@@ -59,6 +59,7 @@ describe("createDraftQuoteForBooking", () => {
     })
     buildMocks.buildPackageQuoteLineItems.mockResolvedValue({
       lineItems: [{ description: "Blue Train - Adult", qty: 2, unitPrice: 1000, total: 2000 }],
+      incompleteLegs: [],
     })
     const { supabase, store } = createSupabaseMock()
 
@@ -80,7 +81,7 @@ describe("createDraftQuoteForBooking", () => {
       services: [{ id: "svc-1" }],
       units: [],
     })
-    buildMocks.buildPackageQuoteLineItems.mockResolvedValue({ lineItems: [] })
+    buildMocks.buildPackageQuoteLineItems.mockResolvedValue({ lineItems: [], incompleteLegs: [] })
     const { supabase } = createSupabaseMock({
       app_settings: [
         { key: "default_commission_type", value: "percent" },
@@ -110,7 +111,7 @@ describe("createDraftQuoteForBooking", () => {
       services: [{ id: "svc-1" }],
       units: [],
     })
-    buildMocks.buildPackageQuoteLineItems.mockResolvedValue({ lineItems: [] })
+    buildMocks.buildPackageQuoteLineItems.mockResolvedValue({ lineItems: [], incompleteLegs: [] })
     const { supabase } = createSupabaseMock({
       app_settings: [
         { key: "default_commission_type", value: "percent" },
@@ -128,6 +129,33 @@ describe("createDraftQuoteForBooking", () => {
     expect(buildMocks.buildPackageQuoteLineItems).toHaveBeenCalledWith(
       expect.objectContaining({ selections: [{ legId: "svc-1" }] }),
     )
+  })
+
+  it("keeps a quote pricing_incomplete when a leg was skipped for missing configuration (F10-8)", async () => {
+    adapterMocks.loadBookingServicesPackageDetail.mockResolvedValue({
+      detail: { id: BOOKING_ID, legs: [{ id: "svc-1" }, { id: "svc-2" }] },
+      services: [{ id: "svc-1" }, { id: "svc-2" }],
+      units: [],
+    })
+    buildMocks.buildPackageQuoteLineItems.mockResolvedValue({
+      lineItems: [{ description: "Blue Train - Adult", qty: 2, unitPrice: 1000, total: 2000 }],
+      incompleteLegs: [
+        { legId: "svc-2", legLabel: "Ulysses Transfers", message: "No route selected for leg: Ulysses Transfers" },
+      ],
+    })
+    const { supabase, store } = createSupabaseMock()
+
+    const result = await createDraftQuoteForBooking({
+      supabase: supabase as never,
+      bookingId: BOOKING_ID,
+      bookingNumber: "BT-2026-0001",
+      travelDate: "2026-09-01",
+    })
+
+    expect(store.rows("quotes")[0]).toMatchObject({ status: "pricing_incomplete" })
+    expect(result.warning).toMatch(/No route selected for leg: Ulysses Transfers/)
+    // The lines that did price are still saved -- the quote is partial, not empty.
+    expect(store.rows("quote_line_items")).toHaveLength(1)
   })
 
   it("stamps validity_until from the configured quote_validity_days", async () => {

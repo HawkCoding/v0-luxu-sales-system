@@ -93,7 +93,7 @@ account/rule configuration through the settings UI and the `/test` endpoint.
 ### Import & auto-build
 
 21. Import a fixture end to end. Verify the created records: customer, booking
-    (with a `BT-YYYY-NNNN` number), suite units, transport requests, travellers.
+    (with a `LTT-YYYY-NNNN` number), suite units, transport requests, travellers.
 22. `lib/auto-build/build-from-enquiry.ts` produced `booking_services` with
     `origin='auto'`.
 23. `lib/quotes/create-draft-quote.ts` produced a draft quote. Confirm it is a

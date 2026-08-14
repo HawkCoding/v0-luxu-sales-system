@@ -33,12 +33,13 @@ const supplierRow = {
   status: "active",
   name: "Test Supplier",
   email: "ops@example.com",
-  phone: null,
-  website: null,
-  location: null,
-  notes: null,
+  phone: null as string | null,
+  website: null as string | null,
+  location: null as string | null,
+  notes: null as string | null,
   active: true,
   single_supplement_pct: 0,
+  parent_supplier_id: null as string | null,
   created_at: "2026-01-01T00:00:00.000Z",
   updated_at: "2026-01-02T00:00:00.000Z",
 }
@@ -373,6 +374,344 @@ describe("PATCH /api/suppliers/[slug]", () => {
     expect(suiteTypeUpsert).toHaveBeenCalled()
   })
 
+  describe("linked suppliers", () => {
+    const PARENT_ID = "00000000-0000-4000-8000-0000000000b1"
+
+    function setupLinked(options: {
+      parentSupplierId: string | null
+      parentKind?: string
+      emailUpsert: ReturnType<typeof vi.fn>
+      updatePayloads: Array<Record<string, unknown>>
+    }) {
+      const supplierMaybeSingle = vi.fn(async () => ({
+        data: { updated_at: "2026-01-03T00:00:00.000Z" },
+        error: null,
+      }))
+      const supplierEqMock = vi.fn()
+      const supplierUpdateQuery = {
+        eq: supplierEqMock,
+        select: () => ({ maybeSingle: supplierMaybeSingle }),
+      }
+      supplierEqMock.mockReturnValue(supplierUpdateQuery)
+
+      mockAuth()
+      mockSupplierDetail({
+        parent_supplier_id: options.parentSupplierId,
+        phone: "+27 11 000 0000",
+      })
+
+      helperMocks.supabaseFrom.mockImplementation((table: string) => {
+        if (table === "profiles") return profileQuery("manager")
+        if (table === "suppliers") {
+          return {
+            update: (payload: Record<string, unknown>) => {
+              options.updatePayloads.push(payload)
+              return supplierUpdateQuery
+            },
+            // The parent lookup performed before the update.
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({
+                  data: {
+                    id: PARENT_ID,
+                    name: "Toyota",
+                    kind: options.parentKind ?? "transfers",
+                    parent_supplier_id: null,
+                  },
+                  error: null,
+                }),
+              }),
+            }),
+          }
+        }
+        if (table === "supplier_emails") return { upsert: options.emailUpsert }
+        if (table === "suite_types") return { upsert: async () => ({ error: null }) }
+        if (
+          table === "suite_type_bedroom_types" ||
+          table === "suite_type_bedroom_layouts" ||
+          table === "suite_type_bathroom_types"
+        ) {
+          return {
+            delete: () => ({ in: async () => ({ error: null }) }),
+            insert: async () => ({ error: null }),
+          }
+        }
+        if (table === "supplier_rate_adjustments") {
+          return { delete: () => ({ eq: async () => ({ error: null }) }) }
+        }
+        throw new Error(`Unexpected table ${table}`)
+      })
+    }
+
+    function patchBody(overrides: Record<string, unknown> = {}) {
+      return JSON.stringify({
+        name: "Toyota",
+        kind: "hotel_property",
+        email: "ops@example.com",
+        phone: "+27 11 000 0000",
+        website: "",
+        location: "",
+        notes: "",
+        active: true,
+        emails: [{ id: EMAIL_ID, email: "ops@example.com", label: "General" }],
+        suiteTypes: [{ id: SUITE_TYPE_ID, name: "Suite", active: true }],
+        expectedUpdatedAt: "2026-01-02T00:00:00.000Z",
+        ...overrides,
+      })
+    }
+
+    it("accepts a resubmission of the inherited values without writing emails", async () => {
+      const emailUpsert = vi.fn(async () => ({ error: null }))
+      const updatePayloads: Array<Record<string, unknown>> = []
+      setupLinked({ parentSupplierId: PARENT_ID, emailUpsert, updatePayloads })
+
+      const response = await PATCH(
+        new Request("http://localhost/api/suppliers/test", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: patchBody(),
+        }),
+        { params: Promise.resolve({ slug: "test" }) },
+      )
+
+      expect(response.status).toBe(200)
+      expect(updatePayloads[0]).toMatchObject({ parent_supplier_id: PARENT_ID })
+      // The email rows are the parent's, maintained by trigger -- this route leaves them alone.
+      expect(emailUpsert).not.toHaveBeenCalled()
+    })
+
+    it("rejects an edit to an inherited contact field", async () => {
+      const emailUpsert = vi.fn(async () => ({ error: null }))
+      const updatePayloads: Array<Record<string, unknown>> = []
+      setupLinked({ parentSupplierId: PARENT_ID, emailUpsert, updatePayloads })
+
+      const response = await PATCH(
+        new Request("http://localhost/api/suppliers/test", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: patchBody({ phone: "+27 11 999 9999" }),
+        }),
+        { params: Promise.resolve({ slug: "test" }) },
+      )
+
+      expect(response.status).toBe(400)
+      await expect(response.json()).resolves.toMatchObject({
+        error: expect.stringContaining("inherited from a linked supplier"),
+      })
+      expect(updatePayloads).toHaveLength(0)
+    })
+
+    it("unlinks and lets the contact details be edited in the same save", async () => {
+      const emailUpsert = vi.fn(async () => ({ error: null }))
+      const updatePayloads: Array<Record<string, unknown>> = []
+      setupLinked({ parentSupplierId: PARENT_ID, emailUpsert, updatePayloads })
+
+      const response = await PATCH(
+        new Request("http://localhost/api/suppliers/test", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: patchBody({ parentSupplierId: null, phone: "+27 21 555 5555" }),
+        }),
+        { params: Promise.resolve({ slug: "test" }) },
+      )
+
+      expect(response.status).toBe(200)
+      expect(updatePayloads[0]).toMatchObject({
+        parent_supplier_id: null,
+        phone: "+27 21 555 5555",
+      })
+      expect(emailUpsert).toHaveBeenCalled()
+    })
+
+    it("rejects linking to a supplier in the same category", async () => {
+      const emailUpsert = vi.fn(async () => ({ error: null }))
+      const updatePayloads: Array<Record<string, unknown>> = []
+      setupLinked({
+        parentSupplierId: null,
+        parentKind: "hotel_property",
+        emailUpsert,
+        updatePayloads,
+      })
+
+      const response = await PATCH(
+        new Request("http://localhost/api/suppliers/test", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: patchBody({ parentSupplierId: PARENT_ID }),
+        }),
+        { params: Promise.resolve({ slug: "test" }) },
+      )
+
+      expect(response.status).toBe(400)
+      await expect(response.json()).resolves.toEqual({
+        error: "Link a supplier to a record in a different category.",
+      })
+      expect(updatePayloads).toHaveLength(0)
+    })
+  })
+
+  describe("supplier emails", () => {
+    const SECOND_EMAIL_ID = "00000000-0000-4000-8000-0000000000e1"
+
+    function setup(emailUpsert: ReturnType<typeof vi.fn>) {
+      const supplierMaybeSingle = vi.fn(async () => ({
+        data: { updated_at: "2026-01-03T00:00:00.000Z" },
+        error: null,
+      }))
+      const supplierEqMock = vi.fn()
+      const supplierUpdateQuery = {
+        eq: supplierEqMock,
+        select: () => ({ maybeSingle: supplierMaybeSingle }),
+      }
+      supplierEqMock.mockReturnValue(supplierUpdateQuery)
+
+      mockAuth()
+      mockSupplierDetail()
+      helperMocks.supabaseFrom.mockImplementation((table: string) => {
+        if (table === "profiles") return profileQuery("manager")
+        if (table === "suppliers") return { update: () => supplierUpdateQuery }
+        if (table === "supplier_emails") return { upsert: emailUpsert }
+        if (table === "suite_types") return { upsert: async () => ({ error: null }) }
+        if (
+          table === "suite_type_bedroom_types" ||
+          table === "suite_type_bedroom_layouts" ||
+          table === "suite_type_bathroom_types"
+        ) {
+          return {
+            delete: () => ({ in: async () => ({ error: null }) }),
+            insert: async () => ({ error: null }),
+          }
+        }
+        if (table === "supplier_rate_adjustments") {
+          return { delete: () => ({ eq: async () => ({ error: null }) }) }
+        }
+        throw new Error(`Unexpected table ${table}`)
+      })
+    }
+
+    function patchWithEmails(emails: unknown[]) {
+      return PATCH(
+        new Request("http://localhost/api/suppliers/test", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: "Test Supplier",
+            kind: "hotel_property",
+            email: "",
+            phone: "",
+            website: "",
+            location: "",
+            notes: "",
+            singleSupplementPct: 0,
+            active: true,
+            emails,
+            suiteTypes: [{ id: SUITE_TYPE_ID, name: "Suite", active: true }],
+            expectedUpdatedAt: "2026-01-02T00:00:00.000Z",
+          }),
+        }),
+        { params: Promise.resolve({ slug: "test" }) },
+      )
+    }
+
+    it("removes the outgoing rows before upserting, so an address can be dropped and re-added in one save", async () => {
+      const emailUpsert = vi.fn(async () => ({ error: null }))
+      setup(emailUpsert)
+
+      // The stored row (EMAIL_ID) is gone from the payload and the same address comes back on a
+      // new row -- exactly the shape that used to collide with the (supplier_id, lower(email))
+      // unique index and 500 after the suppliers row had already been written.
+      const response = await patchWithEmails([
+        { id: SECOND_EMAIL_ID, email: "ops@example.com", label: "Accounts" },
+      ])
+
+      expect(response.status).toBe(200)
+      expect(helperMocks.deleteInChunks).toHaveBeenCalledWith(
+        expect.anything(),
+        "supplier_emails",
+        [EMAIL_ID],
+      )
+      expect(helperMocks.deleteInChunks.mock.invocationCallOrder[0]).toBeLessThan(
+        emailUpsert.mock.invocationCallOrder[0],
+      )
+    })
+
+    it("maps a duplicate address to a 409 naming the problem rather than a 500", async () => {
+      const emailUpsert = vi.fn(async () => ({
+        error: { code: "23505", message: "duplicate key value violates unique constraint" },
+      }))
+      setup(emailUpsert)
+
+      const response = await patchWithEmails([
+        { id: EMAIL_ID, email: "ops@example.com", label: "General" },
+      ])
+
+      expect(response.status).toBe(409)
+      await expect(response.json()).resolves.toMatchObject({
+        error: expect.stringContaining("already listed on this supplier"),
+      })
+    })
+
+    it("persists the order the client sent and mirrors the first address onto the supplier", async () => {
+      const emailUpsert = vi.fn(
+        async (_rows: Array<{ email: string; sort_order: number }>) => ({ error: null })
+      )
+      const supplierUpdatePayloads: Array<Record<string, unknown>> = []
+      const supplierMaybeSingle = vi.fn(async () => ({
+        data: { updated_at: "2026-01-03T00:00:00.000Z" },
+        error: null,
+      }))
+      const supplierEqMock = vi.fn()
+      const supplierUpdateQuery = {
+        eq: supplierEqMock,
+        select: () => ({ maybeSingle: supplierMaybeSingle }),
+      }
+      supplierEqMock.mockReturnValue(supplierUpdateQuery)
+
+      mockAuth()
+      mockSupplierDetail()
+      helperMocks.supabaseFrom.mockImplementation((table: string) => {
+        if (table === "profiles") return profileQuery("manager")
+        if (table === "suppliers") {
+          return {
+            update: (payload: Record<string, unknown>) => {
+              supplierUpdatePayloads.push(payload)
+              return supplierUpdateQuery
+            },
+          }
+        }
+        if (table === "supplier_emails") return { upsert: emailUpsert }
+        if (table === "suite_types") return { upsert: async () => ({ error: null }) }
+        if (
+          table === "suite_type_bedroom_types" ||
+          table === "suite_type_bedroom_layouts" ||
+          table === "suite_type_bathroom_types"
+        ) {
+          return {
+            delete: () => ({ in: async () => ({ error: null }) }),
+            insert: async () => ({ error: null }),
+          }
+        }
+        if (table === "supplier_rate_adjustments") {
+          return { delete: () => ({ eq: async () => ({ error: null }) }) }
+        }
+        throw new Error(`Unexpected table ${table}`)
+      })
+
+      const response = await patchWithEmails([
+        { id: SECOND_EMAIL_ID, email: "accounts@example.com", label: "Accounts" },
+        { id: EMAIL_ID, email: "ops@example.com", label: "General" },
+      ])
+
+      expect(response.status).toBe(200)
+      const rows = emailUpsert.mock.calls[0][0]
+      expect(rows.map((row) => [row.email, row.sort_order])).toEqual([
+        ["accounts@example.com", 0],
+        ["ops@example.com", 1],
+      ])
+      expect(supplierUpdatePayloads[0]).toMatchObject({ email: "accounts@example.com" })
+    })
+  })
+
   it("accepts vocabulary + suite_type variant memberships round-trip", async () => {
     const BEDROOM_TYPE_ID = "00000000-0000-4000-8000-0000000000a1"
     const BEDROOM_LAYOUT_ID = "00000000-0000-4000-8000-0000000000a2"
@@ -593,8 +932,6 @@ describe("PATCH /api/suppliers/[slug]", () => {
     })
 
     const response = await PATCH(
-      // Draft save: the full-save schema rejects empty route names, so the
-      // empty-name → derived fallback is only reachable on drafts.
       new Request("http://localhost/api/suppliers/test?draft=true", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -640,6 +977,182 @@ describe("PATCH /api/suppliers/[slug]", () => {
     const routeRows = routeUpsertPayloads[0] as Array<{ name: string }>
     expect(routeRows[0].name).toBe("Custom Journey Name")
     expect(routeRows[1].name).toBe("Pretoria ↔ Cape Town")
+  })
+
+  describe("route names", () => {
+    const ORIGIN_ID = "00000000-0000-4000-8000-0000000000d1"
+    const DEST_ID = "00000000-0000-4000-8000-0000000000d2"
+    const ROUTE_ID = "00000000-0000-4000-8000-0000000000d3"
+
+    function setup(kind: string, options: { locationsFromDetail: boolean }) {
+      const routeUpsertPayloads: Array<unknown> = []
+      const supplierMaybeSingle = vi.fn(async () => ({
+        data: { updated_at: "2026-01-03T00:00:00.000Z" },
+        error: null,
+      }))
+      const supplierEqMock = vi.fn()
+      const supplierUpdateQuery = {
+        eq: supplierEqMock,
+        select: () => ({ maybeSingle: supplierMaybeSingle }),
+      }
+      supplierEqMock.mockReturnValue(supplierUpdateQuery)
+      const locationLookup = vi.fn(async () => ({
+        data: [
+          { id: ORIGIN_ID, name: "Pretoria" },
+          { id: DEST_ID, name: "Cape Town" },
+        ],
+        error: null,
+      }))
+
+      mockAuth()
+      helperMocks.loadSupplierDetail.mockResolvedValue({
+        supplier: { ...supplierRow, kind },
+        suiteTypes: [],
+        emails: [],
+        routes: [],
+        stationAddresses: [],
+        rateCards: [],
+        // Empty on purpose in the lookup case: a brand-new route can point at a city this
+        // supplier has never used, which is not covered by loadSupplierDetail's location fetch.
+        locations: options.locationsFromDetail
+          ? [
+              { id: ORIGIN_ID, name: "Pretoria" },
+              { id: DEST_ID, name: "Cape Town" },
+            ]
+          : [],
+        bedroomTypes: [],
+        bedroomLayouts: [],
+        bathroomTypes: [],
+        suiteTypeBedroomTypes: [],
+        suiteTypeBedroomLayouts: [],
+        suiteTypeBathroomTypes: [],
+        rateTypes: [],
+      })
+      helperMocks.supabaseFrom.mockImplementation((table: string) => {
+        if (table === "profiles") return profileQuery("manager")
+        if (table === "suppliers") return { update: () => supplierUpdateQuery }
+        if (table === "locations") return { select: () => ({ in: locationLookup }) }
+        if (table === "supplier_emails") return { upsert: async () => ({ error: null }) }
+        if (table === "suite_types") return { upsert: async () => ({ error: null }) }
+        if (table === "routes") {
+          return {
+            upsert: async (payload: unknown) => {
+              routeUpsertPayloads.push(payload)
+              return { error: null }
+            },
+          }
+        }
+        if (table === "vehicle_rental_route_details") {
+          return { delete: () => ({ in: async () => ({ error: null }) }) }
+        }
+        if (table === "supplier_rate_adjustments") {
+          return { delete: () => ({ eq: async () => ({ error: null }) }) }
+        }
+        if (
+          table === "suite_type_bedroom_types" ||
+          table === "suite_type_bedroom_layouts" ||
+          table === "suite_type_bathroom_types"
+        ) {
+          return { delete: () => ({ in: async () => ({ error: null }) }) }
+        }
+        throw new Error(`Unexpected table ${table}`)
+      })
+
+      return { routeUpsertPayloads, locationLookup }
+    }
+
+    function patchWithRoute(kind: string, route: Record<string, unknown>) {
+      return PATCH(
+        new Request("http://localhost/api/suppliers/test", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: "Test Supplier",
+            kind,
+            email: "",
+            phone: "",
+            website: "",
+            location: "",
+            notes: "",
+            singleSupplementPct: 0,
+            active: true,
+            emails: [],
+            suiteTypes: [],
+            routes: [route],
+            expectedUpdatedAt: "2026-01-02T00:00:00.000Z",
+          }),
+        }),
+        { params: Promise.resolve({ slug: "test" }) },
+      )
+    }
+
+    it("derives a blank train route name on a full save, looking up cities the supplier has not used before", async () => {
+      const { routeUpsertPayloads, locationLookup } = setup("train_operator", {
+        locationsFromDetail: false,
+      })
+
+      const response = await patchWithRoute("train_operator", {
+        id: ROUTE_ID,
+        name: "",
+        originLocationId: ORIGIN_ID,
+        destinationLocationId: DEST_ID,
+        directionMode: "one_way",
+        active: true,
+        rateCards: [],
+      })
+
+      expect(response.status).toBe(200)
+      expect(locationLookup).toHaveBeenCalled()
+      const routeRows = routeUpsertPayloads[0] as Array<{ name: string }>
+      expect(routeRows[0].name).toBe("Pretoria → Cape Town")
+    })
+
+    it("still requires a name for kinds that cannot derive one", async () => {
+      setup("hotel_property", { locationsFromDetail: true })
+
+      const response = await patchWithRoute("hotel_property", {
+        id: ROUTE_ID,
+        name: "",
+        active: true,
+        rateCards: [],
+      })
+
+      expect(response.status).toBe(400)
+    })
+
+    it("derives a blank tour-operator itinerary name from its tour type, and rewrites a mismatched name on save", async () => {
+      const SUITE_TYPE_ID = "00000000-0000-4000-8000-0000000000d4"
+      const { routeUpsertPayloads } = setup("tour_operator", { locationsFromDetail: true })
+
+      const response = await PATCH(
+        new Request("http://localhost/api/suppliers/test", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: "Test Supplier",
+            kind: "tour_operator",
+            email: "",
+            phone: "",
+            website: "",
+            location: "",
+            notes: "",
+            singleSupplementPct: 0,
+            active: true,
+            emails: [],
+            suiteTypes: [{ id: SUITE_TYPE_ID, name: "Classic Hop-on-Hop-off Ticket", active: true }],
+            routes: [
+              { id: ROUTE_ID, name: "", suiteTypeId: SUITE_TYPE_ID, active: true, rateCards: [] },
+            ],
+            expectedUpdatedAt: "2026-01-02T00:00:00.000Z",
+          }),
+        }),
+        { params: Promise.resolve({ slug: "test" }) },
+      )
+
+      expect(response.status).toBe(200)
+      const routeRows = routeUpsertPayloads[0] as Array<{ name: string }>
+      expect(routeRows[0].name).toBe("Classic Hop-on-Hop-off Ticket")
+    })
   })
 
   describe("station addresses", () => {

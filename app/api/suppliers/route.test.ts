@@ -17,6 +17,7 @@ vi.mock("./helpers", async () => {
 import { GET, POST } from "./route"
 
 const USER_ID = "00000000-0000-4000-8000-000000000001"
+const PARENT_ID = "00000000-0000-4000-8000-0000000000b1"
 
 function createUnauthorizedResponse() {
   return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -362,7 +363,8 @@ describe("POST /api/suppliers", () => {
     const payload = await response.json()
     expect(response.status).toBe(201)
     expect(supplierInsertRows[0]).toMatchObject({
-      slug: "blue-train-3",
+      // `blue-train` and `blue-train-2` are taken, so the category is tried before a number.
+      slug: "blue-train-train-operator",
       active: false,
       email: "Sales@Example.com",
       single_supplement_pct: 0,
@@ -373,12 +375,14 @@ describe("POST /api/suppliers", () => {
         supplier_id: "00000000-0000-4000-8000-000000000099",
         email: "Sales@Example.com",
         label: "Sales",
+        // The surviving row after dedupe keeps position 0, so it stays the primary contact.
+        sort_order: 0,
       },
     ])
-    expect(payload.slug).toBe("blue-train-3")
+    expect(payload.slug).toBe("blue-train-train-operator")
   })
 
-  it("returns 409 on duplicate supplier name", async () => {
+  it("returns 409 naming the category and location when the composite key collides", async () => {
     helperMocks.requireAuthenticatedUser.mockResolvedValue({
       supabase: {
         from: vi.fn((table: string) => {
@@ -440,7 +444,176 @@ describe("POST /api/suppliers", () => {
     )
     expect(response.status).toBe(409)
     await expect(response.json()).resolves.toEqual({
-      error: "A supplier with this name already exists.",
+      error: 'A Hotel supplier named "Duplicate Name" already exists at this location.',
+    })
+  })
+
+  it("links to a sibling record and leaves its email rows to the database trigger", async () => {
+    const supplierInsertRows: Record<string, unknown>[] = []
+    const supplierEmailsInsert = vi.fn(async () => ({ error: null }))
+
+    helperMocks.requireAuthenticatedUser.mockResolvedValue({
+      supabase: {
+        from: vi.fn((table: string) => {
+          if (table === "profiles") {
+            return {
+              select: vi.fn(() => ({
+                eq: vi.fn(() => ({
+                  single: vi.fn(async () => ({
+                    data: { clearance_level: "manager" },
+                    error: null,
+                  })),
+                })),
+              })),
+            }
+          }
+
+          if (table === "suppliers") {
+            return {
+              select: vi.fn((selection: string) => {
+                if (selection === "slug") {
+                  return { or: vi.fn(async () => ({ data: [], error: null })) }
+                }
+                // The parent lookup.
+                return {
+                  eq: vi.fn(() => ({
+                    maybeSingle: vi.fn(async () => ({
+                      data: {
+                        id: PARENT_ID,
+                        name: "Toyota",
+                        kind: "hotel_property",
+                        parent_supplier_id: null,
+                      },
+                      error: null,
+                    })),
+                  })),
+                }
+              }),
+              insert: vi.fn((row: Record<string, unknown>) => {
+                supplierInsertRows.push(row)
+                return {
+                  select: vi.fn(() => ({
+                    single: vi.fn(async () => ({
+                      data: {
+                        id: "00000000-0000-4000-8000-0000000000aa",
+                        slug: String(row.slug),
+                        kind: row.kind,
+                        status: "draft",
+                        name: row.name,
+                        // Mirrored onto the row by tr_supplier_inherit_contacts.
+                        email: "hotel@toyota.test",
+                        phone: "+27 11 000 0000",
+                        website: null,
+                        location: null,
+                        notes: null,
+                        single_supplement_pct: 0,
+                        active: false,
+                        parent_supplier_id: row.parent_supplier_id,
+                        created_at: "2026-01-01T00:00:00.000Z",
+                        updated_at: "2026-01-01T00:00:00.000Z",
+                      },
+                      error: null,
+                    })),
+                  })),
+                }
+              }),
+            }
+          }
+
+          if (table === "supplier_emails") {
+            return { insert: supplierEmailsInsert }
+          }
+
+          throw new Error(`Unexpected table ${table}`)
+        }),
+      },
+      user: { id: USER_ID },
+    })
+
+    const response = await POST(
+      new Request("http://localhost/api/suppliers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "transfers",
+          name: "Toyota",
+          email: "",
+          phone: "",
+          website: "",
+          location: "",
+          notes: "",
+          emails: [{ email: "ignored@toyota.test", label: "General" }],
+          parentSupplierId: PARENT_ID,
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(201)
+    expect(supplierInsertRows[0]).toMatchObject({ parent_supplier_id: PARENT_ID })
+    // The trigger copies the parent's addresses down; writing the submitted ones here would only
+    // be overwritten.
+    expect(supplierEmailsInsert).not.toHaveBeenCalled()
+  })
+
+  it("rejects linking to a supplier in the same category", async () => {
+    helperMocks.requireAuthenticatedUser.mockResolvedValue({
+      supabase: {
+        from: vi.fn((table: string) => {
+          if (table === "profiles") {
+            return {
+              select: vi.fn(() => ({
+                eq: vi.fn(() => ({
+                  single: vi.fn(async () => ({
+                    data: { clearance_level: "manager" },
+                    error: null,
+                  })),
+                })),
+              })),
+            }
+          }
+          if (table === "suppliers") {
+            return {
+              select: vi.fn(() => ({
+                eq: vi.fn(() => ({
+                  maybeSingle: vi.fn(async () => ({
+                    data: {
+                      id: PARENT_ID,
+                      name: "Toyota",
+                      kind: "transfers",
+                      parent_supplier_id: null,
+                    },
+                    error: null,
+                  })),
+                })),
+              })),
+            }
+          }
+          throw new Error(`Unexpected table ${table}`)
+        }),
+      },
+      user: { id: USER_ID },
+    })
+
+    const response = await POST(
+      new Request("http://localhost/api/suppliers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "transfers",
+          name: "Toyota",
+          email: "",
+          phone: "",
+          website: "",
+          location: "",
+          notes: "",
+          parentSupplierId: PARENT_ID,
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({
+      error: "Link a supplier to a record in a different category.",
     })
   })
 })

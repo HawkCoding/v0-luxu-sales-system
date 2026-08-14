@@ -4,7 +4,7 @@ import { type ParsedDraft } from "@/lib/import/parseEmailDraft"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
 import { resolveSuitePhrases, unresolvedSuitePhrase } from "@/lib/suites/resolve-suite-phrase"
 import { loadSupplierSuiteVocabulary } from "@/lib/suites/suite-vocabulary"
-import { SUITE_TYPE_MISSING_FIELD } from "@/lib/suites/missing-fields"
+import { buildReviewDecision, REVIEW_REASON } from "@/lib/inbound-email/review-reasons"
 import { createServiceClient } from "@/lib/supabase/server"
 import { allocateJobNumberForBooking } from "@/lib/job-numbering"
 import { createRawEmailPreview } from "@/lib/inbound-email/html"
@@ -221,29 +221,38 @@ export async function createEmailBookingFromParsedDraft(
     },
   } satisfies Json
 
-  // An unidentified suite is a reported gap, never a blocker: the booking is created either way
-  // and quote build stays the only hard stop.
-  const missingFieldsWithSuites =
-    unresolvedSuiteCount > 0 && !context.missingFields.includes(SUITE_TYPE_MISSING_FIELD)
-      ? [...context.missingFields, SUITE_TYPE_MISSING_FIELD]
-      : context.missingFields
-
   // The customer's wording was recognised (so validateDraft's raw-text check already passed) but
   // didn't match any active supplier or route row -- a distinct failure from "the email never
   // mentioned a supplier at all", and one auto-build silently no-ops on, so it must surface here
   // even though it's caught too late to have been part of the pre-resolution review metadata.
   const resolutionFailureReasons: string[] = []
   if (parsed.trip.supplier && !trainSupplierId) {
-    resolutionFailureReasons.push("Train operator not matched to an active supplier")
+    resolutionFailureReasons.push(REVIEW_REASON.supplierUnmatched)
   }
   if (payload.direction && !routeId) {
-    resolutionFailureReasons.push("Route not matched to an active route")
+    // Separated so the review screen says WHY: an unresolved operator can't be given a route at
+    // all (findRouteMatch refuses to pick between operators), which is a different fix for the
+    // consultant than wording that matches no route this operator files.
+    resolutionFailureReasons.push(
+      trainSupplierId ? REVIEW_REASON.routeUnmatched : REVIEW_REASON.routeUnresolvedNoOperator,
+    )
   }
-  const missingFieldsWithResolutionGaps = [
-    ...missingFieldsWithSuites,
-    ...resolutionFailureReasons.filter((reason) => !missingFieldsWithSuites.includes(reason)),
-  ]
-  const needsReview = missingFieldsWithResolutionGaps.length > 0 || Boolean(duplicateOfBookingId)
+
+  // An unidentified suite is a reported gap, never a blocker for creation: the booking is created
+  // either way and quote build stays the only hard stop. Every reason -- including a possible
+  // duplicate, which used to raise the flag silently -- goes through buildReviewDecision so the flag
+  // can never be set without the banner having something to say.
+  const {
+    needsReview,
+    missingFields: missingFieldsWithResolutionGaps,
+    warnings: reviewWarnings,
+  } = buildReviewDecision({
+    missingFields: context.missingFields,
+    warnings: context.warnings,
+    hasUnresolvedSuites: unresolvedSuiteCount > 0,
+    resolutionFailures: resolutionFailureReasons,
+    duplicateOfBookingId,
+  })
 
   const { bookingNumber: allocatedBookingNumber } = await allocateJobNumberForBooking(supabase)
 
@@ -257,11 +266,16 @@ export async function createEmailBookingFromParsedDraft(
     departure_date: payload.departureDate || null,
     route_id: routeId,
     hotel_supplier_id: hotelSupplierId,
-    no_of_adults: payload.noOfAdults || 1,
+    // Never defaulted to 1. parseEmailDraft deliberately leaves an unstated count at 0 ("an
+    // invented suite count silently manufactures a room nobody asked for") and the importer used
+    // to override that honest 0 -- an out-of-office reply was stored as 1 adult + 1 suite with
+    // zero booking_suites rows. 0 now survives to the review screen, where the missing-field flag
+    // is the only claim made about it.
+    no_of_adults: payload.noOfAdults || 0,
     no_of_children: payload.noOfChildren || 0,
-    no_of_adults_original: payload.noOfAdults || 1,
+    no_of_adults_original: payload.noOfAdults || 0,
     no_of_children_original: payload.noOfChildren || 0,
-    no_of_suites: payload.noOfSuites || 1,
+    no_of_suites: payload.noOfSuites || 0,
     child_ages: payload.childAges.length > 0 ? payload.childAges : null,
     raw_text: context.rawText,
     extracted_json: extractedJson,
@@ -275,7 +289,7 @@ export async function createEmailBookingFromParsedDraft(
     // guess. Review is reserved for things actually missing, unresolved, or a possible duplicate.
     email_import_needs_review: needsReview,
     email_import_missing_fields: missingFieldsWithResolutionGaps,
-    email_import_warnings: context.warnings,
+    email_import_warnings: reviewWarnings,
     email_import_duplicate_of_booking_id: duplicateOfBookingId,
     email_import_subject: context.subject,
     email_import_mailbox: context.mailboxEmail,
@@ -383,6 +397,6 @@ export async function createEmailBookingFromParsedDraft(
     rawPreview,
     needsReview,
     missingFields: missingFieldsWithResolutionGaps,
-    warnings: context.warnings,
+    warnings: reviewWarnings,
   }
 }

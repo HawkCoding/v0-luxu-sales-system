@@ -98,9 +98,15 @@ export async function createDraftQuoteForBooking({
       })
       lineItems = built.lineItems
       // A flight leg with no fare typed in yet still counts as "not fully priced" -- same bar as
-      // having zero lines at all.
+      // having zero lines at all. A leg skipped for missing configuration counts too: the lines
+      // that priced are real, but the quote is not the whole booking.
       status =
-        lineItems.length > 0 && !lineItems.some(isMissingPricing) ? "draft" : "pricing_incomplete"
+        lineItems.length > 0 && built.incompleteLegs.length === 0 && !lineItems.some(isMissingPricing)
+          ? "draft"
+          : "pricing_incomplete"
+      if (built.incompleteLegs.length > 0) {
+        warning = built.incompleteLegs.map((leg) => leg.message).join(" · ")
+      }
     } catch (error) {
       warning = error instanceof Error ? error.message : "Services were built, but pricing could not be pre-filled."
     }

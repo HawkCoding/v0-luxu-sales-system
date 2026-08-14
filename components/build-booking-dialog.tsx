@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Boxes, ChevronDown, ChevronUp, Percent, TriangleAlert } from "lucide-react"
+import { Boxes, Check, ChevronDown, ChevronUp, Percent, TriangleAlert } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -26,6 +26,7 @@ import type { BookingTransportRequest, CommissionKind, PackageDetail, QuoteLineI
 import { SUPPLIER_KIND_LABELS } from "@/lib/types"
 import { PresenceAvatars } from "@/components/presence-avatars"
 import { isMissingPricing } from "@/lib/quotes/pricing-engine"
+import type { IncompleteLeg } from "@/lib/quotes/build-from-package"
 import { useRecordPresence } from "@/hooks/use-record-presence"
 import { useVersionedSave } from "@/hooks/use-versioned-save"
 import { CommissionControl, type CommissionControlValue } from "@/components/supplier/commission-control"
@@ -34,13 +35,17 @@ import { SuiteLegEditor } from "@/components/packages/suite-leg-editor"
 import { TransportLegEditor } from "@/components/packages/transport-leg-editor"
 import { FxRateBanner } from "@/components/quotes/fx-rate-banner"
 import { FxProvenanceNote } from "@/components/quotes/fx-provenance-note"
+import { RoomOverrideNote } from "@/components/quotes/room-override-note"
+import { TransportOverrideNote } from "@/components/quotes/transport-override-note"
 import { useFxRates } from "@/lib/fx/use-fx-rates"
 import { BASE_CURRENCY, formatMoney } from "@/lib/money"
+import { formatDisplayDateTime } from "@/lib/date-format"
 import { TripDateSummary } from "@/components/packages/trip-date-summary"
 import { TravellerCountsEditor, type TravellerCounts } from "@/components/bookings/traveller-counts-editor"
 import { resolveAdultsOnlyDelta, type PassengerTotals } from "@/lib/packages/passenger-totals"
 import type { AgeBuckets } from "@/lib/pricing/age-buckets"
-import { deriveTripDateRangeFromStates } from "@/lib/packages/trip-date-range"
+import { deriveTripDateRangeFromStates, dateOnly } from "@/lib/packages/trip-date-range"
+import { findRateCardCandidates, selectRateCard } from "@/lib/rate-cards/resolve"
 import {
   applyAnchoredHotelDates,
   buildDefaultLegStates,
@@ -135,6 +140,12 @@ export function BuildBookingDialog({
   const [packageDetail, setPackageDetail] = useState<PackageDetail | null>(null)
   const [building, setBuilding] = useState(false)
   const [savedState, setSavedState] = useState<SavedPackageState | null>(null)
+  /** Who accepted the built service list and when — until this was surfaced, a confirmed list was
+   * indistinguishable from one that was never auto-built. */
+  const [confirmedStamp, setConfirmedStamp] = useState<{ at: string; by: string | null } | null>(null)
+  /** Legs the preview could not price because they are still unconfigured. The preview shows the
+   * rest; applying to the quote stays blocked until this is empty. */
+  const [incompleteLegs, setIncompleteLegs] = useState<IncompleteLeg[]>([])
   const [existingTransportRequests, setExistingTransportRequests] = useState<BookingTransportRequest[]>([])
   const [legStates, setLegStates] = useState<ApplyLegState[]>([])
   const [totalsBySupplierId, setTotalsBySupplierId] = useState<Record<string, PassengerTotals>>({})
@@ -249,6 +260,11 @@ export function BuildBookingDialog({
           ? ((await servicesRes.json()) as SavedPackageState)
           : null
         setSavedState(saved)
+        setConfirmedStamp(
+          saved?.servicesConfirmedAt
+            ? { at: saved.servicesConfirmedAt, by: saved.servicesConfirmedByName ?? null }
+            : null,
+        )
         setExistingTransportRequests(
           transportRes.ok ? ((await transportRes.json()) as BookingTransportRequest[]) : [],
         )
@@ -293,15 +309,19 @@ export function BuildBookingDialog({
   )
 
   /**
-   * Currencies in play on this build that are not the quote's — i.e. the ones that will be
-   * converted. Empty means every price is already native and the FX banner stays hidden, which
+   * Currencies in play on this build that are not the quote's — i.e. the ones that will actually
+   * be converted. Empty means every price is already native and the FX banner stays hidden, which
    * is the common case and must not cost the salesperson any screen space.
    *
-   * Rate-card legs contribute their cards' currencies; manual-pricing legs contribute the
-   * currency chosen on the leg itself.
+   * Mirrors the resolution build-from-package.ts and validateConfigureState use (route + suite +
+   * date + rate type → selectRateCard), not just "does this leg own a foreign card anywhere" — a
+   * supplier with both a USD and a ZAR card must not flag foreign just because one of its cards
+   * happens to be. A leg that isn't configured enough to resolve yet (no route/date picked)
+   * contributes nothing rather than guessing, so the banner never flashes speculatively.
    */
   const foreignCurrencies = useMemo(() => {
     const legById = new Map(sortedLegs.map((leg) => [leg.id, leg]))
+    const systemDefaultRateTypeId = rateTypes.find((rt) => rt.isDefault)?.id ?? null
     const found = new Set<string>()
 
     for (const state of legStates) {
@@ -309,18 +329,50 @@ export function BuildBookingDialog({
       const leg = legById.get(state.legId)
       if (!leg) continue
 
+      if (state.kind === "transport") {
+        for (const request of state.requests) {
+          if (request.priceOverride != null) {
+            found.add(state.priceCurrency)
+            continue
+          }
+          const pricingDate = dateOnly(request.pickupAt)
+          if (!request.routeId || !request.suiteTypeId || !pricingDate) continue
+          const candidates = findRateCardCandidates(leg.rateCards, request.routeId, request.suiteTypeId, pricingDate)
+          const selection = selectRateCard(
+            candidates,
+            state.rateTypeId,
+            leg.quoteRateTypeId,
+            leg.baseRateTypeId,
+            systemDefaultRateTypeId,
+          )
+          if (selection?.ok) found.add(selection.card.currency)
+        }
+        continue
+      }
+
       if (leg.pricingMode === "manual") {
         found.add(state.priceCurrency)
         continue
       }
-      for (const card of leg.rateCards) {
-        found.add((card.currency ?? "").trim().toUpperCase() || BASE_CURRENCY)
+
+      if (!state.routeId || !state.serviceDate) continue
+      for (const unit of state.units) {
+        if (!unit.suiteTypeId) continue
+        const candidates = findRateCardCandidates(leg.rateCards, state.routeId, unit.suiteTypeId, state.serviceDate)
+        const selection = selectRateCard(
+          candidates,
+          state.rateTypeId,
+          leg.quoteRateTypeId,
+          leg.baseRateTypeId,
+          systemDefaultRateTypeId,
+        )
+        if (selection?.ok) found.add(selection.card.currency)
       }
     }
 
     found.delete(quoteCurrency)
     return Array.from(found).sort()
-  }, [sortedLegs, legStates, quoteCurrency])
+  }, [sortedLegs, legStates, quoteCurrency, rateTypes])
 
   // Surfaced next to the blocking validation error too — hitting Next with a stale booking total
   // shouldn't be a dead end; the fix is one click away right where the error is shown.
@@ -359,6 +411,7 @@ export function BuildBookingDialog({
     setBookingCounts(null)
     setCommission(EMPTY_COMMISSION)
     setPreviewLineItems([])
+    setIncompleteLegs([])
     setBuildError(null)
     setValidationErrors([])
     setEditingTravellers(false)
@@ -444,6 +497,10 @@ export function BuildBookingDialog({
       // just picked here has no "optional" concept; only respect an existing saved deselection.
       setLegStates(states.map((state) => (savedLegIds.has(state.legId) ? state : { ...state, selected: true })))
       setStep("configure")
+      // The reorder pass in build-booking bumps updated_at on every kept leg, not just moved ones;
+      // legStates above still carries the pre-build stamps from the dialog's initial load, so the
+      // next PATCH would 409 against a write this very build made. Re-read the fresh versions.
+      await refreshLegVersions()
     } catch {
       setBuildError("Failed to build booking services. Please try again.")
     } finally {
@@ -471,6 +528,22 @@ export function BuildBookingDialog({
 
   const hasAutoFilledServices = legStates.some((state) => state.origin === "auto")
 
+  /** Re-reads booking_services.updated_at for every leg after a write this dialog made itself. */
+  async function refreshLegVersions() {
+    const res = await fetch(`/api/jobs/${jobId}/services`)
+    if (!res.ok) return
+    const saved = (await res.json().catch(() => null)) as SavedPackageState | null
+    if (!saved?.selections) return
+    const versionByLegId = new Map(saved.selections.map((row) => [row.package_leg_id, row.updated_at ?? null]))
+    setLegStates((prev) =>
+      prev.map((state) =>
+        versionByLegId.has(state.legId)
+          ? { ...state, updatedAt: versionByLegId.get(state.legId) ?? null }
+          : state,
+      ),
+    )
+  }
+
   async function confirmServices() {
     setConfirmingServices(true)
     try {
@@ -480,7 +553,14 @@ export function BuildBookingDialog({
         toast.error(typeof body?.error === "string" ? body.error : "Failed to confirm services")
         return
       }
+      const body = (await res.json().catch(() => null)) as { servicesConfirmedAt?: string } | null
       setLegStates((prev) => prev.map((state) => ({ ...state, origin: "consultant" })))
+      // The confirmer's name only comes back on the next load of saved state; the stamp itself is
+      // what matters here, so the banner falls back to "Services confirmed <date>".
+      setConfirmedStamp({ at: body?.servicesConfirmedAt ?? new Date().toISOString(), by: null })
+      // Confirming flips origin on the service rows, which bumps their updated_at — re-read the
+      // versions or the next save in this session 409s against this dialog's own write.
+      await refreshLegVersions()
       toast.success("Services confirmed")
     } catch {
       toast.error("Failed to confirm services. Please try again.")
@@ -599,8 +679,31 @@ export function BuildBookingDialog({
       })
       if (!patchRes.ok) {
         const body = await patchRes.json().catch(() => ({}))
+        // A concurrent editor's save landed first. Nothing of theirs was overwritten; this dialog
+        // is simply holding a stale copy, so the fix is to reopen rather than retry.
+        if (patchRes.status === 409 && body?.code === "STALE_VERSION") {
+          setBuildError(typeof body.error === "string" ? body.error : "This booking's services changed while you were editing.")
+          return
+        }
         setBuildError(`Could not save service selections: ${body.error ?? patchRes.statusText}`)
         return
+      }
+      // Adopt the row versions the save produced, so a second save in the same session doesn't
+      // 409 against stamps this very request moved on.
+      const patchBody = (await patchRes.json().catch(() => null)) as
+        | { selections?: Array<{ package_leg_id: string; updated_at?: string | null }> }
+        | null
+      if (patchBody?.selections) {
+        const versionByLegId = new Map(
+          patchBody.selections.map((row) => [row.package_leg_id, row.updated_at ?? null]),
+        )
+        setLegStates((prev) =>
+          prev.map((state) =>
+            versionByLegId.has(state.legId)
+              ? { ...state, updatedAt: versionByLegId.get(state.legId) ?? null }
+              : state,
+          ),
+        )
       }
 
       // 2. Persist transport requests — pricing reads them from the DB in the next step.
@@ -646,6 +749,7 @@ export function BuildBookingDialog({
         return
       }
       setPreviewLineItems(payload.lineItems as QuoteLineItem[])
+      setIncompleteLegs((payload.incompleteLegs as IncompleteLeg[] | undefined) ?? [])
       setStep("confirm")
     } catch {
       setBuildError("Failed to validate pricing. Please try again.")
@@ -656,6 +760,12 @@ export function BuildBookingDialog({
 
   async function applyToQuote(options?: { ignoreExpectedUpdatedAt: boolean }) {
     if (previewLineItems.length === 0) return
+    // The preview deliberately prices what it can; saving a quote that silently omits a leg is a
+    // different matter. Guarded here as well as by the disabled button.
+    if (incompleteLegs.length > 0) {
+      setBuildError("Finish configuring every service before applying this to the quote.")
+      return
+    }
     try {
       await saveQuote({ lineItems: lineItemsToSave }, options)
       toast.success("Booking services applied to quote")
@@ -793,16 +903,6 @@ export function BuildBookingDialog({
 
             <TripDateSummary detail={packageDetail} states={legStates} />
 
-            <FxRateBanner
-              foreignCurrencies={foreignCurrencies}
-              quoteCurrency={quoteCurrency}
-              rates={fxRates}
-              asOf={fxAsOf}
-              stale={fxStale}
-              onRefresh={refreshFxRates}
-              onRateChange={setFxRate}
-            />
-
             {hasAutoFilledServices && (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3">
                 <p className="text-sm">
@@ -815,6 +915,15 @@ export function BuildBookingDialog({
               </div>
             )}
 
+            {!hasAutoFilledServices && confirmedStamp && (
+              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Check className="h-3.5 w-3.5" />
+                Services confirmed
+                {confirmedStamp.by ? ` by ${confirmedStamp.by}` : ""} on{" "}
+                {formatDisplayDateTime(confirmedStamp.at)}
+              </p>
+            )}
+
             <div className="space-y-4">
               {sortedLegs.map((leg) => {
                 const state = legStates.find((candidate) => candidate.legId === leg.id)
@@ -822,7 +931,14 @@ export function BuildBookingDialog({
                 return (
                   <div key={leg.id} className="space-y-2">
                     {state.kind === "transport" ? (
-                      <TransportLegEditor leg={leg} value={state} onChange={updateLegState} rateTypes={rateTypes} />
+                      <TransportLegEditor
+                        leg={leg}
+                        value={state}
+                        onChange={updateLegState}
+                        rateTypes={rateTypes}
+                        quoteCurrency={quoteCurrency}
+                        fxRates={fxRates}
+                      />
                     ) : (
                       <SuiteLegEditor
                         leg={leg}
@@ -839,6 +955,16 @@ export function BuildBookingDialog({
                 )
               })}
             </div>
+
+            <FxRateBanner
+              foreignCurrencies={foreignCurrencies}
+              quoteCurrency={quoteCurrency}
+              rates={fxRates}
+              asOf={fxAsOf}
+              stale={fxStale}
+              onRefresh={refreshFxRates}
+              onRateChange={setFxRate}
+            />
 
             <div
               className={`rounded-lg border-2 p-4 ${
@@ -984,6 +1110,26 @@ export function BuildBookingDialog({
               </DialogDescription>
             </DialogHeader>
 
+            {incompleteLegs.length > 0 && (
+              <div className="rounded-lg border border-destructive/50 bg-destructive/5 p-3 text-sm">
+                <p className="flex items-center gap-1.5 font-medium">
+                  <TriangleAlert className="h-4 w-4 text-destructive" />
+                  {incompleteLegs.length === 1 ? "One service is" : `${incompleteLegs.length} services are`}{" "}
+                  not priced below
+                </p>
+                <ul className="mt-1 list-disc pl-6 text-xs text-muted-foreground">
+                  {incompleteLegs.map((leg) => (
+                    <li key={leg.legId}>{leg.message}</li>
+                  ))}
+                </ul>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Go back and finish configuring{" "}
+                  {incompleteLegs.length === 1 ? "it" : "them"} — the quote cannot be saved while a
+                  service is missing from it.
+                </p>
+              </div>
+            )}
+
             <div className="rounded-md border">
               <table className="w-full text-sm">
                 <thead>
@@ -1018,6 +1164,8 @@ export function BuildBookingDialog({
                           </span>
                         )}
                         <FxProvenanceNote snapshot={li.pricingSnapshot ?? null} />
+                        <RoomOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={quoteCurrency} />
+                        <TransportOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={quoteCurrency} />
                         <CommissionBadge
                           commission={li.pricingSnapshot?.commission ?? null}
                           currency={quoteCurrency}
@@ -1048,11 +1196,15 @@ export function BuildBookingDialog({
                 Back
               </Button>
               {quoteConflict && (
-                <Button variant="outline" onClick={() => applyToQuote({ ignoreExpectedUpdatedAt: true })} disabled={applying}>
+                <Button
+                  variant="outline"
+                  onClick={() => applyToQuote({ ignoreExpectedUpdatedAt: true })}
+                  disabled={applying || incompleteLegs.length > 0}
+                >
                   Save anyway
                 </Button>
               )}
-              <Button onClick={() => applyToQuote()} disabled={applying}>
+              <Button onClick={() => applyToQuote()} disabled={applying || incompleteLegs.length > 0}>
                 {applying ? "Applying…" : existingLineItemCount > 0 ? "Replace & apply" : "Apply to quote"}
               </Button>
             </DialogFooter>

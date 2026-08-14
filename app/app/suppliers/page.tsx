@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  Link2 as LinkIcon,
   Mail,
   MapPin,
   Phone,
@@ -47,6 +48,8 @@ export default function SuppliersPage() {
   const [locationsOpen, setLocationsOpen] = useState(false)
   const [selectedSupplierSlug, setSelectedSupplierSlug] = useState<string | null>(null)
   const [pendingOpen, setPendingOpen] = useState(true)
+  /** Only the kinds the user has explicitly closed; everything else stays open. */
+  const [collapsedKinds, setCollapsedKinds] = useState<Record<string, boolean>>({})
   const canEdit = can("edit:suppliers")
 
   useEffect(() => {
@@ -206,18 +209,42 @@ export default function SuppliersPage() {
           const group = suppliersByKind[kind] ?? []
           if (group.length === 0) return null
 
-          return (
-            <section key={kind} className="space-y-3">
-              <div className="flex items-center gap-2">
-                <Badge variant="secondary" className="text-xs font-semibold">
-                  {label}
-                </Badge>
-                <span className="text-xs text-muted-foreground">
-                  {group.length} supplier{group.length === 1 ? "" : "s"}
-                </span>
-              </div>
+          // Open unless the user has closed this kind -- collapsing is for getting a long list out
+          // of the way, so nothing should be hidden on arrival.
+          const isOpen = collapsedKinds[kind] !== true
 
-              <div className="grid gap-4 lg:grid-cols-2">
+          return (
+            <Collapsible
+              key={kind}
+              open={isOpen}
+              onOpenChange={(open) =>
+                setCollapsedKinds((current) => ({ ...current, [kind]: !open }))
+              }
+              className="space-y-3"
+              asChild
+            >
+              <section>
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  className="flex items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label={`${isOpen ? "Collapse" : "Expand"} ${label} suppliers`}
+                >
+                  <Badge variant="secondary" className="text-xs font-semibold">
+                    {label}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {group.length} supplier{group.length === 1 ? "" : "s"}
+                  </span>
+                  {isOpen ? (
+                    <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                  ) : (
+                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                  )}
+                </button>
+              </CollapsibleTrigger>
+
+              <CollapsibleContent className="grid gap-4 lg:grid-cols-2">
                 {group.map((supplier) => (
                   <Link
                     key={supplier.id}
@@ -268,6 +295,12 @@ export default function SuppliersPage() {
                                 {supplier.location && (
                                   <Badge variant="secondary">{supplier.location}</Badge>
                                 )}
+                                {supplier.parentSupplierId && (
+                                  <Badge variant="outline" title="Contact details inherited from another category">
+                                    <LinkIcon className="mr-1 h-3 w-3" />
+                                    Linked
+                                  </Badge>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -297,8 +330,9 @@ export default function SuppliersPage() {
                     </Card>
                   </Link>
                 ))}
-              </div>
-            </section>
+              </CollapsibleContent>
+              </section>
+            </Collapsible>
           )
         })}
 

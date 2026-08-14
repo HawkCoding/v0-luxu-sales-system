@@ -6,7 +6,20 @@ import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { Clipboard, PenLine } from "lucide-react"
-import { parseEmailDraft, type ParsedDraft } from "@/lib/import/parseEmailDraft"
+import {
+  parseEmailDraft,
+  STAFF_LEAD_SOURCE_OPTIONS,
+  type ParsedDraft,
+  type StaffLeadSource,
+} from "@/lib/import/parseEmailDraft"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { buildEnquiryImportPayload } from "@/lib/import/enquiry-payload"
 import { ReviewImportedDraftModal } from "@/components/review-imported-draft-modal"
 import { ProgressDialog } from "@/components/progress-dialog"
@@ -82,6 +95,9 @@ export function NewEnquiryDialog({ open, onOpenChange, onSaved, presetCustomer }
   const [screen, setScreen] = useState<Screen>("tabs")
   const [activeTab, setActiveTab] = useState<"paste" | "manual">("paste")
   const [pasteText, setPasteText] = useState("")
+  // No default: a staff-typed enquiry recorded as a web form submission is what made lead-source
+  // reporting wrong, and guessing a source is no better than the wrong one.
+  const [manualSource, setManualSource] = useState<StaffLeadSource | "">("")
   const [parsedDraft, setParsedDraft] = useState<ParsedDraft | null>(null)
   const [saveProgress, setSaveProgress] = useState(0)
   const [saveStepIndex, setSaveStepIndex] = useState(0)
@@ -118,6 +134,7 @@ export function NewEnquiryDialog({ open, onOpenChange, onSaved, presetCustomer }
     onOpenChange(false)
     window.setTimeout(() => {
       setPasteText("")
+      setManualSource("")
       setParsedDraft(null)
       setSaveError(null)
       setFailedDraft(null)
@@ -132,7 +149,8 @@ export function NewEnquiryDialog({ open, onOpenChange, onSaved, presetCustomer }
   }
 
   const handleManualEntry = () => {
-    setParsedDraft(emptyDraft())
+    if (!manualSource) return
+    setParsedDraft({ ...emptyDraft(), source: manualSource })
     setScreen("review")
   }
 
@@ -243,9 +261,31 @@ export function NewEnquiryDialog({ open, onOpenChange, onSaved, presetCustomer }
               <p className="text-sm text-muted-foreground">
                 Skip email paste and fill in all enquiry fields directly. All sections will start blank.
               </p>
+              <div className="space-y-1.5">
+                <Label htmlFor="manual-enquiry-source">How did this enquiry reach us?</Label>
+                <Select
+                  value={manualSource}
+                  onValueChange={(value) => setManualSource(value as StaffLeadSource)}
+                >
+                  <SelectTrigger id="manual-enquiry-source">
+                    <SelectValue placeholder="Select a lead source" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STAFF_LEAD_SOURCE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Recorded on the booking so lead-source reporting reflects where the enquiry
+                  actually came from.
+                </p>
+              </div>
               <div className="flex justify-end gap-2">
                 <Button variant="outline" size="sm" onClick={resetAndClose}>Cancel</Button>
-                <Button size="sm" onClick={handleManualEntry}>
+                <Button size="sm" onClick={handleManualEntry} disabled={!manualSource}>
                   Start Manual Enquiry
                 </Button>
               </div>

@@ -33,7 +33,7 @@ you did.
 
 ### Creation & pricing
 
-1. `POST /api/jobs/{id}/start-quote` → quote created, number `BT-YYYY-NNNN-Q1`
+1. `POST /api/jobs/{id}/start-quote` → quote created, number `LTT-YYYY-NNNN-Q1`
    (`lib/quotes/quote-number.ts`), validity stamped from `app_settings`
    (14 days per CLAUDE.md — confirm the actual value and its source).
 2. Price the booking's services into lines via `/services/apply` or

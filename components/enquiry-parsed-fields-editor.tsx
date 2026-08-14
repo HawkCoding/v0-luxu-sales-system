@@ -23,6 +23,12 @@ export interface ParsedFields {
 interface EnquiryParsedFieldsEditorProps {
   bookingId: string
   fields: ParsedFields
+  /**
+   * Row version of the booking this editor loaded. Sent back with the save so a concurrent write
+   * is rejected with a 409 the salesperson can see, instead of one edit quietly overwriting the
+   * other. Undefined only while the booking is still loading.
+   */
+  expectedUpdatedAt?: string
   /** Traveller counts as first captured from the enquiry, kept for reference once a salesperson edits the current ones. */
   originalNoOfAdults?: number
   originalNoOfChildren?: number
@@ -35,6 +41,7 @@ interface EnquiryParsedFieldsEditorProps {
 export function EnquiryParsedFieldsEditor({
   bookingId,
   fields,
+  expectedUpdatedAt,
   originalNoOfAdults,
   originalNoOfChildren,
   directionResolved = true,
@@ -59,10 +66,18 @@ export function EnquiryParsedFieldsEditor({
             noOfSuites: draft.noOfSuites,
             departureDate: draft.departureDate ?? null,
           },
+          ...(expectedUpdatedAt ? { expectedUpdatedAt } : {}),
         }),
       })
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string }
+        if (res.status === 409) {
+          // The server's message already names the entity and tells them to refresh; the draft is
+          // kept in edit mode so nothing they typed is lost while they reload.
+          toast.error(body.error ?? "Someone else changed this booking. Refresh and try again.")
+          await onSaved?.()
+          return
+        }
         throw new Error(body.error ?? "Failed to save")
       }
       setIsEditing(false)

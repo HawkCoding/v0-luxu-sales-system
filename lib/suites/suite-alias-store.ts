@@ -60,7 +60,7 @@ export async function recordSuiteAliasCorrections(
       continue
     }
 
-    await supabase
+    const { error } = await supabase
       .from("suite_vocab_aliases")
       .upsert(
         {
@@ -80,6 +80,19 @@ export async function recordSuiteAliasCorrections(
         },
         { onConflict: "supplier_id,axis,phrase" },
       )
+
+    // Still never thrown -- the contract above stands -- but no longer invisible. A rejected write
+    // here (RLS, constraint, anything) meant the alias loop learned nothing while every caller and
+    // every mocked unit test reported success; the only way that surfaced was a QA run counting
+    // rows. Logged so the next silent rejection shows up in the server log instead.
+    if (error) {
+      console.error("suite-alias-store:record", {
+        supplierId: write.supplierId,
+        axis: write.axis,
+        phrase,
+        message: error.message,
+      })
+    }
   }
 }
 
@@ -117,6 +130,9 @@ export async function promoteSuiteAliases(
     }
     if (row.status !== "confirmed") patch.confirmed_at = nowIso
 
-    await supabase.from("suite_vocab_aliases").update(patch).eq("id", row.id)
+    const { error } = await supabase.from("suite_vocab_aliases").update(patch).eq("id", row.id)
+    if (error) {
+      console.error("suite-alias-store:promote", { aliasId: row.id, message: error.message })
+    }
   }
 }

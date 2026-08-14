@@ -115,7 +115,13 @@ function buildSupabase(state: MockState) {
       if (table === "booking_transport_requests") {
         return {
           delete: vi.fn(() => ({
-            in: vi.fn(() => transportDelete()),
+            in: vi.fn(() => ({
+              // The route selects the deleted rows back so it can report how many went with the leg.
+              select: vi.fn(async () => {
+                await transportDelete()
+                return { data: [{ id: "transport-removed" }], error: null }
+              }),
+            })),
           })),
           insert: vi.fn((rows: unknown[]) => transportInsert(rows)),
         }
@@ -301,6 +307,84 @@ describe("POST /api/jobs/[id]/build-booking", () => {
     expect(res.status).toBe(200)
     expect(built.transportDelete).toHaveBeenCalled()
     expect(built.serviceDelete).toHaveBeenCalled()
+    const body = await res.json()
+    expect(body.removedServiceCount).toBe(1)
+    expect(body.removedTransportRequestCount).toBe(1)
+  })
+
+  it("adopts an existing service when the request omits legId, instead of deleting and re-creating it (F10-4)", async () => {
+    const built = mockAuth({
+      existingServices: [{ id: SERVICE_A, supplier_id: SUPPLIER_A, sort_order: 0 }],
+    })
+
+    const res = await POST(
+      new Request("http://localhost", {
+        method: "POST",
+        body: JSON.stringify({
+          services: [{ supplierId: SUPPLIER_A, supplierKind: "train_operator" }],
+        }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(200)
+    expect(built.serviceDelete).not.toHaveBeenCalled()
+    expect(built.transportDelete).not.toHaveBeenCalled()
+    expect(built.serviceInsert).not.toHaveBeenCalled()
+    const body = await res.json()
+    expect(body.removedServiceCount).toBe(0)
+  })
+
+  it("refuses to guess when two existing services share the supplier and no legId is sent", async () => {
+    const SERVICE_A2 = "00000000-0000-4000-8000-0000000000a9"
+    const built = mockAuth({
+      existingServices: [
+        { id: SERVICE_A, supplier_id: SUPPLIER_A, sort_order: 0 },
+        { id: SERVICE_A2, supplier_id: SUPPLIER_A, sort_order: 1 },
+      ],
+    })
+
+    const res = await POST(
+      new Request("http://localhost", {
+        method: "POST",
+        body: JSON.stringify({
+          services: [{ supplierId: SUPPLIER_A, supplierKind: "train_operator" }],
+        }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toMatch(/legId/)
+    expect(built.serviceDelete).not.toHaveBeenCalled()
+    expect(built.serviceInsert).not.toHaveBeenCalled()
+  })
+
+  it("still deletes a leg that is genuinely dropped from the list, even when others are adopted", async () => {
+    const SERVICE_B = "00000000-0000-4000-8000-0000000000f2"
+    const built = mockAuth({
+      existingServices: [
+        { id: SERVICE_A, supplier_id: SUPPLIER_A, sort_order: 0 },
+        { id: SERVICE_B, supplier_id: SUPPLIER_B, sort_order: 1 },
+      ],
+    })
+
+    const res = await POST(
+      new Request("http://localhost", {
+        method: "POST",
+        body: JSON.stringify({
+          services: [{ supplierId: SUPPLIER_A, supplierKind: "train_operator" }],
+        }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(200)
+    expect(built.serviceDelete).toHaveBeenCalled()
+    expect(built.serviceInsert).not.toHaveBeenCalled()
+    const body = await res.json()
+    expect(body.removedServiceCount).toBe(1)
   })
 })
 

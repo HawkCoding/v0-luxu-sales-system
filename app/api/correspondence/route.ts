@@ -144,7 +144,7 @@ export async function POST(req: Request) {
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
     .select(
-      "id, booking_number, stage, source, raw_text, updated_at, customer_id, consultant, departure_date, duration_nights, invoice_balance, assigned_salesperson_id, customer_invoice_number, email_import_needs_review, email_import_review_resolved_at, customer:customers(email, title, first_name, last_name, phone, country)",
+      "id, booking_number, stage, source, raw_text, updated_at, customer_id, consultant, departure_date, duration_nights, invoice_balance, assigned_salesperson_id, customer_invoice_number, email_import_needs_review, email_import_review_resolved_at, reservation_form_received_at, customer:customers(email, title, first_name, last_name, phone, country)",
     )
     .eq("id", bookingId)
     .single()
@@ -394,6 +394,22 @@ export async function POST(req: Request) {
 
     if (voucherUpdateError) {
       console.error("correspondence:update-voucher", voucherUpdateError)
+    }
+  }
+
+  // Sending the acknowledgement is the moment the reservation form is, in fact, received. The
+  // client also PATCHes the booking after a successful send; this is the server-side backstop so
+  // the pipeline gate at lib/pipeline/validate-transition.ts never depends on that second call
+  // landing. Only ever fills a blank — it must not overwrite an earlier, hand-entered date.
+  if (parsed.data.kind === "reservation_received" && !booking.reservation_form_received_at) {
+    const { error: receivedStampError } = await supabase
+      .from("bookings")
+      .update({ reservation_form_received_at: parsed.data.sentAt ?? now })
+      .eq("id", bookingId)
+      .is("reservation_form_received_at", null)
+
+    if (receivedStampError) {
+      console.error("correspondence:stamp-reservation-form-received", receivedStampError)
     }
   }
 

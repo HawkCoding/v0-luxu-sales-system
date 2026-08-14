@@ -110,4 +110,71 @@ describe("EnquiryParsedFieldsEditor", () => {
       expect(screen.queryByRole("button", { name: /save journey details/i })).toBeInTheDocument(),
     )
   })
+
+  it("sends the row version it loaded so a concurrent write is caught", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: "b1" }),
+    } as Response)
+
+    render(
+      <EnquiryParsedFieldsEditor
+        bookingId="b1"
+        fields={baseFields}
+        expectedUpdatedAt="2026-08-13T10:00:00.000Z"
+      />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: /edit journey details/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save journey details/i }))
+
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledOnce())
+    const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      expectedUpdatedAt: "2026-08-13T10:00:00.000Z",
+    })
+  })
+
+  it("omits the row version while the booking is still loading", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: "b1" }),
+    } as Response)
+
+    render(<EnquiryParsedFieldsEditor bookingId="b1" fields={baseFields} />)
+    fireEvent.click(screen.getByRole("button", { name: /edit journey details/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save journey details/i }))
+
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledOnce())
+    const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).not.toHaveProperty("expectedUpdatedAt")
+  })
+
+  it("keeps the edit open and refetches when the save loses a 409 conflict", async () => {
+    const onSaved = vi.fn().mockResolvedValue(undefined)
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({
+        error: "This booking was modified by another user since you started editing.",
+        code: "STALE_VERSION",
+      }),
+    } as Response)
+
+    render(
+      <EnquiryParsedFieldsEditor
+        bookingId="b1"
+        fields={baseFields}
+        expectedUpdatedAt="2026-08-13T10:00:00.000Z"
+        onSaved={onSaved}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: /edit journey details/i }))
+    fireEvent.click(screen.getByRole("button", { name: /save journey details/i }))
+
+    // Refetching pulls the winning version in; staying in edit mode keeps the typed draft alive.
+    await waitFor(() => expect(onSaved).toHaveBeenCalledOnce())
+    expect(screen.getByRole("button", { name: /save journey details/i })).toBeInTheDocument()
+  })
 })

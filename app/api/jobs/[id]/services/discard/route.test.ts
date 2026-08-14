@@ -22,6 +22,7 @@ interface MockState {
   bookingExists?: boolean
   services?: { id: string; origin: string }[]
   quotes?: { id: string }[]
+  liveQuotes?: { id: string; quote_number: string | null; status: string }[]
 }
 
 function buildSupabase(state: MockState = {}) {
@@ -61,7 +62,13 @@ function buildSupabase(state: MockState = {}) {
         return {
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
-              in: vi.fn(async () => ({ data: state.quotes ?? [{ id: QUOTE_ID }], error: null })),
+              // The route queries quotes twice with different status filters: once for live
+              // (sent/accepted) quotes that block the discard, once for voidable drafts.
+              in: vi.fn(async (_col: string, statuses: string[]) =>
+                statuses.includes("sent")
+                  ? { data: state.liveQuotes ?? [], error: null }
+                  : { data: state.quotes ?? [{ id: QUOTE_ID }], error: null },
+              ),
             })),
           })),
           update: vi.fn(() => ({
@@ -157,5 +164,44 @@ describe("POST /api/jobs/[id]/services/discard", () => {
 
     expect(res.status).toBe(200)
     expect(built.voidedQuoteIds).toHaveLength(0)
+  })
+
+  it("refuses with 409 when a sent quote is priced from the services (F10-1)", async () => {
+    const built = mockAuth({
+      services: [{ id: AUTO_SERVICE, origin: "auto" }],
+      liveQuotes: [{ id: QUOTE_ID, quote_number: "LTT-2026-0049-Q1", status: "sent" }],
+    })
+    const res = await POST(new Request("http://localhost", { method: "POST" }), makeParams())
+
+    expect(res.status).toBe(409)
+    const body = await res.json()
+    expect(body.code).toBe("LIVE_QUOTE_EXISTS")
+    expect(body.error).toContain("LTT-2026-0049-Q1")
+    expect(built.deletedServiceIds).toHaveLength(0)
+    expect(built.voidedQuoteIds).toHaveLength(0)
+    expect(auditMocks.writeAuditLog).not.toHaveBeenCalled()
+  })
+
+  it("refuses with 409 when an accepted quote exists", async () => {
+    const built = mockAuth({
+      services: [{ id: AUTO_SERVICE, origin: "auto" }],
+      liveQuotes: [{ id: QUOTE_ID, quote_number: null, status: "accepted" }],
+    })
+    const res = await POST(new Request("http://localhost", { method: "POST" }), makeParams())
+
+    expect(res.status).toBe(409)
+    expect(built.deletedServiceIds).toHaveLength(0)
+  })
+
+  it("stays a 200 no-op with a live quote once there is nothing left to discard", async () => {
+    const built = mockAuth({
+      services: [{ id: CONSULTANT_SERVICE, origin: "consultant" }],
+      liveQuotes: [{ id: QUOTE_ID, quote_number: "LTT-2026-0049-Q1", status: "sent" }],
+    })
+    const res = await POST(new Request("http://localhost", { method: "POST" }), makeParams())
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ discarded: 0, warning: null })
+    expect(built.deletedServiceIds).toHaveLength(0)
   })
 })

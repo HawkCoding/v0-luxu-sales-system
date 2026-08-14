@@ -27,7 +27,9 @@ import {
   SupplierEmailEditor,
   type EditableSupplierEmail,
 } from "@/components/supplier-email-editor"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Textarea } from "@/components/ui/textarea"
+import { useSuppliers } from "@/lib/use-data"
 import { shortenUrl } from "@/lib/url"
 import { SUPPLIER_KIND_LABELS, type SupplierKind } from "@/lib/types"
 
@@ -44,9 +46,14 @@ interface CreateSupplierFormState {
   website: string
   location: string
   notes: string
+  /** Set when the user ticks "Linked": the sibling record whose contact details this one reuses. */
+  parentSupplierId: string | null
 }
 
-type SupplierFormField = Exclude<keyof CreateSupplierFormState, "notes" | "emails">
+type SupplierFormField = Exclude<
+  keyof CreateSupplierFormState,
+  "notes" | "emails" | "parentSupplierId"
+>
 type SupplierFormErrors = Record<SupplierFormField | "emails", string | null>
 type SupplierFormTouched = Partial<Record<SupplierFormField, boolean>>
 
@@ -63,6 +70,7 @@ function getInitialFormState(): CreateSupplierFormState {
     website: "",
     location: "",
     notes: "",
+    parentSupplierId: null,
   }
 }
 
@@ -124,6 +132,28 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
   const [form, setForm] = useState<CreateSupplierFormState>(getInitialFormState())
   const [touched, setTouched] = useState<SupplierFormTouched>(getInitialTouchedState())
   const errors = useMemo(() => validateSupplierForm(form), [form])
+  const { data: suppliers } = useSuppliers()
+
+  // The same company can hold one record per category. When the name matches a record in another
+  // category, offer to reuse that record's contact details rather than re-typing them. Records that
+  // already inherit are excluded -- inheritance is one level deep.
+  const linkCandidates = useMemo(() => {
+    const normalizedName = form.name.trim().toLowerCase()
+    if (normalizedName.length < 2 || !Array.isArray(suppliers)) return []
+    return suppliers.filter(
+      (supplier) =>
+        supplier.name.trim().toLowerCase() === normalizedName &&
+        supplier.kind !== form.kind &&
+        !supplier.parentSupplierId,
+    )
+  }, [form.kind, form.name, suppliers])
+
+  // Derived rather than reset on every keystroke: a stale id simply stops matching and goes inert.
+  const linkedParent = useMemo(
+    () => linkCandidates.find((candidate) => candidate.id === form.parentSupplierId) ?? null,
+    [linkCandidates, form.parentSupplierId],
+  )
+  const isLinked = linkedParent !== null
 
   const canSubmit = useMemo(
     () =>
@@ -192,16 +222,19 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
           name: form.name,
           email: "",
           emails: form.emails
-            .map((entry) => ({
+            .map((entry, index) => ({
               id: entry.id,
               email: entry.email.trim(),
               label: entry.label.trim() || "General",
+              // The editor's row order is the saved order; the first address is the primary contact.
+              sortOrder: index,
             }))
             .filter((entry) => entry.email.length > 0),
           phone: form.phone,
           website: form.website,
           location: form.location,
           notes: form.notes,
+          parentSupplierId: linkedParent?.id ?? null,
         }),
       })
 
@@ -279,11 +312,62 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
             ) : null}
           </div>
 
+          {linkCandidates.length > 0 ? (
+            <div className="space-y-2 rounded-lg border border-dashed bg-muted/40 p-3 md:col-span-2">
+              <div className="flex items-start gap-3">
+                <Checkbox
+                  id="supplier-linked"
+                  checked={isLinked}
+                  onCheckedChange={(checked) =>
+                    setForm((current) => ({
+                      ...current,
+                      parentSupplierId: checked === true ? linkCandidates[0].id : null,
+                    }))
+                  }
+                />
+                <div className="space-y-1">
+                  <Label htmlFor="supplier-linked" className="font-medium">
+                    Linked — use the same contact details
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    {linkCandidates.length === 1
+                      ? `"${linkCandidates[0].name}" already exists under ${SUPPLIER_KIND_LABELS[linkCandidates[0].kind]}. Tick to reuse its phone, website and email list — edit them there and this record follows.`
+                      : `"${form.name.trim()}" already exists in other categories. Tick to reuse one record's phone, website and email list.`}
+                  </p>
+                </div>
+              </div>
+
+              {isLinked && linkCandidates.length > 1 ? (
+                <div className="space-y-2 pl-7">
+                  <Label htmlFor="supplier-linked-parent">Inherit from</Label>
+                  <Select
+                    value={linkedParent?.id ?? ""}
+                    onValueChange={(value) =>
+                      setForm((current) => ({ ...current, parentSupplierId: value }))
+                    }
+                  >
+                    <SelectTrigger id="supplier-linked-parent">
+                      <SelectValue placeholder="Select a supplier" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {linkCandidates.map((candidate) => (
+                        <SelectItem key={candidate.id} value={candidate.id}>
+                          {candidate.name} ({SUPPLIER_KIND_LABELS[candidate.kind]})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="space-y-2">
             <Label htmlFor="supplier-phone">Phone</Label>
             <Input
               id="supplier-phone"
-              value={form.phone}
+              value={isLinked ? (linkedParent.phone ?? "") : form.phone}
+              disabled={isLinked}
               onChange={(event) =>
                 setForm((current) => ({ ...current, phone: event.target.value }))
               }
@@ -300,7 +384,8 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
             <Label htmlFor="supplier-website">Website</Label>
             <Input
               id="supplier-website"
-              value={form.website}
+              value={isLinked ? (linkedParent.website ?? "") : form.website}
+              disabled={isLinked}
               onChange={(event) =>
                 setForm((current) => ({ ...current, website: event.target.value }))
               }
@@ -337,12 +422,24 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
           </div>
 
           <div className="space-y-2 md:col-span-2">
-            <SupplierEmailEditor
-              emails={form.emails}
-              onChange={(emails) => setForm((current) => ({ ...current, emails }))}
-              idPrefix="add-supplier"
-            />
-            {errors.emails ? <p className="text-xs text-destructive">{errors.emails}</p> : null}
+            {isLinked ? (
+              <>
+                <Label>Supplier emails</Label>
+                <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                  Copied from {linkedParent.name} ({SUPPLIER_KIND_LABELS[linkedParent.kind]}) when
+                  this supplier is created, and kept in step with it afterwards.
+                </div>
+              </>
+            ) : (
+              <>
+                <SupplierEmailEditor
+                  emails={form.emails}
+                  onChange={(emails) => setForm((current) => ({ ...current, emails }))}
+                  idPrefix="add-supplier"
+                />
+                {errors.emails ? <p className="text-xs text-destructive">{errors.emails}</p> : null}
+              </>
+            )}
           </div>
 
           <div className="space-y-2 md:col-span-2">

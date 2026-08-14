@@ -83,7 +83,7 @@ describe("buildVoucherServiceBlocks", () => {
             service_type: "transfer",
             pickup_point: "Cape Town International Airport",
             dropoff_point: "The Silo Hotel",
-            pickup_at: "2026-09-01T08:30:00",
+            pickup_at: "2026-09-01T06:30:00.000Z",
             flight_number: "SA321",
             notes: "Meet & greet",
             sort_order: 0,
@@ -97,7 +97,7 @@ describe("buildVoucherServiceBlocks", () => {
             service_type: "transfer",
             pickup_point: "The Silo Hotel",
             dropoff_point: "Cape Town Station",
-            pickup_at: "2026-09-03T14:00:00",
+            pickup_at: "2026-09-03T12:00:00.000Z",
             flight_number: null,
             notes: null,
             sort_order: 1,
@@ -130,6 +130,37 @@ describe("buildVoucherServiceBlocks", () => {
     // Both stay in the leg's slot, in captured order.
     expect(first.displayOrder).toBeLessThan(second.displayOrder)
     expect(Math.floor(first.displayOrder)).toBe(2)
+  })
+
+  it("prints a transfer's pickup time in South African time, not the server process's UTC clock", async () => {
+    // Entered as 16:00 in the builder (SAST, UTC+2) — Postgrest returns the stored timestamptz
+    // as its UTC instant, 14:00Z. The block builder runs server-side (UTC on Vercel), so it must
+    // convert back to SAST rather than reading the UTC clock hour directly.
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [transferSelection()],
+        transportRequests: [
+          {
+            id: "req-1600-sast",
+            service_id: "leg-transfer",
+            service_type: "transfer",
+            pickup_point: "Cape Town Station",
+            dropoff_point: "Hotel",
+            pickup_at: "2026-10-28T14:00:00.000Z",
+            flight_number: null,
+            notes: null,
+            sort_order: 0,
+            suppliers: supplier(),
+            suite_types: null,
+            rental_details: null,
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceData.departureDate).toBe("2026-10-28")
+    expect(blocks[0].serviceData.startTime).toBe("16:00")
   })
 
   it("keeps a single fallback block (route name, no pickup/drop-off) when a transfer leg has no requests", async () => {
@@ -194,13 +225,13 @@ describe("buildVoucherServiceBlocks", () => {
             service_type: "rental",
             pickup_point: "Airport depot",
             dropoff_point: "Airport depot",
-            pickup_at: "2026-09-01T09:00:00",
+            pickup_at: "2026-09-01T07:00:00.000Z",
             flight_number: null,
             notes: null,
             sort_order: 0,
             suppliers: supplier({ kind: "vehicle_rental", name: "Cape Rentals" }),
             suite_types: { name: "SUV" },
-            rental_details: { return_at: "2026-09-05T16:00:00" },
+            rental_details: { return_at: "2026-09-05T14:00:00.000Z" },
           },
         ],
       }),
@@ -516,6 +547,78 @@ describe("buildVoucherServiceBlocks", () => {
     expect(blocks[0].serviceData.suiteType).toBe("Twin bedded Deluxe Suite with a shower")
   })
 
+  it("appends the Suite noun to a train unit's type name when it isn't already nouned", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "leg-train",
+            selected: true,
+            supplier_id: "supplier-train",
+            route_id: "route-train",
+            suite_type_id: "suite-deluxe",
+            service_date: "2026-09-01",
+            nights: null,
+            notes: null,
+            sort_order: 0, label: "The Blue Train",
+            suppliers: supplier({ kind: "train_operator", name: "Blue Train" }),
+            routes: { name: "Pretoria ↔ Cape Town", duration_days: 3 },
+            suite_types: null,
+            units: [
+              {
+                suite_type_id: "suite-deluxe",
+                sort_order: 0,
+                suite_types: { name: "Deluxe" },
+                bedroom_types: { name: "Twin" },
+                bedroom_layouts: null,
+                bathroom_types: { name: "Shower" },
+              },
+            ],
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceData.suiteType).toBe("Twin bedded Deluxe Suite with a shower")
+  })
+
+  it("puts a bedroom layout after the bathroom, keeping bedding as the leading word", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "leg-train",
+            selected: true,
+            supplier_id: "supplier-train",
+            route_id: "route-train",
+            suite_type_id: "suite-deluxe",
+            service_date: "2026-09-01",
+            nights: null,
+            notes: null,
+            sort_order: 0, label: "Rovos Rail",
+            suppliers: supplier({ kind: "train_operator", name: "Rovos Rail" }),
+            routes: { name: "Pretoria ↔ Cape Town", duration_days: 3 },
+            suite_types: null,
+            units: [
+              {
+                suite_type_id: "suite-deluxe",
+                sort_order: 0,
+                suite_types: { name: "Deluxe Suite" },
+                bedroom_types: { name: "Twin" },
+                bedroom_layouts: { name: "Crosswise" },
+                bathroom_types: { name: "Shower" },
+              },
+            ],
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceData.suiteType).toBe("Twin bedded Deluxe Suite with a shower, Crosswise")
+  })
+
   it("leaves a hotel unit's room name plain — no bed/bathroom suffix", async () => {
     const { blocks } = await buildVoucherServiceBlocks(
       buildSupabase({
@@ -551,6 +654,43 @@ describe("buildVoucherServiceBlocks", () => {
 
     expect(blocks).toHaveLength(1)
     expect(blocks[0].serviceData.roomType).toBe("Standard Room")
+  })
+
+  it("appends the Room noun to a hotel unit's type name when it isn't already nouned", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "leg-hotel",
+            selected: true,
+            supplier_id: "supplier-hotel",
+            route_id: "route-hotel",
+            suite_type_id: null,
+            service_date: "2026-09-01",
+            nights: 2,
+            notes: null,
+            sort_order: 0, label: "Irene Country Lodge",
+            suppliers: supplier({ kind: "hotel_property", name: "Irene Country Lodge" }),
+            routes: { name: "Full Board", duration_days: null },
+            suite_types: null,
+            units: [
+              {
+                suite_type_id: "room-deluxe",
+                sort_order: 0,
+                suite_types: { name: "Deluxe" },
+                bedroom_types: { name: "Twin" },
+                bedroom_layouts: null,
+                bathroom_types: { name: "En-suite shower" },
+              },
+            ],
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    // No bed/bathroom suffix (includeConfig is false for hotel legs) — only the noun is added.
+    expect(blocks[0].serviceData.roomType).toBe("Deluxe Room")
   })
 
   it("joins distinct suite names across mixed per-unit rows", async () => {
@@ -612,7 +752,7 @@ describe("buildVoucherServiceBlocks", () => {
       service_type: "transfer",
       pickup_point: "Rovos Rail Station",
       dropoff_point: "The Silo Hotel",
-      pickup_at: "2026-09-01T16:00:00",
+      pickup_at: "2026-09-01T14:00:00.000Z",
       flight_number: null,
       notes: null,
       sort_order: 0,
@@ -641,7 +781,7 @@ describe("buildVoucherServiceBlocks", () => {
       service_type: "transfer",
       pickup_point: "OR Tambo",
       dropoff_point: "Rovos Rail Station",
-      pickup_at: "2026-08-01T09:00:00",
+      pickup_at: "2026-08-01T07:00:00.000Z",
       flight_number: null,
       notes: null,
       sort_order: 0,
@@ -757,7 +897,7 @@ describe("buildVoucherServiceBlocks", () => {
       service_type: "transfer",
       pickup_point: "Cape Town International Airport",
       dropoff_point: "The Silo Hotel",
-      pickup_at: "2026-09-01T08:30:00",
+      pickup_at: "2026-09-01T06:30:00.000Z",
       flight_number: null,
       notes: null,
       sort_order: 0,
@@ -1077,6 +1217,32 @@ describe("buildVoucherServiceBlocks", () => {
     expect(blocks[0].serviceData.itinerary).toBe("Kimberley Day Tour")
   })
 
+  it("leaves a tour leg's suite type name untouched — no noun appended for non-train/hotel kinds", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "leg-tour",
+            selected: true,
+            supplier_id: "supplier-tour",
+            route_id: "route-tour",
+            suite_type_id: "tour-type",
+            service_date: "2026-09-08",
+            nights: null,
+            notes: null,
+            sort_order: 0, label: "Kimberley Excursion",
+            suppliers: supplier({ kind: "tour_operator", name: "Kimberley Tours" }),
+            routes: { name: "Kimberley Day Tour", duration_days: 1 },
+            suite_types: { name: "Full Day" },
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceData.suiteType).toBe("Full Day")
+  })
+
   it("builds an airline block from a service_type='flight' transport request", async () => {
     const { blocks } = await buildVoucherServiceBlocks(
       buildSupabase({
@@ -1087,7 +1253,7 @@ describe("buildVoucherServiceBlocks", () => {
             service_type: "flight",
             pickup_point: "CPT",
             dropoff_point: "JNB",
-            pickup_at: "2026-09-11T16:20:00",
+            pickup_at: "2026-09-11T14:20:00.000Z",
             flight_number: "FA-120",
             passenger_count: 2,
             notes: null,
@@ -1102,7 +1268,7 @@ describe("buildVoucherServiceBlocks", () => {
               cabin: "Economy",
               departure_airport_code: "CPT",
               arrival_airport_code: "JNB",
-              arrival_at: "2026-09-11T18:25:00",
+              arrival_at: "2026-09-11T16:25:00.000Z",
               hand_luggage_kg: 7,
               checked_luggage_kg: 20,
               priority_boarding: true,
@@ -1141,7 +1307,7 @@ describe("buildVoucherServiceBlocks", () => {
             service_type: "flight",
             pickup_point: "CPT",
             dropoff_point: "JNB",
-            pickup_at: "2026-09-11T16:20:00",
+            pickup_at: "2026-09-11T14:20:00.000Z",
             flight_number: "FA-120",
             passenger_count: 2,
             notes: null,

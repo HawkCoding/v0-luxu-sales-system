@@ -5,6 +5,7 @@ import type {
   VoucherServiceBlockData,
   VoucherServiceType,
 } from "@/lib/generate-voucher"
+import { formatDateISO, formatTimeHHMM } from "@/lib/date-format"
 import { voucherServiceTypeLabel } from "@/lib/generate-voucher"
 import { addDays, trainArrivalDate } from "@/lib/packages/hotel-dates"
 import { getHotelDefaultTimes, type HotelDefaultTimes } from "@/lib/suppliers/hotel-default-times"
@@ -12,7 +13,13 @@ import type { Database } from "@/lib/supabase/types"
 import type { SupplierKind } from "@/lib/types"
 import { resolveDirectedArrivalName, resolveDirectedRouteName } from "@/lib/routes/route-name"
 import { resolveRouteSchedule, toHoursMinutes } from "@/lib/routes/route-schedule"
+import { formatSuitePhrase, type SuiteSelection } from "@/lib/templates/suite-description"
 import { firstRecord } from "@/lib/utils"
+
+/** Kinds whose suite/room name gets a noun appended when the type name doesn't already carry
+ * one (see formatSuitePhrase). Tour, airline and transfer labels feed different sentences
+ * ("… Tour", "in Economy") and are left exactly as typed. */
+const SUITE_NOUN_KINDS: ReadonlySet<SupplierKind> = new Set(["train_operator", "hotel_property"])
 
 export function mapSupplierKindToServiceType(kind: SupplierKind | string | null): VoucherServiceType {
   switch (kind) {
@@ -231,21 +238,19 @@ export interface BuildVoucherServiceBlocksResult {
   blocks: VoucherServiceBlock[]
 }
 
-/** YYYY-MM-DD part of a pickup timestamp. */
+/** YYYY-MM-DD part of a pickup timestamp, read in `APP_TIME_ZONE` — this runs server-side
+ * (Vercel, UTC), so reading the calendar date straight off the ISO string would print the wrong
+ * day for a pickup near local midnight. */
 function timestampDate(value: string | null | undefined): string | null {
-  if (!value) return null
-  const candidate = value.slice(0, 10)
-  return /^\d{4}-\d{2}-\d{2}$/.test(candidate) ? candidate : null
+  return formatDateISO(value)
 }
 
-/** HH:MM part of a pickup timestamp, in the timezone it was entered (same convention as
- * `formatDisplayDateTime` on the booking screens). */
+/** HH:MM part of a pickup timestamp, in `APP_TIME_ZONE` (same convention as
+ * `formatDisplayDateTime` on the booking screens) — not the naive `new Date(value).getHours()`,
+ * which reads the executing process's local clock and prints the wrong hour when this runs
+ * server-side (Vercel, UTC) versus the browser (SAST). */
 function timestampTime(value: string | null | undefined): string | null {
-  if (!value) return null
-  const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) return null
-  const pad = (part: number) => String(part).padStart(2, "0")
-  return `${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`
+  return formatTimeHHMM(value)
 }
 
 function cleanList(values: string[] | null | undefined): string[] {
@@ -253,48 +258,51 @@ function cleanList(values: string[] | null | undefined): string[] {
 }
 
 /** "Twin bedded Deluxe Suite with a shower" — a unit's suite type, prefixed with its bed
- * configuration and suffixed with its bathroom, when the unit has those selected. Either can be
+ * configuration and suffixed with its bathroom (and bedroom layout), when the unit has those
+ * selected, and the supplier-kind noun appended ("Suite"/"Room") when the type name doesn't
+ * already carry one. A thin wrapper over formatSuitePhrase, shared with the
+ * {{suiteDescription}} email token so the two surfaces never diverge on grammar. Any part can be
  * absent (legacy rows, or a supplier that doesn't track that variant), in which case that part is
- * simply omitted rather than leaving an awkward gap. */
+ * simply omitted. */
 function composeUnitSuiteLabel(
-  suiteTypeName: string | null | undefined,
-  bedConfigName: string | null | undefined,
-  bathroomTypeName: string | null | undefined,
+  selection: Omit<SuiteSelection, "suiteTypeName"> & { suiteTypeName: string | null | undefined },
 ): string | null {
-  const suite = suiteTypeName?.trim()
-  if (!suite) return null
-  const bedPrefix = bedConfigName?.trim() ? `${bedConfigName.trim()} bedded ` : ""
-  const bathroomSuffix = bathroomTypeName?.trim() ? ` with a ${bathroomTypeName.trim().toLowerCase()}` : ""
-  return `${bedPrefix}${suite}${bathroomSuffix}`
+  return formatSuitePhrase({ ...selection, suiteTypeName: selection.suiteTypeName ?? "" }) || null
 }
 
 /** Suite/room labels selected for a leg, in unit order, de-duplicated. Falls back to the
  * leg-level suite_types join for rows with no unit children, which therefore have no
  * bedroom/bathroom configuration to compose in.
  *
- * `includeConfig` composes each unit's bed/bathroom configuration into its label (train legs, so
- * the itinerary line reads "Twin bedded Deluxe Suite with a shower"); hotel legs pass false since
- * their room name alone already fills that role in the sentence. */
+ * `includeConfig` composes each unit's bed/bathroom/layout configuration into its label (train
+ * legs, so the itinerary line reads "Twin bedded Deluxe Suite with a shower"); hotel legs pass
+ * false since their room name alone already fills that role in the sentence — only the noun is
+ * added. `nounKind` drives the noun appended by formatSuitePhrase (null leaves the type name
+ * untouched, for tour/airline/transfer legs). */
 function resolveLegSuiteNames(
   row: SelectionJoinRow,
   includeConfig: boolean,
+  nounKind: SupplierKind | null,
 ): { names: string[]; unitCount: number } {
   const unitRows = [...(row.units ?? [])].sort((a, b) => a.sort_order - b.sort_order)
   const unitLabels = unitRows
     .map((unit) =>
-      includeConfig
-        ? composeUnitSuiteLabel(
-            firstRecord(unit.suite_types)?.name,
-            firstRecord(unit.bedroom_layouts)?.name ?? firstRecord(unit.bedroom_types)?.name,
-            firstRecord(unit.bathroom_types)?.name,
-          )
-        : firstRecord(unit.suite_types)?.name?.trim() || null,
+      composeUnitSuiteLabel({
+        suiteTypeName: firstRecord(unit.suite_types)?.name,
+        bedroomType: includeConfig ? firstRecord(unit.bedroom_types)?.name : null,
+        bedroomLayout: includeConfig ? firstRecord(unit.bedroom_layouts)?.name : null,
+        bathroomType: includeConfig ? firstRecord(unit.bathroom_types)?.name : null,
+        supplierKind: nounKind,
+      }),
     )
     .filter((label): label is string => Boolean(label))
   if (unitRows.length > 0) {
     return { names: Array.from(new Set(unitLabels)), unitCount: unitRows.length }
   }
-  const legacyName = firstRecord(row.suite_types)?.name?.trim()
+  const legacyName = composeUnitSuiteLabel({
+    suiteTypeName: firstRecord(row.suite_types)?.name,
+    supplierKind: nounKind,
+  })
   return { names: legacyName ? [legacyName] : [], unitCount: legacyName ? 1 : 0 }
 }
 
@@ -626,7 +634,11 @@ export async function buildVoucherServiceBlocks(
     const stationPoints = isTrain
       ? resolveStationPoints(supplier, route, row.route_reversed ?? false)
       : { boarding: null, arrival: null }
-    const { names: suiteNames, unitCount } = resolveLegSuiteNames(row, serviceType === "train")
+    const nounKind =
+      supplier?.kind && SUITE_NOUN_KINDS.has(supplier.kind as SupplierKind)
+        ? (supplier.kind as SupplierKind)
+        : null
+    const { names: suiteNames, unitCount } = resolveLegSuiteNames(row, serviceType === "train", nounKind)
     const suiteName = suiteNames.length > 0 ? suiteNames.join(", ") : null
     const serviceData: VoucherServiceBlockData = {
       route: isHotel ? null : directedRouteName,

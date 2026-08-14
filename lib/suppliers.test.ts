@@ -44,6 +44,7 @@ const supplierRow: SupplierRow = {
   street_address: null,
   emergency_phone: null,
   default_contact_name: null,
+  parent_supplier_id: null,
   infant_max_age: null,
   child_max_age: null,
   created_at: "2026-01-01T10:00:00.000Z",
@@ -109,6 +110,7 @@ const supplierEmailRow: SupplierEmailRow = {
   supplier_id: supplierRow.id,
   email: "bookings@example.com",
   label: "Bookings",
+  sort_order: 0,
   created_at: "2026-01-01T10:00:00.000Z",
 }
 

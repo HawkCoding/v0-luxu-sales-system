@@ -2,9 +2,9 @@ import { ImapFlow } from "imapflow"
 import { simpleParser } from "mailparser"
 import { createEmailBookingFromParsedDraft } from "@/lib/inbound-email/import-booking"
 import { decryptCredential } from "@/lib/inbound-email/crypto"
-import { htmlToPlainText } from "@/lib/inbound-email/html"
+import { createRawEmailPreview, htmlToPlainText } from "@/lib/inbound-email/html"
 import { findMatchingInboundSubjectRule, type InboundSubjectRule } from "@/lib/inbound-email/rules"
-import { getEmailImportReviewMetadata } from "@/lib/inbound-email/review"
+import { assessEnquiryPlausibility, getEmailImportReviewMetadata } from "@/lib/inbound-email/review"
 import { parseEmailDraft } from "@/lib/import/parseEmailDraft"
 import { createServiceClient } from "@/lib/supabase/server"
 import { logError } from "@/lib/error-log"
@@ -22,6 +22,8 @@ export interface EmailSyncSummary {
   importedCount: number
   needsReviewCount: number
   duplicateCount: number
+  /** Claimed by a subject rule but too empty to be an enquiry -- see assessEnquiryPlausibility. */
+  skippedNotEnquiryCount: number
   errors: string[]
 }
 
@@ -45,6 +47,9 @@ const STALE_PROCESSING_MS = 60 * 60 * 1000
 interface CollectedMessage {
   uid: number
   source: Buffer
+  /** IMAP INTERNALDATE -- when the message landed in the mailbox. Only used when the message
+   * carries no usable `Date:` header of its own. */
+  internalDate?: Date
 }
 
 interface CollectedBatch {
@@ -64,6 +69,15 @@ function mapRule(row: RuleRow): InboundSubjectRule {
 }
 
 function createImapClient(account: AccountRow): ImapFlow {
+  // The seeded demo mailbox carries a placeholder ('demo-no-real-credentials'), not a v1 envelope,
+  // and it ships disabled -- but enabling it used to surface as a bare "Unsupported encrypted
+  // credential format" with nothing pointing at the cause. Say what to do about it instead.
+  if (!account.password_encrypted?.startsWith("v1:")) {
+    throw new Error(
+      `Mailbox ${account.email} has no stored credential (or one saved before encryption) -- re-enter its password in Settings before enabling sync.`,
+    )
+  }
+
   return new ImapFlow({
     host: account.host,
     port: account.port,
@@ -284,9 +298,16 @@ async function collectCandidateMessages(
     const messages: CollectedMessage[] = []
 
     if (freshUids.length > 0) {
-      for await (const message of client.fetch(freshUids, { uid: true, source: true }, { uid: true })) {
+      for await (const message of client.fetch(freshUids, { uid: true, source: true, internalDate: true }, { uid: true })) {
         if (!message.uid || !message.source) continue
-        messages.push({ uid: message.uid, source: message.source })
+        // imapflow types internalDate as `string | Date` -- normalise to a Date, dropping anything
+        // unparseable so a bad value can never reach `.toISOString()`.
+        const internalDate = message.internalDate ? new Date(message.internalDate) : undefined
+        messages.push({
+          uid: message.uid,
+          source: message.source,
+          internalDate: internalDate && !Number.isNaN(internalDate.getTime()) ? internalDate : undefined,
+        })
       }
     }
 
@@ -321,12 +342,15 @@ async function importCollectedMessages(
   summary: EmailSyncSummary,
   trainOperatorNames: string[],
 ): Promise<void> {
-  for (const { uid, source } of messages) {
+  for (const { uid, source, internalDate } of messages) {
     const parsedMail = await simpleParser(source)
     const subject = parsedMail.subject?.trim() || "(no subject)"
     const messageId = parsedMail.messageId ?? null
     const fromAddress = parsedMail.from?.text ?? null
-    const receivedAt = parsedMail.date?.toISOString() ?? null
+    // The message's own `Date:` header is the email's time and always wins. INTERNALDATE (when the
+    // message landed in the mailbox) only rescues mail that arrived without a readable header --
+    // without it those imports showed no received time at all.
+    const receivedAt = parsedMail.date?.toISOString() ?? internalDate?.toISOString() ?? null
     const matchingRule = findMatchingInboundSubjectRule(subject, rules)
 
     if (!matchingRule) {
@@ -389,6 +413,30 @@ async function importCollectedMessages(
     const rawText = getMessageBody(parsedMail.text, parsedMail.html)
     const parsedDraft = parseEmailDraft(rawText, { trainOperatorNames })
     const review = getEmailImportReviewMetadata(parsedDraft)
+
+    // Content gate. The subject rule got this far; the body decides whether anything is created.
+    // A message that fails here is left claimed and recorded with its preview, so it is visible,
+    // counted for dedupe, and never re-imported -- but no customer, booking or quote exists for it.
+    const plausibility = assessEnquiryPlausibility(parsedDraft)
+    if (!plausibility.importable) {
+      const { error: skipError } = await supabase
+        .from("inbound_email_messages")
+        .update({
+          status: "skipped_not_an_enquiry",
+          filing_status: "not_applicable",
+          missing_fields: review.missingFields,
+          warnings: review.warnings,
+          raw_preview: createRawEmailPreview(rawText),
+          error: plausibility.reason,
+        })
+        .eq("id", claim.id)
+
+      if (skipError) {
+        summary.errors.push(`Failed to record non-enquiry for UID ${uid}: ${skipError.message}`)
+      }
+      summary.skippedNotEnquiryCount += 1
+      continue
+    }
 
     let created: Awaited<ReturnType<typeof createEmailBookingFromParsedDraft>>
     try {
@@ -540,6 +588,7 @@ export async function syncInboundEmailAccount(account: AccountRow): Promise<Emai
     importedCount: 0,
     needsReviewCount: 0,
     duplicateCount: 0,
+    skippedNotEnquiryCount: 0,
     errors: [],
   }
 
@@ -629,6 +678,7 @@ export async function syncAllEnabledInboundEmailAccounts(): Promise<EmailSyncSum
     importedCount: 0,
     needsReviewCount: 0,
     duplicateCount: 0,
+    skippedNotEnquiryCount: 0,
     errors: [],
   }
 
@@ -639,6 +689,7 @@ export async function syncAllEnabledInboundEmailAccounts(): Promise<EmailSyncSum
       total.importedCount += summary.importedCount
       total.needsReviewCount += summary.needsReviewCount
       total.duplicateCount += summary.duplicateCount
+      total.skippedNotEnquiryCount += summary.skippedNotEnquiryCount
       total.errors.push(...summary.errors)
     } catch (error) {
       total.errors.push(error instanceof Error ? error.message : `Sync failed for ${account.email}`)

@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/command"
 import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { SortableList } from "@/components/ui/sortable-list"
 import { useRole } from "@/lib/role-context"
 import { type SupplierEmailLabel, useSupplierEmailLabels } from "@/lib/use-data"
 import { cn } from "@/lib/utils"
@@ -56,9 +57,17 @@ interface SupplierEmailEditorProps {
   emails: EditableSupplierEmail[]
   onChange: (next: EditableSupplierEmail[]) => void
   idPrefix: string
+  /** Read-only mode: the list is shown but cannot be edited, reordered or added to. Used when a
+   * supplier inherits its contacts from a linked sibling record. */
+  disabled?: boolean
 }
 
-export function SupplierEmailEditor({ emails, onChange, idPrefix }: SupplierEmailEditorProps) {
+export function SupplierEmailEditor({
+  emails,
+  onChange,
+  idPrefix,
+  disabled = false,
+}: SupplierEmailEditorProps) {
   const { can } = useRole()
   const canManageLabels = can("edit:suppliers")
   const { data: persistedLabelOptions, mutate: mutateLabelOptions } = useSupplierEmailLabels()
@@ -104,6 +113,18 @@ export function SupplierEmailEditor({ emails, onChange, idPrefix }: SupplierEmai
 
   const addEmail = () => {
     onChange([...emails, createEmptySupplierEmail()])
+  }
+
+  const reorderEmails = (orderedIds: string[]) => {
+    const byId = new Map(emails.map((entry) => [entry.id, entry]))
+    const reordered = orderedIds.flatMap((id) => {
+      const entry = byId.get(id)
+      return entry ? [entry] : []
+    })
+    // Anything the drag list didn't name (shouldn't happen) keeps its place at the end rather than
+    // being dropped from the supplier.
+    const missing = emails.filter((entry) => !orderedIds.includes(entry.id))
+    onChange([...reordered, ...missing])
   }
 
   const getActiveLabelValue = (label: string) => {
@@ -263,13 +284,18 @@ export function SupplierEmailEditor({ emails, onChange, idPrefix }: SupplierEmai
 
       {emails.length > 0 ? (
         <div className="space-y-2">
-          <div className="hidden items-center gap-3 px-1 text-xs font-medium text-muted-foreground md:grid md:grid-cols-[170px_1fr_auto]">
+          <div className="hidden items-center gap-3 px-1 text-xs font-medium text-muted-foreground md:grid md:grid-cols-[28px_170px_1fr_auto]">
+            <span className="sr-only">Reorder</span>
             <span>Label</span>
             <span>Email address</span>
             <span className="sr-only">Actions</span>
           </div>
 
-          {emails.map((entry, index) => {
+          <SortableList
+            items={emails}
+            onReorder={reorderEmails}
+            disabled={disabled}
+            renderItem={({ item: entry, index, dragHandle }) => {
             const isLabelPopoverOpen = openLabelRowId === entry.id
             const normalizedSearchValue = labelSearchValue.trim()
             const showCustomLabelOption =
@@ -278,9 +304,10 @@ export function SupplierEmailEditor({ emails, onChange, idPrefix }: SupplierEmai
 
             return (
               <div
-                key={entry.id}
-                className="grid items-end gap-3 md:grid-cols-[170px_1fr_auto]"
+                className="grid items-end gap-3 md:grid-cols-[28px_170px_1fr_auto]"
               >
+                <div className="flex items-center pb-1">{dragHandle}</div>
+
                 <div className="space-y-2">
                   <Label className="md:sr-only">Label</Label>
                   <Popover
@@ -304,6 +331,7 @@ export function SupplierEmailEditor({ emails, onChange, idPrefix }: SupplierEmai
                         variant="outline"
                         role="combobox"
                         aria-expanded={isLabelPopoverOpen}
+                        disabled={disabled}
                         className="w-full justify-between font-normal"
                       >
                         <span className="truncate text-left">
@@ -395,6 +423,7 @@ export function SupplierEmailEditor({ emails, onChange, idPrefix }: SupplierEmai
                     value={entry.email}
                     onValueChange={(value) => updateEmailValue(index, value)}
                     placeholder="supplier@example.com"
+                    disabled={disabled}
                   />
                 </div>
 
@@ -404,13 +433,21 @@ export function SupplierEmailEditor({ emails, onChange, idPrefix }: SupplierEmai
                   variant="outline"
                   className={REMOVE_ICON_BUTTON_CLASS}
                   aria-label="Remove email"
+                  disabled={disabled}
                   onClick={() => removeEmail(index)}
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </div>
             )
-          })}
+            }}
+          />
+
+          <p className="px-1 text-xs text-muted-foreground">
+            {disabled
+              ? "The first address is the supplier's primary contact."
+              : "Drag to reorder. The first address is the supplier's primary contact."}
+          </p>
         </div>
       ) : (
         <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
@@ -418,12 +455,14 @@ export function SupplierEmailEditor({ emails, onChange, idPrefix }: SupplierEmai
         </div>
       )}
 
-      <div className="flex justify-end">
-        <Button type="button" size="sm" variant="outline" onClick={addEmail}>
-          <Plus className="mr-2 h-4 w-4" />
-          Add email
-        </Button>
-      </div>
+      {disabled ? null : (
+        <div className="flex justify-end">
+          <Button type="button" size="sm" variant="outline" onClick={addEmail}>
+            <Plus className="mr-2 h-4 w-4" />
+            Add email
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

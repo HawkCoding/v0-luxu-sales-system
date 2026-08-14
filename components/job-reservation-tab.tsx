@@ -20,6 +20,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { AlertCircle, Plus, RotateCcw, Trash2, UserCheck } from "lucide-react"
 import { toast } from "sonner"
 import { ReservationFormCard } from "@/components/reservation-form-card"
@@ -142,6 +152,20 @@ function formatCustomerAddress(customer: Customer | null): string {
 const SMOKING_NONE = "none"
 const MEAL_SEATING_NONE = "none"
 
+function plural(count: number, noun: string, pluralNoun: string): string {
+  return `${count} ${count === 1 ? noun : pluralNoun}`
+}
+
+/** "2 adults, 1 child, 1 infant" — zero buckets are dropped so the sentence stays readable. */
+function describePax(totals: { adultCount: number; childCount: number; infantCount: number } | null): string {
+  if (!totals) return "none"
+  const parts: string[] = []
+  if (totals.adultCount > 0) parts.push(plural(totals.adultCount, "adult", "adults"))
+  if (totals.childCount > 0) parts.push(plural(totals.childCount, "child", "children"))
+  if (totals.infantCount > 0) parts.push(plural(totals.infantCount, "infant", "infants"))
+  return parts.length > 0 ? parts.join(", ") : "nobody"
+}
+
 export function JobReservationTab({
   bookingId,
   reservationFormReceivedAt,
@@ -167,6 +191,8 @@ export function JobReservationTab({
   const [travellerSeeds, setTravellerSeeds] = useState<Map<string, TravellerDraft>>(new Map())
   const [prefilledFields, setPrefilledFields] = useState<Map<string, Set<PrefillField>>>(new Map())
   const [savingTravellers, setSavingTravellers] = useState(false)
+  const [syncingPax, setSyncingPax] = useState(false)
+  const [confirmWipeOpen, setConfirmWipeOpen] = useState(false)
   const travellersHydrated = useRef(false)
   const guestsCardRef = useRef<HTMLDivElement | null>(null)
   const [showReceivedPrompt, setShowReceivedPrompt] = useState(false)
@@ -197,6 +223,12 @@ export function JobReservationTab({
     () => ({ name: customer?.companyName ?? "", address: formatCustomerAddress(customer) }),
     [customer],
   )
+
+  const savedTravellerCount = travellersData?.travellers.length ?? 0
+  // Reflects the *saved* roster, not the drafts on screen — the pax it is compared against only
+  // moves when the guest list is saved, so anything else would flip on every keystroke.
+  const paxComparison = travellersData?.paxComparison ?? null
+  const paxMismatch = paxComparison && !paxComparison.matches ? paxComparison : null
 
   const [dietary, setDietary] = useState("")
   const [medical, setMedical] = useState("")
@@ -278,6 +310,38 @@ export function JobReservationTab({
     })
   }
 
+  /**
+   * Writes the saved roster into the booking's passenger counts. Explicit on purpose: pricing must
+   * never move because somebody typed a date of birth (see the sync-pax route).
+   */
+  const applyRosterToPax = async () => {
+    setSyncingPax(true)
+    try {
+      const response = await fetch(`/api/jobs/${bookingId}/travellers/sync-pax`, { method: "POST" })
+      const payload = await response.json().catch(() => null)
+      if (!response.ok) {
+        throw new Error(typeof payload?.error === "string" ? payload.error : "Could not apply the guest list")
+      }
+      await mutateTravellers()
+      await mutateJob()
+      toast.success("Passenger counts updated from the guest list")
+      if (typeof payload?.warning === "string") toast.warning(payload.warning)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not apply the guest list")
+    } finally {
+      setSyncingPax(false)
+    }
+  }
+
+  const requestSaveTravellers = () => {
+    // An empty payload is a replace-set wipe: ID numbers and dates of birth do not come back.
+    if (travellers.length === 0 && savedTravellerCount > 0) {
+      setConfirmWipeOpen(true)
+      return
+    }
+    void saveTravellers()
+  }
+
   const saveTravellers = async () => {
     const invalid = travellers.some((t) => !t.firstName.trim() || !t.lastName.trim() || !t.idPassport.trim())
     if (invalid) {
@@ -309,12 +373,14 @@ export function JobReservationTab({
         const payload = await response.json().catch(() => null)
         throw new Error(typeof payload?.error === "string" ? payload.error : "Could not save guests")
       }
+      const payload = (await response.json().catch(() => null)) as { warning?: string | null } | null
       await mutateTravellers()
       await mutateJob()
       // Prefilled values are now stored guest details, so drop the "check, then
       // save" hint.
       setPrefilledFields(new Map())
       toast.success("Guests saved")
+      if (typeof payload?.warning === "string") toast.warning(payload.warning)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not save guests")
     } finally {
@@ -396,6 +462,33 @@ export function JobReservationTab({
         </DialogContent>
       </Dialog>
 
+      {/* Genuinely destructive and unrecoverable, so this one is an AlertDialog: it must not be
+          dismissable by an outside click. */}
+      <AlertDialog open={confirmWipeOpen} onOpenChange={setConfirmWipeOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Remove {plural(savedTravellerCount, "guest", "guests")}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Saving an empty guest list deletes every saved guest on this booking. Their names, ID
+              or passport numbers and dates of birth cannot be recovered.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep guests</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmWipeOpen(false)
+                void saveTravellers()
+              }}
+            >
+              Remove all guests
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {!reservationFormReceivedAt ? (
         <p className="text-xs text-muted-foreground">
           Mark the reservation form received above once it comes back, then record the returned
@@ -436,6 +529,35 @@ export function JobReservationTab({
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
+          {paxMismatch ? (
+            <Alert>
+              <AlertCircle className="w-4 h-4" />
+              <AlertTitle>Guest list does not match the passenger counts</AlertTitle>
+              <AlertDescription className="space-y-2">
+                <p>
+                  Saved guests: {describePax(paxMismatch.roster)}. This booking is priced for{" "}
+                  {describePax(paxMismatch.booking)}. Quotes, invoices and vouchers all use the
+                  priced counts, not the guest list.
+                  {paxMismatch.roster && paxMismatch.roster.undatedCount > 0
+                    ? ` ${paxMismatch.roster.undatedCount} guest${
+                        paxMismatch.roster.undatedCount === 1 ? " has" : "s have"
+                      } no date of birth and ${
+                        paxMismatch.roster.undatedCount === 1 ? "was" : "were"
+                      } counted by the "child" tick instead.`
+                    : ""}
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={applyRosterToPax}
+                  disabled={syncingPax || savedTravellerCount === 0}
+                >
+                  {syncingPax ? "Applying..." : "Apply guest list to passenger counts"}
+                </Button>
+              </AlertDescription>
+            </Alert>
+          ) : null}
           {travellersLoading ? (
             <div className="space-y-2" aria-busy="true">
               <Skeleton className="h-10 w-full" />
@@ -590,7 +712,7 @@ export function JobReservationTab({
             })
           )}
           <div className="flex justify-end">
-            <Button size="sm" onClick={saveTravellers} disabled={savingTravellers}>
+            <Button size="sm" onClick={requestSaveTravellers} disabled={savingTravellers}>
               {savingTravellers ? "Saving..." : "Save guests"}
             </Button>
           </div>
