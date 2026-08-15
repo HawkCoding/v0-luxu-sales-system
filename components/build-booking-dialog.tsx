@@ -903,6 +903,16 @@ export function BuildBookingDialog({
 
             <TripDateSummary detail={packageDetail} states={legStates} />
 
+            <FxRateBanner
+              foreignCurrencies={foreignCurrencies}
+              quoteCurrency={quoteCurrency}
+              rates={fxRates}
+              asOf={fxAsOf}
+              stale={fxStale}
+              onRefresh={refreshFxRates}
+              onRateChange={setFxRate}
+            />
+
             {hasAutoFilledServices && (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3">
                 <p className="text-sm">
