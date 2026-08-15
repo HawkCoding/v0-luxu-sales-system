@@ -731,7 +731,9 @@ export function SuiteLegEditor({
                   ) : null}
                 </div>
 
-                {bedroomTypeIds.length > 0 ? (
+                {/* TODO: bedroom_types/bathroom_types vocab is hidden (hotel_property only) but still
+                    fully wired in the DB/quote/voucher layers — see suite-vocabulary-card.tsx. */}
+                {!isHotel && bedroomTypeIds.length > 0 ? (
                   <div className="space-y-1.5">
                     <Label>Bed configuration</Label>
                     <Select
@@ -775,7 +777,7 @@ export function SuiteLegEditor({
                   </div>
                 ) : null}
 
-                {bathroomTypeIds.length > 0 ? (
+                {!isHotel && bathroomTypeIds.length > 0 ? (
                   <div className="space-y-1.5">
                     <Label>Bathroom type</Label>
                     <Select

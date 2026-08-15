@@ -1953,6 +1953,7 @@ interface SuiteTypeEditorRowProps {
   suiteType: EditableSuiteType
   suiteTypeIndex: number
   vocabulary: SupplierVocabulary
+  kind: SupplierKind
   bedroomTypes: EditableVocabularyValue[]
   bedroomLayouts: EditableVocabularyValue[]
   bathroomTypes: EditableVocabularyValue[]
@@ -1975,6 +1976,7 @@ const SuiteTypeEditorRow = memo(function SuiteTypeEditorRow({
   suiteType,
   suiteTypeIndex,
   vocabulary,
+  kind,
   bedroomTypes,
   bedroomLayouts,
   bathroomTypes,
@@ -1985,6 +1987,9 @@ const SuiteTypeEditorRow = memo(function SuiteTypeEditorRow({
   onRemoveSuiteType,
 }: SuiteTypeEditorRowProps) {
   const isTransport = vocabulary.suiteType === "Vehicle Type"
+  // TODO: bedroom_types/bathroom_types are hidden for hotel_property (UI-only, see
+  // suite-vocabulary-card.tsx). Full removal would also touch the DB tables/columns.
+  const hideBedroomAndBathroomTypes = kind === "hotel_property"
 
   return (
     <div className="rounded-lg border p-3 space-y-3">
@@ -2062,14 +2067,16 @@ const SuiteTypeEditorRow = memo(function SuiteTypeEditorRow({
       </div>
       {showVariants && onUpdateSuiteTypeVariantIds ? (
         <div className="grid gap-3 md:grid-cols-3">
-          <VariantChipPicker
-            label="Bedroom Types"
-            available={bedroomTypes.map((value) => ({ id: value.id, name: value.name }))}
-            selectedIds={suiteType.bedroomTypeIds}
-            onChange={(ids) =>
-              onUpdateSuiteTypeVariantIds(suiteTypeIndex, "bedroomTypeIds", ids)
-            }
-          />
+          {!hideBedroomAndBathroomTypes ? (
+            <VariantChipPicker
+              label="Bedroom Types"
+              available={bedroomTypes.map((value) => ({ id: value.id, name: value.name }))}
+              selectedIds={suiteType.bedroomTypeIds}
+              onChange={(ids) =>
+                onUpdateSuiteTypeVariantIds(suiteTypeIndex, "bedroomTypeIds", ids)
+              }
+            />
+          ) : null}
           <VariantChipPicker
             label="Bedroom Layouts"
             available={bedroomLayouts.map((value) => ({ id: value.id, name: value.name }))}
@@ -2078,14 +2085,16 @@ const SuiteTypeEditorRow = memo(function SuiteTypeEditorRow({
               onUpdateSuiteTypeVariantIds(suiteTypeIndex, "bedroomLayoutIds", ids)
             }
           />
-          <VariantChipPicker
-            label="Bathroom Types"
-            available={bathroomTypes.map((value) => ({ id: value.id, name: value.name }))}
-            selectedIds={suiteType.bathroomTypeIds}
-            onChange={(ids) =>
-              onUpdateSuiteTypeVariantIds(suiteTypeIndex, "bathroomTypeIds", ids)
-            }
-          />
+          {!hideBedroomAndBathroomTypes ? (
+            <VariantChipPicker
+              label="Bathroom Types"
+              available={bathroomTypes.map((value) => ({ id: value.id, name: value.name }))}
+              selectedIds={suiteType.bathroomTypeIds}
+              onChange={(ids) =>
+                onUpdateSuiteTypeVariantIds(suiteTypeIndex, "bathroomTypeIds", ids)
+              }
+            />
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -5217,6 +5226,7 @@ export function SupplierDetailView({
                           suiteType={item}
                           suiteTypeIndex={index}
                           vocabulary={activeVocabulary}
+                          kind={form.kind}
                           bedroomTypes={form.bedroomTypes}
                           bedroomLayouts={form.bedroomLayouts}
                           bathroomTypes={form.bathroomTypes}
@@ -5238,11 +5248,14 @@ export function SupplierDetailView({
                 ) : supplier.suiteTypes.length > 0 ? (
                   <div className="flex flex-wrap gap-2">
                     {supplier.suiteTypes.map((suiteType) => {
-                      const variantLabels = [
-                        ...(suiteType.bedroomTypes ?? []),
-                        ...(suiteType.bedroomLayouts ?? []),
-                        ...(suiteType.bathroomTypes ?? []),
-                      ]
+                      const variantLabels =
+                        supplier.kind === "hotel_property"
+                          ? [...(suiteType.bedroomLayouts ?? [])]
+                          : [
+                              ...(suiteType.bedroomTypes ?? []),
+                              ...(suiteType.bedroomLayouts ?? []),
+                              ...(suiteType.bathroomTypes ?? []),
+                            ]
                       const variantSuffix =
                         variantLabels.length > 0 ? ` — ${variantLabels.join(", ")}` : ""
                       return (
