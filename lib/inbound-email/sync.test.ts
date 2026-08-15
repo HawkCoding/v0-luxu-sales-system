@@ -7,6 +7,7 @@ const syncMocks = vi.hoisted(() => ({
   createServiceClient: vi.fn(),
   logError: vi.fn(async (_input: ErrorLogInput) => {}),
   createEmailBookingFromParsedDraft: vi.fn(),
+  assessEnquiryPlausibility: vi.fn(),
 }))
 
 vi.mock("@/lib/supabase/server", () => ({
@@ -31,6 +32,7 @@ vi.mock("@/lib/import/parseEmailDraft", () => ({
 
 vi.mock("@/lib/inbound-email/review", () => ({
   getEmailImportReviewMetadata: vi.fn(() => ({ missingFields: [], warnings: [] })),
+  assessEnquiryPlausibility: syncMocks.assessEnquiryPlausibility,
 }))
 
 // --- Fake IMAP server -------------------------------------------------------
@@ -44,6 +46,9 @@ vi.mock("@/lib/inbound-email/review", () => ({
 interface FakeMessage {
   uid: number
   source: Buffer
+  /** IMAP INTERNALDATE -- what the server recorded when the message arrived, independent of the
+   *  message's own `Date:` header. */
+  internalDate?: Date
 }
 
 interface FakeMailboxState {
@@ -119,13 +124,13 @@ class FakeImapClient {
     range: number[],
     _query: unknown,
     _opts?: { uid?: boolean },
-  ): AsyncGenerator<{ uid: number; source: Buffer }> {
+  ): AsyncGenerator<{ uid: number; source: Buffer; internalDate?: Date }> {
     this.fetchOpen = true
     try {
       for (const uid of range) {
         const message = this.state.inbox.get(uid)
         if (!message) continue
-        yield { uid, source: message.source }
+        yield { uid, source: message.source, internalDate: message.internalDate }
       }
     } finally {
       this.fetchOpen = false
@@ -181,14 +186,15 @@ import { syncInboundEmailAccount, type EmailSyncSummary } from "./sync"
 
 // --- Fixtures ----------------------------------------------------------------
 
-function rawEmail(opts: { subject: string; from?: string; date?: Date; text?: string }): Buffer {
-  const date = opts.date ?? new Date("2026-08-01T10:00:00Z")
+/** `date: null` builds a message with no `Date:` header at all -- the case INTERNALDATE covers. */
+function rawEmail(opts: { subject: string; from?: string; date?: Date | null; text?: string }): Buffer {
+  const date = opts.date === null ? null : opts.date ?? new Date("2026-08-01T10:00:00Z")
   return Buffer.from(
     [
       `From: ${opts.from ?? "Jane Doe <jane@example.com>"}`,
       "To: bookings@example.com",
       `Subject: ${opts.subject}`,
-      `Date: ${date.toUTCString()}`,
+      ...(date ? [`Date: ${date.toUTCString()}`] : []),
       "Content-Type: text/plain; charset=utf-8",
       "",
       opts.text ?? "Hello, please quote us.",
@@ -207,7 +213,9 @@ function accountRow(overrides: Partial<MockRow> = {}): MockRow {
     port: 993,
     tls_mode: "ssl_tls",
     username: "bookings@luxus.test",
-    password_encrypted: "irrelevant-in-tests",
+    // Contents are irrelevant (decryptCredential is mocked) but the v1 envelope shape is not --
+    // createImapClient refuses an account whose credential was never encrypted.
+    password_encrypted: "v1:aXY=:dGFn:Y3Q=",
     inbox_folder: "INBOX",
     processed_folder: "Processed",
     needs_review_folder: "Needs Review",
@@ -248,6 +256,13 @@ beforeEach(() => {
   })
   syncMocks.createServiceClient.mockReturnValue(mock.supabase)
   syncMocks.createEmailBookingFromParsedDraft.mockResolvedValue(bookingResult())
+  // Importable by default; the non-enquiry gate has its own test that overrides this.
+  syncMocks.assessEnquiryPlausibility.mockReturnValue({
+    importable: true,
+    reason: "",
+    completed: 9,
+    total: 9,
+  })
 })
 
 function seedMessage(uid: number, subject: string): void {
@@ -280,12 +295,40 @@ describe("syncInboundEmailAccount", () => {
     expect(messageRow.status).toBe("imported_complete")
     expect(messageRow.filing_status).toBe("filed")
     expect(messageRow.booking_id).toBe("booking-1")
+    // The email's own Date: header, not the time the sync ran.
+    expect(messageRow.received_at).toBe("2026-08-01T10:00:00.000Z")
 
     expect(mailboxState.inbox.has(101)).toBe(false)
     expect(mailboxState.folders.get("Processed")?.map((m) => m.uid)).toEqual([101])
 
     const accountUpdate = mock.store.rows("inbound_email_accounts")
     expect(accountUpdate[0]?.last_seen_uid).toBe(101)
+  })
+
+  it("falls back to the IMAP internal date when the message has no Date: header", async () => {
+    mailboxState.inbox.set(107, {
+      uid: 107,
+      source: rawEmail({ subject: "New enquiry: no date header", date: null }),
+      internalDate: new Date("2026-08-02T06:15:00Z"),
+    })
+
+    await runSync(accountRow())
+
+    const messageRow = mock.store.rows("inbound_email_messages")[0]
+    expect(messageRow.received_at).toBe("2026-08-02T06:15:00.000Z")
+  })
+
+  it("prefers the message's own Date: header over the IMAP internal date", async () => {
+    mailboxState.inbox.set(108, {
+      uid: 108,
+      source: rawEmail({ subject: "New enquiry: both dates", date: new Date("2026-08-01T10:00:00Z") }),
+      internalDate: new Date("2026-08-03T23:59:00Z"),
+    })
+
+    await runSync(accountRow())
+
+    const messageRow = mock.store.rows("inbound_email_messages")[0]
+    expect(messageRow.received_at).toBe("2026-08-01T10:00:00.000Z")
   })
 
   it("files a needs-review booking into the needs_review_folder, not processed", async () => {
@@ -310,6 +353,74 @@ describe("syncInboundEmailAccount", () => {
     const messageRow = mock.store.rows("inbound_email_messages")[0]
     expect(messageRow.status).toBe("skipped_no_rule")
     expect(messageRow.filing_status).toBe("not_applicable")
+  })
+
+  it("records a rule-matched non-enquiry as skipped without creating a booking", async () => {
+    // A subject rule is a blunt instrument: an out-of-office auto-reply on an enquiry thread
+    // matched one and produced a customer, a booking and a draft quote. The body decides now.
+    seedMessage(107, "New enquiry: Out of Office AutoReply")
+    syncMocks.assessEnquiryPlausibility.mockReturnValue({
+      importable: false,
+      reason: "Only 4 of 9 required fields parsed (minimum 5) -- does not look like an enquiry",
+      completed: 4,
+      total: 9,
+    })
+
+    const summary = await runSync(accountRow())
+
+    expect(syncMocks.createEmailBookingFromParsedDraft).not.toHaveBeenCalled()
+    expect(summary.importedCount).toBe(0)
+    expect(summary.skippedNotEnquiryCount).toBe(1)
+
+    // The claim row stays, so the message is visible, counted for dedupe, and never re-imported.
+    const messageRow = mock.store.rows("inbound_email_messages")[0]
+    expect(messageRow.status).toBe("skipped_not_an_enquiry")
+    expect(messageRow.filing_status).toBe("not_applicable")
+    expect(messageRow.booking_id).toBeNull()
+    expect(messageRow.error).toContain("does not look like an enquiry")
+  })
+
+  it("caps a run at MAX_UIDS_PER_RUN and leaves the rest for the next run", async () => {
+    // A backlog larger than the cap must drain across runs rather than risk a platform timeout
+    // mid-run -- and the cursor must land on the last UID of THIS batch, not the last in the inbox,
+    // or everything past the cap would be skipped forever.
+    for (let uid = 1; uid <= 130; uid += 1) {
+      seedMessage(uid, `New enquiry ${uid}`)
+    }
+
+    const summary = await runSync(accountRow())
+
+    expect(summary.scannedCount).toBe(100)
+    expect(mock.store.rows("inbound_email_messages")).toHaveLength(100)
+    expect(syncMocks.createEmailBookingFromParsedDraft).toHaveBeenCalledTimes(100)
+    expect(mock.store.rows("inbound_email_accounts")[0]?.last_seen_uid).toBe(100)
+    // Uids 101-130 are untouched and still in the inbox for the next run.
+    expect(mailboxState.inbox.has(101)).toBe(true)
+    expect(mailboxState.inbox.has(130)).toBe(true)
+  })
+
+  it("imports the rest of the batch when one message fails to import", async () => {
+    seedMessage(201, "New enquiry: fine")
+    seedMessage(202, "New enquiry: explodes")
+    seedMessage(203, "New enquiry: also fine")
+
+    let call = 0
+    syncMocks.createEmailBookingFromParsedDraft.mockImplementation(async () => {
+      call += 1
+      if (call === 2) throw new Error("resolver blew up")
+      return bookingResult({ id: `booking-${call}` })
+    })
+
+    const summary = await runSync(accountRow())
+
+    expect(summary.importedCount).toBe(2)
+    expect(summary.errors).toHaveLength(1)
+    expect(summary.errors[0]).toContain("resolver blew up")
+
+    // The failed message left no claim behind (free to retry); the other two imported normally.
+    const rows = mock.store.rows("inbound_email_messages")
+    expect(rows.map((row) => row.uid).sort((a, b) => Number(a) - Number(b))).toEqual([201, 203])
+    expect(rows.every((row) => row.status === "imported_complete")).toBe(true)
   })
 
   it("does not re-import a UID that already has a row (dedupe)", async () => {

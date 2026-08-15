@@ -190,8 +190,17 @@ export interface JobTraveller {
   sortOrder: number
 }
 
+/** Booking pax vs. the captured roster — see lib/packages/roster-pax.ts. Null while the booking
+ * is still loading; `roster` is null until at least one guest has been captured. */
+export interface JobPaxComparison {
+  matches: boolean
+  roster: { adultCount: number; childCount: number; infantCount: number; total: number; undatedCount: number } | null
+  booking: { adultCount: number; childCount: number; infantCount: number; total: number }
+  referenceDate: string
+}
+
 export function useJobTravellers(bookingId: string | null | undefined) {
-  return useSWR<{ travellers: JobTraveller[] }>(
+  return useSWR<{ travellers: JobTraveller[]; paxComparison: JobPaxComparison | null }>(
     bookingId ? `/api/jobs/${bookingId}/travellers` : null,
     fetcher,
     swrOptions,

@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server"
 import { requireRole } from "@/lib/api/auth"
 import { jsonError, safeSupabaseError } from "@/lib/api/responses"
 import { writeAuditLog } from "@/lib/audit-write"
@@ -7,6 +8,10 @@ export const runtime = "nodejs"
 
 type QuoteStatus = Database["public"]["Enums"]["quote_status"]
 const VOIDABLE_QUOTE_STATUSES: QuoteStatus[] = ["draft", "pricing_incomplete"]
+/** Statuses that mean the customer is holding a live quote: deleting the services behind it would
+ * leave a priced document with nothing to render on the voucher. expired/superseded/cancelled are
+ * dead documents, so they don't block. */
+const LIVE_QUOTE_STATUSES: QuoteStatus[] = ["sent", "accepted"]
 
 interface RouteParams {
   params: Promise<{ id: string }>
@@ -19,6 +24,9 @@ interface RouteParams {
  * is left one click from Send. Idempotent -- re-running when nothing is left to discard is a
  * harmless no-op -- and it re-enables auto-build to run again once the consultant fixes whatever
  * the enquiry got wrong (supplier, route, ...).
+ *
+ * Refuses with 409 when a quote is already sent or accepted: those services are what the customer
+ * is holding a price for, and deleting them leaves a live quote with nothing behind it.
  */
 export async function POST(_req: Request, { params }: RouteParams) {
   const auth = await requireRole(["admin", "manager", "consultant"])
@@ -48,6 +56,29 @@ export async function POST(_req: Request, { params }: RouteParams) {
 
   if (autoServiceIds.length === 0) {
     return Response.json({ discarded: 0, warning: null })
+  }
+
+  // Checked after the no-op return above so re-running a completed discard stays idempotent rather
+  // than starting to 409 the moment a quote goes out.
+  const { data: liveQuotes, error: liveQuotesError } = await supabase
+    .from("quotes")
+    .select("id, quote_number, status")
+    .eq("booking_id", id)
+    .in("status", LIVE_QUOTE_STATUSES)
+
+  if (liveQuotesError) return safeSupabaseError("services-discard:load-live-quotes", liveQuotesError)
+
+  if (liveQuotes && liveQuotes.length > 0) {
+    const numbers = liveQuotes.map((quote) => quote.quote_number).filter(Boolean).join(", ")
+    const subject = numbers ? `Quote ${numbers}` : "A quote for this booking"
+    return NextResponse.json(
+      {
+        error: `${subject} has already gone to the customer — cancel or supersede it before discarding the services it was priced from.`,
+        code: "LIVE_QUOTE_EXISTS",
+        quotes: liveQuotes.map((quote) => ({ id: quote.id, quoteNumber: quote.quote_number, status: quote.status })),
+      },
+      { status: 409 },
+    )
   }
 
   const { error: deleteError } = await supabase.from("booking_services").delete().in("id", autoServiceIds)

@@ -52,6 +52,12 @@ export interface SuiteUnitState {
   manualAdultPrice: number | null
   manualChildPrice: number | null
   manualInfantPrice: number | null
+  /** Hotel legs only: a consultant-typed price per room per night that replaces the rate card for
+   *  this room on this booking. Null leaves the room priced off its card. Booking-scoped and
+   *  one-shot — it is never read back as a rate for a later booking. */
+  manualRoomPrice: number | null
+  /** Read-only provenance for the override, stamped server-side. Never sent back on save. */
+  manualRoomPriceSetAt?: string | null
 }
 
 export interface SuiteLegState {
@@ -77,6 +83,9 @@ export interface SuiteLegState {
   /** 'auto' drives the "Auto-filled" chip — cleared (by the caller, in updateLegState) the
    *  moment any field on this leg is edited, mirroring FieldFlags' dirty-suppresses-badge rule. */
   origin: "auto" | "consultant"
+  /** The row version this state was hydrated from; echoed back so a concurrent save 409s instead
+   *  of being silently overwritten. Null for a leg that has never been saved. */
+  updatedAt?: string | null
 }
 
 export interface TransportLegState {
@@ -92,6 +101,8 @@ export interface TransportLegState {
   priceCurrency: string
   requests: BookingTransportRequest[]
   origin: "auto" | "consultant"
+  /** See SuiteLegState.updatedAt. */
+  updatedAt?: string | null
 }
 
 export type ApplyLegState = SuiteLegState | TransportLegState
@@ -110,6 +121,8 @@ export interface SavedSelectionUnitRow {
   manual_adult_price?: number | null
   manual_child_price?: number | null
   manual_infant_price?: number | null
+  manual_room_price?: number | null
+  manual_room_price_set_at?: string | null
 }
 
 export interface SavedSelectionRow {
@@ -132,6 +145,9 @@ export interface SavedSelectionRow {
    *  booking_services row. Missing/undefined is treated as 'consultant' -- never surface a chip
    *  on data this old. */
   origin?: "auto" | "consultant"
+  /** booking_services.updated_at, echoed back on the next PATCH as the optimistic-lock token.
+   *  Absent for catalogue selection rows, which have no such column. */
+  updated_at?: string | null
 }
 
 export interface SavedPackageState {
@@ -139,6 +155,10 @@ export interface SavedPackageState {
   tripStartDate: string | null
   tripEndDate: string | null
   selections: SavedSelectionRow[]
+  /** Absent for a catalogue selection; set on a booking whose service list was explicitly
+   *  confirmed (POST /api/jobs/[id]/services/confirm). */
+  servicesConfirmedAt?: string | null
+  servicesConfirmedByName?: string | null
 }
 
 let draftCounter = 0
@@ -157,6 +177,8 @@ export function createDraftUnit(totals?: PassengerTotals): SuiteUnitState {
     manualAdultPrice: null,
     manualChildPrice: null,
     manualInfantPrice: null,
+    manualRoomPrice: null,
+    manualRoomPriceSetAt: null,
   }
 }
 
@@ -183,6 +205,7 @@ export function createDraftTransportRequest(leg: PackageLeg, routeId?: string | 
     luggageCount: null,
     flightNumber: null,
     priceOverride: null,
+    priceOverrideSetAt: null,
     notes: null,
     supplierReference: null,
     sortOrder: 0,
@@ -366,6 +389,7 @@ export function hydrateFromSaved(
         priceCurrency: row?.price_currency ?? fallback.priceCurrency,
         requests: legRequests.length > 0 ? legRequests : fallback.requests,
         origin: row?.origin ?? fallback.origin,
+        updatedAt: row?.updated_at ?? null,
       } satisfies TransportLegState
     }
 
@@ -386,6 +410,8 @@ export function hydrateFromSaved(
         manualAdultPrice: unit.manual_adult_price ?? null,
         manualChildPrice: unit.manual_child_price ?? null,
         manualInfantPrice: unit.manual_infant_price ?? null,
+        manualRoomPrice: unit.manual_room_price ?? null,
+        manualRoomPriceSetAt: unit.manual_room_price_set_at ?? null,
       }))
 
     const isHotel = fallback.supplierKind === "hotel_property"
@@ -407,6 +433,7 @@ export function hydrateFromSaved(
       priceCurrency: row.price_currency ?? fallback.priceCurrency,
       units: units.length > 0 ? units : fallback.units,
       origin: row.origin ?? fallback.origin,
+      updatedAt: row.updated_at ?? null,
     } satisfies SuiteLegState
   })
 
@@ -417,6 +444,8 @@ export function hydrateFromSaved(
 export interface PackageSelectionsPatchBody {
   selections: Array<{
     packageLegId: string
+    /** Optimistic-lock token: the row version this leg was hydrated from. */
+    expectedUpdatedAt?: string
     selected: boolean
     routeId: string | null
     routeReversed?: boolean
@@ -439,6 +468,8 @@ export interface PackageSelectionsPatchBody {
       manualAdultPrice: number | null
       manualChildPrice: number | null
       manualInfantPrice: number | null
+      /** Hotel legs only — the server rejects it on any other supplier kind. */
+      manualRoomPrice: number | null
     }>
   }>
 }
@@ -449,6 +480,7 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
       if (state.kind === "transport") {
         return {
           packageLegId: state.legId,
+          ...(state.updatedAt ? { expectedUpdatedAt: state.updatedAt } : {}),
           selected: state.selected,
           routeId: state.routeId,
           rateTypeId: state.rateTypeId,
@@ -457,6 +489,7 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
       }
       return {
         packageLegId: state.legId,
+        ...(state.updatedAt ? { expectedUpdatedAt: state.updatedAt } : {}),
         selected: state.selected,
         routeId: state.routeId,
         routeReversed: state.reversed,
@@ -479,6 +512,7 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
           manualAdultPrice: unit.manualAdultPrice,
           manualChildPrice: unit.manualChildPrice,
           manualInfantPrice: unit.manualInfantPrice,
+          manualRoomPrice: state.supplierKind === "hotel_property" ? unit.manualRoomPrice : null,
         })),
       }
     }),
@@ -563,6 +597,9 @@ export interface ApplyLegSelectionPayload {
   serviceDate?: string | null
   suiteTypeId?: string
   units?: Array<{
+    /** booking_service_units.id for a saved room; absent for one added since the last save. Only
+     *  used server-side to look up the room override's provenance. */
+    unitId?: string
     suiteTypeId: string
     bedroomTypeId: string | null
     bedroomLayoutId: string | null
@@ -573,6 +610,8 @@ export interface ApplyLegSelectionPayload {
     manualAdultPrice: number | null
     manualChildPrice: number | null
     manualInfantPrice: number | null
+    /** Hotel legs only: replaces the rate card's per-room-per-night price for this room. */
+    manualRoomPrice: number | null
   }>
   nights?: number
   /** Per-leg rate type override; omitted falls back to the system default. */
@@ -614,6 +653,7 @@ export function toApplySelections(
       units: state.units
         .filter((unit): unit is SuiteUnitState & { suiteTypeId: string } => Boolean(unit.suiteTypeId))
         .map((unit) => ({
+          unitId: unit.id.startsWith("draft-") ? undefined : unit.id,
           suiteTypeId: unit.suiteTypeId,
           bedroomTypeId: unit.bedroomTypeId,
           bedroomLayoutId: unit.bedroomLayoutId,
@@ -624,6 +664,7 @@ export function toApplySelections(
           manualAdultPrice: unit.manualAdultPrice,
           manualChildPrice: unit.manualChildPrice,
           manualInfantPrice: unit.manualInfantPrice,
+          manualRoomPrice: state.supplierKind === "hotel_property" ? unit.manualRoomPrice : null,
         })),
       nights:
         state.supplierKind === "hotel_property" ? Math.max(1, state.nights ?? 1) : undefined,
@@ -740,10 +781,18 @@ export function validateConfigureState(
         errors.push(
           `${legLabel}: ${leg.supplierKind === "hotel_property" ? "room" : "suite"} ${index + 1} needs a type`,
         )
-      } else if (leg.pricingMode !== "manual" && state.routeId && state.serviceDate) {
+      } else if (
+        leg.pricingMode !== "manual" &&
+        (unit.manualRoomPrice ?? null) === null &&
+        state.routeId &&
+        state.serviceDate
+      ) {
         // Manual-pricing legs (e.g. airlines) have no rate card to check -- the fare is typed
         // in, and a blank one is allowed here (flagged as pricing_incomplete on the quote
         // instead of blocking the itinerary from being built).
+        //
+        // A room with its own typed price is the same situation one room at a time: it never
+        // reads the card, so a missing one is not an error to raise against it.
         const pricingError = describeMissingRateCard(
           leg,
           state.routeId,

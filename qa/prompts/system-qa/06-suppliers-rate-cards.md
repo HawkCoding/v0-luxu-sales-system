@@ -43,6 +43,11 @@ restored). Run as admin; repeat the edit checks as manager and consultant.
 ### Contacts & addresses
 
 5. Supplier emails: add several with different labels, edit, delete, reorder.
+   Order is persisted (`supplier_emails.sort_order`) and the **first** address is
+   the supplier's primary contact, mirrored onto `suppliers.email` — confirm the
+   order survives a save/reload and that reordering changes the primary contact.
+   Also confirm that deleting an address and re-adding the same one in a single
+   save succeeds rather than 500-ing part-way (see F06-1).
 6. Email labels vocabulary (`/api/supplier-email-labels`): create a label, use
    it, then delete it — confirm suppliers using the deleted label degrade
    gracefully rather than erroring.
@@ -55,9 +60,16 @@ restored). Run as admin; repeat the edit checks as manager and consultant.
 
 9. Create locations, then a route between two of them. Confirm the route appears
    on the supplier and is selectable when configuring a leg.
-10. Bidirectional routes: create A→B, then attempt B→A. Record whether the system
-    treats it as one route or two (see `scripts/merge-bidirectional-routes.mjs`
-    for the intended model) and whether a duplicate is prevented.
+10. Bidirectional routes: create A→B, then add B→A. Two one-way routes is a
+    **supported** configuration — rate cards hang off `route_id`, so an operator
+    charging a different fare each way can only be modelled this way, and a
+    `round_trip` route carries a single price list. The save must therefore
+    succeed. What is required is that the editor **warns** (dismissible, not
+    blocking) that the new route is the reverse of an existing one, so the
+    common mistake — filing the return leg and assuming the first route's rate
+    cards cover it — is caught. Confirm the warning appears, dismisses, and does
+    not prevent the save. `scripts/merge-bidirectional-routes.mjs` remains the
+    after-the-fact cleanup for pairs that were meant to be one round trip.
 11. Delete a location that a route references → blocked or cascaded
     deliberately, never leaving a dangling route.
 
@@ -94,7 +106,13 @@ restored). Run as admin; repeat the edit checks as manager and consultant.
     **Zero-priced silent output is Sev-1.**
 21. Rate adjustments and `lib/rate-types/rebase-adjustments.ts`: apply an
     adjustment, confirm the resulting price and that the rate-type pills
-    (`view-rate-type-pills.ts`) show what was applied.
+    (`view-rate-type-pills.ts`) show what was applied. Note that
+    `supplier_rate_adjustments.discount_pct` is an **authoring aid**, not a
+    pricing rule: nothing in `lib/quotes/**` reads it. The quoted price comes
+    from the rate card tagged with that rate type, so do not expect
+    `base − discount_pct` arithmetic. The percentage is applied only when a user
+    clicks **Apply markdown** in the pricing matrix
+    (`components/supplier-detail-view.tsx`).
 
 ### Pricing config
 
@@ -103,10 +121,18 @@ restored). Run as admin; repeat the edit checks as manager and consultant.
 23. `lib/suppliers/auto-child-price.ts` — child price derived from the adult
     price and the configured ratio; confirm the derived value and that a manual
     child price overrides it.
-24. Commission control: percentage markup vs fixed total, and supplier-level
-    override of the global default from QA 04.
-25. Applicable rates card reflects the rate types available for this supplier
-    and honours the per-`supplier_kind` default from QA 04.
+24. Commission is **not** configured on the supplier — `suppliers` has no
+    commission column and the detail view never renders the word. Confirm only
+    that: commission is chosen per quote build
+    (`components/supplier/commission-control.tsx`, imported solely by
+    `components/build-booking-dialog.tsx`), seeded from
+    `app_settings.default_commission_type` / `default_commission_value`. The
+    "% Markup vs Fixed Total" control itself belongs to QA 11, not here.
+25. Applicable rates card reflects the rate types available for this supplier.
+    There is no per-`supplier_kind` default — `rate_types` has no such column.
+    The real precedence is `suppliers.base_rate_type_id` → `rate_types.is_default`
+    → first active (`lib/rate-types/supplier-rate-tiers.ts`). Confirm the card
+    honours exactly that.
 26. Hotel default times (`lib/suppliers/hotel-default-times.ts`) prefill on a
     hotel supplier.
 27. Vehicle-rental route details, if the kind exists — record what it configures.

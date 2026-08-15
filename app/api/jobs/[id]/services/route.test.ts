@@ -26,6 +26,8 @@ const SERVICE_A = "00000000-0000-4000-8000-0000000000a1"
 const SERVICE_B = "00000000-0000-4000-8000-0000000000a2"
 const FOREIGN_SERVICE = "00000000-0000-4000-8000-0000000000ff"
 const SUITE_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+const UNIT_A = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1"
+const UNIT_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2"
 
 function makeParams(id = BOOKING_ID) {
   return { params: Promise.resolve({ id }) }
@@ -39,6 +41,15 @@ interface MockState {
   noOfChildren?: number
   childAges?: number[]
   allowedBedroomTypes?: Array<{ suite_type_id: string; bedroom_type_id: string }>
+  /** booking_services.updated_at as stored — the optimistic-lock token. */
+  serviceUpdatedAt?: string
+  /** Stored rooms, read back to carry a room override's provenance across the replace-set. */
+  existingUnits?: Array<{
+    id: string
+    manual_room_price: number | null
+    manual_room_price_set_at: string | null
+    manual_room_price_set_by: string | null
+  }>
 }
 
 function buildSupabase(state: MockState = {}) {
@@ -82,6 +93,7 @@ function buildSupabase(state: MockState = {}) {
                     data: (state.validServiceIds ?? [SERVICE_A, SERVICE_B]).map((serviceId) => ({
                       id: serviceId,
                       supplier_id: `${serviceId}-supplier`,
+                      updated_at: state.serviceUpdatedAt ?? "2026-08-14T10:00:00.000Z",
                       suppliers: { kind: state.serviceKinds?.[serviceId] ?? "train_operator" },
                     })),
                     error: null,
@@ -107,6 +119,11 @@ function buildSupabase(state: MockState = {}) {
       }
       if (table === "booking_service_units") {
         return {
+          // Read back before the replace-set so an untouched room override keeps its original
+          // set_at/set_by instead of being re-dated by an unrelated save.
+          select: vi.fn(() => ({
+            in: vi.fn(async () => ({ data: state.existingUnits ?? [], error: null })),
+          })),
           delete: vi.fn(() => ({
             eq: vi.fn(async (_col: string, serviceId: string) => {
               unitDeletes.push(serviceId)
@@ -251,6 +268,108 @@ describe("PATCH /api/jobs/[id]/services", () => {
     expect(body.details?.invalidServiceIds).toEqual([FOREIGN_SERVICE])
   })
 
+  it("rejects a room price override on a non-hotel service", async () => {
+    mockAuth({ validServiceIds: [SERVICE_A], serviceKinds: { [SERVICE_A]: "train_operator" } })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          selections: [
+            {
+              packageLegId: SERVICE_A,
+              units: [{ suiteTypeId: SUITE_A, adultCount: 2, childCount: 1, manualRoomPrice: 3600 }],
+            },
+          ],
+        }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/only available on hotel services/)
+  })
+
+  it("stamps who set a hotel room override and when, and leaves an unchanged one alone", async () => {
+    const built = mockAuth({
+      validServiceIds: [SERVICE_A],
+      serviceKinds: { [SERVICE_A]: "hotel_property" },
+      existingUnits: [
+        {
+          id: UNIT_A,
+          manual_room_price: 3600,
+          manual_room_price_set_at: "2026-08-01T08:00:00.000Z",
+          manual_room_price_set_by: "someone-else",
+        },
+        {
+          id: UNIT_B,
+          manual_room_price: 4200,
+          manual_room_price_set_at: "2026-08-01T08:00:00.000Z",
+          manual_room_price_set_by: "someone-else",
+        },
+      ],
+    })
+
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          selections: [
+            {
+              packageLegId: SERVICE_A,
+              units: [
+                // Untouched: keeps the original stamp.
+                { id: UNIT_A, suiteTypeId: SUITE_A, manualRoomPrice: 3600 },
+                // Changed: re-stamped with this save's actor.
+                { id: UNIT_B, suiteTypeId: SUITE_A, manualRoomPrice: 5000 },
+              ],
+            },
+          ],
+        }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(200)
+    const [untouched, changed] = built.unitInserts
+    expect(untouched.manual_room_price).toBe(3600)
+    expect(untouched.manual_room_price_set_at).toBe("2026-08-01T08:00:00.000Z")
+    expect(untouched.manual_room_price_set_by).toBe("someone-else")
+    expect(changed.manual_room_price).toBe(5000)
+    expect(changed.manual_room_price_set_at).not.toBe("2026-08-01T08:00:00.000Z")
+    expect(changed.manual_room_price_set_by).toBe("u1")
+  })
+
+  it("clears a room override's provenance when the override is removed", async () => {
+    const built = mockAuth({
+      validServiceIds: [SERVICE_A],
+      serviceKinds: { [SERVICE_A]: "hotel_property" },
+      existingUnits: [
+        {
+          id: UNIT_A,
+          manual_room_price: 3600,
+          manual_room_price_set_at: "2026-08-01T08:00:00.000Z",
+          manual_room_price_set_by: "someone-else",
+        },
+      ],
+    })
+
+    await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          selections: [
+            { packageLegId: SERVICE_A, units: [{ id: UNIT_A, suiteTypeId: SUITE_A, manualRoomPrice: null }] },
+          ],
+        }),
+      }),
+      makeParams(),
+    )
+
+    expect(built.unitInserts[0].manual_room_price).toBeNull()
+    expect(built.unitInserts[0].manual_room_price_set_at).toBeNull()
+    expect(built.unitInserts[0].manual_room_price_set_by).toBeNull()
+  })
+
   it("updates leg-level fields directly on booking_services, tagged origin: consultant", async () => {
     const built = mockAuth({})
     const res = await PATCH(
@@ -283,6 +402,96 @@ describe("PATCH /api/jobs/[id]/services", () => {
       expect.anything(),
       expect.objectContaining({ action: "booking_services_updated" }),
     )
+  })
+
+  it("409s when a leg was changed by someone else since it was read (F10-5)", async () => {
+    const built = mockAuth({ serviceUpdatedAt: "2026-08-14T10:00:00.000Z" })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          selections: [
+            { packageLegId: SERVICE_A, expectedUpdatedAt: "2026-08-14T09:00:00.000Z", notes: "TAB-A note" },
+          ],
+        }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(409)
+    const body = await res.json()
+    expect(body.code).toBe("STALE_VERSION")
+    expect(body.packageLegId).toBe(SERVICE_A)
+    expect(body.currentUpdatedAt).toBe("2026-08-14T10:00:00.000Z")
+    expect(built.updateCalls).toHaveLength(0)
+  })
+
+  it("accepts the write when the expected version still matches", async () => {
+    const built = mockAuth({ serviceUpdatedAt: "2026-08-14T10:00:00.000Z" })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          selections: [
+            { packageLegId: SERVICE_A, expectedUpdatedAt: "2026-08-14T10:00:00.000Z", notes: "TAB-A note" },
+          ],
+        }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(200)
+    expect(built.updateCalls).toContainEqual({
+      serviceId: SERVICE_A,
+      payload: expect.objectContaining({ notes: "TAB-A note" }),
+    })
+  })
+
+  it("keeps last-write-wins for a client that sends no version", async () => {
+    const built = mockAuth({ serviceUpdatedAt: "2026-08-14T10:00:00.000Z" })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({ selections: [{ packageLegId: SERVICE_A, notes: "TAB-B note" }] }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(200)
+    expect(built.updateCalls).toHaveLength(1)
+  })
+
+  it("refuses to deselect the train leg — it is priced either way (F10-7)", async () => {
+    const built = mockAuth({ serviceKinds: { [SERVICE_A]: "train_operator" } })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({ selections: [{ packageLegId: SERVICE_A, selected: false }] }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toMatch(/train journey/i)
+    expect(built.updateCalls).toHaveLength(0)
+  })
+
+  it("still allows an optional leg to be deselected", async () => {
+    const built = mockAuth({ serviceKinds: { [SERVICE_A]: "hotel_property" } })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({ selections: [{ packageLegId: SERVICE_A, selected: false }] }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(200)
+    expect(built.updateCalls).toContainEqual({
+      serviceId: SERVICE_A,
+      payload: expect.objectContaining({ selected: false }),
+    })
   })
 
   it("rejects units on a transfer/rental service", async () => {

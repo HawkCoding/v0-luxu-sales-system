@@ -24,7 +24,16 @@ interface FxRateBannerProps {
  *
  * The rate box is editable so a salesperson can nudge it a few cents before applying. Whatever
  * is in it is sent with the apply request, so the preview and the saved lines cannot disagree.
+ *
+ * Display-only: rates fetched from the provider carry many decimals, which overflows the narrow
+ * box. Shown rounded up to 2dp so the field never truncates a trailing digit into a misleading
+ * value; the full-precision rate is still what gets sent on apply.
  */
+function roundUpToCents(value: number): number {
+  // Snap to 6dp first so float noise (e.g. 16.10 * 100 = 1609.9999999999998) doesn't ceil up a
+  // rate that was already exact at 2dp.
+  return Math.ceil(Math.round(value * 1e6) / 1e4) / 100
+}
 export function FxRateBanner({
   foreignCurrencies,
   quoteCurrency,
@@ -48,7 +57,7 @@ export function FxRateBanner({
             step="0.01"
             className="h-7 w-24"
             aria-label={`${currency} to ${quoteCurrency} exchange rate`}
-            value={rates[currency] ?? null}
+            value={rates[currency] != null ? roundUpToCents(rates[currency]) : null}
             nullable
             onValueChange={(next) => {
               if (next !== null) onRateChange(currency, next)

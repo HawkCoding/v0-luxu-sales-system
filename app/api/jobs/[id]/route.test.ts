@@ -135,6 +135,68 @@ describe("PATCH /api/jobs/[id]", () => {
     expect(res.status).toBe(403)
   })
 
+  describe("unrecognised fields", () => {
+    it("rejects a field the schema doesn't know instead of silently discarding it", async () => {
+      supabaseMocks.createSessionClient.mockResolvedValue(createSupabase())
+
+      // The trap this closes: `noOfAdults` belongs under parsedFieldEdits. Sent at the top level
+      // it used to return 200 with the edit dropped on the floor.
+      const res = await PATCH(makeRequest({ noOfAdults: 4 }), {
+        params: Promise.resolve({ id: BOOKING_ID }),
+      })
+
+      expect(res.status).toBe(400)
+      expect(((await res.json()) as { error: string }).error).toBe("Invalid request payload")
+    })
+
+    it("still accepts every field the schema declares", async () => {
+      supabaseMocks.createSessionClient.mockResolvedValue(createSupabase())
+
+      const res = await PATCH(makeRequest({ parsedFieldEdits: { noOfSuites: 3 } }), {
+        params: Promise.resolve({ id: BOOKING_ID }),
+      })
+
+      expect(res.status).toBe(200)
+    })
+  })
+
+  describe("traveller-count floor", () => {
+    it("rejects an edit that leaves nobody travelling", async () => {
+      supabaseMocks.createSessionClient.mockResolvedValue(createSupabase())
+
+      const res = await PATCH(
+        makeRequest({ parsedFieldEdits: { noOfAdults: 0, noOfChildren: 0 } }),
+        { params: Promise.resolve({ id: BOOKING_ID }) },
+      )
+
+      expect(res.status).toBe(400)
+      expect(((await res.json()) as { error: string }).error).toMatch(/at least one traveller/i)
+    })
+
+    it("rejects clearing adults when the stored child count is also zero", async () => {
+      supabaseMocks.createSessionClient.mockResolvedValue(createSupabase())
+
+      // no_of_children is 0 on BASE_BOOKING, so an adults-only edit still has to be checked
+      // against the stored value rather than assumed safe.
+      const res = await PATCH(makeRequest({ parsedFieldEdits: { noOfAdults: 0 } }), {
+        params: Promise.resolve({ id: BOOKING_ID }),
+      })
+
+      expect(res.status).toBe(400)
+    })
+
+    it("allows zero adults when children are travelling", async () => {
+      supabaseMocks.createSessionClient.mockResolvedValue(createSupabase())
+
+      const res = await PATCH(
+        makeRequest({ parsedFieldEdits: { noOfAdults: 0, noOfChildren: 2, childAges: [8, 11] } }),
+        { params: Promise.resolve({ id: BOOKING_ID }) },
+      )
+
+      expect(res.status).toBe(200)
+    })
+  })
+
   describe("baseline field-conflict detection", () => {
     const SALESPERSON_CURRENT = "00000000-0000-4000-8000-0000000000c1"
     const SALESPERSON_NEW = "00000000-0000-4000-8000-0000000000c2"

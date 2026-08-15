@@ -17,6 +17,13 @@ const INHERIT_VALUE = "__inherit__"
 interface RateTypeSelectProps {
   /** Pre-filtered to non-archived rate types by callers. */
   rateTypes: RateType[]
+  /**
+   * Restricts the list to the rates a specific supplier prices at. Null/undefined means the set is
+   * unknown, so every rate type is offered rather than hiding valid choices. A value already picked
+   * stays listed even if it falls outside the set — dropping it would blank the trigger and hide
+   * what the leg is actually quoting at.
+   */
+  allowedRateTypeIds?: string[] | null
   value: string | null
   onChange: (rateTypeId: string | null) => void
   id?: string
@@ -35,6 +42,7 @@ interface RateTypeSelectProps {
 
 export function RateTypeSelect({
   rateTypes,
+  allowedRateTypeIds,
   value,
   onChange,
   id,
@@ -43,7 +51,11 @@ export function RateTypeSelect({
   label = "Rate type",
   inheritLabel,
 }: RateTypeSelectProps) {
-  if (rateTypes.length === 0) return null
+  const allowed = allowedRateTypeIds
+    ? rateTypes.filter((rt) => allowedRateTypeIds.includes(rt.id) || rt.id === value)
+    : rateTypes
+
+  if (allowed.length === 0) return null
 
   return (
     <div className={cn("space-y-1.5", className)}>
@@ -61,7 +73,7 @@ export function RateTypeSelect({
         </SelectTrigger>
         <SelectContent>
           {inheritLabel ? <SelectItem value={INHERIT_VALUE}>{inheritLabel}</SelectItem> : null}
-          {rateTypes.map((rt) => (
+          {allowed.map((rt) => (
             <SelectItem key={rt.id} value={rt.id}>
               {rt.name}
               {rt.isDefault ? " (default)" : ""}

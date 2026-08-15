@@ -4,6 +4,7 @@ import { requireRole } from "@/lib/api/auth"
 import { buildPackageQuoteLineItems } from "@/lib/quotes/build-from-package"
 import { priceExtraLineItems } from "@/lib/quotes/price-extra-line"
 import { loadBookingServicesPackageDetail } from "@/lib/quotes/adapters/from-booking-services"
+import { loadRoomOverrideProvenance } from "@/lib/quotes/room-override-provenance"
 import { safeSupabaseError } from "@/lib/api/responses"
 import { getCachedRates } from "@/lib/fx/rates"
 import { BASE_CURRENCY, normaliseCurrency } from "@/lib/money"
@@ -34,6 +35,9 @@ const extraSchema = z.object({
 })
 
 const unitSelectionSchema = z.object({
+  /** booking_service_units.id, when this room has been saved. Used only to look the room's
+   * override provenance up server-side — the client never states who set a price. */
+  unitId: z.string().uuid().optional(),
   suiteTypeId: z.string().uuid(),
   bedroomTypeId: z.string().uuid().nullable().optional(),
   bedroomLayoutId: z.string().uuid().nullable().optional(),
@@ -45,6 +49,8 @@ const unitSelectionSchema = z.object({
   manualAdultPrice: z.number().nonnegative().nullable().optional(),
   manualChildPrice: z.number().nonnegative().nullable().optional(),
   manualInfantPrice: z.number().nonnegative().nullable().optional(),
+  /** Hotel legs only: the typed price per room per night that replaces this room's rate card. */
+  manualRoomPrice: z.number().nonnegative().nullable().optional(),
 })
 
 const applyServicesSchema = z.object({
@@ -140,13 +146,35 @@ export async function POST(req: Request, { params }: RouteParams) {
     quoteCurrency,
   )
 
+  // The dialog saves the rooms (PATCH /services) before asking for this preview, so the stored
+  // provenance is already current. Read it here rather than trusting the payload — the price is
+  // the salesperson's to type, but who typed it is the server's to say.
+  const roomOverrideProvenance = await loadRoomOverrideProvenance(
+    supabase,
+    parsed.selections.flatMap((selection) =>
+      (selection.units ?? []).map((unit) => unit.unitId).filter((unitId): unitId is string => Boolean(unitId)),
+    ),
+  )
+
+  const selections = parsed.selections.map((selection) => ({
+    ...selection,
+    units: selection.units?.map((unit) => {
+      const provenance = unit.unitId ? roomOverrideProvenance.get(unit.unitId) : undefined
+      return {
+        ...unit,
+        manualRoomPriceSetAt: provenance?.setAt ?? null,
+        manualRoomPriceSetByName: provenance?.setByName ?? null,
+      }
+    }),
+  }))
+
   try {
-    const { lineItems } = await buildPackageQuoteLineItems({
+    const { lineItems, incompleteLegs } = await buildPackageQuoteLineItems({
       supabase,
       packageDetail: detail,
       jobId: parsed.jobId,
       travelDate: parsed.travelDate,
-      selections: parsed.selections,
+      selections,
       fallbackRateTypeId,
       rateTypes,
       commissionBonus: Number(quoteRow?.commission_bonus ?? 0),
@@ -172,8 +200,20 @@ export async function POST(req: Request, { params }: RouteParams) {
       )
     ).flatMap((result) => result.lineItems)
 
+    // Nothing this route does is persisted -- it prices a preview -- so an unconfigured leg is
+    // reported alongside the legs that did price instead of losing the whole preview to a 400.
+    // The client must refuse to save while incompleteLegs is non-empty.
+    const pricedALeg = lineItems.some((item) => item.pricingSnapshot?.legId)
+    if (incompleteLegs.length > 0 && !pricedALeg) {
+      return NextResponse.json(
+        { error: incompleteLegs[0].message, incompleteLegs },
+        { status: 400 },
+      )
+    }
+
     return NextResponse.json({
       lineItems: [...lineItems, ...extraLineItems],
+      incompleteLegs,
       currency: quoteCurrency,
       // Let the dialog render its mixed-currency banner without a second round trip.
       fx: { rates: effectiveRates, asOf: fx.rows[0]?.asOf ?? null, stale: fx.stale },

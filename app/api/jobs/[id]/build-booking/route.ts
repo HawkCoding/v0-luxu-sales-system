@@ -85,23 +85,66 @@ export async function POST(req: Request, { params }: RouteParams) {
 
   if (existingError) return safeSupabaseError("build-booking:load-services", existingError)
 
-  const existingServiceIds = new Set((existingServices ?? []).map((service) => service.id))
-  const keptServiceIds = new Set(
+  const existingRows = existingServices ?? []
+  const existingServiceIds = new Set(existingRows.map((service) => service.id))
+  const claimedServiceIds = new Set(
     parsed.data.services
       .map((service) => service.legId)
-      .filter((legId): legId is string => Boolean(legId) && existingServiceIds.has(legId!)),
+      .filter((legId): legId is string => legId !== undefined && existingServiceIds.has(legId)),
   )
-  const removedServiceIds = (existingServices ?? [])
+
+  // A client that forgets to echo legId used to have its whole service list deleted and re-created
+  // with new ids -- taking the linked transport requests and the rows quote lines point at with it.
+  // Adopt the existing row instead whenever the supplier identifies it unambiguously, and refuse
+  // rather than guess when it doesn't.
+  const resolvedLegIds: (string | null)[] = parsed.data.services.map((service) =>
+    service.legId && existingServiceIds.has(service.legId) ? service.legId : null,
+  )
+  const ambiguousSupplierIds: string[] = []
+
+  for (const [index, service] of parsed.data.services.entries()) {
+    if (resolvedLegIds[index]) continue
+    const candidates = existingRows.filter(
+      (row) => row.supplier_id === service.supplierId && !claimedServiceIds.has(row.id),
+    )
+    if (candidates.length > 1) {
+      ambiguousSupplierIds.push(service.supplierId)
+      continue
+    }
+    if (candidates.length === 1) {
+      resolvedLegIds[index] = candidates[0].id
+      claimedServiceIds.add(candidates[0].id)
+    }
+  }
+
+  if (ambiguousSupplierIds.length > 0) {
+    const { data: ambiguousSuppliers } = await supabase
+      .from("suppliers")
+      .select("id, name")
+      .in("id", ambiguousSupplierIds)
+    const names = (ambiguousSuppliers ?? []).map((row) => row.name).join(", ")
+    return jsonError(
+      `This booking already has more than one service for ${names || "that supplier"} — send the legId of the one you mean.`,
+      400,
+      { ambiguousSupplierIds },
+    )
+  }
+
+  const removedServiceIds = existingRows
     .map((service) => service.id)
-    .filter((serviceId) => !keptServiceIds.has(serviceId))
+    .filter((serviceId) => !claimedServiceIds.has(serviceId))
+
+  let removedTransportRequestCount = 0
 
   if (removedServiceIds.length > 0) {
     // Cascades booking_service_units via FK; transport requests reference the service directly.
-    const { error: deleteTransportError } = await supabase
+    const { data: removedTransportRequests, error: deleteTransportError } = await supabase
       .from("booking_transport_requests")
       .delete()
       .in("service_id", removedServiceIds)
+      .select("id")
     if (deleteTransportError) return safeSupabaseError("build-booking:remove-transport-requests", deleteTransportError)
+    removedTransportRequestCount = (removedTransportRequests ?? []).length
 
     const { error: deleteServicesError } = await supabase
       .from("booking_services")
@@ -110,9 +153,7 @@ export async function POST(req: Request, { params }: RouteParams) {
     if (deleteServicesError) return safeSupabaseError("build-booking:remove-services", deleteServicesError)
   }
 
-  const addedServices = parsed.data.services.filter(
-    (service) => !service.legId || !existingServiceIds.has(service.legId),
-  )
+  const addedServices = parsed.data.services.filter((_service, index) => !resolvedLegIds[index])
 
   const addedSupplierIds = Array.from(new Set(addedServices.map((service) => service.supplierId)))
   const { data: addedSuppliers, error: suppliersError } =
@@ -127,7 +168,7 @@ export async function POST(req: Request, { params }: RouteParams) {
     booking_id: id,
     supplier_id: service.supplierId,
     label: supplierNameById.get(service.supplierId) ?? null,
-    sort_order: keptServiceIds.size + index,
+    sort_order: claimedServiceIds.size + index,
   }))
 
   if (newServiceRows.length > 0) {
@@ -135,17 +176,14 @@ export async function POST(req: Request, { params }: RouteParams) {
     if (insertServicesError) return safeSupabaseError("build-booking:insert-services", insertServicesError)
   }
 
-  // Reorder kept services to match the requested order.
-  let sortOrder = 0
-  for (const service of parsed.data.services) {
-    if (service.legId && keptServiceIds.has(service.legId)) {
-      const { error: reorderError } = await supabase
-        .from("booking_services")
-        .update({ sort_order: sortOrder })
-        .eq("id", service.legId)
-      if (reorderError) return safeSupabaseError("build-booking:reorder-services", reorderError)
-    }
-    sortOrder += 1
+  // Reorder kept (and adopted) services to match the requested order.
+  for (const [sortOrder, legId] of resolvedLegIds.entries()) {
+    if (!legId) continue
+    const { error: reorderError } = await supabase
+      .from("booking_services")
+      .update({ sort_order: sortOrder })
+      .eq("id", legId)
+    if (reorderError) return safeSupabaseError("build-booking:reorder-services", reorderError)
   }
 
   // 2. Seed units/transport-requests for the newly added services only.
@@ -162,6 +200,9 @@ export async function POST(req: Request, { params }: RouteParams) {
         kind: kindBySupplierId.get(row.supplier_id) ?? null,
       })),
       { tripStartDate: null, tripEndDate: null },
+      // Anything built through this route was chosen by a human, so it is origin='consultant' and
+      // deliberately not discardable -- only lib/auto-build writes 'auto'. "Build then discard" is
+      // therefore not a round trip: remove a leg by omitting it from a later build instead.
       "consultant",
     )
     if (seedResult.error) return safeSupabaseError("build-booking:seed-units", seedResult.error)
@@ -173,10 +214,19 @@ export async function POST(req: Request, { params }: RouteParams) {
     entityType: "Booking",
     entityId: id,
     action: "booking_services_built",
-    meta: { service_count: parsed.data.services.length },
+    meta: {
+      service_count: parsed.data.services.length,
+      removed_service_ids: removedServiceIds,
+      removed_transport_request_count: removedTransportRequestCount,
+    },
   })
 
   const { detail } = await loadBookingServicesPackageDetail(supabase, id, booking.booking_number)
 
-  return Response.json({ packageDetail: detail })
+  // Deletions are reported back so "build again" can never throw work away silently.
+  return Response.json({
+    packageDetail: detail,
+    removedServiceCount: removedServiceIds.length,
+    removedTransportRequestCount,
+  })
 }

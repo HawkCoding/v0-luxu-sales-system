@@ -6,6 +6,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSWRConfig } from "swr"
 import {
   AlertCircle,
+  AlertTriangle,
   ArrowLeft,
   Info,
   Mail,
@@ -16,6 +17,7 @@ import {
   Save,
   Star,
   Trash2,
+  X,
 } from "lucide-react"
 import { SortableList } from "@/components/ui/sortable-list"
 import { BulletLineList } from "@/components/supplier/bullet-line-list"
@@ -85,6 +87,7 @@ import {
   shouldAutoFillChild,
   shouldPromptChildUpdate,
 } from "@/lib/suppliers/auto-child-price"
+import { readSupplierDraft, serializeSupplierDraft } from "@/lib/suppliers/supplier-draft-storage"
 import { AgeRangeChip } from "@/components/ui/age-range-chip"
 import {
   DEFAULT_AGE_BUCKETS,
@@ -157,7 +160,7 @@ interface EditableRoute {
   active: boolean
 }
 
-interface EditableSuiteType {
+export interface EditableSuiteType {
   id: string
   name: string
   passengerCapacity: number | null
@@ -184,7 +187,7 @@ interface EditableRateCard {
   validTo: string | null
 }
 
-interface EditablePackage {
+export interface EditablePackage {
   id: string
   name: string
   description: string
@@ -196,7 +199,13 @@ interface EditablePackage {
   rateCards: EditableRateCard[]
 }
 
-interface SupplierFormState {
+/**
+ * The editable shape behind the supplier detail form. Also persisted as a local draft -- bump
+ * `SUPPLIER_DRAFT_SCHEMA_VERSION` in `lib/suppliers/supplier-draft-storage.ts` whenever a field is
+ * added, removed or renamed, so drafts written by an older build are dropped instead of restored
+ * with missing keys.
+ */
+export interface SupplierFormState {
   name: string
   kind: SupplierKind
   /** 'manual' skips rate cards entirely -- the fare is typed per unit at quote-build time. */
@@ -382,7 +391,7 @@ function createRoutesRateGroup(): EditablePackage {
 
 function buildFormState(supplier: SupplierDetail): SupplierFormState {
   const detailEmails =
-    supplier.emails.length > 0
+    (supplier.emails ?? []).length > 0
       ? supplier.emails.map((entry) => ({
           id: entry.id,
           email: entry.email,
@@ -1944,6 +1953,7 @@ interface SuiteTypeEditorRowProps {
   suiteType: EditableSuiteType
   suiteTypeIndex: number
   vocabulary: SupplierVocabulary
+  kind: SupplierKind
   bedroomTypes: EditableVocabularyValue[]
   bedroomLayouts: EditableVocabularyValue[]
   bathroomTypes: EditableVocabularyValue[]
@@ -1966,6 +1976,7 @@ const SuiteTypeEditorRow = memo(function SuiteTypeEditorRow({
   suiteType,
   suiteTypeIndex,
   vocabulary,
+  kind,
   bedroomTypes,
   bedroomLayouts,
   bathroomTypes,
@@ -1976,6 +1987,9 @@ const SuiteTypeEditorRow = memo(function SuiteTypeEditorRow({
   onRemoveSuiteType,
 }: SuiteTypeEditorRowProps) {
   const isTransport = vocabulary.suiteType === "Vehicle Type"
+  // TODO: bedroom_types/bathroom_types are hidden for hotel_property (UI-only, see
+  // suite-vocabulary-card.tsx). Full removal would also touch the DB tables/columns.
+  const hideBedroomAndBathroomTypes = kind === "hotel_property"
 
   return (
     <div className="rounded-lg border p-3 space-y-3">
@@ -2053,14 +2067,16 @@ const SuiteTypeEditorRow = memo(function SuiteTypeEditorRow({
       </div>
       {showVariants && onUpdateSuiteTypeVariantIds ? (
         <div className="grid gap-3 md:grid-cols-3">
-          <VariantChipPicker
-            label="Bedroom Types"
-            available={bedroomTypes.map((value) => ({ id: value.id, name: value.name }))}
-            selectedIds={suiteType.bedroomTypeIds}
-            onChange={(ids) =>
-              onUpdateSuiteTypeVariantIds(suiteTypeIndex, "bedroomTypeIds", ids)
-            }
-          />
+          {!hideBedroomAndBathroomTypes ? (
+            <VariantChipPicker
+              label="Bedroom Types"
+              available={bedroomTypes.map((value) => ({ id: value.id, name: value.name }))}
+              selectedIds={suiteType.bedroomTypeIds}
+              onChange={(ids) =>
+                onUpdateSuiteTypeVariantIds(suiteTypeIndex, "bedroomTypeIds", ids)
+              }
+            />
+          ) : null}
           <VariantChipPicker
             label="Bedroom Layouts"
             available={bedroomLayouts.map((value) => ({ id: value.id, name: value.name }))}
@@ -2069,14 +2085,16 @@ const SuiteTypeEditorRow = memo(function SuiteTypeEditorRow({
               onUpdateSuiteTypeVariantIds(suiteTypeIndex, "bedroomLayoutIds", ids)
             }
           />
-          <VariantChipPicker
-            label="Bathroom Types"
-            available={bathroomTypes.map((value) => ({ id: value.id, name: value.name }))}
-            selectedIds={suiteType.bathroomTypeIds}
-            onChange={(ids) =>
-              onUpdateSuiteTypeVariantIds(suiteTypeIndex, "bathroomTypeIds", ids)
-            }
-          />
+          {!hideBedroomAndBathroomTypes ? (
+            <VariantChipPicker
+              label="Bathroom Types"
+              available={bathroomTypes.map((value) => ({ id: value.id, name: value.name }))}
+              selectedIds={suiteType.bathroomTypeIds}
+              onChange={(ids) =>
+                onUpdateSuiteTypeVariantIds(suiteTypeIndex, "bathroomTypeIds", ids)
+              }
+            />
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -2205,6 +2223,39 @@ function RouteReturnTimeHint({ label, origin, destination, leg }: RouteReturnTim
   )
 }
 
+/**
+ * Name of another route on this supplier that runs the same two cities the other way round, or
+ * null when there isn't one.
+ *
+ * A mirrored pair is legitimate -- an operator can charge a different fare northbound and
+ * southbound, and rate cards hang off `route_id`, so that can only be modelled as two one-way
+ * routes. It is also the shape of a common mistake: filing the return leg as a second route and
+ * assuming the first route's rate cards cover it, which leaves enquiries in that direction pricing
+ * as `pricing_incomplete`. The editor points the pair out and lets the user decide; nothing is
+ * blocked and nothing is merged automatically.
+ */
+function findMirrorRouteName(
+  routes: EditableRoute[],
+  route: EditableRoute,
+  locations: Location[],
+): string | null {
+  if (!route.originLocationId || !route.destinationLocationId) return null
+
+  const mirror = routes.find(
+    (candidate) =>
+      candidate.id !== route.id &&
+      candidate.originLocationId === route.destinationLocationId &&
+      candidate.destinationLocationId === route.originLocationId,
+  )
+  if (!mirror) return null
+
+  if (mirror.name.trim()) return mirror.name.trim()
+  // An unnamed sibling still deserves to be pointed at -- fall back to its endpoints.
+  const origin = locations.find((location) => location.id === mirror.originLocationId)?.name
+  const destination = locations.find((location) => location.id === mirror.destinationLocationId)?.name
+  return origin && destination ? `${origin} → ${destination}` : null
+}
+
 interface RouteEditorRowProps {
   route: EditableRoute
   routeIndex: number
@@ -2212,6 +2263,8 @@ interface RouteEditorRowProps {
   kind: SupplierKind
   vocabulary: SupplierVocabulary
   locations: Location[]
+  /** Set when another route runs these two cities the other way round. See `findMirrorRouteName`. */
+  mirrorRouteName: string | null
   onUpdateRoute: (
     packageIndex: number,
     routeIndex: number,
@@ -2228,9 +2281,11 @@ const RouteEditorRow = memo(function RouteEditorRow({
   kind,
   vocabulary,
   locations,
+  mirrorRouteName,
   onUpdateRoute,
   onRemoveRoute,
 }: RouteEditorRowProps) {
+  const [mirrorNoticeDismissed, setMirrorNoticeDismissed] = useState(false)
   const isTransport = vocabulary.suiteType === "Vehicle Type"
   const isRental = vocabulary.priceLabel === "per day"
   const autoDeriveName = vocabulary.routeNameAutoDerived
@@ -2286,6 +2341,23 @@ const RouteEditorRow = memo(function RouteEditorRow({
             : "md:grid-cols-[1.5fr_1fr_auto]"
       }`}
     >
+      {mirrorRouteName && !mirrorNoticeDismissed ? (
+        <div className="col-span-full flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <p className="flex-1">
+            {`This is the reverse of "${mirrorRouteName}". If it is the same journey both ways, set that ${vocabulary.route.toLowerCase()} to round trip instead — a separate ${vocabulary.route.toLowerCase()} needs its own rate cards.`}
+          </p>
+          <button
+            type="button"
+            aria-label="Dismiss reverse route notice"
+            className="shrink-0 rounded text-amber-900/70 hover:text-amber-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 dark:text-amber-200/70 dark:hover:text-amber-100"
+            onClick={() => setMirrorNoticeDismissed(true)}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ) : null}
+
       <div className="space-y-1.5">
         <Label>{`${vocabulary.route} name`}</Label>
         {kind === "tour_operator" ? (
@@ -2554,6 +2626,9 @@ interface ItineraryEditorRowProps {
   packageIndex: number
   vocabulary: SupplierVocabulary
   suiteTypes: { id: string; name: string }[]
+  // Only the unassigned bucket needs to pick a tour type; a grouped row's type is already fixed
+  // by the group it renders under, and its name derives from that type on save.
+  showTypeSelector: boolean
   onUpdateRoute: (
     packageIndex: number,
     routeIndex: number,
@@ -2574,24 +2649,14 @@ const ItineraryEditorRow = memo(function ItineraryEditorRow({
   packageIndex,
   vocabulary,
   suiteTypes,
+  showTypeSelector,
   onUpdateRoute,
   onRemoveRoute,
 }: ItineraryEditorRowProps) {
   const typeLabel = vocabulary.suiteType
   return (
     <div className="space-y-3 rounded-lg border p-3">
-      <div className="grid gap-3 md:grid-cols-[1fr_14rem]">
-        <div className="min-w-0 space-y-1.5">
-          <Label htmlFor={`${route.id}-name`}>{`${vocabulary.route} name`}</Label>
-          {/* Itinerary names can run long — wrap down instead of scrolling sideways. */}
-          <BufferedTextarea
-            id={`${route.id}-name`}
-            rows={2}
-            className="resize-none"
-            value={route.name}
-            onValueChange={(value) => onUpdateRoute(packageIndex, routeIndex, "name", value)}
-          />
-        </div>
+      {showTypeSelector ? (
         <div className="min-w-0 space-y-1.5">
           <Label htmlFor={`${route.id}-suite-type`}>{typeLabel}</Label>
           <Select
@@ -2612,7 +2677,7 @@ const ItineraryEditorRow = memo(function ItineraryEditorRow({
             </SelectContent>
           </Select>
         </div>
-      </div>
+      ) : null}
 
       <div className="min-w-0 space-y-1.5">
         <Label htmlFor={`${route.id}-description`}>Description</Label>
@@ -2717,16 +2782,18 @@ function ItinerariesByTourType({
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 {group.name}
               </p>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="h-7 text-xs"
-                onClick={() => onAddRoute(0, group.id ?? undefined)}
-              >
-                <Plus className="mr-1 h-3.5 w-3.5" />
-                {`Add ${routeLabel}`}
-              </Button>
+              {group.entries.length === 0 ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs"
+                  onClick={() => onAddRoute(0, group.id ?? undefined)}
+                >
+                  <Plus className="mr-1 h-3.5 w-3.5" />
+                  {`Add ${routeLabel}`}
+                </Button>
+              ) : null}
             </div>
             {group.entries.length > 0 ? (
               group.entries.map((entry) => (
@@ -2737,6 +2804,7 @@ function ItinerariesByTourType({
                   packageIndex={0}
                   vocabulary={vocabulary}
                   suiteTypes={suiteTypes}
+                  showTypeSelector={false}
                   onUpdateRoute={onUpdateRoute}
                   onRemoveRoute={onRemoveRoute}
                 />
@@ -2762,6 +2830,7 @@ function ItinerariesByTourType({
                 packageIndex={0}
                 vocabulary={vocabulary}
                 suiteTypes={suiteTypes}
+                showTypeSelector={true}
                 onUpdateRoute={onUpdateRoute}
                 onRemoveRoute={onRemoveRoute}
               />
@@ -2871,6 +2940,10 @@ export function SupplierDetailView({
   const [staleVersionDialog, setStaleVersionDialog] = useState<StaleVersionDialogState | null>(null)
   const [form, setForm] = useState<SupplierFormState | null>(null)
   const [pendingLocalDraft, setPendingLocalDraft] = useState<SupplierFormState | null>(null)
+  // Kept outside SupplierFormState on purpose: the local-draft schema would otherwise need a
+  // version bump, and an unsaved "unlink" is not worth restoring across sessions. `null` here means
+  // "unlink on the next save"; `undefined` means "leave the current link alone".
+  const [pendingUnlink, setPendingUnlink] = useState(false)
   const baselineSnapshotRef = useRef<string | null>(null)
   const hydratedSupplierIdentityRef = useRef<string | null>(null)
   const expectedUpdatedAtRef = useRef<string | null>(null)
@@ -2885,6 +2958,9 @@ export function SupplierDetailView({
 
   const hasLoadError = Boolean(error)
   const supplier = data && !("error" in data) ? data : null
+  // Contacts are mirrored from a sibling record (same company, different category) and maintained
+  // by the database, so the editor shows them read-only until the link is broken.
+  const isLinkedSupplier = Boolean(supplier?.parentSupplierId) && !pendingUnlink
   const isDraftSupplier = supplier?.status === "draft"
   const isTemporarySupplier = supplier?.status === "temporary"
   const supplierUpdatedAt = supplier?.updatedAt
@@ -2938,39 +3014,17 @@ export function SupplierDetailView({
 
       if (supplier.status !== "draft" && supplier.status !== "temporary") {
         const raw = window.localStorage.getItem(localDraftStorageKey)
-        if (!raw) {
-          setPendingLocalDraft(null)
+        // A draft from an older schema is dropped rather than restored: every missing key would
+        // otherwise land in the form as `undefined` and crash the render.
+        const storedDraft = readSupplierDraft(raw, nextForm)
+        if (storedDraft) {
+          setPendingLocalDraft(storedDraft)
           return
         }
-
-        try {
-          const parsed = JSON.parse(raw) as SupplierFormState
-          const parsedEmails = Array.isArray((parsed as { emails?: unknown }).emails)
-            ? parsed.emails
-            : []
-          if (
-            parsed &&
-            typeof parsed === "object" &&
-            Array.isArray(parsed.suiteTypes) &&
-            Array.isArray(parsed.packages)
-          ) {
-            setPendingLocalDraft({
-              ...parsed,
-              emails:
-                parsedEmails.length > 0
-                  ? parsedEmails
-                  : supplier.email
-                    ? [{ id: makeClientId(), email: supplier.email, label: "General" }]
-                    : [createEmptySupplierEmail()],
-              // Drafts stored before station addresses existed have no such key.
-              stationAddresses: parsed.stationAddresses ?? [],
-            })
-            return
-          }
-        } catch {
-          // Invalid local draft payload, clear stale storage.
+        setPendingLocalDraft(null)
+        if (raw) {
+          window.localStorage.removeItem(localDraftStorageKey)
         }
-        window.localStorage.removeItem(localDraftStorageKey)
       } else {
         setPendingLocalDraft(null)
       }
@@ -3778,12 +3832,13 @@ export function SupplierDetailView({
     if (!canEdit || !form || !isEditing || isPatchInFlight) return
 
     const timeout = setTimeout(() => {
+      // Compare the form itself, not the stored envelope -- its `savedAt` changes every write.
       const snapshot = JSON.stringify(form)
       if (snapshot === baselineSnapshotRef.current) {
         window.localStorage.removeItem(localDraftStorageKey)
         return
       }
-      window.localStorage.setItem(localDraftStorageKey, snapshot)
+      window.localStorage.setItem(localDraftStorageKey, serializeSupplierDraft(form))
       setPendingLocalDraft(form)
     }, DRAFT_AUTOSAVE_DEBOUNCE_MS)
 
@@ -3830,10 +3885,12 @@ export function SupplierDetailView({
     }
 
     const cleanedEmails = form.emails
-      .map((entry) => ({
+      .map((entry, index) => ({
         id: entry.id,
         email: entry.email.trim(),
         label: entry.label.trim() || "General",
+        // The editor's row order is the saved order; the first address is the primary contact.
+        sortOrder: index,
       }))
       .filter((entry) => entry.email.length > 0)
 
@@ -4142,6 +4199,9 @@ export function SupplierDetailView({
           bedroomTypes: cleanedBedroomTypes,
           bedroomLayouts: cleanedBedroomLayouts,
           bathroomTypes: cleanedBathroomTypes,
+          // Only sent when the user broke the link -- otherwise the key is omitted and the server
+          // leaves the existing link untouched.
+          ...(pendingUnlink ? { parentSupplierId: null } : {}),
           expectedUpdatedAt:
             expectedUpdatedAtRef.current ?? supplier?.updatedAt,
         }),
@@ -4215,6 +4275,7 @@ export function SupplierDetailView({
       ])
       window.localStorage.removeItem(localDraftStorageKey)
       setPendingLocalDraft(null)
+      setPendingUnlink(false)
       setIsEditing(false)
       setStaleVersionDialog(null)
       toast.success(
@@ -4376,7 +4437,7 @@ export function SupplierDetailView({
     rateCards: supplier.rateCards,
   }
   const supplierEmailsForDisplay =
-    supplier.emails.length > 0
+    (supplier.emails ?? []).length > 0
       ? supplier.emails
       : supplier.email
         ? [{ id: "legacy-email", supplierId: supplier.id, email: supplier.email, label: "General", createdAt: supplier.createdAt }]
@@ -4599,6 +4660,7 @@ export function SupplierDetailView({
                     <BufferedInput
                       id="supplier-phone"
                       value={form.phone}
+                      disabled={isLinkedSupplier}
                       onValueChange={(value) => updateField("phone", value)}
                     />
                   </div>
@@ -4608,6 +4670,7 @@ export function SupplierDetailView({
                     <BufferedInput
                       id="supplier-website"
                       value={form.website}
+                      disabled={isLinkedSupplier}
                       onValueChange={(value) => updateField("website", value)}
                       onBlur={(event) => updateField("website", shortenUrl(event.target.value))}
                     />
@@ -4665,10 +4728,46 @@ export function SupplierDetailView({
                   )}
                 </div>
 
+                {supplier?.parentSupplierId ? (
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-dashed bg-muted/40 p-3">
+                    <p className="text-sm text-muted-foreground">
+                      {isLinkedSupplier ? (
+                        <>
+                          Phone, website and emails are inherited from{" "}
+                          <Link
+                            href={`/app/suppliers/${supplier.parentSupplierSlug}`}
+                            className="font-medium text-foreground underline underline-offset-2"
+                          >
+                            {supplier.parentSupplierName}
+                          </Link>
+                          {supplier.parentSupplierKind
+                            ? ` (${SUPPLIER_KIND_LABELS[supplier.parentSupplierKind]})`
+                            : null}
+                          . Edit them there and this supplier follows.
+                        </>
+                      ) : (
+                        <>
+                          Link removed. These contact details become this supplier&apos;s own when
+                          you save.
+                        </>
+                      )}
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setPendingUnlink((current) => !current)}
+                    >
+                      {isLinkedSupplier ? "Unlink" : "Keep link"}
+                    </Button>
+                  </div>
+                ) : null}
+
                 <SupplierEmailEditor
                   emails={form.emails}
                   onChange={(emails) => updateField("emails", emails)}
                   idPrefix="supplier-detail"
+                  disabled={isLinkedSupplier}
                 />
 
                 <div className="space-y-2">
@@ -4683,12 +4782,12 @@ export function SupplierDetailView({
                   </p>
                   <BufferedTextarea
                     id="supplier-description"
-                    value={form.description}
+                    value={form.description ?? ""}
                     onValueChange={(value) => updateField("description", value)}
                     rows={3}
                   />
                   <div className="flex items-start justify-between gap-2 mt-1">
-                    {form.description.length > DESCRIPTION_SOFT_LIMIT && (
+                    {(form.description ?? "").length > DESCRIPTION_SOFT_LIMIT && (
                       <p className="text-xs text-amber-600">
                         Text is too long and may not present well on the voucher.
                       </p>
@@ -4696,12 +4795,12 @@ export function SupplierDetailView({
                     <p
                       className={cn(
                         "text-xs ml-auto tabular-nums",
-                        form.description.length > DESCRIPTION_SOFT_LIMIT
+                        (form.description ?? "").length > DESCRIPTION_SOFT_LIMIT
                           ? "text-amber-600"
                           : "text-muted-foreground"
                       )}
                     >
-                      {form.description.length} / {DESCRIPTION_SOFT_LIMIT}
+                      {(form.description ?? "").length} / {DESCRIPTION_SOFT_LIMIT}
                     </p>
                   </div>
                 </div>
@@ -5127,6 +5226,7 @@ export function SupplierDetailView({
                           suiteType={item}
                           suiteTypeIndex={index}
                           vocabulary={activeVocabulary}
+                          kind={form.kind}
                           bedroomTypes={form.bedroomTypes}
                           bedroomLayouts={form.bedroomLayouts}
                           bathroomTypes={form.bathroomTypes}
@@ -5148,11 +5248,14 @@ export function SupplierDetailView({
                 ) : supplier.suiteTypes.length > 0 ? (
                   <div className="flex flex-wrap gap-2">
                     {supplier.suiteTypes.map((suiteType) => {
-                      const variantLabels = [
-                        ...(suiteType.bedroomTypes ?? []),
-                        ...(suiteType.bedroomLayouts ?? []),
-                        ...(suiteType.bathroomTypes ?? []),
-                      ]
+                      const variantLabels =
+                        supplier.kind === "hotel_property"
+                          ? [...(suiteType.bedroomLayouts ?? [])]
+                          : [
+                              ...(suiteType.bedroomTypes ?? []),
+                              ...(suiteType.bedroomLayouts ?? []),
+                              ...(suiteType.bathroomTypes ?? []),
+                            ]
                       const variantSuffix =
                         variantLabels.length > 0 ? ` — ${variantLabels.join(", ")}` : ""
                       return (
@@ -5214,6 +5317,11 @@ export function SupplierDetailView({
                         kind={form.kind}
                         vocabulary={activeVocabulary}
                         locations={locations}
+                        mirrorRouteName={findMirrorRouteName(
+                          routeRateGroup.routes,
+                          route,
+                          locations,
+                        )}
                         onUpdateRoute={updateRoute}
                         onRemoveRoute={removeRoute}
                       />

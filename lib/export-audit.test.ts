@@ -98,8 +98,8 @@ describe("exportAuditToCsv", () => {
     expect(result.split("\r\n")[0]).toBe(
       '"Timestamp","Actor","Action","Description","Entity Type","Entity ID","Before (JSON)","After (JSON)","Metadata"',
     )
-    // Time-of-day is local so it varies by TZ; only the day/month/year order is asserted.
-    expect(result).toContain('"07/03/2026 ')
+    // Timestamps print in South African time (UTC+2), so 10:30Z is 12:30 SAST.
+    expect(result).toContain('"07-03-2026 12:30"')
     expect(result).toContain('"Jane Admin recorded updated on Booking"')
     expect(result).toContain('"{""note"":""old \\""value\\""""}"')
     expect(result).toContain('"{""note"":""new,value""}"')

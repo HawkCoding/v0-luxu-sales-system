@@ -2,7 +2,12 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { mapSupplier } from "@/lib/suppliers"
 import { getHotelDefaultTimes } from "@/lib/suppliers/hotel-default-times"
-import { allowedRoles, requireAuthenticatedUser, resolveUniqueSupplierSlug } from "./helpers"
+import {
+  allowedRoles,
+  requireAuthenticatedUser,
+  resolveUniqueSupplierSlug,
+  supplierConflictMessage,
+} from "./helpers"
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const PHONE_PATTERN = /^[+\d\s()-]*$/
@@ -60,10 +65,18 @@ const createSupplierSchema = z.object({
             message: "Enter a valid email (e.g. name@example.com)",
           }),
         label: z.string().trim().max(EMAIL_LABEL_MAX_LENGTH).default("General"),
+        /** Accepted for symmetry with the save schema; the create path writes array position. */
+        sortOrder: z.number().int().nonnegative().optional(),
       }),
     )
     .optional()
     .default([]),
+  /**
+   * Set to reuse a sibling record's contact details -- the same company trading in a second
+   * category (e.g. "Toyota (Transfers)" inheriting from "Toyota (Hotel)"). The database mirrors
+   * the parent's contacts onto this row, so the supplied email/phone/website/emails are ignored.
+   */
+  parentSupplierId: z.string().uuid().nullable().optional(),
 })
 
 export async function GET(req: Request) {
@@ -143,9 +156,42 @@ export async function POST(req: Request) {
     return true
   })
 
+  // Validate the link before inserting so a bad parent yields a clear 400 rather than surfacing as
+  // a raw trigger exception. The database enforces the same rules as a backstop.
+  const parentSupplierId = parsed.parentSupplierId ?? null
+  if (parentSupplierId) {
+    const { data: parentSupplier, error: parentError } = await supabase
+      .from("suppliers")
+      .select("id, name, kind, parent_supplier_id")
+      .eq("id", parentSupplierId)
+      .maybeSingle()
+
+    if (parentError) {
+      return NextResponse.json({ error: "Failed to create supplier" }, { status: 500 })
+    }
+    if (!parentSupplier) {
+      return NextResponse.json(
+        { error: "The supplier you linked to no longer exists." },
+        { status: 400 },
+      )
+    }
+    if (parentSupplier.parent_supplier_id) {
+      return NextResponse.json(
+        { error: `${parentSupplier.name} already inherits its contacts from another supplier.` },
+        { status: 400 },
+      )
+    }
+    if (parentSupplier.kind === parsed.kind) {
+      return NextResponse.json(
+        { error: "Link a supplier to a record in a different category." },
+        { status: 400 },
+      )
+    }
+  }
+
   let slug: string
   try {
-    slug = await resolveUniqueSupplierSlug(supabase, supplierName)
+    slug = await resolveUniqueSupplierSlug(supabase, supplierName, parsed.kind)
   } catch {
     return NextResponse.json({ error: "Failed to create supplier" }, { status: 500 })
   }
@@ -169,6 +215,7 @@ export async function POST(req: Request) {
       location_detail: parsed.locationDetail?.trim() || null,
       street_address: parsed.streetAddress?.trim() || null,
       notes: parsed.notes.trim() || null,
+      parent_supplier_id: parentSupplierId,
       single_supplement_pct: 0,
       default_time_start: hotelDefaultTimes?.checkIn ?? null,
       default_time_end: hotelDefaultTimes?.checkOut ?? null,
@@ -180,21 +227,26 @@ export async function POST(req: Request) {
   if (error || !supplier) {
     if (error?.code === "23505") {
       return NextResponse.json(
-        { error: "A supplier with this name already exists." },
+        { error: supplierConflictMessage(error, supplierName, parsed.kind) },
         { status: 409 },
       )
     }
     return NextResponse.json({ error: "Failed to create supplier" }, { status: 500 })
   }
 
-  if (normalizedEmails.length > 0) {
+  // A linked record's email list is a mirror of its parent's, seeded by the database trigger --
+  // writing the submitted addresses here would only be overwritten.
+  if (!parentSupplierId && normalizedEmails.length > 0) {
     const { error: supplierEmailsError } = await supabase
       .from("supplier_emails")
       .insert(
-        normalizedEmails.map((entry) => ({
+        normalizedEmails.map((entry, index) => ({
           supplier_id: supplier.id,
           email: entry.email,
           label: entry.label,
+          // Array position is the order; the first row is the primary contact mirrored onto
+          // suppliers.email above.
+          sort_order: index,
         })),
       )
 

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import type { PricingSnapshot } from "@/lib/types"
 import {
   buildSuiteTokens,
+  formatSuitePhrase,
   suiteSelectionsFromSnapshots,
   type SuiteSelection,
 } from "@/lib/templates/suite-description"
@@ -200,6 +201,24 @@ describe("buildSuiteTokens accommodation-leg ranking", () => {
     const tokens = buildSuiteTokens([{ suiteTypeName: "Deluxe Suite", supplierKind: "train_operator" }])
 
     expect(tokens.suiteType).toBe("Deluxe Suite")
+  })
+})
+
+describe("formatSuitePhrase", () => {
+  // Shared with lib/voucher/build-service-blocks.ts so the itinerary line composed there uses
+  // the exact same grammar as the {{suiteDescription}} token — no article, unlike the token.
+  it("builds the full prose, article-free", () => {
+    expect(formatSuitePhrase(full)).toBe("Twin bedded Deluxe Suite with a shower")
+  })
+
+  it("appends the noun for a type name that doesn't already carry one", () => {
+    expect(
+      formatSuitePhrase({ suiteTypeName: "Deluxe", bedroomType: "Twin", supplierKind: "train_operator" }),
+    ).toBe("Twin bedded Deluxe Suite")
+  })
+
+  it("returns an empty string when there is no suite name", () => {
+    expect(formatSuitePhrase({ suiteTypeName: "" })).toBe("")
   })
 })
 

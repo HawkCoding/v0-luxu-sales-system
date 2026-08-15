@@ -19,6 +19,7 @@ function leg(id: string, supplierKind: SupplierKind, sortOrder: number): Package
     baseRateTypeId: null,
     quoteRateTypeId: null,
     inheritedRateTypeName: null,
+    applicableRateTypeIds: null,
     label: null,
     sortOrder,
     dateAnchor: null,

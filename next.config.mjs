@@ -3,6 +3,10 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  // Client crash reports arrive as minified frames (`eB` at char 123534), which cannot be traced
+  // back to a file without maps. The app is login-gated and no secret ships in a client bundle, so
+  // the only cost is that the original source is readable in devtools.
+  productionBrowserSourceMaps: true,
   async headers() {
     return [
       {

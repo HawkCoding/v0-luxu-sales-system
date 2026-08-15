@@ -122,7 +122,13 @@ function configurationSuffix(selection: SuiteSelection): string {
   return parts.join(", ")
 }
 
-function describeSelection(selection: SuiteSelection): string {
+/**
+ * "Twin bedded Deluxe Suite with a shower" — one suite's full prose, article-free (callers that
+ * need the article, e.g. {@link buildSuiteTokens}, add it themselves). Shared with
+ * lib/voucher/build-service-blocks.ts so the itinerary line composed there and the
+ * {{suiteDescription}} token never fall out of sync on the noun/bedding/bathroom grammar.
+ */
+export function formatSuitePhrase(selection: SuiteSelection): string {
   const suite = suiteTypeWithNoun(selection)
   if (!suite) return ""
 
@@ -168,7 +174,7 @@ export function buildSuiteTokens(selections: SuiteSelection[]): SuiteTokens {
     suiteType: joinNaturally(dedupe(usable.map(suiteTypeWithNoun))),
     suiteConfiguration: joinNaturally(dedupe(usable.map(describeConfiguration))),
     // Deduped first so identical suites share one article, not one each.
-    suiteDescription: joinNaturally(dedupe(usable.map(describeSelection)).map(withArticle)),
+    suiteDescription: joinNaturally(dedupe(usable.map(formatSuitePhrase)).map(withArticle)),
   }
 }
 

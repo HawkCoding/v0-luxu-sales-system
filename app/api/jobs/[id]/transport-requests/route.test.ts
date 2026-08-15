@@ -19,7 +19,13 @@ import { GET, PUT } from "./route"
 
 const BOOKING_ID = "00000000-0000-4000-8000-00000000aaaa"
 
-function buildSupabase() {
+/** Column list from the PUT handler's existing-provenance pre-fetch, kept here to distinguish it
+ * from the list/reload query below (same table, no .order() call). */
+const PROVENANCE_COLUMNS = "id, price_override, price_override_set_at, price_override_set_by"
+
+function buildSupabase(options: { savedRows?: unknown[]; existingRows?: unknown[] } = {}) {
+  const savedRows = options.savedRows ?? [{ id: "tr1" }]
+  const existingRows = options.existingRows ?? []
   const replaceTransportRequests = vi.fn(async (_args: unknown) => ({ error: null }))
 
   return {
@@ -33,11 +39,16 @@ function buildSupabase() {
     from: vi.fn((table: string) => {
       if (table === "booking_transport_requests") {
         return {
-          select: vi.fn(() => ({
-            eq: vi.fn(() => ({
-              order: vi.fn(async () => ({ data: [{ id: "tr1" }], error: null })),
-            })),
-          })),
+          select: vi.fn((columns: string) => {
+            if (columns === PROVENANCE_COLUMNS) {
+              return { eq: vi.fn(async () => ({ data: existingRows, error: null })) }
+            }
+            return {
+              eq: vi.fn(() => ({
+                order: vi.fn(async () => ({ data: savedRows, error: null })),
+              })),
+            }
+          }),
         }
       }
       if (table === "bookings") {
@@ -260,6 +271,130 @@ describe("PUT /api/jobs/[id]/transport-requests", () => {
           return_cutoff_time: "10:00",
         }),
       ],
+    })
+  })
+
+  describe("price override provenance", () => {
+    it("stamps a brand-new override with the current user and a fresh timestamp", async () => {
+      const supabase = buildSupabase({ existingRows: [] })
+      authMocks.requireRole.mockResolvedValue({
+        ok: true,
+        value: {
+          supabase,
+          user: { id: "u1", email: "u@example.com" },
+          profile: { clearanceLevel: "consultant", actorName: "Jane", name: "Jane", surname: "D", email: "u@example.com" },
+        },
+      })
+      const req = new Request("http://localhost", {
+        method: "PUT",
+        body: JSON.stringify({
+          transportRequests: [{ serviceType: "transfer", pickupPoint: "A", dropoffPoint: "B", priceOverride: 850 }],
+        }),
+        headers: { "Content-Type": "application/json" },
+      })
+      const res = await PUT(req, { params })
+      expect(res.status).toBe(200)
+      const { p_transport_requests: rows } = supabase.replaceTransportRequests.mock.calls[0][0] as {
+        p_transport_requests: Record<string, unknown>[]
+      }
+      expect(rows[0].price_override).toBe(850)
+      expect(rows[0].price_override_set_by).toBe("u1")
+      expect(typeof rows[0].price_override_set_at).toBe("string")
+    })
+
+    it("keeps the original stamp when the override is re-saved unchanged", async () => {
+      const REQUEST_ID = "00000000-0000-4000-8000-0000000000b1"
+      const supabase = buildSupabase({
+        existingRows: [
+          { id: REQUEST_ID, price_override: 850, price_override_set_at: "2026-08-01T00:00:00Z", price_override_set_by: "u-original" },
+        ],
+      })
+      authMocks.requireRole.mockResolvedValue({
+        ok: true,
+        value: {
+          supabase,
+          user: { id: "u2", email: "u2@example.com" },
+          profile: { clearanceLevel: "consultant", actorName: "Alex", name: "Alex", surname: "K", email: "u2@example.com" },
+        },
+      })
+      const req = new Request("http://localhost", {
+        method: "PUT",
+        body: JSON.stringify({
+          transportRequests: [{ id: REQUEST_ID, serviceType: "transfer", pickupPoint: "A", dropoffPoint: "B", priceOverride: 850 }],
+        }),
+        headers: { "Content-Type": "application/json" },
+      })
+      const res = await PUT(req, { params })
+      expect(res.status).toBe(200)
+      const { p_transport_requests: rows } = supabase.replaceTransportRequests.mock.calls[0][0] as {
+        p_transport_requests: Record<string, unknown>[]
+      }
+      expect(rows[0].price_override_set_at).toBe("2026-08-01T00:00:00Z")
+      expect(rows[0].price_override_set_by).toBe("u-original")
+    })
+
+    it("re-stamps when the override value changes", async () => {
+      const REQUEST_ID = "00000000-0000-4000-8000-0000000000b2"
+      const supabase = buildSupabase({
+        existingRows: [
+          { id: REQUEST_ID, price_override: 850, price_override_set_at: "2026-08-01T00:00:00Z", price_override_set_by: "u-original" },
+        ],
+      })
+      authMocks.requireRole.mockResolvedValue({
+        ok: true,
+        value: {
+          supabase,
+          user: { id: "u2", email: "u2@example.com" },
+          profile: { clearanceLevel: "consultant", actorName: "Alex", name: "Alex", surname: "K", email: "u2@example.com" },
+        },
+      })
+      const req = new Request("http://localhost", {
+        method: "PUT",
+        body: JSON.stringify({
+          transportRequests: [{ id: REQUEST_ID, serviceType: "transfer", pickupPoint: "A", dropoffPoint: "B", priceOverride: 950 }],
+        }),
+        headers: { "Content-Type": "application/json" },
+      })
+      const res = await PUT(req, { params })
+      expect(res.status).toBe(200)
+      const { p_transport_requests: rows } = supabase.replaceTransportRequests.mock.calls[0][0] as {
+        p_transport_requests: Record<string, unknown>[]
+      }
+      expect(rows[0].price_override).toBe(950)
+      expect(rows[0].price_override_set_by).toBe("u2")
+      expect(rows[0].price_override_set_at).not.toBe("2026-08-01T00:00:00Z")
+    })
+
+    it("clears both stamps when the override is cleared to null", async () => {
+      const REQUEST_ID = "00000000-0000-4000-8000-0000000000b3"
+      const supabase = buildSupabase({
+        existingRows: [
+          { id: REQUEST_ID, price_override: 850, price_override_set_at: "2026-08-01T00:00:00Z", price_override_set_by: "u-original" },
+        ],
+      })
+      authMocks.requireRole.mockResolvedValue({
+        ok: true,
+        value: {
+          supabase,
+          user: { id: "u2", email: "u2@example.com" },
+          profile: { clearanceLevel: "consultant", actorName: "Alex", name: "Alex", surname: "K", email: "u2@example.com" },
+        },
+      })
+      const req = new Request("http://localhost", {
+        method: "PUT",
+        body: JSON.stringify({
+          transportRequests: [{ id: REQUEST_ID, serviceType: "transfer", pickupPoint: "A", dropoffPoint: "B", priceOverride: null }],
+        }),
+        headers: { "Content-Type": "application/json" },
+      })
+      const res = await PUT(req, { params })
+      expect(res.status).toBe(200)
+      const { p_transport_requests: rows } = supabase.replaceTransportRequests.mock.calls[0][0] as {
+        p_transport_requests: Record<string, unknown>[]
+      }
+      expect(rows[0].price_override).toBeNull()
+      expect(rows[0].price_override_set_at).toBeNull()
+      expect(rows[0].price_override_set_by).toBeNull()
     })
   })
 })

@@ -46,7 +46,6 @@ If a prerequisite is missing, the prompt tells you to mark the affected checks
 | 04 | `04-settings-configuration.md` | Every settings card and its downstream effect |
 | 05 | `05-customers.md` | Customer CRUD, duplicates, linked accounts, CSV import |
 | 06 | `06-suppliers-rate-cards.md` | Suppliers, locations, routes, suite types, rate cards |
-| 07 | `07-packages.md` | Package catalogue, legs, leg rate cards |
 | 08 | `08-enquiry-intake-manual.md` | Manual enquiry capture, booking numbering, inbox |
 | 09 | `09-email-intake-auto-build.md` | Inbound email accounts, rules, parsing, auto-build |
 | 10 | `10-build-booking-services.md` | Build Booking, services, travellers, transport |
@@ -59,6 +58,10 @@ If a prerequisite is missing, the prompt tells you to mark the affected checks
 | 17 | `17-email-templates-outbound.md` | Templates, signatures, outbound send, correspondence |
 | 18 | `18-automation-cron-webhooks.md` | Cron jobs, Gravity Forms webhook, enquiry webhook |
 | 19 | `19-reporting-audit-cross-cutting.md` | Reporting, audit, error log, a11y, responsive |
+
+**Note:** Prompt 07 was retired on 2026-08-13 when the catalogue-package model was dropped from
+the database (`supabase/migrations/20260811140000_drop_catalogue_packages.sql`). The numbering is
+intentionally non-contiguous. Build Booking — the replacement model — is covered by prompt 10.
 
 `COVERAGE.md` maps every route, API route and domain module to the prompt that
 covers it — and lists what is deliberately not covered. That file is what makes

@@ -2,13 +2,25 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { requireAdminSettingsAccess } from "@/lib/settings-access"
+import { isValidSubjectPattern } from "@/lib/inbound-email/rules"
 
-const ruleSchema = z.object({
-  name: z.string().trim().min(1),
-  subjectPattern: z.string().trim().min(1),
-  matchType: z.enum(["contains", "exact", "regex"]).default("contains"),
-  active: z.boolean().default(true),
-})
+const ruleSchema = z
+  .object({
+    name: z.string().trim().min(1),
+    subjectPattern: z.string().trim().min(1),
+    matchType: z.enum(["contains", "exact", "regex"]).default("contains"),
+    active: z.boolean().default(true),
+  })
+  .superRefine((value, ctx) => {
+    // A regex that doesn't compile is silently inert at sync time, so it has to fail here.
+    if (!isValidSubjectPattern(value.subjectPattern, value.matchType)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["subjectPattern"],
+        message: "Not a valid regular expression",
+      })
+    }
+  })
 
 function mapRule(row: {
   id: string

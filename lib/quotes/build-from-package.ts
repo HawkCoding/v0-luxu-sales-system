@@ -6,6 +6,8 @@ import type { Database } from "@/lib/supabase/types"
 import { fetchDefaultAgeBuckets, resolveAgeBuckets, type AgeBuckets } from "@/lib/pricing/age-buckets"
 import { projectPassengerTotals } from "@/lib/packages/passenger-totals"
 import { dateOnly } from "@/lib/packages/trip-date-range"
+import { getBillableRentalDays } from "@/lib/packages/rental-days"
+import { resolveOverrideSetterNames } from "@/lib/quotes/room-override-provenance"
 import {
   buildCommissionBreakdown,
   calculateCommissionAmount,
@@ -37,6 +39,17 @@ export interface PackageUnitSelection {
   manualAdultPrice?: number | null
   manualChildPrice?: number | null
   manualInfantPrice?: number | null
+  /** Hotel legs only: a consultant-typed price per room per night that replaces this room's rate
+   *  card for this booking. Denominated in the card's own currency (falling back to the leg's
+   *  priceCurrency when the room has no card at all), and converted like any other line.
+   *
+   *  Deliberately unvalidated against the card: the typed figure is what the hotel quoted for
+   *  this room, and a wrong one is the consultant's to own — it just has to be visible. */
+  manualRoomPrice?: number | null
+  /** Server-resolved provenance for manualRoomPrice, stamped into the line's pricing snapshot so
+   *  the internal quote view can show who set the price without a second lookup. */
+  manualRoomPriceSetAt?: string | null
+  manualRoomPriceSetByName?: string | null
 }
 
 export interface PackageLegSelection {
@@ -76,6 +89,8 @@ interface TransportRequestRow {
   dropoff_point: string
   pickup_at: string | null
   price_override: number | null
+  price_override_set_at: string | null
+  price_override_set_by: string | null
   rental_details?: { return_at: string | null } | { return_at: string | null }[] | null
 }
 
@@ -108,8 +123,26 @@ interface BuildPackageQuoteLineItemsInput {
   fxRateAsOf?: string | null
 }
 
+/** A leg that could not be priced because it has not been configured yet (no route/meal plan
+ * chosen). Reported rather than thrown so the legs that *are* ready still price — see
+ * BuildPackageQuoteLineItemsResult.incompleteLegs. */
+export interface IncompleteLeg {
+  legId: string
+  legLabel: string
+  message: string
+}
+
 interface BuildPackageQuoteLineItemsResult {
   lineItems: QuoteLineItem[]
+  /**
+   * Legs skipped because they are not configured yet. A non-empty list means `lineItems` is a
+   * partial preview: fine to show, never fine to save to a quote.
+   *
+   * Only missing *configuration* lands here. A leg that is configured but cannot be priced (no
+   * rate card covers the travel date, a type that doesn't belong to the leg) still throws, so a
+   * pricing failure can never be mistaken for a leg somebody forgot to fill in.
+   */
+  incompleteLegs: IncompleteLeg[]
 }
 
 export async function buildPackageQuoteLineItems({
@@ -138,9 +171,16 @@ export async function buildPackageQuoteLineItems({
 
   const { data: transportRequests } = await supabase
     .from("booking_transport_requests")
-    .select("service_type, route_id, suite_type_id, service_id, pickup_point, dropoff_point, pickup_at, price_override, rental_details:booking_vehicle_rental_details(return_at)")
+    .select("service_type, route_id, suite_type_id, service_id, pickup_point, dropoff_point, pickup_at, price_override, price_override_set_at, price_override_set_by, rental_details:booking_vehicle_rental_details(return_at)")
     .eq("booking_id", jobId)
     .order("sort_order", { ascending: true })
+
+  // Batch-resolve display names for whoever set a transport price override, same source as the
+  // hotel room override's "set by" note — read once here rather than per request below.
+  const transportOverrideSetByName = await resolveOverrideSetterNames(
+    supabase,
+    (transportRequests ?? []).map((request) => request.price_override_set_by),
+  )
 
   // Load variant snapshots for all suite types in this package — used for line description suffixes.
   const suiteTypeIds = packageDetail.legs.flatMap((leg) =>
@@ -295,6 +335,7 @@ export async function buildPackageQuoteLineItems({
   const selectionMap = new Map(selections.map((entry) => [entry.legId, entry]))
   const rateTypeMetaById = new Map(rateTypes.map((rt) => [rt.id, rt]))
   const lineItems: QuoteLineItem[] = []
+  const incompleteLegs: IncompleteLeg[] = []
   // The rate card resolved for the leg currently being priced; addLineItem
   // reads it to stamp the rate type into each line's pricing snapshot.
   let activeRateCard: PackageDetail["legs"][number]["rateCards"][number] | null = null
@@ -379,6 +420,27 @@ export async function buildPackageQuoteLineItems({
     /** The currency `unitPrice` is expressed in — the rate card's own, or the leg's for typed
      * fares. Converted into the quote currency before anything else touches the number. */
     sourceCurrency?: string | null
+    /** Hotels only: this line's price was typed by a consultant rather than read off the card.
+     * Internal-only — none of this reaches the client-facing description or the quote PDF, which
+     * show the resulting amount and nothing else. */
+    roomOverride?: {
+      /** The typed price per room per night, in sourceCurrency. */
+      price: number
+      /** What the rate card would have charged, same currency. Null when no card covered the room. */
+      basePrice: number | null
+      setAt: string | null
+      setByName: string | null
+    } | null
+    /** Transfers/rentals only: this line's price was typed by a consultant rather than read off
+     * the card. Internal-only, same posture as roomOverride. */
+    transportOverride?: {
+      /** The typed price (per day for rentals, flat for transfers), in sourceCurrency. */
+      price: number
+      /** What the rate card would have charged, same currency. Null when no card covered the trip. */
+      basePrice: number | null
+      setAt: string | null
+      setByName: string | null
+    } | null
   }
 
   function formatSingleSupplementSuffix(pct: number): string {
@@ -402,6 +464,8 @@ export async function buildPackageQuoteLineItems({
     hideRoomConfig,
     pricingMode: linePricingMode = "rate_card",
     sourceCurrency,
+    roomOverride,
+    transportOverride,
   }: AddLineItemOptions) {
     if (qty <= 0) return
 
@@ -484,6 +548,22 @@ export async function buildPackageQuoteLineItems({
         selectedVariants: selectedVariantGroups && selectedVariantGroups.length > 0 ? selectedVariantGroups : undefined,
         commission: null,
         unit: unit ?? null,
+        ...(roomOverride
+          ? {
+              manualRoomPrice: roomOverride.price,
+              manualRoomPriceBase: roomOverride.basePrice,
+              manualRoomPriceSetAt: roomOverride.setAt,
+              manualRoomPriceSetByName: roomOverride.setByName,
+            }
+          : {}),
+        ...(transportOverride
+          ? {
+              manualTransportPrice: transportOverride.price,
+              manualTransportPriceBase: transportOverride.basePrice,
+              manualTransportPriceSetAt: transportOverride.setAt,
+              manualTransportPriceSetByName: transportOverride.setByName,
+            }
+          : {}),
       }
     }
 
@@ -504,6 +584,26 @@ export async function buildPackageQuoteLineItems({
     }
     if (leg.routes.length === 1) {
       return leg.routes[0].id
+    }
+    return null
+  }
+
+  /**
+   * Why this leg cannot be priced yet, or null if it is ready. Checked up front so one leg nobody
+   * has configured yet no longer costs the salesperson the preview of every other leg — the two
+   * cases below are exactly the ones the loop used to throw on before pricing anything.
+   */
+  function describeLegConfigIssue(
+    leg: PackageDetail["legs"][number],
+    selection: { routeId?: string },
+  ): string | null {
+    const legLabel = leg.label ?? leg.supplierName
+    const routeId = getRequiredRouteId(leg, selection)
+    if (!routeId) {
+      return `No ${leg.supplierKind === "hotel_property" ? "meal plan" : "route"} selected for leg: ${legLabel}`
+    }
+    if (!leg.routes.some((route) => route.id === routeId)) {
+      return `Selected route is not available for leg: ${legLabel}`
     }
     return null
   }
@@ -556,20 +656,11 @@ export async function buildPackageQuoteLineItems({
     )
   }
 
-  function getBillableRentalDays(request: TransportRequestRow | null): number {
+  function billableRentalDaysForRequest(request: TransportRequestRow | null): number {
     const rentalDetails = Array.isArray(request?.rental_details)
       ? request?.rental_details[0]
       : request?.rental_details
-    if (!request?.pickup_at || !rentalDetails?.return_at) return 1
-
-    const pickupAt = new Date(request.pickup_at)
-    const returnAt = new Date(rentalDetails.return_at)
-    if (Number.isNaN(pickupAt.getTime()) || Number.isNaN(returnAt.getTime())) return 1
-
-    const durationMs = returnAt.getTime() - pickupAt.getTime()
-    if (durationMs <= 0) return 1
-
-    return Math.max(1, Math.ceil(durationMs / (1000 * 60 * 60 * 24)))
+    return getBillableRentalDays(request?.pickup_at ?? null, rentalDetails?.return_at ?? null)
   }
 
   if (packageDetail.fixedPricePerPerson !== null) {
@@ -631,6 +722,18 @@ export async function buildPackageQuoteLineItems({
         continue
       }
 
+      const configIssue = describeLegConfigIssue(leg, selection)
+      if (configIssue) {
+        incompleteLegs.push({
+          legId: leg.id,
+          legLabel: leg.label ?? leg.supplierName,
+          message: configIssue,
+        })
+        continue
+      }
+
+      // Both guards are unreachable after describeLegConfigIssue — kept so a future caller that
+      // skips the pre-check still fails loudly instead of pricing a leg with no route.
       const requiredRouteId = getRequiredRouteId(leg, selection)
       if (!requiredRouteId) {
         throw new Error(`No ${isHotel ? "meal plan" : "route"} selected for leg: ${leg.label ?? leg.supplierName}`)
@@ -694,6 +797,24 @@ export async function buildPackageQuoteLineItems({
         }
       }
 
+      /** A unit carrying a typed override still tries its rate card — the card's price and
+       * currency are wanted for the internal "was / now" note — but a miss is no longer fatal.
+       * A negotiated one-off room or trip, or a season nobody has loaded yet, is exactly the case
+       * the override exists for, and hard-failing there would block the whole quote. */
+      function resolveOverriddenUnit(suiteTypeId: string, pricingDate: string = legPricingDate) {
+        const suiteBelongsToLeg = leg.suiteTypes.some((suiteType) => suiteType.id === suiteTypeId)
+        if (!suiteBelongsToLeg) {
+          throw new Error(`Selected type is not available for leg: ${legLabel}`)
+        }
+        const selected = getValidRateCard(leg, routeId, suiteTypeId, pricingDate, selection.rateTypeId)
+        return {
+          validRateCard: selected?.ok ? selected.card : null,
+          rateTypeInherited: selected?.ok ? selected.inherited : null,
+          description: [legLabel, routeName].filter(Boolean).join(" - "),
+          suiteTypeName: getSuiteTypeName(leg, suiteTypeId),
+        }
+      }
+
       // Manual-pricing legs (see PackageLeg.pricingMode) never touch rate_cards -- the fare is
       // typed per unit at quote-build time instead, so there is nothing here to validate against
       // a validity window or throw "no rate card" for.
@@ -718,6 +839,42 @@ export async function buildPackageQuoteLineItems({
         const nights = Math.max(1, selection.nights ?? 1)
 
         for (const unitSelection of units) {
+          // 0 is a real override (a comped room), so this is a null check, not a truthiness one.
+          const overridePrice =
+            unitSelection.manualRoomPrice === null || unitSelection.manualRoomPrice === undefined
+              ? null
+              : unitSelection.manualRoomPrice
+
+          if (overridePrice !== null) {
+            const { validRateCard, rateTypeInherited, description, suiteTypeName } =
+              resolveOverriddenUnit(unitSelection.suiteTypeId)
+            activeRateCard = validRateCard
+            activeRateCardInherited = rateTypeInherited ?? false
+            // The typed figure is in the currency of the card it replaces; with no card to
+            // replace, the leg's own price currency is what the consultant was shown.
+            const overrideCurrency = validRateCard?.currency ?? selection.priceCurrency ?? targetCurrency
+            addLineItem({
+              description,
+              qty: nights,
+              unitPrice: overridePrice,
+              supplierDescription,
+              suiteTypeId: unitSelection.suiteTypeId,
+              suiteTypeName,
+              variantNames: specificUnitVariantNames(unitSelection),
+              selectedVariantGroups: specificUnitVariantGroups(unitSelection),
+              unit,
+              hideRoomConfig: true,
+              sourceCurrency: overrideCurrency,
+              roomOverride: {
+                price: overridePrice,
+                basePrice: validRateCard?.pricePerPerson ?? null,
+                setAt: unitSelection.manualRoomPriceSetAt ?? null,
+                setByName: unitSelection.manualRoomPriceSetByName ?? null,
+              },
+            })
+            continue
+          }
+
           const { validRateCard, rateTypeInherited, description, suiteTypeName } = resolveUnit(
             unitSelection.suiteTypeId,
           )
@@ -754,39 +911,71 @@ export async function buildPackageQuoteLineItems({
           }
           const requestPricingDate = dateOnly(transportRequest?.pickup_at) ?? legPricingDate
           activePricingDate = requestPricingDate
+
+          const pointLabel =
+            transportRequest?.pickup_point.trim() && transportRequest?.dropoff_point.trim()
+              ? `${transportRequest.pickup_point} -> ${transportRequest.dropoff_point}`
+              : null
+          const qty = isVehicleRental ? billableRentalDaysForRequest(transportRequest) : 1
+
+          // A per-request price override beats the rate card (odd trips, after-hours, etc.). A
+          // missing card is no longer fatal once an override is set — see resolveOverriddenUnit.
+          const overridePrice = transportRequest?.price_override ?? null
+
+          if (overridePrice !== null) {
+            const { validRateCard, rateTypeInherited, description, suiteTypeName } = resolveOverriddenUnit(
+              suiteTypeId,
+              requestPricingDate,
+            )
+            activeRateCard = validRateCard
+            activeRateCardInherited = rateTypeInherited ?? false
+            // The typed figure is in the currency of the card it replaces; with no card to
+            // replace, the leg's own price currency is what the consultant was shown.
+            const overrideCurrency = validRateCard?.currency ?? selection.priceCurrency ?? targetCurrency
+            // Transfers show supplier label + route leg (e.g. "Ulysses Tours & Transfers - CPT
+            // Station → Hotel"); suiteTypeName (vehicle category) stays internal pricing metadata.
+            const transportDescription = isTransfer
+              ? description
+              : [description, pointLabel].filter(Boolean).join(" - ")
+            addLineItem({
+              description: transportDescription,
+              qty,
+              unitPrice: overridePrice,
+              supplierDescription,
+              suiteTypeId,
+              suiteTypeName,
+              unit,
+              hideVariantSuffix: isTransfer,
+              sourceCurrency: overrideCurrency,
+              transportOverride: {
+                price: overridePrice,
+                basePrice: validRateCard?.pricePerPerson ?? null,
+                setAt: transportRequest?.price_override_set_at ?? null,
+                setByName: transportOverrideSetByName.get(transportRequest?.price_override_set_by ?? "") ?? null,
+              },
+            })
+            continue
+          }
+
           const { validRateCard, rateTypeInherited, description, suiteTypeName } = resolveUnit(
             suiteTypeId,
             requestPricingDate,
           )
           activeRateCard = validRateCard
           activeRateCardInherited = rateTypeInherited
-
-          const pointLabel =
-            transportRequest?.pickup_point.trim() && transportRequest?.dropoff_point.trim()
-              ? `${transportRequest.pickup_point} -> ${transportRequest.dropoff_point}`
-              : null
-          // Transfers show supplier label + route leg (e.g. "Ulysses Tours & Transfers - CPT
-          // Station → Hotel"); suiteTypeName (vehicle category) stays internal pricing metadata.
           const transportDescription = isTransfer
             ? description
             : [description, pointLabel].filter(Boolean).join(" - ")
-
-          // A per-request price override beats the rate card (odd trips, after-hours, etc.).
-          // It is a hand-typed figure, so it carries the LEG's currency rather than the card's.
-          const hasOverride = transportRequest?.price_override != null
-
           addLineItem({
             description: transportDescription,
-            qty: isVehicleRental ? getBillableRentalDays(transportRequest) : 1,
-            unitPrice: transportRequest?.price_override ?? validRateCard.pricePerPerson,
+            qty,
+            unitPrice: validRateCard.pricePerPerson,
             supplierDescription,
             suiteTypeId,
             suiteTypeName,
             unit,
             hideVariantSuffix: isTransfer,
-            sourceCurrency: hasOverride
-              ? (selection.priceCurrency ?? targetCurrency)
-              : validRateCard.currency,
+            sourceCurrency: validRateCard.currency,
           })
         }
       } else {
@@ -1014,7 +1203,7 @@ export async function buildPackageQuoteLineItems({
 
   // Re-fold the quote's manual top-up into the freshly rebuilt Commission line. Without this,
   // any Build Booking re-price would drop it, since every line item is regenerated from scratch.
-  return { lineItems: applyCommissionBonus(lineItems, commissionBonus) }
+  return { lineItems: applyCommissionBonus(lineItems, commissionBonus), incompleteLegs }
 }
 
 export function calculateQuoteTotals(lineItems: QuoteLineItem[]) {

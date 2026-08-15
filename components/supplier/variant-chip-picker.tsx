@@ -35,7 +35,8 @@ export interface VariantChipPickerProps {
 export function VariantChipPicker({
   label,
   available,
-  selectedIds,
+  // Fed from draft-derived form state, which may predate these ids existing.
+  selectedIds = [],
   onChange,
   onCreate,
   emptyText = "Select...",

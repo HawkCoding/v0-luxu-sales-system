@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { getEmailImportReviewMetadata } from "@/lib/inbound-email/review"
+import { assessEnquiryPlausibility, getEmailImportReviewMetadata } from "@/lib/inbound-email/review"
 import { parseEmailDraft } from "@/lib/import/parseEmailDraft"
 
 describe("email import review metadata", () => {
@@ -79,5 +79,76 @@ No. of Suites: 1
 
     expect(review.needsReview).toBe(false)
     expect(review.warnings).toContain("DepartureDate parsed with low confidence")
+  })
+})
+
+describe("assessEnquiryPlausibility", () => {
+  it("rejects an out-of-office auto-reply", () => {
+    // This exact body produced a customer, a booking LTT-2026-0057 and a draft quote, because the
+    // subject rule was the only content gate the automated path had.
+    const draft = parseEmailDraft(`
+Thank you for your email. I am currently out of the office until 20 August
+and will respond on my return.
+
+For urgent matters contact reception@example.com.
+
+Regards,
+Sarah Jones
+`)
+
+    const verdict = assessEnquiryPlausibility(draft)
+
+    expect(verdict.importable).toBe(false)
+    expect(verdict.reason).toContain("does not look like an enquiry")
+  })
+
+  it("rejects an email with a contactable human but no trip detail at all", () => {
+    const draft = parseEmailDraft(`
+First name: Jane
+Surname: Smith
+Email: jane@example.com
+Country: South Africa
+No. of Adults: 2
+No. of Suites: 1
+Please add me to your mailing list.
+`)
+
+    const verdict = assessEnquiryPlausibility(draft)
+
+    expect(verdict.importable).toBe(false)
+    expect(verdict.reason).toContain("No supplier, route or departure date")
+  })
+
+  it("accepts a half-filled enquiry — that is what Needs Review is for", () => {
+    const draft = parseEmailDraft(`
+First name: Jane
+Surname: Smith
+Email: jane@example.com
+Country: South Africa
+Rovos Rail
+Departure Date: 2026-09-15
+`)
+
+    const verdict = assessEnquiryPlausibility(draft)
+
+    expect(verdict.importable).toBe(true)
+    // Still flagged — importable and complete are different bars.
+    expect(getEmailImportReviewMetadata(draft).needsReview).toBe(true)
+  })
+
+  it("accepts a complete enquiry", () => {
+    const draft = parseEmailDraft(`
+First name: Jane
+Surname: Smith
+Email: jane@example.com
+Country: South Africa
+Rovos Rail
+Direction: Pretoria to Cape Town
+Departure Date: 2026-09-15
+No. of Adults: 2
+No. of Suites: 1
+`)
+
+    expect(assessEnquiryPlausibility(draft).importable).toBe(true)
   })
 })

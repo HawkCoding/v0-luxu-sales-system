@@ -1,4 +1,4 @@
-import { type ParsedDraft } from "@/lib/import/parseEmailDraft"
+import { type ParsedDraft, type StaffLeadSource } from "@/lib/import/parseEmailDraft"
 import { getDraftSuiteUnits } from "@/lib/import/suite-selections"
 import type { SuiteAxis } from "@/lib/suites/suite-vocabulary"
 
@@ -41,6 +41,7 @@ export interface EnquiryImportPayload {
   flightDepartureDate?: string
   province?: string
   linkedCustomerId?: string
+  source?: StaffLeadSource
   extractedJson: {
     parsedFrom: "email_draft"
     formFields: ParsedDraft["formFields"]
@@ -86,6 +87,8 @@ export function buildEnquiryImportPayload(draft: ParsedDraft): EnquiryImportPayl
 
   return {
     rawText: draft.rawText,
+    // Only the manual-entry path sets this; the API ignores it for a paste import.
+    source: draft.source,
     purpose: draft.trip.purpose,
     title: draft.customer.title,
     name: draft.customer.firstName,

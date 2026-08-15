@@ -88,6 +88,13 @@ function compareRouteCandidates(a: RouteCandidate, b: RouteCandidate): number {
  * rather than abandoned -- an unresolved route leaves the booking with no rate cards and no way to
  * price a quote, which is worse than a reproducible best guess a consultant can correct. Nothing
  * is flagged when the tie-break fires, by design.
+ *
+ * That tie-break is scoped to ONE operator, which is why `supplierId` is mandatory in practice:
+ * with no operator the search widened to every route in the table and cheerfully returned another
+ * operator's route for an enquiry that never named them (an "Orient Express" enquiry came back with
+ * The Blue Train's Pretoria <-> Cape Town). Choosing between operators is not a tie-break, it is a
+ * guess, so an unresolved operator now resolves no route at all -- the raw direction wording is
+ * still kept on the booking, and the consultant picking the operator resolves the route with it.
  */
 export async function findRouteMatch(
   supabase: ServiceClient,
@@ -95,19 +102,18 @@ export async function findRouteMatch(
   supplierId: string | null = null,
 ): Promise<RouteMatch> {
   if (typeof direction !== "string" || !direction.trim()) return NO_MATCH
+  if (!supplierId) return NO_MATCH
 
   const { data: locations } = await supabase.from("locations").select("id, name")
   const endpoints = extractDirectionLocationIds(direction, locations ?? [])
   if (!endpoints) return NO_MATCH
   const [firstLocId, secondLocId] = endpoints
 
-  let routesQuery = supabase
+  const routesQuery = supabase
     .from("routes")
     .select("id, name, origin_location_id, destination_location_id, direction_mode, duration_days")
     .eq("active", true)
-  if (supplierId) {
-    routesQuery = routesQuery.eq("supplier_id", supplierId)
-  }
+    .eq("supplier_id", supplierId)
   const { data: routes } = await routesQuery
 
   const matches = (routes ?? []).filter((route) => {

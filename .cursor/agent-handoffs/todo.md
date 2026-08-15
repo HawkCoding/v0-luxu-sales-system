@@ -1189,3 +1189,32 @@ Use this as an implementation tracker. Prefer completing each section in order b
 - [ ] Restore tested in non-production. _(Automated coverage in `app/api/backups/restore/route.test.ts`; human confirms in non-prod — UAT 3.5.)_
 - [ ] UAT feedback captured. _(Depends on Phase 33 runthrough — capture in `.cursor/agent-handoffs/uat-findings/`.)_
 - [x] Final handoff notes written. _(`.cursor/agent-handoffs/final-release-handoff.md`.)_
+
+## Deferred — awaiting client decision
+
+Raised by QA 06 (`qa/reports/system-qa/2026-08-13-06-suppliers-rate-cards.md`) and deliberately
+not fixed. Each is recorded here so a later pass does not re-raise it as new.
+
+- [ ] **F06-3 — `pricing_snapshot.passengerKind` is hardcoded `"adult"`** on child and infant lines
+      (`lib/quotes/build-from-package.ts`, in `addLineItem`). The line description and the price are
+      correct; only the audit field is wrong. **Blocked on the client**, because the fix is not
+      invisible: setting the real kind activates the currently-dead `(Child)` / `(Infant)` branch in
+      `lib/invoices/describe-invoice-line.ts`, which feeds `buildInvoiceView` → `ensure-invoice-pdf.ts`
+      → the invoice PDF the client receives. Today two invoice lines can read identically at
+      different prices. The client must say how a child line should read on an invoice before this
+      is changed. Fixing it also corrects `deriveFlightCapPerPerson`
+      (`lib/quotes/quote-presentation.ts`), which currently counts child fares as adult when
+      choosing the flight cap. The quote PDF is unaffected either way — it renders the stored
+      description, which already carries "- Child".
+
+- [ ] **F06-6 — `PATCH /api/suppliers/{slug}` is last-write-wins without `expectedUpdatedAt`.**
+      The optimistic lock is opt-in by the caller. With the token a stale second save is correctly
+      refused (`409 STALE_VERSION`); without it the write lands unconditionally. The supplier editor
+      always sends it, so this is exposure only for a non-UI caller. Informational.
+
+- [ ] **Supplier save is not transactional.** The email failure mode is fixed, but the `suppliers`
+      row is still written before its children, so a failure in a later child write (routes, suite
+      types, rate cards, station addresses) still reports an error to the user after part of the
+      save has landed. Closing the whole class means moving the handler body into a `save_supplier`
+      Postgres function — a migration plus a ~450-line rewrite that relocates `STALE_VERSION` and the
+      dependency 409s into SQL.

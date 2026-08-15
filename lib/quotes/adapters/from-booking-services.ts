@@ -134,6 +134,7 @@ export async function loadBookingServicesPackageDetail(
     const supplier = firstRecord(service.suppliers)
     const supplierKind = (supplier?.kind as SupplierKind) ?? "train_operator"
     const rateTiers = resolveSupplierRateTiers({
+      supplierId: service.supplier_id,
       baseRateTypeId: supplier?.base_rate_type_id ?? null,
       quoteRateTypeId: supplier?.quote_rate_type_id ?? null,
     })
@@ -154,6 +155,7 @@ export async function loadBookingServicesPackageDetail(
       supplierBaseRateTypeId: rateTiers.baseRateTypeId,
       supplierQuoteRateTypeId: rateTiers.quoteRateTypeId,
       supplierInheritedRateTypeName: rateTiers.inheritedRateTypeName,
+      supplierApplicableRateTypeIds: rateTiers.applicableRateTypeIds,
     }
   })
 
@@ -226,6 +228,10 @@ export function bookingServicesToLegSelections(
         manualAdultPrice: unit.manual_adult_price,
         manualChildPrice: unit.manual_child_price,
         manualInfantPrice: unit.manual_infant_price,
+        manualRoomPrice: unit.manual_room_price,
+        // The setter's display name is resolved by the caller that has a Supabase client
+        // (see lib/quotes/room-override-provenance.ts); this pure mapper only carries the stamp.
+        manualRoomPriceSetAt: unit.manual_room_price_set_at,
       }))
 
     const selection: PackageLegSelection = {

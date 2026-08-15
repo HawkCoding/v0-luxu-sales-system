@@ -971,6 +971,7 @@ export default function JobDetailPage() {
             enquiry={enquiry}
             itineraries={itineraries}
             stage={job.stage}
+            bookingUpdatedAt={data?.job?.updatedAt}
             hasDraftQuotes={quotes.some((quote: { status: string }) => quote.status === "draft")}
             onQuoteStarted={async (quoteId) => {
               await mutate()

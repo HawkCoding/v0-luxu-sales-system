@@ -12,11 +12,19 @@ export interface SupplierRateTiers {
   quoteRateTypeId: string | null
   /** Display name of what an un-chosen leg inherits: the quoted rate where set, else the base. */
   inheritedRateTypeName: string | null
+  /**
+   * Every rate type this supplier actually prices at -- its base rate plus the rates it has a
+   * markdown for (the "Applicable Rates" card). Null when the caller passed no adjustments, which
+   * means "unknown", not "none": consumers must not filter on it in that case.
+   */
+  applicableRateTypeIds: string[] | null
 }
 
 export interface SupplierRateTierSource {
   baseRateTypeId?: string | null
   quoteRateTypeId?: string | null
+  /** Rate types this supplier has a markdown row for. Omit when they haven't been loaded. */
+  adjustmentRateTypeIds?: string[]
 }
 
 /**
@@ -33,7 +41,12 @@ export function resolveSupplierRateTiers(
 ): SupplierRateTiers {
   const active = rateTypes.filter((rt) => !rt.archivedAt)
   if (active.length === 0) {
-    return { baseRateTypeId: null, quoteRateTypeId: null, inheritedRateTypeName: null }
+    return {
+      baseRateTypeId: null,
+      quoteRateTypeId: null,
+      inheritedRateTypeName: null,
+      applicableRateTypeIds: supplier.adjustmentRateTypeIds ? [] : null,
+    }
   }
 
   const activeId = (rateTypeId: string | null | undefined) =>
@@ -48,9 +61,24 @@ export function resolveSupplierRateTiers(
   const quoteRateTypeId = nominated === baseRateTypeId ? null : nominated
   const inheritedId = quoteRateTypeId ?? baseRateTypeId
 
+  // The base rate leads: it is the one tier a supplier always prices at, so a leg can always fall
+  // back to it even when no markdown has been captured yet. Anything archived or deleted is
+  // dropped the same way the tiers above are.
+  const applicableRateTypeIds = supplier.adjustmentRateTypeIds
+    ? [
+        baseRateTypeId,
+        ...active
+          .filter(
+            (rt) => rt.id !== baseRateTypeId && supplier.adjustmentRateTypeIds?.includes(rt.id),
+          )
+          .map((rt) => rt.id),
+      ]
+    : null
+
   return {
     baseRateTypeId,
     quoteRateTypeId,
     inheritedRateTypeName: active.find((rt) => rt.id === inheritedId)?.name ?? null,
+    applicableRateTypeIds,
   }
 }

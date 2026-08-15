@@ -677,4 +677,54 @@ Departure Date
     expect(draft.trip.route).toBe("Durban To Dar Es Salaam")
     expect(draft.confidence["trip.route"]).toBe("high")
   })
+
+  it("matches an operator whose DB name carries a definite article the email omits", () => {
+    // Every Blue Train enquiry writes "Blue Train"; the supplier row reads "The Blue Train". An
+    // exact scan matched none of them, sending a whole operator's traffic to Needs Review for a
+    // supplier the parser could already name.
+    const draft = parseEmailDraft("Please send me Blue Train Information for September.", {
+      trainOperatorNames: ["The Blue Train", "Rovos Rail"],
+    })
+
+    expect(draft.trip.supplier).toBe("The Blue Train")
+    expect(draft.confidence["trip.supplier"]).toBe("high")
+  })
+
+  it("matches the same operator when the email does write the article", () => {
+    const draft = parseEmailDraft("We would like to book The Blue Train.", {
+      trainOperatorNames: ["The Blue Train", "Rovos Rail"],
+    })
+
+    expect(draft.trip.supplier).toBe("The Blue Train")
+  })
+
+  it("prefers an explicit 'from X to Y' over the first bare 'X to Y' in prose", () => {
+    // The bare fallback used to take "...would love to do..." and present
+    // "Daughter And Would Love To Do The Rovos Rail" as a high-confidence route.
+    const draft = parseEmailDraft(
+      "We are a couple travelling with their daughter and would love to do the Rovos Rail trip from Pretoria to Cape Town.",
+    )
+
+    expect(draft.trip.route).toBe("Pretoria To Cape Town")
+  })
+
+  it("returns no route rather than a sentence fragment when nothing looks like a place pair", () => {
+    const draft = parseEmailDraft("We would love to do a rail journey next year, please advise.")
+
+    expect(draft.trip.route).toBe("")
+    expect(validateDraft(draft).missingRequired).toContain("Route / Direction")
+  })
+
+  it("still reads a bare 'X to Y' when both endpoints look like places", () => {
+    const draft = parseEmailDraft("Enquiry for Pretoria to Cape Town in May.")
+
+    expect(draft.trip.route).toBe("Pretoria To Cape Town")
+    expect(draft.confidence["trip.route"]).toBe("high")
+  })
+
+  it("reads 'between X and Y' wording", () => {
+    const draft = parseEmailDraft("We want to travel between Pretoria and Victoria Falls.")
+
+    expect(draft.trip.route).toBe("Pretoria To Victoria Falls")
+  })
 })

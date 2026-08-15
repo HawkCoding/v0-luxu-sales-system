@@ -23,6 +23,7 @@ function leg(partial: Partial<PackageLeg> & { id: string; supplierKind: Supplier
     baseRateTypeId: null,
     quoteRateTypeId: null,
     inheritedRateTypeName: null,
+    applicableRateTypeIds: null,
     label: null,
     sortOrder: 0,
     dateAnchor: null,
@@ -296,6 +297,7 @@ describe("hydrateFromSaved", () => {
     luggageCount: 2,
     flightNumber: "SA123",
     priceOverride: null,
+    priceOverrideSetAt: null,
     notes: null,
     supplierReference: null,
     sortOrder: 0,
@@ -481,6 +483,9 @@ describe("toApplySelections", () => {
     const trainSel = selections.find((s) => s.legId === "leg-train")
     expect(trainSel?.units).toEqual([
       {
+        // A draft room has no persisted id to send, and a train leg never carries a room override.
+        unitId: undefined,
+        manualRoomPrice: null,
         suiteTypeId: "suite-1",
         bedroomTypeId: null,
         bedroomLayoutId: null,

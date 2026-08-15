@@ -441,6 +441,29 @@ describe("supplierSaveSchema — tour operators price the tour type", () => {
     })
     expect(result.success).toBe(false)
   })
+
+  it("accepts a blank itinerary name when a tour type is linked (name derives from the tour type)", () => {
+    const result = supplierSaveSchema.safeParse(
+      tourPayload({
+        routes: [{ id: UUID_3, name: "", suiteTypeId: UUID_2, active: true }],
+      }),
+    )
+    expect(result.success).toBe(true)
+  })
+
+  it("rejects two itineraries linked to the same tour type", () => {
+    const result = supplierSaveSchema.safeParse(
+      tourPayload({
+        routes: [
+          { id: UUID_3, name: "Cape Town - One Day Pass", suiteTypeId: UUID_2, active: true },
+          { id: UUID_4, name: "Cape Town - One Day Pass (2)", suiteTypeId: UUID_2, active: true },
+        ],
+      }),
+    )
+    expect(result.success).toBe(false)
+    if (result.success) return
+    expect(result.error.issues[0].message).toMatch(/only have one itinerary/)
+  })
 })
 
 describe("supplierDraftSaveSchema", () => {

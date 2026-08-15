@@ -12,6 +12,22 @@ function normalizeSubject(value: string): string {
   return value.trim().toLowerCase()
 }
 
+/**
+ * True when `pattern` is usable for `matchType`. Only `regex` can be unusable -- an uncompilable
+ * pattern is caught by `matchesInboundSubjectRule` at sync time and treated as "no match", which
+ * means a rule saved with a typo'd regex is permanently inert and never tells the admin who wrote
+ * it. Callers that accept a rule from a human must reject it up front with this.
+ */
+export function isValidSubjectPattern(pattern: string, matchType: InboundRuleMatchType): boolean {
+  if (matchType !== "regex") return true
+  try {
+    new RegExp(pattern.trim(), "i")
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function matchesInboundSubjectRule(subject: string, rule: InboundSubjectRule): boolean {
   if (!rule.active) return false
 

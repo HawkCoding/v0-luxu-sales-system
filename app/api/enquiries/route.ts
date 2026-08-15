@@ -18,6 +18,7 @@ import {
   type SuiteAliasWrite,
 } from "@/lib/suites/suite-alias-store"
 import { withSuiteTypeMissingField } from "@/lib/suites/missing-fields"
+import { REVIEW_REASON } from "@/lib/inbound-email/review-reasons"
 import { createServiceClient, createSessionClient } from "@/lib/supabase/server"
 import type { Json } from "@/lib/supabase/types"
 import { COMPLETED_REPEAT_BOOKING_STAGES } from "@/lib/customer-repeat-status"
@@ -215,8 +216,22 @@ const transportRequestInputSchema = z.object({
     .nullish(),
 })
 
+// Lead sources a consultant may stamp on an enquiry they captured themselves. The three
+// mechanical sources -- web_form, paste_import, email -- are decided by the intake path, never
+// by the caller: `email` in particular gates the reject-import DELETE below, and `web_form` is
+// what the public form must always be recorded as.
+const STAFF_SELECTABLE_SOURCES = [
+  "phone_call",
+  "walk_in",
+  "referral",
+  "advertisement",
+  "social_media",
+  "travel_agent",
+] as const
+
 const enquiryBodySchema = z.object({
   email: z.string().trim().max(255).nullish(),
+  source: z.enum(STAFF_SELECTABLE_SOURCES).nullish().catch(null),
   name: z.string().trim().max(120).nullish(),
   surname: z.string().trim().max(120).nullish(),
   title: z.string().trim().max(40).nullish(),
@@ -318,6 +333,35 @@ export async function POST(req: Request) {
   }
   const body = parsedBody.data
 
+  // Every field above is nullish + .catch(), so an empty body parses clean. Without this an
+  // errored client (or a bare curl) mints a booking, a nameless customer and a draft quote that
+  // nobody can trace back to a person. Any one identifying detail is enough to keep the enquiry.
+  const hasIdentifyingDetail = [
+    body.email,
+    body.name,
+    body.surname,
+    body.contactNumber,
+    body.rawText,
+  ].some((value) => typeof value === "string" && value.trim().length > 0)
+  if (!hasIdentifyingDetail && !body.linkedCustomerId) {
+    return NextResponse.json(
+      { error: "An enquiry needs at least a name, email, contact number or the original text" },
+      { status: 400 },
+    )
+  }
+
+  // Mirrors the defaults the booking insert applies below. A booking with nobody travelling
+  // can't be priced (lib/packages/passenger-totals.ts divides by the pax count) and the dialog
+  // already blocks it -- the API has to agree.
+  const effectiveAdults = body.noOfAdults ?? 1
+  const effectiveChildren = body.noOfChildren ?? 0
+  if (effectiveAdults + effectiveChildren < 1) {
+    return NextResponse.json(
+      { error: "An enquiry needs at least one traveller" },
+      { status: 400 },
+    )
+  }
+
   // Service-role client: the public web form has no user session, and staff
   // sessions may lack RLS access to every table this intake touches.
   const supabase = createServiceClient()
@@ -372,10 +416,14 @@ export async function POST(req: Request) {
     : legacySuiteNamesToUnits(Array.isArray(body.suiteTypes) ? body.suiteTypes : [])
   // Gaps worth flagging that the parser can't fabricate its way out of.
   const suiteReviewMissingFields: string[] = []
-  if (!body.noOfSuites) suiteReviewMissingFields.push("Number of suites")
-  if (!normalizeNullableText(body.direction)) suiteReviewMissingFields.push("Direction")
+  if (!body.noOfSuites) suiteReviewMissingFields.push(REVIEW_REASON.numberOfSuites)
+  if (!normalizeNullableText(body.direction)) suiteReviewMissingFields.push(REVIEW_REASON.direction)
 
-  const source = body.rawText ? "paste_import" : "web_form"
+  // A consultant typing an enquiry they took over the phone is not a web form submission --
+  // recording it as one is what made lead-source reporting wrong. An authenticated staff session
+  // may therefore stamp the real lead source; the public webhook never can, so the form it owns
+  // stays web_form and a paste import stays paste_import.
+  const source = user && body.source ? body.source : body.rawText ? "paste_import" : "web_form"
   // body.supplier is free text (the web form can't know internal supplier UUIDs); resolve it the
   // same never-guess way findHotelSupplierId already resolves body.hotelOption below, rather than
   // silently dropping every request that arrives without a client-resolved id.
@@ -494,8 +542,14 @@ export async function POST(req: Request) {
   }
 
   // Alias learning (service-role only, best-effort — a failed write must never fail an enquiry).
+  //
+  // "service-role only" is literal: suite_vocab_aliases has RLS on with no INSERT/UPDATE policy
+  // for `authenticated`, so passing the request's session client here meant every learned alias
+  // was rejected by RLS and swallowed by the store's best-effort contract — the self-confirming
+  // alias loop never learned anything. The caller is already authorised above.
   if (suiteVocabulary) {
     const supplierIdForAliases = suiteVocabulary.supplierId
+    const aliasClient = createServiceClient()
     try {
       const corrections: SuiteAliasWrite[] = []
       for (const unit of resolvedSuiteUnits) {
@@ -508,7 +562,7 @@ export async function POST(req: Request) {
         }
       }
       if (corrections.length > 0) {
-        await recordSuiteAliasCorrections(supabase, corrections, user?.id ?? null)
+        await recordSuiteAliasCorrections(aliasClient, corrections, user?.id ?? null)
         await supabase.from("audit_logs").insert({
           actor: user?.email ?? "system",
           actor_user_id: user?.id ?? null,
@@ -522,7 +576,7 @@ export async function POST(req: Request) {
       // A suggestion that came from an unconfirmed alias and survived untouched is now trusted.
       for (const unit of resolvedSuiteUnits) {
         if (!unit.rawPhrase || unit.aliasAcceptedAxes.length === 0) continue
-        await promoteSuiteAliases(supabase, supplierIdForAliases, unit.rawPhrase, unit.aliasAcceptedAxes)
+        await promoteSuiteAliases(aliasClient, supplierIdForAliases, unit.rawPhrase, unit.aliasAcceptedAxes)
       }
     } catch (error) {
       console.error("enquiries:suiteAliasLearning", error)
@@ -663,7 +717,7 @@ export async function POST(req: Request) {
     actor_user_id: user?.id ?? null,
     entity_type: "Booking",
     entity_id: booking.id,
-    action: body.rawText ? "created_from_paste_import" : "created_from_web_form",
+    action: `created_from_${source}`,
     meta_json: {
       draft_quote_id: draftQuote.quoteId,
       draft_quote_warning: draftQuote.warning,

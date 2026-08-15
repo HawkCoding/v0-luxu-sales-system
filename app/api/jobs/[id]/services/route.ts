@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { NextResponse } from "next/server"
 import { requireRole, requireUser } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { writeAuditLog } from "@/lib/audit-write"
@@ -6,6 +7,7 @@ import { loadAllowedSuiteVariantIds, findInvalidVariantField } from "@/lib/packa
 import { computeLegPassengerTotals } from "@/lib/packages/passenger-totals"
 import { recomputeBookingTripDates } from "@/lib/packages/recompute-trip-dates"
 import { learnSuiteAliasesFromUnits } from "@/lib/suites/learn-from-units"
+import { createServiceClient } from "@/lib/supabase/server"
 import type { Database } from "@/lib/supabase/types"
 
 export const runtime = "nodejs"
@@ -21,7 +23,7 @@ export const runtime = "nodejs"
  * hydrateFromSaved, SavedPackageState) are shared unmodified between both flows.
  */
 
-import { SUPPORTED_CURRENCY_VALUES } from "@/lib/types"
+import { isOptionalPackageLegKind, SUPPORTED_CURRENCY_VALUES, type SupplierKind } from "@/lib/types"
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/
 
@@ -42,10 +44,17 @@ const selectionUnitSchema = z.object({
   manualAdultPrice: z.number().nonnegative().nullable().optional(),
   manualChildPrice: z.number().nonnegative().nullable().optional(),
   manualInfantPrice: z.number().nonnegative().nullable().optional(),
+  /** Hotel legs only: this room's typed price per room per night, replacing its rate card for
+   * this booking. Rejected on any other supplier kind — see the guard in PATCH. */
+  manualRoomPrice: z.number().nonnegative().nullable().optional(),
 })
 
 const updateServiceSchema = z.object({
   packageLegId: z.string().uuid(),
+  /** booking_services.updated_at as the client last read it. Sent by the Build Booking dialog so a
+   * second consultant's concurrent save is rejected instead of silently overwritten. Optional:
+   * a client that doesn't track versions keeps the old last-write-wins behaviour. */
+  expectedUpdatedAt: z.string().optional(),
   selected: z.boolean().optional(),
   // A service's supplier is fixed at creation (build-booking/route.ts) and never edited here --
   // unlike a catalogue selection's supplier_id, booking_services.supplier_id is NOT NULL, so
@@ -77,8 +86,8 @@ type BookingServiceUpdate = Database["public"]["Tables"]["booking_services"]["Up
 type BookingServiceUnitInsert = Database["public"]["Tables"]["booking_service_units"]["Insert"]
 
 const SERVICES_WITH_UNITS_SELECT =
-  "id, booking_id, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, date_anchor, rate_type_id, notes, selected, origin, price_currency, " +
-  "units:booking_service_units(id, suite_type_id, bedroom_type_id, bedroom_layout_id, bathroom_type_id, adult_count, child_count, infant_count, sort_order, manual_adult_price, manual_child_price, manual_infant_price)"
+  "id, booking_id, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, date_anchor, rate_type_id, notes, selected, origin, price_currency, updated_at, " +
+  "units:booking_service_units(id, suite_type_id, bedroom_type_id, bedroom_layout_id, bathroom_type_id, adult_count, child_count, infant_count, sort_order, manual_adult_price, manual_child_price, manual_infant_price, manual_room_price, manual_room_price_set_at)"
 
 interface ServiceUnitRow {
   id: string
@@ -93,6 +102,8 @@ interface ServiceUnitRow {
   manual_adult_price: number | null
   manual_child_price: number | null
   manual_infant_price: number | null
+  manual_room_price: number | null
+  manual_room_price_set_at: string | null
 }
 
 interface ServiceWithUnitsRow {
@@ -110,6 +121,7 @@ interface ServiceWithUnitsRow {
   selected: boolean
   origin: "auto" | "consultant"
   price_currency: string
+  updated_at: string
   units: ServiceUnitRow[]
 }
 
@@ -124,12 +136,27 @@ export async function GET(_req: Request, { params }: RouteParams) {
 
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
-    .select("id, trip_start_date, trip_end_date")
+    .select("id, trip_start_date, trip_end_date, services_confirmed_at, services_confirmed_by")
     .eq("id", id)
     .maybeSingle()
 
   if (bookingError) return safeSupabaseError("services:get-booking", bookingError)
   if (!booking) return jsonError("Booking not found", 404)
+
+  // Who confirmed the list and when: stored since the confirm route landed, but nothing showed it,
+  // so a reopened dialog looked identical to one that had never been auto-built.
+  let servicesConfirmedByName: string | null = null
+  if (booking.services_confirmed_by) {
+    const { data: confirmer } = await supabase
+      .from("profiles")
+      .select("name, surname, email")
+      .eq("user_id", booking.services_confirmed_by)
+      .maybeSingle()
+    if (confirmer) {
+      servicesConfirmedByName =
+        [confirmer.name, confirmer.surname].filter(Boolean).join(" ").trim() || confirmer.email || null
+    }
+  }
 
   const { data: services, error: servicesError } = await supabase
     .from("booking_services")
@@ -145,6 +172,8 @@ export async function GET(_req: Request, { params }: RouteParams) {
     packageId: serviceRows.length > 0 ? id : null,
     tripStartDate: booking.trip_start_date,
     tripEndDate: booking.trip_end_date,
+    servicesConfirmedAt: booking.services_confirmed_at,
+    servicesConfirmedByName,
     selections: serviceRows.map((row) => ({ ...row, package_leg_id: row.id })),
   })
 }
@@ -179,7 +208,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   const serviceIds = parsed.data.selections.map((selection) => selection.packageLegId)
   const { data: validServices, error: servicesLoadError } = await supabase
     .from("booking_services")
-    .select("id, supplier_id, suppliers(kind)")
+    .select("id, supplier_id, updated_at, suppliers(kind)")
     .eq("booking_id", id)
     .in("id", serviceIds)
 
@@ -189,6 +218,47 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   const invalid = serviceIds.filter((serviceId) => !serviceById.has(serviceId))
   if (invalid.length > 0) {
     return jsonError("Selections reference services outside this booking", 400, { invalidServiceIds: invalid })
+  }
+
+  // Optimistic lock, checked across every selection before a single write lands: two consultants
+  // saving the same booking used to both get a 200, with the later save silently erasing the
+  // earlier one. Mirrors PATCH /api/jobs/[id]'s STALE_VERSION contract.
+  const staleSelections = parsed.data.selections.filter((selection) => {
+    if (!selection.expectedUpdatedAt) return false
+    const stored = serviceById.get(selection.packageLegId)?.updated_at
+    return Boolean(stored) && Date.parse(stored as string) !== Date.parse(selection.expectedUpdatedAt)
+  })
+
+  if (staleSelections.length > 0) {
+    const first = staleSelections[0]
+    return NextResponse.json(
+      {
+        error:
+          "Someone else changed this booking's services while you were editing. Close and reopen the dialog to pick up their changes.",
+        code: "STALE_VERSION",
+        packageLegId: first.packageLegId,
+        currentUpdatedAt: serviceById.get(first.packageLegId)?.updated_at ?? null,
+        staleLegIds: staleSelections.map((selection) => selection.packageLegId),
+      },
+      { status: 409 },
+    )
+  }
+
+  // `selected` drives voucher inclusion but is a no-op for pricing on a non-optional leg
+  // (lib/quotes/build-from-package.ts), so unticking the train used to leave the customer paying
+  // for a journey the voucher never mentions. The leg is part of every booking: refuse instead.
+  for (const selection of parsed.data.selections) {
+    if (selection.selected !== false) continue
+    const service = serviceById.get(selection.packageLegId)
+    const supplier = Array.isArray(service?.suppliers) ? service.suppliers[0] : service?.suppliers
+    const supplierKind = supplier?.kind as SupplierKind | undefined
+    if (supplierKind && !isOptionalPackageLegKind(supplierKind)) {
+      return jsonError(
+        "The train journey is part of every booking and cannot be excluded from the quote or the voucher.",
+        400,
+        { packageLegId: selection.packageLegId, supplierKind },
+      )
+    }
   }
 
   // Validate units up front (before any writes) — same rules as package-selections.
@@ -209,6 +279,19 @@ export async function PATCH(req: Request, { params }: RouteParams) {
         400,
         { packageLegId: selection.packageLegId },
       )
+    }
+
+    // The room-price override replaces a hotel's per-room-per-night rate card. Every other kind
+    // prices per person (and manual-pricing kinds already have their own typed fares), so an
+    // override there would silently mean something different from what was typed.
+    if (
+      supplierKind !== "hotel_property" &&
+      selection.units.some((unit) => unit.manualRoomPrice !== null && unit.manualRoomPrice !== undefined)
+    ) {
+      return jsonError("A per-room price override is only available on hotel services", 400, {
+        packageLegId: selection.packageLegId,
+        supplierKind,
+      })
     }
 
     for (const [unitIndex, unit] of selection.units.entries()) {
@@ -281,6 +364,34 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   // Per-service unit replacement (full replace-set, only for services whose payload includes units).
   const servicesWithUnits = parsed.data.selections.filter((selection) => selection.units)
+
+  // Units are replaced wholesale, so the override's "who and when" has to be carried across the
+  // delete/insert by hand: an unchanged amount keeps its original stamp, a changed or brand-new
+  // one is stamped with this save. Without this, re-saving a leg for an unrelated reason would
+  // keep re-dating an override nobody touched.
+  const existingUnitProvenance = new Map<string, { price: number | null; setAt: string | null; setBy: string | null }>()
+  if (servicesWithUnits.length > 0) {
+    const { data: existingUnits, error: existingUnitsError } = await supabase
+      .from("booking_service_units")
+      .select("id, manual_room_price, manual_room_price_set_at, manual_room_price_set_by")
+      .in(
+        "service_id",
+        servicesWithUnits.map((selection) => selection.packageLegId),
+      )
+
+    if (existingUnitsError) return safeSupabaseError("services:load-units", existingUnitsError)
+
+    for (const unit of existingUnits ?? []) {
+      existingUnitProvenance.set(unit.id, {
+        price: unit.manual_room_price,
+        setAt: unit.manual_room_price_set_at,
+        setBy: unit.manual_room_price_set_by,
+      })
+    }
+  }
+
+  const savedAt = new Date().toISOString()
+
   for (const selection of servicesWithUnits) {
     const { error: deleteUnitsError } = await supabase
       .from("booking_service_units")
@@ -289,21 +400,29 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
     if (deleteUnitsError) return safeSupabaseError("services:clear-units", deleteUnitsError)
 
-    const unitRows: BookingServiceUnitInsert[] = (selection.units ?? []).map((unit, index) => ({
-      service_id: selection.packageLegId,
-      suite_type_id: unit.suiteTypeId,
-      bedroom_type_id: unit.bedroomTypeId ?? null,
-      bedroom_layout_id: unit.bedroomLayoutId ?? null,
-      bathroom_type_id: unit.bathroomTypeId ?? null,
-      adult_count: unit.adultCount,
-      child_count: unit.childCount,
-      infant_count: unit.infantCount,
-      sort_order: unit.sortOrder ?? index,
-      manual_adult_price: unit.manualAdultPrice ?? null,
-      manual_child_price: unit.manualChildPrice ?? null,
-      manual_infant_price: unit.manualInfantPrice ?? null,
-      origin: "consultant",
-    }))
+    const unitRows: BookingServiceUnitInsert[] = (selection.units ?? []).map((unit, index) => {
+      const roomPrice = unit.manualRoomPrice ?? null
+      const previous = unit.id ? existingUnitProvenance.get(unit.id) : undefined
+      const unchanged = roomPrice !== null && previous?.price === roomPrice
+      return {
+        service_id: selection.packageLegId,
+        suite_type_id: unit.suiteTypeId,
+        bedroom_type_id: unit.bedroomTypeId ?? null,
+        bedroom_layout_id: unit.bedroomLayoutId ?? null,
+        bathroom_type_id: unit.bathroomTypeId ?? null,
+        adult_count: unit.adultCount,
+        child_count: unit.childCount,
+        infant_count: unit.infantCount,
+        sort_order: unit.sortOrder ?? index,
+        manual_adult_price: unit.manualAdultPrice ?? null,
+        manual_child_price: unit.manualChildPrice ?? null,
+        manual_infant_price: unit.manualInfantPrice ?? null,
+        manual_room_price: roomPrice,
+        manual_room_price_set_at: roomPrice === null ? null : unchanged ? previous?.setAt ?? savedAt : savedAt,
+        manual_room_price_set_by: roomPrice === null ? null : unchanged ? previous?.setBy ?? user.id : user.id,
+        origin: "consultant" as const,
+      }
+    })
 
     if (unitRows.length > 0) {
       const { error: insertUnitsError } = await supabase.from("booking_service_units").insert(unitRows)
@@ -313,10 +432,16 @@ export async function PATCH(req: Request, { params }: RouteParams) {
 
   // Learn from the correction — the higher-traffic correction point, same alias store as the
   // import review modal. Best-effort: a failed alias write must never fail the update.
+  //
+  // Deliberately the SERVICE client, not the session one: suite_vocab_aliases has RLS on with no
+  // INSERT/UPDATE policy for `authenticated` (by design — see the migration), so every learning
+  // write made with the session client was silently rejected by RLS and the store swallowed it.
+  // The user is already authorised for this booking above; this write is a system consequence of
+  // that, not a user-scoped one.
   if (servicesWithUnits.length > 0) {
     try {
       await learnSuiteAliasesFromUnits(
-        supabase,
+        createServiceClient(),
         id,
         servicesWithUnits.flatMap((selection) => selection.units ?? []),
         user.id,

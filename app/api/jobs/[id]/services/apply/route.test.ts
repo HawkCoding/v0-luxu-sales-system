@@ -21,6 +21,7 @@ import { POST } from "./route"
 const JOB_ID = "11111111-1111-4111-8111-111111111111"
 const QUOTE_ID = "22222222-2222-4222-8222-222222222222"
 const TRAIN_SERVICE_ID = "44444444-4444-4444-8444-444444444444"
+const HOTEL_SERVICE_ID = "55555555-5555-4555-8555-555555555555"
 const TRAIN_ROUTE_ID = "77777777-7777-4777-8777-777777777777"
 const TRAIN_SUITE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 const RATE_TYPE_DEFAULT_ID = "00000000-0000-4000-8000-000000000099"
@@ -50,6 +51,7 @@ function buildDetail(): PackageDetail {
         baseRateTypeId: null,
         quoteRateTypeId: null,
         inheritedRateTypeName: null,
+        applicableRateTypeIds: null,
         dateAnchor: null,
         label: "Blue Train",
         sortOrder: 0,
@@ -90,6 +92,51 @@ function buildDetail(): PackageDetail {
             updatedAt: "2026-01-01T00:00:00.000Z",
           },
         ],
+      },
+    ],
+  }
+}
+
+/** A hotel leg with two meal plans and no chosen one — the "straight after Build Booking" state
+ * that used to 400 the whole apply. */
+function withUnconfiguredHotelLeg(detail: PackageDetail): PackageDetail {
+  const supplierId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+  const route = (id: string, name: string) => ({
+    id,
+    supplierId,
+    name,
+    originLocationId: null,
+    destinationLocationId: null,
+    active: true,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  })
+
+  return {
+    ...detail,
+    legs: [
+      ...detail.legs,
+      {
+        id: HOTEL_SERVICE_ID,
+        packageId: JOB_ID,
+        supplierId,
+        supplierName: "Portswood Hotel",
+        supplierDescription: null,
+        supplierKind: "hotel_property",
+        pricingMode: "rate_card",
+        baseRateTypeId: null,
+        quoteRateTypeId: null,
+        inheritedRateTypeName: null,
+        applicableRateTypeIds: null,
+        dateAnchor: null,
+        label: "Portswood Hotel",
+        sortOrder: 1,
+        routes: [
+          route("88888888-8888-4888-8888-888888888888", "Bed & Breakfast"),
+          route("99999999-9999-4999-8999-999999999999", "Dinner, Bed & Breakfast"),
+        ],
+        rateCards: [],
+        suiteTypes: [],
       },
     ],
   }
@@ -257,6 +304,58 @@ describe("POST /api/jobs/[id]/services/apply", () => {
       // commission badge) render the right symbol.
       "ZAR",
     )
+  })
+
+  it("prices the configured legs and reports the unconfigured one (F10-8)", async () => {
+    helperMocks.loadBookingServicesPackageDetail.mockResolvedValue({
+      detail: withUnconfiguredHotelLeg(buildDetail()),
+      services: [{ id: TRAIN_SERVICE_ID }, { id: HOTEL_SERVICE_ID }],
+      units: [],
+    })
+
+    const response = await postApply({
+      jobId: JOB_ID,
+      quoteId: QUOTE_ID,
+      travelDate: "2026-06-01",
+      selections: [
+        {
+          legId: TRAIN_SERVICE_ID,
+          selected: true,
+          units: [{ suiteTypeId: TRAIN_SUITE_ID, adultCount: 2, childCount: 0, infantCount: 0 }],
+        },
+        { legId: HOTEL_SERVICE_ID, selected: true },
+      ],
+    })
+    const payload = await response.json()
+
+    expect(response.status).toBe(200)
+    expect(payload.lineItems).toContainEqual(
+      expect.objectContaining({ description: "Blue Train - Cape Town to Pretoria — Deluxe Suite - Adult" }),
+    )
+    expect(payload.incompleteLegs).toEqual([
+      expect.objectContaining({ legId: HOTEL_SERVICE_ID, message: expect.stringContaining("No meal plan selected") }),
+    ])
+  })
+
+  it("still 400s when no leg could be priced at all", async () => {
+    const detail = buildDetail()
+    helperMocks.loadBookingServicesPackageDetail.mockResolvedValue({
+      detail: { ...detail, legs: withUnconfiguredHotelLeg(detail).legs.slice(1) },
+      services: [{ id: HOTEL_SERVICE_ID }],
+      units: [],
+    })
+
+    const response = await postApply({
+      jobId: JOB_ID,
+      quoteId: QUOTE_ID,
+      travelDate: "2026-06-01",
+      selections: [{ legId: HOTEL_SERVICE_ID, selected: true }],
+    })
+    const payload = await response.json()
+
+    expect(response.status).toBe(400)
+    expect(payload.error).toMatch(/No meal plan selected/)
+    expect(payload.incompleteLegs).toHaveLength(1)
   })
 
   it("returns 400 with the engine's message when a required suite type is missing", async () => {

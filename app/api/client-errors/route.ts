@@ -13,6 +13,10 @@ const clientErrorSchema = z.object({
   stack: z.string().max(20_000).optional(),
   url: z.string().max(2000).optional(),
   componentStack: z.string().max(20_000).optional(),
+  /** Next.js server-error digest, when the crash came from a server component. */
+  digest: z.string().max(200).optional(),
+  /** APP_VERSION of the build that threw — needed to match a stack to its source. */
+  appVersion: z.string().max(50).optional(),
 })
 
 export async function POST(request: Request) {
@@ -41,6 +45,8 @@ export async function POST(request: Request) {
       url: parsed.data.url ?? null,
       stack: parsed.data.stack ?? null,
       componentStack: parsed.data.componentStack ?? null,
+      digest: parsed.data.digest ?? null,
+      appVersion: parsed.data.appVersion ?? null,
       userAgent: request.headers.get("user-agent"),
     },
   })

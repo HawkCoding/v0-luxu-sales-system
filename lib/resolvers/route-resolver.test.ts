@@ -51,7 +51,7 @@ describe("findRouteId", () => {
     expect(routeId).toBe("route-1")
   })
 
-  it("breaks a tie across suppliers by the same rule when no supplier is known", async () => {
+  it("resolves no route at all when no supplier is known", async () => {
     const { supabase } = mockWith([
       {
         id: "route-1",
@@ -73,8 +73,10 @@ describe("findRouteId", () => {
       },
     ])
 
+    // Choosing between two OPERATORS is a guess, not a tie-break: the old behaviour handed an
+    // enquiry that named no operator whichever supplier's route sorted first.
     const routeId = await findRouteId(supabase as never, "Pretoria to Cape Town", null)
-    expect(routeId).toBe("route-2")
+    expect(routeId).toBeNull()
   })
 
   it("matches round_trip routes regardless of endpoint order", async () => {

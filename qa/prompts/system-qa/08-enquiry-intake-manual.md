@@ -31,7 +31,7 @@ QA 05 (QA customer exists), QA 06 (supplier). Run as consultant
    QA 05: travel dates `2026-09-12 → 2026-09-16`, 2 adults, 0 children, leisure,
    source website, the QA supplier from QA 06.
    **Record the booking id and booking number.**
-2. **Booking number format** — `BT-YYYY-NNNN` per `lib/job-numbering.ts`.
+2. **Booking number format** — `LTT-YYYY-NNNN` per `lib/job-numbering.ts`.
    Confirm the year segment and that the sequence increments. Create a second
    enquiry immediately and confirm no collision.
 3. Create an enquiry for a **new** customer inline (not an existing one) — the

@@ -108,7 +108,10 @@ const patchJobSchema = z.object({
       childAges: z.array(z.number().int().min(0).max(30)).max(50).nullable().optional(),
     })
     .optional(),
-}).passthrough()
+// Strict, not passthrough: an unrecognised field used to be accepted and silently dropped, so a
+// client that sent `noOfAdults` at the top level (instead of under parsedFieldEdits) got a 200
+// and no edit. Failing the request is the only way the caller finds out.
+}).strict()
 
 /**
  * Reads back the raw wording an intake path preserved in `extracted_json.formFields` (see
@@ -570,12 +573,21 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  let body: z.infer<typeof patchJobSchema>
+  let rawBody: unknown
   try {
-    body = patchJobSchema.parse(await req.json())
+    rawBody = await req.json()
   } catch {
     return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
   }
+
+  const parsedBody = patchJobSchema.safeParse(rawBody)
+  if (!parsedBody.success) {
+    return NextResponse.json(
+      { error: "Invalid request payload", details: parsedBody.error.flatten().fieldErrors },
+      { status: 400 },
+    )
+  }
+  const body: z.infer<typeof patchJobSchema> = parsedBody.data
 
   const { data: booking } = await supabase
     .from("bookings")
@@ -989,6 +1001,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   if (body.parsedFieldEdits) {
     const edits = body.parsedFieldEdits
+
+    // Same floor the intake route enforces: a booking with nobody travelling can't be priced.
+    // Either count may be edited on its own, so the check uses the stored value for the other.
+    const nextAdults = edits.noOfAdults ?? booking.no_of_adults
+    const nextChildren = edits.noOfChildren ?? booking.no_of_children
+    if (nextAdults + nextChildren < 1) {
+      return NextResponse.json(
+        { error: "A booking needs at least one traveller" },
+        { status: 400 },
+      )
+    }
 
     // A non-empty age roster is what the age-bucket pricing derives infants/child-vs-adult from
     // (see lib/packages/passenger-totals.ts) — it must always agree with noOfChildren, or pricing

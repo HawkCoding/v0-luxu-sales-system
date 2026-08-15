@@ -4,7 +4,7 @@ import { mapSupplier } from "@/lib/suppliers"
 import { getHotelDefaultTimes } from "@/lib/suppliers/hotel-default-times"
 import { buildRouteName } from "@/lib/routes/route-name"
 import { isTypePricedSupplier } from "@/lib/types"
-import { requireAuthenticatedUser, resolveUniqueSupplierSlug } from "../helpers"
+import { requireAuthenticatedUser, resolveUniqueSupplierSlug, supplierConflictMessage } from "../helpers"
 import { createServiceClient } from "@/lib/supabase/server"
 
 const allowedRoles = new Set(["admin", "manager", "consultant"])
@@ -166,7 +166,7 @@ export async function POST(req: Request) {
   const adminSupabase = await createServiceClient()
 
   // Resolve a unique slug using the session client (no elevated privileges needed).
-  const slug = await resolveUniqueSupplierSlug(supabase, parsed.name)
+  const slug = await resolveUniqueSupplierSlug(supabase, parsed.name, parsed.kind)
 
   const now = new Date().toISOString()
   const routeId = crypto.randomUUID()
@@ -200,12 +200,15 @@ export async function POST(req: Request) {
       active: false,
       status: "temporary",
     })
-    .select("id, slug, kind, pricing_mode, status, name, email, phone, website, location, location_detail, location_id, location_area_id, description, notes, active, single_supplement_pct, infant_max_age, child_max_age, default_time_start, default_time_end, inclusions, exclusions, street_address, emergency_phone, default_contact_name, created_at, updated_at")
+    .select("id, slug, kind, pricing_mode, status, name, email, phone, website, location, location_detail, location_id, location_area_id, description, notes, active, single_supplement_pct, infant_max_age, child_max_age, default_time_start, default_time_end, inclusions, exclusions, street_address, emergency_phone, default_contact_name, parent_supplier_id, created_at, updated_at")
     .single()
 
   if (supplierError || !supplier) {
     if (supplierError?.code === "23505") {
-      return NextResponse.json({ error: "A supplier with this name already exists." }, { status: 409 })
+      return NextResponse.json(
+        { error: supplierConflictMessage(supplierError, parsed.name.trim(), parsed.kind) },
+        { status: 409 },
+      )
     }
     return NextResponse.json({ error: "Failed to create supplier" }, { status: 500 })
   }

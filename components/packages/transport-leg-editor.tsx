@@ -1,6 +1,7 @@
 "use client"
 
-import { Plus, Trash2 } from "lucide-react"
+import { useState } from "react"
+import { Info, Plus, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -9,6 +10,8 @@ import { DateTimePicker } from "@/components/ui/date-time-picker"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { NumericInput } from "@/components/ui/numeric-input"
+import { InputGroup, InputGroupAddon, InputGroupText } from "@/components/ui/input-group"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Select,
   SelectContent,
@@ -16,15 +19,193 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { BookingTransportRequest, PackageLeg, RateType } from "@/lib/types"
+import type { BookingTransportRequest, PackageLeg, RateType, SupplierRateCard } from "@/lib/types"
 import {
   createDraftTransportRequest,
   type TransportLegState,
 } from "@/lib/packages/apply-dialog-state"
+import { dateOnly } from "@/lib/packages/trip-date-range"
+import { getBillableRentalDays } from "@/lib/packages/rental-days"
+import { findRateCardCandidates, selectRateCard } from "@/lib/rate-cards/resolve"
 import { RateTypeSelect } from "@/components/rate-type-select"
 import { CurrencySelect } from "@/components/currency-select"
+import { formatMoney, BASE_CURRENCY } from "@/lib/money"
+import { convertAmount, type FxRateMap } from "@/lib/pricing/convert-currency"
+import { formatDisplayDate } from "@/lib/date-format"
 
 const NONE_VALUE = "__none"
+
+interface RequestPriceOverrideProps {
+  request: BookingTransportRequest
+  index: number
+  isRental: boolean
+  /** The card this request would otherwise price off, or null when none covers it. */
+  baseRateCard: SupplierRateCard | null
+  /** Used for the override's currency when no rate card covers the request. */
+  fallbackCurrency: string
+  quoteCurrency: string
+  formatInQuoteCurrency: (amount: number, from: string) => string | null
+  onChange: (next: number | null) => void
+}
+
+/**
+ * A transfer/rental charges what it charges for a given trip — after-hours pickups, an odd route,
+ * a rate nobody has loaded yet. Rather than block on that, the consultant types the amount the
+ * supplier quoted and it carries straight through to the quote, same posture as a hotel room's
+ * price override.
+ */
+function RequestPriceOverride({
+  request,
+  index,
+  isRental,
+  baseRateCard,
+  fallbackCurrency,
+  quoteCurrency,
+  formatInQuoteCurrency,
+  onChange,
+}: RequestPriceOverrideProps) {
+  const currency = baseRateCard?.currency ?? fallbackCurrency
+  // 0 is a real price (a comped trip), so this is a null check, not a truthiness one.
+  const overridden = request.priceOverride !== null && request.priceOverride !== undefined
+  // Derived rather than synced: a leg loaded with a saved override opens expanded on first paint,
+  // and reverting collapses it again, so the two can never drift apart.
+  const [requested, setRequested] = useState(false)
+  const expanded = requested || overridden
+
+  const price = request.priceOverride ?? 0
+  const billableDays = isRental
+    ? getBillableRentalDays(request.pickupAt, request.rentalDetails?.returnAt ?? null)
+    : 1
+  const total = Math.round(price * billableDays * 100) / 100
+  const convertedTotal = formatInQuoteCurrency(total, currency)
+  const dayLabel = `${billableDays} ${billableDays === 1 ? "day" : "days"}`
+  const tripNoun = isRental ? "vehicle" : "transfer"
+
+  if (!expanded) {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3 md:col-span-2 xl:col-span-3">
+        <span className="text-xs text-muted-foreground">
+          {baseRateCard ? (
+            <>
+              Rate card{" "}
+              <span className="font-medium tabular-nums text-foreground">
+                {formatMoney(baseRateCard.pricePerPerson, baseRateCard.currency)}
+              </span>{" "}
+              {isRental ? "per vehicle per day" : "per transfer"}
+            </>
+          ) : (
+            `No rate card price for this ${tripNoun} yet`
+          )}
+        </span>
+        <Button
+          type="button"
+          size="sm"
+          variant="link"
+          className="h-auto p-0 text-xs"
+          onClick={() => setRequested(true)}
+        >
+          Override price
+        </Button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3 rounded-md border bg-muted/40 p-3 md:col-span-2 xl:col-span-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <Label>Price override</Label>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label="About price overrides"
+                className="text-muted-foreground transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 rounded-sm"
+              >
+                <Info className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-64">
+              The client sees only the amount. This price applies to this trip alone and is never
+              saved as a rate.
+              {request.priceOverrideSetAt ? ` Last set ${formatDisplayDate(request.priceOverrideSetAt)}.` : ""}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+        {overridden ? (
+          <Badge variant="secondary" className="h-5 text-[10px]">
+            Overridden
+          </Badge>
+        ) : null}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <InputGroup className="w-full sm:w-64">
+          <InputGroupAddon align="inline-start">
+            <InputGroupText className="text-xs font-medium">{currency}</InputGroupText>
+          </InputGroupAddon>
+          <NumericInput
+            min="0"
+            step="0.01"
+            nullable
+            data-slot="input-group-control"
+            className="flex-1 rounded-none border-0 bg-transparent text-right tabular-nums shadow-none focus-visible:ring-0 dark:bg-transparent [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+            placeholder={
+              baseRateCard
+                ? baseRateCard.pricePerPerson.toLocaleString("en-ZA", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })
+                : "Rate card price"
+            }
+            aria-label={`Price override for ${tripNoun} ${index + 1}`}
+            value={request.priceOverride ?? null}
+            onValueChange={onChange}
+          />
+          {isRental ? (
+            <InputGroupAddon align="inline-end">
+              <InputGroupText className="text-xs">/ day</InputGroupText>
+            </InputGroupAddon>
+          ) : null}
+        </InputGroup>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-8 px-2 text-xs"
+          onClick={() => {
+            setRequested(false)
+            onChange(null)
+          }}
+        >
+          Revert
+        </Button>
+      </div>
+
+      {overridden ? (
+        <div className="space-y-1">
+          {isRental ? (
+            <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs text-muted-foreground">
+              <span className="font-medium tabular-nums text-foreground">
+                {formatMoney(total, currency)} for {dayLabel}
+              </span>
+              {convertedTotal ? <span className="tabular-nums">≈ {convertedTotal}</span> : null}
+            </div>
+          ) : null}
+          <p className="text-xs text-muted-foreground">
+            {baseRateCard
+              ? `Replaces the rate card's ${formatMoney(baseRateCard.pricePerPerson, baseRateCard.currency)} ${isRental ? "per day" : "per transfer"}.`
+              : `No rate card covers this ${tripNoun}, so nothing is being replaced.`}
+          </p>
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Leave blank to keep pricing this {tripNoun} off the rate card.
+        </p>
+      )}
+    </div>
+  )
+}
 
 interface TransportLegEditorProps {
   leg: PackageLeg
@@ -32,9 +213,21 @@ interface TransportLegEditorProps {
   onChange: (next: TransportLegState) => void
   /** Active (non-archived) rate types — shows the per-leg rate type selector when non-empty. */
   rateTypes?: RateType[]
+  /** The quote's currency. Typed override prices in another currency are previewed converted into it. */
+  quoteCurrency?: string
+  /** Base-currency rates, used only for the live "≈ R x" preview under a typed override. The
+   *  authoritative conversion happens server-side at pricing time. */
+  fxRates?: FxRateMap
 }
 
-export function TransportLegEditor({ leg, value, onChange, rateTypes = [] }: TransportLegEditorProps) {
+export function TransportLegEditor({
+  leg,
+  value,
+  onChange,
+  rateTypes = [],
+  quoteCurrency = BASE_CURRENCY,
+  fxRates = { [BASE_CURRENCY]: 1 },
+}: TransportLegEditorProps) {
   const isRental = leg.supplierKind === "vehicle_rental"
 
   function updateRequest(id: string, patch: Partial<BookingTransportRequest>) {
@@ -42,6 +235,32 @@ export function TransportLegEditor({ leg, value, onChange, rateTypes = [] }: Tra
       ...value,
       requests: value.requests.map((request) => (request.id === id ? { ...request, ...patch } : request)),
     })
+  }
+
+  /**
+   * The card a request would price off today — shown next to a typed override so the consultant
+   * can see what they are replacing, and read for the override's currency. Null when nothing
+   * covers the request, which is a legitimate reason to type a price rather than a blocker.
+   * Uses the leg's own route: a request's own routeId is quick-fill-template-only and is never
+   * consulted for pricing (mirrors the server in lib/quotes/build-from-package.ts).
+   */
+  function resolveRequestRateCard(request: BookingTransportRequest): SupplierRateCard | null {
+    const suiteTypeId = request.suiteTypeId
+    const pricingDate = dateOnly(request.pickupAt)
+    if (!suiteTypeId || !value.routeId || !pricingDate) return null
+    const candidates = findRateCardCandidates(leg.rateCards, value.routeId, suiteTypeId, pricingDate)
+    const selected = selectRateCard(candidates, value.rateTypeId, leg.quoteRateTypeId, leg.baseRateTypeId, null)
+    return selected?.ok ? selected.card : null
+  }
+
+  /** Same preview-only contract as the hotel editor's helper: no rate for the pair renders nothing. */
+  function formatInQuoteCurrency(amount: number, from: string): string | null {
+    if (from === quoteCurrency) return null
+    try {
+      return formatMoney(convertAmount(amount, from, quoteCurrency, fxRates).amount, quoteCurrency)
+    } catch {
+      return null
+    }
   }
 
   /** Routes are quick-fill templates: picking one pre-fills empty pickup/drop-off fields but never
@@ -150,6 +369,7 @@ export function TransportLegEditor({ leg, value, onChange, rateTypes = [] }: Tra
         <div className="flex flex-wrap items-end gap-3">
           <RateTypeSelect
             rateTypes={rateTypes}
+            allowedRateTypeIds={leg.applicableRateTypeIds}
             value={value.rateTypeId}
             onChange={(rateTypeId) => onChange({ ...value, rateTypeId })}
             id={`rate-type-${leg.id}`}
@@ -268,18 +488,16 @@ export function TransportLegEditor({ leg, value, onChange, rateTypes = [] }: Tra
                   onChange={(event) => updateRequest(request.id, { flightNumber: event.target.value || null })}
                 />
               </div>
-              <div className="space-y-1.5">
-                <Label>Price override</Label>
-                <NumericInput
-                  min="0"
-                  step="0.01"
-                  nullable
-                  value={request.priceOverride}
-                  onValueChange={(next) => updateRequest(request.id, { priceOverride: next })}
-                  placeholder="Rate card price"
-                  aria-label="Price override"
-                />
-              </div>
+              <RequestPriceOverride
+                request={request}
+                index={index}
+                isRental={isRental}
+                baseRateCard={resolveRequestRateCard(request)}
+                fallbackCurrency={value.priceCurrency}
+                quoteCurrency={quoteCurrency}
+                formatInQuoteCurrency={formatInQuoteCurrency}
+                onChange={(next) => updateRequest(request.id, { priceOverride: next })}
+              />
               <div className="space-y-1.5 md:col-span-2">
                 <Label>Special requests / allergies</Label>
                 <Textarea

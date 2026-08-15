@@ -13,6 +13,8 @@ import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { formatMoney } from "@/lib/money"
 import { ConvertQuoteCurrencyDialog } from "@/components/quotes/convert-quote-currency-dialog"
 import { FxProvenanceNote } from "@/components/quotes/fx-provenance-note"
+import { RoomOverrideNote } from "@/components/quotes/room-override-note"
+import { TransportOverrideNote } from "@/components/quotes/transport-override-note"
 import { QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 import { BuildBookingDialog } from "@/components/build-booking-dialog"
 import { CreateQuoteDialog } from "@/components/create-quote-dialog"
@@ -311,6 +313,9 @@ export function JobQuotesTab({
                           {/* Internal only — the client's PDF and email show the converted
                               figure alone. See components/quotes/fx-provenance-note.tsx. */}
                           <FxProvenanceNote snapshot={li.pricingSnapshot ?? null} />
+                          {/* Also internal only — see components/quotes/room-override-note.tsx. */}
+                          <RoomOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={q.currency} />
+                          <TransportOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={q.currency} />
                         </td>
                         <td className="py-2 pl-4 text-xs text-right text-muted-foreground">
                           <div>{li.qty}</div>

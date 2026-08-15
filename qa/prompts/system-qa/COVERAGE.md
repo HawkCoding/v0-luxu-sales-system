@@ -24,7 +24,7 @@ Counts at time of writing: **31 page routes**, **122 API route files**.
 | `/app/jobs` → redirect | 01 |
 | `/app/customers` · `/app/customers/[id]` | 05 |
 | `/app/suppliers` · `/app/suppliers/[slug]` | 06 |
-| `/app/packages` · `/app/packages/[slug]` **(deleted — must 404)** | 01, 07 |
+| `/app/packages` · `/app/packages/[slug]` **(deleted — must 404)** | 01 |
 | `/app/quotes` **(deleted — must 404)** | 01 |
 | `/app/payments` **(orphan — dashboard cards only)** | 01, 13 |
 | `/app/documents` | 16 |
@@ -144,7 +144,8 @@ consultant, unauthenticated).
 | Pipeline | `lib/pipeline/validate-transition.ts`, `apply-transition.ts`, `constants.ts` | 12, 14, 15 |
 | Quotes | `lib/quotes/*` (pricing-engine, quote-number, validity, revision-reset, accepted-quote-scope, commission-bonus, adapters) | 11 |
 | Pricing | `lib/pricing/*`, `lib/rate-cards/*`, `lib/rate-card-validity.ts`, `lib/rate-types/*` | 04, 06, 11 |
-| Packages | `lib/packages/*` | 07 |
+| Service leg logistics | `lib/packages/{apply-dialog-state, hotel-dates, recompute-trip-dates, seed-service-units, trip-date-range}` | 10 |
+| Location & pax pricing | `lib/packages/{location-filter, passenger-totals}` | 11 |
 | Suites | `lib/suites/*`, `lib/packages/suite-config.ts` | 06, 09 |
 | Resolvers | `lib/resolvers/supplier-resolver.ts`, `route-resolver.ts` | 09 |
 | Auto-build | `lib/auto-build/build-from-enquiry.ts` | 09, 10 |
@@ -187,7 +188,7 @@ important gets a new prompt or a new check in an existing one.
 
 Even with all nineteen prompts GREEN, these remain the thinnest spots:
 
-1. **RLS-only API routes.** Suppliers, packages, rate types, locations, quotes and
+1. **RLS-only API routes.** Suppliers, rate types, locations, quotes and
    several settings routes use the session client with no explicit `requireRole`.
    Prompt 03 probes them, but coverage depends on that probe being run
    exhaustively — treat its API status table as the single most important

@@ -3,6 +3,8 @@ import { requireRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { writeAuditLog } from "@/lib/audit-write"
 import { normalizeDateOfBirth } from "@/lib/date-format"
+import { compareRosterToBooking, type RosterComparison } from "@/lib/packages/roster-pax"
+import { fetchDefaultAgeBuckets } from "@/lib/pricing/age-buckets"
 import { TRAVELLER_COLUMNS } from "@/lib/supabase/columns"
 import type { createSessionClient } from "@/lib/supabase/server"
 import type { Database } from "@/lib/supabase/types"
@@ -106,6 +108,41 @@ function mapTraveller(row: TravellerRow) {
   }
 }
 
+/**
+ * The roster and the pax the booking is priced from are captured separately and never reconciled
+ * automatically, so every read of the roster carries the comparison with it — that is the only
+ * thing standing between a child captured as a guest and an invoice priced for two adults.
+ * Guests are aged at the trip start (falling back to the departure date, then today).
+ */
+async function loadPaxComparison(
+  supabase: SessionClient,
+  bookingId: string,
+  travellers: { dateOfBirth?: string | null; isChild?: boolean }[],
+): Promise<RosterComparison | null> {
+  const { data: booking } = await supabase
+    .from("bookings")
+    .select("no_of_adults, no_of_children, child_ages, trip_start_date, departure_date")
+    .eq("id", bookingId)
+    .maybeSingle()
+
+  if (!booking) return null
+
+  const buckets = await fetchDefaultAgeBuckets(supabase)
+  const referenceDate =
+    booking.trip_start_date ?? booking.departure_date ?? new Date().toISOString().slice(0, 10)
+
+  return compareRosterToBooking(
+    travellers,
+    {
+      noOfAdults: booking.no_of_adults,
+      noOfChildren: booking.no_of_children,
+      childAges: booking.child_ages ?? [],
+    },
+    buckets,
+    referenceDate,
+  )
+}
+
 export async function GET(_req: Request, { params }: RouteParams) {
   const auth = await requireRole(["admin", "manager", "consultant"])
   if (!auth.ok) return auth.response
@@ -121,7 +158,12 @@ export async function GET(_req: Request, { params }: RouteParams) {
 
   if (error) return safeSupabaseError("travellers:list", error)
 
-  return Response.json({ travellers: (data ?? []).map((row) => mapTraveller(row as TravellerRow)) })
+  const travellers = (data ?? []).map((row) => mapTraveller(row as TravellerRow))
+
+  return Response.json({
+    travellers,
+    paxComparison: await loadPaxComparison(supabase, id, travellers),
+  })
 }
 
 export async function PUT(req: Request, { params }: RouteParams) {
@@ -169,8 +211,15 @@ export async function PUT(req: Request, { params }: RouteParams) {
     sort_order: index,
   }))
 
-  const { error: deleteError } = await supabase.from("travellers").delete().eq("booking_id", id)
+  // Replace-set semantics: the delete is unconditional. Count what goes so an empty payload can
+  // report the wipe rather than returning a silent 200 (guest IDs and DOBs are unrecoverable).
+  const { data: cleared, error: deleteError } = await supabase
+    .from("travellers")
+    .delete()
+    .eq("booking_id", id)
+    .select("id")
   if (deleteError) return safeSupabaseError("travellers:clear", deleteError)
+  const removedCount = Math.max(0, (cleared ?? []).length - rows.length)
 
   if (rows.length > 0) {
     const { error: insertError } = await supabase.from("travellers").insert(rows)
@@ -200,5 +249,15 @@ export async function PUT(req: Request, { params }: RouteParams) {
 
   if (reloadError) return safeSupabaseError("travellers:reload", reloadError)
 
-  return Response.json({ travellers: (reloaded ?? []).map((row) => mapTraveller(row as TravellerRow)) })
+  const travellers = (reloaded ?? []).map((row) => mapTraveller(row as TravellerRow))
+
+  return Response.json({
+    travellers,
+    removedCount,
+    warning:
+      rows.length === 0 && removedCount > 0
+        ? `${removedCount} guest${removedCount === 1 ? "" : "s"} removed — ID numbers and dates of birth were deleted with them.`
+        : null,
+    paxComparison: await loadPaxComparison(supabase, id, travellers),
+  })
 }

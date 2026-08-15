@@ -461,6 +461,9 @@ export type Database = {
           manual_adult_price: number | null
           manual_child_price: number | null
           manual_infant_price: number | null
+          manual_room_price: number | null
+          manual_room_price_set_at: string | null
+          manual_room_price_set_by: string | null
           origin: Database["public"]["Enums"]["service_origin"]
           service_id: string
           sort_order: number
@@ -479,6 +482,9 @@ export type Database = {
           manual_adult_price?: number | null
           manual_child_price?: number | null
           manual_infant_price?: number | null
+          manual_room_price?: number | null
+          manual_room_price_set_at?: string | null
+          manual_room_price_set_by?: string | null
           origin?: Database["public"]["Enums"]["service_origin"]
           service_id: string
           sort_order?: number
@@ -497,6 +503,9 @@ export type Database = {
           manual_adult_price?: number | null
           manual_child_price?: number | null
           manual_infant_price?: number | null
+          manual_room_price?: number | null
+          manual_room_price_set_at?: string | null
+          manual_room_price_set_by?: string | null
           origin?: Database["public"]["Enums"]["service_origin"]
           service_id?: string
           sort_order?: number
@@ -824,6 +833,8 @@ export type Database = {
           pickup_at: string | null
           pickup_point: string
           price_override: number | null
+          price_override_set_at: string | null
+          price_override_set_by: string | null
           route_id: string | null
           service_id: string | null
           service_type: string
@@ -847,6 +858,8 @@ export type Database = {
           pickup_at?: string | null
           pickup_point: string
           price_override?: number | null
+          price_override_set_at?: string | null
+          price_override_set_by?: string | null
           route_id?: string | null
           service_id?: string | null
           service_type: string
@@ -870,6 +883,8 @@ export type Database = {
           pickup_at?: string | null
           pickup_point?: string
           price_override?: number | null
+          price_override_set_at?: string | null
+          price_override_set_by?: string | null
           route_id?: string | null
           service_id?: string | null
           service_type?: string
@@ -3132,6 +3147,7 @@ export type Database = {
           email: string
           id: string
           label: string
+          sort_order: number
           supplier_id: string
         }
         Insert: {
@@ -3139,6 +3155,7 @@ export type Database = {
           email: string
           id?: string
           label?: string
+          sort_order?: number
           supplier_id: string
         }
         Update: {
@@ -3146,6 +3163,7 @@ export type Database = {
           email?: string
           id?: string
           label?: string
+          sort_order?: number
           supplier_id?: string
         }
         Relationships: [
@@ -3398,6 +3416,7 @@ export type Database = {
           location_id: string | null
           name: string
           notes: string | null
+          parent_supplier_id: string | null
           phone: string | null
           pricing_mode: Database["public"]["Enums"]["supplier_pricing_mode"]
           quote_rate_type_id: string | null
@@ -3430,6 +3449,7 @@ export type Database = {
           location_id?: string | null
           name: string
           notes?: string | null
+          parent_supplier_id?: string | null
           phone?: string | null
           pricing_mode?: Database["public"]["Enums"]["supplier_pricing_mode"]
           quote_rate_type_id?: string | null
@@ -3462,6 +3482,7 @@ export type Database = {
           location_id?: string | null
           name?: string
           notes?: string | null
+          parent_supplier_id?: string | null
           phone?: string | null
           pricing_mode?: Database["public"]["Enums"]["supplier_pricing_mode"]
           quote_rate_type_id?: string | null
@@ -3492,6 +3513,13 @@ export type Database = {
             columns: ["location_id"]
             isOneToOne: false
             referencedRelation: "locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "suppliers_parent_supplier_id_fkey"
+            columns: ["parent_supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
             referencedColumns: ["id"]
           },
           {
@@ -3810,6 +3838,10 @@ export type Database = {
       auth_has_role: {
         Args: { required_roles: Database["public"]["Enums"]["user_role"][] }
         Returns: boolean
+      }
+      copy_supplier_emails_to_child: {
+        Args: { p_child_id: string; p_parent_id: string }
+        Returns: undefined
       }
       custom_access_token_hook: { Args: { event: Json }; Returns: Json }
       default_rate_type_id: { Args: never; Returns: string }

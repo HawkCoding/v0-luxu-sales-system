@@ -1,29 +1,36 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  formatDateISO,
   formatDayOfMonth,
   formatDisplayDate,
   formatDisplayDateLong,
   formatDisplayDateShort,
   formatDisplayDateTime,
+  formatTimeHHMM,
   normalizeDateOfBirth,
 } from "./date-format"
 
 describe("formatDisplayDate", () => {
-  it("formats an ISO date as zero-padded day/month/year", () => {
-    expect(formatDisplayDate("2026-03-07")).toBe("07/03/2026")
+  it("formats an ISO date as zero-padded day-month-year", () => {
+    expect(formatDisplayDate("2026-03-07")).toBe("07-03-2026")
   })
 
   it("zero-pads both day and month for single-digit values", () => {
-    expect(formatDisplayDate("2026-01-02")).toBe("02/01/2026")
+    expect(formatDisplayDate("2026-01-02")).toBe("02-01-2026")
   })
 
   it("does not shift the day across timezones for date-only input", () => {
-    expect(formatDisplayDate("2026-12-31")).toBe("31/12/2026")
+    expect(formatDisplayDate("2026-12-31")).toBe("31-12-2026")
   })
 
   it("accepts a Date instance", () => {
-    expect(formatDisplayDate(new Date(2026, 6, 4))).toBe("04/07/2026")
+    expect(formatDisplayDate(new Date("2026-07-04T08:00:00Z"))).toBe("04-07-2026")
+  })
+
+  it("reads a timestamp in South African time, not the process timezone", () => {
+    // 22:30Z on the 3rd is already 00:30 on the 4th in SAST (UTC+2).
+    expect(formatDisplayDate("2026-07-03T22:30:00.000Z")).toBe("04-07-2026")
   })
 
   it("returns an empty string for null, undefined, and unparseable input", () => {
@@ -34,8 +41,12 @@ describe("formatDisplayDate", () => {
 })
 
 describe("formatDisplayDateTime", () => {
-  it("appends zero-padded 24-hour time to the date", () => {
-    expect(formatDisplayDateTime(new Date(2026, 6, 4, 9, 5))).toBe("04/07/2026 09:05")
+  it("appends zero-padded 24-hour time in South African time", () => {
+    expect(formatDisplayDateTime("2026-07-04T09:05:00.000Z")).toBe("04-07-2026 11:05")
+  })
+
+  it("rolls into the next SAST day for a late-evening UTC instant", () => {
+    expect(formatDisplayDateTime("2026-07-03T22:56:00.000Z")).toBe("04-07-2026 00:56")
   })
 
   it("returns an empty string for null input", () => {
@@ -116,6 +127,29 @@ describe("normalizeDateOfBirth", () => {
 
   it("returns an empty string for null input", () => {
     expect(formatDisplayDateShort(null)).toBe("")
+  })
+})
+
+describe("formatTimeHHMM", () => {
+  it("reads a timestamp's clock time in South African time, not the process timezone", () => {
+    // A transfer entered as 16:00 SAST is stored as 14:00Z.
+    expect(formatTimeHHMM("2026-10-28T14:00:00.000Z")).toBe("16:00")
+  })
+
+  it("returns null for null, undefined, and unparseable input", () => {
+    expect(formatTimeHHMM(null)).toBeNull()
+    expect(formatTimeHHMM(undefined)).toBeNull()
+    expect(formatTimeHHMM("not a date")).toBeNull()
+  })
+})
+
+describe("formatDateISO", () => {
+  it("rolls into the next SAST day for a late-evening UTC instant", () => {
+    expect(formatDateISO("2026-07-03T22:56:00.000Z")).toBe("2026-07-04")
+  })
+
+  it("returns null for null input", () => {
+    expect(formatDateISO(null)).toBeNull()
   })
 })
 
