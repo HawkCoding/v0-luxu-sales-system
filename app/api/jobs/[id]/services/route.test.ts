@@ -36,6 +36,9 @@ function makeParams(id = BOOKING_ID) {
 interface MockState {
   validServiceIds?: string[]
   serviceKinds?: Record<string, string>
+  /** booking_services.service_date as stored — the departure date a flight's arrival is checked
+   * against when the payload omits serviceDate. */
+  serviceDates?: Record<string, string | null>
   bookingExists?: boolean
   noOfAdults?: number
   noOfChildren?: number
@@ -94,6 +97,7 @@ function buildSupabase(state: MockState = {}) {
                       id: serviceId,
                       supplier_id: `${serviceId}-supplier`,
                       updated_at: state.serviceUpdatedAt ?? "2026-08-14T10:00:00.000Z",
+                      service_date: state.serviceDates?.[serviceId] ?? null,
                       suppliers: { kind: state.serviceKinds?.[serviceId] ?? "train_operator" },
                     })),
                     error: null,
@@ -287,6 +291,150 @@ describe("PATCH /api/jobs/[id]/services", () => {
 
     expect(res.status).toBe(400)
     expect((await res.json()).error).toMatch(/only available on hotel services/)
+  })
+
+  it("persists a flight schedule on an airline service, uppercasing the airport codes", async () => {
+    const built = mockAuth({
+      validServiceIds: [SERVICE_A],
+      serviceKinds: { [SERVICE_A]: "airline" },
+    })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          selections: [
+            {
+              packageLegId: SERVICE_A,
+              serviceDate: "2026-10-14",
+              departureTime: "10:00",
+              arrivalDate: "2026-10-14",
+              arrivalTime: "12:15",
+              flightNumber: "FA212",
+              departureAirportCode: "hla",
+              arrivalAirportCode: "cpt",
+              handLuggageKg: 7,
+              checkedLuggageKg: 23,
+            },
+          ],
+        }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(200)
+    expect(built.updateCalls[0].payload).toMatchObject({
+      service_date: "2026-10-14",
+      departure_time: "10:00",
+      arrival_date: "2026-10-14",
+      arrival_time: "12:15",
+      flight_number: "FA212",
+      departure_airport_code: "HLA",
+      arrival_airport_code: "CPT",
+      hand_luggage_kg: 7,
+      checked_luggage_kg: 23,
+    })
+  })
+
+  it("rejects flight schedule fields on a non-airline service", async () => {
+    mockAuth({ validServiceIds: [SERVICE_A], serviceKinds: { [SERVICE_A]: "hotel_property" } })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          selections: [{ packageLegId: SERVICE_A, departureTime: "10:00" }],
+        }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/only available on airline services/)
+  })
+
+  it("rejects an arrival date before the departure date", async () => {
+    mockAuth({ validServiceIds: [SERVICE_A], serviceKinds: { [SERVICE_A]: "airline" } })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          selections: [
+            { packageLegId: SERVICE_A, serviceDate: "2026-10-14", arrivalDate: "2026-10-13" },
+          ],
+        }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/cannot arrive before it departs/)
+  })
+
+  it("rejects a same-day arrival at or before the departure time", async () => {
+    mockAuth({ validServiceIds: [SERVICE_A], serviceKinds: { [SERVICE_A]: "airline" } })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          selections: [
+            {
+              packageLegId: SERVICE_A,
+              serviceDate: "2026-10-14",
+              departureTime: "12:15",
+              arrivalDate: "2026-10-14",
+              arrivalTime: "10:00",
+            },
+          ],
+        }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/must arrive after it departs/)
+  })
+
+  it("checks an arrival date against the stored departure date when the payload omits it", async () => {
+    mockAuth({
+      validServiceIds: [SERVICE_A],
+      serviceKinds: { [SERVICE_A]: "airline" },
+      serviceDates: { [SERVICE_A]: "2026-10-14" },
+    })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          selections: [{ packageLegId: SERVICE_A, arrivalDate: "2026-10-12" }],
+        }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/cannot arrive before it departs/)
+  })
+
+  it("accepts an overnight flight", async () => {
+    const built = mockAuth({ validServiceIds: [SERVICE_A], serviceKinds: { [SERVICE_A]: "airline" } })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          selections: [
+            {
+              packageLegId: SERVICE_A,
+              serviceDate: "2026-10-14",
+              departureTime: "22:40",
+              arrivalDate: "2026-10-15",
+              arrivalTime: "06:15",
+            },
+          ],
+        }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(200)
+    expect(built.updateCalls[0].payload).toMatchObject({ arrival_date: "2026-10-15", arrival_time: "06:15" })
   })
 
   it("stamps who set a hotel room override and when, and leaves an unchanged one alone", async () => {

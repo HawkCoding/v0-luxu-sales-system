@@ -24,7 +24,7 @@ import { loadSuiteSelections } from "@/lib/templates/suite-selections"
 import { buildQuoteSummaryBlock } from "@/lib/quotes/quote-summary-block"
 import { formatMoney, normaliseCurrency } from "@/lib/money"
 import { deriveFlightCapPerPerson, deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
-import { legIdsFromLineItems } from "@/lib/quotes/accepted-quote-scope"
+import { complimentaryLegIdsFromLineItems, legIdsFromLineItems } from "@/lib/quotes/accepted-quote-scope"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 import { getBankingSettings, getDocumentTextSettings } from "@/lib/settings-access"
 
@@ -241,11 +241,13 @@ export async function resolveSharedEmailTokens(
         .eq("quote_id", latestQuote.id)
 
       const legIds = legIdsFromLineItems(lineItems)
+      const complimentaryLegIds = complimentaryLegIdsFromLineItems(lineItems)
 
       const { blocks: itineraryBlocks } = await buildVoucherServiceBlocks(supabase, {
         bookingId,
         additionalServicesDetails: null,
         legIds: legIds.size > 0 ? legIds : undefined,
+        complimentaryLegIds,
       })
 
       const journey = deriveJourneyFromBlocks(itineraryBlocks) ?? { start: null, end: null }

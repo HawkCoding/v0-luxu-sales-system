@@ -4,7 +4,6 @@ import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -21,8 +20,6 @@ interface RowDraft {
   reference: string
   contactName: string
   footnote: string
-  /** One per line; joined into an array on save. Only meaningful for "selection"/"service" rows. */
-  excursions: string
 }
 
 function draftFromRow(row: JobLegReferenceRow): RowDraft {
@@ -30,7 +27,6 @@ function draftFromRow(row: JobLegReferenceRow): RowDraft {
     reference: row.supplierReference ?? "",
     contactName: row.supplierContactName ?? "",
     footnote: row.voucherFootnote ?? "",
-    excursions: row.excursions.join("\n"),
   }
 }
 
@@ -38,8 +34,7 @@ function isDirty(draft: RowDraft, row: JobLegReferenceRow): boolean {
   return (
     draft.reference !== (row.supplierReference ?? "") ||
     draft.contactName !== (row.supplierContactName ?? "") ||
-    draft.footnote !== (row.voucherFootnote ?? "") ||
-    draft.excursions !== row.excursions.join("\n")
+    draft.footnote !== (row.voucherFootnote ?? "")
   )
 }
 
@@ -79,10 +74,6 @@ export function JobReferencesTab({ bookingId }: JobReferencesTabProps) {
               supplierReference: draft.reference.trim() || null,
               supplierContactName: draft.contactName.trim() || null,
               voucherFootnote: draft.footnote.trim() || null,
-              excursions: draft.excursions
-                .split("\n")
-                .map((line) => line.trim())
-                .filter(Boolean),
             },
           ],
         }),
@@ -159,7 +150,6 @@ export function JobReferencesTab({ bookingId }: JobReferencesTabProps) {
             const draft = drafts[row.key] ?? draftFromRow(row)
             const dirty = isDirty(draft, row)
             const missing = !row.supplierReference?.trim()
-            const supportsExcursions = row.kind !== "transport_request"
             return (
               <div key={row.key} className="space-y-3 rounded-md border p-3">
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -199,34 +189,19 @@ export function JobReferencesTab({ bookingId }: JobReferencesTabProps) {
                 </div>
 
                 <div className="space-y-1">
-                  <Label htmlFor={`footnote-${row.key}`}>Voucher footnote</Label>
+                  <Label htmlFor={`footnote-${row.key}`}>Special note for this leg</Label>
                   <p className="text-xs text-muted-foreground">
-                    A one-off caveat printed under this leg, e.g. &quot;Check in IRENE COUNTRY LODGE
-                    2h prior to departure&quot;.
+                    Anything the guest needs to know that isn&apos;t already shown above. It prints on
+                    the voucher, under this supplier&apos;s details.
+                    <br />
+                    Example: &quot;Check in at Irene Country Lodge 2 hours before departure&quot;
                   </p>
                   <Input
                     id={`footnote-${row.key}`}
                     value={draft.footnote}
                     onChange={(event) => updateDraft(row.key, { footnote: event.target.value })}
-                    placeholder="Operational note for this leg"
                   />
                 </div>
-
-                {supportsExcursions ? (
-                  <div className="space-y-1">
-                    <Label htmlFor={`excursions-${row.key}`}>Excursions</Label>
-                    <p className="text-xs text-muted-foreground">
-                      One per line. Overrides the route&apos;s default excursions on this booking.
-                    </p>
-                    <Textarea
-                      id={`excursions-${row.key}`}
-                      value={draft.excursions}
-                      onChange={(event) => updateDraft(row.key, { excursions: event.target.value })}
-                      rows={2}
-                      placeholder={"Kimberley **Weather & Time Permitted"}
-                    />
-                  </div>
-                ) : null}
               </div>
             )
           })}

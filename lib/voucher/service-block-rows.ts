@@ -72,9 +72,11 @@ export function voucherRowsForBlock(block: VoucherServiceBlock): VoucherRow[] {
     // behind them: "Onboard: a, b; Off-train: c".
     const included = formatBulletLinesInline(d.inclusions)
     if (included) rows.push({ label: "Included", value: included })
+    // Smoking preference and meal seating are train-specific — the hotel branch below prints
+    // dietary and occasion instead, the pair a hotel actually acts on.
     if (d.requestsLine) rows.push({ label: "Requests", value: d.requestsLine })
-    if (d.occasion) rows.push({ label: "Occasion", value: d.occasion })
-    if (d.excursions && d.excursions.length > 0) rows.push({ label: "Excursion", value: d.excursions.join("; ") })
+    // Excursions are deliberately not printed — not something clients have asked to see on the
+    // voucher. The underlying data (route defaults, leg overrides) is left in place untouched.
   } else if (block.serviceType === "hotel") {
     if (d.roomType) rows.push(suiteRow("Room Type", d.roomType, d.numberOfSuites))
     if (d.nights != null) rows.push({ label: "Nights", value: d.nights })
@@ -86,7 +88,9 @@ export function voucherRowsForBlock(block: VoucherServiceBlock): VoucherRow[] {
     // behind them: "Onboard: a, b; Off-train: c".
     const included = formatBulletLinesInline(d.inclusions)
     if (included) rows.push({ label: "Included", value: included })
-    if (d.requestsLine) rows.push({ label: "Requests", value: d.requestsLine })
+    // Dietary and occasion are the preferences a hotel acts on — smoking/meal seating print on
+    // the train block instead.
+    if (d.dietary) rows.push({ label: "Dietary", value: d.dietary })
     if (d.occasion) rows.push({ label: "Occasion", value: d.occasion })
   } else if (block.serviceType === "transfer") {
     if (d.passengerCount != null) rows.push({ label: "No of Guests", value: `${d.passengerCount} Adults` })

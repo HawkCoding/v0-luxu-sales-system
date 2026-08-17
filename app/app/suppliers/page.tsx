@@ -32,7 +32,8 @@ import {
 import { Input } from "@/components/ui/input"
 import { useRole } from "@/lib/role-context"
 import { cn } from "@/lib/utils"
-import { useSuppliers } from "@/lib/use-data"
+import { useLocations, useSuppliers } from "@/lib/use-data"
+import { supplierLocationName } from "@/lib/suppliers"
 import { SUPPLIER_KIND_LABELS } from "@/lib/types"
 
 function getSupplierSlugFromPath(pathname: string): string | null {
@@ -42,6 +43,11 @@ function getSupplierSlugFromPath(pathname: string): string | null {
 
 export default function SuppliersPage() {
   const { data: suppliers, isLoading, error, mutate } = useSuppliers()
+  const { data: locations } = useLocations()
+  const locationNameById = useMemo(
+    () => new Map((locations ?? []).map((location) => [location.id, location.name])),
+    [locations],
+  )
   const { can } = useRole()
   const [search, setSearch] = useState("")
   const [addOpen, setAddOpen] = useState(false)
@@ -86,15 +92,15 @@ export default function SuppliersPage() {
         SUPPLIER_KIND_LABELS[supplier.kind],
         supplier.email ?? "",
         supplier.phone ?? "",
-        supplier.location ?? "",
-        supplier.locationDetail ?? "",
+        supplierLocationName(supplier, locationNameById) ?? "",
+        supplier.streetAddress ?? "",
         supplier.notes ?? "",
       ]
         .join(" ")
         .toLowerCase()
         .includes(normalizedSearch),
     )
-  }, [search, suppliers])
+  }, [search, suppliers, locationNameById])
 
   const temporarySuppliers = useMemo(
     () => filteredSuppliers.filter((s) => s.status === "temporary"),
@@ -292,8 +298,16 @@ export default function SuppliersPage() {
                                     {supplier.status === "active" ? "Active" : "Inactive"}
                                   </Badge>
                                 )}
-                                {supplier.location && (
-                                  <Badge variant="secondary">{supplier.location}</Badge>
+                                {supplierLocationName(supplier, locationNameById) && (
+                                  <Badge variant="secondary">
+                                    {supplierLocationName(supplier, locationNameById)}
+                                  </Badge>
+                                )}
+                                {supplier.parentSupplierId && (
+                                  <Badge variant="outline" title="Contact details inherited from another category">
+                                    <LinkIcon className="mr-1 h-3 w-3" />
+                                    Linked
+                                  </Badge>
                                 )}
                                 {supplier.parentSupplierId && (
                                   <Badge variant="outline" title="Contact details inherited from another category">
@@ -319,7 +333,9 @@ export default function SuppliersPage() {
                           </div>
                           <div className="flex items-center gap-2">
                             <MapPin className="h-4 w-4" />
-                            <span>{supplier.location || "No location on file"}</span>
+                            <span>
+                              {supplierLocationName(supplier, locationNameById) || "No location on file"}
+                            </span>
                           </div>
                         </div>
 
@@ -416,8 +432,10 @@ export default function SuppliersPage() {
                                   Pending Activation
                                 </Badge>
                                 <Badge variant="secondary">{SUPPLIER_KIND_LABELS[supplier.kind]}</Badge>
-                                {supplier.location && (
-                                  <Badge variant="secondary">{supplier.location}</Badge>
+                                {supplierLocationName(supplier, locationNameById) && (
+                                  <Badge variant="secondary">
+                                    {supplierLocationName(supplier, locationNameById)}
+                                  </Badge>
                                 )}
                               </div>
                             </div>

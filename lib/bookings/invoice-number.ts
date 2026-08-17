@@ -10,7 +10,7 @@ export interface UpdateInvoiceNumberInput {
 }
 
 export type UpdateInvoiceNumberResult =
-  | { ok: true; before: string | null; after: string | null }
+  | { ok: true; before: string | null; after: string | null; updatedAt: string | null }
   | { ok: false; error: string; notFound?: boolean }
 
 export async function updateInvoiceNumber(
@@ -22,7 +22,7 @@ export async function updateInvoiceNumber(
 
   const { data: existing, error: fetchError } = await supabase
     .from("bookings")
-    .select("id, customer_invoice_number")
+    .select("id, customer_invoice_number, updated_at")
     .eq("id", bookingId)
     .maybeSingle()
 
@@ -31,13 +31,15 @@ export async function updateInvoiceNumber(
 
   const before = (existing as { customer_invoice_number: string | null }).customer_invoice_number ?? null
   if (before === normalised) {
-    return { ok: true, before, after: normalised }
+    return { ok: true, before, after: normalised, updatedAt: existing.updated_at ?? null }
   }
 
-  const { error: updateError } = await supabase
+  const { data: updatedRow, error: updateError } = await supabase
     .from("bookings")
     .update({ customer_invoice_number: normalised, updated_at: new Date().toISOString() })
     .eq("id", bookingId)
+    .select("updated_at")
+    .single()
 
   if (updateError) return { ok: false, error: updateError.message }
 
@@ -51,5 +53,5 @@ export async function updateInvoiceNumber(
     after: { customer_invoice_number: normalised },
   })
 
-  return { ok: true, before, after: normalised }
+  return { ok: true, before, after: normalised, updatedAt: updatedRow?.updated_at ?? null }
 }

@@ -23,7 +23,20 @@ export function isFixedPackageInclusion(lineItem: QuoteLineItem): boolean {
   return lineItem.pricingSnapshot?.pricingMode === "fixed_package"
 }
 
+/**
+ * True when a hotel room's price was deliberately typed as R0 (the supplier comped it) rather
+ * than left unpriced. `manualRoomPrice` only exists on hotel legs, so this can't misfire on
+ * other supplier kinds. See the "Mark complimentary" action in suite-leg-editor.tsx.
+ */
+export function isComplimentaryRoom(lineItem: QuoteLineItem): boolean {
+  return lineItem.pricingSnapshot?.manualRoomPrice === 0
+}
+
 /** True when a line is zero-priced for a reason the quote still needs resolved. */
 export function isMissingPricing(lineItem: QuoteLineItem): boolean {
-  return lineItem.unitPrice === 0 && !isFixedPackageInclusion(lineItem)
+  return (
+    lineItem.unitPrice === 0 &&
+    !isFixedPackageInclusion(lineItem) &&
+    !isComplimentaryRoom(lineItem)
+  )
 }

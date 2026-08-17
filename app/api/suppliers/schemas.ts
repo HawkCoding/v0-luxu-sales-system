@@ -399,6 +399,8 @@ export const supplierSaveSchema = z.object({
     .refine((value) => value === "" || WEBSITE_PATTERN.test(value), {
       message: "Enter a valid website (e.g. example.com)",
     }),
+  /** Free-text head office city -- train operators only (a train has no single city). Every
+   *  other kind is expected to send "" here; the route forces it to null regardless of kind. */
   location: z
     .string()
     .trim()
@@ -406,7 +408,6 @@ export const supplierSaveSchema = z.object({
     .refine((value) => value === "" || value.length >= 2, {
       message: "Location must be at least 2 characters",
     }),
-  locationDetail: z.string().trim().max(255).nullable().optional(),
   /** The supplier's own street address. Trains use per-city `stationAddresses` instead — a train
    * boards guests at a different station in every city it serves. */
   streetAddress: z.string().trim().max(255).nullable().optional(),
@@ -570,7 +571,6 @@ export const supplierDraftSaveSchema = z.object({
     })
     .default(""),
   location: z.string().trim().max(255).default(""),
-  locationDetail: z.string().trim().max(255).nullable().default(null),
   streetAddress: z.string().trim().max(255).nullable().default(null),
   locationId: z.string().uuid().nullable().optional(),
   description: z.string().trim().max(2000).nullable().default(null),

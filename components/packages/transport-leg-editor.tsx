@@ -41,6 +41,9 @@ interface RequestPriceOverrideProps {
   isRental: boolean
   /** The card this request would otherwise price off, or null when none covers it. */
   baseRateCard: SupplierRateCard | null
+  /** Shown in place of the price when baseRateCard is null — explains why (missing vehicle
+   *  category, no route template, no pickup date, or a genuine pricing gap). */
+  noCardMessage: string
   /** Used for the override's currency when no rate card covers the request. */
   fallbackCurrency: string
   quoteCurrency: string
@@ -59,6 +62,7 @@ function RequestPriceOverride({
   index,
   isRental,
   baseRateCard,
+  noCardMessage,
   fallbackCurrency,
   quoteCurrency,
   formatInQuoteCurrency,
@@ -94,7 +98,7 @@ function RequestPriceOverride({
               {isRental ? "per vehicle per day" : "per transfer"}
             </>
           ) : (
-            `No rate card price for this ${tripNoun} yet`
+            noCardMessage
           )}
         </span>
         <Button
@@ -218,6 +222,9 @@ interface TransportLegEditorProps {
   /** Base-currency rates, used only for the live "≈ R x" preview under a typed override. The
    *  authoritative conversion happens server-side at pricing time. */
   fxRates?: FxRateMap
+  /** The job's travel date — the same last-resort pricing date the server falls back to
+   *  (build-from-package.ts's legPricingDate) when a request has no pickup time of its own yet. */
+  travelDate?: string | null
 }
 
 export function TransportLegEditor({
@@ -227,6 +234,7 @@ export function TransportLegEditor({
   rateTypes = [],
   quoteCurrency = BASE_CURRENCY,
   fxRates = { [BASE_CURRENCY]: 1 },
+  travelDate = null,
 }: TransportLegEditorProps) {
   const isRental = leg.supplierKind === "vehicle_rental"
 
@@ -235,6 +243,14 @@ export function TransportLegEditor({
       ...value,
       requests: value.requests.map((request) => (request.id === id ? { ...request, ...patch } : request)),
     })
+  }
+
+  const tripNoun = isRental ? "vehicle" : "transfer"
+
+  /** Falls back to the job's travel date, same as the server's legPricingDate, so a request
+   *  without its own pickup time yet can still price off a rate card. */
+  function requestPricingDate(request: BookingTransportRequest): string | null {
+    return dateOnly(request.pickupAt) ?? dateOnly(travelDate)
   }
 
   /**
@@ -246,11 +262,20 @@ export function TransportLegEditor({
    */
   function resolveRequestRateCard(request: BookingTransportRequest): SupplierRateCard | null {
     const suiteTypeId = request.suiteTypeId
-    const pricingDate = dateOnly(request.pickupAt)
+    const pricingDate = requestPricingDate(request)
     if (!suiteTypeId || !value.routeId || !pricingDate) return null
     const candidates = findRateCardCandidates(leg.rateCards, value.routeId, suiteTypeId, pricingDate)
     const selected = selectRateCard(candidates, value.rateTypeId, leg.quoteRateTypeId, leg.baseRateTypeId, null)
     return selected?.ok ? selected.card : null
+  }
+
+  /** Explains why resolveRequestRateCard came back null, instead of collapsing every reason into
+   *  one generic "no rate card" message. */
+  function describeNoRateCard(request: BookingTransportRequest): string {
+    if (!request.suiteTypeId) return `Select a vehicle category to see the ${tripNoun} price`
+    if (!value.routeId) return `Select a route template to see the ${tripNoun} price`
+    if (!requestPricingDate(request)) return `Set a pickup date to see the ${tripNoun} price`
+    return `No rate card price for this ${tripNoun} yet`
   }
 
   /** Same preview-only contract as the hotel editor's helper: no rate for the pair renders nothing. */
@@ -493,6 +518,7 @@ export function TransportLegEditor({
                 index={index}
                 isRental={isRental}
                 baseRateCard={resolveRequestRateCard(request)}
+                noCardMessage={describeNoRateCard(request)}
                 fallbackCurrency={value.priceCurrency}
                 quoteCurrency={quoteCurrency}
                 formatInQuoteCurrency={formatInQuoteCurrency}

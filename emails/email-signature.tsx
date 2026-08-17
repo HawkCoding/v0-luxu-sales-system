@@ -1,4 +1,5 @@
 import { Hr, Img, Link, Section, Text } from "@react-email/components"
+import type { CSSProperties } from "react"
 import type { ResolvedEmailSignature } from "@/lib/email/signature"
 
 interface EmailSignatureProps {
@@ -23,31 +24,41 @@ export function EmailSignature({ signature }: EmailSignatureProps) {
 
   return (
     <Section style={block}>
-      <Text style={nameLine}>
-        <strong>{fullName}</strong>
-        {jobTitle ? (
+      <Text style={senderLines}>
+        <span style={nameSpan}>
+          <strong>{fullName}</strong>
+          {jobTitle ? (
+            <>
+              {" | "}
+              <span style={jobTitleStyle}>{jobTitle}</span>
+            </>
+          ) : null}
+        </span>
+        {contactLine ? (
           <>
-            {" | "}
-            <span style={jobTitleStyle}>{jobTitle}</span>
+            <br />
+            <span style={contactSpan}>{contactLine}</span>
+          </>
+        ) : null}
+        {email || website ? (
+          <>
+            <br />
+            <span style={contactSpan}>
+              {email ? (
+                <>
+                  Email: <Link href={`mailto:${email}`} style={link}>{email}</Link>
+                </>
+              ) : null}
+              {email && website ? " | " : null}
+              {website ? (
+                <>
+                  Web: <Link href={`https://${website.replace(/^https?:\/\//i, "")}`} style={link}>{website}</Link>
+                </>
+              ) : null}
+            </span>
           </>
         ) : null}
       </Text>
-      {contactLine ? <Text style={contactLineStyle}>{contactLine}</Text> : null}
-      {(email || website) && (
-        <Text style={contactLineStyle}>
-          {email ? (
-            <>
-              Email: <Link href={`mailto:${email}`} style={link}>{email}</Link>
-            </>
-          ) : null}
-          {email && website ? " | " : null}
-          {website ? (
-            <>
-              Web: <Link href={`https://${website.replace(/^https?:\/\//i, "")}`} style={link}>{website}</Link>
-            </>
-          ) : null}
-        </Text>
-      )}
 
       {brand.bannerUrl ? (
         <Img
@@ -107,10 +118,20 @@ const block = {
   padding: "0 24px 0",
 }
 
-const nameLine = {
-  margin: "0 0 2px",
-  color: "#2f2a24",
+// react-email's <Text> hardcodes line-height:24px on every <p>, applied
+// before the caller's style — that's what opened the gaps between these
+// 12-13px lines, not margin. Override it explicitly; the mso rule stops
+// Outlook's Word engine rounding it back up.
+const senderLines = {
+  margin: "16px 0 0",
   fontSize: "13px",
+  lineHeight: "16px",
+  msoLineHeightRule: "exactly",
+  color: "#3d3831",
+} as CSSProperties
+
+const nameSpan = {
+  color: "#2f2a24",
 }
 
 const jobTitleStyle = {
@@ -118,9 +139,7 @@ const jobTitleStyle = {
   fontWeight: "normal" as const,
 }
 
-const contactLineStyle = {
-  margin: "0 0 2px",
-  color: "#3d3831",
+const contactSpan = {
   fontSize: "12px",
 }
 

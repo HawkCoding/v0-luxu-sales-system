@@ -242,7 +242,9 @@ export function QuoteDocument({
   const perPersonRate = derivePerPersonRate(total, pax)
   const sortedBlocks = sortItineraryBlocksChronologically(itineraryBlocks)
   const flightCapBullet =
-    flightCapPerPerson != null ? formatFlightCapLine((amount) => formatMoney(amount, currency), flightCapPerPerson) : null
+    flightCapPerPerson != null
+      ? formatFlightCapLine((amount) => formatMoney(amount, currency, { decimals: false }), flightCapPerPerson)
+      : null
   const itineraryLines = buildQuoteItineraryLines(sortedBlocks, flightCapBullet)
   const exclusions = collectQuoteExclusions(sortedBlocks, packageExcludesDefault)
 

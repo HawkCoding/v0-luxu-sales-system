@@ -9,6 +9,7 @@ import type {
 import type { PassengerTotals } from "@/lib/packages/passenger-totals"
 import { findAnchorTrainLeg, resolveHotelStayDates } from "@/lib/packages/hotel-dates"
 import { dateOnly } from "@/lib/packages/trip-date-range"
+import { toHoursMinutes } from "@/lib/routes/route-schedule"
 import { BASE_CURRENCY } from "@/lib/money"
 import {
   findRateCardCandidates,
@@ -71,6 +72,16 @@ export interface SuiteLegState {
   serviceDate: string | null
   /** Hotel legs only. */
   nights: number | null
+  /** Airline legs only — the flight this booking is actually on. `serviceDate` is its departure
+   *  date; `arrivalDate` is a full date so an overnight flight states a real arrival day. */
+  departureTime: string | null
+  arrivalDate: string | null
+  arrivalTime: string | null
+  flightNumber: string | null
+  departureAirportCode: string | null
+  arrivalAirportCode: string | null
+  handLuggageKg: number | null
+  checkedLuggageKg: number | null
   /** Hotel legs only: `pre`/`post` derive serviceDate from the train leg, `custom` leaves it manual. */
   dateAnchor: HotelDateAnchor | null
   notes: string | null
@@ -138,6 +149,15 @@ export interface SavedSelectionRow {
   date_anchor: string | null
   rate_type_id: string | null
   notes: string | null
+  /** Airline legs only, and absent on a catalogue selection row. */
+  departure_time?: string | null
+  arrival_date?: string | null
+  arrival_time?: string | null
+  flight_number?: string | null
+  departure_airport_code?: string | null
+  arrival_airport_code?: string | null
+  hand_luggage_kg?: number | null
+  checked_luggage_kg?: number | null
   /** Absent on a catalogue selection row; present on a booking_services row. */
   price_currency?: string | null
   units: SavedSelectionUnitRow[]
@@ -279,6 +299,16 @@ function buildRawDefaultLegStates(
       reversed: false,
       serviceDate: options.tripStartDate,
       nights: isHotel ? 1 : null,
+      // A flight's schedule is never guessed — a wrong time on a client document is worse than a
+      // blank one, so every field stays empty until the consultant types the actual flight.
+      departureTime: null,
+      arrivalDate: null,
+      arrivalTime: null,
+      flightNumber: null,
+      departureAirportCode: null,
+      arrivalAirportCode: null,
+      handLuggageKg: null,
+      checkedLuggageKg: null,
       // An un-anchored hotel keeps today's behaviour: a manually picked service date.
       dateAnchor: isHotel ? leg.dateAnchor ?? "custom" : null,
       notes: null,
@@ -415,6 +445,7 @@ export function hydrateFromSaved(
       }))
 
     const isHotel = fallback.supplierKind === "hotel_property"
+    const isAirline = fallback.supplierKind === "airline"
     const routeId = row.route_id ?? fallback.routeId
 
     return {
@@ -426,6 +457,15 @@ export function hydrateFromSaved(
         : false,
       serviceDate: row.service_date ?? fallback.serviceDate,
       nights: isHotel ? row.nights ?? fallback.nights : null,
+      // Postgres hands a `time` back as "10:00:00"; the editor and the API both speak HH:MM.
+      departureTime: isAirline ? toHoursMinutes(row.departure_time) : null,
+      arrivalDate: isAirline ? row.arrival_date ?? null : null,
+      arrivalTime: isAirline ? toHoursMinutes(row.arrival_time) : null,
+      flightNumber: isAirline ? row.flight_number ?? null : null,
+      departureAirportCode: isAirline ? row.departure_airport_code ?? null : null,
+      arrivalAirportCode: isAirline ? row.arrival_airport_code ?? null : null,
+      handLuggageKg: isAirline ? row.hand_luggage_kg ?? null : null,
+      checkedLuggageKg: isAirline ? row.checked_luggage_kg ?? null : null,
       // No saved anchor (pre-existing booking, or seeded by intake) falls back to the package's.
       dateAnchor: isHotel ? normalizeSavedAnchor(row.date_anchor) ?? fallback.dateAnchor : null,
       notes: row.notes,
@@ -451,6 +491,15 @@ export interface PackageSelectionsPatchBody {
     routeReversed?: boolean
     serviceDate?: string | null
     nights?: number | null
+    /** Airline legs only — the server rejects them on any other supplier kind. */
+    departureTime?: string | null
+    arrivalDate?: string | null
+    arrivalTime?: string | null
+    flightNumber?: string | null
+    departureAirportCode?: string | null
+    arrivalAirportCode?: string | null
+    handLuggageKg?: number | null
+    checkedLuggageKg?: number | null
     dateAnchor?: HotelDateAnchor | null
     rateTypeId?: string | null
     priceCurrency?: string
@@ -495,6 +544,20 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
         routeReversed: state.reversed,
         serviceDate: state.serviceDate,
         nights: state.supplierKind === "hotel_property" ? Math.max(1, state.nights ?? 1) : null,
+        // Sent only for airlines: the server refuses these fields on any other kind, so a hotel
+        // leg posting an explicit null would 400 rather than quietly clear nothing.
+        ...(state.supplierKind === "airline"
+          ? {
+              departureTime: state.departureTime,
+              arrivalDate: state.arrivalDate,
+              arrivalTime: state.arrivalTime,
+              flightNumber: state.flightNumber,
+              departureAirportCode: state.departureAirportCode,
+              arrivalAirportCode: state.arrivalAirportCode,
+              handLuggageKg: state.handLuggageKg,
+              checkedLuggageKg: state.checkedLuggageKg,
+            }
+          : {}),
         dateAnchor: state.supplierKind === "hotel_property" ? state.dateAnchor : null,
         rateTypeId: state.rateTypeId,
         priceCurrency: state.priceCurrency,
@@ -771,6 +834,23 @@ export function validateConfigureState(
         }
       })
       continue
+    }
+
+    // An inverted flight is a typo the server refuses outright, so catch it here rather than let
+    // the Next sequence fail on a 400 the consultant has to translate back to a field.
+    if (state.supplierKind === "airline" && state.arrivalDate && state.serviceDate) {
+      if (state.arrivalDate < state.serviceDate) {
+        errors.push(`${legLabel}: the flight cannot arrive before it departs`)
+      } else if (
+        state.arrivalDate === state.serviceDate &&
+        state.arrivalTime &&
+        state.departureTime &&
+        state.arrivalTime <= state.departureTime
+      ) {
+        errors.push(
+          `${legLabel}: a flight arriving on its departure day must arrive after it departs — set a later arrival time, or an arrival date of the next day`,
+        )
+      }
     }
 
     if (state.units.length === 0) {

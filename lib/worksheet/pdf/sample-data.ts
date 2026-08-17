@@ -1,13 +1,13 @@
 import type { WorksheetPdfData } from "./worksheet-document"
 
 // Sample worksheet fixture for /api/pdf-preview, mirroring the reference
-// paper worksheet (Blue Train, 2 pax, full payment) so the layout can be
-// judged against the document it is meant to reproduce.
-export function sampleWorksheetData(): Omit<WorksheetPdfData, "brand" | "brandLogo"> {
+// paper worksheet (Blue Train, 2 pax, train + hotel + transfer) so the layout
+// can be judged against the document it is meant to reproduce.
+export function sampleWorksheetData(): Omit<WorksheetPdfData, "brandLogo"> {
   return {
     bookingNumber: "LTT-2026-0042",
-    productName: "Blue Train",
-    consultant: "LB",
+    serviceName: "The Blue Train",
+    consultant: "Leonie Bisschoff",
     arriveDate: "2026-12-13",
     departDate: "2026-12-20",
     noOfPax: 2,
@@ -27,7 +27,7 @@ export function sampleWorksheetData(): Omit<WorksheetPdfData, "brand" | "brandLo
     allPaid: false,
     allSent: false,
     docsDate: null,
-    docsBy: "LB",
+    docsBy: "Leonie Bisschoff",
     pax: [
       {
         title: "Mr",
@@ -54,38 +54,43 @@ export function sampleWorksheetData(): Omit<WorksheetPdfData, "brand" | "brandLo
       {
         fromDate: "2026-12-13",
         toDate: "2026-12-14",
-        description: "Blue Train — Pretoria to Cape Town",
+        description: "The Blue Train",
         bookingDate: null,
         confirmationDate: null,
         reservationReference: "BT-118824",
         paymentMadeDate: null,
         paidWith: null,
-        amountPayable: null,
-        amountReceivable: null,
         notes: null,
       },
       {
         fromDate: "2026-12-14",
         toDate: "2026-12-20",
-        description: "Cape Town Hotel — 6 nights",
+        description: "Commodore Hotel",
         bookingDate: null,
         confirmationDate: null,
         reservationReference: null,
         paymentMadeDate: null,
         paidWith: null,
-        amountPayable: null,
-        amountReceivable: null,
         notes: "Sea-facing room requested",
+      },
+      {
+        fromDate: "2026-12-14",
+        toDate: null,
+        description: "Cape Town Executive Transfers",
+        bookingDate: null,
+        confirmationDate: null,
+        reservationReference: "480789",
+        paymentMadeDate: null,
+        paidWith: null,
+        notes: null,
       },
     ],
     payments: [
       {
         date: "2025-10-08",
         paidWith: "EFT",
-        amount: 33807.5,
         reference: null,
       },
     ],
-    hasSupplierCosts: false,
   }
 }

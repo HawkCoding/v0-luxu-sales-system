@@ -2,14 +2,8 @@
 
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog"
 import type { Correspondence } from "@/lib/types"
-import { useRole } from "@/lib/role-context"
-import { useState } from "react"
-import { Send, Mail, AlertCircle, Clock } from "lucide-react"
+import { Mail, AlertCircle, Clock } from "lucide-react"
 import { formatDisplayDateTime } from "@/lib/date-format"
 
 const STATUS_CONFIG: Record<string, { icon: typeof Mail; color: string }> = {
@@ -18,64 +12,11 @@ const STATUS_CONFIG: Record<string, { icon: typeof Mail; color: string }> = {
   scheduled: { icon: Clock, color: "text-payment-yellow" },
 }
 
-export function JobCorrespondenceTab({ correspondence, jobId, mutate }: { correspondence: Correspondence[]; jobId: string; mutate: () => void }) {
-  const { can } = useRole()
-  const [open, setOpen] = useState(false)
-  const [subject, setSubject] = useState("")
-  const [body, setBody] = useState("")
-  const [sending, setSending] = useState(false)
-
-  const handleSend = async () => {
-    setSending(true)
-    try {
-      await fetch("/api/correspondence", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId, subject, bodyHtml: `<p>${body.replace(/\n/g, "</p><p>")}</p>` }),
-      })
-      mutate()
-      setOpen(false)
-      setSubject("")
-      setBody("")
-    } finally {
-      setSending(false)
-    }
-  }
-
+// Manual email sending is disabled — all outbound mail is template/flow-driven.
+// This tab is a read-only log; `jobId`/`mutate` stay in the props for the caller.
+export function JobCorrespondenceTab({ correspondence }: { correspondence: Correspondence[]; jobId: string; mutate: () => void }) {
   return (
     <div className="space-y-4">
-      {can("send:correspondence") && (
-        <div className="flex justify-end">
-          <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild>
-              <Button size="sm"><Send className="w-4 h-4 mr-1.5" /> Send Email</Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-lg">
-              <DialogHeader>
-                <DialogTitle>Compose Email</DialogTitle>
-                <DialogDescription>Send an email to the customer for this job.</DialogDescription>
-              </DialogHeader>
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground">Subject</label>
-                  <Input value={subject} onChange={(e) => setSubject(e.target.value)} className="mt-1" />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground">Body</label>
-                  <Textarea value={body} onChange={(e) => setBody(e.target.value)} rows={8} className="mt-1 text-sm" />
-                </div>
-                <div className="flex justify-end gap-2 pt-2">
-                  <Button variant="outline" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
-                  <Button size="sm" onClick={handleSend} disabled={sending || !subject}>
-                    {sending ? "Sending..." : "Send"}
-                  </Button>
-                </div>
-              </div>
-            </DialogContent>
-          </Dialog>
-        </div>
-      )}
-
       {correspondence.length === 0 ? (
         <div className="text-center py-8 text-sm text-muted-foreground">No emails sent</div>
       ) : (

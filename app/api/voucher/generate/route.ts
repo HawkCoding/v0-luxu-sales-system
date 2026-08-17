@@ -19,8 +19,8 @@ import { buildSuiteTokens } from "@/lib/templates/suite-description"
 import { loadSuiteSelections } from "@/lib/templates/suite-selections"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { renderVoucherPdf } from "@/lib/voucher/render-pdf"
+import { loadBrandLogo } from "@/lib/pdf/brand-logo"
 import { getDocumentBrandSettings, getDocumentTextSettings, resolveDocumentBrand } from "@/lib/settings-access"
-import { buildSpecialRequestsText } from "@/lib/reservation-details/format-special-requests"
 import { resolveConsultant } from "@/lib/consultant/resolve-consultant"
 import { clientInvoiceNumber } from "@/lib/invoices/invoice-status"
 import { VOUCHER_TEMPLATE_DEFAULTS, type VoucherTemplate } from "@/lib/types"
@@ -133,18 +133,19 @@ export async function POST(req: Request) {
       .order("sort_order"),
     supabase
       .from("booking_reservation_details")
-      .select("dietary, medical, occasion, smoking_preference, meal_seating")
+      .select("dietary, occasion, smoking_preference, meal_seating, voucher_special_requests")
       .eq("booking_id", parsed.data.jobId)
       .maybeSingle(),
     supabase
       .from("voucher_template")
-      .select("id, logo_url, banner_url, header_text, product_line, accent_colour, section_bg, font_family, section_order, hidden_sections, footer_company, footer_phone, footer_email, guidance_text")
+      .select("id, header_text, product_line, accent_colour, section_bg, font_family, section_order, hidden_sections, footer_company, footer_phone, footer_email, guidance_text")
       .limit(1)
       .maybeSingle(),
     getDocumentTextSettings(supabase),
     getDocumentBrandSettings(supabase),
   ])
   const { brand } = resolveDocumentBrand(documentBrandSettings)
+  const brandLogo = await loadBrandLogo(brand.logoUrl)
 
   if (bookingError || !bookingRaw) return jsonError("Booking not found", 404)
   if (suitesError) return safeSupabaseError("voucher:suites", suitesError)
@@ -185,6 +186,7 @@ export async function POST(req: Request) {
       includeUnlinkedTransportRequests: false,
       reservationDetails: reservationDetails
         ? {
+            dietary: reservationDetails.dietary,
             occasion: reservationDetails.occasion,
             mealSeating: reservationDetails.meal_seating as "first" | "second" | null,
             smokingPreference: reservationDetails.smoking_preference as "smoking" | "non_smoking" | null,
@@ -212,8 +214,10 @@ export async function POST(req: Request) {
       supplierContactName: block.supplierContactName,
       streetAddress: block.contactDetails.streetAddress,
       boardingPoint: block.serviceData.boardingPoint,
+      location: block.contactDetails.location,
       startTime: block.serviceData.startTime,
       endTime: block.serviceData.endTime,
+      arrivalDate: block.serviceData.arrivalDate,
       hasGuestBreakdown: Boolean(block.serviceData.guestBreakdown),
       cabin: block.serviceData.cabin,
       handLuggageKg: block.serviceData.handLuggageKg,
@@ -262,13 +266,7 @@ export async function POST(req: Request) {
     arrival: "",
     suiteType,
     numberOfGuests: booking.no_of_adults + booking.no_of_children,
-    specialRequests: buildSpecialRequestsText(booking.additional_services_details, {
-      dietary: reservationDetails?.dietary,
-      medical: reservationDetails?.medical,
-      occasion: reservationDetails?.occasion,
-      smokingPreference: reservationDetails?.smoking_preference as "smoking" | "non_smoking" | null,
-      mealSeating: reservationDetails?.meal_seating as "first" | "second" | null,
-    }),
+    specialRequests: reservationDetails?.voucher_special_requests ?? "",
     customerEmail: customer.email,
     customerPhone: customer.phone ?? "",
     enquiry: {
@@ -302,6 +300,7 @@ export async function POST(req: Request) {
       template,
       docTitle: documentText.voucher_doc_title,
       brand,
+      brandLogo,
     })
   } catch (error) {
     console.error("voucher:render-pdf", error)

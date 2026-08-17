@@ -49,16 +49,20 @@ interface BuildContext {
    * it, instead of whatever is currently selected live on the job. Manually-added transport
    * requests (no package leg) are never priced this way and stay unfiltered. */
   legIds?: Set<string>
+  /** Leg ids whose quote line was marked complimentary — flags the hotel block's "COMPLIMENTARY"
+   * callout. Subset of legIds; undefined/empty means no complimentary legs on this quote. */
+  complimentaryLegIds?: Set<string>
   /** Transport requests tied to neither a package leg nor a booking service are never priced
    * into a quote (see `findTransportRequestsForLeg` in lib/quotes/build-from-package.ts), so on
    * a surface scoped to the accepted quote they would be the one thing `legIds` cannot filter.
    * Voucher and itinerary pass false; quote surfaces leave the default so their behavior is
    * unchanged. */
   includeUnlinkedTransportRequests?: boolean
-  /** The booking's reservation-details form — folded into every train/hotel block as a
-   * "Requests" and "Occasion" row, mirroring how the legacy voucher repeated the party's meal
-   * seating, smoking preference and occasion on each service block. */
+  /** The booking's reservation-details form. Meal seating and smoking preference print as a
+   * "Requests" row on train blocks only — the train operator is who acts on them. Dietary and
+   * occasion print on hotel blocks only — the hotel is who acts on those. */
   reservationDetails?: {
+    dietary: string | null
     occasion: string | null
     mealSeating: "first" | "second" | null
     smokingPreference: "smoking" | "non_smoking" | null
@@ -82,7 +86,10 @@ interface SupplierJoin {
   phone: string | null
   email: string | null
   website: string | null
+  /** Free text -- train operators only. Every other kind's printed location comes from `city`. */
   location: string | null
+  location_id: string | null
+  city: { name: string } | { name: string }[] | null
   description: string | null
   street_address: string | null
   emergency_phone: string | null
@@ -93,6 +100,14 @@ interface SupplierJoin {
   inclusions: string[] | null
   exclusions: string[] | null
   station_addresses: StationAddressJoin[] | null
+}
+
+/** Mirrors `supplierLocationName` in lib/suppliers.ts against this join's shape -- trains print
+ *  their free-text head office city, everyone else prints the name of their joined `city`. */
+function resolveSupplierJoinLocation(supplier: SupplierJoin | null | undefined): string | null {
+  if (!supplier) return null
+  if (supplier.kind === "train_operator") return supplier.location
+  return firstRecord(supplier.city)?.name ?? null
 }
 
 interface RouteJoin {
@@ -172,6 +187,16 @@ interface SelectionJoinRow {
   supplier_contact_name: string | null
   voucher_footnote: string | null
   excursions: string[] | null
+  /** Airline legs only — the flight this booking is actually on. `service_date` is its departure
+   * date; `arrival_date` is a full date so an overnight flight states a real arrival day. */
+  departure_time: string | null
+  arrival_date: string | null
+  arrival_time: string | null
+  flight_number: string | null
+  departure_airport_code: string | null
+  arrival_airport_code: string | null
+  hand_luggage_kg: number | null
+  checked_luggage_kg: number | null
   package_legs: { sort_order: number; label: string | null } | { sort_order: number; label: string | null }[] | null
   suppliers: SupplierJoin | SupplierJoin[] | null
   routes: RouteJoin | RouteJoin[] | null
@@ -197,6 +222,14 @@ interface BookingServiceJoinRow {
   supplier_contact_name: string | null
   voucher_footnote: string | null
   excursions: string[] | null
+  departure_time: string | null
+  arrival_date: string | null
+  arrival_time: string | null
+  flight_number: string | null
+  departure_airport_code: string | null
+  arrival_airport_code: string | null
+  hand_luggage_kg: number | null
+  checked_luggage_kg: number | null
   suppliers: SupplierJoin | SupplierJoin[] | null
   routes: RouteJoin | RouteJoin[] | null
   suite_types: { name: string | null } | { name: string | null }[] | null
@@ -226,6 +259,14 @@ function serviceRowToSelectionRow(row: BookingServiceJoinRow): SelectionJoinRow 
     supplier_contact_name: row.supplier_contact_name,
     voucher_footnote: row.voucher_footnote,
     excursions: row.excursions,
+    departure_time: row.departure_time,
+    arrival_date: row.arrival_date,
+    arrival_time: row.arrival_time,
+    flight_number: row.flight_number,
+    departure_airport_code: row.departure_airport_code,
+    arrival_airport_code: row.arrival_airport_code,
+    hand_luggage_kg: row.hand_luggage_kg,
+    checked_luggage_kg: row.checked_luggage_kg,
     package_legs: { sort_order: row.sort_order, label: row.label },
     suppliers: row.suppliers,
     routes: row.routes,
@@ -499,8 +540,9 @@ function transportRequestBlock(
  * runs for its route's duration_days, which counts the departure day itself.
  *
  * Times: a train leg takes its route's own departure/arrival pair, chosen by the direction the
- * booking travels; every other kind takes the supplier's default pair, and hotels fall back to the
- * app-wide check-in/check-out settings so a stay always states a time.
+ * booking travels; an airline leg takes the flight schedule captured on the leg itself, since every
+ * booking is a different flight; every other kind takes the supplier's default pair, and hotels
+ * fall back to the app-wide check-in/check-out settings so a stay always states a time.
  */
 export async function buildVoucherServiceBlocks(
   supabase: SupabaseClient<Database>,
@@ -510,7 +552,8 @@ export async function buildVoucherServiceBlocks(
     .from("booking_services")
     .select(
       `id, label, sort_order, selected, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, notes, supplier_reference, supplier_contact_name, voucher_footnote, excursions,
-       suppliers(name, phone, email, website, location, description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions, station_addresses:supplier_station_addresses(location_id, station_name, street_address)),
+       departure_time, arrival_date, arrival_time, flight_number, departure_airport_code, arrival_airport_code, hand_luggage_kg, checked_luggage_kg,
+       suppliers(name, phone, email, website, location, location_id, city:locations!suppliers_location_id_fkey(name), description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions, station_addresses:supplier_station_addresses(location_id, station_name, street_address)),
        routes(name, description, duration_days, direction_mode, departure_time, arrival_time, return_departure_time, return_arrival_time, default_excursions, origin:locations!routes_origin_location_id_fkey(id, name), destination:locations!routes_destination_location_id_fkey(id, name)),
        suite_types(name),
        units:booking_service_units(suite_type_id, sort_order, adult_count, child_count, infant_count, suite_types(name), bedroom_types(name), bedroom_layouts(name), bathroom_types(name))`,
@@ -525,7 +568,7 @@ export async function buildVoucherServiceBlocks(
     .from("booking_transport_requests")
     .select(
       `id, service_id, supplier_id, service_type, pickup_point, dropoff_point, pickup_at, flight_number, passenger_count, notes, sort_order, supplier_reference, supplier_contact_name, voucher_footnote,
-       suppliers(name, phone, email, website, location, description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions, station_addresses:supplier_station_addresses(location_id, station_name, street_address)),
+       suppliers(name, phone, email, website, location, location_id, city:locations!suppliers_location_id_fkey(name), description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions, station_addresses:supplier_station_addresses(location_id, station_name, street_address)),
        suite_types(name),
        rental_details:booking_vehicle_rental_details(return_at),
        flight_details:booking_flight_details(cabin, departure_airport_code, arrival_airport_code, arrival_at, hand_luggage_kg, checked_luggage_kg, priority_boarding)`,
@@ -548,6 +591,7 @@ export async function buildVoucherServiceBlocks(
 
   const requestsLine = buildRequestsLine(context.reservationDetails)
   const occasion = context.reservationDetails?.occasion?.trim() || null
+  const dietary = context.reservationDetails?.dietary?.trim() || null
 
   const blocks: VoucherServiceBlock[] = selections.flatMap((row, idx) => {
     const supplier = firstRecord(row.suppliers)
@@ -558,13 +602,14 @@ export async function buildVoucherServiceBlocks(
     const serviceType = mapSupplierKindToServiceType(supplier?.kind ?? null)
     const isHotel = serviceType === "hotel"
     const isTrain = serviceType === "train"
+    const isAirline = serviceType === "airline"
 
     const contactDetails: VoucherServiceBlockContact = {
       name: supplier?.name ?? null,
       phone: supplier?.phone ?? null,
       email: supplier?.email ?? null,
       website: supplier?.website ?? null,
-      location: supplier?.location ?? null,
+      location: resolveSupplierJoinLocation(supplier),
       description: supplier?.description ?? null,
       streetAddress: supplier?.street_address ?? null,
       emergencyPhone: supplier?.emergency_phone ?? null,
@@ -611,20 +656,30 @@ export async function buildVoucherServiceBlocks(
         arrivalDate = trainArrivalDate(serviceDate, durationDays)
       }
     }
+    // A flight's arrival is captured per booking, never derived: an airline route carries no
+    // duration_days (routeHasDuration is false for airline), so the rule above always leaves this
+    // null, and an overnight flight lands on a day no offset from the departure date could know.
+    // The captured value therefore wins outright rather than filling a gap.
+    if (isAirline && row.arrival_date) arrivalDate = row.arrival_date
 
     // A train's schedule belongs to the route it runs, picked by the direction this booking
     // travels, and the route is its only source — the operator's supplier-wide pair is no longer
     // editable for trains, so falling back to it would print a time nobody can see or correct.
-    // Everything else still reads that pair, with hotels falling back to the app-wide
+    // A flight's schedule belongs to the booking, not the airline: every booking is a different
+    // flight, so the leg's own captured pair leads, and the supplier-wide pair survives only as a
+    // fallback so legs saved before flight times existed keep printing what they printed before.
+    // Everything else reads that supplier pair, with hotels falling back to the app-wide
     // check-in/check-out settings so a stay always states a time.
     const routeSchedule = isTrain ? resolveRouteSchedule(route, row.route_reversed ?? false) : null
     const startTime = isTrain
       ? routeSchedule?.startTime ?? null
-      : toHoursMinutes(supplier?.default_time_start) ??
+      : (isAirline ? toHoursMinutes(row.departure_time) : null) ??
+        toHoursMinutes(supplier?.default_time_start) ??
         (isHotel ? hotelDefaults?.checkIn ?? null : null)
     const endTime = isTrain
       ? routeSchedule?.endTime ?? null
-      : toHoursMinutes(supplier?.default_time_end) ??
+      : (isAirline ? toHoursMinutes(row.arrival_time) : null) ??
+        toHoursMinutes(supplier?.default_time_end) ??
         (isHotel ? hotelDefaults?.checkOut ?? null : null)
 
     // A hotel leg's "route" is its meal plan (see lib/packages/apply-dialog-state.ts).
@@ -649,7 +704,16 @@ export async function buildVoucherServiceBlocks(
       suiteType: suiteName,
       numberOfSuites: unitCount > 0 ? unitCount : null,
       roomType: isHotel ? suiteName : null,
+      isComplimentary: isHotel ? context.complimentaryLegIds?.has(row.package_leg_id) ?? false : null,
       vehicleType: serviceType === "transfer" ? suite?.name ?? null : null,
+      // A flight's cabin is the booked suite type — SUITE_NOUN_KINDS deliberately excludes airline,
+      // so the name reads as typed ("Economy") and feeds the itinerary's "in Economy".
+      cabin: isAirline ? suiteName : null,
+      flightNumber: isAirline ? row.flight_number ?? null : null,
+      departureAirportCode: isAirline ? row.departure_airport_code ?? null : null,
+      arrivalAirportCode: isAirline ? row.arrival_airport_code ?? null : null,
+      handLuggageKg: isAirline ? row.hand_luggage_kg ?? null : null,
+      checkedLuggageKg: isAirline ? row.checked_luggage_kg ?? null : null,
       departureDate: serviceDate,
       arrivalDate,
       startTime,
@@ -660,11 +724,12 @@ export async function buildVoucherServiceBlocks(
       footnote: row.voucher_footnote ?? null,
       inclusions: cleanList(supplier?.inclusions),
       exclusions: cleanList(supplier?.exclusions),
-      // The party's meal-seating/smoking/occasion preferences apply to the whole trip, so they're
-      // repeated on every train/hotel block rather than tied to one leg.
+      // The party's preferences apply to the whole trip, so they're repeated on every block of the
+      // category that acts on them: meal-seating/smoking on trains, dietary/occasion on hotels.
       guestBreakdown: isTrain || isHotel ? sumUnitGuestBreakdown(row.units) : null,
-      requestsLine: isTrain || isHotel ? requestsLine : null,
-      occasion: isTrain || isHotel ? occasion : null,
+      requestsLine: isTrain ? requestsLine : null,
+      occasion: isHotel ? occasion : null,
+      dietary: isHotel ? dietary : null,
       // A leg's own excursions override the route's defaults; only trains carry the concept today.
       excursions: isTrain ? (row.excursions?.length ? cleanList(row.excursions) : cleanList(route?.default_excursions)) : undefined,
       itinerary: serviceType === "tour" ? directedRouteName || row.notes || null : null,
@@ -707,7 +772,7 @@ export async function buildVoucherServiceBlocks(
             phone: supplier?.phone ?? null,
             email: supplier?.email ?? null,
             website: supplier?.website ?? null,
-            location: supplier?.location ?? null,
+            location: resolveSupplierJoinLocation(supplier),
             description: supplier?.description ?? null,
             streetAddress: supplier?.street_address ?? null,
             emergencyPhone: supplier?.emergency_phone ?? null,

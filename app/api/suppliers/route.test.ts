@@ -382,6 +382,105 @@ describe("POST /api/suppliers", () => {
     expect(payload.slug).toBe("blue-train-train-operator")
   })
 
+  it("writes locationId as location_id for a non-train supplier and discards any free-text location it sends", async () => {
+    const supplierInsertRows: Array<Record<string, unknown>> = []
+    const LOCATION_ID = "00000000-0000-4000-8000-0000000000c1"
+
+    helperMocks.requireAuthenticatedUser.mockResolvedValue({
+      supabase: {
+        from: vi.fn((table: string) => {
+          if (table === "profiles") {
+            return {
+              select: vi.fn(() => ({
+                eq: vi.fn(() => ({
+                  single: vi.fn(async () => ({
+                    data: { clearance_level: "manager" },
+                    error: null,
+                  })),
+                })),
+              })),
+            }
+          }
+
+          if (table === "suppliers") {
+            return {
+              select: vi.fn(() => ({
+                or: vi.fn(async () => ({ data: [], error: null })),
+              })),
+              insert: vi.fn((row: Record<string, unknown>) => {
+                supplierInsertRows.push(row)
+                return {
+                  select: vi.fn(() => ({
+                    single: vi.fn(async () => ({
+                      data: {
+                        id: "00000000-0000-4000-8000-000000000099",
+                        slug: String(row.slug),
+                        kind: row.kind,
+                        status: "draft",
+                        name: row.name,
+                        email: row.email,
+                        phone: row.phone,
+                        website: row.website,
+                        location: row.location,
+                        location_id: row.location_id,
+                        notes: row.notes,
+                        single_supplement_pct: row.single_supplement_pct,
+                        active: row.active,
+                        created_at: "2026-01-01T00:00:00.000Z",
+                        updated_at: "2026-01-01T00:00:00.000Z",
+                      },
+                      error: null,
+                    })),
+                  })),
+                }
+              }),
+            }
+          }
+
+          if (table === "supplier_emails") {
+            return { insert: vi.fn(async () => ({ error: null })) }
+          }
+
+          if (table === "app_settings") {
+            return {
+              select: vi.fn(() => ({
+                in: vi.fn(async () => ({ data: [], error: null })),
+              })),
+            }
+          }
+
+          throw new Error(`Unexpected table ${table}`)
+        }),
+      },
+      user: { id: USER_ID },
+    })
+
+    const response = await POST(
+      new Request("http://localhost/api/suppliers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "hotel_property",
+          name: "The Silo Hotel",
+          email: "",
+          phone: "",
+          website: "",
+          // A hotel has no reason to send text here, but the route must not trust it either way --
+          // only train_operator's free text is ever written.
+          location: "CT",
+          locationId: LOCATION_ID,
+          notes: "",
+        }),
+      }),
+    )
+
+    expect(response.status).toBe(201)
+    expect(supplierInsertRows[0]).toMatchObject({
+      location: null,
+      location_id: LOCATION_ID,
+    })
+  })
+
   it("returns 409 naming the category and location when the composite key collides", async () => {
     helperMocks.requireAuthenticatedUser.mockResolvedValue({
       supabase: {

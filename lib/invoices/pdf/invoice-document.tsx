@@ -228,6 +228,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     marginBottom: 2,
   },
+  // Address is the only multi-line value: keep the label pinned to the first
+  // line instead of stretching alongside a tall stack.
+  billingRowTop: {
+    flexDirection: "row",
+    marginBottom: 2,
+    alignItems: "flex-start",
+  },
   billingLabel: {
     fontSize: 8.5,
     color: "#8a7f74",
@@ -237,6 +244,18 @@ const styles = StyleSheet.create({
     fontSize: 8.5,
     color: "#312b24",
     flex: 1,
+  },
+  // Container for stacked address lines. Column layout with no flex on the
+  // children, so the box grows to the natural height of every line; `flex: 1`
+  // on the children would make them share one line's worth of space and paint
+  // over the rows below. `minWidth: 0` lets a long street line soft-wrap.
+  billingValueStack: {
+    flex: 1,
+    minWidth: 0,
+  },
+  billingLine: {
+    fontSize: 8.5,
+    color: "#312b24",
   },
 
   // Departure information: paired label/value columns (left + right), mirroring
@@ -639,17 +658,17 @@ export function InvoiceDocument({
               <Text style={styles.billingLabel}>Company</Text>
               <Text style={styles.billingValue}>{orDash(billing?.companyName)}</Text>
             </View>
-            <View style={styles.billingRow}>
+            <View style={styles.billingRowTop}>
               <Text style={styles.billingLabel}>Address</Text>
-              <View style={styles.billingValue}>
+              <View style={styles.billingValueStack}>
                 {addressLines.length > 0 ? (
                   addressLines.map((line, index) => (
-                    <Text key={index} style={styles.billingValue}>
+                    <Text key={index} style={styles.billingLine}>
                       {line}
                     </Text>
                   ))
                 ) : (
-                  <Text style={styles.billingValue}>{EMPTY}</Text>
+                  <Text style={styles.billingLine}>{EMPTY}</Text>
                 )}
               </View>
             </View>

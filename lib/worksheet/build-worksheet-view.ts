@@ -1,14 +1,19 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { firstRecord } from "@/lib/utils"
+import {
+  buildWorksheetServiceLines,
+  type WorksheetScheduleRow,
+  type WorksheetServiceRow,
+  type WorksheetTransportRow,
+} from "@/lib/worksheet/service-lines"
 import type {
   WorksheetPayment,
   WorksheetPaxRow,
   WorksheetPdfData,
-  WorksheetServiceLine,
 } from "@/lib/worksheet/pdf/worksheet-document"
 
-export type WorksheetView = Omit<WorksheetPdfData, "brand" | "brandLogo">
+export type WorksheetView = Omit<WorksheetPdfData, "brandLogo">
 
 /** Age at the booking's departure (or today, if no departure date is set yet). */
 function computeAge(dateOfBirth: string | null, asOf: string | null): number | null {
@@ -39,14 +44,6 @@ function meanFormattedRemark(
   return parts.length > 0 ? parts.join("; ") : null
 }
 
-const SUPPLIER_KIND_LABEL: Record<string, string> = {
-  hotel: "Hotel",
-  transfer: "Transfer",
-  activity: "Activity",
-  restaurant: "Restaurant",
-  other: "Other",
-}
-
 export interface BuildWorksheetViewOptions {
   bookingId: string
 }
@@ -65,6 +62,7 @@ export async function buildWorksheetView(
     { data: bookingRaw, error: bookingError },
     { data: travellers },
     { data: reservationDetails },
+    { data: services },
     { data: schedules },
     { data: transportRequests },
     { data: invoices },
@@ -73,10 +71,9 @@ export async function buildWorksheetView(
     supabase
       .from("bookings")
       .select(
-        `id, booking_number, consultant, departure_date, trip_end_date, no_of_adults, no_of_children,
+        `id, booking_number, assigned_salesperson_id, departure_date, trip_end_date, no_of_adults, no_of_children,
          voucher_sent_at, deposit_paid_at, final_paid_at, invoice_balance,
-         customer:customers(title, first_name, last_name, email, phone, country),
-         route:routes(name)`,
+         customer:customers(title, first_name, last_name, email, phone, country)`,
       )
       .eq("id", bookingId)
       .maybeSingle(),
@@ -90,16 +87,26 @@ export async function buildWorksheetView(
       .select("meal_seating, smoking_preference, dietary, medical, occasion")
       .eq("booking_id", bookingId)
       .maybeSingle(),
+    // The booking's real itinerary. The Suppliers tab (booking_supplier_schedules, below) only
+    // ever held the admin dates staff type by hand, so reading it alone left every train, hotel
+    // and flight off the sheet.
+    supabase
+      .from("booking_services")
+      .select(
+        `id, supplier_id, sort_order, service_date, nights, arrival_date, supplier_reference, notes,
+         suppliers(name, kind), routes(duration_days)`,
+      )
+      .eq("booking_id", bookingId)
+      .eq("selected", true)
+      .order("sort_order"),
     supabase
       .from("booking_supplier_schedules")
-      .select(
-        "supplier_kind, label, date_from, date_to, notes, sort_order, booking_date, confirmation_date, payment_made_date, paid_with, amount_payable, amount_receivable, supplier:suppliers(name)",
-      )
+      .select("supplier_id, booking_date, confirmation_date, payment_made_date, paid_with")
       .eq("booking_id", bookingId)
       .order("sort_order"),
     supabase
       .from("booking_transport_requests")
-      .select("service_type, pickup_point, dropoff_point, pickup_at, notes, supplier_reference, sort_order")
+      .select("service_id, supplier_id, sort_order, pickup_at, notes, supplier_reference, suppliers(name)")
       .eq("booking_id", bookingId)
       .order("sort_order"),
     supabase
@@ -109,7 +116,7 @@ export async function buildWorksheetView(
       .order("created_at"),
     supabase
       .from("payments")
-      .select("amount, received_at, method, reference")
+      .select("received_at, method, reference")
       .eq("booking_id", bookingId)
       .order("received_at"),
   ])
@@ -117,7 +124,18 @@ export async function buildWorksheetView(
   if (bookingError || !bookingRaw) throw new Error("Booking not found")
 
   const customer = firstRecord(bookingRaw.customer)
-  const route = firstRecord(bookingRaw.route)
+
+  // profiles carries no foreign key to bookings, so it cannot be embedded in the select above —
+  // the assigned salesperson is resolved by a second lookup, as elsewhere in the app.
+  let consultant: string | null = null
+  if (bookingRaw.assigned_salesperson_id) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("name, surname")
+      .eq("user_id", bookingRaw.assigned_salesperson_id)
+      .maybeSingle()
+    consultant = [profile?.name, profile?.surname].filter(Boolean).join(" ").trim() || null
+  }
 
   const arriveDate = bookingRaw.departure_date
   const departDate = bookingRaw.trip_end_date
@@ -143,49 +161,21 @@ export async function buildWorksheetView(
     remarks: (t.is_primary || i === 0) ? remark : null,
   }))
 
-  const scheduleLines: WorksheetServiceLine[] = (schedules ?? []).map((s) => {
-    const supplier = firstRecord(s.supplier)
-    const kindLabel = SUPPLIER_KIND_LABEL[s.supplier_kind] ?? s.supplier_kind
-    const description = [kindLabel, supplier?.name, s.label].filter(Boolean).join(" — ")
-    return {
-      fromDate: s.date_from,
-      toDate: s.date_to,
-      description: description || kindLabel,
-      bookingDate: s.booking_date,
-      confirmationDate: s.confirmation_date,
-      reservationReference: null,
-      paymentMadeDate: s.payment_made_date,
-      paidWith: s.paid_with,
-      amountPayable: s.amount_payable,
-      amountReceivable: s.amount_receivable,
-      notes: s.notes,
-    }
+  const serviceRows = (services ?? []) as unknown as WorksheetServiceRow[]
+  const serviceLines = buildWorksheetServiceLines({
+    services: serviceRows,
+    transportRequests: (transportRequests ?? []) as unknown as WorksheetTransportRow[],
+    schedules: (schedules ?? []) as unknown as WorksheetScheduleRow[],
   })
 
-  const transportLines: WorksheetServiceLine[] = (transportRequests ?? []).map((r) => ({
-    fromDate: r.pickup_at ? r.pickup_at.slice(0, 10) : null,
-    toDate: null,
-    description: `Transfer — ${r.service_type}: ${r.pickup_point} → ${r.dropoff_point}`,
-    bookingDate: null,
-    confirmationDate: null,
-    reservationReference: r.supplier_reference,
-    paymentMadeDate: null,
-    paidWith: null,
-    amountPayable: null,
-    amountReceivable: null,
-    notes: r.notes,
-  }))
-
-  const serviceLines = [...scheduleLines, ...transportLines].sort((a, b) => {
-    if (!a.fromDate) return 1
-    if (!b.fromDate) return -1
-    return a.fromDate.localeCompare(b.fromDate)
-  })
+  // The header's "Service" cell names the rail operator this job is built around — in practice
+  // The Blue Train or Rovos Rail — and stays blank on a booking with no train.
+  const trainService = serviceRows.find((row) => firstRecord(row.suppliers)?.kind === "train_operator")
+  const serviceName = firstRecord(trainService?.suppliers)?.name ?? null
 
   const paymentRows: WorksheetPayment[] = (payments ?? []).map((p) => ({
     date: p.received_at,
     paidWith: p.method,
-    amount: Number(p.amount ?? 0),
     reference: p.reference,
   }))
 
@@ -193,8 +183,8 @@ export async function buildWorksheetView(
 
   return {
     bookingNumber: bookingRaw.booking_number,
-    productName: route?.name ?? null,
-    consultant: bookingRaw.consultant,
+    serviceName,
+    consultant,
     arriveDate,
     departDate,
     noOfPax,
@@ -214,10 +204,9 @@ export async function buildWorksheetView(
     allPaid: (bookingRaw.invoice_balance ?? 0) <= 0 && (invoices ?? []).length > 0,
     allSent: Boolean(bookingRaw.voucher_sent_at),
     docsDate: bookingRaw.voucher_sent_at,
-    docsBy: bookingRaw.consultant,
+    docsBy: consultant,
     pax,
     serviceLines,
     payments: paymentRows,
-    hasSupplierCosts: serviceLines.some((l) => l.amountPayable != null),
   }
 }

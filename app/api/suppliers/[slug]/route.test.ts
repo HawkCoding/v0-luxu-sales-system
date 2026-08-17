@@ -374,6 +374,76 @@ describe("PATCH /api/suppliers/[slug]", () => {
     expect(suiteTypeUpsert).toHaveBeenCalled()
   })
 
+  it("discards free-text location for a non-train supplier, even if the client sends one", async () => {
+    const supplierUpdatePayloads: Array<Record<string, unknown>> = []
+    const supplierMaybeSingle = vi.fn(async () => ({
+      data: { updated_at: "2026-01-03T00:00:00.000Z" },
+      error: null,
+    }))
+    const supplierEqMock = vi.fn()
+    const supplierUpdateQuery = {
+      eq: supplierEqMock,
+      select: () => ({ maybeSingle: supplierMaybeSingle }),
+    }
+    supplierEqMock.mockReturnValue(supplierUpdateQuery)
+
+    mockAuth()
+    mockSupplierDetail()
+    helperMocks.supabaseFrom.mockImplementation((table: string) => {
+      if (table === "profiles") return profileQuery("manager")
+      if (table === "suppliers") {
+        return {
+          update: (payload: Record<string, unknown>) => {
+            supplierUpdatePayloads.push(payload)
+            return supplierUpdateQuery
+          },
+        }
+      }
+      if (table === "supplier_emails") return { upsert: async () => ({ error: null }) }
+      if (table === "suite_types") return { upsert: async () => ({ error: null }) }
+      if (
+        table === "suite_type_bedroom_types" ||
+        table === "suite_type_bedroom_layouts" ||
+        table === "suite_type_bathroom_types"
+      ) {
+        return {
+          delete: () => ({ in: async () => ({ error: null }) }),
+          insert: async () => ({ error: null }),
+        }
+      }
+      if (table === "supplier_rate_adjustments") {
+        return { delete: () => ({ eq: async () => ({ error: null }) }) }
+      }
+      throw new Error(`Unexpected table ${table}`)
+    })
+
+    const response = await PATCH(
+      new Request("http://localhost/api/suppliers/test", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Test Supplier",
+          kind: "hotel_property",
+          email: "ops@example.com",
+          phone: "",
+          website: "",
+          // A hotel has no reason to send text here, but the route must not trust it either way --
+          // only train_operator's free text is ever written.
+          location: "CT",
+          notes: "",
+          active: true,
+          emails: [],
+          suiteTypes: [],
+          expectedUpdatedAt: "2026-01-02T00:00:00.000Z",
+        }),
+      }),
+      { params: Promise.resolve({ slug: "test" }) },
+    )
+
+    expect(response.status).toBe(200)
+    expect(supplierUpdatePayloads[0]).toMatchObject({ location: null })
+  })
+
   describe("linked suppliers", () => {
     const PARENT_ID = "00000000-0000-4000-8000-0000000000b1"
 

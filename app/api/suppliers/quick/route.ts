@@ -128,7 +128,7 @@ export async function POST(req: Request) {
   // it and the rate card hangs off the type alone.
   const isItineraryKind = isTypePricedSupplier(parsed.kind)
 
-  // Resolve location names needed for supplier.location and auto-derived route name.
+  // Resolve location names needed for the auto-derived route name.
   const locationIdsToFetch = Array.from(
     new Set(
       [
@@ -149,10 +149,6 @@ export async function POST(req: Request) {
       locationNameById.set(row.id, row.name)
     }
   }
-
-  const supplierLocation = parsed.locationId
-    ? (locationNameById.get(parsed.locationId) ?? "")
-    : ""
 
   const effectiveRouteName = (() => {
     const clientName = parsed.routeName.trim()
@@ -191,7 +187,9 @@ export async function POST(req: Request) {
       email: parsed.email || null,
       phone: parsed.phone || null,
       website: null,
-      location: supplierLocation || null,
+      // Free text is train-only (a train has no single city); the quick-add dialog never collects
+      // it, so this always starts null and only the full supplier editor can set it.
+      location: null,
       location_id: parsed.locationId ?? null,
       notes: null,
       single_supplement_pct: 0,
@@ -200,7 +198,7 @@ export async function POST(req: Request) {
       active: false,
       status: "temporary",
     })
-    .select("id, slug, kind, pricing_mode, status, name, email, phone, website, location, location_detail, location_id, location_area_id, description, notes, active, single_supplement_pct, infant_max_age, child_max_age, default_time_start, default_time_end, inclusions, exclusions, street_address, emergency_phone, default_contact_name, parent_supplier_id, created_at, updated_at")
+    .select("id, slug, kind, pricing_mode, status, name, email, phone, website, location, location_id, location_area_id, description, notes, active, single_supplement_pct, infant_max_age, child_max_age, default_time_start, default_time_end, inclusions, exclusions, street_address, emergency_phone, default_contact_name, parent_supplier_id, created_at, updated_at")
     .single()
 
   if (supplierError || !supplier) {

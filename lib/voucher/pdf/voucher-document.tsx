@@ -1,6 +1,7 @@
 import { Document, Page, Text, View } from "@react-pdf/renderer"
 import type { VoucherData } from "@/lib/generate-voucher"
 import { sortedVoucherServiceBlocks } from "@/lib/generate-voucher"
+import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
 import type { DocumentBrand } from "@/lib/settings-access"
 import type { VoucherSectionKey, VoucherTemplate } from "@/lib/types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
@@ -16,8 +17,10 @@ export interface VoucherDocumentProps {
   data: VoucherData
   template?: VoucherTemplate | null
   docTitle?: string
-  /** Shared brand copy for the masthead; omitted keeps the template's own text. */
+  /** Shared brand copy for the masthead. */
   brand?: DocumentBrand
+  /** Brand logo resolved to embeddable bytes (see lib/pdf/brand-logo.ts). */
+  brandLogo?: BrandLogoImage | null
 }
 
 function normalizeTemplate(template?: VoucherTemplate | null): VoucherTemplate {
@@ -56,7 +59,7 @@ function sectionFor(key: VoucherSectionKey, data: VoucherData, template: Voucher
   return null
 }
 
-export function VoucherDocument({ data, template, docTitle = "TRAVEL VOUCHERS", brand }: VoucherDocumentProps) {
+export function VoucherDocument({ data, template, docTitle = "TRAVEL VOUCHERS", brand, brandLogo }: VoucherDocumentProps) {
   registerDocumentFonts()
 
   const t = normalizeTemplate(template)
@@ -79,7 +82,7 @@ export function VoucherDocument({ data, template, docTitle = "TRAVEL VOUCHERS", 
         <View fixed style={styles.frameOuter} />
         <View fixed style={styles.frameInner} />
 
-        <HeaderBanner template={t} styles={styles} brand={brand} />
+        <HeaderBanner styles={styles} brand={brand} brandLogo={brandLogo} />
 
         <View style={styles.voucherNumberRow}>
           <Text style={styles.title}>{docTitle}</Text>

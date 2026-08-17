@@ -58,7 +58,7 @@ export function ServiceBlock({ block, styles, density = "comfortable", showEyebr
         ) : null}
         {rows.map((row, idx) =>
           row.cells ? (
-            <CellRow key={`${block.serviceType}-${idx}`} cells={row.cells} styles={styles} dotted />
+            <CellRow key={`${block.serviceType}-${idx}`} label={row.label} cells={row.cells} styles={styles} dotted />
           ) : (
             <InfoRow
               key={`${block.serviceType}-${idx}`}

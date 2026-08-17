@@ -34,4 +34,12 @@ describe("isMissingPricing", () => {
     })
     expect(isMissingPricing(unpricedExtra)).toBe(true)
   })
+
+  it("does not flag a hotel room deliberately overridden to R0 (a supplier comp)", () => {
+    const comped = line({
+      unitPrice: 0,
+      pricingSnapshot: { pricingMode: "rate_card", manualRoomPrice: 0 } as QuoteLineItem["pricingSnapshot"],
+    })
+    expect(isMissingPricing(comped)).toBe(false)
+  })
 })

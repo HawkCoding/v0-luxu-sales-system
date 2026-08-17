@@ -10,14 +10,9 @@ export interface DensityTokens {
   page: { paddingTop: number; paddingHorizontal: number; paddingBottom: number }
   frame: { outerInset: number; innerInset: number }
   header: {
-    minHeight: number
     marginBottom: number
-    logoHeight: number
-    logoWidth: number
     logoCenterHeight: number
     logoCenterWidth: number
-    bannerHeight: number
-    bannerFullHeight: number
   }
   title: { fontSize: number; letterSpacing: number }
   voucherNumberRow: { marginTop: number; marginBottom: number }
@@ -36,7 +31,6 @@ export interface DensityTokens {
   providerContact: { fontSize: number; marginBottom: number }
   endOfServices: { marginTop: number; marginBottom: number }
   footerSection: { marginTop: number }
-  footerRule: { marginBottom: number }
   pageNumber: { bottom: number }
   /** Rough char budget a `ServiceBlock` can hold on one page before it must be
    * allowed to wrap — see `sections/service-block.tsx`. */
@@ -47,14 +41,9 @@ const comfortable: DensityTokens = {
   page: { paddingTop: 48, paddingHorizontal: 56, paddingBottom: 56 },
   frame: { outerInset: 20, innerInset: 24 },
   header: {
-    minHeight: 100,
     marginBottom: 18,
-    logoHeight: 80,
-    logoWidth: 100,
     logoCenterHeight: 70,
     logoCenterWidth: 180,
-    bannerHeight: 100,
-    bannerFullHeight: 110,
   },
   title: { fontSize: 22, letterSpacing: 3 },
   voucherNumberRow: { marginTop: 18, marginBottom: 10 },
@@ -73,7 +62,6 @@ const comfortable: DensityTokens = {
   providerContact: { fontSize: 8, marginBottom: 10 },
   endOfServices: { marginTop: 4, marginBottom: 18 },
   footerSection: { marginTop: 8 },
-  footerRule: { marginBottom: 12 },
   pageNumber: { bottom: 32 },
   singlePageCharBudget: 1800,
 }
@@ -82,14 +70,9 @@ const compact: DensityTokens = {
   page: { paddingTop: 34, paddingHorizontal: 40, paddingBottom: 40 },
   frame: { outerInset: 14, innerInset: 17 },
   header: {
-    minHeight: 72,
     marginBottom: 10,
-    logoHeight: 60,
-    logoWidth: 76,
     logoCenterHeight: 52,
     logoCenterWidth: 140,
-    bannerHeight: 72,
-    bannerFullHeight: 80,
   },
   title: { fontSize: 16, letterSpacing: 2 },
   voucherNumberRow: { marginTop: 10, marginBottom: 6 },
@@ -108,7 +91,6 @@ const compact: DensityTokens = {
   providerContact: { fontSize: 7, marginBottom: 5 },
   endOfServices: { marginTop: 2, marginBottom: 8 },
   footerSection: { marginTop: 6 },
-  footerRule: { marginBottom: 8 },
   pageNumber: { bottom: 22 },
   // Deliberately conservative, not a measurement of real per-page capacity (which is far
   // higher at this row height) — just enough headroom above `comfortable` that ordinary

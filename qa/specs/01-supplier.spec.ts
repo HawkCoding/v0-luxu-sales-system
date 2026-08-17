@@ -134,7 +134,9 @@ test("01-supplier creates supplier, route, suite type, and report", async ({ pag
     await fillBuffered(dialog.getByLabel("Supplier name"), supplier.name)
     await fillBuffered(dialog.getByLabel("Phone"), supplier.phone)
     await fillBuffered(dialog.getByLabel("Website"), supplier.website)
-    await fillBuffered(dialog.getByLabel("Location"), supplier.location)
+    // Train operators have no single city, so this is the free-text "Head office city" field --
+    // every other kind is tagged via a City dropdown instead.
+    await fillBuffered(dialog.getByLabel("Head office city"), supplier.location)
     await fillBuffered(dialog.getByLabel("Email address"), supplier.email)
     await fillBuffered(dialog.getByLabel("Notes"), supplier.notes)
     await expect(createButton).toBeEnabled()
@@ -158,7 +160,7 @@ test("01-supplier creates supplier, route, suite type, and report", async ({ pag
     await expect(page.getByLabel("Supplier name")).toHaveValue(supplier.name)
     await expect(page.getByLabel("Phone")).toHaveValue(supplier.phone)
     await expect(page.getByLabel("Website")).toHaveValue("https://qa-rovos.test/")
-    await expect(page.getByLabel("Location")).toHaveValue(supplier.location)
+    await expect(page.getByLabel("Head office city")).toHaveValue(supplier.location)
     await expect(page.getByPlaceholder("supplier@example.com")).toHaveValue(supplier.email)
     await expect(page.getByLabel("Notes")).toHaveValue(supplier.notes)
     report.step("Supplier fields round-trip on detail page", {

@@ -1,6 +1,7 @@
 import { renderToBuffer } from "@react-pdf/renderer"
 import { createElement } from "react"
 import type { ItineraryData } from "@/lib/itinerary/build-itinerary"
+import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
 import type { DocumentBrand } from "@/lib/settings-access"
 import type { VoucherTemplate } from "@/lib/types"
 import { ItineraryDocument } from "./pdf/itinerary-document"
@@ -11,6 +12,7 @@ export interface RenderItineraryPdfInput {
   journeyHeading?: string
   introText?: string
   brand?: DocumentBrand
+  brandLogo?: BrandLogoImage | null
 }
 
 const SLOW_RENDER_THRESHOLD_MS = 2_000

@@ -118,8 +118,17 @@ describe("GET /api/jobs/[id]/reservation-details", () => {
       occasion: "",
       smokingPreference: null,
       mealSeating: null,
+      voucherSpecialRequests: "",
       agencyName: "",
       agencyAddress: "",
+      billingCompanyName: "",
+      billingVatNumber: "",
+      billingAddressLine1: "",
+      billingAddressLine2: "",
+      billingCity: "",
+      billingProvince: "",
+      billingPostalCode: "",
+      billingCountry: "",
       updatedAt: null,
     })
   })
@@ -202,5 +211,43 @@ describe("PUT /api/jobs/[id]/reservation-details", () => {
       supabase,
       expect.objectContaining({ action: "reservation_details_updated", entityId: BOOKING_ID }),
     )
+  })
+
+  it("upserts the job billing fields separately from the agency fields", async () => {
+    const supabase = buildSupabase()
+    authMocks.requireRole.mockResolvedValue({ ok: true, value: buildAuthValue(supabase) })
+    const req = new Request("http://localhost", {
+      method: "PUT",
+      body: JSON.stringify({
+        billingCompanyName: "Acme Travel",
+        billingVatNumber: "VAT123",
+        billingAddressLine1: "1 Job St",
+        billingPostalCode: "8001",
+      }),
+      headers: { "Content-Type": "application/json" },
+    })
+    const res = await PUT(req, { params })
+    expect(res.status).toBe(200)
+    expect(supabase.upsertCalls).toEqual([
+      expect.objectContaining({
+        booking_id: BOOKING_ID,
+        billing_company_name: "Acme Travel",
+        billing_vat_number: "VAT123",
+        billing_address_line1: "1 Job St",
+        billing_address_line2: null,
+        billing_postal_code: "8001",
+      }),
+    ])
+  })
+
+  it("rejects a billing field over the max length", async () => {
+    authMocks.requireRole.mockResolvedValue({ ok: true, value: buildAuthValue() })
+    const req = new Request("http://localhost", {
+      method: "PUT",
+      body: JSON.stringify({ billingCompanyName: "x".repeat(201) }),
+      headers: { "Content-Type": "application/json" },
+    })
+    const res = await PUT(req, { params })
+    expect(res.status).toBe(400)
   })
 })

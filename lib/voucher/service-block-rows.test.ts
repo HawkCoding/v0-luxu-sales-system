@@ -34,7 +34,7 @@ describe("voucherRowsForBlock", () => {
     expect(rows[0]).toEqual({ label: "Your Reference", value: "38562 – Carla" })
   })
 
-  it("train block: prints an Excursion row; the footnote is no longer a table row", () => {
+  it("train block: never prints an Excursion row, even when excursions data is present; the footnote is not a table row either", () => {
     const rows = voucherRowsForBlock(
       block({
         serviceType: "train",
@@ -44,7 +44,7 @@ describe("voucherRowsForBlock", () => {
         },
       }),
     )
-    expect(rows.find((r) => r.label === "Excursion")?.value).toBe("Kimberley **Weather & Time Permitted")
+    expect(rows.some((r) => r.label === "Excursion")).toBe(false)
     // The footnote is printed by the renderers directly from `block.serviceData.footnote` as an
     // italic line under the table, not as a labelled row — see sections/service-block.tsx.
     expect(rows.some((r) => r.label === "Note")).toBe(false)
@@ -199,7 +199,7 @@ describe("voucherRowsForBlock", () => {
     expect(suiteRow).toEqual({ label: "Suite Type", value: "Royal Suite" })
   })
 
-  it("train block: folds startTime/endTime into the date rows, and prints guests/requests/occasion/inclusions", () => {
+  it("train block: folds startTime/endTime into the date rows, and prints guests/requests/inclusions", () => {
     const rows = voucherRowsForBlock(
       block({
         serviceType: "train",
@@ -214,6 +214,7 @@ describe("voucherRowsForBlock", () => {
           mealPlan: "All inclusive",
           inclusions: ["High Tea", "Butler service"],
           requestsLine: "1st seating meals; Nonsmoking",
+          // Occasion is hotel-only now — set here to confirm the train branch ignores it.
           occasion: "Birthday Celebration",
         },
       }),
@@ -227,7 +228,7 @@ describe("voucherRowsForBlock", () => {
     ])
     expect(rows.find((r) => r.label === "Included")?.value).toBe("High Tea, Butler service")
     expect(rows.find((r) => r.label === "Requests")?.value).toBe("1st seating meals; Nonsmoking")
-    expect(rows.find((r) => r.label === "Occasion")?.value).toBe("Birthday Celebration")
+    expect(rows.find((r) => r.label === "Occasion")).toBeUndefined()
   })
 
   it("train block: drops Route and Suite Type entirely when unset, instead of printing an em dash", () => {
@@ -266,6 +267,24 @@ describe("voucherRowsForBlock", () => {
     expect(rows.find((r) => r.label === "Check-In")?.value).toBe("09 September 2026 at 14h00")
     expect(rows.find((r) => r.label === "Check-Out")?.value).toBe("11 September 2026 at 11h00")
     expect(rows.find((r) => r.label === "Guests")?.cells?.[0]).toEqual({ label: "Adults", value: 2 })
+  })
+
+  it("hotel block: prints dietary and occasion, not the train-only requests line", () => {
+    const rows = voucherRowsForBlock(
+      block({
+        serviceType: "hotel",
+        serviceData: {
+          roomType: "Milkwood Room",
+          dietary: "Vegetarian",
+          occasion: "Birthday Celebration",
+          // Requests (seating/smoking) is train-only — set here to confirm the hotel branch ignores it.
+          requestsLine: "1st seating meals; Nonsmoking",
+        },
+      }),
+    )
+    expect(rows.find((r) => r.label === "Dietary")?.value).toBe("Vegetarian")
+    expect(rows.find((r) => r.label === "Occasion")?.value).toBe("Birthday Celebration")
+    expect(rows.find((r) => r.label === "Requests")).toBeUndefined()
   })
 
   it("transfer block: prints No of Guests from passengerCount right after the reference", () => {

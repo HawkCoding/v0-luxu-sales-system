@@ -43,6 +43,8 @@ const createSupplierSchema = z.object({
     .refine((value) => value === "" || WEBSITE_PATTERN.test(value), {
       message: "Enter a valid website (e.g. example.com)",
     }),
+  /** Free-text head office city -- train operators only (a train has no single city). Every
+   *  other kind sends `locationId` instead; the route forces this to null regardless of kind. */
   location: z
     .string()
     .trim()
@@ -50,7 +52,7 @@ const createSupplierSchema = z.object({
     .refine((value) => value === "" || value.length >= 2, {
       message: "Location must be at least 2 characters",
     }),
-  locationDetail: z.string().trim().max(255).nullable().optional(),
+  locationId: z.string().uuid().nullable().optional(),
   streetAddress: z.string().trim().max(255).nullable().optional(),
   notes: z.string().trim().max(5000),
   emails: z
@@ -211,8 +213,8 @@ export async function POST(req: Request) {
       email: normalizedEmails[0]?.email ?? null,
       phone: parsed.phone.trim() || null,
       website: parsed.website.trim() || null,
-      location: parsed.location.trim() || null,
-      location_detail: parsed.locationDetail?.trim() || null,
+      location: parsed.kind === "train_operator" ? parsed.location.trim() || null : null,
+      location_id: parsed.kind === "train_operator" ? null : (parsed.locationId ?? null),
       street_address: parsed.streetAddress?.trim() || null,
       notes: parsed.notes.trim() || null,
       parent_supplier_id: parentSupplierId,

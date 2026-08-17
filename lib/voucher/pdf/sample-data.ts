@@ -116,6 +116,30 @@ export function sampleVoucherServiceBlocks(): VoucherServiceBlock[] {
       },
     },
     {
+      // An overnight flight on purpose: the arrival lands on a different day from the departure,
+      // which is the case the Departure/Arrival rows exist to state and the one a preview built
+      // only from same-day flights would never show.
+      serviceType: "airline",
+      title: "SAfair — Johannesburg to Cape Town",
+      supplierReference: "FA-77120",
+      displayOrder: 4,
+      contactDetails: { name: "SAfair", phone: "+27 87 135 1351" },
+      serviceData: {
+        route: "Lanseria INT Airport → Cape Town INT Airport",
+        cabin: "Economy",
+        flightNumber: "FA212",
+        departureAirportCode: "HLA",
+        arrivalAirportCode: "CPT",
+        departureDate: "2026-03-07",
+        arrivalDate: "2026-03-08",
+        startTime: "22:40",
+        endTime: "01:05",
+        handLuggageKg: 7,
+        checkedLuggageKg: 23,
+        passengerNames: ["Sample Guest", "Second Guest"],
+      },
+    },
+    {
       serviceType: "tour",
       title: "Kimberley Day Excursion",
       supplierReference: "KIM-01",

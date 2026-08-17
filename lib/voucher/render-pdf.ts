@@ -1,6 +1,7 @@
 import { renderToBuffer } from "@react-pdf/renderer"
 import { createElement } from "react"
 import type { VoucherData } from "@/lib/generate-voucher"
+import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
 import type { DocumentBrand } from "@/lib/settings-access"
 import type { VoucherTemplate } from "@/lib/types"
 import { VoucherDocument } from "./pdf/voucher-document"
@@ -10,6 +11,7 @@ export interface RenderVoucherPdfInput {
   template?: VoucherTemplate | null
   docTitle?: string
   brand?: DocumentBrand
+  brandLogo?: BrandLogoImage | null
 }
 
 const SLOW_RENDER_THRESHOLD_MS = 2_000

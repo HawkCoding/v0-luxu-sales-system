@@ -26,15 +26,20 @@ export function normaliseCurrency(value: string | null | undefined): SupportedCu
  * Two migrations exist purely to strip a literal "R" that was typed in front of a token which
  * already carried one; see `20260810120000_fix_double_rand_templates_all_rows.sql`.
  */
-export function formatMoney(amount: number, currency: string = BASE_CURRENCY): string {
+export function formatMoney(
+  amount: number,
+  currency: string = BASE_CURRENCY,
+  options?: { decimals?: boolean },
+): string {
   const code = (currency ?? "").trim().toUpperCase() || BASE_CURRENCY
+  const fractionDigits = options?.decimals === false ? 0 : 2
   try {
     return new Intl.NumberFormat("en-ZA", {
       style: "currency",
       currency: code,
       currencyDisplay: "narrowSymbol",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: fractionDigits,
     }).format(amount)
   } catch {
     // An unknown ISO code makes Intl throw. Degrade to a readable "USD 1234.50" rather than

@@ -1,31 +1,14 @@
 "use client"
 
-import { useEffect, useState, useRef, useCallback } from "react"
-import Cropper, { type Area } from "react-easy-crop"
+import { useState, useCallback, useMemo } from "react"
 import { useSWRConfig } from "swr"
 import { toast } from "sonner"
-import {
-  Eye,
-  EyeOff,
-  GripVertical,
-  ImagePlus,
-  Loader2,
-  Save,
-} from "lucide-react"
+import { Eye, EyeOff, GripVertical, Loader2, Save } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Separator } from "@/components/ui/separator"
-import { Slider } from "@/components/ui/slider"
 import {
   Select,
   SelectContent,
@@ -34,33 +17,21 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
-import { MAX_IMAGE_BYTES, MAX_IMAGE_MB } from "@/lib/upload-limits"
-import {
-  createCroppedVoucherAsset,
-  getVoucherCropOutput,
-  type VoucherImageKind,
-} from "@/lib/voucher-image-crop"
 import {
   generateVoucherHTML,
   type VoucherData,
+  type VoucherPreviewBrand,
 } from "@/lib/generate-voucher"
 import type { VoucherTemplate, VoucherSectionKey } from "@/lib/types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
-
-const FONT_OPTIONS = [
-  { value: "Georgia, serif", label: "Georgia (Serif)" },
-  { value: "'Playfair Display', Georgia, serif", label: "Playfair Display (Elegant Serif)" },
-  { value: "Arial, sans-serif", label: "Arial (Sans-serif)" },
-  { value: "'Montserrat', Arial, sans-serif", label: "Montserrat (Modern)" },
-]
+import { VOUCHER_FONT_OPTIONS } from "@/lib/voucher/voucher-fonts"
+import { useDocumentBrandSettings } from "@/lib/use-data"
 
 const SECTION_LABELS: Record<VoucherSectionKey, string> = {
   guest_info: "Guest Information",
   service_provider: "Service Provider",
   footer: "Footer & Contact",
 }
-
-const RASTER_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"] as const
 
 const PREVIEW_DATA: VoucherData = {
   voucherNumber: "180226-01",
@@ -96,227 +67,6 @@ const PREVIEW_DATA: VoucherData = {
     termsAccepted: true,
     createdAt: new Date().toISOString(),
   },
-}
-
-interface ImageUploadZoneProps {
-  label: string
-  kind: VoucherImageKind
-  currentUrl: string | null
-  onUploaded: (url: string) => void
-  disabled?: boolean
-}
-
-function ImageUploadZone({ label, kind, currentUrl, onUploaded, disabled }: ImageUploadZoneProps) {
-  const [uploading, setUploading] = useState(false)
-  const [cropDialogOpen, setCropDialogOpen] = useState(false)
-  const [pendingImageUrl, setPendingImageUrl] = useState<string | null>(null)
-  const [crop, setCrop] = useState({ x: 0, y: 0 })
-  const [zoom, setZoom] = useState(1)
-  const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  const output = getVoucherCropOutput(kind)
-  const isBanner = kind === "banner"
-  const aspect = output.width / output.height
-
-  useEffect(() => {
-    return () => {
-      if (pendingImageUrl) URL.revokeObjectURL(pendingImageUrl)
-    }
-  }, [pendingImageUrl])
-
-  const uploadFile = useCallback(
-    async (file: File): Promise<boolean> => {
-      if (file.size > MAX_IMAGE_BYTES) {
-        toast.error(`Image too large. Maximum size is ${MAX_IMAGE_MB} MB.`)
-        return false
-      }
-
-      setUploading(true)
-      try {
-        const fd = new FormData()
-        fd.append("file", file)
-        fd.append("kind", kind)
-        const res = await fetch("/api/voucher-template/upload", { method: "POST", body: fd })
-        if (!res.ok) throw new Error(await res.text())
-        const { url } = await res.json()
-        onUploaded(url)
-        toast.success(`${label} uploaded`)
-        return true
-      } catch (err) {
-        toast.error(`Upload failed: ${err instanceof Error ? err.message : "Unknown error"}`)
-        return false
-      } finally {
-        setUploading(false)
-      }
-    },
-    [kind, label, onUploaded]
-  )
-
-  const handleFile = useCallback(
-    async (file: File) => {
-      if (file.size > MAX_IMAGE_BYTES) {
-        toast.error(`Image too large. Maximum size is ${MAX_IMAGE_MB} MB.`)
-        return
-      }
-
-      if (!RASTER_IMAGE_TYPES.includes(file.type as (typeof RASTER_IMAGE_TYPES)[number])) {
-        toast.error("Please upload a PNG, JPG, or WebP image.")
-        return
-      }
-
-      if (pendingImageUrl) URL.revokeObjectURL(pendingImageUrl)
-      setPendingImageUrl(URL.createObjectURL(file))
-      setCrop({ x: 0, y: 0 })
-      setZoom(1)
-      setCroppedAreaPixels(null)
-      setCropDialogOpen(true)
-    },
-    [pendingImageUrl, uploadFile]
-  )
-
-  const closeCropDialog = useCallback(() => {
-    setCropDialogOpen(false)
-    if (pendingImageUrl) URL.revokeObjectURL(pendingImageUrl)
-    setPendingImageUrl(null)
-    setCroppedAreaPixels(null)
-  }, [pendingImageUrl])
-
-  const uploadCroppedImage = useCallback(async () => {
-    if (!pendingImageUrl || !croppedAreaPixels) {
-      toast.error("Please choose the image area first.")
-      return
-    }
-
-    try {
-      const croppedFile = await createCroppedVoucherAsset(pendingImageUrl, croppedAreaPixels, kind)
-      const uploaded = await uploadFile(croppedFile)
-      if (uploaded) closeCropDialog()
-    } catch (err) {
-      toast.error(`Crop failed: ${err instanceof Error ? err.message : "Unknown error"}`)
-    }
-  }, [closeCropDialog, croppedAreaPixels, kind, pendingImageUrl, uploadFile])
-
-  return (
-    <div className="flex flex-col gap-2">
-      <Label>{label}</Label>
-      <div
-        className={cn(
-          "relative border-2 border-dashed rounded-lg flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors",
-          kind === "logo" ? "h-28 w-28" : "h-28 flex-1",
-          disabled ? "opacity-50 cursor-not-allowed" : "hover:border-primary hover:bg-muted/30"
-        )}
-        onClick={() => !disabled && inputRef.current?.click()}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => {
-          e.preventDefault()
-          const file = e.dataTransfer.files[0]
-          if (file && !disabled) handleFile(file)
-        }}
-      >
-        {currentUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={currentUrl}
-            alt={label}
-            className={cn("object-contain rounded", kind === "logo" ? "max-h-20 max-w-20" : "max-h-20 w-full")}
-          />
-        ) : (
-          <>
-            <ImagePlus className="h-6 w-6 text-muted-foreground" />
-            <span className="text-xs text-muted-foreground text-center px-2">
-              {uploading ? "Uploading…" : `Click or drag ${label.toLowerCase()} here`}
-            </span>
-          </>
-        )}
-        {uploading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-background/70 rounded-lg">
-            <Loader2 className="h-5 w-5 animate-spin text-primary" />
-          </div>
-        )}
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/png,image/jpeg,image/webp"
-          className="hidden"
-          disabled={disabled || uploading}
-          onChange={(e) => {
-            const file = e.target.files?.[0]
-            if (file) handleFile(file)
-            e.target.value = ""
-          }}
-        />
-      </div>
-      {currentUrl && (
-        <button
-          type="button"
-          className="text-xs text-destructive hover:underline self-start"
-          onClick={() => onUploaded("")}
-          disabled={disabled}
-        >
-          Remove
-        </button>
-      )}
-      <Dialog open={cropDialogOpen} onOpenChange={(open) => !open && closeCropDialog()}>
-        <DialogContent className="sm:max-w-3xl data-[state=open]:zoom-in-100 data-[state=closed]:zoom-out-100 data-[state=open]:duration-0 data-[state=closed]:duration-0">
-          <DialogHeader>
-            <DialogTitle>Crop {label}</DialogTitle>
-            <DialogDescription>
-              {isBanner
-                ? "Drag the image to choose the banner area. The saved banner will be 1200 x 300 pixels."
-                : "Drag the image to choose the logo area."}
-            </DialogDescription>
-          </DialogHeader>
-          <div
-            className={cn(
-              "relative overflow-hidden rounded-md border bg-muted",
-              isBanner ? "aspect-[4/1]" : "aspect-square max-h-[56vh]",
-            )}
-          >
-            {pendingImageUrl && (
-              <Cropper
-                image={pendingImageUrl}
-                crop={crop}
-                zoom={zoom}
-                aspect={aspect}
-                onCropChange={setCrop}
-                onZoomChange={setZoom}
-                onCropComplete={(_, pixels) => setCroppedAreaPixels(pixels)}
-                restrictPosition
-                showGrid={false}
-              />
-            )}
-          </div>
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between gap-3">
-              <Label htmlFor={`${kind}-zoom`} className="text-xs text-muted-foreground">
-                Zoom
-              </Label>
-              <span className="text-xs tabular-nums text-muted-foreground">{zoom.toFixed(1)}x</span>
-            </div>
-            <Slider
-              id={`${kind}-zoom`}
-              min={1}
-              max={4}
-              step={0.1}
-              value={[zoom]}
-              onValueChange={(value) => setZoom(value[0] ?? 1)}
-              disabled={uploading}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={closeCropDialog} disabled={uploading}>
-              Cancel
-            </Button>
-            <Button onClick={uploadCroppedImage} disabled={uploading || !croppedAreaPixels}>
-              {uploading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              Use Image
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  )
 }
 
 interface SectionRowProps {
@@ -365,10 +115,20 @@ interface Props {
 
 export function VoucherTemplateEditor({ initial, canEdit }: Props) {
   const { mutate } = useSWRConfig()
+  const { data: brandSettings } = useDocumentBrandSettings()
   const [draft, setDraft] = useState<VoucherTemplate>({ ...VOUCHER_TEMPLATE_DEFAULTS, ...initial })
   const [saving, setSaving] = useState(false)
   const [showPreview, setShowPreview] = useState(false)
   const [draggingKey, setDraggingKey] = useState<VoucherSectionKey | null>(null)
+
+  const previewBrand: VoucherPreviewBrand = useMemo(
+    () => ({
+      heading: brandSettings?.brand_block_heading ?? "",
+      subheading: brandSettings?.brand_block_subheading ?? "",
+      logoUrl: brandSettings?.brand_block_logo_url || null,
+    }),
+    [brandSettings],
+  )
 
   const set = useCallback(<K extends keyof VoucherTemplate>(key: K, value: VoucherTemplate[K]) => {
     setDraft((prev) => ({ ...prev, [key]: value }))
@@ -381,14 +141,11 @@ export function VoucherTemplateEditor({ initial, canEdit }: Props) {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          logo_url: draft.logo_url,
-          banner_url: draft.banner_url,
           accent_colour: draft.accent_colour,
           section_bg: draft.section_bg,
           font_family: draft.font_family,
           section_order: draft.section_order,
           hidden_sections: draft.hidden_sections,
-          footer_company: draft.footer_company,
           footer_phone: draft.footer_phone,
           footer_email: draft.footer_email,
           guidance_text: draft.guidance_text,
@@ -415,44 +172,16 @@ export function VoucherTemplateEditor({ initial, canEdit }: Props) {
     set("section_order", order)
   }
 
-  const previewHtml = generateVoucherHTML(PREVIEW_DATA, draft)
+  const previewHtml = generateVoucherHTML(PREVIEW_DATA, draft, previewBrand)
 
   return (
     <div className="flex flex-col gap-6">
-      {/* ── Header Images ── */}
-      <section>
-        <h3 className="text-sm font-semibold mb-3">Header Images</h3>
-        <div className="flex gap-4 items-start">
-          <ImageUploadZone
-            label="Logo"
-            kind="logo"
-            currentUrl={draft.logo_url}
-            onUploaded={(url) => set("logo_url", url || null)}
-            disabled={!canEdit}
-          />
-          <div className="flex-1">
-            <ImageUploadZone
-              label="Banner Image"
-              kind="banner"
-              currentUrl={draft.banner_url}
-              onUploaded={(url) => set("banner_url", url || null)}
-              disabled={!canEdit}
-            />
-          </div>
-        </div>
-        <p className="text-xs text-muted-foreground mt-2">
-          Logo appears left; banner fills the right side of the header. PNG, JPG or WebP, max 5 MB.
-        </p>
-      </section>
-
-      <Separator />
-
-      {/* The masthead heading + sub-heading are now edited once on
-          Templates → Documents (the brand block), which feeds every document. */}
+      {/* The voucher masthead — logo, heading and sub-heading — is set once on the Branding
+          tab (brand block), which feeds every document (voucher, itinerary, quote, invoice). */}
       <p className="text-xs text-muted-foreground">
-        The masthead heading and sub-heading are set on the{" "}
-        <span className="font-medium">Documents</span> tab (brand block) so they
-        stay consistent across quotes, invoices and vouchers.
+        The voucher masthead — logo, heading and sub-heading — is set on the{" "}
+        <span className="font-medium">Branding</span> tab (brand block) so it stays
+        consistent across quotes, invoices, vouchers and itineraries.
       </p>
 
       <Separator />
@@ -512,7 +241,7 @@ export function VoucherTemplateEditor({ initial, canEdit }: Props) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {FONT_OPTIONS.map((o) => (
+                {VOUCHER_FONT_OPTIONS.map((o) => (
                   <SelectItem key={o.value} value={o.value}>
                     {o.label}
                   </SelectItem>
@@ -569,16 +298,7 @@ export function VoucherTemplateEditor({ initial, canEdit }: Props) {
       {/* ── Footer Details ── */}
       <section>
         <h3 className="text-sm font-semibold mb-3">Footer Contact Details</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="footer_company">Company name</Label>
-            <Input
-              id="footer_company"
-              value={draft.footer_company}
-              onChange={(e) => set("footer_company", e.target.value)}
-              disabled={!canEdit}
-            />
-          </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="footer_phone">Phone</Label>
             <Input

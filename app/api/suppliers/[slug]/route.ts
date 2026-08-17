@@ -940,8 +940,9 @@ export async function PATCH(
     email: normalizedEmails[0]?.email ?? null,
     phone: parsed.phone || null,
     website: parsed.website || null,
-    location: parsed.location || null,
-    location_detail: parsed.locationDetail?.trim() || null,
+    // Free text only carries meaning for train operators -- a train has no single city. Every
+    // other kind resolves its printed city from location_id (see supplierLocationName).
+    location: parsed.kind === "train_operator" ? parsed.location || null : null,
     street_address: parsed.streetAddress?.trim() || null,
     location_id: parsed.locationId ?? null,
     description: parsed.description?.trim() || null,

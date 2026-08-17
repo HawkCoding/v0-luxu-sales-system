@@ -823,8 +823,9 @@ export interface Supplier {
   email: string | null
   phone: string | null
   website: string | null
+  /** Free-text head office city -- train operators only (a train has no single city). Every
+   *  other kind resolves its city from `locationId`; see `supplierLocationName`. */
   location: string | null
-  locationDetail: string | null
   locationId: string | null
   locationAreaId: string | null
   description: string | null
@@ -1266,8 +1267,6 @@ export type VoucherSectionKey = "guest_info" | "service_provider" | "footer"
 
 export interface VoucherTemplate {
   id?: string
-  logo_url: string | null
-  banner_url: string | null
   header_text: string
   product_line: string
   accent_colour: string
@@ -1307,13 +1306,11 @@ export interface BackupRecord {
 }
 
 export const VOUCHER_TEMPLATE_DEFAULTS: VoucherTemplate = {
-  logo_url: null,
-  banner_url: null,
   header_text: "A division of Luxus Travel & Tours",
   product_line: "THE BLUE TRAIN • ROVOS RAIL • KRUGER SHALATI",
   accent_colour: "#0B2A3A",
   section_bg: "#1a3a4a",
-  font_family: "Georgia, serif",
+  font_family: "Arial, sans-serif",
   section_order: ["guest_info", "service_provider", "footer"],
   hidden_sections: [],
   footer_company: "Luxus Travel & Tours",

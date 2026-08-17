@@ -10,7 +10,7 @@ import { formatMoney } from "@/lib/money"
 import { deriveFlightCapPerPerson, deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
 import { resolvePrimaryRoute, resolvePrimarySupplierId } from "@/lib/quotes/resolve-primary-route"
 import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
-import { legIdsFromLineItems } from "@/lib/quotes/accepted-quote-scope"
+import { complimentaryLegIdsFromLineItems, legIdsFromLineItems } from "@/lib/quotes/accepted-quote-scope"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import type { PricingSnapshot } from "@/lib/types"
@@ -113,6 +113,7 @@ export async function POST(req: Request, { params }: RouteParams) {
   // currently selected live on the job — an empty set means a manual/no-package quote, so fall
   // back to unfiltered (today's behavior) rather than rendering an empty itinerary.
   const quoteLegIds = legIdsFromLineItems(lineItems)
+  const complimentaryLegIds = complimentaryLegIdsFromLineItems(lineItems)
 
   // Itinerary degrades to an omitted section rather than failing the preview.
   let itineraryBlocks: VoucherServiceBlock[] = []
@@ -121,6 +122,7 @@ export async function POST(req: Request, { params }: RouteParams) {
       bookingId: quote.booking_id,
       additionalServicesDetails: null,
       legIds: quoteLegIds.size > 0 ? quoteLegIds : undefined,
+      complimentaryLegIds,
     })
     itineraryBlocks = blocks
   } catch {

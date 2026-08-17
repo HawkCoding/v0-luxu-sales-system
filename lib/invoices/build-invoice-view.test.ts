@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { buildDaysLabel, resolveDurationNights } from "@/lib/invoices/build-invoice-view"
+import { buildBillingParty, buildDaysLabel, resolveDurationNights } from "@/lib/invoices/build-invoice-view"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 
 function trainBlock(durationDays: number | null, displayOrder = 0): VoucherServiceBlock {
@@ -59,6 +59,58 @@ describe("resolveDurationNights", () => {
       [trainBlock(5, 1), trainBlock(2, 0)],
     )
     expect(nights).toBe(1)
+  })
+})
+
+describe("buildBillingParty", () => {
+  it("reads company, VAT and address from booking_reservation_details, not the customer profile", () => {
+    const billing = buildBillingParty(
+      {
+        billing_company_name: "Acme Travel",
+        billing_vat_number: "VAT123",
+        billing_address_line1: "1 Job St",
+        billing_address_line2: null,
+        billing_city: "Cape Town",
+        billing_province: "Western Cape",
+        billing_postal_code: "8001",
+        billing_country: "South Africa",
+      },
+      { phone: "+27 21 555 0000", email: "customer@example.com" },
+    )
+    expect(billing.companyName).toBe("Acme Travel")
+    expect(billing.vatNumber).toBe("VAT123")
+    expect(billing.postalCode).toBe("8001")
+    expect(billing.addressLines).toEqual(["1 Job St", "Cape Town, Western Cape", "South Africa"])
+    // Phone and e-mail are the one exception — still sourced from the customer profile.
+    expect(billing.phone).toBe("+27 21 555 0000")
+    expect(billing.email).toBe("customer@example.com")
+  })
+
+  it("has no fallback to the customer profile — a null details row prints blank, not customer data", () => {
+    const billing = buildBillingParty(null, { phone: "+27 21 555 0000", email: "customer@example.com" })
+    expect(billing.companyName).toBeNull()
+    expect(billing.vatNumber).toBeNull()
+    expect(billing.postalCode).toBeNull()
+    expect(billing.addressLines).toEqual([])
+    expect(billing.phone).toBe("+27 21 555 0000")
+    expect(billing.email).toBe("customer@example.com")
+  })
+
+  it("drops empty address lines rather than printing blanks", () => {
+    const billing = buildBillingParty(
+      {
+        billing_company_name: null,
+        billing_vat_number: null,
+        billing_address_line1: "1 Job St",
+        billing_address_line2: null,
+        billing_city: null,
+        billing_province: null,
+        billing_postal_code: null,
+        billing_country: null,
+      },
+      null,
+    )
+    expect(billing.addressLines).toEqual(["1 Job St"])
   })
 })
 

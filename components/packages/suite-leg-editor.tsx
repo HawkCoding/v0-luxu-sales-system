@@ -1,12 +1,13 @@
 ﻿"use client"
 
 import { useState } from "react"
-import { ArrowLeftRight, Info, Plus, Trash2 } from "lucide-react"
+import { ArrowLeftRight, Gift, Info, Plus, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { DatePicker } from "@/components/ui/date-picker"
+import { WallClockTimeInput } from "@/components/ui/wall-clock-time-input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { NumericInput } from "@/components/ui/numeric-input"
@@ -138,6 +139,10 @@ function RoomPriceOverride({
   const currency = baseRateCard?.currency ?? fallbackCurrency
   // 0 is a real price (a comped room), so this is a null check, not a truthiness one.
   const overridden = unit.manualRoomPrice !== null && unit.manualRoomPrice !== undefined
+  // A comped room is an override whose typed price happens to be zero — the client sees
+  // "Complimentary" instead of "R0.00" and it's exempted from the missing-pricing check
+  // (see isMissingPricing in lib/quotes/pricing-engine.ts).
+  const isComplimentary = overridden && unit.manualRoomPrice === 0
   // Derived rather than synced: a leg loaded with a saved override opens expanded on first paint,
   // and reverting collapses it again, so the two can never drift apart.
   const [requested, setRequested] = useState(false)
@@ -164,15 +169,30 @@ function RoomPriceOverride({
             "No rate card price for this room yet"
           )}
         </span>
-        <Button
-          type="button"
-          size="sm"
-          variant="link"
-          className="h-auto p-0 text-xs"
-          onClick={() => setRequested(true)}
-        >
-          Override price
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button
+            type="button"
+            size="sm"
+            variant="link"
+            className="h-auto p-0 text-xs"
+            onClick={() => setRequested(true)}
+          >
+            Override price
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="link"
+            className="h-auto gap-1 p-0 text-xs text-emerald-600 hover:text-emerald-700"
+            onClick={() => {
+              setRequested(true)
+              onChange(0)
+            }}
+          >
+            <Gift className="h-3.5 w-3.5" />
+            Mark complimentary
+          </Button>
+        </div>
       </div>
     )
   }
@@ -201,7 +221,11 @@ function RoomPriceOverride({
             </TooltipContent>
           </Tooltip>
         </div>
-        {overridden ? (
+        {isComplimentary ? (
+          <Badge className="h-5 text-[10px] bg-emerald-100 text-emerald-700 hover:bg-emerald-100 border-emerald-200">
+            Complimentary
+          </Badge>
+        ) : overridden ? (
           <Badge variant="secondary" className="h-5 text-[10px]">
             Overridden
           </Badge>
@@ -258,9 +282,11 @@ function RoomPriceOverride({
             {convertedStayTotal ? <span className="tabular-nums">≈ {convertedStayTotal}</span> : null}
           </div>
           <p className="text-xs text-muted-foreground">
-            {baseRateCard
-              ? `Replaces the rate card's ${formatMoney(baseRateCard.pricePerPerson, baseRateCard.currency)} per night.`
-              : "No rate card covers this room, so nothing is being replaced."}
+            {isComplimentary
+              ? "The client's quote and voucher will show this room as complimentary."
+              : baseRateCard
+                ? `Replaces the rate card's ${formatMoney(baseRateCard.pricePerPerson, baseRateCard.currency)} per night.`
+                : "No rate card covers this room, so nothing is being replaced."}
           </p>
         </div>
       ) : (
@@ -306,11 +332,30 @@ export function SuiteLegEditor({
   fxRates = { [BASE_CURRENCY]: 1 },
 }: SuiteLegEditorProps) {
   const isHotel = leg.supplierKind === "hotel_property"
+  const isAirline = leg.supplierKind === "airline"
   const vocab = getSupplierVocabulary(leg.supplierKind)
   const optional = isOptionalPackageLegKind(leg.supplierKind)
   // A non-optional leg is always part of the booking, whatever a legacy row has stored.
   const included = optional ? value.selected : true
   const showPassengerSplit = PASSENGER_SPLIT_SUPPLIER_KINDS.has(leg.supplierKind)
+
+  // Same two rules the server enforces, surfaced under the fields instead of arriving as a 400 the
+  // consultant has to trace back. A later arrival date is legitimate (overnight flight) and gets a
+  // muted confirmation rather than silence, so it never looks like a mistyped year.
+  const flightScheduleError =
+    isAirline && value.arrivalDate && value.serviceDate
+      ? value.arrivalDate < value.serviceDate
+        ? "The flight cannot arrive before it departs."
+        : value.arrivalDate === value.serviceDate &&
+            value.arrivalTime &&
+            value.departureTime &&
+            value.arrivalTime <= value.departureTime
+          ? "A flight arriving on its departure day must arrive after it departs."
+          : null
+      : null
+  const landsNextDay = Boolean(
+    isAirline && value.arrivalDate && value.serviceDate && value.arrivalDate > value.serviceDate,
+  )
   const pricesByTypeOnly = isTypePricedSupplier(leg.supplierKind)
   const activeSuiteTypes = leg.suiteTypes.filter((suiteType) => suiteType.active)
 
@@ -559,9 +604,11 @@ export function SuiteLegEditor({
           </div>
           <div className="text-xs text-muted-foreground">{leg.supplierName}</div>
         </div>
-        {isHotel ? null : (
+        {isHotel || isAirline ? null : (
           <div className="space-y-1">
-            <Label className="text-xs" htmlFor={`service-date-${leg.id}`}>Service date</Label>
+            <Label className="text-xs" htmlFor={`service-date-${leg.id}`}>
+              Service date
+            </Label>
             <DatePicker
               id={`service-date-${leg.id}`}
               value={value.serviceDate ?? ""}
@@ -655,6 +702,148 @@ export function SuiteLegEditor({
           ) : null}
 
           {pricesByTypeOnly ? null : legFields}
+
+          {isAirline ? (
+            <div className="space-y-3 rounded-md border bg-muted/40 p-3">
+              <Label className="text-xs">Flight details</Label>
+
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs" htmlFor={`flight-number-${leg.id}`}>Flight number</Label>
+                  <Input
+                    id={`flight-number-${leg.id}`}
+                    value={value.flightNumber ?? ""}
+                    onChange={(event) =>
+                      onChange({ ...value, flightNumber: event.target.value.trim() || null })
+                    }
+                    placeholder="FA212"
+                    maxLength={20}
+                    className="h-10 w-28"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs" htmlFor={`departure-airport-${leg.id}`}>From</Label>
+                  <Input
+                    id={`departure-airport-${leg.id}`}
+                    value={value.departureAirportCode ?? ""}
+                    onChange={(event) =>
+                      onChange({
+                        ...value,
+                        departureAirportCode: event.target.value.toUpperCase().trim() || null,
+                      })
+                    }
+                    placeholder="HLA"
+                    maxLength={4}
+                    aria-label="Departure airport code"
+                    className="h-10 w-20 text-center uppercase"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs" htmlFor={`arrival-airport-${leg.id}`}>To</Label>
+                  <Input
+                    id={`arrival-airport-${leg.id}`}
+                    value={value.arrivalAirportCode ?? ""}
+                    onChange={(event) =>
+                      onChange({
+                        ...value,
+                        arrivalAirportCode: event.target.value.toUpperCase().trim() || null,
+                      })
+                    }
+                    placeholder="CPT"
+                    maxLength={4}
+                    aria-label="Arrival airport code"
+                    className="h-10 w-20 text-center uppercase"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs" htmlFor={`service-date-${leg.id}`}>Departure date</Label>
+                  <DatePicker
+                    id={`service-date-${leg.id}`}
+                    value={value.serviceDate ?? ""}
+                    onChange={(date) =>
+                      onChange({
+                        ...value,
+                        serviceDate: date || null,
+                        // Most flights land the day they take off, so the arrival date follows the
+                        // departure until someone says otherwise — an overnight flight is then a single
+                        // deliberate edit rather than two fields to fill every time.
+                        ...(date && !value.arrivalDate ? { arrivalDate: date } : {}),
+                      })
+                    }
+                    className="w-40"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs" htmlFor={`departure-time-${leg.id}`}>Departs at</Label>
+                  <WallClockTimeInput
+                    id={`departure-time-${leg.id}`}
+                    value={value.departureTime}
+                    onChange={(time) => onChange({ ...value, departureTime: time })}
+                    aria-label="Flight departure time"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs" htmlFor={`arrival-date-${leg.id}`}>Arrives on</Label>
+                  <DatePicker
+                    id={`arrival-date-${leg.id}`}
+                    aria-label="Flight arrival date"
+                    value={value.arrivalDate ?? ""}
+                    onChange={(date) => onChange({ ...value, arrivalDate: date || null })}
+                    className="w-40"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs" htmlFor={`arrival-time-${leg.id}`}>Arrives at</Label>
+                  <WallClockTimeInput
+                    id={`arrival-time-${leg.id}`}
+                    value={value.arrivalTime}
+                    onChange={(time) => onChange({ ...value, arrivalTime: time })}
+                    aria-label="Flight arrival time"
+                  />
+                </div>
+              </div>
+
+              {flightScheduleError ? (
+                <p className="text-xs text-destructive">{flightScheduleError}</p>
+              ) : landsNextDay ? (
+                <p className="text-xs text-muted-foreground">
+                  Arrives the following day — the quote will show the arrival on its own date.
+                </p>
+              ) : null}
+
+              {/* Baggage prints on the voucher and is what the voucher-readiness check looks for,
+                  so it is captured here with the rest of the flight rather than chased later. */}
+              <div className="flex flex-wrap items-end gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs" htmlFor={`hand-luggage-${leg.id}`}>Hand luggage (kg)</Label>
+                  <NumericInput
+                    id={`hand-luggage-${leg.id}`}
+                    min="0"
+                    step="0.5"
+                    className="h-10 w-24"
+                    nullable
+                    value={value.handLuggageKg}
+                    onValueChange={(next) => onChange({ ...value, handLuggageKg: next })}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs" htmlFor={`checked-luggage-${leg.id}`}>Checked luggage (kg)</Label>
+                  <NumericInput
+                    id={`checked-luggage-${leg.id}`}
+                    min="0"
+                    step="0.5"
+                    className="h-10 w-24"
+                    nullable
+                    value={value.checkedLuggageKg}
+                    onValueChange={(next) => onChange({ ...value, checkedLuggageKg: next })}
+                  />
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-xs font-medium text-muted-foreground">

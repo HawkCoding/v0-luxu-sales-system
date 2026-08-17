@@ -29,14 +29,7 @@ export function GuestInfo({ data, styles }: GuestInfoProps) {
         styles={styles}
         shaded={nextShaded()}
       />
-      <InfoRow label="Contact Email" value={data.customerEmail} styles={styles} shaded={nextShaded()} />
-      <InfoRow label="Contact Phone" value={data.customerPhone} styles={styles} shaded={nextShaded()} />
-      <InfoRow
-        label="Consultant"
-        value={data.consultant && data.consultantName ? `${data.consultant} - ${data.consultantName}` : ""}
-        styles={styles}
-        shaded={nextShaded()}
-      />
+      <InfoRow label="Consultant" value={data.consultantName} styles={styles} shaded={nextShaded()} />
       {data.specialRequests ? (
         <InfoRow label="Special Requests" value={data.specialRequests} styles={styles} shaded={nextShaded()} />
       ) : null}

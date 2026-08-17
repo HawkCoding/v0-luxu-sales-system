@@ -201,6 +201,7 @@ describe("checkVoucherReadiness", () => {
           supplierContactName: "Reservations",
           streetAddress: null,
           boardingPoint: "Cape Town Station",
+          location: "Cape Town",
           startTime: "14:00",
           endTime: "11:00",
           hasGuestBreakdown: true,
@@ -208,6 +209,45 @@ describe("checkVoucherReadiness", () => {
       ],
     })
     expect(result.warnings.map((w) => w.code)).toEqual(["supplier_address_missing"])
+  })
+
+  it("warns when a hotel block has no city set", () => {
+    const result = checkVoucherReadiness({
+      ...readyInput,
+      serviceBlocks: [
+        {
+          title: "The Silo Hotel",
+          serviceType: "hotel",
+          supplierContactName: "Reservations",
+          streetAddress: "Silo Square, V&A Waterfront",
+          location: null,
+          startTime: "14:00",
+          endTime: "11:00",
+          hasGuestBreakdown: true,
+        },
+      ],
+    })
+    expect(result.warnings.map((w) => w.code)).toEqual(["supplier_location_missing"])
+    expect(result.warnings[0].message).toContain("The Silo Hotel")
+  })
+
+  it("does not warn about a train block's city -- it carries free text there instead", () => {
+    const result = checkVoucherReadiness({
+      ...readyInput,
+      serviceBlocks: [
+        {
+          title: "Rovos Rail",
+          serviceType: "train",
+          supplierContactName: "Carla",
+          boardingPoint: "Rovos Rail Station, Capital Park, Pretoria",
+          location: null,
+          startTime: "09:00",
+          endTime: "16:00",
+          hasGuestBreakdown: true,
+        },
+      ],
+    })
+    expect(result.warnings).toEqual([])
   })
 
   it("does not warn about times/guests for a transfer block (neither concept applies)", () => {
@@ -219,6 +259,7 @@ describe("checkVoucherReadiness", () => {
           serviceType: "transfer",
           supplierContactName: "Pierre",
           streetAddress: "5 Johannes Drive",
+          location: "Cape Town",
           startTime: null,
           endTime: null,
           hasGuestBreakdown: false,
@@ -251,6 +292,63 @@ describe("checkVoucherReadiness", () => {
     expect(result.warnings).toContainEqual(
       expect.objectContaining({ code: "flight_details_incomplete", message: expect.stringContaining("FlySafair FA-120") }),
     )
+  })
+
+  it("flags an airline block missing a departure time, arrival time or arrival date", () => {
+    const completeFlight = {
+      title: "SAfair FA212",
+      serviceType: "airline",
+      supplierContactName: "Reservations",
+      streetAddress: "Airport Rd",
+      location: "Cape Town",
+      startTime: "10:00",
+      endTime: "12:15",
+      arrivalDate: "2026-10-14",
+      hasGuestBreakdown: false,
+      cabin: "Economy",
+      departureAirportCode: "HLA",
+      arrivalAirportCode: "CPT",
+      handLuggageKg: 7,
+      checkedLuggageKg: 23,
+    }
+
+    expect(checkVoucherReadiness({ ...readyInput, serviceBlocks: [completeFlight] }).warnings).toEqual([])
+
+    for (const missing of [{ startTime: null }, { endTime: null }, { arrivalDate: null }]) {
+      const result = checkVoucherReadiness({
+        ...readyInput,
+        serviceBlocks: [{ ...completeFlight, ...missing }],
+      })
+      expect(result.warnings.map((w) => w.code)).toEqual(["flight_times_incomplete"])
+      expect(result.warnings[0].message).toContain("SAfair FA212")
+    }
+  })
+
+  it("no longer judges a flight by the generic service_times_missing rule", () => {
+    // That warning's fix hint points at the supplier's default times, which are meaningless for an
+    // airline — every booking is a different flight.
+    const result = checkVoucherReadiness({
+      ...readyInput,
+      serviceBlocks: [
+        {
+          title: "SAfair FA212",
+          serviceType: "airline",
+          supplierContactName: "Reservations",
+          streetAddress: "Airport Rd",
+          location: "Cape Town",
+          startTime: null,
+          endTime: null,
+          arrivalDate: null,
+          hasGuestBreakdown: false,
+          cabin: "Economy",
+          departureAirportCode: "HLA",
+          arrivalAirportCode: "CPT",
+          handLuggageKg: 7,
+          checkedLuggageKg: 23,
+        },
+      ],
+    })
+    expect(result.warnings.map((w) => w.code)).toEqual(["flight_times_incomplete"])
   })
 
   it("does not fail generation when warnings are present", () => {

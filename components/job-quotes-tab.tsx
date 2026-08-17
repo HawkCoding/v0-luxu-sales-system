@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { toast } from "sonner"
 import type { Quote } from "@/lib/types"
-import { isMissingPricing } from "@/lib/quotes/pricing-engine"
+import { isComplimentaryRoom, isMissingPricing } from "@/lib/quotes/pricing-engine"
 import { useRole } from "@/lib/role-context"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { formatMoney } from "@/lib/money"
@@ -294,6 +294,7 @@ export function JobQuotesTab({
                   <tbody>
                     {q.lineItems.map((li, i) => {
                       const isExtra = li.pricingSnapshot?.isExtra === true
+                      const isComplimentary = isComplimentaryRoom(li)
                       const lineBonus = getCommissionBonus(li)
                       return (
                       <tr key={i} className="border-b border-border/50 last:border-0">
@@ -323,8 +324,12 @@ export function JobQuotesTab({
                             <div className="text-[10px] text-muted-foreground">{li.pricingSnapshot.unit}</div>
                           ) : null}
                         </td>
-                        <td className={`py-2 pl-6 text-xs text-right ${isMissingPricing(li) ? "text-destructive font-medium" : "text-muted-foreground"}`}>
-                          {li.unitPrice === 0
+                        <td
+                          className={`py-2 pl-6 text-xs text-right ${
+                            isMissingPricing(li) ? "text-destructive font-medium" : "text-muted-foreground"
+                          }`}
+                        >
+                          {li.unitPrice === 0 && !isComplimentary
                             ? isMissingPricing(li)
                               ? "TBD"
                               : "Included"

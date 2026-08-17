@@ -1,8 +1,6 @@
 import { Document, Image, Page, StyleSheet, Text, View } from "@react-pdf/renderer"
 import { formatDisplayDate } from "@/lib/date-format"
-import { BASE_CURRENCY, formatMoney as formatSharedMoney } from "@/lib/money"
 import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
-import type { DocumentBrand } from "@/lib/settings-access"
 
 /** One row of the pax grid. Room fields are the v2 manual-capture columns — blank until then. */
 export interface WorksheetPaxRow {
@@ -17,10 +15,9 @@ export interface WorksheetPaxRow {
 }
 
 /**
- * One supplier service line (hotel/rail/transfer booking). The financial
- * columns (booking/confirmation/payment-made dates, paid-with, payable,
- * receivable) are the v2 manual-capture columns on `booking_supplier_schedules`
- * — blank until that ships.
+ * One booked service. `description` is deliberately nothing but the supplier's name — the
+ * worksheet is an internal record, not an itinerary. The admin dates come from the Suppliers tab
+ * when it has been filled in; everything financial is left blank for pen.
  */
 export interface WorksheetServiceLine {
   fromDate: string | null
@@ -31,16 +28,13 @@ export interface WorksheetServiceLine {
   reservationReference: string | null
   paymentMadeDate: string | null
   paidWith: string | null
-  amountPayable: number | null
-  amountReceivable: number | null
   notes: string | null
 }
 
-/** One client payment received against the booking's invoices. */
+/** One client payment received against the booking's invoices. Amounts are hand-written. */
 export interface WorksheetPayment {
   date: string | null
   paidWith: string | null
-  amount: number
   reference: string | null
 }
 
@@ -54,7 +48,9 @@ export interface WorksheetContact {
 
 export interface WorksheetPdfData {
   bookingNumber: string
-  productName: string | null
+  /** The rail operator on this booking — "The Blue Train" / "Rovos Rail" — or null when it has none. */
+  serviceName: string | null
+  /** Full name of the salesperson assigned to the job; null when nobody is assigned. */
   consultant: string | null
   arriveDate: string | null
   departDate: string | null
@@ -75,28 +71,22 @@ export interface WorksheetPdfData {
   pax: WorksheetPaxRow[]
   serviceLines: WorksheetServiceLine[]
   payments: WorksheetPayment[]
-  /** True once any service line carries a real supplier cost (v2). Gates the honesty note on Gross Profit. */
-  hasSupplierCosts: boolean
-  brand?: DocumentBrand
   brandLogo?: BrandLogoImage | null
 }
 
-const EMPTY = "–"
+/** Nothing unknown ever prints a placeholder — every blank cell on this sheet is filled in by hand. */
+const EMPTY = ""
 
-function orDash(value: string | null | undefined): string {
+/** Blank rows appended to the hand-filled tables so there is somewhere to write. */
+const FILL_ROW_COUNT = 3
+
+function orBlank(value: string | null | undefined): string {
   return value?.trim() || EMPTY
 }
 
-function dateOrDash(value: string | null | undefined): string {
+function dateOrBlank(value: string | null | undefined): string {
   if (!value) return EMPTY
   return formatDisplayDate(value.slice(0, 10)) || EMPTY
-}
-
-/** The worksheet is an internal ops document covering payable/receivable across suppliers, so it
- *  stays in the base currency rather than mixing per-supplier ones into one gross-profit figure. */
-function formatMoney(amount: number | null | undefined): string {
-  if (amount === null || amount === undefined) return EMPTY
-  return formatSharedMoney(amount, BASE_CURRENCY)
 }
 
 const styles = StyleSheet.create({
@@ -122,17 +112,27 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0.5,
     borderBottomColor: "#000000",
   },
+  // minHeight matters: an empty <Text> collapses to zero height, and most cells on this sheet
+  // print empty by design — without it a blank row would draw as a hairline.
   cell: {
     borderRightWidth: 0.5,
     borderRightColor: "#000000",
     paddingVertical: 2,
     paddingHorizontal: 3,
+    minHeight: 13,
+    alignItems: "center",
     justifyContent: "center",
   },
   cellLast: {
     paddingVertical: 2,
     paddingHorizontal: 3,
+    minHeight: 13,
+    alignItems: "center",
     justifyContent: "center",
+  },
+  /** Taller than a data row — these are written into by hand. */
+  fillCell: {
+    minHeight: 18,
   },
   headCell: {
     backgroundColor: "#e5e5e5",
@@ -145,9 +145,6 @@ const styles = StyleSheet.create({
   },
   bodyText: {
     fontSize: 7,
-  },
-  bodyTextCenter: {
-    fontSize: 7,
     textAlign: "center",
   },
   bold: {
@@ -157,35 +154,16 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   brandCell: {
-    width: 70,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 3,
+    width: 86,
+    paddingVertical: 4,
   },
   brandLogoImg: {
-    width: 30,
+    width: 72,
     height: 30,
     objectFit: "contain",
-    marginBottom: 2,
-  },
-  brandText: {
-    fontSize: 6,
-    fontFamily: "Helvetica-Bold",
-    textAlign: "center",
   },
   flagCell: {
-    width: 56,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  wideCell: {
-    width: 90,
-  },
-  note: {
-    fontSize: 6,
-    fontStyle: "italic",
-    color: "#555555",
-    marginTop: 2,
+    width: 60,
   },
 })
 
@@ -222,7 +200,11 @@ interface Column {
   label: string
   width?: number
   flex?: number
-  align?: "left" | "center"
+}
+
+function columnStyle(column: Column): { width: number } | { flex: number } {
+  if (column.width) return { width: column.width }
+  return { flex: column.flex ?? 1 }
 }
 
 function TableHead({ columns }: { columns: Column[] }) {
@@ -231,11 +213,7 @@ function TableHead({ columns }: { columns: Column[] }) {
       {columns.map((col, i) => (
         <View
           key={col.key}
-          style={[
-            i === columns.length - 1 ? styles.cellLast : styles.cell,
-            col.width ? { width: col.width } : {},
-            col.flex ? { flex: col.flex } : {},
-          ]}
+          style={[i === columns.length - 1 ? styles.cellLast : styles.cell, columnStyle(col)]}
         >
           <Text style={styles.headText}>{col.label}</Text>
         </View>
@@ -248,10 +226,12 @@ function TableRow({
   columns,
   values,
   last = false,
+  fill = false,
 }: {
   columns: Column[]
   values: string[]
   last?: boolean
+  fill?: boolean
 }) {
   return (
     <View style={[styles.row, !last ? styles.rowDivider : {}]} wrap={false}>
@@ -260,55 +240,65 @@ function TableRow({
           key={col.key}
           style={[
             i === columns.length - 1 ? styles.cellLast : styles.cell,
-            col.width ? { width: col.width } : {},
-            col.flex ? { flex: col.flex } : {},
+            columnStyle(col),
+            fill ? styles.fillCell : {},
           ]}
         >
-          <Text style={col.align === "center" ? styles.bodyTextCenter : styles.bodyText}>
-            {values[i] || EMPTY}
-          </Text>
+          <Text style={styles.bodyText}>{values[i] ?? EMPTY}</Text>
         </View>
       ))}
     </View>
   )
 }
 
+/** The written-in part of a hand-finished table. */
+function FillRows({ columns, count = FILL_ROW_COUNT }: { columns: Column[]; count?: number }) {
+  return (
+    <>
+      {Array.from({ length: count }, (_, i) => (
+        <TableRow key={`fill-${i}`} columns={columns} values={[]} fill last={i === count - 1} />
+      ))}
+    </>
+  )
+}
+
+// Widths target the landscape A4 content box: 842pt page - 2x20pt padding = 802pt.
 const PAX_COLUMNS: Column[] = [
-  { key: "no", label: "No.", width: 18, align: "center" },
+  { key: "no", label: "No.", width: 20 },
   { key: "first", label: "Name", flex: 1.4 },
   { key: "last", label: "Surname", flex: 1.4 },
-  { key: "title", label: "Title", width: 32, align: "center" },
-  { key: "nat", label: "Nationality", width: 46, align: "center" },
-  { key: "age", label: "Age", width: 26, align: "center" },
-  { key: "roomWith", label: "Room With", width: 62, align: "center" },
-  { key: "roomType", label: "Room Type", width: 46, align: "center" },
+  { key: "title", label: "Title", width: 34 },
+  { key: "nat", label: "Nationality", width: 60 },
+  { key: "age", label: "Age", width: 28 },
+  { key: "roomWith", label: "Room With", width: 75 },
+  { key: "roomType", label: "Room Type", width: 60 },
   { key: "remarks", label: "Remarks", flex: 2 },
 ]
 
 const SERVICE_COLUMNS: Column[] = [
-  { key: "from", label: "From Date", width: 44, align: "center" },
-  { key: "to", label: "To Date", width: 44, align: "center" },
+  { key: "from", label: "From Date", width: 52 },
+  { key: "to", label: "To Date", width: 52 },
   { key: "desc", label: "Service Description", flex: 2 },
-  { key: "bookingDate", label: "Booking Date", width: 44, align: "center" },
-  { key: "confirmDate", label: "Confirm. Date", width: 44, align: "center" },
-  { key: "ref", label: "Reservation Reference", flex: 1.2, align: "center" },
-  { key: "paidDate", label: "Payment Made Date", width: 46, align: "center" },
-  { key: "paidWith", label: "Paid With", width: 40, align: "center" },
-  { key: "payable", label: "Amounts Payable", width: 54, align: "center" },
-  { key: "receivable", label: "Amounts Receivable", width: 54, align: "center" },
-  { key: "notes", label: "Notes", flex: 1 },
+  { key: "bookingDate", label: "Booking Date", width: 52 },
+  { key: "confirmDate", label: "Confirm. Date", width: 52 },
+  { key: "ref", label: "Reservation Reference", width: 80 },
+  { key: "paidDate", label: "Payment Made Date", width: 56 },
+  { key: "paidWith", label: "Paid With", width: 48 },
+  { key: "payable", label: "Amounts Payable", width: 70 },
+  { key: "receivable", label: "Amounts Receivable", width: 70 },
+  { key: "notes", label: "Notes", flex: 1.5 },
 ]
 
 const PAYMENT_COLUMNS: Column[] = [
-  { key: "date", label: "Payment Made Date", width: 70, align: "center" },
-  { key: "paidWith", label: "Paid With", width: 70, align: "center" },
-  { key: "payable", label: "Amounts Payable", flex: 1, align: "center" },
-  { key: "receivable", label: "Amounts Receivable", flex: 1, align: "center" },
+  { key: "date", label: "Payment Made Date", flex: 1 },
+  { key: "paidWith", label: "Paid With", flex: 1 },
+  { key: "payable", label: "Amounts Payable", flex: 1 },
+  { key: "receivable", label: "Amounts Receivable", flex: 1 },
 ]
 
 export function WorksheetDocument({
   bookingNumber,
-  productName,
+  serviceName,
   consultant,
   arriveDate,
   departDate,
@@ -327,58 +317,42 @@ export function WorksheetDocument({
   pax,
   serviceLines,
   payments,
-  hasSupplierCosts,
-  brand,
   brandLogo = null,
 }: WorksheetPdfData) {
-  const resolvedBrand: DocumentBrand = brand ?? {
-    heading: "Luxus",
-    subheading: "Travel & Tours",
-    logoUrl: null,
-  }
-
-  const totalPayable = serviceLines.reduce((sum, l) => sum + (l.amountPayable ?? 0), 0)
-  const totalReceivable = payments.reduce((sum, p) => sum + p.amount, 0)
-  const grossProfit = totalReceivable - totalPayable
-
   return (
     <Document
       author="Luxus Travel & Tours"
       subject={`Booking Worksheet ${bookingNumber}`}
       title={`Worksheet ${bookingNumber} — ${contact.name}`}
     >
-      <Page size="A4" style={styles.page}>
-        {/* Row 1: brand + status flags + consultant + client + product + departure */}
+      <Page size="A4" orientation="landscape" style={styles.page}>
+        {/* Row 1: logo + status flags + consultant + client + service + booking number */}
         <View style={[styles.box, styles.sectionGap]}>
           <View style={styles.row}>
             <View style={[styles.cell, styles.brandCell]}>
               {brandLogo ? <Image src={brandLogo} style={styles.brandLogoImg} /> : null}
-              <Text style={styles.brandText}>{resolvedBrand.heading}</Text>
-              <Text style={[styles.brandText, { fontFamily: "Helvetica", fontSize: 5 }]}>
-                {resolvedBrand.subheading}
-              </Text>
             </View>
             <View style={[styles.cell, styles.flagCell]}>
               <Text style={styles.headText}>All Paid</Text>
-              <Text style={styles.bodyTextCenter}>{allPaid ? "YES" : "NO"}</Text>
+              <Text style={styles.bodyText}>{allPaid ? "YES" : "NO"}</Text>
             </View>
             <View style={[styles.cell, styles.flagCell]}>
               <Text style={styles.headText}>All Sent</Text>
-              <Text style={styles.bodyTextCenter}>{allSent ? "YES" : "NO"}</Text>
-            </View>
-            <View style={[styles.cell, styles.flagCell]}>
-              <Text style={styles.headText}>Consultant</Text>
-              <Text style={styles.bodyTextCenter}>{orDash(consultant)}</Text>
-            </View>
-            <View style={[styles.cell, { width: 44 }]}>
-              <Text style={styles.headText}>Client</Text>
-              <Text style={styles.bodyText}>{orDash(contact.name)}</Text>
+              <Text style={styles.bodyText}>{allSent ? "YES" : "NO"}</Text>
             </View>
             <View style={[styles.cell, { flex: 1 }]}>
-              <Text style={styles.headText}>Product</Text>
-              <Text style={[styles.bodyText, styles.bold]}>{orDash(productName)}</Text>
+              <Text style={styles.headText}>Consultant</Text>
+              <Text style={styles.bodyText}>{orBlank(consultant)}</Text>
             </View>
-            <View style={[styles.cellLast, styles.wideCell]}>
+            <View style={[styles.cell, { flex: 1.4 }]}>
+              <Text style={styles.headText}>Client</Text>
+              <Text style={styles.bodyText}>{orBlank(contact.name)}</Text>
+            </View>
+            <View style={[styles.cell, { flex: 1.2 }]}>
+              <Text style={styles.headText}>Service</Text>
+              <Text style={[styles.bodyText, styles.bold]}>{orBlank(serviceName)}</Text>
+            </View>
+            <View style={[styles.cellLast, { width: 110 }]}>
               <Text style={styles.headText}>Booking No.</Text>
               <Text style={[styles.bodyText, styles.bold]}>{bookingNumber}</Text>
             </View>
@@ -390,10 +364,14 @@ export function WorksheetDocument({
           <HeaderRow
             last
             cells={[
-              { label: "Title / Contact Name & Surname", value: `${orDash(contact.title)} ${contact.name}`.trim(), flex: 2 },
-              { label: "Nationality", value: orDash(contact.nationality), width: 60 },
-              { label: "E-mail", value: orDash(contact.email), flex: 2 },
-              { label: "Contact Number", value: orDash(contact.phone), width: 80 },
+              {
+                label: "Title / Contact Name & Surname",
+                value: `${orBlank(contact.title)} ${contact.name}`.trim(),
+                flex: 2,
+              },
+              { label: "Nationality", value: orBlank(contact.nationality), width: 80 },
+              { label: "E-mail", value: orBlank(contact.email), flex: 2 },
+              { label: "Contact Number", value: orBlank(contact.phone), width: 110 },
             ]}
           />
         </View>
@@ -403,21 +381,21 @@ export function WorksheetDocument({
           <HeaderRow
             last
             cells={[
-              { label: "Arrive", value: dateOrDash(arriveDate), width: 46 },
-              { label: "Depart", value: dateOrDash(departDate), width: 46 },
-              { label: "No. Pax", value: String(noOfPax), width: 34 },
-              { label: "Inv. Date", value: dateOrDash(invoiceDate), width: 46 },
+              { label: "Arrive", value: dateOrBlank(arriveDate), flex: 1 },
+              { label: "Depart", value: dateOrBlank(departDate), flex: 1 },
+              { label: "No. Pax", value: String(noOfPax), flex: 0.6 },
+              { label: "Inv. Date", value: dateOrBlank(invoiceDate), flex: 1 },
               {
                 label: "Deposit %",
                 value: depositPercentage != null ? `${depositPercentage}%` : EMPTY,
-                width: 40,
+                flex: 0.7,
               },
-              { label: "Dep. Due", value: dateOrDash(depositDueDate), width: 46 },
-              { label: "Paid", value: dateOrDash(depositPaidAt), width: 46 },
-              { label: "Final Due", value: dateOrDash(finalDueDate), width: 46 },
-              { label: "Paid", value: dateOrDash(finalPaidAt), width: 46 },
-              { label: "Docs Date", value: dateOrDash(docsDate), width: 46 },
-              { label: "Docs By", value: orDash(docsBy), width: 40 },
+              { label: "Dep. Due", value: dateOrBlank(depositDueDate), flex: 1 },
+              { label: "Paid", value: dateOrBlank(depositPaidAt), flex: 1 },
+              { label: "Final Due", value: dateOrBlank(finalDueDate), flex: 1 },
+              { label: "Paid", value: dateOrBlank(finalPaidAt), flex: 1 },
+              { label: "Docs Date", value: dateOrBlank(docsDate), flex: 1 },
+              { label: "Docs By", value: orBlank(docsBy), flex: 1 },
             ]}
           />
         </View>
@@ -437,88 +415,74 @@ export function WorksheetDocument({
                   String(i + 1),
                   p.firstName,
                   p.lastName,
-                  p.title ?? "",
-                  p.nationality ?? "",
-                  p.age != null ? String(p.age) : "",
-                  p.roomWith ?? "",
-                  p.roomType ?? "",
-                  p.remarks ?? "",
+                  p.title ?? EMPTY,
+                  p.nationality ?? EMPTY,
+                  p.age != null ? String(p.age) : EMPTY,
+                  p.roomWith ?? EMPTY,
+                  p.roomType ?? EMPTY,
+                  p.remarks ?? EMPTY,
                 ]}
               />
             ))
           )}
         </View>
 
-        {/* Service lines (supplier bookings) */}
+        {/* Service lines — every service booked on this job, plus room to add more by hand */}
         <View style={[styles.box, styles.sectionGap]}>
           <TableHead columns={SERVICE_COLUMNS} />
-          {serviceLines.length === 0 ? (
-            <TableRow columns={SERVICE_COLUMNS} values={[]} last />
-          ) : (
-            serviceLines.map((l, i) => (
-              <TableRow
-                key={i}
-                last={i === serviceLines.length - 1}
-                columns={SERVICE_COLUMNS}
-                values={[
-                  dateOrDash(l.fromDate),
-                  dateOrDash(l.toDate),
-                  l.description,
-                  dateOrDash(l.bookingDate),
-                  dateOrDash(l.confirmationDate),
-                  l.reservationReference ?? "",
-                  dateOrDash(l.paymentMadeDate),
-                  l.paidWith ?? "",
-                  formatMoney(l.amountPayable),
-                  formatMoney(l.amountReceivable),
-                  l.notes ?? "",
-                ]}
-              />
-            ))
-          )}
+          {serviceLines.map((l, i) => (
+            <TableRow
+              key={i}
+              columns={SERVICE_COLUMNS}
+              values={[
+                dateOrBlank(l.fromDate),
+                dateOrBlank(l.toDate),
+                l.description,
+                dateOrBlank(l.bookingDate),
+                dateOrBlank(l.confirmationDate),
+                l.reservationReference ?? EMPTY,
+                dateOrBlank(l.paymentMadeDate),
+                l.paidWith ?? EMPTY,
+                EMPTY,
+                EMPTY,
+                l.notes ?? EMPTY,
+              ]}
+            />
+          ))}
+          <FillRows columns={SERVICE_COLUMNS} />
         </View>
 
-        {/* Client payment information */}
+        {/* Client payment information — amounts, totals and gross profit are written in by hand */}
         <View style={[styles.box, styles.sectionGap]}>
           <TableHead columns={PAYMENT_COLUMNS} />
-          {payments.length === 0 ? (
-            <TableRow columns={PAYMENT_COLUMNS} values={[]} last />
-          ) : (
-            payments.map((p, i) => (
-              <TableRow
-                key={i}
-                last={i === payments.length - 1}
-                columns={PAYMENT_COLUMNS}
-                values={[dateOrDash(p.date), p.paidWith ?? "", EMPTY, formatMoney(p.amount)]}
-              />
-            ))
-          )}
+          {payments.map((p, i) => (
+            <TableRow
+              key={i}
+              columns={PAYMENT_COLUMNS}
+              values={[dateOrBlank(p.date), p.paidWith ?? EMPTY, EMPTY, EMPTY]}
+            />
+          ))}
+          <FillRows columns={PAYMENT_COLUMNS} />
           <View style={[styles.row, styles.rowDivider, styles.headCell]} wrap={false}>
             <View style={[styles.cell, { flex: 2 }]}>
-              <Text style={[styles.headText, { textAlign: "right" }]}>Totals</Text>
+              <Text style={styles.headText}>Totals</Text>
             </View>
-            <View style={[styles.cell, PAYMENT_COLUMNS[2].width ? { width: PAYMENT_COLUMNS[2].width } : { flex: 1 }]}>
-              <Text style={styles.bodyTextCenter}>{formatMoney(totalPayable)}</Text>
+            <View style={[styles.cell, styles.fillCell, { flex: 1 }]}>
+              <Text style={styles.bodyText}>{EMPTY}</Text>
             </View>
-            <View style={[styles.cellLast, PAYMENT_COLUMNS[3].width ? { width: PAYMENT_COLUMNS[3].width } : { flex: 1 }]}>
-              <Text style={styles.bodyTextCenter}>{formatMoney(totalReceivable)}</Text>
+            <View style={[styles.cellLast, styles.fillCell, { flex: 1 }]}>
+              <Text style={styles.bodyText}>{EMPTY}</Text>
             </View>
           </View>
           <View style={styles.row} wrap={false}>
-            <View style={[styles.cellLast, { flex: 1 }]}>
-              <Text style={[styles.headText, { textAlign: "right" }]}>
-                Gross Profit: <Text style={styles.bold}>{formatMoney(grossProfit)}</Text>
-              </Text>
+            <View style={[styles.cell, { flex: 3 }]}>
+              <Text style={styles.headText}>Gross Profit</Text>
+            </View>
+            <View style={[styles.cellLast, styles.fillCell, { flex: 1 }]}>
+              <Text style={styles.bodyText}>{EMPTY}</Text>
             </View>
           </View>
         </View>
-
-        {!hasSupplierCosts ? (
-          <Text style={styles.note}>
-            * Supplier costs are not yet captured for this booking — Gross Profit reflects revenue
-            received only, not net margin.
-          </Text>
-        ) : null}
       </Page>
     </Document>
   )
