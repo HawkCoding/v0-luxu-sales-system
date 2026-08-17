@@ -309,6 +309,12 @@ export default function SuppliersPage() {
                                     Linked
                                   </Badge>
                                 )}
+                                {supplier.parentSupplierId && (
+                                  <Badge variant="outline" title="Contact details inherited from another category">
+                                    <LinkIcon className="mr-1 h-3 w-3" />
+                                    Linked
+                                  </Badge>
+                                )}
                               </div>
                             </div>
                           </div>
