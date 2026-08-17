@@ -59,7 +59,6 @@ type BookingVoucherRecord = {
   no_of_suites: number
   no_of_adults: number
   no_of_children: number
-  additional_services_details: string | null
   customer: CustomerRecord | CustomerRecord[] | null
   route: { name: string | null; supplier: SupplierRecord | SupplierRecord[] | null } | null
 }
@@ -117,7 +116,7 @@ export async function POST(req: Request) {
     supabase
       .from("bookings")
       .select(
-        "id, booking_number, customer_invoice_number, stage, invoice_balance, consultant, assigned_salesperson_id, departure_date, no_of_suites, no_of_adults, no_of_children, additional_services_details, customer:customers(first_name, last_name, email, phone, title), route:routes(name, supplier:suppliers(name, description))",
+        "id, booking_number, customer_invoice_number, stage, invoice_balance, consultant, assigned_salesperson_id, departure_date, no_of_suites, no_of_adults, no_of_children, customer:customers(first_name, last_name, email, phone, title), route:routes(name, supplier:suppliers(name, description))",
       )
       .eq("id", parsed.data.jobId)
       .single(),
@@ -181,7 +180,6 @@ export async function POST(req: Request) {
   try {
     const built = await buildVoucherServiceBlocks(supabase, {
       bookingId: booking.id,
-      additionalServicesDetails: booking.additional_services_details ?? null,
       legIds: scopedLegIds,
       includeUnlinkedTransportRequests: false,
       reservationDetails: reservationDetails
