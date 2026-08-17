@@ -107,7 +107,7 @@ describe("PATCH /api/voucher-template", () => {
   it("returns 401 when unauthenticated", async () => {
     createSessionClientMock.mockResolvedValue(createSupabase({ user: null }))
 
-    const response = await PATCH(createPatchRequest({ font_family: "Arial" }))
+    const response = await PATCH(createPatchRequest({ font_family: "Arial, sans-serif" }))
 
     expect(response.status).toBe(401)
   })
@@ -115,7 +115,7 @@ describe("PATCH /api/voucher-template", () => {
   it("returns 403 for non-admins", async () => {
     createSessionClientMock.mockResolvedValue(createSupabase({ role: "consultant" }))
 
-    const response = await PATCH(createPatchRequest({ font_family: "Arial" }))
+    const response = await PATCH(createPatchRequest({ font_family: "Arial, sans-serif" }))
 
     expect(response.status).toBe(403)
   })
@@ -132,12 +132,12 @@ describe("PATCH /api/voucher-template", () => {
     const supabase = createSupabase()
     createSessionClientMock.mockResolvedValue(supabase)
 
-    const response = await PATCH(createPatchRequest({ font_family: "Arial" }))
+    const response = await PATCH(createPatchRequest({ font_family: "Arial, sans-serif" }))
     const payload = await response.json()
 
     expect(response.status).toBe(200)
     expect(payload).toEqual({ success: true })
-    expect(supabase.updates[0]).toMatchObject({ font_family: "Arial" })
+    expect(supabase.updates[0]).toMatchObject({ font_family: "Arial, sans-serif" })
     expect(supabase.inserts).toHaveLength(0)
   })
 
@@ -145,12 +145,12 @@ describe("PATCH /api/voucher-template", () => {
     const supabase = createSupabase({ templateMissing: true })
     createSessionClientMock.mockResolvedValue(supabase)
 
-    const response = await PATCH(createPatchRequest({ font_family: "Arial" }))
+    const response = await PATCH(createPatchRequest({ font_family: "Arial, sans-serif" }))
     const payload = await response.json()
 
     expect(response.status).toBe(200)
     expect(payload).toEqual({ success: true })
     expect(supabase.inserts).toHaveLength(1)
-    expect(supabase.updates[0]).toMatchObject({ font_family: "Arial" })
+    expect(supabase.updates[0]).toMatchObject({ font_family: "Arial, sans-serif" })
   })
 })

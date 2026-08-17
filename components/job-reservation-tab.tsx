@@ -30,7 +30,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { AlertCircle, Plus, RotateCcw, Trash2, UserCheck } from "lucide-react"
+import { AlertCircle, Copy, Plus, RotateCcw, Trash2, UserCheck } from "lucide-react"
 import { toast } from "sonner"
 import { ReservationFormCard } from "@/components/reservation-form-card"
 import { normalizeDateOfBirth } from "@/lib/date-format"
@@ -224,6 +224,22 @@ export function JobReservationTab({
     [customer],
   )
 
+  // Structured fields for the "Copy from customer profile" buttons below — the invoice
+  // reads only the billing_* columns (no fallback), so this is a one-shot fill, not a default.
+  const billingSeed = useMemo(
+    () => ({
+      companyName: customer?.companyName ?? "",
+      vatNumber: customer?.vatNumber ?? "",
+      addressLine1: customer?.addressLine1 ?? "",
+      addressLine2: customer?.addressLine2 ?? "",
+      city: customer?.city ?? "",
+      province: customer?.province ?? "",
+      postalCode: customer?.postalCode ?? "",
+      country: customer?.country ?? "",
+    }),
+    [customer],
+  )
+
   const savedTravellerCount = travellersData?.travellers.length ?? 0
   // Reflects the *saved* roster, not the drafts on screen — the pax it is compared against only
   // moves when the guest list is saved, so anything else would flip on every keystroke.
@@ -235,8 +251,17 @@ export function JobReservationTab({
   const [occasion, setOccasion] = useState("")
   const [smokingPreference, setSmokingPreference] = useState<string>(SMOKING_NONE)
   const [mealSeating, setMealSeating] = useState<string>(MEAL_SEATING_NONE)
+  const [voucherSpecialRequests, setVoucherSpecialRequests] = useState("")
   const [agencyName, setAgencyName] = useState("")
   const [agencyAddress, setAgencyAddress] = useState("")
+  const [billingCompanyName, setBillingCompanyName] = useState("")
+  const [billingVatNumber, setBillingVatNumber] = useState("")
+  const [billingAddressLine1, setBillingAddressLine1] = useState("")
+  const [billingAddressLine2, setBillingAddressLine2] = useState("")
+  const [billingCity, setBillingCity] = useState("")
+  const [billingProvince, setBillingProvince] = useState("")
+  const [billingPostalCode, setBillingPostalCode] = useState("")
+  const [billingCountry, setBillingCountry] = useState("")
   const [savingDetails, setSavingDetails] = useState(false)
   const detailsHydrated = useRef(false)
 
@@ -248,9 +273,36 @@ export function JobReservationTab({
     setOccasion(detailsData.occasion)
     setSmokingPreference(detailsData.smokingPreference ?? SMOKING_NONE)
     setMealSeating(detailsData.mealSeating ?? MEAL_SEATING_NONE)
+    setVoucherSpecialRequests(detailsData.voucherSpecialRequests)
     setAgencyName(detailsData.agencyName || agencySeed.name)
     setAgencyAddress(detailsData.agencyAddress || agencySeed.address)
+    setBillingCompanyName(detailsData.billingCompanyName)
+    setBillingVatNumber(detailsData.billingVatNumber)
+    setBillingAddressLine1(detailsData.billingAddressLine1)
+    setBillingAddressLine2(detailsData.billingAddressLine2)
+    setBillingCity(detailsData.billingCity)
+    setBillingProvince(detailsData.billingProvince)
+    setBillingPostalCode(detailsData.billingPostalCode)
+    setBillingCountry(detailsData.billingCountry)
   }, [detailsData, agencySeed])
+
+  // One-shot fill from the customer profile — never overwrites without the salesperson asking,
+  // since the invoice no longer falls back to the customer profile on its own.
+  const copyCompanyFromCustomer = () => {
+    if (!customer) return
+    setBillingCompanyName(billingSeed.companyName)
+    setBillingVatNumber(billingSeed.vatNumber)
+  }
+
+  const copyBillingAddressFromCustomer = () => {
+    if (!customer) return
+    setBillingAddressLine1(billingSeed.addressLine1)
+    setBillingAddressLine2(billingSeed.addressLine2)
+    setBillingCity(billingSeed.city)
+    setBillingProvince(billingSeed.province)
+    setBillingPostalCode(billingSeed.postalCode)
+    setBillingCountry(billingSeed.country)
+  }
 
   // Once the salesperson edits a field themselves it is no longer "from the
   // customer profile", so drop the hint for it.
@@ -381,6 +433,11 @@ export function JobReservationTab({
       setPrefilledFields(new Map())
       toast.success("Guests saved")
       if (typeof payload?.warning === "string") toast.warning(payload.warning)
+      // The billing address sub-panel lives inside this card visually but is
+      // stored on booking_reservation_details, so it saves alongside the roster.
+      // Skipped until that row has hydrated — otherwise its still-blank drafts
+      // would overwrite whatever was already saved.
+      if (detailsHydrated.current) await saveDetails({ silent: true })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not save guests")
     } finally {
@@ -388,7 +445,7 @@ export function JobReservationTab({
     }
   }
 
-  const saveDetails = async () => {
+  const saveDetails = async (opts?: { silent?: boolean }) => {
     setSavingDetails(true)
     try {
       const response = await fetch(`/api/jobs/${bookingId}/reservation-details`, {
@@ -400,8 +457,17 @@ export function JobReservationTab({
           occasion: occasion || null,
           smokingPreference: smokingPreference === SMOKING_NONE ? null : smokingPreference,
           mealSeating: mealSeating === MEAL_SEATING_NONE ? null : mealSeating,
+          voucherSpecialRequests: voucherSpecialRequests || null,
           agencyName: agencyName || null,
           agencyAddress: agencyAddress || null,
+          billingCompanyName: billingCompanyName || null,
+          billingVatNumber: billingVatNumber || null,
+          billingAddressLine1: billingAddressLine1 || null,
+          billingAddressLine2: billingAddressLine2 || null,
+          billingCity: billingCity || null,
+          billingProvince: billingProvince || null,
+          billingPostalCode: billingPostalCode || null,
+          billingCountry: billingCountry || null,
         }),
       })
       if (!response.ok) {
@@ -409,7 +475,7 @@ export function JobReservationTab({
         throw new Error(typeof payload?.error === "string" ? payload.error : "Could not save reservation details")
       }
       await mutateDetails()
-      toast.success("Reservation details saved")
+      if (!opts?.silent) toast.success("Reservation details saved")
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not save reservation details")
     } finally {
@@ -707,6 +773,59 @@ export function JobReservationTab({
                       </Button>
                     </div>
                   ) : null}
+                  {traveller.isPrimary ? (
+                    <div className="rounded-md border bg-muted/20 p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-xs font-medium">Billing address</Label>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-6 px-2 text-xs"
+                          onClick={copyBillingAddressFromCustomer}
+                          disabled={!customer}
+                        >
+                          <Copy className="w-3 h-3 mr-1" /> Copy from customer profile
+                        </Button>
+                      </div>
+                      <div className="grid sm:grid-cols-2 gap-2">
+                        <Input
+                          placeholder="Address line 1"
+                          value={billingAddressLine1}
+                          onChange={(e) => setBillingAddressLine1(e.target.value)}
+                        />
+                        <Input
+                          placeholder="Address line 2"
+                          value={billingAddressLine2}
+                          onChange={(e) => setBillingAddressLine2(e.target.value)}
+                        />
+                        <Input
+                          placeholder="City"
+                          value={billingCity}
+                          onChange={(e) => setBillingCity(e.target.value)}
+                        />
+                        <Input
+                          placeholder="Province"
+                          value={billingProvince}
+                          onChange={(e) => setBillingProvince(e.target.value)}
+                        />
+                        <Input
+                          placeholder="Code"
+                          value={billingPostalCode}
+                          onChange={(e) => setBillingPostalCode(e.target.value)}
+                        />
+                        <Input
+                          placeholder="Country"
+                          value={billingCountry}
+                          onChange={(e) => setBillingCountry(e.target.value)}
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Printed on the invoice as Address / Code. Saves with the guest list. Left blank
+                        prints a dash — it no longer falls back to the customer profile.
+                      </p>
+                    </div>
+                  ) : null}
                 </div>
               )
             })
@@ -714,6 +833,56 @@ export function JobReservationTab({
           <div className="flex justify-end">
             <Button size="sm" onClick={requestSaveTravellers} disabled={savingTravellers}>
               {savingTravellers ? "Saving..." : "Save guests"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0">
+          <CardTitle className="text-sm">Company details</CardTitle>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={copyCompanyFromCustomer}
+            disabled={!customer}
+          >
+            <Copy className="w-3.5 h-3.5 mr-1" /> Copy from customer profile
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {detailsLoading ? (
+            <div className="space-y-2" aria-busy="true">
+              <Skeleton className="h-9 w-full" />
+            </div>
+          ) : (
+            <div className="grid sm:grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs text-muted-foreground">Company name</Label>
+                <Input
+                  value={billingCompanyName}
+                  onChange={(e) => setBillingCompanyName(e.target.value)}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">VAT number</Label>
+                <Input
+                  value={billingVatNumber}
+                  onChange={(e) => setBillingVatNumber(e.target.value)}
+                  className="mt-1"
+                />
+              </div>
+            </div>
+          )}
+          <p className="text-xs text-muted-foreground">
+            Printed on the invoice as Company / VAT. Left blank prints a dash — it no longer falls
+            back to the customer profile.
+          </p>
+          <div className="flex justify-end">
+            <Button size="sm" onClick={() => saveDetails()} disabled={savingDetails}>
+              {savingDetails ? "Saving..." : "Save company details"}
             </Button>
           </div>
         </CardContent>
@@ -736,6 +905,23 @@ export function JobReservationTab({
             </div>
           ) : (
             <>
+              <div>
+                <Label className="text-xs text-muted-foreground">Voucher special requests</Label>
+                <Textarea
+                  value={voucherSpecialRequests}
+                  onChange={(e) => setVoucherSpecialRequests(e.target.value)}
+                  className="mt-1"
+                  rows={3}
+                  placeholder="Anniversary celebration, wheelchair access at boarding, etc."
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Prints as SPECIAL REQUESTS on the voucher. Nothing else does.
+                </p>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Dietary and occasion print on hotel service blocks; smoking and meal seating print on train
+                service blocks. Medical is kept here for internal use only and does not print on any document.
+              </p>
               <div className="grid sm:grid-cols-3 gap-3">
                 <div>
                   <Label className="text-xs text-muted-foreground">Dietary</Label>
@@ -777,7 +963,7 @@ export function JobReservationTab({
             </>
           )}
           <div className="flex justify-end">
-            <Button size="sm" onClick={saveDetails} disabled={savingDetails}>
+            <Button size="sm" onClick={() => saveDetails()} disabled={savingDetails}>
               {savingDetails ? "Saving..." : "Save special requests"}
             </Button>
           </div>
@@ -826,7 +1012,7 @@ export function JobReservationTab({
             ) : null}
           </div>
           <div className="flex justify-end">
-            <Button size="sm" onClick={saveDetails} disabled={savingDetails}>
+            <Button size="sm" onClick={() => saveDetails()} disabled={savingDetails}>
               {savingDetails ? "Saving..." : "Save agency details"}
             </Button>
           </div>

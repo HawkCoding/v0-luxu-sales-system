@@ -41,7 +41,7 @@ export async function ensureWorksheetPdf(
 
   let pdfBuffer: Buffer
   try {
-    pdfBuffer = await renderWorksheetPdf({ ...view, brand, brandLogo })
+    pdfBuffer = await renderWorksheetPdf({ ...view, brandLogo })
   } catch (err) {
     void logError({
       severity: "Critical",

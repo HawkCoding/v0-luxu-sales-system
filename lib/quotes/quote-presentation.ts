@@ -105,9 +105,9 @@ export function deriveFlightCapPerPerson(
   return adultFlightFares.length > 0 ? Math.max(...adultFlightFares) : null
 }
 
-/** "Flights are capped at R2 000 pp — incl. baggage & fees" */
+/** "Flights are capped at R2 000pp — incl. baggage & fees" */
 export function formatFlightCapLine(amountFormatter: (amount: number) => string, capPerPerson: number): string {
-  return `Flights are capped at ${amountFormatter(capPerPerson)} pp — incl. baggage & fees`
+  return `Flights are capped at ${amountFormatter(capPerPerson)}pp — incl. baggage & fees`
 }
 
 /**
@@ -178,6 +178,16 @@ function toProseRoute(route: string): string {
   return route.replace(/\s*[→↔]\s*/g, " to ")
 }
 
+/** "departing at 10h00 for arrival at 12h15" — the flight schedule as the client reads it. Either
+ * half stands alone while the other is still unknown, so a half-captured flight still states what
+ * it knows instead of falling silent. */
+function flightTimesPhrase(start: string | null, end: string | null): string | null {
+  if (start && end) return `departing at ${start} for arrival at ${end}`
+  if (start) return `departing at ${start}`
+  if (end) return `arriving at ${end}`
+  return null
+}
+
 /** "Cape Town Station" → "the Cape Town Station" — skipped when the text already carries an
  * article, so supplier-entered strings like "the hotel" never double up. */
 function withLeadingThe(value: string): string {
@@ -209,7 +219,7 @@ function describeBlock(block: VoucherServiceBlock): string {
           d.roomType ? `in a ${d.roomType}` : null,
           d.mealPlan ? `incl. ${d.mealPlan}` : null,
         ],
-        [start ? `Check in from ${start}` : null],
+        [start ? `Check in from ${start}` : null, d.isComplimentary ? "COMPLIMENTARY" : null],
       )
     }
     case "train": {
@@ -256,14 +266,19 @@ function describeBlock(block: VoucherServiceBlock): string {
       )
     }
     case "airline": {
+      // The arrival is folded into this sentence only when the flight lands the day it took off.
+      // On an overnight flight it would sit under the departure date and read as same-day, so it
+      // earns its own dated line instead (see describeEndLine).
+      const landsSameDay = Boolean(d.arrivalDate) && d.arrivalDate === d.departureDate
+      const end = landsSameDay ? formatTimeOfDay(d.endTime) : null
       return joinSentence(
         [
           supplier ? `Flight with ${supplier}` : "Flight",
           d.flightNumber,
-          d.route ? `— ${d.route}` : null,
+          d.route ? `— ${toProseRoute(d.route)}` : null,
           d.cabin ? `in ${d.cabin}` : null,
         ],
-        [start ? `Departs at ${start}` : null],
+        [flightTimesPhrase(start, end)],
       )
     }
     default:
@@ -294,6 +309,21 @@ function describeEndLine(block: VoucherServiceBlock): QuoteItineraryLine | null 
       bullets: [{ kind: "item", text: "Train arrival times cannot be guaranteed" }],
     }
   }
+  if (block.serviceType === "airline") {
+    // A same-day arrival already sits in the departure sentence; only an overnight flight needs a
+    // line of its own, and it needs one because it falls on a different itinerary date. (The
+    // voucher's tabular renderer always prints both as rows — the difference is deliberate: prose
+    // reads as one sentence, a table reads as fields.)
+    if (d.arrivalDate === d.departureDate) return null
+    const where = d.arrivalAirportCode?.trim() || null
+    return {
+      dateISO: d.arrivalDate,
+      text: end
+        ? `Flight arrives${where ? ` at ${where}` : ""} at ${end}`
+        : `Flight arrives${where ? ` at ${where}` : ""}`,
+      bullets: [],
+    }
+  }
   return null
 }
 
@@ -301,7 +331,7 @@ function describeEndLine(block: VoucherServiceBlock): QuoteItineraryLine | null 
  * The client-facing itinerary. One block can produce two lines — a hotel stay is a check-in line
  * and a separate check-out line on a later date — so lines are re-sorted by date afterwards.
  *
- * `flightCapBullet` (already formatted, e.g. "Flights are capped at R2 000 pp — incl. baggage &
+ * `flightCapBullet` (already formatted, e.g. "Flights are capped at R2 000pp — incl. baggage &
  * fees" via {@link formatFlightCapLine}) is attached under the *first* flight block only, one
  * combined line for the whole quote rather than repeated per flight.
  */

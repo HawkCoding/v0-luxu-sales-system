@@ -45,15 +45,18 @@ export interface VoucherServiceBlockData {
   arrivalPoint?: string | null
   departureDate?: string | null
   arrivalDate?: string | null
-  /** HH:MM the service starts — train departure, hotel check-in, transfer pickup. */
+  /** HH:MM the service starts — train departure, flight departure, hotel check-in, transfer pickup. */
   startTime?: string | null
-  /** HH:MM the service ends — train arrival, hotel check-out. */
+  /** HH:MM the service ends — train arrival, flight arrival, hotel check-out. */
   endTime?: string | null
   suiteType?: string | null
   numberOfSuites?: number | null
   roomType?: string | null
   nights?: number | null
   mealPlan?: string | null
+  /** Hotel-only: true when the consultant marked this room's quote line complimentary. Drives a
+   *  client-facing "COMPLIMENTARY" callout on the itinerary line. */
+  isComplimentary?: boolean | null
   vehicleType?: string | null
   pickup?: string | null
   dropoff?: string | null
@@ -74,10 +77,12 @@ export interface VoucherServiceBlockData {
   /** Total passengers on a transfer trip, from the captured transport request. */
   passengerCount?: number | null
   /** "1st seating meals; Nonsmoking" — composed from the booking's reservation-details form,
-   * repeated on every train/hotel block since the preference applies to the whole party. */
+   * repeated on every train block since the train operator acts on seating/smoking. */
   requestsLine?: string | null
-  /** The booking's occasion (e.g. "Birthday Celebration"), repeated per train/hotel block. */
+  /** The booking's occasion (e.g. "Birthday Celebration"), repeated on every hotel block. */
   occasion?: string | null
+  /** The booking's dietary requirement, repeated on every hotel block since the hotel acts on it. */
+  dietary?: string | null
   /** Excursion lines for a train leg, e.g. "Kimberley **Weather & Time Permitted" — the leg's own
    * override when set, else the route's `default_excursions`. */
   excursions?: string[]
@@ -163,57 +168,28 @@ function escapeHtml(value: string | number | null | undefined): string {
   })
 }
 
-// Mirrors resolveVoucherFontPairing in lib/voucher/pdf/fonts.ts, which is
-// server-only; the template option picks the body leaning of the fixed pairing.
-function previewBodyFontStack(fontFamily: string): string {
-  const sansBody = fontFamily === "Arial, sans-serif" || fontFamily === "'Montserrat', Arial, sans-serif"
-  return sansBody ? "'Montserrat', Arial, sans-serif" : "'Playfair Display', Georgia, serif"
+export interface VoucherPreviewBrand {
+  heading: string
+  subheading: string
+  logoUrl: string | null
 }
 
-function buildHeaderHtml(t: VoucherTemplate): string {
-  const hasLogo = Boolean(t.logo_url)
-  const hasBanner = Boolean(t.banner_url)
+const DEFAULT_PREVIEW_BRAND: VoucherPreviewBrand = { heading: "", subheading: "", logoUrl: null }
 
-  if (hasLogo && hasBanner) {
-    return `
-    <div class="header header-split">
-      <div class="header-logo-side">
-        <img src="${escapeHtml(t.logo_url)}" alt="Logo" class="header-logo" />
-      </div>
-      <div class="header-banner-side">
-        <img src="${escapeHtml(t.banner_url)}" alt="Header" class="header-banner" />
-        <div class="header-text-overlay">
-          <div class="product-line">${escapeHtml(t.product_line)}</div>
-          <div class="header-subtitle">${escapeHtml(t.header_text)}</div>
-        </div>
-      </div>
-    </div>`
-  }
-
-  if (hasLogo) {
+function buildHeaderHtml(brand: VoucherPreviewBrand): string {
+  if (brand.logoUrl) {
     return `
     <div class="header header-logo-only">
-      <img src="${escapeHtml(t.logo_url)}" alt="Logo" class="header-logo-center" />
-      <div class="product-line">${escapeHtml(t.product_line)}</div>
-      <div class="header-subtitle">${escapeHtml(t.header_text)}</div>
-    </div>`
-  }
-
-  if (hasBanner) {
-    return `
-    <div class="header header-banner-only">
-      <img src="${escapeHtml(t.banner_url)}" alt="Header" class="header-banner-full" />
-      <div class="header-text-below">
-        <div class="product-line">${escapeHtml(t.product_line)}</div>
-        <div class="header-subtitle">${escapeHtml(t.header_text)}</div>
-      </div>
+      <img src="${escapeHtml(brand.logoUrl)}" alt="Logo" class="header-logo-center" />
+      <div class="product-line">${escapeHtml(brand.heading)}</div>
+      <div class="header-subtitle">${escapeHtml(brand.subheading)}</div>
     </div>`
   }
 
   return `
   <div class="header header-text-only">
-    <div class="product-line">${escapeHtml(t.product_line)}</div>
-    <div class="header-subtitle">${escapeHtml(t.header_text)}</div>
+    <div class="product-line">${escapeHtml(brand.heading)}</div>
+    <div class="header-subtitle">${escapeHtml(brand.subheading)}</div>
   </div>`
 }
 
@@ -228,8 +204,14 @@ function infoRow(label: string, value: string | number, opts: { shaded?: boolean
       </div>`
 }
 
-function cellRow(cells: Array<{ label: string; value: string | number }>, opts: { dotted?: boolean } = {}): string {
-  const classes = ["cell-row", opts.dotted ? "info-row-dotted" : ""].filter(Boolean).join(" ")
+// Shares .info-row's shape (fixed label gutter, flex:1 value area) so a cell row lines up on
+// the same grid as every plain row in a provider box — see the PDF twin, sections/info-row.tsx.
+function cellRow(
+  label: string,
+  cells: Array<{ label: string; value: string | number }>,
+  opts: { dotted?: boolean } = {},
+): string {
+  const classes = ["info-row", opts.dotted ? "info-row-dotted" : ""].filter(Boolean).join(" ")
   const cellsHtml = cells
     .map(
       (cell) => `
@@ -240,7 +222,10 @@ function cellRow(cells: Array<{ label: string; value: string | number }>, opts: 
     )
     .join("")
   return `
-      <div class="${classes}">${cellsHtml}
+      <div class="${classes}">
+        <div class="info-label">${escapeHtml(label)}</div>
+        <div class="cell-group">${cellsHtml}
+        </div>
       </div>`
 }
 
@@ -252,13 +237,7 @@ function buildGuestInfoSection(data: VoucherData): string {
   const rows = [
     infoRow("Guest Names", data.guestNames, { shaded: true }),
     infoRow("Number of Guests", `${data.numberOfGuests} (${data.enquiry.noOfAdults} adults${childText})`),
-    infoRow("Contact Email", data.customerEmail, { shaded: true }),
-    infoRow("Contact Phone", data.customerPhone),
-    infoRow(
-      "Consultant",
-      data.consultant && data.consultantName ? `${data.consultant} – ${data.consultantName}` : "",
-      { shaded: true },
-    ),
+    infoRow("Consultant", data.consultantName, { shaded: true }),
   ]
   if (data.specialRequests) rows.push(infoRow("Special Requests", data.specialRequests))
 
@@ -271,7 +250,7 @@ ${rows.join("\n")}
 
 function buildServiceBlockBodyRows(block: VoucherServiceBlock): string {
   return voucherRowsForBlock(block)
-    .map((row) => (row.cells ? cellRow(row.cells, { dotted: true }) : infoRow(row.label, row.value ?? "", { dotted: true })))
+    .map((row) => (row.cells ? cellRow(row.label, row.cells, { dotted: true }) : infoRow(row.label, row.value ?? "", { dotted: true })))
     .join("\n")
 }
 
@@ -331,14 +310,17 @@ function buildFooterSection(t: VoucherTemplate): string {
   const contact = [t.footer_phone, t.footer_email].filter(Boolean)
   return `
   <div class="section footer-section">
-    <div class="footer-rule"></div>
-${t.footer_company ? `    <div class="footer-company">${escapeHtml(t.footer_company)}</div>` : ""}
 ${contact.length > 0 ? `    <div class="footer-contact">${contact.map((part) => escapeHtml(part)).join(" &middot; ")}</div>` : ""}
   </div>`
 }
 
-export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplate): string {
+export function generateVoucherHTML(
+  data: VoucherData,
+  template?: VoucherTemplate,
+  brand: VoucherPreviewBrand = DEFAULT_PREVIEW_BRAND,
+): string {
   const t: VoucherTemplate = template ?? VOUCHER_TEMPLATE_DEFAULTS
+  const fontFamily = t.font_family || VOUCHER_TEMPLATE_DEFAULTS.font_family
 
   const sectionOrder = t.section_order.length > 0
     ? t.section_order
@@ -369,13 +351,10 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
 <head>
   <meta charset="utf-8">
   <title>Travel Voucher – ${escapeHtml(data.voucherNumber)}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
   <style>
     @page { size: A4; margin: 14mm; }
     body {
-      font-family: ${previewBodyFontStack(t.font_family)};
+      font-family: ${fontFamily};
       font-size: 9pt;
       line-height: 1.4;
       color: #2B2B2B;
@@ -389,35 +368,21 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
 
     /* Header variants */
     .header { margin-bottom: 10pt; }
-    .header-split { display: flex; align-items: stretch; border-bottom: 0.5pt solid ${rule}; padding-bottom: 12pt; }
-    .header-logo-side { width: 90px; min-width: 90px; display: flex; align-items: center; justify-content: center; padding: 8px; background: #fff; }
-    .header-logo { max-width: 76px; max-height: 60px; object-fit: contain; }
-    .header-banner-side { flex: 1; position: relative; overflow: hidden; }
-    .header-banner { width: 100%; height: 72px; object-fit: cover; display: block; }
-    .header-text-overlay { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.35); padding: 8px 16px; }
-    .header-text-overlay .product-line { color: #fff; margin: 0; }
-    .header-text-overlay .header-subtitle { color: rgba(255,255,255,0.85); margin: 2pt 0 0; }
-
     .header-logo-only { text-align: center; padding-bottom: 12pt; border-bottom: 0.5pt solid ${rule}; }
     .header-logo-center { max-height: 52px; object-fit: contain; margin-bottom: 6px; }
-
-    .header-banner-only { border-bottom: 0.5pt solid ${rule}; padding-bottom: 8pt; }
-    .header-banner-only .header-banner-full { width: 100%; max-height: 80px; object-fit: cover; display: block; }
-    .header-text-below { text-align: center; padding: 8pt 0; }
-
     .header-text-only { text-align: center; padding-bottom: 12pt; border-bottom: 0.5pt solid ${rule}; }
 
     .product-line {
-      font-family: 'Montserrat', Arial, sans-serif;
+      font-family: ${fontFamily};
       font-size: 8.5pt;
-      font-weight: 600;
+      font-weight: 700;
       color: ${t.accent_colour};
       letter-spacing: 2pt;
       text-transform: uppercase;
       margin-top: 8pt;
     }
     .header-subtitle {
-      font-family: 'Playfair Display', Georgia, serif;
+      font-family: ${fontFamily};
       font-size: 9pt;
       color: #6B6B6B;
       font-style: italic;
@@ -432,7 +397,7 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
       margin: 10pt 0 6pt;
     }
     h1 {
-      font-family: 'Playfair Display', Georgia, serif;
+      font-family: ${fontFamily};
       font-size: 16pt;
       font-weight: 700;
       letter-spacing: 2pt;
@@ -447,15 +412,15 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
       text-align: center;
     }
     .voucher-stub-label {
-      font-family: 'Montserrat', Arial, sans-serif;
+      font-family: ${fontFamily};
       font-size: 7.5pt;
-      font-weight: 600;
+      font-weight: 700;
       letter-spacing: 1.5pt;
       text-transform: uppercase;
       color: #6B6B6B;
     }
     .voucher-stub-number {
-      font-family: 'Playfair Display', Georgia, serif;
+      font-family: ${fontFamily};
       font-size: 11pt;
       font-weight: 700;
       color: ${t.accent_colour};
@@ -463,7 +428,7 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
     }
 
     .guidance {
-      font-family: 'Playfair Display', Georgia, serif;
+      font-family: ${fontFamily};
       font-size: 7.5pt;
       font-style: italic;
       line-height: 1.3;
@@ -474,9 +439,9 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
 
     .section { margin-bottom: 10pt; }
     .section-title {
-      font-family: 'Montserrat', Arial, sans-serif;
+      font-family: ${fontFamily};
       font-size: 7.5pt;
-      font-weight: 600;
+      font-weight: 700;
       letter-spacing: 1.2pt;
       text-transform: uppercase;
       color: ${t.section_bg};
@@ -494,9 +459,9 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
     .info-row-dotted { border-bottom: 0.5pt dotted ${ruleFaint}; padding-bottom: 2.5pt; }
     .info-row-shaded { background: #F4F4F4; margin: 0 -5pt; padding: 1.5pt 5pt; }
     .info-label {
-      font-family: 'Montserrat', Arial, sans-serif;
+      font-family: ${fontFamily};
       font-size: 7.5pt;
-      font-weight: 600;
+      font-weight: 700;
       letter-spacing: 0.4pt;
       text-transform: uppercase;
       text-align: right;
@@ -508,11 +473,12 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
     }
     .info-value { color: #2B2B2B; font-size: 9pt; flex: 1; }
 
-    .cell-row { display: flex; gap: 16pt; padding: 1.5pt 0; }
+    .cell-group { display: flex; flex: 1; gap: 16pt; }
+    .cell { flex: 1; }
     .cell-label {
-      font-family: 'Montserrat', Arial, sans-serif;
+      font-family: ${fontFamily};
       font-size: 6.5pt;
-      font-weight: 600;
+      font-weight: 700;
       letter-spacing: 1pt;
       text-transform: uppercase;
       color: #6B6B6B;
@@ -525,27 +491,27 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
       padding: 7pt 9pt;
     }
     .provider-name {
-      font-family: 'Playfair Display', Georgia, serif;
+      font-family: ${fontFamily};
       font-size: 11pt;
       font-weight: 700;
       color: ${t.accent_colour};
       margin-bottom: 1.5pt;
     }
     .provider-contact {
-      font-family: 'Montserrat', Arial, sans-serif;
+      font-family: ${fontFamily};
       font-size: 7pt;
       color: #6B6B6B;
       margin-bottom: 5pt;
     }
     .provider-description {
-      font-family: 'Playfair Display', Georgia, serif;
+      font-family: ${fontFamily};
       font-size: 9.5pt;
       color: #6B6B6B;
       font-style: italic;
       margin-bottom: 12pt;
     }
     .provider-footnote {
-      font-family: 'Playfair Display', Georgia, serif;
+      font-family: ${fontFamily};
       font-size: 7.5pt;
       color: #6B6B6B;
       font-style: italic;
@@ -553,7 +519,7 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
     }
 
     .end-of-services {
-      font-family: 'Montserrat', Arial, sans-serif;
+      font-family: ${fontFamily};
       font-size: 8pt;
       letter-spacing: 1.5pt;
       text-transform: uppercase;
@@ -563,24 +529,15 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
     }
 
     .footer-section { margin-top: 6pt; text-align: center; }
-    .footer-rule { width: 64pt; border-top: 0.5pt solid ${rule}; margin: 0 auto 8pt; }
-    .footer-company {
-      font-family: 'Montserrat', Arial, sans-serif;
-      font-size: 8.5pt;
-      font-weight: 600;
-      letter-spacing: 1.5pt;
-      text-transform: uppercase;
-      color: ${t.accent_colour};
-    }
     .footer-contact {
-      font-family: 'Montserrat', Arial, sans-serif;
+      font-family: ${fontFamily};
       font-size: 7.5pt;
       color: #6B6B6B;
       margin-top: 4pt;
     }
 
     .page-number {
-      font-family: 'Montserrat', Arial, sans-serif;
+      font-family: ${fontFamily};
       text-align: center;
       font-size: 7.5pt;
       color: #9A9A9A;
@@ -591,7 +548,7 @@ export function generateVoucherHTML(data: VoucherData, template?: VoucherTemplat
 <body>
   <div class="frame-outer"></div>
   <div class="frame-inner"></div>
-${buildHeaderHtml(t)}
+${buildHeaderHtml(brand)}
 
   <div class="voucher-number-row">
     <h1>TRAVEL VOUCHERS</h1>

@@ -38,6 +38,7 @@ import { JobEnquiryTab } from "@/components/job-enquiry-tab"
 import { JobQuotesTab } from "@/components/job-quotes-tab"
 import { JobReservationTab } from "@/components/job-reservation-tab"
 import { JobReferencesTab } from "@/components/job-references-tab"
+import { JobTransferTimesTab } from "@/components/job-transfer-times-tab"
 import { JobPaymentsTab } from "@/components/job-payments-tab"
 import { JobCorrespondenceTab } from "@/components/job-correspondence-tab"
 import { JobDocumentsTab } from "@/components/job-documents-tab"
@@ -70,6 +71,7 @@ type JobDetailTab =
   | "enquiry"
   | "quotes"
   | "reservation"
+  | "times"
   | "references"
   | "payments"
   | "correspondence"
@@ -82,6 +84,7 @@ const JOB_DETAIL_TABS = new Set<JobDetailTab>([
   "enquiry",
   "quotes",
   "reservation",
+  "times",
   "references",
   "payments",
   "correspondence",
@@ -957,6 +960,7 @@ export default function JobDetailPage() {
           <TabsTrigger value="enquiry" className="text-xs">Enquiry</TabsTrigger>
           <TabsTrigger value="quotes" className="text-xs">Quotes ({quotes.length})</TabsTrigger>
           <TabsTrigger value="reservation" className="text-xs">Reservation</TabsTrigger>
+          <TabsTrigger value="times" className="text-xs">Transfer Times</TabsTrigger>
           <TabsTrigger value="references" className="text-xs">Voucher Details</TabsTrigger>
           <TabsTrigger value="payments" className="text-xs">Payments ({payments.length})</TabsTrigger>
           <TabsTrigger value="correspondence" className="text-xs">Emails Sent ({correspondence.length})</TabsTrigger>
@@ -1004,6 +1008,9 @@ export default function JobDetailPage() {
             customer={customer ?? null}
             stage={currentStage}
           />
+        </TabsContent>
+        <TabsContent value="times">
+          <JobTransferTimesTab bookingId={id} />
         </TabsContent>
         <TabsContent value="references">
           <JobReferencesTab bookingId={id} />

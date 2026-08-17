@@ -50,45 +50,6 @@ export function voucherStyles({
     header: {
       marginBottom: d.header.marginBottom,
     },
-    headerSplit: {
-      borderBottomColor: t.rule,
-      borderBottomWidth: 0.5,
-      flexDirection: "row",
-      minHeight: d.header.minHeight,
-      paddingBottom: 12,
-    },
-    headerLogoSide: {
-      alignItems: "center",
-      backgroundColor: "#ffffff",
-      justifyContent: "center",
-      padding: 8,
-      width: 120,
-    },
-    headerLogo: {
-      height: d.header.logoHeight,
-      objectFit: "contain",
-      width: d.header.logoWidth,
-    },
-    headerBannerSide: {
-      flex: 1,
-      minHeight: d.header.minHeight,
-      position: "relative",
-    },
-    headerBanner: {
-      height: d.header.bannerHeight,
-      objectFit: "cover",
-      width: "100%",
-    },
-    headerTextOverlay: {
-      alignItems: "center",
-      backgroundColor: "rgba(0, 0, 0, 0.35)",
-      bottom: 0,
-      left: 0,
-      paddingHorizontal: 16,
-      paddingVertical: 8,
-      position: "absolute",
-      right: 0,
-    },
     headerLogoOnly: {
       alignItems: "center",
       borderBottomColor: t.rule,
@@ -100,20 +61,6 @@ export function voucherStyles({
       objectFit: "contain",
       width: d.header.logoCenterWidth,
     },
-    headerBannerOnly: {
-      borderBottomColor: t.rule,
-      borderBottomWidth: 0.5,
-      paddingBottom: 8,
-    },
-    headerBannerFull: {
-      height: d.header.bannerFullHeight,
-      objectFit: "cover",
-      width: "100%",
-    },
-    headerTextBelow: {
-      alignItems: "center",
-      paddingVertical: 8,
-    },
     headerTextOnly: {
       alignItems: "center",
       borderBottomColor: t.rule,
@@ -124,17 +71,9 @@ export function voucherStyles({
       color: t.accent,
       fontFamily: fonts.sans,
       fontSize: 8.5,
-      fontWeight: 600,
+      fontWeight: 700,
       letterSpacing: 2,
       marginTop: 8,
-      textTransform: "uppercase",
-    },
-    overlayProductLine: {
-      color: "#ffffff",
-      fontFamily: fonts.sans,
-      fontSize: 8.5,
-      fontWeight: 600,
-      letterSpacing: 2,
       textTransform: "uppercase",
     },
     headerSubtitle: {
@@ -143,13 +82,6 @@ export function voucherStyles({
       fontSize: 9,
       fontStyle: "italic",
       marginTop: 4,
-    },
-    overlaySubtitle: {
-      color: "rgba(255, 255, 255, 0.85)",
-      fontFamily: fonts.display,
-      fontSize: 9,
-      fontStyle: "italic",
-      marginTop: 2,
     },
     voucherNumberRow: {
       alignItems: "flex-end",
@@ -178,7 +110,7 @@ export function voucherStyles({
       color: t.inkMuted,
       fontFamily: fonts.sans,
       fontSize: 7.5,
-      fontWeight: 600,
+      fontWeight: 700,
       letterSpacing: 1.5,
       textTransform: "uppercase",
     },
@@ -208,7 +140,7 @@ export function voucherStyles({
       color: t.eyebrow,
       fontFamily: fonts.sans,
       fontSize: d.sectionTitle.fontSize,
-      fontWeight: 600,
+      fontWeight: 700,
       letterSpacing: d.sectionTitle.letterSpacing,
       marginBottom: d.sectionTitle.marginBottom,
       paddingBottom: d.sectionTitle.paddingBottom,
@@ -239,7 +171,7 @@ export function voucherStyles({
       color: t.inkMuted,
       fontFamily: fonts.sans,
       fontSize: d.infoLabel.fontSize,
-      fontWeight: 600,
+      fontWeight: 700,
       letterSpacing: d.infoLabel.letterSpacing,
       paddingRight: 12,
       paddingTop: 1,
@@ -253,18 +185,21 @@ export function voucherStyles({
       fontSize: d.infoValue.fontSize,
       lineHeight: d.infoValue.lineHeight,
     },
-    cellRow: {
+    // The value-area wrapper that sits beside a cell row's label — same slot InfoRow's plain
+    // Text value fills, so every row in a provider box shares one label gutter and right edge.
+    cellGroup: {
+      flex: 1,
       flexDirection: "row",
-      marginBottom: d.infoRow.marginBottom,
     },
     cell: {
+      flex: 1,
       marginRight: d.cell.marginRight,
     },
     cellLabel: {
       color: t.inkMuted,
       fontFamily: fonts.sans,
       fontSize: d.cell.labelFontSize,
-      fontWeight: 600,
+      fontWeight: 700,
       letterSpacing: 1,
       marginBottom: 2,
       textTransform: "uppercase",
@@ -320,20 +255,6 @@ export function voucherStyles({
     footerSection: {
       alignItems: "center",
       marginTop: d.footerSection.marginTop,
-    },
-    footerRule: {
-      borderTopColor: t.rule,
-      borderTopWidth: 0.5,
-      marginBottom: d.footerRule.marginBottom,
-      width: 64,
-    },
-    footerCompany: {
-      color: t.accent,
-      fontFamily: fonts.sans,
-      fontSize: 8.5,
-      fontWeight: 600,
-      letterSpacing: 1.5,
-      textTransform: "uppercase",
     },
     footerContact: {
       color: t.inkMuted,

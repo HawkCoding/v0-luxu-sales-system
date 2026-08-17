@@ -26,6 +26,27 @@ export const runtime = "nodejs"
 import { isOptionalPackageLegKind, SUPPORTED_CURRENCY_VALUES, type SupplierKind } from "@/lib/types"
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/
+const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/
+
+/** IATA is 3 letters, ICAO 4 — both accepted, stored uppercase so the voucher's "CPT at 16h20"
+ * row never depends on how the consultant typed it. */
+const airportCodeSchema = z
+  .string()
+  .trim()
+  .regex(/^[A-Za-z]{3,4}$/, "Expected a 3- or 4-letter airport code")
+  .transform((code) => code.toUpperCase())
+
+/** Airline-only fields on a leg. Rejected on every other supplier kind — see the guard in PATCH. */
+const FLIGHT_SCHEDULE_FIELDS = [
+  "departureTime",
+  "arrivalDate",
+  "arrivalTime",
+  "flightNumber",
+  "departureAirportCode",
+  "arrivalAirportCode",
+  "handLuggageKg",
+  "checkedLuggageKg",
+] as const
 
 const PASSENGER_SPLIT_SUPPLIER_KINDS = new Set(["train_operator", "tour_operator", "airline"])
 const TRANSPORT_SUPPLIER_KINDS = new Set(["transfers", "vehicle_rental"])
@@ -65,6 +86,17 @@ const updateServiceSchema = z.object({
   routeReversed: z.boolean().optional(),
   serviceDate: z.string().regex(datePattern, "Expected YYYY-MM-DD").nullable().optional(),
   nights: z.number().int().positive().nullable().optional(),
+  /** Airline legs only. `serviceDate` is the departure date; only the time is separate here.
+   * `arrivalDate` is a full date rather than a day offset so an overnight flight states a real
+   * arrival day. All rejected on any other supplier kind — see the guard in PATCH. */
+  departureTime: z.string().regex(timePattern, "Expected HH:MM").nullable().optional(),
+  arrivalDate: z.string().regex(datePattern, "Expected YYYY-MM-DD").nullable().optional(),
+  arrivalTime: z.string().regex(timePattern, "Expected HH:MM").nullable().optional(),
+  flightNumber: z.string().trim().min(2).max(20).nullable().optional(),
+  departureAirportCode: airportCodeSchema.nullable().optional(),
+  arrivalAirportCode: airportCodeSchema.nullable().optional(),
+  handLuggageKg: z.number().nonnegative().nullable().optional(),
+  checkedLuggageKg: z.number().nonnegative().nullable().optional(),
   dateAnchor: z.enum(["pre", "post", "custom"]).nullable().optional(),
   rateTypeId: z.string().uuid().nullable().optional(),
   notes: z.string().nullable().optional(),
@@ -87,6 +119,7 @@ type BookingServiceUnitInsert = Database["public"]["Tables"]["booking_service_un
 
 const SERVICES_WITH_UNITS_SELECT =
   "id, booking_id, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, date_anchor, rate_type_id, notes, selected, origin, price_currency, updated_at, " +
+  "departure_time, arrival_date, arrival_time, flight_number, departure_airport_code, arrival_airport_code, hand_luggage_kg, checked_luggage_kg, " +
   "units:booking_service_units(id, suite_type_id, bedroom_type_id, bedroom_layout_id, bathroom_type_id, adult_count, child_count, infant_count, sort_order, manual_adult_price, manual_child_price, manual_infant_price, manual_room_price, manual_room_price_set_at)"
 
 interface ServiceUnitRow {
@@ -118,6 +151,14 @@ interface ServiceWithUnitsRow {
   date_anchor: string | null
   rate_type_id: string | null
   notes: string | null
+  departure_time: string | null
+  arrival_date: string | null
+  arrival_time: string | null
+  flight_number: string | null
+  departure_airport_code: string | null
+  arrival_airport_code: string | null
+  hand_luggage_kg: number | null
+  checked_luggage_kg: number | null
   selected: boolean
   origin: "auto" | "consultant"
   price_currency: string
@@ -208,7 +249,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   const serviceIds = parsed.data.selections.map((selection) => selection.packageLegId)
   const { data: validServices, error: servicesLoadError } = await supabase
     .from("booking_services")
-    .select("id, supplier_id, updated_at, suppliers(kind)")
+    .select("id, supplier_id, updated_at, service_date, suppliers(kind)")
     .eq("booking_id", id)
     .in("id", serviceIds)
 
@@ -258,6 +299,51 @@ export async function PATCH(req: Request, { params }: RouteParams) {
         400,
         { packageLegId: selection.packageLegId, supplierKind },
       )
+    }
+  }
+
+  // A flight schedule describes one specific flight. On any other kind these fields would be a
+  // stored value nothing reads, so they are refused rather than silently kept — the same rule the
+  // hotel-only room-price override follows below.
+  for (const selection of parsed.data.selections) {
+    const touchesFlightFields = FLIGHT_SCHEDULE_FIELDS.some((field) => selection[field] !== undefined)
+    if (!touchesFlightFields) continue
+
+    const service = serviceById.get(selection.packageLegId)
+    const supplier = Array.isArray(service?.suppliers) ? service.suppliers[0] : service?.suppliers
+    const supplierKind = supplier?.kind
+    if (supplierKind !== "airline") {
+      return jsonError("Flight schedule fields are only available on airline services", 400, {
+        packageLegId: selection.packageLegId,
+        supplierKind,
+      })
+    }
+
+    // The DB rejects an arrival before the departure day; a same-day arrival at or before the
+    // departure time needs both fields together, so it is checked here. An omitted serviceDate
+    // means the stored departure date still applies.
+    const departureDate =
+      selection.serviceDate !== undefined ? selection.serviceDate : service?.service_date ?? null
+    if (selection.arrivalDate && departureDate) {
+      if (selection.arrivalDate < departureDate) {
+        return jsonError("A flight cannot arrive before it departs", 400, {
+          packageLegId: selection.packageLegId,
+          departureDate,
+          arrivalDate: selection.arrivalDate,
+        })
+      }
+      if (
+        selection.arrivalDate === departureDate &&
+        selection.arrivalTime &&
+        selection.departureTime &&
+        selection.arrivalTime <= selection.departureTime
+      ) {
+        return jsonError("A flight arriving on its departure day must arrive after it departs", 400, {
+          packageLegId: selection.packageLegId,
+          departureTime: selection.departureTime,
+          arrivalTime: selection.arrivalTime,
+        })
+      }
     }
   }
 
@@ -348,6 +434,18 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     if (selection.rateTypeId !== undefined) updatePayload.rate_type_id = selection.rateTypeId
     if (selection.notes !== undefined) updatePayload.notes = selection.notes
     if (selection.priceCurrency !== undefined) updatePayload.price_currency = selection.priceCurrency
+    if (selection.departureTime !== undefined) updatePayload.departure_time = selection.departureTime
+    if (selection.arrivalDate !== undefined) updatePayload.arrival_date = selection.arrivalDate
+    if (selection.arrivalTime !== undefined) updatePayload.arrival_time = selection.arrivalTime
+    if (selection.flightNumber !== undefined) updatePayload.flight_number = selection.flightNumber
+    if (selection.departureAirportCode !== undefined) {
+      updatePayload.departure_airport_code = selection.departureAirportCode
+    }
+    if (selection.arrivalAirportCode !== undefined) {
+      updatePayload.arrival_airport_code = selection.arrivalAirportCode
+    }
+    if (selection.handLuggageKg !== undefined) updatePayload.hand_luggage_kg = selection.handLuggageKg
+    if (selection.checkedLuggageKg !== undefined) updatePayload.checked_luggage_kg = selection.checkedLuggageKg
 
     // Origin flips to 'consultant' the moment a human writes to this row, mirroring the
     // FieldFlags/editedAxes convention: an auto-filled value stops being auto-filled on edit.

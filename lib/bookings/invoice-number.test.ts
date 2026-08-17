@@ -10,8 +10,21 @@ import { updateInvoiceNumber } from "./invoice-number"
 
 const BOOKING_ID = "00000000-0000-4000-8000-00000000aaaa"
 
-function makeSupabase(existing: string | null, updateResult: { error: unknown } = { error: null }) {
-  const updateChain = vi.fn(() => ({ eq: vi.fn(async () => updateResult) }))
+function makeSupabase(
+  existing: string | null,
+  updateResult: { data?: { updated_at: string | null } | null; error: unknown } = {
+    data: { updated_at: "2026-08-17T00:00:00.000Z" },
+    error: null,
+  },
+  existingUpdatedAt: string | null = "2026-08-01T00:00:00.000Z",
+) {
+  const updateChain = vi.fn(() => ({
+    eq: vi.fn(() => ({
+      select: vi.fn(() => ({
+        single: vi.fn(async () => updateResult),
+      })),
+    })),
+  }))
   return {
     from: vi.fn((table: string) => {
       if (table === "bookings") {
@@ -19,7 +32,7 @@ function makeSupabase(existing: string | null, updateResult: { error: unknown } 
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
               maybeSingle: vi.fn(async () => ({
-                data: { id: BOOKING_ID, customer_invoice_number: existing },
+                data: { id: BOOKING_ID, customer_invoice_number: existing, updated_at: existingUpdatedAt },
                 error: null,
               })),
             })),
@@ -47,6 +60,7 @@ describe("updateInvoiceNumber", () => {
       actorUserId: "u1",
     })
     expect(result.ok).toBe(true)
+    if (result.ok) expect(result.updatedAt).toBe("2026-08-17T00:00:00.000Z")
     expect(auditMocks.writeAuditLog).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -59,8 +73,8 @@ describe("updateInvoiceNumber", () => {
     )
   })
 
-  it("skips audit when value unchanged", async () => {
-    const supabase = makeSupabase("SAME")
+  it("skips audit when value unchanged and returns the row's existing updated_at", async () => {
+    const supabase = makeSupabase("SAME", { error: null }, "2026-08-10T00:00:00.000Z")
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await updateInvoiceNumber(supabase as any, {
       bookingId: BOOKING_ID,
@@ -69,6 +83,7 @@ describe("updateInvoiceNumber", () => {
       actorUserId: "u1",
     })
     expect(result.ok).toBe(true)
+    if (result.ok) expect(result.updatedAt).toBe("2026-08-10T00:00:00.000Z")
     expect(auditMocks.writeAuditLog).not.toHaveBeenCalled()
   })
 

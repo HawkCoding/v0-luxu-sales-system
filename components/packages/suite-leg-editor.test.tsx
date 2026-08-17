@@ -25,6 +25,18 @@ const leg: PackageLeg = {
   suiteTypes: [],
 }
 
+/** Airline-only fields, empty on every non-flight leg. */
+const noFlightSchedule = {
+  departureTime: null,
+  arrivalDate: null,
+  arrivalTime: null,
+  flightNumber: null,
+  departureAirportCode: null,
+  arrivalAirportCode: null,
+  handLuggageKg: null,
+  checkedLuggageKg: null,
+} satisfies Partial<SuiteLegState>
+
 function makeLegState(units: SuiteLegState["units"]): SuiteLegState {
   return {
     kind: "suite",
@@ -35,6 +47,7 @@ function makeLegState(units: SuiteLegState["units"]): SuiteLegState {
     reversed: false,
     serviceDate: "2026-09-24",
     nights: null,
+    ...noFlightSchedule,
     dateAnchor: null,
     notes: null,
     rateTypeId: null,
@@ -166,6 +179,7 @@ function makeHotelState(overrides: Partial<SuiteLegState["units"][number]> = {})
     reversed: false,
     serviceDate: "2026-09-24",
     nights: 3,
+    ...noFlightSchedule,
     dateAnchor: "custom",
     notes: null,
     rateTypeId: null,
@@ -206,7 +220,7 @@ describe("SuiteLegEditor room price override", () => {
     )
 
     expect(screen.getByLabelText(/price override for room 1/i)).toBeInTheDocument()
-    expect(screen.getByText("Overridden")).toBeInTheDocument()
+    expect(screen.getByText("Complimentary")).toBeInTheDocument()
   })
 
   it("clears the override and collapses on Revert", () => {

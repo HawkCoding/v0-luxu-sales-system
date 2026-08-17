@@ -266,6 +266,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       city: customer.city,
       province: customer.province,
       postalCode: customer.postal_code,
+      vatNumber: customer.vat_number,
       isRepeatClient: customer.is_repeat_client,
       createdAt: customer.created_at,
         createdAtDisplay: formatDisplayDateTime(customer.created_at),
@@ -996,6 +997,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (!result.ok) {
       const status = result.notFound ? 404 : 500
       return NextResponse.json({ error: result.error }, { status })
+    }
+    if (body.expectedUpdatedAt && result.updatedAt) {
+      body.expectedUpdatedAt = result.updatedAt
     }
   }
 

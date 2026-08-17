@@ -1,6 +1,7 @@
 import { Document, Page, Text, View } from "@react-pdf/renderer"
 import { StyleSheet } from "@react-pdf/renderer"
 import type { ItineraryData } from "@/lib/itinerary/build-itinerary"
+import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
 import type { DocumentBrand } from "@/lib/settings-access"
 import type { VoucherTemplate } from "@/lib/types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
@@ -16,8 +17,10 @@ export interface ItineraryDocumentProps {
   template?: VoucherTemplate | null
   journeyHeading?: string
   introText?: string
-  /** Shared brand copy for the masthead; omitted keeps the template's own text. */
+  /** Shared brand copy for the masthead. */
   brand?: DocumentBrand
+  /** Brand logo resolved to embeddable bytes (see lib/pdf/brand-logo.ts). */
+  brandLogo?: BrandLogoImage | null
 }
 
 function normalizeTemplate(t?: VoucherTemplate | null): VoucherTemplate {
@@ -30,6 +33,7 @@ export function ItineraryDocument({
   journeyHeading = "Your Journey",
   introText,
   brand,
+  brandLogo,
 }: ItineraryDocumentProps) {
   registerDocumentFonts()
 
@@ -111,7 +115,7 @@ export function ItineraryDocument({
       title={data.tripTitle || `Itinerary — ${data.bookingNumber}`}
     >
       <Page size="A4" style={styles.page}>
-        <HeaderBanner template={t} styles={styles} brand={brand} />
+        <HeaderBanner styles={styles} brand={brand} brandLogo={brandLogo} />
 
         <View style={extra.titleRow}>
           <Text style={extra.tripTitle}>{data.tripTitle || "Your Itinerary"}</Text>

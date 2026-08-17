@@ -34,6 +34,17 @@ export function RoomOverrideNote({ snapshot, quoteCurrency }: RoomOverrideNotePr
     .filter(Boolean)
     .join(" ")
 
+  // 0 is a deliberate comp, not an unpriced/replaced room — see isComplimentaryRoom in
+  // lib/quotes/pricing-engine.ts.
+  if (snapshot.manualRoomPrice === 0) {
+    return (
+      <div className="text-[11px] text-emerald-600 dark:text-emerald-500">
+        Complimentary night
+        {attribution ? ` · ${attribution}` : ""}
+      </div>
+    )
+  }
+
   return (
     <div className="text-[11px] text-amber-600 dark:text-amber-500">
       ⚑ Manual room price — {formatMoney(snapshot.manualRoomPrice, currency)}/night

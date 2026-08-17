@@ -180,6 +180,43 @@ describe("TransportLegEditor price override", () => {
     expect(screen.getByLabelText(/price override for transfer 1/i)).toBeInTheDocument()
   })
 
+  it("falls back to the job's travel date when the request has no pickup time yet", () => {
+    render(
+      <TransportLegEditor
+        leg={transferLeg}
+        value={makeLegState([makeRequest({ pickupAt: null })])}
+        onChange={vi.fn()}
+        travelDate="2026-09-24"
+      />,
+    )
+
+    expect(screen.getByText(/rate card/i)).toBeInTheDocument()
+  })
+
+  it("asks for a pickup date instead of showing the generic message when none is set anywhere", () => {
+    render(
+      <TransportLegEditor
+        leg={transferLeg}
+        value={makeLegState([makeRequest({ pickupAt: null })])}
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText(/set a pickup date to see the transfer price/i)).toBeInTheDocument()
+  })
+
+  it("asks for a vehicle category before mentioning the rate card at all", () => {
+    render(
+      <TransportLegEditor
+        leg={transferLeg}
+        value={makeLegState([makeRequest({ suiteTypeId: null })])}
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText(/select a vehicle category to see the transfer price/i)).toBeInTheDocument()
+  })
+
   it("shows the multi-day total for a rental override, using the billable day count", () => {
     const rentalRequest = makeRequest({
       id: "req-rental-1",

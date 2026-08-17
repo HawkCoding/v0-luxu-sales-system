@@ -133,4 +133,35 @@ describe("renderSignatureFragment", () => {
     })
     expect(html).toMatch(/<a[^>]*href="https:\/\/iata\.org"[^>]*>\s*<img/)
   })
+
+  it("never leaves the react-email default 24px line-height on the sender lines", async () => {
+    const html = await renderSignatureFragment(BASE)
+    expect(html).not.toContain("line-height:24px")
+  })
+
+  it("stacks name, contact, and email/web in a single paragraph joined by <br>", async () => {
+    const html = await renderSignatureFragment(BASE)
+    const senderBlock = html.slice(0, html.indexOf("<img"))
+    expect(senderBlock.match(/<p/g)?.length).toBe(1)
+    expect(senderBlock.match(/<br/g)?.length).toBe(2)
+  })
+
+  it("renders no leading <br> when there are no phone numbers", async () => {
+    const html = await renderSignatureFragment({ ...BASE, tel: null, cell: null, fax: null })
+    const senderBlock = html.slice(0, html.indexOf("<img"))
+    expect(senderBlock.match(/<br/g)?.length).toBe(1)
+  })
+
+  it("renders zero <br> for a name-only signature", async () => {
+    const html = await renderSignatureFragment({
+      ...BASE,
+      tel: null,
+      cell: null,
+      fax: null,
+      email: null,
+      website: null,
+    })
+    const senderBlock = html.slice(0, html.indexOf("<img"))
+    expect(senderBlock).not.toContain("<br")
+  })
 })

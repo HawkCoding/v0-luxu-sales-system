@@ -32,7 +32,7 @@ async function fetchVoucherTemplate(supabase: SupabaseClient<Database>): Promise
   const { data } = await supabase
     .from("voucher_template")
     .select(
-      "id, logo_url, banner_url, header_text, product_line, accent_colour, section_bg, font_family, section_order, hidden_sections, footer_company, footer_phone, footer_email, guidance_text",
+      "id, header_text, product_line, accent_colour, section_bg, font_family, section_order, hidden_sections, footer_company, footer_phone, footer_email, guidance_text",
     )
     .limit(1)
     .maybeSingle()
@@ -68,6 +68,7 @@ export async function GET(
         template,
         docTitle: documentText.voucher_doc_title,
         brand,
+        brandLogo,
       })
     } else if (type === "itinerary") {
       const [template, documentText] = await Promise.all([
@@ -80,6 +81,7 @@ export async function GET(
         journeyHeading: documentText.itinerary_doc_journey_heading,
         introText: documentText.itinerary_doc_intro_text,
         brand,
+        brandLogo,
       })
     } else if (type === "quote") {
       const documentText = await getDocumentTextSettings(supabase)
@@ -97,7 +99,6 @@ export async function GET(
     } else if (type === "worksheet") {
       buffer = await renderWorksheetPdf({
         ...sampleWorksheetData(),
-        brand,
         brandLogo,
       })
     } else {

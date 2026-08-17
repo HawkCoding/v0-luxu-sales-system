@@ -38,6 +38,20 @@ export function legIdsFromLineItems(lineItems: readonly LineItemSnapshotRow[] | 
   )
 }
 
+/**
+ * Leg ids whose room price was deliberately typed as R0 (a supplier comp — see
+ * "Mark complimentary" in suite-leg-editor.tsx / manualRoomPrice). Subset of
+ * `legIdsFromLineItems` — used to flag the "COMPLIMENTARY" callout on client documents.
+ */
+export function complimentaryLegIdsFromLineItems(lineItems: readonly LineItemSnapshotRow[] | null): Set<string> {
+  return new Set(
+    (lineItems ?? [])
+      .filter((item) => (item.pricing_snapshot as PricingSnapshot | null)?.manualRoomPrice === 0)
+      .map((item) => (item.pricing_snapshot as PricingSnapshot | null)?.legId)
+      .filter((legId): legId is string => Boolean(legId)),
+  )
+}
+
 /** Best client-facing name per priced leg, preferring the leg's own label over its supplier. */
 function legLabelsFromLineItems(lineItems: readonly LineItemSnapshotRow[] | null): Map<string, string> {
   const labels = new Map<string, string>()

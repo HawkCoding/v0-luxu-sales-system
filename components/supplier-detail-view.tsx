@@ -99,6 +99,7 @@ import { shortenUrl } from "@/lib/url"
 import { applyRateMarkdown } from "@/lib/pricing/rate-markdown"
 import { rebaseRateAdjustments } from "@/lib/rate-types/rebase-adjustments"
 import { cn } from "@/lib/utils"
+import { supplierLocationName } from "@/lib/suppliers"
 import { useAgeBandsSettings, useLocations, useSupplierDetail, useTrainChildPriceRatio } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
 import { formatRateCardValidityRange } from "@/lib/rate-card-validity"
@@ -213,8 +214,9 @@ export interface SupplierFormState {
   emails: EditableSupplierEmail[]
   phone: string
   website: string
+  /** Free-text head office city -- train operators only; every other kind resolves its city
+   *  from `locationId` instead (see `supplierLocationName`). */
   location: string
-  locationDetail: string
   /** The supplier's own street address; every kind except trains, which use `stationAddresses`. */
   streetAddress: string
   locationId: string | null
@@ -409,7 +411,6 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
     phone: supplier.phone ?? "",
     website: supplier.website ?? "",
     location: supplier.location ?? "",
-    locationDetail: supplier.locationDetail ?? "",
     streetAddress: supplier.streetAddress ?? "",
     locationId: supplier.kind === "train_operator" ? null : supplier.locationId ?? null,
     stationAddresses: (supplier.stationAddresses ?? []).map((station) => ({
@@ -3043,6 +3044,11 @@ export function SupplierDetailView({
     [locations],
   )
 
+  const locationNameById = useMemo(
+    () => new Map(locations.map((location) => [location.id, location.name])),
+    [locations],
+  )
+
   const updateField = <K extends keyof SupplierFormState>(
     key: K,
     value: SupplierFormState[K],
@@ -3090,6 +3096,7 @@ export function SupplierDetailView({
             ...current,
             kind,
             locationId: kind === "train_operator" ? null : current.locationId,
+            location: kind === "train_operator" ? current.location : "",
             // Nothing is cleared on a category change. The station editor and the route location
             // fields are simply not rendered for kinds that have no use for them, and the server
             // preserves the stored values, so a supplier mis-categorised and put back comes home
@@ -4175,8 +4182,7 @@ export function SupplierDetailView({
           emails: cleanedEmails,
           phone: form.phone.trim(),
           website: form.website.trim(),
-          location: form.location.trim(),
-          locationDetail: form.locationDetail.trim(),
+          location: form.kind === "train_operator" ? form.location.trim() : "",
           streetAddress: form.streetAddress.trim() || null,
           locationId: getSupplierLocationId(form),
           description: form.description.trim() || null,
@@ -4676,14 +4682,19 @@ export function SupplierDetailView({
                     />
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="supplier-location">Location</Label>
-                    <BufferedInput
-                      id="supplier-location"
-                      value={form.location}
-                      onValueChange={(value) => updateField("location", value)}
-                    />
-                  </div>
+                  {/* A train has no single city -- it runs between several, unlike every other
+                      kind, which is tagged to one City below. This free-text field is what
+                      prints as its location on client documents. */}
+                  {isTrainOperatorForm && (
+                    <div className="space-y-2">
+                      <Label htmlFor="supplier-location">Head office city</Label>
+                      <BufferedInput
+                        id="supplier-location"
+                        value={form.location}
+                        onValueChange={(value) => updateField("location", value)}
+                      />
+                    </div>
+                  )}
 
                   {!isTrainOperatorForm && (
                     <div className="space-y-2">
@@ -4886,7 +4897,9 @@ export function SupplierDetailView({
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   <InfoItem label="Phone" value={supplier.phone} />
                   <InfoItem label="Website" value={supplier.website} />
-                  <InfoItem label="Location" value={supplier.location} />
+                  {isTrainOperatorSupplier && (
+                    <InfoItem label="Head office city" value={supplier.location} />
+                  )}
                   {!isTrainOperatorSupplier && (
                     <InfoItem label="Street address" value={supplier.streetAddress} />
                   )}
@@ -4951,7 +4964,7 @@ export function SupplierDetailView({
                   </div>
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <MapPin className="h-4 w-4" />
-                    <span>{supplier.location || "No location on file"}</span>
+                    <span>{supplierLocationName(supplier, locationNameById) || "No location on file"}</span>
                   </div>
                 </div>
 

@@ -14,8 +14,6 @@ export function VoucherFooter({ template, styles }: VoucherFooterProps) {
 
   return (
     <View style={[styles.section, styles.footerSection]} wrap={false}>
-      <View style={styles.footerRule} />
-      {template.footer_company ? <Text style={styles.footerCompany}>{template.footer_company}</Text> : null}
       {contact ? <Text style={styles.footerContact}>{contact}</Text> : null}
     </View>
   )

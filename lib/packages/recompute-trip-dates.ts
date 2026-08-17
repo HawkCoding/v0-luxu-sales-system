@@ -39,13 +39,14 @@ export async function recomputeBookingTripDates(
     service_date: string | null
     nights: number | null
     route_id: string | null
+    arrival_date: string | null
     kind: string | null
   }
   const datedRows: DatedRow[] = []
 
   const { data: services, error: servicesError } = await supabase
     .from("booking_services")
-    .select("selected, service_date, nights, route_id, suppliers(kind)")
+    .select("selected, service_date, nights, route_id, arrival_date, suppliers(kind)")
     .eq("booking_id", bookingId)
 
   if (servicesError) return { error: servicesError.message }
@@ -57,6 +58,7 @@ export async function recomputeBookingTripDates(
       service_date: row.service_date,
       nights: row.nights,
       route_id: row.route_id,
+      arrival_date: row.arrival_date,
       kind: supplier?.kind ?? null,
     })
   }
@@ -87,6 +89,7 @@ export async function recomputeBookingTripDates(
         serviceDate: row.service_date,
         nights: row.nights,
         routeDurationDays: row.route_id ? durationByRouteId.get(row.route_id) ?? null : null,
+        arrivalDate: row.arrival_date,
       })
       if (span) spans.push(span)
     }

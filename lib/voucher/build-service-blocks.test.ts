@@ -71,6 +71,135 @@ function transferSelection(partial: Record<string, unknown> = {}) {
   }
 }
 
+function flightService(partial: Record<string, unknown> = {}) {
+  return {
+    id: "leg-flight",
+    selected: true,
+    supplier_id: "supplier-airline",
+    route_id: "route-flight",
+    suite_type_id: null,
+    service_date: "2026-10-14",
+    nights: null,
+    notes: null,
+    sort_order: 0,
+    label: "Positioning flight",
+    departure_time: "10:00:00",
+    arrival_date: "2026-10-14",
+    arrival_time: "12:15:00",
+    flight_number: "FA212",
+    departure_airport_code: "HLA",
+    arrival_airport_code: "CPT",
+    hand_luggage_kg: 7,
+    checked_luggage_kg: 23,
+    suppliers: supplier({ name: "SAfair", kind: "airline" }),
+    routes: { name: "Lanseria INT Airport → Cape Town INT Airport", duration_days: null },
+    suite_types: null,
+    units: [{ suite_type_id: "cabin-economy", sort_order: 0, suite_types: { name: "Economy" } }],
+    ...partial,
+  }
+}
+
+describe("buildVoucherServiceBlocks — flight legs", () => {
+  it("resolves the leg's own captured schedule, cabin, flight number and airport codes", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({ services: [flightService()] }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].serviceType).toBe("airline")
+    expect(blocks[0].serviceData).toMatchObject({
+      departureDate: "2026-10-14",
+      // Postgres hands a `time` back as HH:MM:SS; every surface prints HH:MM.
+      startTime: "10:00",
+      arrivalDate: "2026-10-14",
+      endTime: "12:15",
+      flightNumber: "FA212",
+      departureAirportCode: "HLA",
+      arrivalAirportCode: "CPT",
+      handLuggageKg: 7,
+      checkedLuggageKg: 23,
+      // The cabin is the booked suite type, with no noun appended (airline is not in
+      // SUITE_NOUN_KINDS) — "Economy", never "Economy Suite".
+      cabin: "Economy",
+    })
+  })
+
+  it("keeps an overnight arrival on its real day", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        services: [flightService({ arrival_date: "2026-10-15", departure_time: "22:40:00", arrival_time: "06:15:00" })],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceData.departureDate).toBe("2026-10-14")
+    expect(blocks[0].serviceData.arrivalDate).toBe("2026-10-15")
+  })
+
+  it("lets the captured arrival date beat a route duration", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        services: [
+          flightService({
+            routes: { name: "Lanseria → Cape Town", duration_days: 3 },
+            arrival_date: "2026-10-14",
+          }),
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    // A duration-derived arrival would land on the 16th; the captured fact wins outright.
+    expect(blocks[0].serviceData.arrivalDate).toBe("2026-10-14")
+  })
+
+  it("falls back to the supplier's default times for a leg captured before flight times existed", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        services: [
+          flightService({
+            departure_time: null,
+            arrival_time: null,
+            arrival_date: null,
+            suppliers: supplier({
+              name: "SAfair",
+              kind: "airline",
+              default_time_start: "09:00:00",
+              default_time_end: "11:00:00",
+            }),
+          }),
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceData.startTime).toBe("09:00")
+    expect(blocks[0].serviceData.endTime).toBe("11:00")
+  })
+
+  it("leaves the flight fields off a non-airline leg", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        services: [
+          flightService({
+            suppliers: supplier({ name: "The Blue Train", kind: "train_operator" }),
+            routes: { name: "Pretoria → Cape Town", duration_days: 2, departure_time: "12:00:00", arrival_time: "18:00:00" },
+          }),
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceType).toBe("train")
+    expect(blocks[0].serviceData.flightNumber).toBeNull()
+    expect(blocks[0].serviceData.cabin).toBeNull()
+    expect(blocks[0].serviceData.departureAirportCode).toBeNull()
+    // A train still takes its schedule from the route, not from the leg's flight columns.
+    expect(blocks[0].serviceData.startTime).toBe("12:00")
+  })
+})
+
 describe("buildVoucherServiceBlocks", () => {
   it("renders one block per transfer request using the typed pickup/drop-off, never the route", async () => {
     const { blocks } = await buildVoucherServiceBlocks(
@@ -834,6 +963,76 @@ describe("buildVoucherServiceBlocks", () => {
     expect(blocks[0].serviceData.roomType).toBeNull()
   })
 
+  it("resolves a non-train supplier's printed location from its joined city, not its free-text location", async () => {
+    const hotelLeg = {
+      id: "svc-hotel",
+      label: "The Silo Hotel",
+      sort_order: 0,
+      selected: true,
+      supplier_id: "supplier-hotel",
+      route_id: null,
+      service_date: "2026-08-01",
+      nights: 2,
+      notes: null,
+      supplier_reference: null,
+      // A hotel's free-text `location` is retired -- only train operators still carry it. If the
+      // resolver read it instead of `city`, this stale value would leak onto the voucher.
+      suppliers: supplier({
+        kind: "hotel_property",
+        name: "The Silo Hotel",
+        location: "STALE FREE TEXT",
+        location_id: "loc-cape-town",
+        city: { name: "Cape Town" },
+      }),
+      routes: { name: "Bed & Breakfast", duration_days: null },
+      suite_types: { name: "Ocean Suite" },
+      units: null,
+    }
+
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({ services: [hotelLeg] }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].contactDetails.location).toBe("Cape Town")
+  })
+
+  it("resolves a train operator's printed location from its free-text location, ignoring city", async () => {
+    const trainLeg = {
+      id: "svc-blue-train-location",
+      label: "The Blue Train",
+      sort_order: 0,
+      selected: true,
+      supplier_id: "supplier-blue-train",
+      route_id: "route-blue-train",
+      suite_type_id: null,
+      service_date: "2026-08-01",
+      nights: null,
+      notes: null,
+      supplier_reference: null,
+      // A train has no single city, so `city` (if ever joined) must never win over the free text.
+      suppliers: supplier({
+        kind: "train_operator",
+        name: "Blue Train",
+        location: "Pretoria",
+        location_id: null,
+        city: null,
+      }),
+      routes: { name: "Pretoria ↔ Cape Town", duration_days: 1, direction_mode: null, origin: null, destination: null },
+      suite_types: { name: "Royal Suite" },
+      units: null,
+    }
+
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({ services: [trainLeg] }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].contactDetails.location).toBe("Pretoria")
+  })
+
   it("swaps the arrival station to the route's origin on a reversed round-trip leg, regardless of the supplier's own static location", async () => {
     const returnLeg = {
       id: "svc-blue-train-return",
@@ -1155,7 +1354,7 @@ describe("buildVoucherServiceBlocks", () => {
     expect(blocks[0].serviceData.passengerCount).toBe(3)
   })
 
-  it("repeats the reservation form's meal-seating/smoking/occasion on train and hotel blocks", async () => {
+  it("routes meal-seating/smoking to train blocks and dietary/occasion to hotel blocks", async () => {
     const { blocks } = await buildVoucherServiceBlocks(
       buildSupabase({
         selections: [
@@ -1173,21 +1372,50 @@ describe("buildVoucherServiceBlocks", () => {
             routes: { name: "Pretoria ↔ Cape Town", duration_days: 3 },
             suite_types: { name: "Royal Suite" },
           },
+          {
+            id: "leg-hotel",
+            selected: true,
+            supplier_id: "supplier-hotel",
+            route_id: "route-hotel",
+            suite_type_id: null,
+            service_date: "2026-09-05",
+            nights: 2,
+            notes: null,
+            sort_order: 1, label: "Irene Country Lodge",
+            suppliers: supplier({ kind: "hotel_property", name: "Irene Country Lodge" }),
+            routes: { name: "Full Board", duration_days: null },
+            suite_types: null,
+          },
           transferSelection(),
         ],
       }),
       {
         bookingId: BOOKING_ID,
-        reservationDetails: { occasion: "Birthday Celebration", mealSeating: "first", smokingPreference: "non_smoking" },
+        reservationDetails: {
+          dietary: "Vegetarian",
+          occasion: "Birthday Celebration",
+          mealSeating: "first",
+          smokingPreference: "non_smoking",
+        },
       },
     )
 
     const train = blocks.find((b) => b.serviceType === "train")
+    const hotel = blocks.find((b) => b.serviceType === "hotel")
     const transfer = blocks.find((b) => b.serviceType === "transfer")
+
     expect(train?.serviceData.requestsLine).toBe("1st seating meals; Nonsmoking")
-    expect(train?.serviceData.occasion).toBe("Birthday Celebration")
+    expect(train?.serviceData.occasion).toBeNull()
+    expect(train?.serviceData.dietary).toBeNull()
+
+    expect(hotel?.serviceData.occasion).toBe("Birthday Celebration")
+    expect(hotel?.serviceData.dietary).toBe("Vegetarian")
+    expect(hotel?.serviceData.requestsLine).toBeNull()
+
     // Not a train/hotel type — the party's preferences aren't printed on a transfer block.
     expect(transfer?.serviceData.requestsLine).toBeNull()
+    expect(transfer?.serviceData.occasion).toBeNull()
+    expect(transfer?.serviceData.dietary).toBeNull()
   })
 
   it("stands a tour block's itinerary in from the route name when nothing else is captured", async () => {

@@ -10,7 +10,8 @@ import { addDays, trainArrivalDate } from "@/lib/packages/hotel-dates"
  *
  *   train        → departure … arrival (departure + route durationDays, counting departure day)
  *   hotel        → check-in … check-out (check-in + nights)
- *   tour/airline → service date … service date + route durationDays (single day when unset)
+ *   airline      → departure date … captured arrival date (same day when uncaptured)
+ *   tour         → service date … service date + route durationDays (single day when unset)
  *   transfer     → pickup date
  *   rental       → pickup date … return date
  *
@@ -71,6 +72,9 @@ interface SpanInput {
   nights: number | null
   /** Selected route's durationDays (train/tour legs). */
   routeDurationDays: number | null
+  /** Airline legs: the captured arrival date. An overnight flight ends on a day no route duration
+   * models, so when it is set it defines the span end outright. */
+  arrivalDate?: string | null
 }
 
 /** The span a single dated service covers, or null when it has no usable date. */
@@ -81,6 +85,12 @@ export function serviceDateSpan(input: SpanInput): ServiceDateSpan | null {
   if (input.supplierKind === "hotel_property") {
     const nights = Math.max(1, Math.floor(input.nights ?? 1))
     return { start, end: addDays(start, nights) }
+  }
+
+  // A captured flight arrival is a fact, not a derivation — it beats the route duration below,
+  // which for an airline route is never configured anyway.
+  if (isIsoDate(input.arrivalDate) && input.arrivalDate >= start) {
+    return { start, end: input.arrivalDate }
   }
 
   // trainArrivalDate treats a missing/zero duration as a single-day service (end = start).
@@ -110,6 +120,7 @@ export function legStateDateSpans(detail: PackageDetail, states: ApplyLegState[]
         serviceDate: state.serviceDate,
         nights: state.nights,
         routeDurationDays: selectedRouteDurationDays(legById.get(state.legId), state.routeId),
+        arrivalDate: state.arrivalDate,
       })
       if (span) spans.push(span)
       continue

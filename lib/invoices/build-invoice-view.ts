@@ -30,37 +30,45 @@ export interface InvoiceView {
   items: InvoiceItem[]
 }
 
-type CustomerRow = Pick<
-  Database["public"]["Tables"]["customers"]["Row"],
-  | "company_name"
-  | "address_line1"
-  | "address_line2"
-  | "city"
-  | "province"
-  | "country"
-  | "postal_code"
-  | "phone"
-  | "email"
-  | "vat_number"
+type CustomerRow = Pick<Database["public"]["Tables"]["customers"]["Row"], "phone" | "email">
+
+type BillingDetailsRow = Pick<
+  Database["public"]["Tables"]["booking_reservation_details"]["Row"],
+  | "billing_company_name"
+  | "billing_vat_number"
+  | "billing_address_line1"
+  | "billing_address_line2"
+  | "billing_city"
+  | "billing_province"
+  | "billing_postal_code"
+  | "billing_country"
 >
 
-export function buildBillingParty(customer: CustomerRow | null | undefined): InvoiceBillingParty {
+/**
+ * The billing party is job-level, not customer-level: Company, VAT and address
+ * come only from booking_reservation_details, with no fallback to the customer
+ * profile. Phone and e-mail are the exception and still read the customer.
+ */
+export function buildBillingParty(
+  details: BillingDetailsRow | null | undefined,
+  customer: CustomerRow | null | undefined,
+): InvoiceBillingParty {
   const addressLines = [
-    customer?.address_line1,
-    customer?.address_line2,
-    [customer?.city, customer?.province].filter(Boolean).join(", "),
-    customer?.country,
+    details?.billing_address_line1,
+    details?.billing_address_line2,
+    [details?.billing_city, details?.billing_province].filter(Boolean).join(", "),
+    details?.billing_country,
   ]
     .map((line) => line?.trim() ?? "")
     .filter((line) => line.length > 0)
 
   return {
-    companyName: customer?.company_name ?? null,
+    companyName: details?.billing_company_name ?? null,
     addressLines,
-    postalCode: customer?.postal_code ?? null,
+    postalCode: details?.billing_postal_code ?? null,
     phone: customer?.phone ?? null,
     email: customer?.email ?? null,
-    vatNumber: customer?.vat_number ?? null,
+    vatNumber: details?.billing_vat_number ?? null,
   }
 }
 
@@ -192,11 +200,11 @@ export async function buildInvoiceView(
   supabase: SupabaseClient<Database>,
   { bookingId, quoteId, journeyHeading }: BuildInvoiceViewOptions,
 ): Promise<InvoiceView> {
-  const [{ data: booking }, { data: travellers }] = await Promise.all([
+  const [{ data: booking }, { data: travellers }, { data: billingDetails }] = await Promise.all([
     supabase
       .from("bookings")
       .select(
-        "id, consultant, assigned_salesperson_id, no_of_adults, no_of_children, no_of_suites, duration_nights, trip_start_date, trip_end_date, customer:customers(company_name, address_line1, address_line2, city, province, country, postal_code, phone, email, vat_number), route:routes(name, supplier:suppliers(name))",
+        "id, consultant, assigned_salesperson_id, no_of_adults, no_of_children, no_of_suites, duration_nights, trip_start_date, trip_end_date, customer:customers(phone, email), route:routes(name, supplier:suppliers(name))",
       )
       .eq("id", bookingId)
       .maybeSingle(),
@@ -205,6 +213,13 @@ export async function buildInvoiceView(
       .select("prefix, first_name, last_name, sort_order")
       .eq("booking_id", bookingId)
       .order("sort_order"),
+    supabase
+      .from("booking_reservation_details")
+      .select(
+        "billing_company_name, billing_vat_number, billing_address_line1, billing_address_line2, billing_city, billing_province, billing_postal_code, billing_country",
+      )
+      .eq("booking_id", bookingId)
+      .maybeSingle(),
   ])
 
   const customer = Array.isArray(booking?.customer) ? booking.customer[0] : booking?.customer
@@ -277,7 +292,7 @@ export async function buildInvoiceView(
   return {
     consultant: resolvedConsultant?.key ?? null,
     guestNames,
-    billing: buildBillingParty(customer),
+    billing: buildBillingParty(billingDetails, customer),
     departure,
     items,
   }

@@ -1,63 +1,30 @@
 import { Image, Text, View } from "@react-pdf/renderer"
-import { isRasterAssetUrl } from "@/lib/assets/raster-url"
+import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
 import type { DocumentBrand } from "@/lib/settings-access"
-import type { VoucherTemplate } from "@/lib/types"
 import type { voucherStyles } from "../styles"
 
 type Styles = ReturnType<typeof voucherStyles>
 
 interface HeaderBannerProps {
-  template: VoucherTemplate
   styles: Styles
-  /**
-   * Shared brand copy. The masthead heading/subheading come from here so they
-   * stay in step with the quote/invoice brand block; the template still owns the
-   * logo/banner imagery. Omitted falls back to the template's own text columns.
-   */
+  /** Shared brand copy — heading, sub-heading and logo all come from the brand block, so
+   * every document (quote, invoice, voucher, itinerary) stays in step with one setting. */
   brand?: DocumentBrand
+  /** Logo resolved to embeddable bytes; a URL string is not reliable for react-pdf's
+   * <Image> during server-side rendering (see lib/pdf/brand-logo.ts). */
+  brandLogo?: BrandLogoImage | null
 }
 
-export function HeaderBanner({ template, styles, brand }: HeaderBannerProps) {
-  const heading = brand?.heading ?? template.header_text
-  const subheading = brand?.subheading ?? template.product_line
-  const hasLogo = isRasterAssetUrl(template.logo_url)
-  const hasBanner = isRasterAssetUrl(template.banner_url)
+export function HeaderBanner({ styles, brand, brandLogo }: HeaderBannerProps) {
+  const heading = brand?.heading ?? ""
+  const subheading = brand?.subheading ?? ""
 
-  if (hasLogo && hasBanner) {
-    return (
-      <View style={[styles.header, styles.headerSplit]}>
-        <View style={styles.headerLogoSide}>
-          <Image src={template.logo_url ?? ""} style={styles.headerLogo} />
-        </View>
-        <View style={styles.headerBannerSide}>
-          <Image src={template.banner_url ?? ""} style={styles.headerBanner} />
-          <View style={styles.headerTextOverlay}>
-            <Text style={styles.overlayProductLine}>{heading}</Text>
-            <Text style={styles.overlaySubtitle}>{subheading}</Text>
-          </View>
-        </View>
-      </View>
-    )
-  }
-
-  if (hasLogo) {
+  if (brandLogo) {
     return (
       <View style={[styles.header, styles.headerLogoOnly]}>
-        <Image src={template.logo_url ?? ""} style={styles.headerLogoCenter} />
+        <Image src={brandLogo} style={styles.headerLogoCenter} />
         <Text style={styles.productLine}>{heading}</Text>
         <Text style={styles.headerSubtitle}>{subheading}</Text>
-      </View>
-    )
-  }
-
-  if (hasBanner) {
-    return (
-      <View style={[styles.header, styles.headerBannerOnly]}>
-        <Image src={template.banner_url ?? ""} style={styles.headerBannerFull} />
-        <View style={styles.headerTextBelow}>
-          <Text style={styles.productLine}>{heading}</Text>
-          <Text style={styles.headerSubtitle}>{subheading}</Text>
-        </View>
       </View>
     )
   }

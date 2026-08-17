@@ -22,7 +22,9 @@ export interface LegReferenceRow {
   supplierContactName: string | null
   /** One-off operational caveat, e.g. "Check in IRENE COUNTRY LODGE 2h prior to departure". */
   voucherFootnote: string | null
-  /** Only meaningful for "service" rows on a train leg — excursions are otherwise always []. */
+  /** Only meaningful for "service" rows on a train leg — excursions are otherwise always []. Not
+   * currently editable or shown anywhere (see `job-references-tab.tsx`); kept on the read model
+   * only so the column round-trips unchanged when other fields on the row are saved. */
   excursions: string[]
 }
 

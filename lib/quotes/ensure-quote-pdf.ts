@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { renderQuotePdf } from "@/lib/quotes/render-quote-pdf"
 import { deriveFlightCapPerPerson, deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
-import { legIdsFromLineItems } from "@/lib/quotes/accepted-quote-scope"
+import { complimentaryLegIdsFromLineItems, legIdsFromLineItems } from "@/lib/quotes/accepted-quote-scope"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { loadBrandLogo } from "@/lib/pdf/brand-logo"
@@ -124,6 +124,7 @@ export async function ensureQuotePdf(
   // currently selected live on the job — an empty set means a manual/no-package quote, so fall
   // back to unfiltered (today's behavior) rather than rendering an empty itinerary.
   const quoteLegIds = legIdsFromLineItems(lineItems)
+  const complimentaryLegIds = complimentaryLegIdsFromLineItems(lineItems)
 
   // Itinerary degrades to an empty section rather than blocking the PDF —
   // correspondence relies on a quote email never going out without its PDF.
@@ -133,6 +134,7 @@ export async function ensureQuotePdf(
       bookingId: quote.booking_id,
       additionalServicesDetails: null,
       legIds: quoteLegIds.size > 0 ? quoteLegIds : undefined,
+      complimentaryLegIds,
     })
     itineraryBlocks = blocks
   } catch (err) {

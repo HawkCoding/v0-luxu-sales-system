@@ -21,12 +21,12 @@ export function sampleInvoicePdfData(): Omit<
     dueDate,
     consultant: "LB",
     billing: {
-      companyName: null,
-      addressLines: [],
-      postalCode: null,
+      companyName: "Lunn Family Travel",
+      addressLines: ["14 Kensington Road", "London, Greater London", "United Kingdom"],
+      postalCode: "SW7 2AB",
       phone: "+44 7884 495357",
       email: "sample.guest@example.com",
-      vatNumber: null,
+      vatNumber: "GB123456789",
     },
     departure: {
       heading: "Luxury Train Departure Information",

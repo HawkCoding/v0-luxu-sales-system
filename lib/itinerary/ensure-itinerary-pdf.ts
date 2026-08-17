@@ -5,6 +5,7 @@ import { renderItineraryPdf } from "@/lib/itinerary/render-pdf"
 import { formatDisplayDateLong } from "@/lib/date-format"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { getDocumentBrandSettings, getDocumentTextSettings, resolveDocumentBrand } from "@/lib/settings-access"
+import { loadBrandLogo } from "@/lib/pdf/brand-logo"
 import { resolveDirectedRouteName } from "@/lib/routes/route-name"
 import { buildDefaultTripTitle } from "@/lib/itinerary/default-trip-title"
 import { resolveConsultant } from "@/lib/consultant/resolve-consultant"
@@ -139,7 +140,7 @@ export async function ensureItineraryPdf(
       .single(),
     supabase
       .from("voucher_template")
-      .select("id, logo_url, banner_url, header_text, product_line, accent_colour, section_bg, font_family, section_order, hidden_sections, footer_company, footer_phone, footer_email, guidance_text")
+      .select("id, header_text, product_line, accent_colour, section_bg, font_family, section_order, hidden_sections, footer_company, footer_phone, footer_email, guidance_text")
       .limit(1)
       .maybeSingle(),
     supabase.from("itineraries").select("id, name, notes").eq("booking_id", bookingId).maybeSingle(),
@@ -147,6 +148,7 @@ export async function ensureItineraryPdf(
     getDocumentBrandSettings(supabase),
   ])
   const { brand } = resolveDocumentBrand(documentBrandSettings)
+  const brandLogo = await loadBrandLogo(brand.logoUrl)
 
   if (bookingError || !bookingRaw) throw new Error("Booking not found")
 
@@ -185,6 +187,7 @@ export async function ensureItineraryPdf(
       journeyHeading: documentText.itinerary_doc_journey_heading,
       introText: documentText.itinerary_doc_intro_text,
       brand,
+      brandLogo,
     })
   } catch (error) {
     console.error("itinerary:render-pdf", error)

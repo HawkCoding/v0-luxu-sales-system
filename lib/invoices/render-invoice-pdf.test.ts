@@ -87,6 +87,46 @@ describe("renderInvoicePdf smoke", () => {
     expect(text).not.toContain("Commission")
   })
 
+  it("renders every billing address line alongside the phone and e-mail rows", async () => {
+    const buffer = await renderInvoicePdf({
+      invoiceNumber: "LTT-2026-0001-INV",
+      bookingNumber: "LTT-2026-0001",
+      customerName: "Rachel O'Brien",
+      guestNames: ["Mrs Rachel O'Brien"],
+      issueDate: "2026-07-12",
+      dueDate: "2026-07-19",
+      departure: null,
+      items,
+      totals: depositTotals,
+      banking,
+      billing: {
+        companyName: "JPS",
+        // Deliberately long first line so it soft-wraps inside the value column.
+        addressLines: [
+          "7 Fulmar Close, Sandgebaan Estate, Western Cape Province",
+          "Sandgebaan",
+          "Cape Town, WC",
+          "South Africa",
+        ],
+        postalCode: "7535",
+        phone: "+353871234567",
+        email: "rachel.obrien@eircom.ie",
+        vatNumber: "112223456",
+      },
+    })
+
+    const { text } = await pdfParse(buffer)
+    // Every address line must survive: the stacked lines used to collapse into
+    // one line's height and paint over the Phone row.
+    expect(text).toContain("Sandgebaan")
+    expect(text).toContain("Cape Town, WC")
+    expect(text).toContain("South Africa")
+    expect(text).toContain("+353871234567")
+    expect(text).toContain("rachel.obrien@eircom.ie")
+    expect(text).toContain("112223456")
+    expect(text).toContain("7535")
+  })
+
   it("renders custom notes and footer text", async () => {
     const buffer = await renderInvoicePdf({
       invoiceNumber: "LTT-2026-0001-INV",

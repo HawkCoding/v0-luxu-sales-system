@@ -130,7 +130,6 @@ export function mapSupplier(row: SupplierRow): Supplier {
     phone: row.phone,
     website: row.website,
     location: row.location,
-    locationDetail: row.location_detail ?? null,
     locationId: row.location_id ?? null,
     locationAreaId: row.location_area_id ?? null,
     description: row.description ?? null,
@@ -152,6 +151,17 @@ export function mapSupplier(row: SupplierRow): Supplier {
     createdAtDisplay: formatDisplayDateTime(row.created_at),
     updatedAtDisplay: formatDisplayDateTime(row.updated_at),
   }
+}
+
+/** Train operators have no single city, so they carry free text; every other kind resolves its
+ *  city from `locationId`. Callers that only have the raw id (e.g. voucher/quote joins that embed
+ *  the city by name already) can skip the map and pass the name straight through. */
+export function supplierLocationName(
+  supplier: Pick<Supplier, "kind" | "location" | "locationId">,
+  locationNameById: Map<string, string>,
+): string | null {
+  if (supplier.kind === "train_operator") return supplier.location
+  return supplier.locationId ? (locationNameById.get(supplier.locationId) ?? null) : null
 }
 
 export function mapLocation(row: LocationRow): Location {

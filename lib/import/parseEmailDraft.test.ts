@@ -552,6 +552,57 @@ Acceptance
     expect(draft.termsAccepted).toBe(true)
   })
 
+  it("reads a 'No' additional-services answer as declined even when the mail client hard-wraps the label", () => {
+    // Real Rovos Rail Availability-form notification: the label line is long enough that some
+    // mail transports wrap it mid-parenthetical, carrying the closing "etc)*" onto its own line
+    // ahead of the actual "No" answer.
+    const text = `Please indicate the purpose of your request
+  	Availability
+Rovos Rail Departure Information
+Direction
+  	Pretoria to Cape Town
+Date: Pretoria to Cape Town
+  	11 December 2026
+No of Suites
+  	1
+No. of Adults
+  	2
+Suite Type 1
+  	Deluxe Twin Suite
+Additional Pre and Post Train Travel Services
+Do you require additional travel services? (e.g flights, tours, transfers,
+etc)*
+  	No
+Consent
+  	I have read and accept the Terms and Conditions`
+
+    const draft = parseEmailDraft(text)
+
+    expect(draft.additionalServices).toEqual({ requested: false, details: "" })
+    expect(draft.formFields.additionalServicesDetails).toBe("")
+  })
+
+  it("still reads a same-line 'No' additional-services answer when the label isn't wrapped", () => {
+    const draft = parseEmailDraft(`
+Do you require additional travel services? (e.g flights, tours, transfers, etc)*
+  	No
+`)
+
+    expect(draft.additionalServices).toEqual({ requested: false, details: "" })
+  })
+
+  it("keeps the free-text detail when a Quote-form additional-services answer describes the request inline", () => {
+    const draft = parseEmailDraft(`
+Would you like to add additional travel services? (Please specify below)
+Taxi transport from OR Tambo to hotel
+`)
+
+    expect(draft.additionalServices).toEqual({
+      requested: true,
+      details: "Taxi transport from OR Tambo to hotel",
+    })
+  })
+
   it("reads Contact Number by label over a stray digit run elsewhere in the body", () => {
     const draft = parseEmailDraft(`
 Contact Number

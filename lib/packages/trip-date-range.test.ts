@@ -87,6 +87,42 @@ describe("serviceDateSpan", () => {
       serviceDateSpan({ supplierKind: "train_operator", serviceDate: null, nights: null, routeDurationDays: 3 }),
     ).toBeNull()
   })
+
+  it("ends an overnight flight on its captured arrival date", () => {
+    expect(
+      serviceDateSpan({
+        supplierKind: "airline",
+        serviceDate: "2026-10-14",
+        nights: null,
+        routeDurationDays: null,
+        arrivalDate: "2026-10-15",
+      }),
+    ).toEqual({ start: "2026-10-14", end: "2026-10-15" })
+  })
+
+  it("lets a captured arrival date beat a route duration", () => {
+    expect(
+      serviceDateSpan({
+        supplierKind: "airline",
+        serviceDate: "2026-10-14",
+        nights: null,
+        routeDurationDays: 3,
+        arrivalDate: "2026-10-14",
+      }),
+    ).toEqual({ start: "2026-10-14", end: "2026-10-14" })
+  })
+
+  it("ignores an inverted arrival date rather than producing a backwards span", () => {
+    expect(
+      serviceDateSpan({
+        supplierKind: "airline",
+        serviceDate: "2026-10-14",
+        nights: null,
+        routeDurationDays: null,
+        arrivalDate: "2026-10-13",
+      }),
+    ).toEqual({ start: "2026-10-14", end: "2026-10-14" })
+  })
 })
 
 function makeDetail(legs: Array<{ id: string; routes?: Array<{ id: string; durationDays?: number | null }> }>): PackageDetail {
@@ -127,6 +163,14 @@ function suiteState(overrides: Partial<SuiteLegState> & { legId: string }): Suit
     reversed: false,
     serviceDate: null,
     nights: null,
+    departureTime: null,
+    arrivalDate: null,
+    arrivalTime: null,
+    flightNumber: null,
+    departureAirportCode: null,
+    arrivalAirportCode: null,
+    handLuggageKg: null,
+    checkedLuggageKg: null,
     dateAnchor: null,
     notes: null,
     rateTypeId: null,

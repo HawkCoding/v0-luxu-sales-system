@@ -29,7 +29,7 @@ import {
 } from "@/components/supplier-email-editor"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Textarea } from "@/components/ui/textarea"
-import { useSuppliers } from "@/lib/use-data"
+import { useLocations, useSuppliers } from "@/lib/use-data"
 import { shortenUrl } from "@/lib/url"
 import { SUPPLIER_KIND_LABELS, type SupplierKind } from "@/lib/types"
 
@@ -44,7 +44,10 @@ interface CreateSupplierFormState {
   emails: EditableSupplierEmail[]
   phone: string
   website: string
+  /** Free-text head office city -- train operators only (a train has no single city). Every
+   *  other kind is tagged via `locationId` instead. */
   location: string
+  locationId: string | null
   notes: string
   /** Set when the user ticks "Linked": the sibling record whose contact details this one reuses. */
   parentSupplierId: string | null
@@ -52,7 +55,7 @@ interface CreateSupplierFormState {
 
 type SupplierFormField = Exclude<
   keyof CreateSupplierFormState,
-  "notes" | "emails" | "parentSupplierId"
+  "notes" | "emails" | "parentSupplierId" | "locationId"
 >
 type SupplierFormErrors = Record<SupplierFormField | "emails", string | null>
 type SupplierFormTouched = Partial<Record<SupplierFormField, boolean>>
@@ -69,6 +72,7 @@ function getInitialFormState(): CreateSupplierFormState {
     phone: "",
     website: "",
     location: "",
+    locationId: null,
     notes: "",
     parentSupplierId: null,
   }
@@ -118,8 +122,10 @@ function validateSupplierForm(form: CreateSupplierFormState): SupplierFormErrors
       website.length > 0 && !WEBSITE_PATTERN.test(website)
         ? "Enter a valid website (e.g. example.com)"
         : null,
+    // Only train operators edit this field -- every other kind is tagged via the City dropdown,
+    // which has no min-length concept.
     location:
-      location.length > 0 && location.length < 2
+      form.kind === "train_operator" && location.length > 0 && location.length < 2
         ? "Location must be at least 2 characters"
         : null,
   }
@@ -133,6 +139,8 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
   const [touched, setTouched] = useState<SupplierFormTouched>(getInitialTouchedState())
   const errors = useMemo(() => validateSupplierForm(form), [form])
   const { data: suppliers } = useSuppliers()
+  const { data: locations } = useLocations()
+  const isTrainOperator = form.kind === "train_operator"
 
   // The same company can hold one record per category. When the name matches a record in another
   // category, offer to reuse that record's contact details rather than re-typing them. Records that
@@ -232,7 +240,8 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
             .filter((entry) => entry.email.length > 0),
           phone: form.phone,
           website: form.website,
-          location: form.location,
+          location: form.kind === "train_operator" ? form.location : "",
+          locationId: form.kind === "train_operator" ? null : form.locationId,
           notes: form.notes,
           parentSupplierId: linkedParent?.id ?? null,
         }),
@@ -404,22 +413,52 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
             ) : null}
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="supplier-location">Location</Label>
-            <Input
-              id="supplier-location"
-              value={form.location}
-              onChange={(event) =>
-                setForm((current) => ({ ...current, location: event.target.value }))
-              }
-              placeholder="City or region"
-              className={getFieldClassName("location")}
-              onBlur={() => markFieldTouched("location")}
-            />
-            {touched.location && errors.location ? (
-              <p className="text-xs text-destructive">{errors.location}</p>
-            ) : null}
-          </div>
+          {/* A train has no single city -- it runs between several, unlike every other kind,
+              which is tagged to one City below. This free-text field is what prints as its
+              location on client documents. */}
+          {isTrainOperator ? (
+            <div className="space-y-2">
+              <Label htmlFor="supplier-location">Head office city</Label>
+              <Input
+                id="supplier-location"
+                value={form.location}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, location: event.target.value }))
+                }
+                placeholder="City or region"
+                className={getFieldClassName("location")}
+                onBlur={() => markFieldTouched("location")}
+              />
+              {touched.location && errors.location ? (
+                <p className="text-xs text-destructive">{errors.location}</p>
+              ) : null}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Label htmlFor="supplier-location-city">City</Label>
+              <Select
+                value={form.locationId ?? "none"}
+                onValueChange={(value) =>
+                  setForm((current) => ({
+                    ...current,
+                    locationId: value === "none" ? null : value,
+                  }))
+                }
+              >
+                <SelectTrigger id="supplier-location-city">
+                  <SelectValue placeholder="Select city" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">— None —</SelectItem>
+                  {(locations ?? []).map((loc) => (
+                    <SelectItem key={loc.id} value={loc.id}>
+                      {loc.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           <div className="space-y-2 md:col-span-2">
             {isLinked ? (

@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -402,6 +402,14 @@ export type Database = {
         Row: {
           agency_address: string | null
           agency_name: string | null
+          billing_address_line1: string | null
+          billing_address_line2: string | null
+          billing_city: string | null
+          billing_company_name: string | null
+          billing_country: string | null
+          billing_postal_code: string | null
+          billing_province: string | null
+          billing_vat_number: string | null
           booking_id: string
           created_at: string
           dietary: string | null
@@ -411,10 +419,19 @@ export type Database = {
           occasion: string | null
           smoking_preference: string | null
           updated_at: string
+          voucher_special_requests: string | null
         }
         Insert: {
           agency_address?: string | null
           agency_name?: string | null
+          billing_address_line1?: string | null
+          billing_address_line2?: string | null
+          billing_city?: string | null
+          billing_company_name?: string | null
+          billing_country?: string | null
+          billing_postal_code?: string | null
+          billing_province?: string | null
+          billing_vat_number?: string | null
           booking_id: string
           created_at?: string
           dietary?: string | null
@@ -424,10 +441,19 @@ export type Database = {
           occasion?: string | null
           smoking_preference?: string | null
           updated_at?: string
+          voucher_special_requests?: string | null
         }
         Update: {
           agency_address?: string | null
           agency_name?: string | null
+          billing_address_line1?: string | null
+          billing_address_line2?: string | null
+          billing_city?: string | null
+          billing_company_name?: string | null
+          billing_country?: string | null
+          billing_postal_code?: string | null
+          billing_province?: string | null
+          billing_vat_number?: string | null
           booking_id?: string
           created_at?: string
           dietary?: string | null
@@ -437,6 +463,7 @@ export type Database = {
           occasion?: string | null
           smoking_preference?: string | null
           updated_at?: string
+          voucher_special_requests?: string | null
         }
         Relationships: [
           {
@@ -552,10 +579,18 @@ export type Database = {
       }
       booking_services: {
         Row: {
+          arrival_airport_code: string | null
+          arrival_date: string | null
+          arrival_time: string | null
           booking_id: string
+          checked_luggage_kg: number | null
           created_at: string
           date_anchor: string | null
+          departure_airport_code: string | null
+          departure_time: string | null
           excursions: string[] | null
+          flight_number: string | null
+          hand_luggage_kg: number | null
           id: string
           label: string | null
           nights: number | null
@@ -576,10 +611,18 @@ export type Database = {
           voucher_footnote: string | null
         }
         Insert: {
+          arrival_airport_code?: string | null
+          arrival_date?: string | null
+          arrival_time?: string | null
           booking_id: string
+          checked_luggage_kg?: number | null
           created_at?: string
           date_anchor?: string | null
+          departure_airport_code?: string | null
+          departure_time?: string | null
           excursions?: string[] | null
+          flight_number?: string | null
+          hand_luggage_kg?: number | null
           id?: string
           label?: string | null
           nights?: number | null
@@ -600,10 +643,18 @@ export type Database = {
           voucher_footnote?: string | null
         }
         Update: {
+          arrival_airport_code?: string | null
+          arrival_date?: string | null
+          arrival_time?: string | null
           booking_id?: string
+          checked_luggage_kg?: number | null
           created_at?: string
           date_anchor?: string | null
+          departure_airport_code?: string | null
+          departure_time?: string | null
           excursions?: string[] | null
+          flight_number?: string | null
+          hand_luggage_kg?: number | null
           id?: string
           label?: string | null
           nights?: number | null
@@ -3412,7 +3463,6 @@ export type Database = {
           kind: Database["public"]["Enums"]["supplier_kind"]
           location: string | null
           location_area_id: string | null
-          location_detail: string | null
           location_id: string | null
           name: string
           notes: string | null
@@ -3445,7 +3495,6 @@ export type Database = {
           kind: Database["public"]["Enums"]["supplier_kind"]
           location?: string | null
           location_area_id?: string | null
-          location_detail?: string | null
           location_id?: string | null
           name: string
           notes?: string | null
@@ -3478,7 +3527,6 @@ export type Database = {
           kind?: Database["public"]["Enums"]["supplier_kind"]
           location?: string | null
           location_area_id?: string | null
-          location_detail?: string | null
           location_id?: string | null
           name?: string
           notes?: string | null
@@ -3727,7 +3775,6 @@ export type Database = {
       voucher_template: {
         Row: {
           accent_colour: string
-          banner_url: string | null
           font_family: string
           footer_company: string
           footer_email: string
@@ -3737,7 +3784,6 @@ export type Database = {
           header_text: string
           hidden_sections: string[]
           id: string
-          logo_url: string | null
           product_line: string
           section_bg: string
           section_order: string[]
@@ -3745,7 +3791,6 @@ export type Database = {
         }
         Insert: {
           accent_colour?: string
-          banner_url?: string | null
           font_family?: string
           footer_company?: string
           footer_email?: string
@@ -3755,7 +3800,6 @@ export type Database = {
           header_text?: string
           hidden_sections?: string[]
           id?: string
-          logo_url?: string | null
           product_line?: string
           section_bg?: string
           section_order?: string[]
@@ -3763,7 +3807,6 @@ export type Database = {
         }
         Update: {
           accent_colour?: string
-          banner_url?: string | null
           font_family?: string
           footer_company?: string
           footer_email?: string
@@ -3773,7 +3816,6 @@ export type Database = {
           header_text?: string
           hidden_sections?: string[]
           id?: string
-          logo_url?: string | null
           product_line?: string
           section_bg?: string
           section_order?: string[]

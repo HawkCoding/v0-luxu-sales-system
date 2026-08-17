@@ -29,23 +29,32 @@ export function InfoRow({ label, value, styles, dotted, shaded }: InfoRowProps) 
 }
 
 export interface CellRowProps {
+  label: string
   cells: VoucherRowCell[]
   styles: Styles
   dotted?: boolean
 }
 
 /** "Suite Type | Qty", "Adults | Children | Infant" — several label/value pairs tabled inline on
- * one row, the way the legacy voucher printed suite quantity and guest breakdowns. */
-export function CellRow({ cells, styles, dotted }: CellRowProps) {
-  const rowStyle = [styles.cellRow, ...(dotted ? [styles.infoRowDotted] : [])]
+ * one row, the way the legacy voucher printed suite quantity and guest breakdowns. Shares
+ * InfoRow's row shell (fixed label gutter, flex:1 value area) so every row in a provider box —
+ * cell rows and plain rows alike — lines up on the same grid. */
+export function CellRow({ label, cells, styles, dotted }: CellRowProps) {
+  const rowStyle = [
+    styles.infoRow,
+    ...(dotted ? [styles.infoRowDotted] : []),
+  ]
   return (
     <View style={rowStyle} wrap={false}>
-      {cells.map((cell, idx) => (
-        <View key={`${cell.label}-${idx}`} style={styles.cell}>
-          <Text style={styles.cellLabel}>{cell.label}</Text>
-          <Text style={styles.cellValue}>{String(cell.value ?? "")}</Text>
-        </View>
-      ))}
+      <Text style={styles.infoLabel}>{label}</Text>
+      <View style={styles.cellGroup}>
+        {cells.map((cell, idx) => (
+          <View key={`${cell.label}-${idx}`} style={styles.cell}>
+            <Text style={styles.cellLabel}>{cell.label}</Text>
+            <Text style={styles.cellValue}>{String(cell.value ?? "")}</Text>
+          </View>
+        ))}
+      </View>
     </View>
   )
 }

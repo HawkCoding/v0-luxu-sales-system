@@ -119,8 +119,9 @@ export function buildQuoteSummaryBlock(input: QuoteSummaryInput): string {
   const sortedBlocks = sortItineraryBlocksChronologically(input.itineraryBlocks)
 
   let itinerary = ""
+  const moneyNoDecimals = (amount: number) => formatMoney(amount, input.currency, { decimals: false })
   const flightCapBullet =
-    input.flightCapPerPerson != null ? formatFlightCapLine(money, input.flightCapPerPerson) : null
+    input.flightCapPerPerson != null ? formatFlightCapLine(moneyNoDecimals, input.flightCapPerPerson) : null
   const itineraryLines = buildQuoteItineraryLines(sortedBlocks, flightCapBullet)
   if (itineraryLines.length > 0) {
     const heading = input.packageIncludesHeading || DEFAULT_INCLUDES_HEADING

@@ -19,6 +19,25 @@ export function sampleQuotePdfData(): Omit<
     total: 86300,
     itineraryBlocks: [
       {
+        // Same-day flight: the arrival folds into the departure sentence as "departing at 10h00
+        // for arrival at 12h15", which is the shape the client's own itinerary uses.
+        serviceType: "airline",
+        title: "SAfair flight",
+        contactDetails: { name: "SAfair" },
+        serviceData: {
+          departureDate: "2026-07-18",
+          arrivalDate: "2026-07-18",
+          startTime: "10:00",
+          endTime: "12:15",
+          route: "Lanseria INT Airport → Cape Town INT Airport",
+          cabin: "Economy",
+          flightNumber: "FA212",
+          departureAirportCode: "HLA",
+          arrivalAirportCode: "CPT",
+        },
+        displayOrder: 0,
+      },
+      {
         serviceType: "hotel",
         title: "Irene Country Lodge",
         contactDetails: { name: "Irene Country Lodge", location: "Pretoria" },

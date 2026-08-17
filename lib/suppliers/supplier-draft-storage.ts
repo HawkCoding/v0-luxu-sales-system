@@ -13,7 +13,7 @@ import type {
  * the supplier page to the root error boundary in production. The version stamp drops those drafts
  * instead of restoring them; the normalizer below is the second line of defence.
  */
-export const SUPPLIER_DRAFT_SCHEMA_VERSION = 1
+export const SUPPLIER_DRAFT_SCHEMA_VERSION = 2
 
 export interface SupplierDraftEnvelope {
   version: number
@@ -74,7 +74,6 @@ export function normalizeSupplierDraft(
     phone: toText(draft.phone, fallback.phone),
     website: toText(draft.website, fallback.website),
     location: toText(draft.location, fallback.location),
-    locationDetail: toText(draft.locationDetail, fallback.locationDetail),
     streetAddress: toText(draft.streetAddress, fallback.streetAddress),
     description: toText(draft.description, fallback.description),
     notes: toText(draft.notes, fallback.notes),

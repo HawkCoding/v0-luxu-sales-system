@@ -303,8 +303,23 @@ function getLabeledFieldBlock(text: string, labelPatterns: RegExp[]): string {
     const label = stripGluedSectionHeader(normalizeLabel(lines[index]))
     if (!labelPatterns.some((pattern) => pattern.test(label))) continue
 
+    // Some notification emails hard-wrap a long label mid-parenthetical -- e.g. "...transfers,"
+    // on one line and the closing "etc)*" carried onto the next. The label patterns above match
+    // on a prefix, so they still recognise the wrapped first line as the label; without this, the
+    // orphaned closing fragment reads as the start of the answer and gets swept into the value
+    // (turning a "No" answer into "etc)*\nNo", which then looks like free-text detail instead of
+    // a bare flag). Track paren balance from the label line and skip lines until it closes.
+    let cursor = index + 1
+    let openParens = (lines[index].match(/\(/g) || []).length - (lines[index].match(/\)/g) || []).length
+    while (openParens > 0 && cursor < lines.length) {
+      const line = lines[cursor].trim()
+      if (!line) break
+      openParens += (line.match(/\(/g) || []).length - (line.match(/\)/g) || []).length
+      cursor += 1
+    }
+
     const collected: string[] = []
-    for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+    for (; cursor < lines.length; cursor += 1) {
       const line = lines[cursor].trim()
       if (!line) {
         if (collected.length > 0) break

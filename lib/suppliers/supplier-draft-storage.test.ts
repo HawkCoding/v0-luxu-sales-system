@@ -15,7 +15,6 @@ function buildFallback(overrides: Partial<SupplierFormState> = {}): SupplierForm
     phone: "",
     website: "",
     location: "",
-    locationDetail: "",
     streetAddress: "",
     locationId: null,
     stationAddresses: [],
@@ -70,7 +69,6 @@ describe("SUPPLIER_DRAFT_SCHEMA_VERSION", () => {
         "infantMaxAge",
         "kind",
         "location",
-        "locationDetail",
         "locationId",
         "name",
         "notes",
@@ -86,7 +84,7 @@ describe("SUPPLIER_DRAFT_SCHEMA_VERSION", () => {
         "website",
       ].sort(),
     )
-    expect(SUPPLIER_DRAFT_SCHEMA_VERSION).toBe(1)
+    expect(SUPPLIER_DRAFT_SCHEMA_VERSION).toBe(2)
   })
 })
 

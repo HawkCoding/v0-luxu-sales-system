@@ -7,6 +7,7 @@ import path from "path"
 import { describe, expect, it } from "vitest"
 
 import type { VoucherData } from "@/lib/generate-voucher"
+import type { BrandLogoImage } from "@/lib/pdf/brand-logo"
 import type { VoucherTemplate } from "@/lib/types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
 import { sampleVoucherData, sampleVoucherServiceBlocks } from "../sample-data"
@@ -21,8 +22,13 @@ const WRITE_PDF = Boolean(process.env.WRITE_PDF)
 const sampleData = sampleVoucherData
 const serviceBlocks = sampleVoucherServiceBlocks
 
-async function renderAndAssert(name: string, data: VoucherData, template?: VoucherTemplate | null): Promise<Buffer> {
-  const buffer = await renderVoucherPdf({ data, template })
+async function renderAndAssert(
+  name: string,
+  data: VoucherData,
+  template?: VoucherTemplate | null,
+  brandLogo?: BrandLogoImage | null,
+): Promise<Buffer> {
+  const buffer = await renderVoucherPdf({ data, template, brandLogo })
   expect(buffer.subarray(0, 4).toString("ascii")).toBe("%PDF")
   expect(buffer.length).toBeGreaterThan(1000)
   if (WRITE_PDF) {
@@ -49,29 +55,19 @@ describe("renderVoucherPdf smoke", () => {
   })
 
   it.each([
-    ["georgia", "Georgia, serif"],
-    ["playfair", "'Playfair Display', Georgia, serif"],
     ["arial", "Arial, sans-serif"],
-    ["montserrat", "'Montserrat', Arial, sans-serif"],
+    ["helvetica", "Helvetica, Arial, sans-serif"],
+    ["calibri", "Calibri, Candara, Segoe, 'Segoe UI', Optima, Arial, sans-serif"],
+    ["georgia", "Georgia, serif"],
+    ["times", "'Times New Roman', Times, serif"],
+    ["verdana", "Verdana, Geneva, sans-serif"],
   ])("renders with the %s template font option", async (name, fontFamily) => {
     await renderAndAssert(`font-${name}`, sampleData(), { ...VOUCHER_TEMPLATE_DEFAULTS, font_family: fontFamily })
   })
 
-  it("renders the logo-only header variant", async () => {
+  it("renders the logo header variant", async () => {
     const png = readFileSync(path.join(process.cwd(), "public", "placeholder-logo.png"))
-    await renderAndAssert("logo-only", sampleData(), {
-      ...VOUCHER_TEMPLATE_DEFAULTS,
-      logo_url: `data:image/png;base64,${png.toString("base64")}`,
-    })
-  })
-
-  it("falls back to the text-only header when a lingering SVG asset URL is present", async () => {
-    // No network fetch happens — the SVG guard drops the URL before render.
-    await renderAndAssert("svg-guard", sampleData(), {
-      ...VOUCHER_TEMPLATE_DEFAULTS,
-      banner_url: "https://example.test/storage/voucher-assets/banner.svg?t=123",
-      logo_url: "https://example.test/storage/voucher-assets/logo.SVG",
-    })
+    await renderAndAssert("logo", sampleData(), VOUCHER_TEMPLATE_DEFAULTS, { data: png, format: "png" })
   })
 
   it("renders a custom document title", async () => {

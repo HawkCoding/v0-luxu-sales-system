@@ -948,6 +948,7 @@ export function BuildBookingDialog({
                         rateTypes={rateTypes}
                         quoteCurrency={quoteCurrency}
                         fxRates={fxRates}
+                        travelDate={travelDate}
                       />
                     ) : (
                       <SuiteLegEditor

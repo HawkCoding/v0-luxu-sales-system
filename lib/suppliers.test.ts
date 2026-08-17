@@ -8,6 +8,7 @@ import {
   mapSupplierRateCard,
   mapSupplierRoute,
   mapSupplierSuiteType,
+  supplierLocationName,
 } from "@/lib/suppliers"
 
 type LocationRow = Database["public"]["Tables"]["locations"]["Row"]
@@ -33,7 +34,6 @@ const supplierRow: SupplierRow = {
   location_id: null,
   location_area_id: null,
   location: "Cape Town",
-  location_detail: null,
   notes: "Preferred",
   active: false,
   single_supplement_pct: 35,
@@ -153,6 +153,40 @@ describe("mapSupplier", () => {
       status: "unexpected_status_value",
     })
     expect(result.status).toBe("inactive")
+  })
+})
+
+describe("supplierLocationName", () => {
+  const locationNameById = new Map([["loc-cpt", "Cape Town"]])
+
+  it("returns a train operator's free-text location, ignoring locationId", () => {
+    expect(
+      supplierLocationName(
+        { kind: "train_operator", location: "Pretoria", locationId: null },
+        locationNameById,
+      ),
+    ).toBe("Pretoria")
+  })
+
+  it("resolves a non-train supplier's city from locationId", () => {
+    expect(
+      supplierLocationName(
+        { kind: "hotel_property", location: null, locationId: "loc-cpt" },
+        locationNameById,
+      ),
+    ).toBe("Cape Town")
+  })
+
+  it("returns null for a non-train supplier with no city set", () => {
+    expect(
+      supplierLocationName({ kind: "hotel_property", location: null, locationId: null }, locationNameById),
+    ).toBeNull()
+  })
+
+  it("returns null for a non-train supplier whose locationId doesn't resolve", () => {
+    expect(
+      supplierLocationName({ kind: "hotel_property", location: null, locationId: "loc-missing" }, locationNameById),
+    ).toBeNull()
   })
 })
 

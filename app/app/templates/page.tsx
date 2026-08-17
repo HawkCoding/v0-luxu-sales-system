@@ -289,7 +289,7 @@ export default function TemplatesPage() {
       <Tabs defaultValue="emails" className="space-y-4">
         <TabsList>
           <TabsTrigger value="emails">Emails</TabsTrigger>
-          <TabsTrigger value="guest-docs">Guest Documents</TabsTrigger>
+          <TabsTrigger value="guest-docs">Voucher Design</TabsTrigger>
           <TabsTrigger value="billing-docs">Quote &amp; Invoice</TabsTrigger>
           <TabsTrigger value="branding">Branding</TabsTrigger>
         </TabsList>

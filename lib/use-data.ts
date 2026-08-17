@@ -213,8 +213,17 @@ export interface JobReservationDetails {
   occasion: string
   smokingPreference: "smoking" | "non_smoking" | null
   mealSeating: "first" | "second" | null
+  voucherSpecialRequests: string
   agencyName: string
   agencyAddress: string
+  billingCompanyName: string
+  billingVatNumber: string
+  billingAddressLine1: string
+  billingAddressLine2: string
+  billingCity: string
+  billingProvince: string
+  billingPostalCode: string
+  billingCountry: string
   updatedAt: string | null
 }
 
@@ -241,6 +250,38 @@ export interface JobLegReferenceRow {
 export function useJobLegReferences(bookingId: string | null | undefined) {
   return useSWR<{ rows: JobLegReferenceRow[] }>(
     bookingId ? `/api/jobs/${bookingId}/leg-references` : null,
+    fetcher,
+    swrOptions,
+  )
+}
+
+export interface JobMovementTimeRow {
+  key: string
+  kind: "service" | "transport_request"
+  movementType: "flight" | "transfer" | "rental"
+  id: string
+  label: string
+  supplierName: string | null
+  departureDate: string | null
+  departureTime: string | null
+  arrivalDate: string | null
+  arrivalTime: string | null
+  flightNumber: string | null
+  departureAirportCode: string | null
+  arrivalAirportCode: string | null
+  hasArrival: boolean
+  hasFlightIdentity: boolean
+  updatedAt: string | null
+}
+
+export interface JobMovementTimesResponse {
+  rows: JobMovementTimeRow[]
+  voucher: { generatedAt: string | null; sentAt: string | null; stale: boolean }
+}
+
+export function useJobMovementTimes(bookingId: string | null | undefined) {
+  return useSWR<JobMovementTimesResponse>(
+    bookingId ? `/api/jobs/${bookingId}/movement-times` : null,
     fetcher,
     swrOptions,
   )

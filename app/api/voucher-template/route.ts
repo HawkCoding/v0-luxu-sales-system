@@ -4,15 +4,16 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
+import { VOUCHER_FONT_OPTIONS } from "@/lib/voucher/voucher-fonts"
+
+const VOUCHER_FONT_VALUES = VOUCHER_FONT_OPTIONS.map((o) => o.value) as [string, ...string[]]
 
 const patchSchema = z.object({
-  logo_url: z.string().url().nullable().optional(),
-  banner_url: z.string().url().nullable().optional(),
   header_text: z.string().min(1).optional(),
   product_line: z.string().min(1).optional(),
   accent_colour: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   section_bg: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
-  font_family: z.string().min(1).optional(),
+  font_family: z.enum(VOUCHER_FONT_VALUES).optional(),
   section_order: z.array(z.enum(["guest_info", "service_provider", "footer"])).optional(),
   hidden_sections: z.array(z.enum(["guest_info", "service_provider", "footer"])).optional(),
   footer_company: z.string().optional(),
@@ -28,7 +29,7 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from("voucher_template")
-    .select("id, logo_url, banner_url, header_text, product_line, accent_colour, section_bg, font_family, section_order, hidden_sections, footer_company, footer_phone, footer_email, guidance_text")
+    .select("id, header_text, product_line, accent_colour, section_bg, font_family, section_order, hidden_sections, footer_company, footer_phone, footer_email, guidance_text")
     .limit(1)
     .single()
 

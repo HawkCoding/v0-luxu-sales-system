@@ -176,6 +176,16 @@ describe("buildQuoteItineraryLines", () => {
     })
   })
 
+  it("appends a COMPLIMENTARY callout to a hotel line marked complimentary", () => {
+    const lines = buildQuoteItineraryLines([
+      { ...hotelBlock, serviceData: { ...hotelBlock.serviceData, isComplimentary: true } },
+    ])
+
+    expect(lines[0].text).toBe(
+      "Two nights at the Irene Country Lodge, Pretoria in a Guest room with a lake view incl. breakfast | Check in from 14h00 – COMPLIMENTARY",
+    )
+  })
+
   it("derives nights on board from durationDays and lists supplier inclusions as bullets", () => {
     const [boarding, arrival] = buildQuoteItineraryLines([trainBlock])
 
@@ -279,14 +289,94 @@ const flightBlock: VoucherServiceBlock = {
   displayOrder: 0,
 }
 
+describe("buildQuoteItineraryLines — flights", () => {
+  const sameDayFlight: VoucherServiceBlock = {
+    ...flightBlock,
+    serviceData: {
+      ...flightBlock.serviceData,
+      departureDate: "2026-10-14",
+      arrivalDate: "2026-10-14",
+      startTime: "10:00",
+      endTime: "12:15",
+      route: "Lanseria INT Airport → Cape Town INT Airport",
+      flightNumber: "FA212",
+      arrivalAirportCode: "CPT",
+    },
+  }
+
+  it("folds a same-day arrival into the departure sentence", () => {
+    const lines = buildQuoteItineraryLines([sameDayFlight])
+
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toEqual({
+      dateISO: "2026-10-14",
+      text: "Flight with SA Airways FA212 — Lanseria INT Airport to Cape Town INT Airport in Economy | departing at 10h00 for arrival at 12h15",
+      bullets: [],
+    })
+  })
+
+  it("gives an overnight flight its own dated arrival line", () => {
+    const lines = buildQuoteItineraryLines([
+      {
+        ...sameDayFlight,
+        serviceData: { ...sameDayFlight.serviceData, arrivalDate: "2026-10-15", startTime: "22:40", endTime: "06:15" },
+      },
+    ])
+
+    expect(lines).toHaveLength(2)
+    // The arrival time must not appear under the departure date, where it would read as same-day.
+    expect(lines[0].text).toBe(
+      "Flight with SA Airways FA212 — Lanseria INT Airport to Cape Town INT Airport in Economy | departing at 22h40",
+    )
+    expect(lines[1]).toEqual({
+      dateISO: "2026-10-15",
+      text: "Flight arrives at CPT at 06h15",
+      bullets: [],
+    })
+  })
+
+  it("states the departure alone when no arrival has been captured", () => {
+    const lines = buildQuoteItineraryLines([
+      { ...sameDayFlight, serviceData: { ...sameDayFlight.serviceData, arrivalDate: null, endTime: null } },
+    ])
+
+    expect(lines).toHaveLength(1)
+    expect(lines[0].text).toContain("| departing at 10h00")
+    expect(lines[0].text).not.toContain("arrival")
+  })
+
+  it("prints no schedule at all for a flight captured before flight times existed", () => {
+    const lines = buildQuoteItineraryLines([
+      {
+        ...sameDayFlight,
+        serviceData: { ...sameDayFlight.serviceData, startTime: null, endTime: null, arrivalDate: null },
+      },
+    ])
+
+    expect(lines).toHaveLength(1)
+    expect(lines[0].text).toBe(
+      "Flight with SA Airways FA212 — Lanseria INT Airport to Cape Town INT Airport in Economy",
+    )
+  })
+
+  it("renders a round-trip route arrow as prose, since Helvetica has no glyph for it", () => {
+    const [line] = buildQuoteItineraryLines([
+      { ...sameDayFlight, serviceData: { ...sameDayFlight.serviceData, route: "Johannesburg ↔ Cape Town" } },
+    ])
+
+    expect(line.text).toContain("Johannesburg to Cape Town")
+    expect(line.text).not.toContain("↔")
+  })
+})
+
 describe("buildQuoteItineraryLines — flight cap bullet", () => {
   it("attaches the cap bullet under the first flight block only", () => {
     const lines = buildQuoteItineraryLines(
       [flightBlock, trainBlock, { ...flightBlock, displayOrder: 3 }],
-      "Flights are capped at R2 000 pp — incl. baggage & fees",
+      "Flights are capped at R2 000pp — incl. baggage & fees",
     )
     const flightLines = lines.filter((line) => line.text.startsWith("Flight"))
-    const capBullet = { kind: "item", text: "Flights are capped at R2 000 pp — incl. baggage & fees" }
+    const capBullet = { kind: "item", text: "Flights are capped at R2 000pp — incl. baggage & fees" }
     expect(flightLines[0].bullets).toContainEqual(capBullet)
     expect(flightLines[1].bullets).not.toContainEqual(capBullet)
   })
@@ -347,7 +437,7 @@ describe("deriveFlightCapPerPerson", () => {
 
 describe("formatFlightCapLine", () => {
   it("interpolates the formatted amount", () => {
-    expect(formatFlightCapLine((n) => `R${n}`, 2000)).toBe("Flights are capped at R2000 pp — incl. baggage & fees")
+    expect(formatFlightCapLine((n) => `R${n}`, 2000)).toBe("Flights are capped at R2000pp — incl. baggage & fees")
   })
 })
 

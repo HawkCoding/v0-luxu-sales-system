@@ -15,8 +15,10 @@ export interface ReadinessFailure {
 export type ReadinessWarningCode =
   | "supplier_contact_missing"
   | "supplier_address_missing"
+  | "supplier_location_missing"
   | "service_times_missing"
   | "guest_counts_missing"
+  | "flight_times_incomplete"
   | "flight_details_incomplete"
 
 export interface ReadinessWarning {
@@ -42,8 +44,14 @@ export interface ReadinessBlockSummary {
   streetAddress?: string | null
   /** Train blocks are judged on this instead of `streetAddress` — see `buildWarnings`. */
   boardingPoint?: string | null
+  /** The supplier's city (for a train, its free-text head office city). Trains aren't judged on
+   *  this — their printed location comes from `boardingPoint` — see `buildWarnings`. */
+  location?: string | null
   startTime?: string | null
   endTime?: string | null
+  /** Flight blocks are judged on this too: a flight with no arrival date has no landing day to
+   * print, which reads as a same-day arrival it may not have. */
+  arrivalDate?: string | null
   hasGuestBreakdown: boolean
   cabin?: string | null
   handLuggageKg?: number | null
@@ -72,7 +80,10 @@ const PAID_IN_FULL_STAGES = new Set(["final_paid", "voucher_sent", "closed"])
 /** Service types a supplier contact/times/etc. warning is meaningful for — additional_service and
  * tour blocks have no real supplier relationship to chase these fields on. */
 const SUPPLIER_BACKED_TYPES = new Set(["train", "hotel", "transfer", "airline"])
-const TIMED_TYPES = new Set(["train", "hotel", "airline"])
+// Airline is deliberately absent: a flight is judged by `flight_times_incomplete` instead, which
+// wants both times AND an arrival date, and whose fix hint points at the flight rather than at the
+// supplier's default times (meaningless for an airline — every booking is a different flight).
+const TIMED_TYPES = new Set(["train", "hotel"])
 const GUEST_COUNT_TYPES = new Set(["train", "hotel"])
 
 function aggregateWarning(
@@ -106,6 +117,16 @@ function buildWarnings(blocks: ReadinessBlockSummary[]): ReadinessWarning[] {
         .map((b) => b.title),
     ),
     aggregateWarning(
+      "supplier_location_missing",
+      "No city set for",
+      "Pick a city on the supplier record.",
+      // A train prints its free-text head office city, not a picked city, and is covered by the
+      // address warning above instead (its boarding point is what actually matters to the guest).
+      supplierBacked
+        .filter((b) => b.serviceType !== "train" && !b.location?.trim())
+        .map((b) => b.title),
+    ),
+    aggregateWarning(
       "service_times_missing",
       "No time set for",
       "Add a time on the supplier record, or set one for this leg.",
@@ -120,9 +141,21 @@ function buildWarnings(blocks: ReadinessBlockSummary[]): ReadinessWarning[] {
       blocks.filter((b) => GUEST_COUNT_TYPES.has(b.serviceType) && !b.hasGuestBreakdown).map((b) => b.title),
     ),
     aggregateWarning(
+      "flight_times_incomplete",
+      "No departure time, arrival time or arrival date for",
+      "Set the flight's schedule in Build Booking, or on the Transfer Times tab.",
+      blocks
+        .filter(
+          (b) =>
+            b.serviceType === "airline" &&
+            (!b.startTime?.trim() || !b.endTime?.trim() || !b.arrivalDate?.trim()),
+        )
+        .map((b) => b.title),
+    ),
+    aggregateWarning(
       "flight_details_incomplete",
       "Missing cabin, airport codes or baggage allowance for",
-      "Fill in the flight details on the transport request.",
+      "Fill in the flight details in Build Booking — the cabin is the booked suite type.",
       blocks
         .filter(
           (b) =>
