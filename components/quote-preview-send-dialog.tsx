@@ -192,21 +192,24 @@ export function QuotePreviewSendDialog({
       const subjectReference = QUOTE_REFERENCE_ENABLED
         ? payload.quoteNumber ?? bookingNumber
         : bookingNumber
-      const renderedSubject = payload.subject ?? `Quote ${subjectReference}`
+      const renderedSubject = payload.subject?.trim() ? payload.subject : `Quote ${subjectReference}`
       const renderedContent = payload.bodyContentHtml ?? null
       setServerBaseline({ subject: renderedSubject, content: renderedContent, libraryAttachmentIds: [] })
+
+      // Subject always comes from the current template render, never from a stored draft --
+      // a stale/corrupted snapshot (e.g. saved mid-load, or from before a template edit) must
+      // never be able to win over what the template renders right now.
+      setSubject(renderedSubject)
 
       const stored = readDraftEnvelope<EmailComposerDraft>(readRawDraft(draftStorageKey("email-quote", quote.id)), {
         version: EMAIL_DRAFT_SCHEMA_VERSION,
         isValid: isEmailComposerDraft,
       })
       if (stored) {
-        setSubject(stored.data.subject)
         setContent(stored.data.content)
         setLibraryAttachmentIds(stored.data.libraryAttachmentIds)
         toast.success("Restored your unsent draft for this quote email.")
       } else {
-        setSubject(renderedSubject)
         setContent(renderedContent)
       }
       setWarnings(payload.warnings ?? [])
@@ -431,7 +434,7 @@ export function QuotePreviewSendDialog({
           <Button variant="outline" onClick={() => closeGuard.handleOpenChange(false)} disabled={sending}>
             Cancel
           </Button>
-          <Button onClick={handleSend} disabled={sending || loadingPreview || !finalHtml}>
+          <Button onClick={handleSend} disabled={sending || loadingPreview || !finalHtml || !subject.trim()}>
             {sending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Send className="mr-1.5 h-4 w-4" />}
             Send
           </Button>

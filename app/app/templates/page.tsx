@@ -557,7 +557,7 @@ export default function TemplatesPage() {
             )}
             <div className="flex justify-end gap-2">
               <Button variant="outline" size="sm" onClick={() => editCloseGuard.handleOpenChange(false)}>Cancel</Button>
-              <Button size="sm" onClick={handleSave} disabled={saving}>{saving ? "Saving..." : "Save"}</Button>
+              <Button size="sm" onClick={handleSave} disabled={saving || editSubject.trim().length < 1}>{saving ? "Saving..." : "Save"}</Button>
             </div>
           </div>
         </DialogContent>
