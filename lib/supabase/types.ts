@@ -1884,6 +1884,8 @@ export type Database = {
       }
       inbound_email_messages: {
         Row: {
+          alt_body_preview: string | null
+          body_part: string | null
           booking_id: string | null
           created_at: string
           email_account_id: string
@@ -1904,6 +1906,8 @@ export type Database = {
           warnings: string[]
         }
         Insert: {
+          alt_body_preview?: string | null
+          body_part?: string | null
           booking_id?: string | null
           created_at?: string
           email_account_id: string
@@ -1924,6 +1928,8 @@ export type Database = {
           warnings?: string[]
         }
         Update: {
+          alt_body_preview?: string | null
+          body_part?: string | null
           booking_id?: string | null
           created_at?: string
           email_account_id?: string

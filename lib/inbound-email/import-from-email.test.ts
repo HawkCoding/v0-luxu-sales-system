@@ -7,14 +7,17 @@ import { parseEmailDraft } from "@/lib/import/parseEmailDraft"
 import { buildEnquiryImportPayload } from "@/lib/import/enquiry-payload"
 
 /**
- * Drives the exact field-extraction path a live mailbox sync uses -- getMessageBody (picks the
- * text part IMAP delivered) -> parseEmailDraft -> buildEnquiryImportPayload -- against real
- * Gravity Forms notification emails (anonymised, structure and label wording preserved byte-for-
- * byte). These fixtures are what exposed the bugs this test guards against: normalizeLabel only
- * stripping trailing wrapper punctuation (blue-train-starred-labels.json reproduces the
- * "Unknown Unknown" production failure), a section header glued directly onto the next label with
- * no line break (rovos-rail-glued-headers.json), and a bare "I do not require a package" bullet
- * with no preceding label (blue-train-no-package.json).
+ * Drives the exact field-extraction path a live mailbox sync uses -- getMessageBody (scores the
+ * text/plain and flattened text/html candidates and picks whichever one the parser can actually
+ * read) -> parseEmailDraft -> buildEnquiryImportPayload -- against real Gravity Forms notification
+ * emails (anonymised, structure and label wording preserved byte-for-byte). These fixtures are
+ * what exposed the bugs this test guards against: normalizeLabel only stripping trailing wrapper
+ * punctuation (blue-train-starred-labels.json reproduces the "Unknown Unknown" production
+ * failure), a section header glued directly onto the next label with no line break
+ * (rovos-rail-glued-headers.json), a bare "I do not require a package" bullet with no preceding
+ * label (blue-train-no-package.json), and a text/plain part that a mailbox provider flowed into
+ * hard-wrapped paragraphs with an intact HTML table sitting unused in the same message
+ * (blue-train-flowed-text-part.json -- the info@sarail.co.za mailbox-switch incident).
  */
 interface EmailFixture {
   from: string
@@ -36,7 +39,7 @@ function loadFixture(name: string): EmailFixture {
 
 describe("inbound email import: blue-train-full-package.json", () => {
   const fixture = loadFixture("blue-train-full-package.json")
-  const rawText = getMessageBody(fixture.text, fixture.html)
+  const rawText = getMessageBody(fixture.text, fixture.html).body
   const draft = parseEmailDraft(rawText)
   const payload = buildEnquiryImportPayload(draft)
 
@@ -75,7 +78,7 @@ describe("inbound email import: blue-train-full-package.json", () => {
 
 describe("inbound email import: blue-train-no-package.json", () => {
   const fixture = loadFixture("blue-train-no-package.json")
-  const rawText = getMessageBody(fixture.text, fixture.html)
+  const rawText = getMessageBody(fixture.text, fixture.html).body
   const draft = parseEmailDraft(rawText)
   const payload = buildEnquiryImportPayload(draft)
 
@@ -98,7 +101,7 @@ describe("inbound email import: blue-train-no-package.json", () => {
 
 describe("inbound email import: blue-train-starred-labels.json (regression)", () => {
   const fixture = loadFixture("blue-train-starred-labels.json")
-  const rawText = getMessageBody(fixture.text, fixture.html)
+  const rawText = getMessageBody(fixture.text, fixture.html).body
   const draft = parseEmailDraft(rawText)
 
   it("still extracts every labelled field when labels are wrapped in asterisks", () => {
@@ -126,7 +129,7 @@ describe("inbound email import: blue-train-starred-labels.json (regression)", ()
 
 describe("inbound email import: rovos-rail-glued-headers.json", () => {
   const fixture = loadFixture("rovos-rail-glued-headers.json")
-  const rawText = getMessageBody(fixture.text, fixture.html)
+  const rawText = getMessageBody(fixture.text, fixture.html).body
   const draft = parseEmailDraft(rawText)
 
   it("splits a label glued directly onto its section header with no line break", () => {
@@ -159,7 +162,7 @@ describe("inbound email import: rovos-rail-glued-headers.json", () => {
 
 describe("inbound email import: rovos-rail-quote-package.json", () => {
   const fixture = loadFixture("rovos-rail-quote-package.json")
-  const rawText = getMessageBody(fixture.text, fixture.html)
+  const rawText = getMessageBody(fixture.text, fixture.html).body
   const draft = parseEmailDraft(rawText)
   const payload = buildEnquiryImportPayload(draft)
 
@@ -194,7 +197,7 @@ describe("inbound email import: rovos-rail-quote-package.json", () => {
 
 describe("inbound email import: rovos-rail-availability-hotel.json", () => {
   const fixture = loadFixture("rovos-rail-availability-hotel.json")
-  const rawText = getMessageBody(fixture.text, fixture.html)
+  const rawText = getMessageBody(fixture.text, fixture.html).body
   const draft = parseEmailDraft(rawText)
   const payload = buildEnquiryImportPayload(draft)
 
@@ -234,5 +237,65 @@ describe("inbound email import: rovos-rail-availability-hotel.json", () => {
   it("does not let the bare Yes flag leak into the detail text, nor the Consent block", () => {
     expect(draft.additionalServices.details).not.toMatch(/^Yes/)
     expect(draft.additionalServices.details).not.toMatch(/Terms and Conditions/)
+  })
+})
+
+describe("inbound email import: blue-train-flowed-text-part.json (regression)", () => {
+  // The production incident this guards against: switching the mailbox from a personal Gmail
+  // test account to info@sarail.co.za changed nothing about the Gravity Forms template, but the
+  // new mailbox's text/plain alternative arrives hard-wrapped into paragraphs -- no label owns
+  // its own line, so every label-driven field came back empty or garbled (job LTT-2026-0034: no
+  // first/last name, no country, adults read as 0, the suite phrase became "Adults 2 No of
+  // Suites"). The same message's text/html alternative is still the intact Gravity Forms table.
+  // getMessageBody must notice the text part scores far fewer required fields and fall back to
+  // the flattened HTML instead of trusting text/plain unconditionally.
+  const fixture = loadFixture("blue-train-flowed-text-part.json")
+  const selection = getMessageBody(fixture.text, fixture.html)
+  const draft = parseEmailDraft(selection.body)
+  const payload = buildEnquiryImportPayload(draft)
+
+  it("prefers the flattened HTML body over the flowed text/plain part", () => {
+    expect(selection.part).toBe("html")
+  })
+
+  it("extracts every required field from the HTML fallback", () => {
+    expect(draft.customer).toMatchObject({
+      title: "Mr",
+      firstName: "Thabo",
+      surname: "Mokoena",
+      email: "thabo.mokoena@example.com",
+      phone: "0721234567",
+      country: "South Africa",
+      province: "Western Cape",
+    })
+    expect(draft.trip.supplier).toBe("Blue Train")
+    expect(draft.trip.route).toBe("Pretoria To Cape Town")
+    expect(draft.trip.departureDate).toBe("2026-10-26")
+    expect(draft.guests.adults).toBe(2)
+    expect(draft.guests.suites).toBe(1)
+    expect(draft.guests.suiteType).toBe("Deluxe Double with 3/4 bath")
+    expect(payload.extractedJson.formFields.direction).toBe("Pretoria To Cape Town")
+  })
+})
+
+describe("inbound email import: blue-train-html-only.json", () => {
+  // No text/plain alternative at all -- htmlToPlainText is the only path in, on its own (not a
+  // fallback the scoring had to choose).
+  const fixture = loadFixture("blue-train-html-only.json")
+  const selection = getMessageBody(fixture.text, fixture.html)
+  const draft = parseEmailDraft(selection.body)
+
+  it("parses the HTML body when no text/plain part exists", () => {
+    expect(selection.part).toBe("html")
+    expect(draft.customer).toMatchObject({
+      title: "Ms",
+      firstName: "Lindiwe",
+      surname: "Dube",
+      email: "lindiwe.dube@example.com",
+      country: "South Africa",
+    })
+    expect(draft.trip.purpose).toBe("availability")
+    expect(draft.trip.route).toBe("Cape Town To Pretoria")
+    expect(draft.trip.departureDate).toBe("2027-03-14")
   })
 })

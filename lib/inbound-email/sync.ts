@@ -5,7 +5,7 @@ import { decryptCredential } from "@/lib/inbound-email/crypto"
 import { createRawEmailPreview, htmlToPlainText } from "@/lib/inbound-email/html"
 import { findMatchingInboundSubjectRule, type InboundSubjectRule } from "@/lib/inbound-email/rules"
 import { assessEnquiryPlausibility, getEmailImportReviewMetadata } from "@/lib/inbound-email/review"
-import { parseEmailDraft } from "@/lib/import/parseEmailDraft"
+import { countRequiredComplete, parseEmailDraft, type ParseEmailDraftOptions } from "@/lib/import/parseEmailDraft"
 import { createServiceClient } from "@/lib/supabase/server"
 import { logError } from "@/lib/error-log"
 import type { Database } from "@/lib/supabase/types"
@@ -107,10 +107,51 @@ async function ensureMailbox(client: ImapFlow, folder: string): Promise<void> {
   }
 }
 
-export function getMessageBody(text: string | false | undefined, html: string | false | undefined): string {
-  if (typeof text === "string" && text.trim()) return text
-  if (typeof html === "string" && html.trim()) return htmlToPlainText(html)
-  return ""
+export interface MessageBodySelection {
+  body: string
+  /** Which candidate was parsed. "none" when the message carried neither part. */
+  part: "text" | "html" | "none"
+  /**
+   * The candidate that was NOT chosen (flattened, same as `body` would have been), or "" when
+   * there was only one candidate (or none) to choose from. Kept only so the rejected side of a
+   * close call can be recorded for diagnosis -- see inbound_email_messages.alt_body_preview.
+   */
+  altBody: string
+}
+
+/**
+ * Picks whichever body candidate the parser can actually read, instead of trusting `text/plain`
+ * unconditionally. That used to be safe because the only mailbox this ran against (a personal
+ * Gmail test account) always delivered a clean, line-broken text part. Production's mailbox
+ * (info@sarail.co.za) delivers a `text/plain` alternative that some upstream converter has
+ * flowed into hard-wrapped paragraphs -- no label ever owns its own line, so the label-driven
+ * extractors in parseEmailDraft come back empty (name, country, adults, suite type all missed;
+ * see the production incident this fixed: job LTT-2026-0034). The `text/html` alternative in the
+ * SAME message is still the intact Gravity Forms table, and htmlToPlainText already flattens it
+ * into the one-cell-per-line shape the parser wants -- it was just never being tried.
+ *
+ * Both candidates are parsed and scored with the same countRequiredComplete() the import gate
+ * uses, and the higher-scoring one wins. A tie keeps `text`, so a message with a good text part
+ * behaves exactly as before.
+ */
+export function getMessageBody(
+  text: string | false | undefined,
+  html: string | false | undefined,
+  options?: ParseEmailDraftOptions,
+): MessageBodySelection {
+  const textBody = typeof text === "string" && text.trim() ? text : ""
+  const htmlBody = typeof html === "string" && html.trim() ? htmlToPlainText(html) : ""
+
+  if (!textBody && !htmlBody) return { body: "", part: "none", altBody: "" }
+  if (!textBody) return { body: htmlBody, part: "html", altBody: "" }
+  if (!htmlBody) return { body: textBody, part: "text", altBody: "" }
+
+  const textScore = countRequiredComplete(parseEmailDraft(textBody, options)).completed
+  const htmlScore = countRequiredComplete(parseEmailDraft(htmlBody, options)).completed
+
+  return htmlScore > textScore
+    ? { body: htmlBody, part: "html", altBody: textBody }
+    : { body: textBody, part: "text", altBody: htmlBody }
 }
 
 function isUniqueViolation(error: { code?: string } | null | undefined): boolean {
@@ -410,9 +451,11 @@ async function importCollectedMessages(
       continue
     }
 
-    const rawText = getMessageBody(parsedMail.text, parsedMail.html)
+    const bodySelection = getMessageBody(parsedMail.text, parsedMail.html, { trainOperatorNames })
+    const rawText = bodySelection.body
     const parsedDraft = parseEmailDraft(rawText, { trainOperatorNames })
     const review = getEmailImportReviewMetadata(parsedDraft)
+    const altBodyPreview = bodySelection.altBody ? createRawEmailPreview(bodySelection.altBody) : null
 
     // Content gate. The subject rule got this far; the body decides whether anything is created.
     // A message that fails here is left claimed and recorded with its preview, so it is visible,
@@ -427,6 +470,8 @@ async function importCollectedMessages(
           missing_fields: review.missingFields,
           warnings: review.warnings,
           raw_preview: createRawEmailPreview(rawText),
+          body_part: bodySelection.part,
+          alt_body_preview: altBodyPreview,
           error: plausibility.reason,
         })
         .eq("id", claim.id)
@@ -471,6 +516,8 @@ async function importCollectedMessages(
           missing_fields: created.missingFields,
           warnings: created.warnings,
           raw_preview: created.rawPreview,
+          body_part: bodySelection.part,
+          alt_body_preview: altBodyPreview,
         })
         .eq("id", claim.id)
 
