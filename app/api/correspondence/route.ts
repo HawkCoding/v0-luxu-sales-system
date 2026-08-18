@@ -171,6 +171,18 @@ export async function POST(req: Request) {
     booking.stage !== parsed.data.moveStage &&
     PRE_SEND_GATED_STAGES.has(parsed.data.moveStage)
   ) {
+    // The two quote gates read `input.quotes`, so it has to be loaded here.
+    // Omitting it left the array empty, which reads as "no quote was ever
+    // sent" and blocked every reservation-form acknowledgement on the way to
+    // Quote Accepted. The other pre-send gates run off booking/customer
+    // columns already selected above, so this is the only extra query.
+    const { data: gateQuotes, error: gateQuotesError } = await supabase
+      .from("quotes")
+      .select("status, total, created_at")
+      .eq("booking_id", bookingId)
+
+    if (gateQuotesError) return safeSupabaseError("correspondence:load-gate-quotes", gateQuotesError)
+
     const gateFailures = validateTransition({
       booking: {
         id: booking.id,
@@ -182,6 +194,7 @@ export async function POST(req: Request) {
       },
       customer: customerRecord ?? null,
       targetStage: parsed.data.moveStage,
+      quotes: gateQuotes ?? [],
     }).filter((failure) => PRE_SEND_GATE_IDS.has(failure.gateId))
 
     if (gateFailures.length > 0) {

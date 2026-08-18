@@ -26,6 +26,7 @@ import {
   type TransportLegState,
 } from "@/lib/packages/apply-dialog-state"
 import { resolveTransferPickupDate } from "@/lib/packages/transfer-dates"
+import { AnchorDateSection } from "@/components/packages/anchor-date-section"
 import { dateOnly } from "@/lib/packages/trip-date-range"
 import { getBillableRentalDays } from "@/lib/packages/rental-days"
 import { findRateCardCandidates, selectRateCard } from "@/lib/rate-cards/resolve"
@@ -452,72 +453,72 @@ export function TransportLegEditor({
                   placeholder=""
                 />
               </div>
-              <div className="space-y-1.5 md:col-span-2 xl:col-span-1">
-                <Label>Pickup date/time</Label>
-                {!isRental ? (
-                  <div className="flex flex-wrap gap-1">
-                    {ANCHOR_OPTIONS.map((option) => (
-                      <Button
-                        key={option.value}
-                        type="button"
-                        size="sm"
-                        variant={request.dateAnchor === option.value ? "default" : "outline"}
-                        className="h-6 px-2 text-[11px]"
-                        aria-pressed={request.dateAnchor === option.value}
-                        title={option.hint}
-                        disabled={option.value !== "custom" && !anchorContext}
-                        onClick={() => updateRequest(request.id, { dateAnchor: option.value })}
-                      >
-                        {option.label}
-                      </Button>
-                    ))}
-                  </div>
-                ) : null}
-                <DateTimePicker
-                  value={request.pickupAt}
-                  onChange={(pickupAt) => updateRequest(request.id, { pickupAt })}
-                  dateDisabled={!isRental && (request.dateAnchor === "pre" || request.dateAnchor === "post")}
-                  aria-label="Pickup date"
-                />
-                {!isRental && anchorContext && (request.dateAnchor === "pre" || request.dateAnchor === "post") ? (
-                  <p
-                    className={cn(
-                      "text-xs",
-                      resolveTransferPickupDate(request.dateAnchor, {
-                        start: anchorContext.startDate,
-                        end: anchorContext.endDate,
-                      })
-                        ? "text-muted-foreground"
-                        : "text-destructive",
-                    )}
+              {isRental ? (
+                <div className="space-y-1.5 md:col-span-2 xl:col-span-1">
+                  <Label>Pickup date/time</Label>
+                  <DateTimePicker
+                    value={request.pickupAt}
+                    onChange={(pickupAt) => updateRequest(request.id, { pickupAt })}
+                    aria-label="Pickup date"
+                  />
+                </div>
+              ) : (
+                <div className="md:col-span-2 xl:col-span-3">
+                  <AnchorDateSection
+                    label="Pickup date/time"
+                    options={ANCHOR_OPTIONS}
+                    value={request.dateAnchor}
+                    onChange={(next) => updateRequest(request.id, { dateAnchor: next })}
+                    disabledValues={anchorContext ? [] : ["pre", "post"]}
                   >
-                    {(() => {
-                      const resolved = resolveTransferPickupDate(request.dateAnchor, {
-                        start: anchorContext.startDate,
-                        end: anchorContext.endDate,
-                      })
-                      if (!resolved) return `Set ${anchorContext.legLabel}'s date to work out this pickup.`
-                      return (
-                        <>
-                          Pickup <span className="font-medium text-foreground">{formatDisplayDate(resolved)}</span>
-                          {` (${request.dateAnchor === "pre" ? "start" : "end"} of ${anchorContext.legLabel})`}
-                        </>
-                      )
-                    })()}
-                  </p>
-                ) : null}
-                {!isRental && !anchorContext ? (
-                  <p className="text-xs text-muted-foreground">
-                    Nothing above this transfer has a date to anchor to — pick the pickup date manually.
-                  </p>
-                ) : null}
-                {!isRental && request.dateAnchor === "post" && anchorContext?.endDateAssumed ? (
-                  <p className="text-xs text-amber-600 dark:text-amber-500">
-                    {anchorContext.legLabel} has no journey length set, so the pickup falls on its start day. Set
-                    the route&apos;s duration in Suppliers, or pick a custom date.
-                  </p>
-                ) : null}
-              </div>
+                    <DateTimePicker
+                      value={request.pickupAt}
+                      onChange={(pickupAt) => updateRequest(request.id, { pickupAt })}
+                      dateDisabled={request.dateAnchor === "pre" || request.dateAnchor === "post"}
+                      className="w-64"
+                      aria-label="Pickup date"
+                    />
+                    {anchorContext && (request.dateAnchor === "pre" || request.dateAnchor === "post") ? (
+                      <p
+                        className={cn(
+                          "text-xs",
+                          resolveTransferPickupDate(request.dateAnchor, {
+                            start: anchorContext.startDate,
+                            end: anchorContext.endDate,
+                          })
+                            ? "text-muted-foreground"
+                            : "text-destructive",
+                        )}
+                      >
+                        {(() => {
+                          const resolved = resolveTransferPickupDate(request.dateAnchor, {
+                            start: anchorContext.startDate,
+                            end: anchorContext.endDate,
+                          })
+                          if (!resolved) return `Set ${anchorContext.legLabel}'s date to work out this pickup.`
+                          return (
+                            <>
+                              Pickup <span className="font-medium text-foreground">{formatDisplayDate(resolved)}</span>
+                              {` (${request.dateAnchor === "pre" ? "start" : "end"} of ${anchorContext.legLabel})`}
+                            </>
+                          )
+                        })()}
+                      </p>
+                    ) : null}
+                    {!anchorContext ? (
+                      <p className="text-xs text-muted-foreground">
+                        Nothing above this transfer has a date to anchor to — pick the pickup date manually.
+                      </p>
+                    ) : null}
+                    {request.dateAnchor === "post" && anchorContext?.endDateAssumed ? (
+                      <p className="text-xs text-amber-600 dark:text-amber-500">
+                        {anchorContext.legLabel} has no journey length set, so the pickup falls on its start day. Set
+                        the route&apos;s duration in Suppliers, or pick a custom date.
+                      </p>
+                    ) : null}
+                  </AnchorDateSection>
+                </div>
+              )}
               {isRental ? (
                 <div className="space-y-1.5">
                   <Label>Return date/time</Label>
