@@ -14,6 +14,7 @@ export function sampleWorksheetData(): Omit<WorksheetPdfData, "brandLogo"> {
     contact: {
       title: "Mr",
       name: "Schalk van der Merwe",
+      shortName: "S. van der Merwe",
       nationality: "RSA",
       email: "swvdmlegal@example.com",
       phone: "083 377 3203",
@@ -54,7 +55,7 @@ export function sampleWorksheetData(): Omit<WorksheetPdfData, "brandLogo"> {
       {
         fromDate: "2026-12-13",
         toDate: "2026-12-14",
-        description: "The Blue Train",
+        description: "The Blue Train — Pretoria → Cape Town",
         bookingDate: null,
         confirmationDate: null,
         reservationReference: "BT-118824",
@@ -65,7 +66,7 @@ export function sampleWorksheetData(): Omit<WorksheetPdfData, "brandLogo"> {
       {
         fromDate: "2026-12-14",
         toDate: "2026-12-20",
-        description: "Commodore Hotel",
+        description: "Commodore Hotel — Deluxe Suite",
         bookingDate: null,
         confirmationDate: null,
         reservationReference: null,
@@ -89,7 +90,8 @@ export function sampleWorksheetData(): Omit<WorksheetPdfData, "brandLogo"> {
       {
         date: "2025-10-08",
         paidWith: "EFT",
-        reference: null,
+        reference: "DEP-4471",
+        amount: 18500,
       },
     ],
   }

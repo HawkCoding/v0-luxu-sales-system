@@ -12,6 +12,9 @@ interface DateTimePickerProps {
   value: string | null | undefined
   onChange: (value: string | null) => void
   disabled?: boolean
+  /** Disables only the date half, leaving the time free to edit — for a value whose date is
+   *  derived (e.g. a transfer's pre/post pickup anchor) but whose time is still hand-typed. */
+  dateDisabled?: boolean
   id?: string
   className?: string
   datePlaceholder?: string
@@ -28,6 +31,7 @@ export function DateTimePicker({
   value,
   onChange,
   disabled = false,
+  dateDisabled = false,
   id,
   className,
   datePlaceholder = 'Select date',
@@ -60,7 +64,7 @@ export function DateTimePicker({
       <DatePicker
         id={id}
         value={parts.date}
-        disabled={disabled}
+        disabled={disabled || dateDisabled}
         placeholder={datePlaceholder}
         aria-label={ariaLabel}
         className="flex-1"

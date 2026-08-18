@@ -74,6 +74,7 @@ interface AuthOptions {
   quotePdfStoragePath?: string | null
   customerInvoiceNumber?: string | null
   emailImportNeedsReview?: boolean
+  quoteStatus?: string
 }
 
 function buildAuth(options: AuthOptions = {}) {
@@ -89,6 +90,9 @@ function buildAuth(options: AuthOptions = {}) {
   const customerInvoiceNumber =
     options.customerInvoiceNumber === undefined ? "INV-0001" : options.customerInvoiceNumber
   const emailImportNeedsReview = options.emailImportNeedsReview ?? false
+  // The quote status the send gate reads. Draft by default so it never stands in the way of
+  // tests exercising other behaviour — set "pricing_incomplete" to exercise the gate itself.
+  const quoteStatus = options.quoteStatus ?? "draft"
 
   const correspondenceInsertResult = vi.fn(async () => ({
     data: {
@@ -124,6 +128,15 @@ function buildAuth(options: AuthOptions = {}) {
     })),
   }))
   const quoteSelect = vi.fn((columns: string) => {
+    // The pricing_incomplete send gate — a quote whose lines aren't all priced must not become a
+    // client document quoting a total that summed the unpriced ones as zero.
+    if (columns === "status") {
+      return {
+        eq: vi.fn(() => ({
+          maybeSingle: vi.fn(async () => ({ data: { status: quoteStatus }, error: null })),
+        })),
+      }
+    }
     if (columns.includes("pdf_document_id")) {
       return {
         eq: vi.fn(() => ({
@@ -722,6 +735,27 @@ describe("POST /api/correspondence", () => {
         ]),
       }),
     )
+  })
+
+  // QA 11, F11-1. calculateQuoteTotals sums item.total unconditionally, so a quote with an
+  // unpriced line totals as though that line were free. The consultant's screen says so; the
+  // client document does not — so the send is refused rather than mailing a short total.
+  it("refuses to send a quote whose lines are not all priced", async () => {
+    buildAuth({ quoteStatus: "pricing_incomplete" })
+    const res = await POST(
+      postJson({
+        bookingId: BOOKING_ID,
+        subject: "Your quote",
+        kind: "quote",
+        quoteId: QUOTE_ID,
+      }),
+    )
+
+    expect(res.status).toBe(409)
+    expect((await res.json()).error).toContain("unpriced lines")
+    // Refused before anything is rendered or mailed.
+    expect(quotePdfMocks.ensureQuotePdf).not.toHaveBeenCalled()
+    expect(emailMocks.sendEmail).not.toHaveBeenCalled()
   })
 
   it("returns 500 and does not send when the quote PDF cannot be generated", async () => {

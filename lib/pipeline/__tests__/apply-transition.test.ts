@@ -168,7 +168,6 @@ describe("applyTransition", () => {
       actorName: "Douwlien",
       actorUserId: "user-1",
       manualConfirmations: {
-        createDepositInvoice: true,
         finalPaymentReceived: true,
       },
       quotes: [{ id: "quote-1", status: "sent", total: 1000, created_at: "2026-05-01T08:00:00.000Z" }],
@@ -201,19 +200,14 @@ describe("applyTransition", () => {
         payload: expect.objectContaining({ status: "accepted" }),
       }),
     )
-    expect(operations).toContainEqual(
-      expect.objectContaining({
-        table: "documents",
-        action: "insert",
-        payload: expect.objectContaining({ kind: "invoice_pdf", status: "generated" }),
-      }),
+    // Crossing deposit_requested no longer fabricates an invoice document or a
+    // draft deposit email — both belonged to the removed create_invoice_25pct
+    // shortcut, and the gate is a hard block now.
+    expect(operations).not.toContainEqual(
+      expect.objectContaining({ table: "documents", action: "insert" }),
     )
-    expect(operations).toContainEqual(
-      expect.objectContaining({
-        table: "correspondences",
-        action: "insert",
-        payload: expect.objectContaining({ kind: "invoice", status: "scheduled" }),
-      }),
+    expect(operations).not.toContainEqual(
+      expect.objectContaining({ table: "correspondences", action: "insert" }),
     )
     expect(syncMocks.syncBookingPaymentState).toHaveBeenCalledWith(
       client,
@@ -329,7 +323,7 @@ describe("applyTransition", () => {
     )
   })
 
-  it("schedules deposit correspondence when an invoice document already exists", async () => {
+  it("creates no invoice document and drafts no deposit email when crossing deposit_requested", async () => {
     const now = new Date("2026-05-01T10:00:00.000Z")
     const { client, operations } = createFakeSupabase({
       id: "booking-3",
@@ -337,67 +331,7 @@ describe("applyTransition", () => {
       invoice_balance: null,
     })
 
-    const result = await applyTransition(client, {
-      booking: {
-        id: "booking-3",
-        booking_number: "BT-2026-0003",
-        stage: "accepted",
-        source: "web_form",
-        raw_text: null,
-        updated_at: "2026-05-01T09:00:00.000Z",
-        customer_id: "customer-3",
-        consultant: "DR",
-      },
-      targetStage: "deposit_requested",
-      actorName: "Douwlien",
-      actorUserId: "user-1",
-      manualConfirmations: {
-        createDepositInvoice: true,
-      },
-      quotes: [{ id: "quote-3", status: "accepted", total: 1234.56, created_at: "2026-05-01T08:00:00.000Z" }],
-      documents: [{ id: "document-3", kind: "invoice_pdf", status: "generated" }],
-      correspondences: [],
-      now,
-    })
-
-    expect(result.scheduledDepositCorrespondence).toBe(true)
-    expect(operations).toContainEqual(
-      expect.objectContaining({
-        table: "correspondences",
-        action: "insert",
-        payload: expect.objectContaining({
-          booking_id: "booking-3",
-          kind: "invoice",
-          status: "scheduled",
-          subject: "Deposit Invoice — BT-2026-0001",
-        }),
-      }),
-    )
-    // Draft body is composed from the deposit_request template with the
-    // calculated deposit amount (25% of 1234.56).
-    expect(composeMocks.composeEmail).toHaveBeenCalledWith(
-      expect.anything(),
-      "deposit_request",
-      expect.objectContaining({
-        tokens: expect.objectContaining({
-          jobNumber: "BT-2026-0003",
-          depositAmount: "308.64",
-          // Client-facing dates are always "08 May 2026", never raw ISO.
-          dueDate: "08 May 2026",
-        }),
-      }),
-    )
-  })
-
-  it("does not schedule a deposit email when the invoice was sent outside the system", async () => {
-    const now = new Date("2026-05-01T10:00:00.000Z")
-    const { client, operations } = createFakeSupabase({
-      id: "booking-3",
-      stage: "deposit_requested",
-      invoice_balance: null,
-    })
-
-    const result = await applyTransition(client, {
+    await applyTransition(client, {
       booking: {
         id: "booking-3",
         booking_number: "BT-2026-0003",
@@ -417,9 +351,22 @@ describe("applyTransition", () => {
       now,
     })
 
-    expect(result.scheduledDepositCorrespondence).toBe(false)
+    // The gate is a hard block cleared by a real invoice and a real send, so
+    // by the time the transition runs there is nothing left for it to fabricate.
     expect(operations).not.toContainEqual(
       expect.objectContaining({ table: "correspondences", action: "insert" }),
+    )
+    expect(operations).not.toContainEqual(
+      expect.objectContaining({ table: "documents", action: "insert" }),
+    )
+    expect(composeMocks.composeEmail).not.toHaveBeenCalled()
+    // The balance seed is unrelated to the removed shortcut and stays.
+    expect(operations).toContainEqual(
+      expect.objectContaining({
+        table: "bookings",
+        action: "update",
+        payload: expect.objectContaining({ invoice_balance: 1234.56 }),
+      }),
     )
   })
 

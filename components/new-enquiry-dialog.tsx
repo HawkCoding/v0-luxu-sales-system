@@ -24,6 +24,11 @@ import { buildEnquiryImportPayload } from "@/lib/import/enquiry-payload"
 import { ReviewImportedDraftModal } from "@/components/review-imported-draft-modal"
 import { ProgressDialog } from "@/components/progress-dialog"
 import { useSuppliers } from "@/lib/use-data"
+import { DiscardChangesDialog } from "@/components/discard-changes-dialog"
+import { draftStorageKey, readRawDraft, removeDraft, writeDraft } from "@/lib/drafts/draft-storage"
+
+const PASTE_DRAFT_KEY = draftStorageKey("enquiry", "paste-text")
+const PASTE_DRAFT_DEBOUNCE_MS = 1500
 
 interface PresetCustomer {
   id: string
@@ -115,8 +120,40 @@ export function NewEnquiryDialog({ open, onOpenChange, onSaved, presetCustomer }
       setScreen("review")
     } else {
       setScreen("tabs")
+      // Recover a pasted email that was on screen when the tab closed/refreshed before "Review &
+      // Import" was clicked -- re-typing or re-pasting a whole customer email is real lost work.
+      setPasteText((current) => current || readRawDraft(PASTE_DRAFT_KEY) || "")
     }
   }, [open, presetCustomer])
+
+  // Debounced mirror of the raw paste to localStorage; removed once it's empty or has been consumed
+  // into a parsed draft.
+  useEffect(() => {
+    if (!open || screen !== "tabs") return
+    if (!pasteText.trim()) {
+      removeDraft(PASTE_DRAFT_KEY)
+      return
+    }
+    const timeout = window.setTimeout(() => writeDraft(PASTE_DRAFT_KEY, pasteText), PASTE_DRAFT_DEBOUNCE_MS)
+    return () => window.clearTimeout(timeout)
+  }, [open, screen, pasteText])
+
+  const [confirmingTabsDiscard, setConfirmingTabsDiscard] = useState(false)
+  const tabsScreenDirty = activeTab === "paste" && pasteText.trim().length > 0
+
+  function requestCloseTabsScreen() {
+    if (!tabsScreenDirty) {
+      resetAndClose()
+      return
+    }
+    setConfirmingTabsDiscard(true)
+  }
+
+  function confirmTabsDiscard() {
+    setConfirmingTabsDiscard(false)
+    removeDraft(PASTE_DRAFT_KEY)
+    resetAndClose()
+  }
 
   useEffect(() => {
     if (screen !== "saving" || saveError) return
@@ -193,6 +230,7 @@ export function NewEnquiryDialog({ open, onOpenChange, onSaved, presetCustomer }
 
       if (!jobId) throw new Error("The enquiry was saved, but the new job could not be opened.")
 
+      removeDraft(PASTE_DRAFT_KEY)
       setSaveStepIndex(ENQUIRY_SAVE_STEPS.length - 1)
       setSaveProgress(100)
       window.setTimeout(() => {
@@ -221,8 +259,22 @@ export function NewEnquiryDialog({ open, onOpenChange, onSaved, presetCustomer }
 
   return (
     <>
-      <Dialog open={open && screen === "tabs"} onOpenChange={(next) => { if (!next) resetAndClose() }}>
-        <DialogContent className="max-w-lg">
+      <Dialog
+        open={open && screen === "tabs"}
+        onOpenChange={(next) => (next ? undefined : requestCloseTabsScreen())}
+      >
+        <DialogContent
+          className="max-w-lg"
+          onInteractOutside={(e) => { if (tabsScreenDirty) { e.preventDefault(); setConfirmingTabsDiscard(true) } }}
+          onPointerDownOutside={(e) => { if (tabsScreenDirty) { e.preventDefault(); setConfirmingTabsDiscard(true) } }}
+          onEscapeKeyDown={(e) => { if (tabsScreenDirty) { e.preventDefault(); setConfirmingTabsDiscard(true) } }}
+        >
+          <DiscardChangesDialog
+            open={confirmingTabsDiscard}
+            onKeepEditing={() => setConfirmingTabsDiscard(false)}
+            onDiscard={confirmTabsDiscard}
+            description="Your pasted text is saved as a draft and can be restored next time you open this."
+          />
           <DialogHeader>
             <DialogTitle>New Enquiry</DialogTitle>
             <DialogDescription>Choose how to capture this enquiry.</DialogDescription>
@@ -250,7 +302,7 @@ export function NewEnquiryDialog({ open, onOpenChange, onSaved, presetCustomer }
                 className="text-sm field-sizing-fixed h-48 resize-none overflow-y-auto"
               />
               <div className="flex justify-end gap-2">
-                <Button variant="outline" size="sm" onClick={resetAndClose}>Cancel</Button>
+                <Button variant="outline" size="sm" onClick={requestCloseTabsScreen}>Cancel</Button>
                 <Button size="sm" onClick={handlePasteImport} disabled={!pasteText.trim()}>
                   Review &amp; Import
                 </Button>

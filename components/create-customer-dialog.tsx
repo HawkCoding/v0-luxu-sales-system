@@ -31,6 +31,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { ChevronDown, Loader2 } from "lucide-react"
 import { TITLES, COUNTRIES } from "@/lib/form-data"
 import { PHONE_VALIDATION_MESSAGE, isPlausiblePhone } from "@/lib/phone-format"
+import { useDirtyCloseGuard } from "@/hooks/use-dirty-close-guard"
+import { DiscardChangesDialog } from "@/components/discard-changes-dialog"
 
 interface CreateCustomerDialogProps {
   open: boolean
@@ -87,6 +89,9 @@ function getInitialForm(): FormState {
   }
 }
 
+// Stable reference: an all-empty form, so a fresh dialog never reads as dirty.
+const EMPTY_FORM: FormState = getInitialForm()
+
 function validateForm(form: FormState): FormErrors {
   return {
     title: null,
@@ -124,6 +129,8 @@ export function CreateCustomerDialog({ open, onOpenChange, onSuccess }: CreateCu
 
   const markTouched = (field: FormField) => setTouched((t) => ({ ...t, [field]: true }))
 
+  const isDirty = JSON.stringify(form) !== JSON.stringify(EMPTY_FORM)
+
   const handleOpenChange = (next: boolean) => {
     onOpenChange(next)
     if (!next) {
@@ -136,6 +143,11 @@ export function CreateCustomerDialog({ open, onOpenChange, onSuccess }: CreateCu
       }, 300)
     }
   }
+
+  const closeGuard = useDirtyCloseGuard({
+    isDirty,
+    onConfirmedClose: () => handleOpenChange(false),
+  })
 
   const handleSubmit = async () => {
     const currentErrors = validateForm(form)
@@ -196,8 +208,13 @@ export function CreateCustomerDialog({ open, onOpenChange, onSuccess }: CreateCu
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-lg">
+    <Dialog open={open} onOpenChange={(next) => (next ? handleOpenChange(true) : closeGuard.handleOpenChange(false))}>
+      <DialogContent className="max-w-lg" {...closeGuard.contentProps}>
+        <DiscardChangesDialog
+          open={closeGuard.confirming}
+          onKeepEditing={closeGuard.cancelDiscard}
+          onDiscard={closeGuard.confirmDiscard}
+        />
         <DialogHeader>
           <DialogTitle>New Customer</DialogTitle>
           <DialogDescription>Add a new customer to your database.</DialogDescription>
@@ -445,7 +462,7 @@ export function CreateCustomerDialog({ open, onOpenChange, onSuccess }: CreateCu
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => handleOpenChange(false)} disabled={isSaving}>
+          <Button variant="outline" onClick={() => closeGuard.handleOpenChange(false)} disabled={isSaving}>
             Cancel
           </Button>
           <Button onClick={handleSubmit} disabled={isSaving || (hasErrors && Object.keys(touched).length > 0)}>

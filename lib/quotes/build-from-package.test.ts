@@ -506,6 +506,110 @@ describe("buildPackageQuoteLineItems", () => {
     expect(lineItems[0].pricingSnapshot?.manualRoomPrice).toBe(0)
   })
 
+  it("charges nights - 1 per room when the hotel gifted the first night", async () => {
+    const hotelLeg = leg({
+      id: "leg-hotel",
+      supplierKind: "hotel_property",
+      routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+      suiteTypes: [suiteType("room-std", "supplier-leg-hotel", "Standard")],
+      rateCards: [rateCard({ id: "rc-room", routeId: "route-bb", suiteTypeId: "room-std", pricePerPerson: 4000 })],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase(),
+      packageDetail: detail([hotelLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-hotel",
+          selected: true,
+          routeId: "route-bb",
+          nights: 2,
+          units: [
+            { suiteTypeId: "room-std", complimentaryFirstNight: true },
+            { suiteTypeId: "room-std" },
+          ],
+        },
+      ],
+    })
+
+    const [gifted, charged] = lineItems
+    expect(gifted.qty).toBe(1)
+    expect(gifted.unitPrice).toBe(4000)
+    expect(gifted.total).toBe(4000)
+    expect(gifted.pricingSnapshot?.complimentaryNights).toBe(1)
+    expect(gifted.pricingSnapshot?.stayNights).toBe(2)
+
+    // The gift is per room: the second room pays for both its nights.
+    expect(charged.qty).toBe(2)
+    expect(charged.total).toBe(8000)
+    expect(charged.pricingSnapshot?.complimentaryNights).toBeUndefined()
+  })
+
+  it("keeps the gift and a typed override composed — the override is the price of the charged nights", async () => {
+    const hotelLeg = leg({
+      id: "leg-hotel",
+      supplierKind: "hotel_property",
+      routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+      suiteTypes: [suiteType("room-std", "supplier-leg-hotel", "Standard")],
+      rateCards: [rateCard({ id: "rc-room", routeId: "route-bb", suiteTypeId: "room-std", pricePerPerson: 4000 })],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase(),
+      packageDetail: detail([hotelLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-hotel",
+          selected: true,
+          routeId: "route-bb",
+          nights: 2,
+          units: [{ suiteTypeId: "room-std", manualRoomPrice: 3000, complimentaryFirstNight: true }],
+        },
+      ],
+    })
+
+    expect(lineItems[0].qty).toBe(1)
+    expect(lineItems[0].unitPrice).toBe(3000)
+    expect(lineItems[0].total).toBe(3000)
+    expect(lineItems[0].pricingSnapshot?.complimentaryNights).toBe(1)
+  })
+
+  it("still emits a line for a one-night stay whose only night was gifted", async () => {
+    const hotelLeg = leg({
+      id: "leg-hotel",
+      supplierKind: "hotel_property",
+      routes: [route("route-bb", "supplier-leg-hotel", "B&B")],
+      suiteTypes: [suiteType("room-std", "supplier-leg-hotel", "Standard")],
+      rateCards: [rateCard({ id: "rc-room", routeId: "route-bb", suiteTypeId: "room-std", pricePerPerson: 4000 })],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase(),
+      packageDetail: detail([hotelLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-hotel",
+          selected: true,
+          routeId: "route-bb",
+          nights: 1,
+          units: [{ suiteTypeId: "room-std", complimentaryFirstNight: true }],
+        },
+      ],
+    })
+
+    // Dropping the line would drop the hotel from the itinerary, which is scoped to priced legs.
+    expect(lineItems).toHaveLength(1)
+    expect(lineItems[0].qty).toBe(0)
+    expect(lineItems[0].total).toBe(0)
+    expect(lineItems[0].pricingSnapshot?.stayNights).toBe(1)
+  })
+
   it("prices a tour leg off the tour type's route-agnostic card, whichever itinerary was booked", async () => {
     const tourLeg = leg({
       id: "leg-tour",
@@ -1604,6 +1708,97 @@ describe("buildPackageQuoteLineItems", () => {
         .reduce((sum, li) => sum + li.total, 0)
       const commission = lineItems.find((li) => li.description === "Commission")
       expect(commission?.total).toBe(Math.round(converted * 0.1 * 100) / 100)
+    })
+  })
+
+  // QA 11, F11-8. commissionOverride is a per-leg field, but the decision it carries is
+  // booking-level (one Commission line priced off the whole subtotal — see the comment at the
+  // call site). `.find()` used to take the first leg that set one and silently drop the rest, so
+  // two legs disagreeing produced a total that depended on array order, with no signal to anyone.
+  describe("commissionOverride across legs", () => {
+    function twoLegDetail() {
+      const trainLeg = leg({
+        id: "leg-train",
+        supplierKind: "train_operator",
+        routes: [route("route-train", "supplier-leg-train", "CPT-PTA")],
+        suiteTypes: [suiteType("suite-dlx", "supplier-leg-train", "Deluxe")],
+        rateCards: [
+          rateCard({ id: "rc-train", routeId: "route-train", suiteTypeId: "suite-dlx", pricePerPerson: 10000 }),
+        ],
+      })
+      const hotelLeg = leg({
+        id: "leg-hotel",
+        supplierKind: "hotel_property",
+        routes: [route("route-hotel", "supplier-leg-hotel", "Bed & Breakfast")],
+        suiteTypes: [suiteType("suite-std", "supplier-leg-hotel", "Standard Room")],
+        rateCards: [
+          rateCard({ id: "rc-hotel", routeId: "route-hotel", suiteTypeId: "suite-std", pricePerPerson: 2000 }),
+        ],
+      })
+      return detail([trainLeg, hotelLeg])
+    }
+
+    const trainSelection = {
+      legId: "leg-train",
+      selected: true,
+      units: [{ suiteTypeId: "suite-dlx", adultCount: 1, childCount: 0, infantCount: 0 }],
+    }
+    const hotelSelection = {
+      legId: "leg-hotel",
+      selected: true,
+      units: [{ suiteTypeId: "suite-std", adultCount: 1, childCount: 0, infantCount: 0 }],
+    }
+    const soloAdultBooking = {
+      id: JOB_ID,
+      no_of_adults: 1,
+      no_of_children: 0,
+      no_of_suites: 1,
+      child_ages: [],
+      departure_date: "2026-09-01",
+    }
+
+    it("rejects two legs that disagree on the commission override, instead of silently keeping the first", async () => {
+      await expect(
+        buildPackageQuoteLineItems({
+          supabase: buildSupabase({ booking: soloAdultBooking }),
+          packageDetail: twoLegDetail(),
+          jobId: JOB_ID,
+          travelDate: "2026-09-01",
+          selections: [
+            { ...trainSelection, commissionOverride: { type: "percent", value: 10 } },
+            { ...hotelSelection, commissionOverride: { type: "fixed", value: 99 } },
+          ],
+        }),
+      ).rejects.toThrow(/disagree/i)
+    })
+
+    it("accepts the same override repeated on every leg — the only shape the UI sends today", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: soloAdultBooking }),
+        packageDetail: twoLegDetail(),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [
+          { ...trainSelection, commissionOverride: { type: "percent", value: 10 } },
+          { ...hotelSelection, commissionOverride: { type: "percent", value: 10 } },
+        ],
+      })
+
+      const commission = lineItems.find((li) => li.description === "Commission")
+      // (10000 + 2000) x 10%
+      expect(commission?.total).toBe(1200)
+    })
+
+    it("applies the override when only one leg sets it and the rest are unset", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({ booking: soloAdultBooking }),
+        packageDetail: twoLegDetail(),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [trainSelection, { ...hotelSelection, commissionOverride: { type: "fixed", value: 500 } }],
+      })
+
+      expect(lineItems.find((li) => li.description === "Commission")?.total).toBe(500)
     })
   })
 })

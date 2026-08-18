@@ -13,13 +13,12 @@ export function sortItineraryBlocksChronologically(
     if (dateA && !dateB) return -1
     if (!dateA && dateB) return 1
 
-    // Two services on the same day run in clock order, not in the order the consultant happened to
-    // add them — an outbound flight at 10h00 and its connecting transfer at 12h15 read as a
-    // sequence. Only a captured time counts; an untimed block keeps its builder position.
-    const timeA = a.serviceData.startTime?.trim() || null
-    const timeB = b.serviceData.startTime?.trim() || null
-    if (timeA && timeB && timeA !== timeB) return timeA < timeB ? -1 : 1
-
+    // Two services on the same day run in the order the consultant put them in the booking builder,
+    // never in clock order. The times these blocks carry are not comparable events: a transfer's
+    // is the captured pickup, while a hotel's is a "check in from" policy that falls back to the
+    // supplier's or the app's default (see buildVoucherServiceBlocks). Sorting them together made
+    // an unscheduled 15h00 check-in outrank the 18h00 transfer that delivers the guests to it.
+    // booking_services.sort_order is the sequence the salesperson already got right, so it decides.
     return a.displayOrder - b.displayOrder
   })
 }

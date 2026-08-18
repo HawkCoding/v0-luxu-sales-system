@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { z } from "zod"
 
 export interface StaleVersionConflictPayload {
   error: string
@@ -17,6 +18,43 @@ export function staleVersionResponse(
       currentUpdatedAt,
     },
     { status: 409 },
+  )
+}
+
+/**
+ * Zod shape for a route that *requires* its caller to opt into optimistic locking. A save must
+ * either carry the row version it was built from (`expectedUpdatedAt`) or say out loud that it is
+ * a deliberate overwrite (`force: true`) — silence is no longer an accepted third option, because
+ * a replace-the-set write built from stale data deletes whatever the other person added.
+ *
+ * Spread into the route's own object schema and pass the result through
+ * `requireVersionTokenOrForce`.
+ */
+export const versionTokenShape = {
+  expectedUpdatedAt: z.string().datetime({ offset: true }).optional(),
+  /** Deliberate overwrite: skip the version check. Set by the "save anyway" path only. */
+  force: z.boolean().optional(),
+} as const
+
+export interface VersionTokenInput {
+  expectedUpdatedAt?: string
+  force?: boolean
+}
+
+/**
+ * 400 when a caller sent neither the row version nor an explicit `force`. Returns null when the
+ * request is acceptable, so routes read `const bad = requireVersionTokenOrForce(parsed); if (bad) return bad`.
+ */
+export function requireVersionTokenOrForce(
+  input: VersionTokenInput,
+): NextResponse<{ error: string }> | null {
+  if (input.expectedUpdatedAt || input.force) return null
+  return NextResponse.json(
+    {
+      error:
+        "expectedUpdatedAt is required — send the version you loaded, or force: true to overwrite deliberately.",
+    },
+    { status: 400 },
   )
 }
 

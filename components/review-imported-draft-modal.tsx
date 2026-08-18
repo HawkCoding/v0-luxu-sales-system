@@ -25,6 +25,37 @@ import { suiteVocabularyFromSupplierDetail, type SuiteAxis } from "@/lib/suites/
 import { useActiveSuppliers, useSupplierDetail } from "@/lib/use-data"
 import { resolveDraftSupplierId } from "@/lib/import/resolve-draft-supplier"
 import { cn } from "@/lib/utils"
+import { toast } from "sonner"
+import {
+  draftStorageKey,
+  readDraftEnvelope,
+  readRawDraft,
+  removeDraft,
+  serializeDraft,
+  writeDraft,
+} from "@/lib/drafts/draft-storage"
+import { useUnloadGuard } from "@/hooks/use-unload-guard"
+import { DiscardChangesDialog } from "@/components/discard-changes-dialog"
+
+/** Bump whenever the persisted shape below changes -- see lib/drafts/draft-storage.ts. */
+const ENQUIRY_DRAFT_SCHEMA_VERSION = 1
+const ENQUIRY_DRAFT_KEY = draftStorageKey("enquiry", "new")
+const ENQUIRY_DRAFT_DEBOUNCE_MS = 1500
+
+interface EnquiryDraftPayload {
+  draft: ParsedDraft
+  dirtyFields: string[]
+}
+
+function isEnquiryDraftPayload(data: unknown): data is EnquiryDraftPayload {
+  if (!data || typeof data !== "object") return false
+  const candidate = data as Partial<EnquiryDraftPayload>
+  return (
+    !!candidate.draft &&
+    typeof candidate.draft === "object" &&
+    Array.isArray(candidate.dirtyFields)
+  )
+}
 
 const CONFIG_AXES: ReadonlyArray<{
   axis: Exclude<SuiteAxis, "suiteType">
@@ -106,6 +137,90 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
       setDirtyFields(new Set())
     }
   }, [parsedDraft])
+
+  // A draft found on disk from a previous, unsaved session -- offered via the banner below rather
+  // than applied automatically, since it could belong to a completely different paste than whatever
+  // was just parsed. `hasEdits` gates the offer so it never appears once the consultant has actually
+  // started correcting the fresh parse.
+  const [storedDraftOffer, setStoredDraftOffer] = useState<EnquiryDraftPayload | null>(null)
+  const hasEdits = dirtyFields.size > 0
+
+  useEffect(() => {
+    if (!open) return
+    const envelope = readDraftEnvelope<EnquiryDraftPayload>(readRawDraft(ENQUIRY_DRAFT_KEY), {
+      version: ENQUIRY_DRAFT_SCHEMA_VERSION,
+      isValid: isEnquiryDraftPayload,
+    })
+    setStoredDraftOffer(envelope?.data ?? null)
+  }, [open])
+
+  // Debounced autosave of whatever the consultant has actually corrected -- system reconciliation
+  // (supplier id backfill, suite axis resolution) doesn't touch `dirtyFields`, so it never triggers
+  // a write on its own.
+  useEffect(() => {
+    if (!open || !draft || !hasEdits) return
+    const timeout = window.setTimeout(() => {
+      writeDraft(
+        ENQUIRY_DRAFT_KEY,
+        serializeDraft<EnquiryDraftPayload>(
+          { draft, dirtyFields: Array.from(dirtyFields) },
+          { version: ENQUIRY_DRAFT_SCHEMA_VERSION, recordUpdatedAt: null },
+        ),
+      )
+    }, ENQUIRY_DRAFT_DEBOUNCE_MS)
+    return () => window.clearTimeout(timeout)
+  }, [open, draft, dirtyFields, hasEdits])
+
+  function restoreStoredDraft() {
+    if (!storedDraftOffer) return
+    setDraft(storedDraftOffer.draft)
+    setDirtyFields(new Set(storedDraftOffer.dirtyFields))
+    setStoredDraftOffer(null)
+    toast.success("Restored your unsaved enquiry draft.")
+  }
+
+  function discardStoredDraft() {
+    removeDraft(ENQUIRY_DRAFT_KEY)
+    setStoredDraftOffer(null)
+  }
+
+  // Two ways out of this modal need the same guard: the dialog's own close (backdrop/Escape/X) and
+  // the "Back" button, which bypasses `onOpenChange` entirely. `pendingAction` tracks which one is
+  // waiting on confirmation so a single confirm dialog covers both.
+  const [pendingAction, setPendingAction] = useState<"close" | "back" | null>(null)
+
+  function guardDismiss(event: { preventDefault: () => void }) {
+    if (!hasEdits) return
+    event.preventDefault()
+    setPendingAction("close")
+  }
+
+  function requestClose() {
+    if (!hasEdits) {
+      removeDraft(ENQUIRY_DRAFT_KEY)
+      onOpenChange(false)
+      return
+    }
+    setPendingAction("close")
+  }
+
+  function requestBack() {
+    if (!hasEdits) {
+      onBack()
+      return
+    }
+    setPendingAction("back")
+  }
+
+  function confirmPendingAction() {
+    const action = pendingAction
+    setPendingAction(null)
+    removeDraft(ENQUIRY_DRAFT_KEY)
+    if (action === "back") onBack()
+    else onOpenChange(false)
+  }
+
+  useUnloadGuard(open && hasEdits)
 
   const { data: suppliers = [] } = useActiveSuppliers()
   const trainSuppliers = useMemo(
@@ -208,6 +323,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
     const draftToSave = draft
 
     if (openAfterSave) {
+      removeDraft(ENQUIRY_DRAFT_KEY)
       onSaveAndOpen(draftToSave)
       return
     }
@@ -221,18 +337,48 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
         body: JSON.stringify(buildEnquiryImportPayload(draftToSave)),
       })
 
-      if (response.ok) {
-        onOpenChange(false)
-        window.location.reload()
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}))
+        toast.error(typeof body?.error === "string" ? body.error : "Failed to save enquiry")
+        return
       }
+
+      removeDraft(ENQUIRY_DRAFT_KEY)
+      onOpenChange(false)
+      window.location.reload()
+    } catch {
+      toast.error("Failed to save enquiry. Please try again.")
     } finally {
       setSaving(false)
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+    <Dialog open={open} onOpenChange={(next) => (next ? onOpenChange(true) : requestClose())}>
+      <DialogContent
+        className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col"
+        onInteractOutside={guardDismiss}
+        onPointerDownOutside={guardDismiss}
+        onEscapeKeyDown={guardDismiss}
+      >
+        <DiscardChangesDialog
+          open={pendingAction !== null}
+          onKeepEditing={() => setPendingAction(null)}
+          onDiscard={confirmPendingAction}
+        />
+        {storedDraftOffer && !hasEdits && (
+          <div className="flex flex-col gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between">
+            <span>You have unsaved edits to an enquiry draft from a previous session.</span>
+            <div className="flex shrink-0 gap-2">
+              <Button type="button" size="sm" variant="outline" onClick={discardStoredDraft}>
+                Discard
+              </Button>
+              <Button type="button" size="sm" onClick={restoreStoredDraft}>
+                Restore my draft
+              </Button>
+            </div>
+          </div>
+        )}
         <DialogHeader>
           <div className="flex items-start justify-between">
             <div>
@@ -836,7 +982,7 @@ export function ReviewImportedDraftModal({ open, onOpenChange, parsedDraft, onBa
         {/* Footer Actions */}
         <Separator />
         <div className="flex items-center justify-between gap-2">
-          <Button variant="outline" size="sm" onClick={onBack} disabled={saving}>
+          <Button variant="outline" size="sm" onClick={requestBack} disabled={saving}>
             Back
           </Button>
           <div className="flex items-center gap-2">

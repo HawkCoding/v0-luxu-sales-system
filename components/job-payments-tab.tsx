@@ -18,6 +18,8 @@ import { Plus } from "lucide-react"
 import { formatDisplayDate } from "@/lib/date-format"
 import { BASE_CURRENCY, formatMoney } from "@/lib/money"
 import { toast } from "sonner"
+import { useDirtyCloseGuard } from "@/hooks/use-dirty-close-guard"
+import { DiscardChangesDialog } from "@/components/discard-changes-dialog"
 
 const PAYMENT_ENABLED_STAGES: ReadonlySet<PipelineStage> = new Set([
   "deposit_requested",
@@ -49,6 +51,14 @@ export function JobPaymentsTab({ payments, jobId, mutate, stage, currency = BASE
   const stageAllowsRecording = stage ? PAYMENT_ENABLED_STAGES.has(stage) : true
 
   const totalPaid = payments.reduce((s, p) => s + p.amount, 0)
+
+  const isFormDirty =
+    form.amount !== "" || form.method !== "EFT" || form.reference !== "" || form.notes !== "" || form.paymentDate !== todayLocal
+
+  const closeGuard = useDirtyCloseGuard({
+    isDirty: isFormDirty,
+    onConfirmedClose: () => setOpen(false),
+  })
 
   const handleSubmit = async () => {
     setSaving(true)
@@ -100,7 +110,10 @@ export function JobPaymentsTab({ payments, jobId, mutate, stage, currency = BASE
           </p>
         </div>
         {canRecordPayment && (
-          <Dialog open={open && stageAllowsRecording} onOpenChange={(next) => setOpen(next && stageAllowsRecording)}>
+          <Dialog
+            open={open && stageAllowsRecording}
+            onOpenChange={(next) => (next ? setOpen(stageAllowsRecording) : closeGuard.handleOpenChange(false))}
+          >
             <DialogTrigger asChild>
               {stageAllowsRecording ? (
                 <Button size="sm"><Plus className="w-4 h-4 mr-1" /> Record Payment</Button>
@@ -117,7 +130,12 @@ export function JobPaymentsTab({ payments, jobId, mutate, stage, currency = BASE
                 </Tooltip>
               )}
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent {...closeGuard.contentProps}>
+              <DiscardChangesDialog
+                open={closeGuard.confirming}
+                onKeepEditing={closeGuard.cancelDiscard}
+                onDiscard={closeGuard.confirmDiscard}
+              />
               <DialogHeader>
                 <DialogTitle>Record Payment</DialogTitle>
                 <DialogDescription>Enter the payment details for this job.</DialogDescription>
@@ -151,7 +169,7 @@ export function JobPaymentsTab({ payments, jobId, mutate, stage, currency = BASE
                   <Input value={form.notes} onChange={(e) => setForm(f => ({ ...f, notes: e.target.value }))} className="mt-1" />
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
-                  <Button variant="outline" size="sm" onClick={() => setOpen(false)}>Cancel</Button>
+                  <Button variant="outline" size="sm" onClick={() => closeGuard.handleOpenChange(false)}>Cancel</Button>
                   <Button size="sm" onClick={handleSubmit} disabled={saving || !form.amount}>
                     {saving ? "Saving..." : "Record"}
                   </Button>

@@ -49,9 +49,13 @@ interface BuildContext {
    * it, instead of whatever is currently selected live on the job. Manually-added transport
    * requests (no package leg) are never priced this way and stay unfiltered. */
   legIds?: Set<string>
-  /** Leg ids whose quote line was marked complimentary — flags the hotel block's "COMPLIMENTARY"
-   * callout. Subset of legIds; undefined/empty means no complimentary legs on this quote. */
+  /** Leg ids whose entire stay was comped (room price typed as R0) — flags the hotel block's
+   * "COMPLIMENTARY" callout. Subset of legIds; undefined/empty means no complimentary legs on
+   * this quote. */
   complimentaryLegIds?: Set<string>
+  /** Leg ids where only the first night was gifted — flags the softer "FIRST NIGHT
+   * COMPLIMENTARY" callout, since the rest of the stay is still charged. */
+  firstNightComplimentaryLegIds?: Set<string>
   /** Transport requests tied to neither a package leg nor a booking service are never priced
    * into a quote (see `findTransportRequestsForLeg` in lib/quotes/build-from-package.ts), so on
    * a surface scoped to the accepted quote they would be the one thing `legIds` cannot filter.
@@ -110,7 +114,7 @@ function resolveSupplierJoinLocation(supplier: SupplierJoin | null | undefined):
   return firstRecord(supplier.city)?.name ?? null
 }
 
-interface RouteJoin {
+export interface RouteJoin {
   name: string | null
   /** Tour operators only: what this itinerary covers. */
   description: string | null
@@ -377,9 +381,24 @@ function buildRequestsLine(details: BuildContext["reservationDetails"]): string 
   return parts.length > 0 ? parts.join("; ") : null
 }
 
+/** The minimal route shape needed to name a booked leg — deliberately decoupled from `RouteJoin`'s
+ * full join (which carries an origin/destination `id` no caller of this function needs), so
+ * callers with a narrower query (the worksheet) can pass their own row straight through. */
+export interface RouteNameJoin {
+  name: string | null
+  direction_mode: string | null
+  origin: { name: string | null } | { name: string | null }[] | null
+  destination: { name: string | null } | { name: string | null }[] | null
+}
+
 /** The route name as it should read on client documents: the canonical name, unless it's a
- * two-way route with resolvable endpoint names, in which case it renders the booked direction. */
-function resolveVoucherRouteName(route: RouteJoin | null | undefined, reversed: boolean): string | null {
+ * two-way route with resolvable endpoint names, in which case it renders the booked direction.
+ * Exported for reuse by the worksheet, which needs the same booked-direction naming for its
+ * service-line description. */
+export function resolveVoucherRouteName(
+  route: RouteNameJoin | null | undefined,
+  reversed: boolean,
+): string | null {
   if (!route) return null
   const origin = firstRecord(route.origin)?.name
   const destination = firstRecord(route.destination)?.name
@@ -444,6 +463,13 @@ interface TransportBlockContext {
   supplier: SupplierJoin | null | undefined
   /** Leg-level vehicle category, used when the request doesn't set its own. */
   fallbackVehicle: string | null
+  /** The leg's own `service_date`, used when the trip has no captured `pickup_at`. A transfer
+   * priced onto the quote already knows which day it runs; without this the client document read
+   * "Date to be confirmed" until someone filled in a transport request on another tab. */
+  fallbackDate: string | null
+  /** The leg's own directed route name ("Cape Town Station > Portswood Hotel"), used when the
+   * trip has no typed pickup/drop-off points. Same reason as `fallbackDate`. */
+  fallbackRoute: string | null
   supplierReference: string | null
   /** See `BuildContext.travellerNames` — only read for flight requests. */
   travellerNames: string[] | null
@@ -504,6 +530,12 @@ function transportRequestBlock(
     }
   }
 
+  // A captured trip is authoritative wherever it says something, but a blank field is a gap, not
+  // a statement — so each one falls back to what the leg itself already knows. Rentals keep their
+  // own route wording out of it: `route` is only read when there is no pickup/drop-off pair.
+  const pickup = request.pickup_point.trim() || null
+  const dropoff = request.dropoff_point.trim() || null
+
   return {
     serviceType: "transfer",
     title: blockContext.title,
@@ -512,9 +544,10 @@ function transportRequestBlock(
     supplierContactName,
     contactDetails,
     serviceData: {
-      pickup: request.pickup_point.trim() || null,
-      dropoff: request.dropoff_point.trim() || null,
-      departureDate: timestampDate(request.pickup_at),
+      pickup,
+      dropoff,
+      route: pickup && dropoff ? null : blockContext.fallbackRoute,
+      departureDate: timestampDate(request.pickup_at) ?? blockContext.fallbackDate,
       startTime:
         timestampTime(request.pickup_at) ?? toHoursMinutes(blockContext.supplier?.default_time_start),
       arrivalDate: isRental ? timestampDate(rental?.return_at) : null,
@@ -619,12 +652,14 @@ export async function buildVoucherServiceBlocks(
     const title = leg?.label?.trim() || voucherServiceTypeLabel(serviceType)
     const displayOrder = leg?.sort_order ?? idx
 
-    // A transfer leg renders one block per captured trip; the leg-level selection only supplies
-    // the fallback vehicle category and supplier contact.
+    // A transfer leg renders one block per captured trip; the leg-level selection supplies the
+    // fallback vehicle category, the supplier contact, and — for any field the trip left blank —
+    // the leg's own date and route.
     if (serviceType === "transfer") {
       // row.package_leg_id holds a booking_services.id (see serviceRowToSelectionRow).
       const legRequests = transportRequests.filter((request) => request.service_id === row.package_leg_id)
       if (legRequests.length > 0) {
+        const legRouteName = resolveVoucherRouteName(route, row.route_reversed ?? false)
         return legRequests.map((request, requestIndex) =>
           transportRequestBlock(request, {
             title,
@@ -633,6 +668,8 @@ export async function buildVoucherServiceBlocks(
             contactDetails,
             supplier,
             fallbackVehicle: suite?.name ?? null,
+            fallbackDate: row.service_date ?? null,
+            fallbackRoute: legRouteName,
             supplierReference: request.supplier_reference ?? null,
             travellerNames: context.travellerNames ?? null,
           }),
@@ -705,6 +742,9 @@ export async function buildVoucherServiceBlocks(
       numberOfSuites: unitCount > 0 ? unitCount : null,
       roomType: isHotel ? suiteName : null,
       isComplimentary: isHotel ? context.complimentaryLegIds?.has(row.package_leg_id) ?? false : null,
+      isFirstNightComplimentary: isHotel
+        ? context.firstNightComplimentaryLegIds?.has(row.package_leg_id) ?? false
+        : null,
       vehicleType: serviceType === "transfer" ? suite?.name ?? null : null,
       // A flight's cabin is the booked suite type — SUITE_NOUN_KINDS deliberately excludes airline,
       // so the name reads as typed ("Economy") and feeds the itinerary's "in Economy".
@@ -779,6 +819,10 @@ export async function buildVoucherServiceBlocks(
           },
           supplier,
           fallbackVehicle: null,
+          // An unlinked trip has no leg behind it, so there is nothing to fall back to — what the
+          // request itself carries is all there is.
+          fallbackDate: null,
+          fallbackRoute: null,
           supplierReference: request.supplier_reference ?? null,
           travellerNames: context.travellerNames ?? null,
         }),

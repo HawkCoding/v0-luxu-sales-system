@@ -167,7 +167,13 @@ export function getAuditDisplay(log: AuditLog, context?: AuditDisplayContext): A
 
     return {
       title: sentence,
-      description: "Stage change",
+      // An override moved the booking past gates that were failing, so the
+      // reason for it is the whole point of the entry — show it here rather
+      // than leaving it buried in a column nobody reads back.
+      description:
+        log.action === "stage_change_override"
+          ? `Manager override${log.overrideReason ? ` — ${log.overrideReason}` : ""}`
+          : "Stage change",
       entityLabel: label,
       actorLabel: actor,
     }

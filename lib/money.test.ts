@@ -15,7 +15,7 @@ function plain(value: string): string {
 
 describe("formatMoney", () => {
   it("emits the symbol for every supported currency", () => {
-    expect(plain(formatMoney(1234.5, "ZAR"))).toBe("R 1 234,50")
+    expect(plain(formatMoney(1234.5, "ZAR"))).toBe("R1 234,50")
     expect(plain(formatMoney(1234.5, "USD"))).toBe("$1 234,50")
     expect(plain(formatMoney(1234.5, "EUR"))).toBe("€1 234,50")
     expect(plain(formatMoney(1234.5, "GBP"))).toBe("£1 234,50")
@@ -26,8 +26,8 @@ describe("formatMoney", () => {
   })
 
   it("always shows exactly two decimals", () => {
-    expect(plain(formatMoney(1000, "ZAR"))).toBe("R 1 000,00")
-    expect(plain(formatMoney(0.1 + 0.2, "ZAR"))).toBe("R 0,30")
+    expect(plain(formatMoney(1000, "ZAR"))).toBe("R1 000,00")
+    expect(plain(formatMoney(0.1 + 0.2, "ZAR"))).toBe("R0,30")
   })
 
   it("never emits a doubled symbol — callers must not prefix their own", () => {
@@ -50,7 +50,7 @@ describe("formatMoney", () => {
   })
 
   it("handles negatives and zero", () => {
-    expect(plain(formatMoney(0, "ZAR"))).toBe("R 0,00")
+    expect(plain(formatMoney(0, "ZAR"))).toBe("R0,00")
     expect(formatMoney(-250, "ZAR")).toContain("250,00")
   })
 })

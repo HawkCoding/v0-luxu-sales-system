@@ -45,6 +45,11 @@ const AUDIT_COLUMNS = [
   "before_json",
   "after_json",
   "meta_json",
+  // A manager's override reason was written to audit_logs but never read back:
+  // the stage_change_override event was discoverable, the reason behind it was
+  // not, which is the half that makes an override reviewable.
+  "override_reason",
+  "overridden_by",
   "created_at",
 ].join(", ")
 
@@ -58,6 +63,8 @@ interface AuditRow {
   before_json: unknown
   after_json: unknown
   meta_json: unknown
+  override_reason: string | null
+  overridden_by: string | null
   created_at: string
 }
 
@@ -142,6 +149,8 @@ function mapAuditRow(row: AuditRow): AuditLog {
     beforeJson: row.before_json ? JSON.stringify(row.before_json) : undefined,
     afterJson: row.after_json ? JSON.stringify(row.after_json) : undefined,
     metaJson: row.meta_json ? JSON.stringify(row.meta_json) : undefined,
+    overrideReason: row.override_reason ?? undefined,
+    overriddenBy: row.overridden_by ?? undefined,
     createdAt: row.created_at,
     createdAtDisplay: formatDisplayDateTime(row.created_at),
   }

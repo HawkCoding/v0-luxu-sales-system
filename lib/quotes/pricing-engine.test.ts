@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest"
 import type { QuoteLineItem } from "@/lib/types"
-import { isMissingPricing } from "@/lib/quotes/pricing-engine"
+import {
+  complimentaryNights,
+  hasComplimentaryNight,
+  isMissingPricing,
+  stayNights,
+} from "@/lib/quotes/pricing-engine"
 
 describe("isMissingPricing", () => {
   const line = (overrides: Partial<QuoteLineItem>): QuoteLineItem => ({
@@ -41,5 +46,47 @@ describe("isMissingPricing", () => {
       pricingSnapshot: { pricingMode: "rate_card", manualRoomPrice: 0 } as QuoteLineItem["pricingSnapshot"],
     })
     expect(isMissingPricing(comped)).toBe(false)
+  })
+})
+
+describe("complimentary nights", () => {
+  const gifted = (overrides: Partial<QuoteLineItem> = {}): QuoteLineItem => ({
+    description: "Standard Room",
+    qty: 3,
+    unitPrice: 4000,
+    total: 12000,
+    pricingSnapshot: {
+      pricingMode: "rate_card",
+      complimentaryNights: 1,
+      stayNights: 4,
+    } as QuoteLineItem["pricingSnapshot"],
+    ...overrides,
+  })
+
+  it("reads the gifted night count and the full stay off the snapshot", () => {
+    expect(complimentaryNights(gifted())).toBe(1)
+    expect(stayNights(gifted())).toBe(4)
+    expect(hasComplimentaryNight(gifted())).toBe(true)
+  })
+
+  it("falls back to the line's qty as the stay when nothing was gifted", () => {
+    const plain: QuoteLineItem = { description: "Room", qty: 2, unitPrice: 4000, total: 8000 }
+    expect(complimentaryNights(plain)).toBe(0)
+    expect(hasComplimentaryNight(plain)).toBe(false)
+    expect(stayNights(plain)).toBe(2)
+  })
+
+  it("does not flag a one-night stay whose only night was gifted as unpriced", () => {
+    const wholeStayGifted = gifted({
+      qty: 0,
+      unitPrice: 0,
+      total: 0,
+      pricingSnapshot: {
+        pricingMode: "rate_card",
+        complimentaryNights: 1,
+        stayNights: 1,
+      } as QuoteLineItem["pricingSnapshot"],
+    })
+    expect(isMissingPricing(wholeStayGifted)).toBe(false)
   })
 })

@@ -1,16 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { writeAuditLog } from "@/lib/audit-write"
-import { formatDisplayDateLong } from "@/lib/date-format"
-import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
 import { syncBookingPaymentState } from "@/lib/invoices/sync-booking-payment-state"
-import { formatCustomerSalutation } from "@/lib/person-name-format"
-import { getBankingSettings } from "@/lib/settings-access"
 import type { Database } from "@/lib/supabase/types"
-import { composeEmail } from "@/lib/templates/compose-email"
-import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import type { PipelineStage } from "@/lib/types"
-import { calculateDepositAmount, getDefaultDepositPercentage } from "./constants"
-import { getCrossedForwardStages, type LostContext, type ManualConfirmations } from "./validate-transition"
+import {
+  getCrossedForwardStages,
+  isReopenFromCancelled,
+  type LostContext,
+  type ManualConfirmations,
+} from "./validate-transition"
 
 type BookingRow = Database["public"]["Tables"]["bookings"]["Row"]
 type BookingUpdate = Database["public"]["Tables"]["bookings"]["Update"]
@@ -63,8 +61,6 @@ export class StaleTransitionError extends Error {
 export interface ApplyTransitionResult {
   updated: BookingRow
   crossedStages: PipelineStage[]
-  createdInvoiceDocument: boolean
-  scheduledDepositCorrespondence: boolean
 }
 
 function newestAcceptedOrSentQuote(
@@ -78,17 +74,6 @@ function newestAcceptedOrSentQuote(
     const rightTime = right.created_at ? new Date(right.created_at).getTime() : 0
     return rightTime - leftTime
   })[0] ?? null
-}
-
-function hasCorrespondence(
-  correspondences: Pick<CorrespondenceRow, "kind" | "subject" | "status">[],
-  kind: string,
-  terms: string[],
-): boolean {
-  return correspondences.some((correspondence) => {
-    const subject = correspondence.subject?.toLowerCase() ?? ""
-    return correspondence.kind === kind && terms.some((term) => subject.includes(term))
-  })
 }
 
 function buildBookingUpdates(input: ApplyTransitionInput, nowIso: string): BookingUpdate {
@@ -124,6 +109,21 @@ function buildBookingUpdates(input: ApplyTransitionInput, nowIso: string): Booki
     updates.refund_amount = input.lostContext?.refundAmount ?? null
     updates.refund_reference = input.lostContext?.refundReference?.trim() || null
     updates.refunded_at = input.lostContext?.refundedAt || null
+  } else if (isReopenFromCancelled(input.booking.stage as PipelineStage)) {
+    // Reopening has to undo the cancellation, or the booking lands in states
+    // like `stage=accepted, outcome=Cancelled, cancelled_at=<set>`. The reason
+    // and notes are cleared with it; the reopen itself is what the audit log
+    // now records.
+    updates.cancelled_at = null
+    updates.outcome = "Open"
+    updates.outcome_reason_id = null
+    updates.outcome_notes = null
+    updates.outcome_set_at = null
+    updates.outcome_set_by = null
+    updates.refund_status = null
+    updates.refund_amount = null
+    updates.refund_reference = null
+    updates.refunded_at = null
   }
 
   if (input.booking.source === "email" && input.targetStage !== "enquiry") {
@@ -141,23 +141,31 @@ export async function applyTransition(
   const crossedStages = getCrossedForwardStages(input.booking.stage as PipelineStage, input.targetStage)
   const updates = buildBookingUpdates(input, nowIso)
 
-  let updateQuery = supabase.from("bookings").update(updates).eq("id", input.booking.id)
-  if (input.expectedUpdatedAt) {
-    updateQuery = updateQuery.eq("updated_at", input.expectedUpdatedAt)
-  }
+  // Every transition is guarded, not only the ones whose caller sent a stamp.
+  // `expectedUpdatedAt` used to be the only thing that engaged the check, and
+  // it is optional on the PATCH schema, so two concurrent moves (a double
+  // click, a retry, two tabs) both applied: two pipeline_history rows, two
+  // invoice_pdf documents, two deposit emails queued. The caller's stamp still
+  // wins when it sends one; otherwise the row version we just read serialises
+  // the write, and the loser gets the same 409 as an explicitly stale save.
+  const guardUpdatedAt = input.expectedUpdatedAt ?? input.booking.updated_at
 
-  const { data: updated, error } = await updateQuery.select().maybeSingle()
+  const { data: updated, error } = await supabase
+    .from("bookings")
+    .update(updates)
+    .eq("id", input.booking.id)
+    .eq("updated_at", guardUpdatedAt)
+    .select()
+    .maybeSingle()
   if (error) throw error
   if (!updated) {
-    if (input.expectedUpdatedAt) {
-      const { data: current } = await supabase
-        .from("bookings")
-        .select("updated_at")
-        .eq("id", input.booking.id)
-        .maybeSingle()
-      throw new StaleTransitionError(current?.updated_at ?? input.booking.updated_at)
-    }
-    throw new Error("Booking update did not return a row")
+    const { data: current } = await supabase
+      .from("bookings")
+      .select("updated_at")
+      .eq("id", input.booking.id)
+      .maybeSingle()
+    if (!current) throw new Error("Booking update did not return a row")
+    throw new StaleTransitionError(current.updated_at ?? input.booking.updated_at)
   }
 
   const latestQuote = newestAcceptedOrSentQuote(input.quotes ?? [])
@@ -190,22 +198,14 @@ export async function applyTransition(
     })
   }
 
-  let createdInvoiceDocument = false
-  let scheduledDepositCorrespondence = false
-
   if (crossedStages.includes("deposit_requested")) {
-    const hasInvoiceDocument = (input.documents ?? []).some((document) => document.kind === "invoice_pdf")
-    if (!hasInvoiceDocument && input.manualConfirmations?.createDepositInvoice) {
-      const { error: documentError } = await supabase.from("documents").insert({
-        booking_id: input.booking.id,
-        kind: "invoice_pdf",
-        status: "generated",
-      })
-
-      if (documentError) throw new Error(documentError.message)
-      createdInvoiceDocument = true
-    }
-
+    // No invoice is created here any more. The `invoice_document` gate is a
+    // hard block that can only be cleared by generating a real invoice through
+    // POST /api/invoices/deposit, and `invoice_correspondence` then blocks
+    // until it is actually sent — so by the time this runs, both the invoice
+    // and its email already exist. The placeholder `invoice_pdf` document and
+    // the draft deposit email this branch used to write were the tail end of
+    // the removed `create_invoice_25pct` shortcut.
     const invoiceBalance = latestQuote?.total ?? null
     if (invoiceBalance !== null && updated.invoice_balance === null) {
       const { error: balanceError } = await supabase
@@ -214,68 +214,6 @@ export async function applyTransition(
         .eq("id", input.booking.id)
 
       if (balanceError) throw new Error(balanceError.message)
-    }
-
-    // Only the "create the invoice for me" confirmation schedules a deposit
-    // email draft — the invoice-sent gate itself is a hard block now, cleared
-    // by actually sending (or a manager override), never by drafting here.
-    const shouldScheduleDepositCorrespondence =
-      (hasInvoiceDocument || createdInvoiceDocument) &&
-      !hasCorrespondence(input.correspondences ?? [], "invoice", ["invoice", "deposit request"]) &&
-      input.manualConfirmations?.createDepositInvoice === true
-
-    if (shouldScheduleDepositCorrespondence) {
-      const defaultDepositPercentage = await getDefaultDepositPercentage(supabase)
-      const depositAmount = latestQuote?.total ? calculateDepositAmount(latestQuote.total, defaultDepositPercentage) : null
-
-      // Draft the deposit email from the editable deposit_request template so
-      // the scheduled correspondence is a real, sendable email.
-      let customerName = "Valued Guest"
-      if (input.booking.customer_id) {
-        const { data: customer } = await supabase
-          .from("customers")
-          .select("title, first_name, last_name")
-          .eq("id", input.booking.customer_id)
-          .maybeSingle()
-        const name = formatCustomerSalutation(customer)
-        if (name) customerName = name
-      }
-
-      const dueDate = new Date(nowIso)
-      dueDate.setDate(dueDate.getDate() + 7)
-      const banking = await getBankingSettings(supabase)
-      const shared = await resolveSharedEmailTokens(supabase, input.booking.id)
-      const composed = await composeEmail(supabase, "deposit_request", {
-        tokens: {
-          ...shared.tokens,
-          customerName,
-          jobNumber: input.booking.booking_number,
-          invoiceNumber: `${input.booking.booking_number}-DEP1`,
-          depositAmount: depositAmount === null ? "TBC" : depositAmount.toFixed(2),
-          depositPercentage: String(defaultDepositPercentage),
-          dueDate: formatDisplayDateLong(dueDate),
-        },
-        blocks: {
-          ...shared.blocks,
-          bankingDetails: buildBankingDetailsBlock(banking, `${input.booking.booking_number}-DEP1`),
-        },
-        senderProfileId: input.booking.assigned_salesperson_id ?? input.actorUserId,
-      })
-
-      const { error: correspondenceError } = await supabase.from("correspondences").insert({
-        booking_id: input.booking.id,
-        channel: "email",
-        kind: "invoice",
-        status: "scheduled",
-        scheduled_at: nowIso,
-        subject: composed?.subject ?? `Deposit invoice for ${input.booking.booking_number}`,
-        body_html:
-          composed?.bodyHtml ??
-          "<p>Thank you for choosing Luxus. Please find your deposit invoice attached.</p>",
-      })
-
-      if (correspondenceError) throw new Error(correspondenceError.message)
-      scheduledDepositCorrespondence = true
     }
   }
 
@@ -327,10 +265,5 @@ export async function applyTransition(
     }
   }
 
-  return {
-    updated,
-    crossedStages,
-    createdInvoiceDocument,
-    scheduledDepositCorrespondence,
-  }
+  return { updated, crossedStages }
 }

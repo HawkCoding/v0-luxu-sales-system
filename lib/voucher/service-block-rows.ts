@@ -1,4 +1,4 @@
-import type { VoucherServiceBlock, VoucherServiceBlockContact } from "@/lib/generate-voucher"
+import type { VoucherServiceBlock, VoucherServiceBlockContact, VoucherServiceType } from "@/lib/generate-voucher"
 import { formatDisplayDateLong } from "@/lib/date-format"
 import { formatBulletLinesInline } from "@/lib/inclusions/bullet-lines"
 
@@ -95,6 +95,11 @@ export function voucherRowsForBlock(block: VoucherServiceBlock): VoucherRow[] {
   } else if (block.serviceType === "transfer") {
     if (d.passengerCount != null) rows.push({ label: "No of Guests", value: `${d.passengerCount} Adults` })
     if (d.vehicleType) rows.push({ label: "Vehicle", value: d.vehicleType })
+    // Falls back to the leg's own route name only when the trip has neither a typed pickup nor
+    // drop-off — without it such a block would state no location at all, now that the supplier's
+    // office address no longer prints. Guarded here (not just upstream) so it can never duplicate
+    // the two rows below.
+    if (d.route && !d.pickup && !d.dropoff) rows.push({ label: "Route", value: d.route })
     const pickUp = pickUpLine(departureDate, d.pickup, d.startTime)
     if (pickUp) rows.push({ label: "Pick Up", value: pickUp })
     if (d.dropoff) rows.push({ label: "Drop-off", value: d.dropoff })
@@ -187,10 +192,21 @@ function guestsRow(breakdown: { adults: number; children: number; infants: numbe
   }
 }
 
+/** Categories whose supplier address is the place the guest physically arrives at. Every other
+ * category prints a back-office address the guest never visits — a transfer operator's depot, an
+ * airline's head office — and a train's real address is its per-city boarding point instead (see
+ * the Boarding Point / Arrival Point rows above, resolved from `supplier_station_addresses`). */
+const ADDRESS_IS_A_DESTINATION: ReadonlySet<VoucherServiceType> = new Set(["hotel", "tour"])
+
 /** "Tel: … – Emergency: … • Email: … • {street address}, {location}" — printed as a single small
  * line under the provider name, not as a table row; matches the legacy voucher's contact line
- * directly under each supplier's heading rather than buried at the bottom of the details table. */
-export function voucherProviderContactLine(contact: VoucherServiceBlockContact): string | null {
+ * directly under each supplier's heading rather than buried at the bottom of the details table.
+ * The address segment only prints for categories where that address is somewhere the guest goes —
+ * see `ADDRESS_IS_A_DESTINATION`. */
+export function voucherProviderContactLine(
+  contact: VoucherServiceBlockContact,
+  serviceType: VoucherServiceType,
+): string | null {
   const parts: string[] = []
   if (contact.phone) {
     parts.push(contact.emergencyPhone ? `Tel: ${contact.phone} – Emergency: ${contact.emergencyPhone}` : `Tel: ${contact.phone}`)
@@ -199,7 +215,9 @@ export function voucherProviderContactLine(contact: VoucherServiceBlockContact):
   }
   if (contact.email) parts.push(`Email: ${contact.email}`)
   if (contact.website) parts.push(contact.website)
-  const address = [contact.streetAddress, contact.location].filter(Boolean).join(", ")
-  if (address) parts.push(address)
+  if (ADDRESS_IS_A_DESTINATION.has(serviceType)) {
+    const address = [contact.streetAddress, contact.location].filter(Boolean).join(", ")
+    if (address) parts.push(address)
+  }
   return parts.length > 0 ? parts.join(" • ") : null
 }

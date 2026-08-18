@@ -219,7 +219,16 @@ function describeBlock(block: VoucherServiceBlock): string {
           d.roomType ? `in a ${d.roomType}` : null,
           d.mealPlan ? `incl. ${d.mealPlan}` : null,
         ],
-        [start ? `Check in from ${start}` : null, d.isComplimentary ? "COMPLIMENTARY" : null],
+        [
+          start ? `Check in from ${start}` : null,
+          // The stay length above is always the full stay; a gifted first night is a callout, not
+          // a shorter itinerary. A fully comped stay keeps the older, blunter wording.
+          d.isComplimentary
+            ? "COMPLIMENTARY"
+            : d.isFirstNightComplimentary
+              ? "FIRST NIGHT COMPLIMENTARY"
+              : null,
+        ],
       )
     }
     case "train": {

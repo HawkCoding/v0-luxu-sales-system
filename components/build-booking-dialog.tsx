@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Boxes, Check, ChevronDown, ChevronUp, Percent, TriangleAlert } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -13,6 +13,10 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import { DiscardChangesDialog } from "@/components/discard-changes-dialog"
+import { useDraftAutosave } from "@/hooks/use-draft-autosave"
+import { useDirtyCloseGuard } from "@/hooks/use-dirty-close-guard"
+import { useUnloadGuard } from "@/hooks/use-unload-guard"
 import {
   Select,
   SelectContent,
@@ -47,19 +51,21 @@ import type { AgeBuckets } from "@/lib/pricing/age-buckets"
 import { deriveTripDateRangeFromStates, dateOnly } from "@/lib/packages/trip-date-range"
 import { findRateCardCandidates, selectRateCard } from "@/lib/rate-cards/resolve"
 import {
-  applyAnchoredHotelDates,
+  applyAnchoredDates,
   buildDefaultLegStates,
   hydrateFromSaved,
   PASSENGER_SPLIT_SUPPLIER_KINDS,
   toApplySelections,
   toHotelAnchorContext,
   toPackageSelectionsPatch,
+  toTransferAnchorContext,
   toTransportRequestsPut,
   validateConfigureState,
   type ApplyCommissionOverride,
   type ApplyLegState,
   type HotelAnchorContext,
   type SavedPackageState,
+  type TransferAnchorContext,
 } from "@/lib/packages/apply-dialog-state"
 
 interface BuildBookingDialogProps {
@@ -105,6 +111,34 @@ interface BuildBookingResponse {
 type Step = "services" | "configure" | "confirm"
 
 const EMPTY_COMMISSION: CommissionControlValue = { type: null, value: null }
+
+/**
+ * The slice of this dialog's state that is worth recovering after a refresh, crash, or accidental
+ * dismissal. Everything else (`packageDetail`, `previewLineItems`, `incompleteLegs`, totals) is
+ * server-derived and gets refetched/rebuilt on open, so persisting it would just risk going stale.
+ *
+ * Bump `QUOTE_DRAFT_SCHEMA_VERSION` whenever this shape changes — see `lib/drafts/draft-storage.ts`
+ * for why: a draft written under an old shape is dropped rather than restored with `undefined` gaps.
+ */
+interface QuoteBuilderDraft {
+  step: Step
+  services: ServiceRow[]
+  legStates: ApplyLegState[]
+  commission: CommissionControlValue
+  travellerDraft: TravellerCounts | null
+}
+
+const QUOTE_DRAFT_SCHEMA_VERSION = 1
+
+// Stable module-level reference -- an inline object literal here would get a new identity every
+// render and restart the autosave hook's debounce on every unrelated re-render.
+const EMPTY_QUOTE_DRAFT: QuoteBuilderDraft = {
+  step: "services",
+  services: [],
+  legStates: [],
+  commission: EMPTY_COMMISSION,
+  travellerDraft: null,
+}
 
 /** The booking's commission is a required step — one value applied to every service line.
  * Returns null while it is still unset, which is what blocks the configure step's Next. */
@@ -176,6 +210,106 @@ export function BuildBookingDialog({
     recordId: quoteId,
     expectedUpdatedAt,
   })
+
+  // Draft autosave: mirrors the persistable slice of this dialog's state to localStorage so a
+  // refresh, crash, or accidental dismissal doesn't throw away typing that hasn't reached the
+  // configure step's "Next" (the first point any of this is saved server-side).
+  const currentQuoteDraftData: QuoteBuilderDraft = { step, services, legStates, commission, travellerDraft }
+  const {
+    pendingDraft: pendingQuoteDraft,
+    pendingDraftRecordUpdatedAt: pendingQuoteDraftRecordUpdatedAt,
+    hasLoadedDraft: hasLoadedQuoteDraft,
+    isDirty: quoteDraftDirty,
+    discardDraft: discardQuoteDraft,
+  } = useDraftAutosave<QuoteBuilderDraft>({
+    kind: "quote",
+    recordId: quoteId,
+    version: QUOTE_DRAFT_SCHEMA_VERSION,
+    enabled: open,
+    data: currentQuoteDraftData,
+    baseline: EMPTY_QUOTE_DRAFT,
+    recordUpdatedAt: expectedUpdatedAt ?? null,
+  })
+  const draftAppliedRef = useRef(false)
+  // A draft found for a quote someone else has since saved (`expectedUpdatedAt` moved on) is offered
+  // rather than silently overlaid -- see the banner rendered near the top of DialogContent below.
+  const [staleQuoteDraft, setStaleQuoteDraft] = useState<QuoteBuilderDraft | null>(null)
+  useUnloadGuard(quoteDraftDirty)
+  const closeGuard = useDirtyCloseGuard({
+    isDirty: quoteDraftDirty,
+    onConfirmedClose: () => {
+      discardQuoteDraft()
+      setOpen(false)
+      reset()
+    },
+  })
+
+  /** Applies a restored draft's leg configuration only if its leg ids still exist on the currently
+   *  loaded package -- a leg the draft points at that no longer exists (booking rebuilt differently
+   *  since the draft was taken) would otherwise silently render nothing. Returns whether the leg
+   *  configuration itself was restorable; `services`/`commission`/`travellerDraft` restore either way. */
+  function applyQuoteDraftToState(draft: QuoteBuilderDraft): boolean {
+    const draftLegIds = draft.legStates.map((state) => state.legId)
+    const availableLegIds = new Set((packageDetail?.legs ?? []).map((leg) => leg.id))
+    const legStatesRestorable =
+      draft.legStates.length === 0 ||
+      (packageDetail !== null && draftLegIds.every((id) => availableLegIds.has(id)))
+
+    if (draft.services.length > 0) setServices(draft.services)
+    if (draft.commission.type !== null) setCommission(draft.commission)
+    if (draft.travellerDraft) setTravellerDraft(draft.travellerDraft)
+
+    if (legStatesRestorable && draft.legStates.length > 0) {
+      setLegStates(draft.legStates)
+      // "confirm" needs previewLineItems, which isn't persisted (it's re-derived server-side) --
+      // land one step back and let Next regenerate it.
+      setStep(draft.step === "confirm" ? "configure" : draft.step)
+      return true
+    }
+    return false
+  }
+
+  // Reset the per-open restore guard, and offer whatever draft is on disk once it's loaded. Waits
+  // for `packageDetail` when the draft has leg configuration to restore, since leg ids are only
+  // resolvable once the dialog's own "load saved services" effect below has populated it.
+  useEffect(() => {
+    if (!open) {
+      draftAppliedRef.current = false
+      setStaleQuoteDraft(null)
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open || draftAppliedRef.current || !hasLoadedQuoteDraft) return
+    const draft = pendingQuoteDraft
+    if (!draft) {
+      draftAppliedRef.current = true
+      return
+    }
+
+    const recordMoved =
+      pendingQuoteDraftRecordUpdatedAt !== null &&
+      expectedUpdatedAt !== undefined &&
+      pendingQuoteDraftRecordUpdatedAt !== expectedUpdatedAt
+    if (recordMoved) {
+      draftAppliedRef.current = true
+      setStaleQuoteDraft(draft)
+      return
+    }
+
+    if (draft.legStates.length > 0 && packageDetail === null) return // wait for packageDetail to load
+
+    draftAppliedRef.current = true
+    const restoredLegs = applyQuoteDraftToState(draft)
+    if (restoredLegs) {
+      toast.success("Restored your unsaved quote changes.", {
+        action: { label: "Undo", onClick: () => { discardQuoteDraft(); reset() } },
+      })
+    } else if (draft.services.length > 0) {
+      toast.success("Restored the services you'd added — click Build to continue configuring.")
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, hasLoadedQuoteDraft, pendingQuoteDraft, pendingQuoteDraftRecordUpdatedAt, expectedUpdatedAt, packageDetail])
 
   const filteredSuppliers = suppliers.filter((supplier) => supplier.kind === pickerKind)
 
@@ -517,13 +651,18 @@ export function BuildBookingDialog({
     const edited: ApplyLegState = next.origin === "auto" ? { ...next, origin: "consultant" } : next
     setLegStates((prev) => {
       const merged = prev.map((state) => (state.legId === edited.legId ? edited : state))
-      return packageDetail ? applyAnchoredHotelDates(packageDetail, merged) : merged
+      return packageDetail ? applyAnchoredDates(packageDetail, merged) : merged
     })
   }
 
   function hotelAnchorContext(legId: string): HotelAnchorContext | null {
     if (!packageDetail) return null
     return toHotelAnchorContext(packageDetail, legStates, legId)
+  }
+
+  function transferAnchorContext(legId: string): TransferAnchorContext | null {
+    if (!packageDetail) return null
+    return toTransferAnchorContext(packageDetail, legStates, legId)
   }
 
   const hasAutoFilledServices = legStates.some((state) => state.origin === "auto")
@@ -769,6 +908,7 @@ export function BuildBookingDialog({
     try {
       await saveQuote({ lineItems: lineItemsToSave }, options)
       toast.success("Booking services applied to quote")
+      discardQuoteDraft()
       setOpen(false)
       reset()
       onApplied()
@@ -780,14 +920,61 @@ export function BuildBookingDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(next) => { setOpen(next); if (!next) reset() }}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (next) {
+          setOpen(true)
+          return
+        }
+        closeGuard.handleOpenChange(false)
+      }}
+    >
       <DialogTrigger asChild>
         <Button variant="outline" size="sm">
           <Boxes className="mr-2 h-4 w-4" />
           Edit Quote
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-4xl">
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-4xl" {...closeGuard.contentProps}>
+        <DiscardChangesDialog
+          open={closeGuard.confirming}
+          onKeepEditing={closeGuard.cancelDiscard}
+          onDiscard={closeGuard.confirmDiscard}
+        />
+        {staleQuoteDraft && (
+          <div className="flex flex-col gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between">
+            <span>
+              You have unsaved edits to this quote from a previous session, but the quote has changed
+              since then — restoring them may overwrite what changed.
+            </span>
+            <div className="flex shrink-0 gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  discardQuoteDraft()
+                  setStaleQuoteDraft(null)
+                }}
+              >
+                Discard
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => {
+                  applyQuoteDraftToState(staleQuoteDraft)
+                  discardQuoteDraft()
+                  setStaleQuoteDraft(null)
+                  toast.success("Restored your unsaved quote changes.")
+                }}
+              >
+                Restore my draft
+              </Button>
+            </div>
+          </div>
+        )}
         {step === "services" && (
           <>
             <DialogHeader>
@@ -945,6 +1132,7 @@ export function BuildBookingDialog({
                         leg={leg}
                         value={state}
                         onChange={updateLegState}
+                        anchorContext={transferAnchorContext(leg.id)}
                         rateTypes={rateTypes}
                         quoteCurrency={quoteCurrency}
                         fxRates={fxRates}

@@ -1,9 +1,20 @@
 import { addDays, trainArrivalDate } from "@/lib/packages/hotel-dates"
 import { firstRecord } from "@/lib/utils"
-import { mapSupplierKindToServiceType } from "@/lib/voucher/build-service-blocks"
+import {
+  mapSupplierKindToServiceType,
+  resolveVoucherRouteName,
+  type RouteNameJoin,
+} from "@/lib/voucher/build-service-blocks"
 import type { WorksheetServiceLine } from "@/lib/worksheet/pdf/worksheet-document"
 
 type Join<T> = T | T[] | null | undefined
+
+/** The route fields the worksheet loads: `duration_days` for its own end-date math, plus
+ * everything `resolveVoucherRouteName` needs to name the leg the way client documents do. */
+type WorksheetRouteJoin = RouteNameJoin & { duration_days: number | null }
+
+/** A booked room/suite's type name — the only unit field the worksheet's description needs. */
+type WorksheetSuiteJoin = Join<{ name: string | null }>
 
 /** The `booking_services` shape the worksheet loads — the booking's real itinerary. */
 export interface WorksheetServiceRow {
@@ -15,8 +26,14 @@ export interface WorksheetServiceRow {
   arrival_date: string | null
   supplier_reference: string | null
   notes: string | null
+  route_reversed?: boolean | null
   suppliers: Join<{ name: string; kind: string }>
-  routes: Join<{ duration_days: number | null }>
+  routes: Join<WorksheetRouteJoin>
+  /** Legacy pre-cutover hotel rows with no per-room units — see resolveRoomNames. */
+  suite_types?: WorksheetSuiteJoin
+  /** Hotel legs only: one row per booked room, carrying whether its first night was gifted and
+   * which room type was chosen. */
+  units?: Join<{ complimentary_first_night: boolean; suite_types?: WorksheetSuiteJoin }>
 }
 
 /** A captured transfer/rental/flight trip. `service_id` links it back to its service row. */
@@ -67,11 +84,62 @@ function resolveToDate(
 }
 
 /**
+ * Prefixes a hotel line's notes with the nights the hotel gifted, so whoever confirms the booking
+ * with the property sees the deal that was quoted rather than only the stay length. Counted per
+ * room, matching how the gift is captured (see suite-leg-editor.tsx).
+ */
+function complimentaryNote(
+  service: WorksheetServiceRow,
+  serviceType: string,
+  notes: string | null,
+): string | null {
+  if (serviceType !== "hotel") return notes
+  const units = service.units ? (Array.isArray(service.units) ? service.units : [service.units]) : []
+  const gifted = units.filter((unit) => unit.complimentary_first_night).length
+  if (gifted === 0) return notes
+
+  const note =
+    gifted === 1
+      ? "First night complimentary"
+      : `First night complimentary on ${gifted} rooms`
+  return notes?.trim() ? `${note} — ${notes.trim()}` : note
+}
+
+/** Room type name(s) booked on a hotel leg, deduped — per-room `units` when present, falling back
+ * to the leg's own `suite_type_id` for legacy pre-cutover rows with no unit children (mirrors the
+ * fallback in `resolveLegSuiteNames`, minus the bed/bathroom composition the worksheet doesn't need). */
+function resolveRoomNames(service: WorksheetServiceRow): string[] {
+  const units = service.units ? (Array.isArray(service.units) ? service.units : [service.units]) : []
+  const unitNames = units
+    .map((unit) => firstRecord(unit.suite_types)?.name)
+    .filter((name): name is string => Boolean(name))
+  if (unitNames.length > 0) return Array.from(new Set(unitNames))
+
+  const legacyName = firstRecord(service.suite_types)?.name
+  return legacyName ? [legacyName] : []
+}
+
+/** "Rovos Rail — Pretoria → Cape Town" for a train leg, "Grand Hotel — Deluxe Suite" for a hotel
+ * leg (multiple distinct rooms join with a comma), or just the supplier name for everything else —
+ * the worksheet's Service Description column. */
+function resolveServiceDescription(service: WorksheetServiceRow, serviceType: string, supplierName: string): string {
+  if (serviceType === "train") {
+    const routeName = resolveVoucherRouteName(firstRecord(service.routes), service.route_reversed ?? false)
+    return routeName ? `${supplierName} — ${routeName}` : supplierName
+  }
+  if (serviceType === "hotel") {
+    const roomNames = resolveRoomNames(service)
+    return roomNames.length > 0 ? `${supplierName} — ${roomNames.join(", ")}` : supplierName
+  }
+  return supplierName
+}
+
+/**
  * Flattens a booking's services and captured trips into the worksheet's service-line grid.
  *
- * The worksheet is an internal hand-finished document: the description is deliberately nothing but
- * the supplier name, and every financial column is left blank for pen. Only the admin dates the
- * Suppliers tab already captured are carried over, matched by supplier.
+ * The worksheet is an internal hand-finished document: the description is the supplier name, plus
+ * the route booked (trains) or room booked (hotels) — everything financial is left blank for pen.
+ * Only the admin dates the Suppliers tab already captured are carried over, matched by supplier.
  */
 export function buildWorksheetServiceLines({
   services,
@@ -128,9 +196,9 @@ export function buildWorksheetServiceLines({
           service.arrival_date,
           firstRecord(service.routes)?.duration_days ?? null,
         ),
-        description: supplier?.name ?? "",
+        description: resolveServiceDescription(service, serviceType, supplier?.name ?? ""),
         reservationReference: service.supplier_reference,
-        notes: service.notes,
+        notes: complimentaryNote(service, serviceType, service.notes),
         ...adminDates(service.supplier_id),
       },
     ]

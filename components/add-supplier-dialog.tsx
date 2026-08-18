@@ -32,6 +32,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { useLocations, useSuppliers } from "@/lib/use-data"
 import { shortenUrl } from "@/lib/url"
 import { SUPPLIER_KIND_LABELS, type SupplierKind } from "@/lib/types"
+import { useDirtyCloseGuard } from "@/hooks/use-dirty-close-guard"
+import { DiscardChangesDialog } from "@/components/discard-changes-dialog"
 
 interface AddSupplierDialogProps {
   open: boolean
@@ -194,6 +196,25 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
     }
   }
 
+  // Compared field-by-field rather than against a static "empty form" snapshot: each blank email
+  // row carries a `crypto.randomUUID()` id, so two otherwise-identical untouched forms are never
+  // deep-equal.
+  const isDirty =
+    form.kind !== "" ||
+    form.name.trim() !== "" ||
+    form.phone.trim() !== "" ||
+    form.website.trim() !== "" ||
+    form.location.trim() !== "" ||
+    form.locationId !== null ||
+    form.notes.trim() !== "" ||
+    form.parentSupplierId !== null ||
+    form.emails.some((entry) => entry.email.trim() !== "" || entry.label.trim() !== "General")
+
+  const closeGuard = useDirtyCloseGuard({
+    isDirty,
+    onConfirmedClose: () => handleOpenChange(false),
+  })
+
   const handleSubmit = async () => {
     const validationErrors = validateSupplierForm(form)
     const hasValidationErrors = Object.values(validationErrors).some((value) => value !== null)
@@ -265,8 +286,13 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-2xl">
+    <Dialog open={open} onOpenChange={(next) => (next ? handleOpenChange(true) : closeGuard.handleOpenChange(false))}>
+      <DialogContent className="max-w-2xl" {...closeGuard.contentProps}>
+        <DiscardChangesDialog
+          open={closeGuard.confirming}
+          onKeepEditing={closeGuard.cancelDiscard}
+          onDiscard={closeGuard.confirmDiscard}
+        />
         <DialogHeader>
           <DialogTitle>Add Supplier</DialogTitle>
           <DialogDescription>
@@ -496,7 +522,7 @@ export function AddSupplierDialog({ open, onOpenChange }: AddSupplierDialogProps
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => handleOpenChange(false)} disabled={isSaving}>
+          <Button variant="outline" onClick={() => closeGuard.handleOpenChange(false)} disabled={isSaving}>
             Cancel
           </Button>
           <Button onClick={handleSubmit} disabled={isSaving}>

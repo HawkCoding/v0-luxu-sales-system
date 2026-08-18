@@ -694,6 +694,13 @@ export interface PricingSnapshot {
   manualRoomPriceBase?: number | null
   manualRoomPriceSetAt?: string | null
   manualRoomPriceSetByName?: string | null
+  /** Hotel legs only: nights of this room's stay the hotel gifted, so the line prices
+   *  `stayNights - complimentaryNights`. Today only ever 0 or 1 ("first night complimentary"),
+   *  stored as a count so the qty on the line can always be read back against the real stay. */
+  complimentaryNights?: number | null
+  /** Hotel legs only: the room's full stay length in nights. The line's own qty is the charged
+   *  nights, so this is what client documents and the worksheet count the stay by. */
+  stayNights?: number | null
   /** Transfer/rental legs only: the consultant-typed price that replaced the rate card for this
    *  request, in sourceCurrency. Internal-only, same posture as manualRoomPrice. */
   manualTransportPrice?: number | null
@@ -723,9 +730,15 @@ export interface SupplierPackage {
   rateCards: SupplierRateCard[]
 }
 
-/** Where a hotel stay sits relative to its train leg. `custom` is a booking-level override only —
- * a package leg stores `pre`/`post` (or null when the hotel isn't anchored to the train at all). */
-export type HotelDateAnchor = "pre" | "post" | "custom"
+/**
+ * Where a dated service sits relative to the service it hangs off.
+ *
+ * A hotel anchors to its train leg (`pre` = the night(s) before departure, `post` = from the day
+ * the train arrives). A transfer anchors to the leg above it in the itinerary (`pre` = the day that
+ * leg starts, `post` = the day it ends). `custom` is a booking-level override only — a package leg
+ * stores `pre`/`post`, or null when the service isn't anchored at all.
+ */
+export type ServiceDateAnchor = "pre" | "post" | "custom"
 
 export interface PackageLeg {
   id: string
@@ -920,6 +933,9 @@ export interface BookingTransportRequest {
   dropoffPoint: string
   pickupAt: string | null
   pickupAtDisplay?: string
+  /** Transfers only: `pre`/`post` derive the pickup DATE from the leg above it in the itinerary;
+   *  `custom` (the default) leaves it hand-picked. Always null on a rental. */
+  dateAnchor: ServiceDateAnchor | null
   rentalDetails: BookingVehicleRentalDetails | null
   passengerCount: number | null
   luggageCount: number | null
@@ -1242,6 +1258,10 @@ export interface AuditLog {
   beforeJson?: string
   afterJson?: string
   metaJson?: string
+  /** Set on `stage_change_override`: the reason the manager typed. */
+  overrideReason?: string
+  /** Set on `stage_change_override`: the manager's user id. */
+  overriddenBy?: string
   createdAt: string
   createdAtDisplay?: string
 }

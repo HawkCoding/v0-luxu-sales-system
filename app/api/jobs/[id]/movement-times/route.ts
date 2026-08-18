@@ -235,10 +235,13 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     }
 
     if (update.pickupAt !== undefined) {
-      // Scoped on booking_id as well as id so a request from another booking can never be reached.
+      // A pickup typed here is a deliberate override, so it must stick — flip the anchor to
+      // 'custom' or the next Build Booking re-derive (lib/packages/transfer-dates.ts) would
+      // silently overwrite what was just typed. Scoped on booking_id as well as id so a request
+      // from another booking can never be reached.
       const { error } = await supabase
         .from("booking_transport_requests")
-        .update({ pickup_at: update.pickupAt })
+        .update({ pickup_at: update.pickupAt, date_anchor: "custom" })
         .eq("booking_id", id)
         .eq("id", update.id)
 

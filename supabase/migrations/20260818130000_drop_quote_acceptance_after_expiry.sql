@@ -1,0 +1,12 @@
+-- QA 11 (F11-2): `app_settings.quote_acceptance_after_expiry` has been stored as 'blocked' since
+-- 20260516120000_phase_34_business_defaults.sql, but nothing has ever read it. There is no expiry
+-- check anywhere in lib/pipeline/, so a quote 17 days past its validity_until accepts with zero
+-- gate failures. Quote validity is deliberately hidden end to end behind QUOTE_VALIDITY_ENABLED
+-- (lib/feature-flags.ts) — invisible to the consultant and absent from the client document — so
+-- the setting describes a rule the product does not have.
+--
+-- A stored setting that silently does nothing is worse than no setting: the next person to read
+-- app_settings believes expired quotes are blocked. Removing it makes the absence honest. When
+-- validity is switched back on, the gate and its setting get reintroduced together, at which point
+-- already-lapsed quotes need a deliberate migration decision rather than an inherited default.
+delete from public.app_settings where key = 'quote_acceptance_after_expiry';

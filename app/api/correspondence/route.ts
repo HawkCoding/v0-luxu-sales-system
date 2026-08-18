@@ -7,7 +7,8 @@ import { getEmailFromAddress } from "@/lib/email/from"
 import { resolveSalespersonSender, type ResolvedSenderReason } from "@/lib/email/resolve-sender"
 import { isFallbackSendingUnavailable, sendEmail } from "@/lib/email/transport"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
-import { applyTransition } from "@/lib/pipeline/apply-transition"
+import { staleVersionResponse } from "@/lib/concurrency"
+import { applyTransition, StaleTransitionError } from "@/lib/pipeline/apply-transition"
 import { validateTransition } from "@/lib/pipeline/validate-transition"
 import { loadLibraryAttachments } from "@/lib/attachments/email-attachment-library"
 import { ensureQuotePdf, QUOTE_BUCKET } from "@/lib/quotes/ensure-quote-pdf"
@@ -122,7 +123,17 @@ const PRE_SEND_GATED_STAGES = new Set<PipelineStage>(["accepted", "deposit_reque
 // that exists before this request, never on the send/transition this
 // request itself performs — unlike e.g. "reservation form received" or
 // "voucher correspondence sent", which these very sends are what satisfy.
-const PRE_SEND_GATE_IDS = new Set(["customer_complete", "email_import_review", "invoice_number_required"])
+// The two quote gates belong here for the same reason: sending a
+// reservation-form acknowledgement is not what puts a quote in front of the
+// customer, so without them a booking could reach Quote Accepted having never
+// had a quote sent — the one invariant the whole ladder rests on.
+const PRE_SEND_GATE_IDS = new Set([
+  "customer_complete",
+  "email_import_review",
+  "invoice_number_required",
+  "quote_sent_required",
+  "quote_sent_or_accepted",
+])
 
 export async function POST(req: Request) {
   const auth = await requireRole(["admin", "manager", "consultant"])
@@ -204,6 +215,28 @@ export async function POST(req: Request) {
 
     if (!readiness.ready) {
       return jsonError("Voucher cannot be sent", 400, { failures: readiness.failures })
+    }
+  }
+
+  // A quote whose lines are not all priced totals as though the unpriced ones were zero
+  // (calculateQuoteTotals sums item.total unconditionally). The consultant's screen says so
+  // loudly, but the client document does not — so the send is refused rather than mailing a
+  // total that is quietly short. Rendering a PDF or an email preview stays allowed: those are
+  // the consultant checking their own work, and neither reaches the customer.
+  if (parsed.data.kind === "quote" && parsed.data.quoteId) {
+    const { data: quoteRow, error: quoteStatusError } = await supabase
+      .from("quotes")
+      .select("status")
+      .eq("id", parsed.data.quoteId)
+      .maybeSingle()
+
+    if (quoteStatusError) return safeSupabaseError("correspondence:load-quote-status", quoteStatusError)
+    if (!quoteRow) return jsonError("Quote not found", 404)
+    if (quoteRow.status === "pricing_incomplete") {
+      return jsonError(
+        "This quote still has unpriced lines — price them before sending, or the total will be short.",
+        409,
+      )
     }
   }
 
@@ -453,18 +486,24 @@ export async function POST(req: Request) {
     const targetStage = parsed.data.moveStage
     const fromStage = booking.stage as PipelineStage
 
-    const [quotesRes, documentsRes, correspondencesRes] = await Promise.all([
+    const [quotesRes, documentsRes, correspondencesRes, versionRes] = await Promise.all([
       supabase.from("quotes").select("id, status, total, created_at").eq("booking_id", bookingId),
       supabase.from("documents").select("id, kind, status").eq("booking_id", bookingId),
       supabase
         .from("correspondences")
         .select("id, kind, subject, status")
         .eq("booking_id", bookingId),
+      // applyTransition guards the write on this stamp, and the send above may
+      // already have bumped it (the reservation-form backstop writes to the
+      // booking), so the version it gets has to be re-read here rather than
+      // carried over from the load at the top of the request.
+      supabase.from("bookings").select("updated_at").eq("id", bookingId).maybeSingle(),
     ])
 
     if (quotesRes.error) return safeSupabaseError("correspondence:load-quotes", quotesRes.error)
     if (documentsRes.error) return safeSupabaseError("correspondence:load-documents", documentsRes.error)
     if (correspondencesRes.error) return safeSupabaseError("correspondence:load-correspondences", correspondencesRes.error)
+    if (versionRes.error) return safeSupabaseError("correspondence:load-booking-version", versionRes.error)
 
     try {
       await applyTransition(supabase, {
@@ -474,7 +513,7 @@ export async function POST(req: Request) {
           stage: booking.stage,
           source: booking.source,
           raw_text: booking.raw_text,
-          updated_at: booking.updated_at,
+          updated_at: versionRes.data?.updated_at ?? booking.updated_at,
           customer_id: booking.customer_id,
           consultant: booking.consultant,
           assigned_salesperson_id: booking.assigned_salesperson_id,
@@ -489,6 +528,9 @@ export async function POST(req: Request) {
         correspondences: correspondencesRes.data ?? [],
       })
     } catch (transitionError) {
+      if (transitionError instanceof StaleTransitionError) {
+        return staleVersionResponse("booking", transitionError.currentUpdatedAt)
+      }
       return safeSupabaseError("correspondence:apply-transition", transitionError)
     }
 

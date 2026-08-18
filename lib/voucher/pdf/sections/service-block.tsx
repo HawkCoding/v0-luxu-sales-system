@@ -36,7 +36,7 @@ export function ServiceBlock({ block, styles, density = "comfortable", showEyebr
   const title = block.title || voucherServiceTypeLabel(block.serviceType)
   const rows = voucherRowsForBlock(block)
   const name = block.contactDetails.name ?? ""
-  const contactLine = voucherProviderContactLine(block.contactDetails)
+  const contactLine = voucherProviderContactLine(block.contactDetails, block.serviceType)
   const footnote = block.serviceData.footnote
   const charBudget = DENSITY[density].singlePageCharBudget
 

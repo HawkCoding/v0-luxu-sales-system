@@ -39,14 +39,34 @@ export function legIdsFromLineItems(lineItems: readonly LineItemSnapshotRow[] | 
 }
 
 /**
- * Leg ids whose room price was deliberately typed as R0 (a supplier comp — see
- * "Mark complimentary" in suite-leg-editor.tsx / manualRoomPrice). Subset of
+ * Leg ids whose room price was deliberately typed as R0 (the supplier comped the whole stay —
+ * see the price override in suite-leg-editor.tsx / manualRoomPrice). Subset of
  * `legIdsFromLineItems` — used to flag the "COMPLIMENTARY" callout on client documents.
  */
 export function complimentaryLegIdsFromLineItems(lineItems: readonly LineItemSnapshotRow[] | null): Set<string> {
   return new Set(
     (lineItems ?? [])
       .filter((item) => (item.pricing_snapshot as PricingSnapshot | null)?.manualRoomPrice === 0)
+      .map((item) => (item.pricing_snapshot as PricingSnapshot | null)?.legId)
+      .filter((legId): legId is string => Boolean(legId)),
+  )
+}
+
+/**
+ * Leg ids where the hotel gifted the first night and charged the rest (see
+ * "Mark first night complimentary" in suite-leg-editor.tsx). Kept apart from the fully comped set
+ * above because the client-facing callout differs: the stay is still charged, just one night
+ * shorter on the invoice than in the itinerary.
+ */
+export function firstNightComplimentaryLegIdsFromLineItems(
+  lineItems: readonly LineItemSnapshotRow[] | null,
+): Set<string> {
+  return new Set(
+    (lineItems ?? [])
+      .filter((item) => {
+        const nights = (item.pricing_snapshot as PricingSnapshot | null)?.complimentaryNights
+        return typeof nights === "number" && nights > 0
+      })
       .map((item) => (item.pricing_snapshot as PricingSnapshot | null)?.legId)
       .filter((legId): legId is string => Boolean(legId)),
   )

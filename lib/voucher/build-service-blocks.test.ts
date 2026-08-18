@@ -250,7 +250,8 @@ describe("buildVoucherServiceBlocks", () => {
     expect(first.serviceData.flightNumber).toBe("SA321")
     expect(first.serviceData.vehicleType).toBe("Luxury Van")
     expect(first.serviceData.notes).toBe("Meet & greet")
-    expect(first.serviceData.route).toBeUndefined()
+    // Typed points win outright — the leg's route name is only a fallback for a trip that has none.
+    expect(first.serviceData.route).toBeNull()
 
     // No own vehicle category → falls back to the leg-level selection.
     expect(second.serviceData.vehicleType).toBe("Sedan")
@@ -259,6 +260,43 @@ describe("buildVoucherServiceBlocks", () => {
     // Both stay in the leg's slot, in captured order.
     expect(first.displayOrder).toBeLessThan(second.displayOrder)
     expect(Math.floor(first.displayOrder)).toBe(2)
+  })
+
+  // QA 11, F11-5. A priced transfer used to print as "Date to be confirmed — Transfer", with no
+  // route and no points, whenever its trip row was still blank — even though the leg itself
+  // carried both a service_date and a route. The trip is authoritative where it says something;
+  // a blank field is a gap, and the leg fills it.
+  it("falls back to the leg's own date and route when the captured trip is still blank", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [transferSelection({ service_date: "2026-09-22" })],
+        transportRequests: [
+          {
+            id: "req-blank",
+            service_id: "leg-transfer",
+            service_type: "transfer",
+            pickup_point: "",
+            dropoff_point: "",
+            pickup_at: null,
+            flight_number: null,
+            notes: null,
+            sort_order: 0,
+            suppliers: supplier(),
+            suite_types: null,
+            rental_details: null,
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks).toHaveLength(1)
+    const [block] = blocks
+    expect(block.serviceType).toBe("transfer")
+    expect(block.serviceData.departureDate).toBe("2026-09-22")
+    expect(block.serviceData.route).toBe("Airport → Hotel")
+    expect(block.serviceData.pickup).toBeNull()
+    expect(block.serviceData.dropoff).toBeNull()
   })
 
   it("prints a transfer's pickup time in South African time, not the server process's UTC clock", async () => {

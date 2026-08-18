@@ -21,6 +21,8 @@ import { EmailAttachmentPicker } from "@/components/email-attachment-picker"
 import { SignaturePicker } from "@/components/signature-picker"
 import { extractContentSlot, replaceContentSlot } from "@/lib/templates/content-slot"
 import { replaceSignatureSlot } from "@/lib/templates/signature-slot"
+import { useDirtyCloseGuard } from "@/hooks/use-dirty-close-guard"
+import { DiscardChangesDialog } from "@/components/discard-changes-dialog"
 
 const HtmlBodyEditor = dynamic(
   () => import("@/components/ui/html-body-editor").then((m) => m.HtmlBodyEditor),
@@ -94,6 +96,15 @@ export function PreviewAndSendDialog({
   const optimisticSend = useOptimisticSend()
 
   const canEditBody = initialContent !== null
+  const isDirty =
+    subject !== initialSubject ||
+    content !== initialContent ||
+    recipient !== (to ?? "") ||
+    libraryAttachmentIds.length > 0
+  const closeGuard = useDirtyCloseGuard({
+    isDirty,
+    onConfirmedClose: () => onOpenChange(false),
+  })
 
   // Splice the edited content back into the branded wrapper for live preview
   // and for the actual send, then swap in a picked signature. Both splices
@@ -171,8 +182,24 @@ export function PreviewAndSendDialog({
   )
 
   return (
-    <Dialog open={open} onOpenChange={(nextOpen) => !sending && onOpenChange(nextOpen)}>
-      <DialogContent className="sm:max-w-4xl">
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (sending) return
+        if (nextOpen) {
+          onOpenChange(true)
+          return
+        }
+        closeGuard.handleOpenChange(false)
+      }}
+    >
+      <DialogContent className="sm:max-w-4xl" {...closeGuard.contentProps}>
+        <DiscardChangesDialog
+          open={closeGuard.confirming}
+          onKeepEditing={closeGuard.cancelDiscard}
+          onDiscard={closeGuard.confirmDiscard}
+          description="This email hasn't been sent. Your edits will be lost."
+        />
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
@@ -262,7 +289,7 @@ export function PreviewAndSendDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={sending}>
+          <Button variant="outline" onClick={() => closeGuard.handleOpenChange(false)} disabled={sending}>
             Cancel
           </Button>
           <Button onClick={handleSend} disabled={sending || !subject.trim()}>

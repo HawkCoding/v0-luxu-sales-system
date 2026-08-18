@@ -482,6 +482,7 @@ export type Database = {
           bedroom_layout_id: string | null
           bedroom_type_id: string | null
           child_count: number
+          complimentary_first_night: boolean
           created_at: string
           id: string
           infant_count: number
@@ -503,6 +504,7 @@ export type Database = {
           bedroom_layout_id?: string | null
           bedroom_type_id?: string | null
           child_count?: number
+          complimentary_first_night?: boolean
           created_at?: string
           id?: string
           infant_count?: number
@@ -524,6 +526,7 @@ export type Database = {
           bedroom_layout_id?: string | null
           bedroom_type_id?: string | null
           child_count?: number
+          complimentary_first_night?: boolean
           created_at?: string
           id?: string
           infant_count?: number
@@ -875,6 +878,7 @@ export type Database = {
         Row: {
           booking_id: string
           created_at: string
+          date_anchor: string | null
           dropoff_point: string
           flight_number: string | null
           id: string
@@ -900,6 +904,7 @@ export type Database = {
         Insert: {
           booking_id: string
           created_at?: string
+          date_anchor?: string | null
           dropoff_point: string
           flight_number?: string | null
           id?: string
@@ -925,6 +930,7 @@ export type Database = {
         Update: {
           booking_id?: string
           created_at?: string
+          date_anchor?: string | null
           dropoff_point?: string
           flight_number?: string | null
           id?: string

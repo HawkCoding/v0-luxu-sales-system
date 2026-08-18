@@ -1,14 +1,18 @@
 import type {
   BookingTransportRequest,
   CommissionKind,
-  HotelDateAnchor,
   PackageDetail,
   PackageLeg,
+  ServiceDateAnchor,
   SupplierKind,
 } from "@/lib/types"
 import type { PassengerTotals } from "@/lib/packages/passenger-totals"
 import { findAnchorTrainLeg, resolveHotelStayDates } from "@/lib/packages/hotel-dates"
-import { dateOnly } from "@/lib/packages/trip-date-range"
+import type { AnchorLegDates } from "@/lib/packages/transfer-dates"
+import { findTransferAnchorLeg, resolveTransferPickupDate } from "@/lib/packages/transfer-dates"
+import type { ServiceDateSpan } from "@/lib/packages/trip-date-range"
+import { dateOnly, selectedRouteDurationDays, serviceDateSpan } from "@/lib/packages/trip-date-range"
+import { splitLocalDateTime, joinLocalDateTime } from "@/lib/date-time-field"
 import { toHoursMinutes } from "@/lib/routes/route-schedule"
 import { BASE_CURRENCY } from "@/lib/money"
 import {
@@ -59,6 +63,9 @@ export interface SuiteUnitState {
   manualRoomPrice: number | null
   /** Read-only provenance for the override, stamped server-side. Never sent back on save. */
   manualRoomPriceSetAt?: string | null
+  /** Hotel legs only: the hotel gifted this room's first night, so the quote charges nights - 1
+   *  at the room's per-night price (its rate card's, or manualRoomPrice when one was typed). */
+  complimentaryFirstNight: boolean
 }
 
 export interface SuiteLegState {
@@ -83,7 +90,7 @@ export interface SuiteLegState {
   handLuggageKg: number | null
   checkedLuggageKg: number | null
   /** Hotel legs only: `pre`/`post` derive serviceDate from the train leg, `custom` leaves it manual. */
-  dateAnchor: HotelDateAnchor | null
+  dateAnchor: ServiceDateAnchor | null
   notes: string | null
   /** Explicit per-leg rate type; null inherits the supplier's quoted rate at pricing time. */
   rateTypeId: string | null
@@ -134,6 +141,7 @@ export interface SavedSelectionUnitRow {
   manual_infant_price?: number | null
   manual_room_price?: number | null
   manual_room_price_set_at?: string | null
+  complimentary_first_night?: boolean | null
 }
 
 export interface SavedSelectionRow {
@@ -199,6 +207,7 @@ export function createDraftUnit(totals?: PassengerTotals): SuiteUnitState {
     manualInfantPrice: null,
     manualRoomPrice: null,
     manualRoomPriceSetAt: null,
+    complimentaryFirstNight: false,
   }
 }
 
@@ -218,6 +227,9 @@ export function createDraftTransportRequest(leg: PackageLeg, routeId?: string | 
     pickupPoint: route?.pickupPoint ?? "",
     dropoffPoint: route?.dropoffPoint ?? "",
     pickupAt: null,
+    // A rental has no single leg above it to anchor two dates to (pickup and return); a fresh
+    // transfer row starts unanchored too, same as a fresh hotel leg starts on a manual date.
+    dateAnchor: "custom",
     rentalDetails: isRental
       ? { transportRequestId: "", returnAt: null, returnCutoffTime: null, createdAt: now, updatedAt: now }
       : null,
@@ -260,7 +272,7 @@ export function buildDefaultLegStates(
   detail: PackageDetail,
   options: BuildDefaultLegStatesOptions,
 ): ApplyLegState[] {
-  return applyAnchoredHotelDates(detail, buildRawDefaultLegStates(detail, options))
+  return applyAnchoredDates(detail, buildRawDefaultLegStates(detail, options))
 }
 
 function buildRawDefaultLegStates(
@@ -320,7 +332,7 @@ function buildRawDefaultLegStates(
   })
 }
 
-function normalizeSavedAnchor(value: string | null): HotelDateAnchor | null {
+function normalizeSavedAnchor(value: string | null): ServiceDateAnchor | null {
   return value === "pre" || value === "post" || value === "custom" ? value : null
 }
 
@@ -391,6 +403,108 @@ export function applyAnchoredHotelDates(
   })
 }
 
+/** The leg a transfer leg's pickup dates hang off — the nearest dated leg above it — plus that
+ * leg's start/end dates as the transfer editor needs them. Null when the transfer opens the
+ * itinerary or only other transport legs precede it. */
+export function getTransferAnchorContext(
+  detail: PackageDetail,
+  states: ApplyLegState[],
+  transferLegId: string,
+): { anchorLeg: PackageLeg; span: ServiceDateSpan | null } | null {
+  const anchorLeg = findTransferAnchorLeg(detail.legs, transferLegId)
+  if (!anchorLeg) return null
+
+  const anchorState = states.find((candidate) => candidate.legId === anchorLeg.id)
+  if (anchorState?.kind !== "suite") return null
+
+  const span = serviceDateSpan({
+    supplierKind: anchorLeg.supplierKind,
+    serviceDate: anchorState.serviceDate,
+    nights: anchorState.nights,
+    routeDurationDays: selectedRouteDurationDays(anchorLeg, anchorState.routeId),
+    arrivalDate: anchorState.arrivalDate,
+  })
+
+  return { anchorLeg, span }
+}
+
+/** View-model form of {@link getTransferAnchorContext} — what the transport leg editor takes as a
+ * prop. */
+export interface TransferAnchorContext {
+  legLabel: string
+  legKind: SupplierKind
+  startDate: string | null
+  endDate: string | null
+  /** endDate fell back to startDate because the anchor leg's route has no journey length set (or,
+   *  for a flight, no arrival captured yet) — same situation the hotel editor flags for a train
+   *  with no route duration. */
+  endDateAssumed: boolean
+}
+
+export function toTransferAnchorContext(
+  detail: PackageDetail,
+  states: ApplyLegState[],
+  transferLegId: string,
+): TransferAnchorContext | null {
+  const context = getTransferAnchorContext(detail, states, transferLegId)
+  if (!context) return null
+
+  return {
+    legLabel: context.anchorLeg.label ?? context.anchorLeg.supplierName,
+    legKind: context.anchorLeg.supplierKind,
+    startDate: context.span?.start ?? null,
+    endDate: context.span?.end ?? null,
+    endDateAssumed: context.span != null && context.span.end === context.span.start,
+  }
+}
+
+/** Recomputes the pickup date of every pre/post-anchored transfer request from the leg above it.
+ * Runs after any state change so editing an upstream date (or a hotel's nights) re-dates every
+ * transfer that hangs off it — including a chain of transfers, since each is resolved from the
+ * *current* pass's states, not the pre-recompute ones. */
+export function applyAnchoredTransferDates(
+  detail: PackageDetail,
+  states: ApplyLegState[],
+): ApplyLegState[] {
+  return states.map((state) => {
+    if (state.kind !== "transport") return state
+
+    const context = getTransferAnchorContext(detail, states, state.legId)
+    const anchorDates: AnchorLegDates | null = context
+      ? { start: context.span?.start ?? null, end: context.span?.end ?? null }
+      : null
+
+    let changed = false
+    const requests = state.requests.map((request) => {
+      if (request.serviceType !== "transfer") return request
+      if (request.dateAnchor !== "pre" && request.dateAnchor !== "post") return request
+
+      const targetDate = resolveTransferPickupDate(request.dateAnchor, anchorDates)
+      if (!targetDate) return request
+
+      // Rewrites only the date half of pickupAt — the consultant's typed time survives every
+      // re-derive, and an unset time lands at local midnight, same as picking the date alone in
+      // <DateTimePicker> does today.
+      const parts = splitLocalDateTime(request.pickupAt)
+      const nextPickupAt = joinLocalDateTime(targetDate, parts.time)
+      if (!nextPickupAt || nextPickupAt === request.pickupAt) return request
+
+      changed = true
+      return { ...request, pickupAt: nextPickupAt }
+    })
+
+    return changed ? { ...state, requests } : state
+  })
+}
+
+/** Runs the hotel and transfer date-anchor recomputes in the order that makes chaining work: a
+ * transfer can anchor to a hotel, so the hotel's dates must already be settled before transfers
+ * are resolved against it. Neither recompute reads the other's kind of leg, so one pass each
+ * (rather than repeating to a fixed point) is enough. */
+export function applyAnchoredDates(detail: PackageDetail, states: ApplyLegState[]): ApplyLegState[] {
+  return applyAnchoredTransferDates(detail, applyAnchoredHotelDates(detail, states))
+}
+
 /** Hydrates dialog state from the booking's saved selections and transport requests. Legs with
  * no saved row (shouldn't happen after package assign seeds them, but defensive) get defaults. */
 export function hydrateFromSaved(
@@ -442,6 +556,7 @@ export function hydrateFromSaved(
         manualInfantPrice: unit.manual_infant_price ?? null,
         manualRoomPrice: unit.manual_room_price ?? null,
         manualRoomPriceSetAt: unit.manual_room_price_set_at ?? null,
+        complimentaryFirstNight: unit.complimentary_first_night ?? false,
       }))
 
     const isHotel = fallback.supplierKind === "hotel_property"
@@ -477,7 +592,7 @@ export function hydrateFromSaved(
     } satisfies SuiteLegState
   })
 
-  return applyAnchoredHotelDates(detail, hydrated)
+  return applyAnchoredDates(detail, hydrated)
 }
 
 /** PATCH /api/jobs/[id]/package-selections body. */
@@ -500,7 +615,7 @@ export interface PackageSelectionsPatchBody {
     arrivalAirportCode?: string | null
     handLuggageKg?: number | null
     checkedLuggageKg?: number | null
-    dateAnchor?: HotelDateAnchor | null
+    dateAnchor?: ServiceDateAnchor | null
     rateTypeId?: string | null
     priceCurrency?: string
     notes?: string | null
@@ -519,6 +634,8 @@ export interface PackageSelectionsPatchBody {
       manualInfantPrice: number | null
       /** Hotel legs only — the server rejects it on any other supplier kind. */
       manualRoomPrice: number | null
+      /** Hotel legs only — the gifted first night, same server-side restriction. */
+      complimentaryFirstNight: boolean
     }>
   }>
 }
@@ -576,6 +693,8 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
           manualChildPrice: unit.manualChildPrice,
           manualInfantPrice: unit.manualInfantPrice,
           manualRoomPrice: state.supplierKind === "hotel_property" ? unit.manualRoomPrice : null,
+          complimentaryFirstNight:
+            state.supplierKind === "hotel_property" ? unit.complimentaryFirstNight : false,
         })),
       }
     }),
@@ -594,6 +713,8 @@ export interface TransportRequestsPutBody {
     pickupPoint: string
     dropoffPoint: string
     pickupAt: string | null
+    /** Transfers only — a rental is always sent null; the server rejects pre/post on one. */
+    dateAnchor: ServiceDateAnchor | null
     rentalDetails: { returnAt: string | null; returnCutoffTime: string | null } | null
     passengerCount: number | null
     luggageCount: number | null
@@ -628,6 +749,7 @@ export function toTransportRequestsPut(
       pickupPoint: request.pickupPoint,
       dropoffPoint: request.dropoffPoint,
       pickupAt: request.pickupAt,
+      dateAnchor: request.serviceType === "transfer" ? request.dateAnchor : null,
       rentalDetails:
         request.serviceType === "rental"
           ? {
@@ -675,6 +797,8 @@ export interface ApplyLegSelectionPayload {
     manualInfantPrice: number | null
     /** Hotel legs only: replaces the rate card's per-room-per-night price for this room. */
     manualRoomPrice: number | null
+    /** Hotel legs only: the gifted first night, dropping one night from the charged count. */
+    complimentaryFirstNight: boolean
   }>
   nights?: number
   /** Per-leg rate type override; omitted falls back to the system default. */
@@ -728,6 +852,8 @@ export function toApplySelections(
           manualChildPrice: unit.manualChildPrice,
           manualInfantPrice: unit.manualInfantPrice,
           manualRoomPrice: state.supplierKind === "hotel_property" ? unit.manualRoomPrice : null,
+          complimentaryFirstNight:
+            state.supplierKind === "hotel_property" ? unit.complimentaryFirstNight : false,
         })),
       nights:
         state.supplierKind === "hotel_property" ? Math.max(1, state.nights ?? 1) : undefined,
@@ -817,6 +943,23 @@ export function validateConfigureState(
         }
         if (leg.suiteTypes.length > 0 && !request.suiteTypeId) {
           errors.push(`${label}: select a vehicle category`)
+        }
+        // A pre/post anchor that can't resolve yet (nothing dated above it, or the leg above has
+        // no date yet) leaves pickupAt null — catch that here with a readable next step, rather
+        // than letting it fall through to a generic missing-date error further down.
+        if (request.dateAnchor === "pre" || request.dateAnchor === "post") {
+          const anchorContext = toTransferAnchorContext(detail, states, state.legId)
+          const resolved = resolveTransferPickupDate(
+            request.dateAnchor,
+            anchorContext ? { start: anchorContext.startDate, end: anchorContext.endDate } : null,
+          )
+          if (!resolved) {
+            errors.push(
+              anchorContext
+                ? `${label}: set ${anchorContext.legLabel}'s date, or pick a custom pickup date`
+                : `${label}: nothing above this transfer has a date to anchor to — pick a custom pickup date`,
+            )
+          }
         }
         // Route + type resolved: check pricing exists before the salesperson hits Next and gets
         // a build-time error that's harder to connect back to this row.

@@ -225,7 +225,9 @@ export async function POST(req: Request) {
     })),
   })
   if (!readiness.ready) {
-    return jsonError(readiness.failures[0]?.message ?? "Booking is not ready for voucher generation", 422)
+    return jsonError(readiness.failures[0]?.message ?? "Booking is not ready for voucher generation", 422, {
+      failures: readiness.failures,
+    })
   }
 
   if (!customer) {

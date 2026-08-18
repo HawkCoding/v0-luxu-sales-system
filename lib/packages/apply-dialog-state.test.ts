@@ -1,13 +1,19 @@
 import { describe, expect, it } from "vitest"
 import type { BookingTransportRequest, PackageDetail, PackageLeg, SupplierKind } from "@/lib/types"
+import { joinLocalDateTime, splitLocalDateTime } from "@/lib/date-time-field"
 import {
+  applyAnchoredDates,
+  applyAnchoredTransferDates,
   buildDefaultLegStates,
   createDraftTransportRequest,
+  getTransferAnchorContext,
   hydrateFromSaved,
   toApplySelections,
   toPackageSelectionsPatch,
+  toTransferAnchorContext,
   toTransportRequestsPut,
   validateConfigureState,
+  type ApplyLegState,
   type SavedPackageState,
   type SuiteLegState,
   type TransportLegState,
@@ -292,6 +298,7 @@ describe("hydrateFromSaved", () => {
     pickupPoint: "Airport",
     dropoffPoint: "Hotel",
     pickupAt: "2026-09-01T08:00:00.000Z",
+    dateAnchor: "custom",
     rentalDetails: null,
     passengerCount: 3,
     luggageCount: 2,
@@ -463,6 +470,131 @@ describe("toTransportRequestsPut", () => {
     const body = toTransportRequestsPut(states, [])
     expect(body.transportRequests[0].priceOverride).toBe(1250.5)
   })
+
+  it("sends dateAnchor for a transfer request, always null for a rental", () => {
+    const rentalLeg = leg({ id: "leg-rental", supplierKind: "vehicle_rental", sortOrder: 9 })
+    const states = buildDefaultLegStates(detail([transferLeg, rentalLeg]), { tripStartDate: null })
+    const transfer = transportState(states, "leg-transfer")
+    transfer.selected = true
+    transfer.requests[0] = { ...transfer.requests[0], dateAnchor: "post" }
+    const rental = transportState(states, "leg-rental")
+    rental.selected = true
+
+    const body = toTransportRequestsPut(states, [])
+    expect(body.transportRequests.find((r) => r.serviceId === "leg-transfer")?.dateAnchor).toBe("post")
+    expect(body.transportRequests.find((r) => r.serviceId === "leg-rental")?.dateAnchor).toBeNull()
+  })
+})
+
+// pkg is Train(1) -> Hotel(2) -> Transfer(3), so leg-transfer anchors to the hotel — these tests
+// build a second itinerary shape (Train -> Transfer -> Hotel -> Transfer) to cover a transfer that
+// anchors straight to the train, one that anchors to a hotel, and one with nothing above it.
+describe("transfer date anchors", () => {
+  const chainTransfer1 = leg({ id: "leg-transfer-1", supplierKind: "transfers", sortOrder: 2 })
+  const chainTransfer2 = leg({ id: "leg-transfer-2", supplierKind: "transfers", sortOrder: 4 })
+  const chainHotel = { ...hotelLeg, sortOrder: 3 }
+  // A 3-day route, unlike the bare trainLeg fixture (no durationDays), so Post resolves to a real
+  // arrival day rather than immediately hitting the "no journey length set" fallback.
+  const chainTrain = {
+    ...trainLeg,
+    sortOrder: 1,
+    routes: [{ ...trainLeg.routes[0], durationDays: 3 }] as PackageLeg["routes"],
+  }
+  const chainPkg = detail([chainTrain, chainTransfer1, chainHotel, chainTransfer2])
+
+  function anchoredRequest(states: ApplyLegState[], legId: string, anchor: "pre" | "post"): TransportLegState {
+    const state = transportState(states, legId)
+    state.selected = true
+    state.requests[0] = { ...state.requests[0], dateAnchor: anchor }
+    return state
+  }
+
+  it("anchors the first transfer to the train directly above it", () => {
+    const states = buildDefaultLegStates(chainPkg, { tripStartDate: "2026-09-10" })
+    const context = getTransferAnchorContext(chainPkg, states, "leg-transfer-1")
+    expect(context?.anchorLeg.id).toBe("leg-train")
+    expect(context?.span).toEqual({ start: "2026-09-10", end: "2026-09-12" }) // route-1 has no durationDays set here
+  })
+
+  it("returns null for a transfer with nothing dated above it", () => {
+    const states = buildDefaultLegStates(chainPkg, { tripStartDate: "2026-09-10" })
+    expect(getTransferAnchorContext(chainPkg, states, "leg-train")).toBeNull()
+  })
+
+  it("resolves pre/post off the leg above via applyAnchoredTransferDates, preserving the typed time", () => {
+    const states = buildDefaultLegStates(chainPkg, { tripStartDate: "2026-09-10" })
+    suiteState(states, "leg-train").serviceDate = "2026-09-10"
+    const hotel = suiteState(states, "leg-hotel")
+    hotel.selected = true
+    hotel.dateAnchor = "custom"
+    hotel.serviceDate = "2026-09-12"
+    hotel.nights = 2
+
+    anchoredRequest(states, "leg-transfer-1", "post")
+    transportState(states, "leg-transfer-1").requests[0].pickupAt = joinLocalDateTime("2026-01-01", "07:30")
+    anchoredRequest(states, "leg-transfer-2", "post")
+
+    const recomputed = applyAnchoredTransferDates(chainPkg, states)
+    const transfer1 = transportState(recomputed, "leg-transfer-1")
+    const transfer2 = transportState(recomputed, "leg-transfer-2")
+
+    // Post-train: the transfer's date moves to the train's arrival day; the 07:30 pickup time
+    // typed before the anchor was resolved survives the re-derive.
+    expect(splitLocalDateTime(transfer1.requests[0].pickupAt)).toEqual({ date: "2026-09-12", time: "07:30" })
+    // Post-hotel: the second transfer picks up on the hotel's check-out day (check-in + 2 nights).
+    expect(splitLocalDateTime(transfer2.requests[0].pickupAt).date).toBe("2026-09-14")
+  })
+
+  it("chains through applyAnchoredDates: moving the train's date re-dates the hotel, which re-dates the transfer below it", () => {
+    let states = buildDefaultLegStates(chainPkg, { tripStartDate: "2026-09-10" })
+    suiteState(states, "leg-train").serviceDate = "2026-09-10"
+    const hotel = suiteState(states, "leg-hotel")
+    hotel.selected = true
+    hotel.dateAnchor = "post"
+    hotel.nights = 2
+    anchoredRequest(states, "leg-transfer-2", "post")
+
+    states = applyAnchoredDates(chainPkg, states)
+    expect(suiteState(states, "leg-hotel").serviceDate).toBe("2026-09-12")
+    expect(splitLocalDateTime(transportState(states, "leg-transfer-2").requests[0].pickupAt).date).toBe("2026-09-14")
+
+    // Push the train back a day — the hotel and the transfer under it should both follow.
+    suiteState(states, "leg-train").serviceDate = "2026-09-09"
+    states = applyAnchoredDates(chainPkg, states)
+    expect(suiteState(states, "leg-hotel").serviceDate).toBe("2026-09-11")
+    expect(splitLocalDateTime(transportState(states, "leg-transfer-2").requests[0].pickupAt).date).toBe("2026-09-13")
+  })
+
+  it("leaves pickupAt untouched for a custom-anchored request", () => {
+    const states = buildDefaultLegStates(chainPkg, { tripStartDate: "2026-09-10" })
+    const transfer = transportState(states, "leg-transfer-1")
+    transfer.selected = true
+    const customPickupAt = joinLocalDateTime("2026-01-01", "05:00")
+    transfer.requests[0] = { ...transfer.requests[0], dateAnchor: "custom", pickupAt: customPickupAt }
+
+    const recomputed = applyAnchoredTransferDates(chainPkg, states)
+    expect(transportState(recomputed, "leg-transfer-1").requests[0].pickupAt).toBe(customPickupAt)
+  })
+
+  it("flags an unresolved anchor in validateConfigureState with a next step", () => {
+    const states = buildDefaultLegStates(chainPkg, { tripStartDate: null })
+    // No service date set on the train, so the anchor above leg-transfer-1 can't resolve yet.
+    const transfer = anchoredRequest(states, "leg-transfer-1", "post")
+    transfer.requests[0] = { ...transfer.requests[0], suiteTypeId: "vehicle-1" }
+
+    const errors = validateConfigureState(chainPkg, states)
+    expect(errors.some((e) => e.includes("Supplier leg-train") && e.includes("pick a custom pickup date"))).toBe(
+      true,
+    )
+  })
+
+  it("toTransferAnchorContext flags a missing route duration as assumed", () => {
+    const noDurationPkg = detail([{ ...chainTrain, routes: [{ ...chainTrain.routes[0], durationDays: null }] }, chainTransfer1])
+    const states = buildDefaultLegStates(noDurationPkg, { tripStartDate: "2026-09-10" })
+    const context = toTransferAnchorContext(noDurationPkg, states, "leg-transfer-1")
+    expect(context?.endDateAssumed).toBe(true)
+    expect(context?.startDate).toBe(context?.endDate)
+  })
 })
 
 describe("toApplySelections", () => {
@@ -483,9 +615,11 @@ describe("toApplySelections", () => {
     const trainSel = selections.find((s) => s.legId === "leg-train")
     expect(trainSel?.units).toEqual([
       {
-        // A draft room has no persisted id to send, and a train leg never carries a room override.
+        // A draft room has no persisted id to send, and a train leg never carries a room override
+        // or a gifted night — both are hotel-only and the server rejects them elsewhere.
         unitId: undefined,
         manualRoomPrice: null,
+        complimentaryFirstNight: false,
         suiteTypeId: "suite-1",
         bedroomTypeId: null,
         bedroomLayoutId: null,

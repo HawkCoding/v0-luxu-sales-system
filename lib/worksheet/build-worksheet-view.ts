@@ -93,8 +93,11 @@ export async function buildWorksheetView(
     supabase
       .from("booking_services")
       .select(
-        `id, supplier_id, sort_order, service_date, nights, arrival_date, supplier_reference, notes,
-         suppliers(name, kind), routes(duration_days)`,
+        `id, supplier_id, sort_order, service_date, nights, arrival_date, supplier_reference, notes, route_reversed,
+         suppliers(name, kind),
+         routes(duration_days, name, direction_mode, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name)),
+         suite_types(name),
+         units:booking_service_units(complimentary_first_night, suite_types(name))`,
       )
       .eq("booking_id", bookingId)
       .eq("selected", true)
@@ -116,7 +119,7 @@ export async function buildWorksheetView(
       .order("created_at"),
     supabase
       .from("payments")
-      .select("received_at, method, reference")
+      .select("received_at, method, reference, amount")
       .eq("booking_id", bookingId)
       .order("received_at"),
   ])
@@ -177,6 +180,7 @@ export async function buildWorksheetView(
     date: p.received_at,
     paidWith: p.method,
     reference: p.reference,
+    amount: p.amount,
   }))
 
   const noOfPax = pax.length > 0 ? pax.length : (bookingRaw.no_of_adults ?? 0) + (bookingRaw.no_of_children ?? 0)
@@ -191,6 +195,9 @@ export async function buildWorksheetView(
     contact: {
       title: customer?.title ?? null,
       name: [customer?.first_name, customer?.last_name].filter(Boolean).join(" ").trim() || "Guest",
+      shortName: customer?.first_name
+        ? `${customer.first_name.trim().charAt(0).toUpperCase()}. ${customer?.last_name ?? ""}`.trim()
+        : (customer?.last_name ?? "Guest"),
       nationality: customer?.country ?? null,
       email: customer?.email ?? null,
       phone: customer?.phone ?? null,

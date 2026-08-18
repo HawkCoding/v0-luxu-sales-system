@@ -71,6 +71,7 @@ const mismatchedUnits: SuiteLegState["units"] = [
     manualChildPrice: null,
     manualInfantPrice: null,
     manualRoomPrice: null,
+    complimentaryFirstNight: false,
   },
 ]
 

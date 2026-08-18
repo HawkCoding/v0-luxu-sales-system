@@ -1988,9 +1988,9 @@ const SuiteTypeEditorRow = memo(function SuiteTypeEditorRow({
   onRemoveSuiteType,
 }: SuiteTypeEditorRowProps) {
   const isTransport = vocabulary.suiteType === "Vehicle Type"
-  // TODO: bedroom_types/bathroom_types are hidden for hotel_property (UI-only, see
-  // suite-vocabulary-card.tsx). Full removal would also touch the DB tables/columns.
-  const hideBedroomAndBathroomTypes = kind === "hotel_property"
+  // TODO: bedroom_types is hidden for hotel_property (UI-only, see suite-vocabulary-card.tsx).
+  // Full removal would also touch the DB tables/columns.
+  const hideBedroomTypes = kind === "hotel_property"
 
   return (
     <div className="rounded-lg border p-3 space-y-3">
@@ -2068,7 +2068,7 @@ const SuiteTypeEditorRow = memo(function SuiteTypeEditorRow({
       </div>
       {showVariants && onUpdateSuiteTypeVariantIds ? (
         <div className="grid gap-3 md:grid-cols-3">
-          {!hideBedroomAndBathroomTypes ? (
+          {!hideBedroomTypes ? (
             <VariantChipPicker
               label="Bedroom Types"
               available={bedroomTypes.map((value) => ({ id: value.id, name: value.name }))}
@@ -2086,16 +2086,14 @@ const SuiteTypeEditorRow = memo(function SuiteTypeEditorRow({
               onUpdateSuiteTypeVariantIds(suiteTypeIndex, "bedroomLayoutIds", ids)
             }
           />
-          {!hideBedroomAndBathroomTypes ? (
-            <VariantChipPicker
-              label="Bathroom Types"
-              available={bathroomTypes.map((value) => ({ id: value.id, name: value.name }))}
-              selectedIds={suiteType.bathroomTypeIds}
-              onChange={(ids) =>
-                onUpdateSuiteTypeVariantIds(suiteTypeIndex, "bathroomTypeIds", ids)
-              }
-            />
-          ) : null}
+          <VariantChipPicker
+            label="Bathroom Types"
+            available={bathroomTypes.map((value) => ({ id: value.id, name: value.name }))}
+            selectedIds={suiteType.bathroomTypeIds}
+            onChange={(ids) =>
+              onUpdateSuiteTypeVariantIds(suiteTypeIndex, "bathroomTypeIds", ids)
+            }
+          />
         </div>
       ) : null}
     </div>
@@ -4632,6 +4630,19 @@ export function SupplierDetailView({
           <CardContent className="space-y-5">
             {isEditing ? (
               <>
+                <div className="flex items-center justify-between rounded-lg border p-3">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Supplier status</p>
+                    <p className="text-sm text-muted-foreground">
+                      Toggle whether this supplier is currently active.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={form.active}
+                    onCheckedChange={(checked) => updateField("active", checked)}
+                  />
+                </div>
+
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label htmlFor="supplier-name">Supplier name</Label>
@@ -4876,19 +4887,6 @@ export function SupplierDetailView({
                     value={form.notes}
                     onValueChange={(value) => updateField("notes", value)}
                     rows={4}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between rounded-lg border p-3">
-                  <div>
-                    <p className="text-sm font-medium text-foreground">Supplier status</p>
-                    <p className="text-sm text-muted-foreground">
-                      Toggle whether this supplier is currently active.
-                    </p>
-                  </div>
-                  <Switch
-                    checked={form.active}
-                    onCheckedChange={(checked) => updateField("active", checked)}
                   />
                 </div>
               </>
@@ -5263,7 +5261,7 @@ export function SupplierDetailView({
                     {supplier.suiteTypes.map((suiteType) => {
                       const variantLabels =
                         supplier.kind === "hotel_property"
-                          ? [...(suiteType.bedroomLayouts ?? [])]
+                          ? [...(suiteType.bedroomLayouts ?? []), ...(suiteType.bathroomTypes ?? [])]
                           : [
                               ...(suiteType.bedroomTypes ?? []),
                               ...(suiteType.bedroomLayouts ?? []),
