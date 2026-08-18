@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils"
 import { formatDisplayDate } from "@/lib/date-format"
 import { distributePassengerTotals, type PassengerTotals } from "@/lib/packages/passenger-totals"
 import { resolveHotelStayDates } from "@/lib/packages/hotel-dates"
+import { AnchorDateSection } from "@/components/packages/anchor-date-section"
 import {
   createDraftUnit,
   isRouteReversible,
@@ -681,28 +682,13 @@ export function SuiteLegEditor({
       {included ? (
         <>
           {isHotel ? (
-            <div className="space-y-2 rounded-md border bg-muted/40 p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <Label className="text-xs">Stay dates</Label>
-                <div className="flex flex-wrap gap-1">
-                  {ANCHOR_OPTIONS.map((option) => (
-                    <Button
-                      key={option.value}
-                      type="button"
-                      size="sm"
-                      variant={value.dateAnchor === option.value ? "default" : "outline"}
-                      className="h-7 px-2 text-xs"
-                      aria-pressed={value.dateAnchor === option.value}
-                      title={option.hint}
-                      disabled={option.value !== "custom" && !anchorContext}
-                      onClick={() => setAnchor(option.value)}
-                    >
-                      {option.label}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-
+            <AnchorDateSection
+              label="Stay dates"
+              options={ANCHOR_OPTIONS}
+              value={value.dateAnchor}
+              onChange={setAnchor}
+              disabledValues={anchorContext ? [] : ["pre", "post"]}
+            >
               {anchored ? (
                 <p className={cn("text-xs", stayDates ? "text-muted-foreground" : "text-destructive")}>
                   {stayDates ? (
@@ -740,7 +726,7 @@ export function SuiteLegEditor({
                   This package has no train leg to anchor to — pick the check-in date manually.
                 </p>
               ) : null}
-            </div>
+            </AnchorDateSection>
           ) : null}
 
           {pricesByTypeOnly ? null : legFields}

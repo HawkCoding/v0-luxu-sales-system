@@ -35,7 +35,6 @@ import { toast } from "sonner"
 import { ReservationFormCard } from "@/components/reservation-form-card"
 import { normalizeDateOfBirth } from "@/lib/date-format"
 import {
-  describePrefilled,
   fillBlanksFromCustomer,
   PREFILL_FIELDS,
   type PrefillField,
@@ -142,13 +141,6 @@ function describeTraveller(t: TravellerDraft): string {
   return extra ? `${name} (${extra})` : name
 }
 
-function formatCustomerAddress(customer: Customer | null): string {
-  if (!customer) return ""
-  return [customer.addressLine1, customer.addressLine2, customer.city, customer.province, customer.postalCode]
-    .filter(Boolean)
-    .join(", ")
-}
-
 const SMOKING_NONE = "none"
 const MEAL_SEATING_NONE = "none"
 
@@ -219,10 +211,10 @@ export function JobReservationTab({
     setPrefilledFields(prefilled)
   }, [travellersData, customer])
 
-  const agencySeed = useMemo(
-    () => ({ name: customer?.companyName ?? "", address: formatCustomerAddress(customer) }),
-    [customer],
-  )
+  // Only the name seeds from the customer profile — the address does not, since an
+  // agency's own address has no relation to the customer's (billing address is the
+  // section for the customer's address).
+  const agencySeed = useMemo(() => ({ name: customer?.companyName ?? "" }), [customer])
 
   // Structured fields for the "Copy from customer profile" buttons below — the invoice
   // reads only the billing_* columns (no fallback), so this is a one-shot fill, not a default.
@@ -275,7 +267,7 @@ export function JobReservationTab({
     setMealSeating(detailsData.mealSeating ?? MEAL_SEATING_NONE)
     setVoucherSpecialRequests(detailsData.voucherSpecialRequests)
     setAgencyName(detailsData.agencyName || agencySeed.name)
-    setAgencyAddress(detailsData.agencyAddress || agencySeed.address)
+    setAgencyAddress(detailsData.agencyAddress)
     setBillingCompanyName(detailsData.billingCompanyName)
     setBillingVatNumber(detailsData.billingVatNumber)
     setBillingAddressLine1(detailsData.billingAddressLine1)
@@ -635,7 +627,6 @@ export function JobReservationTab({
             travellers.map((traveller) => {
               const seed = travellerSeeds.get(traveller.key)
               const differs = seed ? travellerRowDiffers(traveller, seed) : false
-              const prefilled = prefilledFields.get(traveller.key)
               const unreadableDob =
                 traveller.dateOfBirth.trim().length > 0 && normalizeDateOfBirth(traveller.dateOfBirth) === null
               return (
@@ -747,12 +738,6 @@ export function JobReservationTab({
                       <Trash2 className="w-3.5 h-3.5" />
                     </Button>
                   </div>
-                  {prefilled && prefilled.size > 0 ? (
-                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <UserCheck className="w-3 h-3 shrink-0" aria-hidden="true" />
-                      Prefilled from customer profile: {describePrefilled(prefilled)}. Check, then save.
-                    </p>
-                  ) : null}
                   {unreadableDob ? (
                     <p id={`dob-hint-${traveller.key}`} className="text-xs text-amber-600 dark:text-amber-500">
                       Date of birth isn&apos;t in a format we can read — use 12/05/1980 or 1980-05-12. It will be
@@ -820,10 +805,6 @@ export function JobReservationTab({
                           onChange={(e) => setBillingCountry(e.target.value)}
                         />
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        Printed on the invoice as Address / Code. Saves with the guest list. Left blank
-                        prints a dash — it no longer falls back to the customer profile.
-                      </p>
                     </div>
                   ) : null}
                 </div>
@@ -996,20 +977,6 @@ export function JobReservationTab({
           <div>
             <Label className="text-xs text-muted-foreground">Agency address</Label>
             <Textarea value={agencyAddress} onChange={(e) => setAgencyAddress(e.target.value)} className="mt-1" rows={2} />
-            {agencySeed.address && agencyAddress !== agencySeed.address ? (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
-                <span>Enquiry: {agencySeed.address}</span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-6 px-2"
-                  onClick={() => setAgencyAddress(agencySeed.address)}
-                >
-                  <RotateCcw className="w-3 h-3 mr-1" /> Revert
-                </Button>
-              </div>
-            ) : null}
           </div>
           <div className="flex justify-end">
             <Button size="sm" onClick={() => saveDetails()} disabled={savingDetails}>
