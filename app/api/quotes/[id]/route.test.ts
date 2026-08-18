@@ -24,7 +24,7 @@ interface PrevLine {
   pricing_snapshot: unknown
 }
 
-function buildAuth(previousLineItems: PrevLine[], status = "draft") {
+function buildAuth(previousLineItems: PrevLine[], status = "draft", overrideReason: string | null = null) {
   const rpc = vi.fn(async () => ({ error: null }))
   const auditInsert = vi.fn(async () => ({ error: null }))
   const quoteUpdate = vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) }))
@@ -42,8 +42,8 @@ function buildAuth(previousLineItems: PrevLine[], status = "draft") {
                   subtotal: 0,
                   total: 0,
                   status,
-                  updated_at: "2026-07-14T00:00:00.000Z",
-                  override_reason: null,
+                  updated_at: QUOTE_UPDATED_AT,
+                  override_reason: overrideReason,
                 },
                 error: null,
               })),
@@ -80,10 +80,17 @@ function buildAuth(previousLineItems: PrevLine[], status = "draft") {
   return { rpc, auditInsert, quoteUpdate }
 }
 
-function patchReq(body: unknown) {
+const QUOTE_UPDATED_AT = "2026-07-14T00:00:00.000Z"
+
+/**
+ * Stamps the current row version unless the caller is deliberately testing the version contract
+ * itself — the route now refuses a save that carries neither `expectedUpdatedAt` nor `force`.
+ */
+function patchReq(body: Record<string, unknown>) {
+  const hasVersionField = "expectedUpdatedAt" in body || "force" in body
   return new Request(`http://localhost/api/quotes/${QUOTE_ID}`, {
     method: "PATCH",
-    body: JSON.stringify(body),
+    body: JSON.stringify(hasVersionField ? body : { ...body, expectedUpdatedAt: QUOTE_UPDATED_AT }),
     headers: { "Content-Type": "application/json" },
   })
 }
@@ -207,5 +214,114 @@ describe("PATCH /api/quotes/[id]", () => {
     )
 
     expect(res.status).toBe(400)
+  })
+
+  // QA 11, F11-9. override_reason used to be write-only: once a manual line stamped it, nothing
+  // ever nulled it back out, so the "PRICING OVERRIDE" banner on the quotes tab stuck around even
+  // after the quote was re-priced entirely from rate cards.
+  describe("override_reason clearing", () => {
+    it("clears a stale override_reason once every line is priced by the rate-card engine", async () => {
+      const { quoteUpdate } = buildAuth(
+        [prevLine({ description: "The Blue Train", unit_price: 5000, total: 5000 })],
+        "draft",
+        "Old manual line, since removed",
+      )
+
+      // The old manual line is gone; what's saved now is an ordinary pricing-engine line — the
+      // "re-priced entirely from rate cards" case QA 11 hit.
+      const res = await PATCH(
+        patchReq({
+          lineItems: [
+            {
+              description: "Package Total",
+              qty: 1,
+              unitPrice: 24800,
+              total: 24800,
+              pricingSnapshot: { source: "pricing_engine" },
+            },
+          ],
+        }),
+        routeParams,
+      )
+
+      expect(res.status).toBe(200)
+      expect(quoteUpdate).toHaveBeenCalledWith({ override_reason: null })
+    })
+
+    it("does not write when there is nothing to clear", async () => {
+      const { quoteUpdate } = buildAuth(
+        [prevLine({ description: "Package Total", unit_price: 24800, total: 24800 })],
+        "draft",
+        null,
+      )
+
+      const res = await PATCH(
+        patchReq({ lineItems: [{ description: "Package Total", qty: 1, unitPrice: 24800, total: 24800 }] }),
+        routeParams,
+      )
+
+      expect(res.status).toBe(200)
+      expect(quoteUpdate).not.toHaveBeenCalled()
+    })
+
+    it("keeps a still-current override_reason untouched when nothing about the manual line changed", async () => {
+      const { quoteUpdate } = buildAuth(
+        [prevLine({ description: "The Blue Train", unit_price: 5000, total: 5000 })],
+        "draft",
+        "Agreed rate with supplier",
+      )
+
+      // Same line, same price, but overrideReason is required whenever the request body carries a
+      // manual (non-pricing-engine) line — resubmitting the reason should not cause a redundant write.
+      const res = await PATCH(
+        patchReq({
+          lineItems: [{ description: "The Blue Train", qty: 1, unitPrice: 5000, total: 5000 }],
+          overrideReason: "Agreed rate with supplier",
+        }),
+        routeParams,
+      )
+
+      expect(res.status).toBe(200)
+      expect(quoteUpdate).not.toHaveBeenCalled()
+    })
+  })
+
+  // QA 11, F11-6. This PATCH replaces the whole line-item set, so a save built from a stale copy
+  // silently deletes whatever another consultant added rather than failing to merge it. The
+  // version token is mandatory, and the deliberate overwrite has to say so.
+  describe("optimistic locking", () => {
+    const oneLine = [{ description: "Package Total", qty: 1, unitPrice: 24800, total: 24800 }]
+
+    it("refuses a save that carries neither a version token nor an explicit force", async () => {
+      const { rpc } = buildAuth([prevLine({ description: "Package Total", unit_price: 24800, total: 24800 })])
+
+      const res = await PATCH(patchReq({ lineItems: oneLine, force: false }), routeParams)
+
+      expect(res.status).toBe(400)
+      expect((await res.json()).error).toContain("expectedUpdatedAt is required")
+      expect(rpc).not.toHaveBeenCalled()
+    })
+
+    it("409s a save built from a version someone else has already superseded", async () => {
+      const { rpc } = buildAuth([prevLine({ description: "Package Total", unit_price: 24800, total: 24800 })])
+
+      const res = await PATCH(
+        patchReq({ lineItems: oneLine, expectedUpdatedAt: "2026-07-13T00:00:00.000Z" }),
+        routeParams,
+      )
+
+      expect(res.status).toBe(409)
+      expect((await res.json()).code).toBe("STALE_VERSION")
+      expect(rpc).not.toHaveBeenCalled()
+    })
+
+    it("lets an explicit force through without a version token — the 'save anyway' path", async () => {
+      const { rpc } = buildAuth([prevLine({ description: "Package Total", unit_price: 24800, total: 24800 })])
+
+      const res = await PATCH(patchReq({ lineItems: oneLine, force: true }), routeParams)
+
+      expect(res.status).toBe(200)
+      expect(rpc).toHaveBeenCalledWith("replace_quote_line_items", expect.anything())
+    })
   })
 })

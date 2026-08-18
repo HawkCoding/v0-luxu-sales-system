@@ -31,5 +31,12 @@ export function describeInvoiceLine(
 
   if (snapshot?.passengerKind === "child") return `${base} (Child)`
   if (snapshot?.passengerKind === "infant") return `${base} (Infant)`
+
+  // A gifted night is missing from the line's qty, so the invoice says why rather than leaving a
+  // four-night stay billed as three nights unexplained.
+  const gifted = snapshot?.complimentaryNights ?? 0
+  if (gifted > 0) {
+    return `${base} (${gifted === 1 ? "first night complimentary" : `${gifted} nights complimentary`})`
+  }
   return base
 }

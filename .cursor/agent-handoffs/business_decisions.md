@@ -134,6 +134,12 @@ Current state in code: Public quote acceptance returns an error when `validity_u
 
 Recommended default: Block acceptance after the validity date.
 
-Final decision: Quote acceptance after validity date is blocked. Store the canonical setting as `app_settings.quote_acceptance_after_expiry = blocked`.
+Original decision (2026-05): Quote acceptance after validity date is blocked. Store the canonical setting as `app_settings.quote_acceptance_after_expiry = blocked`.
 
-Affected files: `app/api/quotes/accept-public/[token]/route.ts`, `app/api/quotes/[id]/acceptance-link/route.ts`, `lib/pipeline/validate-transition.ts`, `supabase/seed.sql`, `supabase/migrations/20260516120000_phase_34_business_defaults.sql`.
+**Superseded 2026-08-18 (QA 11, F11-2) — enforcement is deferred, and the setting is deleted.**
+
+The "current state in code" above was never true of the pipeline path. `grep validity_until lib/pipeline/` returns nothing: QA 11 accepted a quote 17 days past its `validity_until` with zero gate failures, and `app_settings.quote_acceptance_after_expiry` was read by nothing. Quote validity is also hidden end to end behind `QUOTE_VALIDITY_ENABLED = false` (`lib/feature-flags.ts`) — no "valid until" on the quote card, the PDF, or the email — so neither the consultant nor the client can see the date the rule would be enforced against.
+
+Rather than leave a stored setting describing a rule the product does not have, the setting is removed (`supabase/migrations/20260818130000_drop_quote_acceptance_after_expiry.sql`). Expiry enforcement is deferred until `QUOTE_VALIDITY_ENABLED` is switched on, at which point the gate, the setting and a decision about already-lapsed quotes are reintroduced together.
+
+Affected files: `lib/feature-flags.ts`, `supabase/seed.sql`, `supabase/migrations/20260516120000_phase_34_business_defaults.sql`, `supabase/migrations/20260818130000_drop_quote_acceptance_after_expiry.sql`.

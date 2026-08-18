@@ -43,7 +43,8 @@ function isPostgrestError(error: unknown): error is PostgrestError {
     "hint" in error
   )
 }
-import { validateTransition } from "@/lib/pipeline/validate-transition"
+import { isReopenFromCancelled, isSameStage, validateTransition } from "@/lib/pipeline/validate-transition"
+import { loadTransitionLegReferences } from "@/lib/pipeline/transition-leg-references"
 import { mapBookingTransportRequest } from "@/lib/suppliers"
 import { getDefaultDepositPercentage } from "@/lib/pipeline/constants"
 import { updateInvoiceNumber } from "@/lib/bookings/invoice-number"
@@ -71,9 +72,11 @@ const patchJobSchema = z.object({
   override: z.boolean().optional(),
   overrideReason: z.string().optional(),
   closedReopenReason: z.string().optional(),
+  // Same thing as `closedReopenReason`, for the other terminal stage: moving a
+  // booking off `lost` is a reopen too and needs the same justification.
+  reopenReason: z.string().optional(),
   manualConfirmations: z
     .object({
-      createDepositInvoice: z.boolean().optional(),
       finalPaymentReceived: z.boolean().optional(),
     })
     .optional(),
@@ -92,6 +95,10 @@ const patchJobSchema = z.object({
   customerId: z.string().optional(),
   customerInvoiceNumber: z.string().trim().max(120).nullable().optional(),
   expectedUpdatedAt: z.string().datetime({ offset: true }).optional(),
+  // Sent by useVersionedSave's "save anyway" path in place of expectedUpdatedAt. This route has
+  // always treated an absent token as "no check", so it changes nothing here — it is declared so
+  // the shared hook's explicit overwrite signal doesn't trip the .strict() below.
+  force: z.boolean().optional(),
   // Values the client loaded for the fields it's changing (keyed by the same
   // client-facing names as the patch body), so a sibling write that bumped
   // updated_at without touching these fields doesn't block this save.
@@ -593,7 +600,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const { data: booking } = await supabase
     .from("bookings")
     .select(
-      "id, stage, booking_number, customer_id, consultant, assigned_salesperson_id, source, raw_text, email_import_needs_review, email_import_review_resolved_at, reservation_form_received_at, updated_at, departure_date, duration_nights, deposit_paid, invoice_balance, no_of_adults, no_of_children, no_of_suites, child_ages, customer_invoice_number",
+      "id, stage, booking_number, customer_id, consultant, assigned_salesperson_id, source, raw_text, email_import_needs_review, email_import_review_resolved_at, reservation_form_received_at, updated_at, cancelled_at, departure_date, duration_nights, deposit_paid, invoice_balance, no_of_adults, no_of_children, no_of_suites, child_ages, customer_invoice_number",
     )
     .eq("id", id)
     .single()
@@ -693,6 +700,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       }
     | null = null
 
+  // A "move" to the stage the booking is already in is not a move. It used to
+  // run the full transition anyway: a bumped updated_at, a `record_updated` and
+  // a `stage_change` audit row whose before and after were identical, and an
+  // `enquiry -> enquiry` row in pipeline_history. Any other field in the same
+  // PATCH still saves normally — only the stage machinery is skipped.
+  if (body.stage && isSameStage(booking.stage as PipelineStage, body.stage as PipelineStage)) {
+    body.stage = undefined
+  }
+
   if (body.stage) {
     const fromStage = booking.stage as PipelineStage
     const targetStage = body.stage as PipelineStage
@@ -707,6 +723,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     const role = extractRoleFromJwt(user) ?? profile?.clearance_level ?? null
     const isManager = role === "manager" || role === "admin"
     const overrideReason = body.overrideReason?.trim() ?? ""
+    const reopenReason = (body.reopenReason ?? body.closedReopenReason)?.trim() ?? ""
     const lostContext = { ...body.lostContext }
 
     const [
@@ -749,6 +766,15 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
           ? (updates.reservation_form_received_at as string | null)
           : booking.reservation_form_received_at,
     }
+    // Fails open: the generate/send readiness check still blocks a voucher with missing
+    // references, so a lookup hiccup here costs a clearer message, never a wrongly-permitted move.
+    let legReferences: Awaited<ReturnType<typeof loadTransitionLegReferences>> = []
+    try {
+      legReferences = await loadTransitionLegReferences(supabase, id, fromStage, targetStage)
+    } catch (error) {
+      console.error("jobs/[id]:leg-references", error)
+    }
+
     const failures = validateTransition({
       booking: validationBooking,
       customer,
@@ -758,6 +784,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       invoices: invoices ?? [],
       correspondences: correspondences ?? [],
       payments: payments ?? [],
+      legReferences,
       manualConfirmations: body.manualConfirmations,
       lostContext,
     })
@@ -776,8 +803,16 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       )
     }
 
-    if (fromStage === "closed" && targetStage !== "closed" && !body.closedReopenReason?.trim()) {
+    if (fromStage === "closed" && targetStage !== "closed" && !reopenReason) {
       return NextResponse.json({ error: "Reason required when reopening a closed booking" }, { status: 400 })
+    }
+
+    // `lost` is the other terminal stage, and until now it was the unguarded
+    // one: a cancelled booking could be PATCHed straight back into any stage
+    // with no reason and no gates. It is now held to the same rule as `closed`,
+    // and validateTransition re-runs the whole ladder for the reopen.
+    if (isReopenFromCancelled(fromStage) && targetStage !== "lost" && !reopenReason) {
+      return NextResponse.json({ error: "Reason required when reopening a cancelled booking" }, { status: 400 })
     }
 
     try {
@@ -877,16 +912,18 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       }
     }
 
-    if (fromStage === "closed" && targetStage !== "closed") {
+    const reopenedFromClosed = fromStage === "closed" && targetStage !== "closed"
+    const reopenedFromCancelled = isReopenFromCancelled(fromStage) && targetStage !== "lost"
+    if (reopenedFromClosed || reopenedFromCancelled) {
       const reopenAudit = await supabase.from("audit_logs").insert({
         actor: actorName,
         actor_user_id: user.id,
         entity_type: "Booking",
         entity_id: id,
-        action: "closed_booking_reopened",
+        action: reopenedFromCancelled ? "cancelled_booking_reopened" : "closed_booking_reopened",
         before_json: { stage: fromStage },
         after_json: { stage: targetStage },
-        meta_json: { reason: body.closedReopenReason?.trim() },
+        meta_json: { reason: reopenReason },
       })
       if (reopenAudit.error) {
         return safeSupabaseError("jobs/[id]:audit_logs", reopenAudit.error, "Failed to record reopen")
@@ -1092,6 +1129,22 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       cancelledAt: stageUpdated.cancelled_at ?? null,
       updatedAt: stageUpdated.updated_at,
       updatedAtDisplay: formatDisplayDateTime(stageUpdated.updated_at),
+    })
+  }
+
+  // Nothing but the timestamp left to write — the commonest case being the
+  // same-stage "move" dropped above. Echo the row rather than bumping
+  // updated_at and logging a `record_updated` for a change that never happened.
+  if (!stageUpdated && Object.keys(updates).length === 1) {
+    return NextResponse.json({
+      id: booking.id,
+      jobNumber: booking.booking_number,
+      stage: booking.stage,
+      consultant: booking.consultant,
+      assignedSalespersonId: booking.assigned_salesperson_id ?? null,
+      cancelledAt: booking.cancelled_at ?? null,
+      updatedAt: booking.updated_at,
+      updatedAtDisplay: formatDisplayDateTime(booking.updated_at),
     })
   }
 

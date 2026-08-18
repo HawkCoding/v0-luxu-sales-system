@@ -51,6 +51,8 @@ const unitSelectionSchema = z.object({
   manualInfantPrice: z.number().nonnegative().nullable().optional(),
   /** Hotel legs only: the typed price per room per night that replaces this room's rate card. */
   manualRoomPrice: z.number().nonnegative().nullable().optional(),
+  /** Hotel legs only: the hotel gifted this room's first night, so the line prices nights - 1. */
+  complimentaryFirstNight: z.boolean().optional(),
 })
 
 const applyServicesSchema = z.object({

@@ -232,6 +232,7 @@ export function bookingServicesToLegSelections(
         // The setter's display name is resolved by the caller that has a Supabase client
         // (see lib/quotes/room-override-provenance.ts); this pure mapper only carries the stamp.
         manualRoomPriceSetAt: unit.manual_room_price_set_at,
+        complimentaryFirstNight: unit.complimentary_first_night,
       }))
 
     const selection: PackageLegSelection = {

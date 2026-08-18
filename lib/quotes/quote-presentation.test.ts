@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
+import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
 import type { QuoteLineItem } from "@/lib/types"
 import {
   buildQuoteItineraryLines,
@@ -186,6 +187,16 @@ describe("buildQuoteItineraryLines", () => {
     )
   })
 
+  it("calls out a gifted first night without shortening the stay it states", () => {
+    const lines = buildQuoteItineraryLines([
+      { ...hotelBlock, serviceData: { ...hotelBlock.serviceData, isFirstNightComplimentary: true } },
+    ])
+
+    expect(lines[0].text).toBe(
+      "Two nights at the Irene Country Lodge, Pretoria in a Guest room with a lake view incl. breakfast | Check in from 14h00 – FIRST NIGHT COMPLIMENTARY",
+    )
+  })
+
   it("derives nights on board from durationDays and lists supplier inclusions as bullets", () => {
     const [boarding, arrival] = buildQuoteItineraryLines([trainBlock])
 
@@ -225,6 +236,68 @@ describe("buildQuoteItineraryLines", () => {
   it("interleaves lines from different blocks by date", () => {
     const dates = buildQuoteItineraryLines([trainBlock, hotelBlock]).map((line) => line.dateISO)
     expect(dates).toEqual(["2026-07-18", "2026-07-20", "2026-07-20", "2026-07-22"])
+  })
+
+  it("prints a station transfer before the hotel it delivers guests to, even though the hotel's default check-in time is earlier on the clock", () => {
+    // Regression for the reported bug: train arrives 25 Nov 18h00, the transfer that carries
+    // guests from the station to the hotel also runs 25 Nov 18h00, and the hotel's check-in is
+    // just its default policy time (15h00) — not a real event. Builder order (train, transfer,
+    // hotel) has to win the same-day tie, or the hotel line prints before the transfer that gets
+    // guests there.
+    const train: VoucherServiceBlock = {
+      serviceType: "train",
+      title: "Blue Train",
+      contactDetails: { name: "Blue Train", location: "Pretoria" },
+      serviceData: {
+        departureDate: "2026-11-23",
+        arrivalDate: "2026-11-25",
+        startTime: "13:00",
+        endTime: "18:00",
+        route: "Pretoria → Cape Town",
+        arrivalStation: "Cape Town",
+        durationDays: 3,
+      },
+      displayOrder: 0,
+    }
+    const transfer: VoucherServiceBlock = {
+      serviceType: "transfer",
+      title: "Transfer",
+      contactDetails: { name: "Luxus Chauffeur" },
+      serviceData: {
+        departureDate: "2026-11-25",
+        startTime: "18:00",
+        pickup: "the Cape Town Station",
+        dropoff: "the TAJ Hotel",
+      },
+      displayOrder: 1,
+    }
+    const hotel: VoucherServiceBlock = {
+      serviceType: "hotel",
+      title: "TAJ Hotel",
+      contactDetails: { name: "TAJ Hotel", location: "Cape Town" },
+      serviceData: {
+        departureDate: "2026-11-25",
+        arrivalDate: "2026-11-27",
+        startTime: "15:00",
+        endTime: "12:00",
+        roomType: "Luxury City View Room",
+        mealPlan: "Bed & Breakfast",
+        nights: 2,
+      },
+      displayOrder: 2,
+    }
+
+    // Deliberately passed out of builder order to prove the sort — not the input order — decides.
+    const sorted = sortItineraryBlocksChronologically([hotel, train, transfer])
+    const lines = buildQuoteItineraryLines(sorted)
+    const nov25 = lines.filter((line) => line.dateISO === "2026-11-25").map((line) => line.text)
+
+    expect(nov25).toEqual([
+      "Arrival at Cape Town station at 18h00",
+      "Transfer from the Cape Town Station to the TAJ Hotel | at 18h00",
+      "Two nights at the TAJ Hotel, Cape Town in a Luxury City View Room incl. Bed & Breakfast | Check in from 15h00",
+    ])
+    expect(lines.find((line) => line.text === "Check out at 12h00")?.dateISO).toBe("2026-11-27")
   })
 
   it("names pickup and dropoff on a transfer", () => {

@@ -274,6 +274,59 @@ describe("PUT /api/jobs/[id]/transport-requests", () => {
     })
   })
 
+  it("threads dateAnchor through to the replace RPC for a transfer", async () => {
+    const supabase = buildSupabase()
+    authMocks.requireRole.mockResolvedValue({
+      ok: true,
+      value: {
+        supabase,
+        user: { id: "u1", email: "u@example.com" },
+        profile: { clearanceLevel: "consultant", actorName: "Jane", name: "Jane", surname: "D", email: "u@example.com" },
+      },
+    })
+    const req = new Request("http://localhost", {
+      method: "PUT",
+      body: JSON.stringify({
+        transportRequests: [{ serviceType: "transfer", pickupPoint: "A", dropoffPoint: "B", dateAnchor: "post" }],
+      }),
+      headers: { "Content-Type": "application/json" },
+    })
+    const res = await PUT(req, { params })
+    expect(res.status).toBe(200)
+    expect(supabase.replaceTransportRequests).toHaveBeenCalledWith({
+      p_booking_id: BOOKING_ID,
+      p_transport_requests: [expect.objectContaining({ date_anchor: "post" })],
+      p_rental_details: [],
+    })
+  })
+
+  it("rejects a pre/post anchor on a vehicle rental — it has no single leg to anchor two dates to", async () => {
+    authMocks.requireRole.mockResolvedValue({
+      ok: true,
+      value: {
+        supabase: buildSupabase(),
+        user: { id: "u1", email: "u@example.com" },
+        profile: { clearanceLevel: "consultant", actorName: "Jane", name: "Jane", surname: "D", email: "u@example.com" },
+      },
+    })
+    const req = new Request("http://localhost", {
+      method: "PUT",
+      body: JSON.stringify({
+        transportRequests: [{
+          serviceType: "rental",
+          pickupPoint: "A",
+          dropoffPoint: "B",
+          pickupAt: "2026-06-01T10:00:00.000Z",
+          dateAnchor: "pre",
+          rentalDetails: { returnAt: "2026-06-03T10:00:00.000Z" },
+        }],
+      }),
+      headers: { "Content-Type": "application/json" },
+    })
+    const res = await PUT(req, { params })
+    expect(res.status).toBe(400)
+  })
+
   describe("price override provenance", () => {
     it("stamps a brand-new override with the current user and a fresh timestamp", async () => {
       const supabase = buildSupabase({ existingRows: [] })

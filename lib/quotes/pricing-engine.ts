@@ -24,12 +24,42 @@ export function isFixedPackageInclusion(lineItem: QuoteLineItem): boolean {
 }
 
 /**
- * True when a hotel room's price was deliberately typed as R0 (the supplier comped it) rather
- * than left unpriced. `manualRoomPrice` only exists on hotel legs, so this can't misfire on
- * other supplier kinds. See the "Mark complimentary" action in suite-leg-editor.tsx.
+ * True when a hotel room's price was deliberately typed as R0 (the supplier comped the whole
+ * stay) rather than left unpriced. `manualRoomPrice` only exists on hotel legs, so this can't
+ * misfire on other supplier kinds. See the price override in suite-leg-editor.tsx.
  */
 export function isComplimentaryRoom(lineItem: QuoteLineItem): boolean {
   return lineItem.pricingSnapshot?.manualRoomPrice === 0
+}
+
+/**
+ * Nights of a hotel room's stay the supplier gifted. Today the "Mark first night complimentary"
+ * action in suite-leg-editor.tsx only ever gifts one, but the count is what the line's qty was
+ * derived from, so it is read back as a number rather than a flag.
+ */
+export function complimentaryNights(lineItem: QuoteLineItem): number {
+  const nights = lineItem.pricingSnapshot?.complimentaryNights
+  return typeof nights === "number" && nights > 0 ? nights : 0
+}
+
+/** The room's full stay length, which is longer than the line's qty once a night is gifted. */
+export function stayNights(lineItem: QuoteLineItem): number {
+  const nights = lineItem.pricingSnapshot?.stayNights
+  return typeof nights === "number" && nights > 0 ? nights : lineItem.qty
+}
+
+/** True when a hotel room had one or more nights gifted but is still charged for the rest. */
+export function hasComplimentaryNight(lineItem: QuoteLineItem): boolean {
+  return complimentaryNights(lineItem) > 0
+}
+
+/**
+ * True when a rate card carried no infant price, so the infant travels free. The pricing engine
+ * resolves that to R0 rather than the child fare (see build-from-package.ts), and a free infant is
+ * a finished line — not one waiting on a number.
+ */
+export function isFreeInfant(lineItem: QuoteLineItem): boolean {
+  return lineItem.pricingSnapshot?.passengerKind === "infant"
 }
 
 /** True when a line is zero-priced for a reason the quote still needs resolved. */
@@ -37,6 +67,10 @@ export function isMissingPricing(lineItem: QuoteLineItem): boolean {
   return (
     lineItem.unitPrice === 0 &&
     !isFixedPackageInclusion(lineItem) &&
-    !isComplimentaryRoom(lineItem)
+    !isComplimentaryRoom(lineItem) &&
+    // A one-night stay with its only night gifted charges nothing and prices nothing — that is a
+    // finished line, not an unpriced one.
+    !hasComplimentaryNight(lineItem) &&
+    !isFreeInfant(lineItem)
   )
 }

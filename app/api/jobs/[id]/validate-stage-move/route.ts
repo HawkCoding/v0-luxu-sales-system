@@ -4,6 +4,7 @@ import { extractRoleFromJwt } from "@/lib/role-utils"
 import { createSessionClient } from "@/lib/supabase/server"
 import type { PipelineStage } from "@/lib/types"
 import { validateTransition } from "@/lib/pipeline/validate-transition"
+import { loadTransitionLegReferences } from "@/lib/pipeline/transition-leg-references"
 
 const pipelineStageSchema = z.enum([
   "enquiry",
@@ -25,7 +26,6 @@ const validateMoveSchema = z.object({
   targetStage: pipelineStageSchema,
   manualConfirmations: z
     .object({
-      createDepositInvoice: z.boolean().optional(),
       finalPaymentReceived: z.boolean().optional(),
     })
     .optional(),
@@ -94,6 +94,21 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const role = extractRoleFromJwt(user) ?? profile?.clearance_level ?? null
   const isManager = role === "manager" || role === "admin"
+
+  // Fails open: the generate/send readiness check still blocks a voucher with missing references,
+  // so a lookup hiccup here costs a clearer message, never a wrongly-permitted move.
+  let legReferences: Awaited<ReturnType<typeof loadTransitionLegReferences>> = []
+  try {
+    legReferences = await loadTransitionLegReferences(
+      supabase,
+      id,
+      booking.stage as PipelineStage,
+      body.targetStage as PipelineStage,
+    )
+  } catch (error) {
+    console.error("validate-stage-move:leg-references", error)
+  }
+
   const failures = validateTransition({
     booking: {
       id: booking.id,
@@ -111,13 +126,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     invoices: invoices ?? [],
     correspondences: correspondences ?? [],
     payments: payments ?? [],
+    legReferences,
     manualConfirmations: body.manualConfirmations,
     lostContext: body.lostContext,
   })
 
-  return NextResponse.json({
-    failures,
-    isManager,
-    autoCreatableInvoice: failures.some((failure) => failure.autoFixable === "create_invoice_25pct"),
-  })
+  // `autoCreatableInvoice` used to ride along here for the removed
+  // `create_invoice_25pct` shortcut. Nothing consumed it, and there is no
+  // auto-creatable invoice any more — the gate sends the user to the real
+  // deposit-invoice dialog instead.
+  return NextResponse.json({ failures, isManager })
 }

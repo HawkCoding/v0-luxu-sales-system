@@ -26,6 +26,8 @@ import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import type { OutcomeReason, PipelineStage } from "@/lib/types"
+import { useDirtyCloseGuard } from "@/hooks/use-dirty-close-guard"
+import { DiscardChangesDialog } from "@/components/discard-changes-dialog"
 
 interface CancelBookingDialogProps {
   open: boolean
@@ -61,6 +63,15 @@ export function CancelBookingDialog({
   const [refundedAt, setRefundedAt] = useState("")
   const [loading, setLoading] = useState(false)
   const requiresRefundCapture = ["deposit_paid", "final_paid", "voucher_sent", "closed", "trip_active"].includes(sourceStage)
+  const defaultRefundAmount =
+    suggestedRefund !== null && suggestedRefund !== undefined ? suggestedRefund.toFixed(2) : ""
+  const isDirty =
+    reasonId !== "" ||
+    notes.trim() !== "" ||
+    refundStatus !== "" ||
+    refundAmount !== defaultRefundAmount ||
+    refundReference !== "" ||
+    refundedAt !== ""
 
   // The API rejects an over-refund with a 400; catch it here so the user sees why
   // before submitting.
@@ -93,6 +104,11 @@ export function CancelBookingDialog({
       onOpenChange(nextOpen)
     }
   }
+
+  const closeGuard = useDirtyCloseGuard({
+    isDirty,
+    onConfirmedClose: () => handleOpenChange(false),
+  })
 
   const handleConfirm = async () => {
     const hasReason = cancelReasons.length === 0 || Boolean(reasonId)
@@ -146,8 +162,13 @@ export function CancelBookingDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-md">
+    <Dialog open={open} onOpenChange={(next) => (next ? handleOpenChange(true) : closeGuard.handleOpenChange(false))}>
+      <DialogContent className="sm:max-w-md" {...closeGuard.contentProps}>
+        <DiscardChangesDialog
+          open={closeGuard.confirming}
+          onKeepEditing={closeGuard.cancelDiscard}
+          onDiscard={closeGuard.confirmDiscard}
+        />
         <DialogHeader>
           <DialogTitle>Cancel Booking</DialogTitle>
           <DialogDescription>
@@ -284,7 +305,7 @@ export function CancelBookingDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => handleOpenChange(false)} disabled={loading}>
+          <Button variant="outline" onClick={() => closeGuard.handleOpenChange(false)} disabled={loading}>
             Cancel
           </Button>
           <Button

@@ -40,7 +40,13 @@ const TRAIN = service({
   service_date: "2026-10-14",
   supplier_reference: "BT-9001",
   suppliers: { name: "The Blue Train", kind: "train_operator" },
-  routes: { duration_days: 2 },
+  routes: {
+    duration_days: 2,
+    name: null,
+    direction_mode: "one_way",
+    origin: { name: "Pretoria" },
+    destination: { name: "Cape Town" },
+  },
 })
 
 const HOTEL = service({
@@ -107,12 +113,97 @@ describe("buildWorksheetServiceLines", () => {
 
   it("leaves a train's end date blank when its route has no duration", () => {
     const [line] = buildWorksheetServiceLines({
-      services: [service({ ...TRAIN, routes: { duration_days: null } })],
+      services: [
+        service({
+          ...TRAIN,
+          routes: { duration_days: null, name: null, direction_mode: "one_way", origin: null, destination: null },
+        }),
+      ],
       transportRequests: [],
       schedules: [],
     })
 
     expect(line.toDate).toBeNull()
+  })
+
+  it("describes a train line with the route booked, alongside the supplier", () => {
+    const [line] = buildWorksheetServiceLines({
+      services: [
+        service({
+          ...TRAIN,
+          routes: {
+            duration_days: 2,
+            name: "Pretoria → Cape Town",
+            direction_mode: "one_way",
+            origin: { name: "Pretoria" },
+            destination: { name: "Cape Town" },
+          },
+        }),
+      ],
+      transportRequests: [],
+      schedules: [],
+    })
+
+    expect(line.description).toBe("The Blue Train — Pretoria → Cape Town")
+  })
+
+  it("describes a hotel line with the room booked, alongside the supplier", () => {
+    const [line] = buildWorksheetServiceLines({
+      services: [
+        service({
+          id: "hotel",
+          service_date: "2026-10-18",
+          nights: 4,
+          suppliers: { name: "Table Bay Hotel", kind: "hotel_property" },
+          units: [
+            { complimentary_first_night: false, suite_types: { name: "Deluxe Suite" } },
+            { complimentary_first_night: false, suite_types: { name: "Deluxe Suite" } },
+          ],
+        }),
+      ],
+      transportRequests: [],
+      schedules: [],
+    })
+
+    expect(line.description).toBe("Table Bay Hotel — Deluxe Suite")
+  })
+
+  it("notes a gifted first night on the hotel line so ops confirms the deal that was quoted", () => {
+    const [line] = buildWorksheetServiceLines({
+      services: [
+        service({
+          id: "hotel",
+          service_date: "2026-10-18",
+          nights: 4,
+          notes: "Late check-out requested",
+          suppliers: { name: "Table Bay Hotel", kind: "hotel_property" },
+          units: [{ complimentary_first_night: true }, { complimentary_first_night: false }],
+        }),
+      ],
+      transportRequests: [],
+      schedules: [],
+    })
+
+    expect(line.notes).toBe("First night complimentary — Late check-out requested")
+  })
+
+  it("leaves a hotel line's notes alone when no night was gifted", () => {
+    const [line] = buildWorksheetServiceLines({
+      services: [
+        service({
+          id: "hotel",
+          service_date: "2026-10-18",
+          nights: 4,
+          notes: "Late check-out requested",
+          suppliers: { name: "Table Bay Hotel", kind: "hotel_property" },
+          units: [{ complimentary_first_night: false }],
+        }),
+      ],
+      transportRequests: [],
+      schedules: [],
+    })
+
+    expect(line.notes).toBe("Late check-out requested")
   })
 
   it("replaces a transfer service with its captured trips instead of double-counting", () => {

@@ -28,6 +28,9 @@ const transportRequestSchema = z.object({
   pickupPoint: z.string().trim().max(500),
   dropoffPoint: z.string().trim().max(500),
   pickupAt: nullableDateTime,
+  /** Transfers only: `pre`/`post` derive pickupAt's date from the leg above it in the itinerary.
+   *  Rejected on a rental below, which has no single "leg above" concept for its two dates. */
+  dateAnchor: z.enum(["pre", "post", "custom"]).nullable().optional(),
   rentalDetails: rentalDetailsSchema,
   passengerCount: z.number().int().nonnegative().nullable().optional(),
   luggageCount: z.number().int().nonnegative().nullable().optional(),
@@ -45,10 +48,22 @@ const transportRequestSchema = z.object({
       message: "Return date/time is required for vehicle rentals",
     })
   }
+
+  if (request.dateAnchor === "pre" || request.dateAnchor === "post") {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["dateAnchor"],
+      message: "A vehicle rental has no single leg to anchor its dates to — pick pickup/return dates directly",
+    })
+  }
 })
 
+// `transportRequests` is required with no default on purpose: this PUT is a replace-the-set
+// operation, so a payload that omits the key (a typo, an older client) used to parse as "replace
+// with nothing" and silently delete every trip on the booking. Requiring it makes that a 400.
+// Clearing the set is still possible — it just has to be asked for explicitly with `[]`.
 const saveTransportRequestsSchema = z.object({
-  transportRequests: z.array(transportRequestSchema).default([]),
+  transportRequests: z.array(transportRequestSchema),
 })
 
 function normalizeNullableUuid(value: string | null | undefined): string | null {
@@ -143,6 +158,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
       pickup_point: request.pickupPoint.trim(),
       dropoff_point: request.dropoffPoint.trim(),
       pickup_at: normalizeNullableDateTime(request.pickupAt),
+      date_anchor: request.serviceType === "rental" ? null : request.dateAnchor ?? null,
       passenger_count: request.passengerCount ?? null,
       luggage_count: request.luggageCount ?? null,
       flight_number: normalizeNullableText(request.flightNumber),

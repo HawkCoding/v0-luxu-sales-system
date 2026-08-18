@@ -375,7 +375,7 @@ describe("PATCH /api/jobs/[id]/movement-times", () => {
     expect((await res.json()).error).toMatch(/cannot arrive before it departs/)
   })
 
-  it("writes a transfer pickup as an instant and leaves the rest of the set alone", async () => {
+  it("writes a transfer pickup as an instant, flips it to a custom anchor, and leaves the rest of the set alone", async () => {
     const { transportUpdates, rentalUpdates } = mockAuthRole()
     const res = await PATCH(
       new Request("http://localhost", {
@@ -390,8 +390,10 @@ describe("PATCH /api/jobs/[id]/movement-times", () => {
     )
 
     expect(res.status).toBe(200)
+    // A pickup typed here is a deliberate override — it flips to a custom anchor so the next Build
+    // Booking re-derive (lib/packages/transfer-dates.ts) doesn't silently overwrite it.
     expect(transportUpdates).toEqual([
-      { requestId: TRANSPORT_ID, payload: { pickup_at: "2026-10-14T13:30:00+02:00" } },
+      { requestId: TRANSPORT_ID, payload: { pickup_at: "2026-10-14T13:30:00+02:00", date_anchor: "custom" } },
     ])
     // No return was sent, so the rental detail row is not touched — a transfer has none.
     expect(rentalUpdates).toEqual([])

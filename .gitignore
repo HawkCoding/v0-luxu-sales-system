@@ -50,3 +50,8 @@ test-results/
 
 # QA screenshots (untracked 2026-07-12; binary artefacts don't belong in git)
 qa-screenshots/
+tests/qa/.auth/
+
+# Handbook build output. The Markdown sources and docs/handbook/screenshots/ ARE
+# committed — the generated PDFs and HTML are not.
+docs/handbook/dist/

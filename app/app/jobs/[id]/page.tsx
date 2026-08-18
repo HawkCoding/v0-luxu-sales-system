@@ -350,6 +350,12 @@ export default function JobDetailPage() {
   const consultantName = CONSULTANTS.find((consultant) => consultant.key === job.consultant)?.name ?? job.consultant ?? undefined
   const needsEmailReview = Boolean(enquiry?.emailImportNeedsReview)
   const nextBlockedByMissingPayment = forwardTargetIsDepositPaid && !hasAnyPayment && !needsEmailReview
+  // Moving to Deposit Paid sends the payment confirmation, and that email is
+  // built around the booking's invoice — POST /payment-received 422s without
+  // one. Next used to be enabled here anyway: it fired, took the 422, and the
+  // page showed nothing at all. Say why instead of leading to a dead end.
+  const nextBlockedByMissingInvoice =
+    forwardTargetIsDepositPaid && hasAnyPayment && invoices.length === 0 && !needsEmailReview
   const assignedSalespersonName = job.assignedSalespersonName ?? "Unassigned"
   const assignedSalespersonId = (job as { assignedSalespersonId?: string | null }).assignedSalespersonId ?? null
   const canReassign = role === "manager" || role === "admin"
@@ -516,9 +522,13 @@ export default function JobDetailPage() {
       const payload = await response.json().catch(() => null)
       const stageGatePayload = response.status === 400 ? parseStageTransitionFailurePayload(payload) : null
       if (stageGatePayload) {
+        // `invoice_document` is a hard block now — there is no tick that fakes
+        // an invoice into existence — so the only way past it is the real
+        // deposit-invoice dialog. Open it for the user rather than reporting a
+        // blocked move they would have to resolve by hand.
         const canGenerateDepositInvoice =
           targetStage === "deposit_requested" &&
-          stageGatePayload.failures.some((failure) => failure.autoFixable === "create_invoice_25pct")
+          stageGatePayload.failures.some((failure) => failure.gateId === "invoice_document")
         if (canGenerateDepositInvoice) {
           setPendingStage(targetStage)
           setTransitionFailures(stageGatePayload.failures)
@@ -526,9 +536,14 @@ export default function JobDetailPage() {
           setDepositInvoiceOpen(true)
           return
         }
+        // ...but only when generating can actually succeed. A leg missing its supplier reference
+        // makes /api/voucher/generate 422, so taking this shortcut would drop the user into a
+        // dialog whose only button fails. Let the modal render that gate and its link to the
+        // Voucher Details tab instead.
         const canGenerateVoucher =
           targetStage === "voucher_sent" &&
-          stageGatePayload.failures.some((failure) => failure.autoFixable === "create_voucher_pdf")
+          stageGatePayload.failures.some((failure) => failure.autoFixable === "create_voucher_pdf") &&
+          !stageGatePayload.failures.some((failure) => failure.gateId === "leg_references")
         if (canGenerateVoucher) {
           setPendingStage(targetStage)
           setTransitionFailures(stageGatePayload.failures)
@@ -696,7 +711,8 @@ export default function JobDetailPage() {
         needsEmailReview ||
         isSavingJob ||
         transitionSubmitting ||
-        (forwardTargetIsDepositPaid && !hasAnyPayment)
+        (forwardTargetIsDepositPaid && !hasAnyPayment) ||
+        nextBlockedByMissingInvoice
       }
       onClick={() => {
         if (forwardTargetIsDepositPaid) {
@@ -856,6 +872,15 @@ export default function JobDetailPage() {
                   </TooltipTrigger>
                   <TooltipContent>Record a payment on the Payments tab to continue</TooltipContent>
                 </Tooltip>
+              ) : nextBlockedByMissingInvoice ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex" onClick={() => setActiveTab("payments")}>
+                      {nextButton}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>Generate the confirmation invoice on the Payments tab to continue</TooltipContent>
+                </Tooltip>
               ) : (
                 nextButton
               )}
@@ -999,7 +1024,9 @@ export default function JobDetailPage() {
             onAutoOpenBuildBookingHandled={() => setAutoOpenBuildBookingQuoteId(null)}
           />
         </TabsContent>
-        <TabsContent value="reservation">
+        {/* forceMount + data-state hiding (rather than the default unmount-on-switch) so an
+            in-progress edit here survives a tab switch instead of being silently discarded. */}
+        <TabsContent value="reservation" forceMount className="data-[state=inactive]:hidden">
           <JobReservationTab
             bookingId={id}
             reservationFormReceivedAt={job.reservationFormReceivedAt ?? null}
@@ -1009,10 +1036,10 @@ export default function JobDetailPage() {
             stage={currentStage}
           />
         </TabsContent>
-        <TabsContent value="times">
+        <TabsContent value="times" forceMount className="data-[state=inactive]:hidden">
           <JobTransferTimesTab bookingId={id} />
         </TabsContent>
-        <TabsContent value="references">
+        <TabsContent value="references" forceMount className="data-[state=inactive]:hidden">
           <JobReferencesTab bookingId={id} />
         </TabsContent>
         <TabsContent value="payments">
@@ -1062,7 +1089,7 @@ export default function JobDetailPage() {
             onChange={mutate}
           />
         </TabsContent>
-        <TabsContent value="notes">
+        <TabsContent value="notes" forceMount className="data-[state=inactive]:hidden">
           <JobInternalNotesTab
             bookingId={id}
             notes={notesData?.notes ?? []}
@@ -1220,6 +1247,10 @@ export default function JobDetailPage() {
         trigger={false}
         jobId={id}
         hasPayments={payments.length > 0}
+        onError={() => {
+          setPaymentConfirmationOpen(false)
+          resetPendingTransition()
+        }}
         mutate={async () => {
           setPaymentConfirmationOpen(false)
           if (pendingStage) {
@@ -1237,6 +1268,10 @@ export default function JobDetailPage() {
         trigger={false}
         jobId={id}
         hasPayments={payments.length > 0}
+        onError={() => {
+          setDepositPaymentConfirmationOpen(false)
+          resetPendingTransition()
+        }}
         mutate={async () => {
           setDepositPaymentConfirmationOpen(false)
           await moveStageTo("deposit_paid")

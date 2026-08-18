@@ -98,6 +98,10 @@ export function useVersionedSave<TPayload extends object, TResponse extends Save
             ...payload,
             ...(opts.expectedUpdatedAt && !skipVersioning ? { expectedUpdatedAt: opts.expectedUpdatedAt } : {}),
             ...(opts.baseline && !skipVersioning ? { baseline: opts.baseline } : {}),
+            // "Save anyway" used to skip the version check by sending nothing at all, which is the
+            // same request shape as a client that simply forgot. Routes now require one or the
+            // other, so the deliberate overwrite says so explicitly.
+            ...(skipVersioning ? { force: true } : {}),
           }),
         })
 

@@ -33,6 +33,32 @@ import { cn } from "@/lib/utils"
 import { replaceContentSlot } from "@/lib/templates/content-slot"
 import { replaceSignatureSlot } from "@/lib/templates/signature-slot"
 import { formatQuoteDisplayLabel } from "@/lib/quotes/quote-number"
+import {
+  draftStorageKey,
+  readDraftEnvelope,
+  readRawDraft,
+  removeDraft,
+  serializeDraft,
+  writeDraft,
+} from "@/lib/drafts/draft-storage"
+import { useDirtyCloseGuard } from "@/hooks/use-dirty-close-guard"
+import { DiscardChangesDialog } from "@/components/discard-changes-dialog"
+
+/** Bump whenever this shape changes -- see lib/drafts/draft-storage.ts. */
+const EMAIL_DRAFT_SCHEMA_VERSION = 1
+const EMAIL_DRAFT_DEBOUNCE_MS = 1500
+
+interface EmailComposerDraft {
+  subject: string
+  content: string | null
+  libraryAttachmentIds: string[]
+}
+
+function isEmailComposerDraft(data: unknown): data is EmailComposerDraft {
+  if (!data || typeof data !== "object") return false
+  const candidate = data as Partial<EmailComposerDraft>
+  return typeof candidate.subject === "string" && Array.isArray(candidate.libraryAttachmentIds)
+}
 
 const HtmlBodyEditor = dynamic(
   () => import("@/components/ui/html-body-editor").then((m) => m.HtmlBodyEditor),
@@ -88,11 +114,46 @@ export function QuotePreviewSendDialog({
   const [error, setError] = useState<string | null>(null)
   const [libraryAttachmentIds, setLibraryAttachmentIds] = useState<string[]>([])
   const optimisticSend = useOptimisticSend()
+  // What the server last rendered, so a hand-edit can be told apart from the template's own wording
+  // -- reopening this dialog re-fetches the preview (moveStage/signature defaults can have changed),
+  // and that used to silently overwrite whatever was typed the first time.
+  const [serverBaseline, setServerBaseline] = useState<EmailComposerDraft>({
+    subject: "",
+    content: null,
+    libraryAttachmentIds: [],
+  })
+  const draftKey = draftStorageKey("email-quote", quote.id)
+  const isDirty =
+    JSON.stringify({ subject, content, libraryAttachmentIds }) !== JSON.stringify(serverBaseline)
 
   function setOpen(next: boolean) {
     if (!isControlled) setInternalOpen(next)
     onOpenChange?.(next)
   }
+
+  const closeGuard = useDirtyCloseGuard({
+    isDirty,
+    onConfirmedClose: () => {
+      removeDraft(draftKey)
+      setOpen(false)
+    },
+  })
+
+  // Debounced autosave of the hand-edited subject/body/attachments while they differ from what the
+  // server rendered.
+  useEffect(() => {
+    if (!open || !isDirty) return
+    const timeout = window.setTimeout(() => {
+      writeDraft(
+        draftKey,
+        serializeDraft<EmailComposerDraft>(
+          { subject, content, libraryAttachmentIds },
+          { version: EMAIL_DRAFT_SCHEMA_VERSION, recordUpdatedAt: null },
+        ),
+      )
+    }, EMAIL_DRAFT_DEBOUNCE_MS)
+    return () => window.clearTimeout(timeout)
+  }, [open, isDirty, draftKey, subject, content, libraryAttachmentIds])
 
   // The email is composed server-side from the quote_email template; edits
   // here are spliced into the branded wrapper for this send only. Content
@@ -124,7 +185,6 @@ export function QuotePreviewSendDialog({
       }
 
       setHtml(payload.html)
-      setContent(payload.bodyContentHtml ?? null)
       setSignatureProfileId(payload.signatureProfileId ?? null)
       setSignatureBrandId(payload.signatureBrandId ?? null)
       // Customer-facing fallback when the template resolves no subject, so it
@@ -132,7 +192,23 @@ export function QuotePreviewSendDialog({
       const subjectReference = QUOTE_REFERENCE_ENABLED
         ? payload.quoteNumber ?? bookingNumber
         : bookingNumber
-      setSubject(payload.subject ?? `Quote ${subjectReference}`)
+      const renderedSubject = payload.subject ?? `Quote ${subjectReference}`
+      const renderedContent = payload.bodyContentHtml ?? null
+      setServerBaseline({ subject: renderedSubject, content: renderedContent, libraryAttachmentIds: [] })
+
+      const stored = readDraftEnvelope<EmailComposerDraft>(readRawDraft(draftStorageKey("email-quote", quote.id)), {
+        version: EMAIL_DRAFT_SCHEMA_VERSION,
+        isValid: isEmailComposerDraft,
+      })
+      if (stored) {
+        setSubject(stored.data.subject)
+        setContent(stored.data.content)
+        setLibraryAttachmentIds(stored.data.libraryAttachmentIds)
+        toast.success("Restored your unsent draft for this quote email.")
+      } else {
+        setSubject(renderedSubject)
+        setContent(renderedContent)
+      }
       setWarnings(payload.warnings ?? [])
     } catch (previewError) {
       const message = previewError instanceof Error ? previewError.message : "Failed to render quote preview"
@@ -198,12 +274,13 @@ export function QuotePreviewSendDialog({
     })
 
     if (result.ok) {
+      removeDraft(draftKey)
       onSent()
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(next) => (next ? setOpen(true) : closeGuard.handleOpenChange(false))}>
       {!isControlled && (
         <DialogTrigger asChild>
           <Button size="sm" variant={quote.status === "sent" ? "outline" : "default"}>
@@ -212,7 +289,15 @@ export function QuotePreviewSendDialog({
           </Button>
         </DialogTrigger>
       )}
-      <DialogContent className="flex h-[90vh] max-h-[90vh] flex-col overflow-hidden max-w-[95vw] sm:max-w-[95vw] xl:max-w-6xl">
+      <DialogContent
+        className="flex h-[90vh] max-h-[90vh] flex-col overflow-hidden max-w-[95vw] sm:max-w-[95vw] xl:max-w-6xl"
+        {...closeGuard.contentProps}
+      >
+        <DiscardChangesDialog
+          open={closeGuard.confirming}
+          onKeepEditing={closeGuard.cancelDiscard}
+          onDiscard={closeGuard.confirmDiscard}
+        />
         <DialogHeader>
           <DialogTitle>Preview & Send Quote</DialogTitle>
           <DialogDescription>
@@ -343,7 +428,7 @@ export function QuotePreviewSendDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)} disabled={sending}>
+          <Button variant="outline" onClick={() => closeGuard.handleOpenChange(false)} disabled={sending}>
             Cancel
           </Button>
           <Button onClick={handleSend} disabled={sending || loadingPreview || !finalHtml}>

@@ -27,6 +27,8 @@ import {
 import type { Location, SupplierKind } from "@/lib/types"
 import { SUPPLIER_KIND_LABELS, getSupplierVocabulary, isTransportSupplier } from "@/lib/types"
 import { buildRouteName } from "@/lib/routes/route-name"
+import { useDirtyCloseGuard } from "@/hooks/use-dirty-close-guard"
+import { DiscardChangesDialog } from "@/components/discard-changes-dialog"
 
 export interface QuickSupplierResult {
   supplierId: string
@@ -200,9 +202,38 @@ export function NewSupplierQuickDialog({
 
   const cityLocations = locations.filter((location) => !location.parentLocationId)
 
+  const isDirty =
+    kind !== defaultKind ||
+    name.trim() !== "" ||
+    email.trim() !== "" ||
+    phone.trim() !== "" ||
+    locationId !== "" ||
+    routeName.trim() !== "" ||
+    originLocationId !== "" ||
+    destinationLocationId !== "" ||
+    pickupPoint.trim() !== "" ||
+    dropoffPoint.trim() !== "" ||
+    suiteTypeName.trim() !== "" ||
+    price !== null ||
+    priceExpires ||
+    validTo !== ""
+
+  const closeGuard = useDirtyCloseGuard({
+    isDirty,
+    onConfirmedClose: () => {
+      reset()
+      onOpenChange(false)
+    },
+  })
+
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next) reset(); onOpenChange(next) }}>
-      <DialogContent className="sm:max-w-lg">
+    <Dialog open={open} onOpenChange={(next) => (next ? onOpenChange(true) : closeGuard.handleOpenChange(false))}>
+      <DialogContent className="sm:max-w-lg" {...closeGuard.contentProps}>
+        <DiscardChangesDialog
+          open={closeGuard.confirming}
+          onKeepEditing={closeGuard.cancelDiscard}
+          onDiscard={closeGuard.confirmDiscard}
+        />
         <DialogHeader>
           <DialogTitle>New supplier</DialogTitle>
           <DialogDescription>
@@ -371,7 +402,7 @@ export function NewSupplierQuickDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+          <Button variant="outline" onClick={() => closeGuard.handleOpenChange(false)} disabled={saving}>
             Cancel
           </Button>
           <Button onClick={handleSave} disabled={saving}>

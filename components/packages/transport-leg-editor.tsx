@@ -19,11 +19,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { BookingTransportRequest, PackageLeg, RateType, SupplierRateCard } from "@/lib/types"
+import type { BookingTransportRequest, PackageLeg, RateType, ServiceDateAnchor, SupplierRateCard } from "@/lib/types"
 import {
   createDraftTransportRequest,
+  type TransferAnchorContext,
   type TransportLegState,
 } from "@/lib/packages/apply-dialog-state"
+import { resolveTransferPickupDate } from "@/lib/packages/transfer-dates"
 import { dateOnly } from "@/lib/packages/trip-date-range"
 import { getBillableRentalDays } from "@/lib/packages/rental-days"
 import { findRateCardCandidates, selectRateCard } from "@/lib/rate-cards/resolve"
@@ -32,8 +34,15 @@ import { CurrencySelect } from "@/components/currency-select"
 import { formatMoney, BASE_CURRENCY } from "@/lib/money"
 import { convertAmount, type FxRateMap } from "@/lib/pricing/convert-currency"
 import { formatDisplayDate } from "@/lib/date-format"
+import { cn } from "@/lib/utils"
 
 const NONE_VALUE = "__none"
+
+const ANCHOR_OPTIONS: { value: ServiceDateAnchor; label: string; hint: string }[] = [
+  { value: "pre", label: "Pre", hint: "The day the leg above starts" },
+  { value: "post", label: "Post", hint: "The day the leg above ends" },
+  { value: "custom", label: "Custom", hint: "Pick the pickup date manually" },
+]
 
 interface RequestPriceOverrideProps {
   request: BookingTransportRequest
@@ -215,6 +224,10 @@ interface TransportLegEditorProps {
   leg: PackageLeg
   value: TransportLegState
   onChange: (next: TransportLegState) => void
+  /** The leg directly above this one in the itinerary (skipping past other transport legs) — null
+   *  when nothing dated precedes it. Transfer rows only; a rental has no single leg to anchor two
+   *  dates (pickup, return) to. */
+  anchorContext?: TransferAnchorContext | null
   /** Active (non-archived) rate types — shows the per-leg rate type selector when non-empty. */
   rateTypes?: RateType[]
   /** The quote's currency. Typed override prices in another currency are previewed converted into it. */
@@ -231,6 +244,7 @@ export function TransportLegEditor({
   leg,
   value,
   onChange,
+  anchorContext = null,
   rateTypes = [],
   quoteCurrency = BASE_CURRENCY,
   fxRates = { [BASE_CURRENCY]: 1 },
@@ -438,13 +452,71 @@ export function TransportLegEditor({
                   placeholder=""
                 />
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-1.5 md:col-span-2 xl:col-span-1">
                 <Label>Pickup date/time</Label>
+                {!isRental ? (
+                  <div className="flex flex-wrap gap-1">
+                    {ANCHOR_OPTIONS.map((option) => (
+                      <Button
+                        key={option.value}
+                        type="button"
+                        size="sm"
+                        variant={request.dateAnchor === option.value ? "default" : "outline"}
+                        className="h-6 px-2 text-[11px]"
+                        aria-pressed={request.dateAnchor === option.value}
+                        title={option.hint}
+                        disabled={option.value !== "custom" && !anchorContext}
+                        onClick={() => updateRequest(request.id, { dateAnchor: option.value })}
+                      >
+                        {option.label}
+                      </Button>
+                    ))}
+                  </div>
+                ) : null}
                 <DateTimePicker
                   value={request.pickupAt}
                   onChange={(pickupAt) => updateRequest(request.id, { pickupAt })}
+                  dateDisabled={!isRental && (request.dateAnchor === "pre" || request.dateAnchor === "post")}
                   aria-label="Pickup date"
                 />
+                {!isRental && anchorContext && (request.dateAnchor === "pre" || request.dateAnchor === "post") ? (
+                  <p
+                    className={cn(
+                      "text-xs",
+                      resolveTransferPickupDate(request.dateAnchor, {
+                        start: anchorContext.startDate,
+                        end: anchorContext.endDate,
+                      })
+                        ? "text-muted-foreground"
+                        : "text-destructive",
+                    )}
+                  >
+                    {(() => {
+                      const resolved = resolveTransferPickupDate(request.dateAnchor, {
+                        start: anchorContext.startDate,
+                        end: anchorContext.endDate,
+                      })
+                      if (!resolved) return `Set ${anchorContext.legLabel}'s date to work out this pickup.`
+                      return (
+                        <>
+                          Pickup <span className="font-medium text-foreground">{formatDisplayDate(resolved)}</span>
+                          {` (${request.dateAnchor === "pre" ? "start" : "end"} of ${anchorContext.legLabel})`}
+                        </>
+                      )
+                    })()}
+                  </p>
+                ) : null}
+                {!isRental && !anchorContext ? (
+                  <p className="text-xs text-muted-foreground">
+                    Nothing above this transfer has a date to anchor to — pick the pickup date manually.
+                  </p>
+                ) : null}
+                {!isRental && request.dateAnchor === "post" && anchorContext?.endDateAssumed ? (
+                  <p className="text-xs text-amber-600 dark:text-amber-500">
+                    {anchorContext.legLabel} has no journey length set, so the pickup falls on its start day. Set
+                    the route&apos;s duration in Suppliers, or pick a custom date.
+                  </p>
+                ) : null}
               </div>
               {isRental ? (
                 <div className="space-y-1.5">

@@ -15,12 +15,26 @@ interface RoomOverrideNoteProps {
  * rate card said, and who decided otherwise, is ours. Do not add this to
  * lib/quotes/pdf/quote-document.tsx, lib/quotes/quote-summary-block.ts, or any email token.
  *
- * Renders nothing for a line with no override, so it can be dropped into a line-item table
- * unguarded.
+ * Also states a gifted first night ("First night complimentary · 3 of 4 nights charged"), since
+ * the line's qty is the charged nights and would otherwise read as a shorter stay.
+ *
+ * Renders nothing for a line with neither, so it can be dropped into a line-item table unguarded.
  */
 export function RoomOverrideNote({ snapshot, quoteCurrency }: RoomOverrideNoteProps) {
+  const giftedNights = snapshot?.complimentaryNights ?? 0
+  const stay = snapshot?.stayNights ?? null
+  const complimentaryLine =
+    giftedNights > 0 ? (
+      <div className="text-[11px] text-emerald-600 dark:text-emerald-500">
+        {giftedNights === 1 ? "First night complimentary" : `${giftedNights} complimentary nights`}
+        {stay ? ` · ${stay - giftedNights} of ${stay} nights charged` : ""}
+      </div>
+    ) : null
+
   // 0 is a real override (a comped room), so this is a null check, not a truthiness one.
-  if (snapshot?.manualRoomPrice === null || snapshot?.manualRoomPrice === undefined) return null
+  if (snapshot?.manualRoomPrice === null || snapshot?.manualRoomPrice === undefined) {
+    return complimentaryLine
+  }
 
   const currency = snapshot.sourceCurrency ?? quoteCurrency
   const base = snapshot.manualRoomPriceBase
@@ -46,12 +60,15 @@ export function RoomOverrideNote({ snapshot, quoteCurrency }: RoomOverrideNotePr
   }
 
   return (
-    <div className="text-[11px] text-amber-600 dark:text-amber-500">
-      ⚑ Manual room price — {formatMoney(snapshot.manualRoomPrice, currency)}/night
-      {base === null || base === undefined
-        ? ", no rate card covered this room"
-        : `, replacing ${formatMoney(base, currency)}`}
-      {attribution ? ` · ${attribution}` : ""}
-    </div>
+    <>
+      <div className="text-[11px] text-amber-600 dark:text-amber-500">
+        ⚑ Manual room price — {formatMoney(snapshot.manualRoomPrice, currency)}/night
+        {base === null || base === undefined
+          ? ", no rate card covered this room"
+          : `, replacing ${formatMoney(base, currency)}`}
+        {attribution ? ` · ${attribution}` : ""}
+      </div>
+      {complimentaryLine}
+    </>
   )
 }

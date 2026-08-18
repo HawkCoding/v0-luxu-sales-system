@@ -50,6 +50,7 @@ import { Check, Pencil, Plus, Save, Trash2, TriangleAlert } from "lucide-react"
 import { EnquiryParsedFieldsEditor } from "@/components/enquiry-parsed-fields-editor"
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
+import { mergeEditableRows } from "@/lib/merge-editable-rows"
 
 type EditableTransportRequest = BookingTransportRequest & {
   isDraft?: boolean
@@ -84,6 +85,8 @@ function createEmptyTransportRequest(sortOrder: number): EditableTransportReques
     pickupPoint: "",
     dropoffPoint: "",
     pickupAt: null,
+    // An enquiry-stage request has no package leg above it to anchor to.
+    dateAnchor: "custom",
     rentalDetails: null,
     passengerCount: null,
     luggageCount: null,
@@ -164,14 +167,20 @@ export function JobEnquiryTab({
     isoDateDaysFromNow(DEFAULT_QUOTE_VALIDITY_DAYS),
   )
 
+  // Any user on the job (including this tab's own saves) can trigger a realtime revalidation of
+  // `enquiry`, which gives `initialTransportRequests` a fresh array identity — see
+  // `hooks/use-realtime-sync.ts`. Blindly reseeding here used to wipe whatever the salesperson was
+  // mid-typing into a row. `mergeEditableRows` keeps a row's local value while it's being edited, and
+  // keeps rows added locally and not yet saved (absent from the server list entirely) instead of
+  // dropping them.
   useEffect(() => {
-    setTransportRequests(initialTransportRequests)
-    setEditingTransportRequestIds(new Set())
+    setTransportRequests((prev) => mergeEditableRows(prev, initialTransportRequests, editingTransportRequestIds))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialTransportRequests])
 
   useEffect(() => {
-    setSupplierSchedules(initialSupplierSchedules)
-    setEditingSupplierScheduleIds(new Set())
+    setSupplierSchedules((prev) => mergeEditableRows(prev, initialSupplierSchedules, editingSupplierScheduleIds))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSupplierSchedules])
 
   if (!enquiry) {

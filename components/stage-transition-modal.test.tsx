@@ -24,6 +24,10 @@ describe("gateIdToTabPath", () => {
     expect(gateIdToTabPath("final_payment_confirmation")).toBe("")
   })
 
+  it("routes the missing-supplier-reference gate to the Voucher Details tab", () => {
+    expect(gateIdToTabPath("leg_references")).toBe("?tab=references")
+  })
+
   it("returns an empty path for gates with no corresponding tab", () => {
     expect(gateIdToTabPath("cancel_reason")).toBe("")
     expect(gateIdToTabPath("unknown_gate")).toBe("")
@@ -91,6 +95,18 @@ describe("StageTransitionModal", () => {
   it("renders a Fix link to the Payments tab for the deposit-received gate", () => {
     renderModal([depositGate])
     expect(screen.getByRole("link", { name: "Go to Payments tab" })).toBeInTheDocument()
+  })
+
+  it("renders a Fix link to the Voucher Details tab for the missing-reference gate", () => {
+    renderModal([
+      {
+        gateId: "leg_references",
+        message: "Supplier reference numbers are missing for: Table Bay Hotel.",
+        fixHint: "Add a reference number for every leg on the Voucher Details tab.",
+        severity: "block",
+      },
+    ])
+    expect(screen.getByRole("link", { name: "Go to Voucher Details tab" })).toBeInTheDocument()
   })
 
   it("hides Confirm and move when the deposit-received gate is blocking", () => {

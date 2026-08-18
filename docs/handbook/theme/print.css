@@ -1,0 +1,406 @@
+/* Luxus Travel and Tours — handbook print theme.
+ *
+ * Targets headless Chromium's print renderer (page.pdf). @font-face rules are
+ * injected by scripts/build-handbook.mjs with absolute file:// URLs, because
+ * @font-face src cannot be resolved from a CSS variable. This file only refers
+ * to the families by name.
+ */
+
+:root {
+  --accent: #0b2a3a;
+  --accent-soft: #1a3a4a;
+  --ink: #2b2b2b;
+  --ink-muted: #5f6b72;
+  --ink-faint: #939ea5;
+  --rule: #d6dde1;
+  --rule-faint: #eef2f4;
+  --shade: #f6f8f9;
+  --warn-bg: #fdf6e7;
+  --warn-rule: #d9a441;
+  --stop-bg: #fbeeee;
+  --stop-rule: #b4453c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+body {
+  margin: 0;
+  font-family: "Montserrat", "Segoe UI", sans-serif;
+  font-size: 10pt;
+  line-height: 1.55;
+  color: var(--ink);
+}
+
+/* ---------------------------------------------------------------- cover ---- */
+
+.cover {
+  page-break-after: always;
+  break-after: page;
+  height: 247mm; /* A4 height less the 25mm top/bottom page margins */
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.cover-top {
+  padding-top: 24mm;
+}
+
+.cover-logo {
+  display: block;
+  height: 18mm;
+  width: auto;
+  margin-bottom: 14mm;
+}
+
+.cover-eyebrow {
+  font-size: 9pt;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--accent-soft);
+  margin: 0 0 6mm;
+}
+
+.cover-title {
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: 34pt;
+  line-height: 1.1;
+  color: var(--accent);
+  margin: 0;
+}
+
+.cover-rule {
+  width: 46mm;
+  height: 2.5pt;
+  background: var(--accent);
+  margin: 8mm 0 7mm;
+}
+
+.cover-subtitle {
+  font-size: 12pt;
+  color: var(--ink-muted);
+  margin: 0;
+  max-width: 120mm;
+}
+
+.cover-meta {
+  border-top: 0.75pt solid var(--rule);
+  padding-top: 5mm;
+  font-size: 8.5pt;
+  color: var(--ink-muted);
+}
+
+.cover-meta dl {
+  display: grid;
+  grid-template-columns: 30mm 1fr;
+  row-gap: 1.5mm;
+  margin: 0;
+}
+
+.cover-meta dt {
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 7.5pt;
+  color: var(--ink-faint);
+}
+
+.cover-meta dd {
+  margin: 0;
+}
+
+/* ------------------------------------------------------------------ toc ---- */
+
+.toc {
+  page-break-after: always;
+  break-after: page;
+}
+
+.toc h2 {
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: 18pt;
+  color: var(--accent);
+  margin: 0 0 6mm;
+  padding-bottom: 3mm;
+  border-bottom: 1pt solid var(--accent);
+}
+
+.toc ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.toc li {
+  display: flex;
+  align-items: baseline;
+  gap: 2mm;
+  padding: 1.6mm 0;
+  border-bottom: 0.5pt solid var(--rule-faint);
+}
+
+.toc li.toc-h2 {
+  padding-left: 8mm;
+  font-size: 9pt;
+  color: var(--ink-muted);
+  border-bottom: none;
+}
+
+.toc-label {
+  flex: 0 0 auto;
+}
+
+.toc-dots {
+  flex: 1 1 auto;
+  border-bottom: 0.5pt dotted var(--rule);
+  transform: translateY(-1mm);
+}
+
+.toc-page {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted);
+}
+
+/* -------------------------------------------------------------- content ---- */
+
+/* Content headings are scoped to .content so the cover title and the "Contents"
+ * heading — which are also h1/h2 — keep their own styling. */
+
+.content h1 {
+  page-break-before: always;
+  break-before: page;
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: 22pt;
+  line-height: 1.15;
+  color: var(--accent);
+  margin: 0 0 7mm;
+  padding-bottom: 3.5mm;
+  border-bottom: 1.5pt solid var(--accent);
+}
+
+/* The first chapter follows the TOC, which already broke the page. */
+.content > h1:first-child {
+  page-break-before: avoid;
+  break-before: avoid;
+}
+
+.content h2 {
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: 14pt;
+  color: var(--accent-soft);
+  margin: 9mm 0 3mm;
+}
+
+.content h3 {
+  font-size: 10.5pt;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent-soft);
+  margin: 6mm 0 2mm;
+}
+
+.content h4 {
+  font-size: 10pt;
+  font-weight: 700;
+  margin: 4mm 0 1.5mm;
+}
+
+.content h1,
+.content h2,
+.content h3,
+.content h4 {
+  page-break-after: avoid;
+  break-after: avoid;
+}
+
+p {
+  margin: 0 0 3mm;
+  orphans: 3;
+  widows: 3;
+}
+
+ul,
+ol {
+  margin: 0 0 3mm;
+  padding-left: 6mm;
+}
+
+li {
+  margin-bottom: 1mm;
+}
+
+li > ul,
+li > ol {
+  margin-top: 1mm;
+}
+
+strong {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+a {
+  color: var(--accent-soft);
+  text-decoration: none;
+}
+
+code {
+  font-family: Consolas, "DejaVu Sans Mono", monospace;
+  font-size: 8.5pt;
+  background: var(--shade);
+  border: 0.5pt solid var(--rule);
+  border-radius: 1.5pt;
+  padding: 0 1mm;
+}
+
+pre {
+  background: var(--shade);
+  border: 0.5pt solid var(--rule);
+  border-left: 2pt solid var(--accent-soft);
+  border-radius: 2pt;
+  padding: 3mm 4mm;
+  margin: 0 0 4mm;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+  break-inside: avoid;
+}
+
+pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 8.5pt;
+}
+
+hr {
+  border: none;
+  border-top: 0.5pt solid var(--rule);
+  margin: 7mm 0;
+}
+
+/* ----------------------------------------------------------------- table --- */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 5mm;
+  font-size: 9pt;
+}
+
+thead {
+  display: table-header-group; /* repeat the header when a table spans pages */
+}
+
+th {
+  text-align: left;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  font-size: 8.5pt;
+  letter-spacing: 0.04em;
+  padding: 2mm 2.5mm;
+}
+
+td {
+  padding: 2mm 2.5mm;
+  border-bottom: 0.5pt solid var(--rule);
+  vertical-align: top;
+}
+
+tbody tr:nth-child(even) td {
+  background: var(--shade);
+}
+
+tr {
+  break-inside: avoid;
+}
+
+/* -------------------------------------------------------------- callouts --- */
+
+blockquote {
+  margin: 0 0 4mm;
+  padding: 3mm 4mm;
+  background: var(--shade);
+  border-left: 2.5pt solid var(--accent-soft);
+  break-inside: avoid;
+}
+
+blockquote > p:last-child {
+  margin-bottom: 0;
+}
+
+blockquote.note {
+  background: var(--shade);
+  border-left-color: var(--accent-soft);
+}
+
+blockquote.warn {
+  background: var(--warn-bg);
+  border-left-color: var(--warn-rule);
+}
+
+blockquote.stop {
+  background: var(--stop-bg);
+  border-left-color: var(--stop-rule);
+}
+
+/* ----------------------------------------------------------- screenshots --- */
+
+figure {
+  margin: 0 0 5mm;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+figure img {
+  display: block;
+  width: 100%;
+  max-height: 165mm;
+  object-fit: contain;
+  object-position: top left;
+  border: 0.75pt solid var(--rule);
+  border-radius: 2pt;
+}
+
+figcaption {
+  margin-top: 1.5mm;
+  font-size: 8pt;
+  color: var(--ink-muted);
+}
+
+figcaption::before {
+  content: "Figure " counter(figure-counter) " — ";
+  counter-increment: figure-counter;
+  color: var(--ink-faint);
+}
+
+body {
+  counter-reset: figure-counter;
+}
+
+/* ------------------------------------------------------------- utilities --- */
+
+.kbd {
+  font-family: "Montserrat", sans-serif;
+  font-size: 8.5pt;
+  font-weight: 700;
+  border: 0.5pt solid var(--rule);
+  border-bottom-width: 1.5pt;
+  border-radius: 2pt;
+  padding: 0.3mm 1.4mm;
+  background: #fff;
+}
+
+.chapter-lead {
+  font-size: 11pt;
+  color: var(--ink-muted);
+  margin-bottom: 6mm;
+}

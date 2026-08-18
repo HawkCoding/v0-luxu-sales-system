@@ -85,6 +85,12 @@ const SUPPLIER_BACKED_TYPES = new Set(["train", "hotel", "transfer", "airline"])
 // supplier's default times (meaningless for an airline — every booking is a different flight).
 const TIMED_TYPES = new Set(["train", "hotel"])
 const GUEST_COUNT_TYPES = new Set(["train", "hotel"])
+// The voucher only ever prints an address for hotel/tour blocks (the destination itself) and a
+// train's per-city boarding point — transfer and airline blocks print a typed pickup point or
+// flight schedule instead, so a missing supplier street address there is nothing to chase.
+const ADDRESS_WARNING_TYPES = new Set(["train", "hotel", "tour"])
+// City is only ever printed alongside a printed street address — see ADDRESS_WARNING_TYPES.
+const LOCATION_WARNING_TYPES = new Set(["hotel", "tour"])
 
 function aggregateWarning(
   code: ReadinessWarningCode,
@@ -111,8 +117,11 @@ function buildWarnings(blocks: ReadinessBlockSummary[]): ReadinessWarning[] {
       "No street address for",
       "Add a street address to the supplier record — for a train, a station address for the cities its route runs between.",
       // A train supplier has no single street address: it boards guests at a different station in
-      // every city, so the address that matters to the guest is the leg's own boarding point.
-      supplierBacked
+      // every city, so the address that matters to the guest is the leg's own boarding point. A
+      // transfer, car hire or airline block never prints a supplier address at all — see
+      // ADDRESS_WARNING_TYPES — so a blank one there isn't worth chasing.
+      blocks
+        .filter((b) => ADDRESS_WARNING_TYPES.has(b.serviceType))
         .filter((b) => (b.serviceType === "train" ? !b.boardingPoint?.trim() : !b.streetAddress?.trim()))
         .map((b) => b.title),
     ),
@@ -122,8 +131,8 @@ function buildWarnings(blocks: ReadinessBlockSummary[]): ReadinessWarning[] {
       "Pick a city on the supplier record.",
       // A train prints its free-text head office city, not a picked city, and is covered by the
       // address warning above instead (its boarding point is what actually matters to the guest).
-      supplierBacked
-        .filter((b) => b.serviceType !== "train" && !b.location?.trim())
+      blocks
+        .filter((b) => LOCATION_WARNING_TYPES.has(b.serviceType) && !b.location?.trim())
         .map((b) => b.title),
     ),
     aggregateWarning(
@@ -220,7 +229,7 @@ export function checkVoucherReadiness(input: VoucherReadinessInput): VoucherRead
     failures.push({
       code: "leg_references_missing",
       message: `Supplier reference numbers are missing for: ${input.missingLegReferenceLabels.join(", ")}.`,
-      fixHint: "Add a reference number for every leg on the Voucher References tab.",
+      fixHint: "Add a reference number for every leg on the Voucher Details tab.",
     })
   }
 

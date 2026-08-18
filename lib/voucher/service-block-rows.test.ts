@@ -295,6 +295,23 @@ describe("voucherRowsForBlock", () => {
     expect(rows.find((r) => r.label === "No of Guests")?.value).toBe("2 Adults")
   })
 
+  it("transfer block: falls back to the leg's route name when the trip has no pickup or drop-off", () => {
+    const rows = voucherRowsForBlock(
+      block({ serviceType: "transfer", serviceData: { route: "Cape Town Station > Portswood Hotel" } }),
+    )
+    expect(rows.find((r) => r.label === "Route")?.value).toBe("Cape Town Station > Portswood Hotel")
+  })
+
+  it("transfer block: never prints Route alongside a typed pickup or drop-off", () => {
+    const rows = voucherRowsForBlock(
+      block({
+        serviceType: "transfer",
+        serviceData: { route: "Cape Town Station > Portswood Hotel", pickup: "Hotel Lobby" },
+      }),
+    )
+    expect(rows.some((r) => r.label === "Route")).toBe(false)
+  })
+
   it("hotel block: only prints rows for fields actually present", () => {
     const rows = voucherRowsForBlock(
       block({
@@ -405,39 +422,76 @@ describe("voucherRowsForBlock", () => {
 })
 
 describe("voucherProviderContactLine", () => {
-  it("joins phone, email and location with a bullet", () => {
-    const line = voucherProviderContactLine({
-      phone: "084 604 1454",
-      email: "ops@bluetrain.co.za",
-      location: "Pretoria",
-    })
-    expect(line).toBe("Tel: 084 604 1454 • Email: ops@bluetrain.co.za • Pretoria")
+  it("joins phone, email and location with a bullet for a hotel block", () => {
+    const line = voucherProviderContactLine(
+      {
+        phone: "084 604 1454",
+        email: "ops@theroyalportfolio.co.za",
+        location: "Cape Town",
+      },
+      "hotel",
+    )
+    expect(line).toBe("Tel: 084 604 1454 • Email: ops@theroyalportfolio.co.za • Cape Town")
   })
 
   it("returns null when no contact fields are set", () => {
-    expect(voucherProviderContactLine({})).toBeNull()
+    expect(voucherProviderContactLine({}, "hotel")).toBeNull()
   })
 
   it("omits missing parts without leaving stray separators", () => {
-    expect(voucherProviderContactLine({ phone: "084 604 1454" })).toBe("Tel: 084 604 1454")
+    expect(voucherProviderContactLine({ phone: "084 604 1454" }, "hotel")).toBe("Tel: 084 604 1454")
   })
 
   it("includes the website after email, matching the legacy voucher's FlySafair contact line", () => {
-    const line = voucherProviderContactLine({
-      phone: "087 357 0030",
-      email: undefined,
-      website: "flysafair.co.za",
-    })
+    const line = voucherProviderContactLine(
+      {
+        phone: "087 357 0030",
+        email: undefined,
+        website: "flysafair.co.za",
+      },
+      "airline",
+    )
     expect(line).toBe("Tel: 087 357 0030 • flysafair.co.za")
   })
 
-  it("folds an emergency number and street address in, matching the legacy voucher's header line", () => {
-    const line = voucherProviderContactLine({
-      phone: "012 653 0018",
-      emergencyPhone: "082 904 5780",
-      streetAddress: "5 Johannes Drive",
-      location: "Hennops Park, Gauteng",
-    })
+  it("folds an emergency number and street address in for a hotel, matching the legacy voucher's header line", () => {
+    const line = voucherProviderContactLine(
+      {
+        phone: "012 653 0018",
+        emergencyPhone: "082 904 5780",
+        streetAddress: "5 Johannes Drive",
+        location: "Hennops Park, Gauteng",
+      },
+      "hotel",
+    )
     expect(line).toBe("Tel: 012 653 0018 – Emergency: 082 904 5780 • 5 Johannes Drive, Hennops Park, Gauteng")
   })
+
+  it("prints a tour operator's address — it's the only location a tour block has", () => {
+    const line = voucherProviderContactLine(
+      {
+        phone: "021 555 1234",
+        streetAddress: "4 Loop Street",
+        location: "Cape Town City Centre",
+      },
+      "tour",
+    )
+    expect(line).toBe("Tel: 021 555 1234 • 4 Loop Street, Cape Town City Centre")
+  })
+
+  it.each(["train", "transfer", "airline"] as const)(
+    "omits the supplier address for a %s block — the guest never goes there",
+    (serviceType) => {
+      const line = voucherProviderContactLine(
+        {
+          phone: "012 653 0018",
+          email: "res@supplier.co.za",
+          streetAddress: "5 Johannes Drive",
+          location: "Hennops Park, Gauteng",
+        },
+        serviceType,
+      )
+      expect(line).toBe("Tel: 012 653 0018 • Email: res@supplier.co.za")
+    },
+  )
 })

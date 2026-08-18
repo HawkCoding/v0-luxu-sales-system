@@ -1,6 +1,6 @@
 import { isOptionalPackageLegKind, SUPPLIER_VOCABULARY } from "@/lib/types"
 import { resolveDirectedRouteName } from "@/lib/routes/route-name"
-import type { CommissionKind, PackageDetail, QuoteLineItem } from "@/lib/types"
+import type { CommissionKind, PackageDetail, PricingSnapshot, QuoteLineItem } from "@/lib/types"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { fetchDefaultAgeBuckets, resolveAgeBuckets, type AgeBuckets } from "@/lib/pricing/age-buckets"
@@ -50,6 +50,10 @@ export interface PackageUnitSelection {
    *  the internal quote view can show who set the price without a second lookup. */
   manualRoomPriceSetAt?: string | null
   manualRoomPriceSetByName?: string | null
+  /** Hotel legs only: the hotel gifted the first night of this room's stay, so the line charges
+   *  `nights - 1` at the room's per-night price. Composes with manualRoomPrice rather than
+   *  replacing it — the room keeps a real rate and simply loses a night from the count. */
+  complimentaryFirstNight?: boolean | null
 }
 
 export interface PackageLegSelection {
@@ -409,6 +413,10 @@ export async function buildPackageQuoteLineItems({
     /** Passenger type ("Adult"/"Child"/"Infant") — rendered at the very end of the line, after
      * the suite variant suffix, e.g. "... — Deluxe Twin, Shower - Adult". */
     passengerLabel?: string | null
+    /** What `passengerLabel` means to downstream consumers: invoice descriptions append
+     * "(Child)"/"(Infant)" from it, and the flight per-person cap counts adult fares only.
+     * Defaults to "adult" — the right answer for every line that isn't split by age. */
+    passengerKind?: PricingSnapshot["passengerKind"]
     /** Transfers/rentals only: drop the suite/vehicle-type suffix entirely — the client-facing
      * description is just the leg's own label, not the internal vehicle category. */
     hideVariantSuffix?: boolean
@@ -441,6 +449,13 @@ export async function buildPackageQuoteLineItems({
       setAt: string | null
       setByName: string | null
     } | null
+    /** Hotels only: nights of this room's stay the hotel gifted, and the stay they were taken
+     * from. `qty` is already the charged nights; these are carried so the quote view, the
+     * worksheet and the client documents can still speak about the full stay. */
+    complimentary?: {
+      nights: number
+      stayNights: number
+    } | null
   }
 
   function formatSingleSupplementSuffix(pct: number): string {
@@ -460,14 +475,18 @@ export async function buildPackageQuoteLineItems({
     unit,
     singleSupplementPct,
     passengerLabel,
+    passengerKind = "adult",
     hideVariantSuffix,
     hideRoomConfig,
     pricingMode: linePricingMode = "rate_card",
     sourceCurrency,
     roomOverride,
     transportOverride,
+    complimentary,
   }: AddLineItemOptions) {
-    if (qty <= 0) return
+    // A stay whose every night was gifted still has to reach the quote: the client documents read
+    // their itinerary off the priced legs, so dropping the line would drop the hotel entirely.
+    if (qty <= 0 && !complimentary) return
 
     // Convert first: the single supplement, the line total and the commission that sums these
     // lines all have to work off a price already in the quote's currency.
@@ -526,7 +545,7 @@ export async function buildPackageQuoteLineItems({
         rateTypeName: rateTypeMeta?.name ?? null,
         rateTypeInherited: activeRateCard ? activeRateCardInherited : null,
         travelDate: activePricingDate,
-        passengerKind: "adult",
+        passengerKind,
         // Already in the quote's currency, so downstream maths (markup, commission) never has to
         // know a conversion happened; the pre-conversion figure lives in sourceUnitPrice below.
         baseUnitPrice: convertedUnitPrice,
@@ -554,6 +573,12 @@ export async function buildPackageQuoteLineItems({
               manualRoomPriceBase: roomOverride.basePrice,
               manualRoomPriceSetAt: roomOverride.setAt,
               manualRoomPriceSetByName: roomOverride.setByName,
+            }
+          : {}),
+        ...(complimentary
+          ? {
+              complimentaryNights: complimentary.nights,
+              stayNights: complimentary.stayNights,
             }
           : {}),
         ...(transportOverride
@@ -845,6 +870,13 @@ export async function buildPackageQuoteLineItems({
               ? null
               : unitSelection.manualRoomPrice
 
+          // The hotel gifted the first night: the room keeps its per-night price and loses a
+          // night from the count, so a two-night stay at R4 000 is charged R4 000. The gift is
+          // per room, matching the per-room action in suite-leg-editor.tsx.
+          const giftedNights = unitSelection.complimentaryFirstNight ? Math.min(1, nights) : 0
+          const chargedNights = nights - giftedNights
+          const complimentary = giftedNights > 0 ? { nights: giftedNights, stayNights: nights } : null
+
           if (overridePrice !== null) {
             const { validRateCard, rateTypeInherited, description, suiteTypeName } =
               resolveOverriddenUnit(unitSelection.suiteTypeId)
@@ -855,7 +887,7 @@ export async function buildPackageQuoteLineItems({
             const overrideCurrency = validRateCard?.currency ?? selection.priceCurrency ?? targetCurrency
             addLineItem({
               description,
-              qty: nights,
+              qty: chargedNights,
               unitPrice: overridePrice,
               supplierDescription,
               suiteTypeId: unitSelection.suiteTypeId,
@@ -871,6 +903,7 @@ export async function buildPackageQuoteLineItems({
                 setAt: unitSelection.manualRoomPriceSetAt ?? null,
                 setByName: unitSelection.manualRoomPriceSetByName ?? null,
               },
+              complimentary,
             })
             continue
           }
@@ -882,7 +915,7 @@ export async function buildPackageQuoteLineItems({
           activeRateCardInherited = rateTypeInherited
           addLineItem({
             description,
-            qty: nights,
+            qty: chargedNights,
             unitPrice: validRateCard.pricePerPerson,
             supplierDescription,
             suiteTypeId: unitSelection.suiteTypeId,
@@ -892,6 +925,7 @@ export async function buildPackageQuoteLineItems({
             unit,
             hideRoomConfig: true,
             sourceCurrency: validRateCard.currency,
+            complimentary,
           })
         }
       } else if (isTransfer || isVehicleRental) {
@@ -1037,6 +1071,7 @@ export async function buildPackageQuoteLineItems({
           let passengerKinds: {
             key: "adultCount" | "childCount" | "infantCount"
             label: string
+            kind: PricingSnapshot["passengerKind"]
             unitPrice: number
           }[]
           // Typed fares carry the leg's own currency; rate-card fares carry the card's.
@@ -1054,9 +1089,9 @@ export async function buildPackageQuoteLineItems({
             const childPrice = groupUnits[0].manualChildPrice ?? adultPrice
             const infantPrice = groupUnits[0].manualInfantPrice ?? childPrice
             passengerKinds = [
-              { key: "adultCount", label: "Adult", unitPrice: adultPrice },
-              { key: "childCount", label: "Child", unitPrice: childPrice },
-              { key: "infantCount", label: "Infant", unitPrice: infantPrice },
+              { key: "adultCount", label: "Adult", kind: "adult", unitPrice: adultPrice },
+              { key: "childCount", label: "Child", kind: "child", unitPrice: childPrice },
+              { key: "infantCount", label: "Infant", kind: "infant", unitPrice: infantPrice },
             ]
             lineSourceCurrency = selection.priceCurrency ?? targetCurrency
           } else {
@@ -1067,18 +1102,28 @@ export async function buildPackageQuoteLineItems({
             activeRateCardInherited = resolved.rateTypeInherited
             const validRateCard = resolved.validRateCard
             passengerKinds = [
-              { key: "adultCount", label: "Adult", unitPrice: validRateCard.pricePerPerson },
-              { key: "childCount", label: "Child", unitPrice: validRateCard.childPrice ?? validRateCard.pricePerPerson },
+              { key: "adultCount", label: "Adult", kind: "adult", unitPrice: validRateCard.pricePerPerson },
               {
+                key: "childCount",
+                label: "Child",
+                kind: "child",
+                unitPrice: validRateCard.childPrice ?? validRateCard.pricePerPerson,
+              },
+              {
+                // No infant rate on the card means infants travel free. The old chain fell through
+                // to the child rate, so "the supplier set no infant price" and "the supplier
+                // charges the child price for infants" looked identical on the quote — and the
+                // expensive reading won by default. See also price-extra-line.ts.
                 key: "infantCount",
                 label: "Infant",
-                unitPrice: validRateCard.infantPrice ?? validRateCard.childPrice ?? validRateCard.pricePerPerson,
+                kind: "infant",
+                unitPrice: validRateCard.infantPrice ?? 0,
               },
             ]
             lineSourceCurrency = validRateCard.currency
           }
 
-          for (const { key, label, unitPrice } of passengerKinds) {
+          for (const { key, label, kind: linePassengerKind, unitPrice } of passengerKinds) {
             // A unit occupied by exactly one traveller (of any age) pays the single supplement —
             // it's a solo room, not specifically a solo adult. Solo-room travellers can't merge
             // into the shared qty since they don't share its unit price, so they're tallied and
@@ -1129,6 +1174,7 @@ export async function buildPackageQuoteLineItems({
                 addLineItem({
                   description,
                   passengerLabel: label,
+                  passengerKind: linePassengerKind,
                   qty,
                   unitPrice,
                   supplierDescription,
@@ -1156,7 +1202,25 @@ export async function buildPackageQuoteLineItems({
   // Commission is typed by the salesperson in the quote's own currency (a percent is
   // currency-neutral anyway), and it prices off a subtotal whose lines have already been
   // converted — so it needs no conversion of its own.
-  const commissionOverride = selections.find((s) => s.commissionOverride)?.commissionOverride ?? null
+  //
+  // The type is per-leg, but the decision it carries is booking-level (see above), so every leg
+  // the current UI sends carries an identical override. A caller that sent two different ones
+  // used to have the second dropped with no signal at all — same request, different leg order,
+  // different total. Duplicates of the same override are accepted; a genuine disagreement is
+  // rejected rather than silently resolved by array order.
+  const distinctOverrides = selections.reduce<{ type: CommissionKind; value: number }[]>((acc, s) => {
+    if (!s.commissionOverride) return acc
+    const alreadySeen = acc.some(
+      (existing) => existing.type === s.commissionOverride!.type && existing.value === s.commissionOverride!.value,
+    )
+    return alreadySeen ? acc : [...acc, s.commissionOverride]
+  }, [])
+  if (distinctOverrides.length > 1) {
+    throw new Error(
+      "Selections disagree on the commission override — commission is applied once to the whole booking, not per leg.",
+    )
+  }
+  const commissionOverride = distinctOverrides[0] ?? null
   const resolvedCommission = resolveCommission({ lineOverride: commissionOverride })
   if (resolvedCommission.type !== null) {
     const preCommissionSubtotal = Math.round(

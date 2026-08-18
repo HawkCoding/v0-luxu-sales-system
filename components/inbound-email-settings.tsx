@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { toast } from "sonner"
-import { Eye, EyeOff, Inbox, Play, PlugZap, Plus, Save, Trash2 } from "lucide-react"
+import { ChevronDown, ChevronUp, Eye, EyeOff, Inbox, Play, PlugZap, Plus, Save, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -31,6 +31,25 @@ interface InboundAccount {
   enabled: boolean
   firstSyncCompleted: boolean
   lastSyncedAt: string | null
+}
+
+interface InboundMessage {
+  id: string
+  uid: number
+  subject: string
+  fromAddress: string | null
+  receivedAt: string | null
+  status: string
+  filingStatus: string
+  /** Which body part getMessageBody() chose: "text", "html", "none", or null (row predates this). */
+  bodyPart: string | null
+  /** Preview of the body candidate that was NOT chosen, when both existed. */
+  altBodyExcerpt: string | null
+  missingFields: string[]
+  warnings: string[]
+  error: string | null
+  bookingId: string | null
+  createdAt: string
 }
 
 interface InboundRule {
@@ -91,6 +110,9 @@ export function InboundEmailSettings() {
   const [savingAccount, setSavingAccount] = useState(false)
   const [savingRule, setSavingRule] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const [expandedAccountId, setExpandedAccountId] = useState<string | null>(null)
+  const [messagesByAccount, setMessagesByAccount] = useState<Record<string, InboundMessage[]>>({})
+  const [loadingMessages, setLoadingMessages] = useState(false)
 
   const loadSettings = useCallback(async () => {
     setLoading(true)
@@ -236,6 +258,28 @@ export function InboundEmailSettings() {
     }
   }
 
+  const toggleMessageLog = async (accountId: string) => {
+    if (expandedAccountId === accountId) {
+      setExpandedAccountId(null)
+      return
+    }
+    setExpandedAccountId(accountId)
+    if (messagesByAccount[accountId]) return
+
+    setLoadingMessages(true)
+    try {
+      const response = await fetch(`/api/settings/inbound-email/accounts/${accountId}/messages`)
+      if (!response.ok) {
+        toast.error("Failed to load message log")
+        return
+      }
+      const body = (await response.json()) as { messages: InboundMessage[] }
+      setMessagesByAccount((prev) => ({ ...prev, [accountId]: body.messages }))
+    } finally {
+      setLoadingMessages(false)
+    }
+  }
+
   const syncAccount = async (accountId: string) => {
     setBusyId(accountId)
     try {
@@ -249,6 +293,11 @@ export function InboundEmailSettings() {
       }
       toast.success("Mailbox synced", {
         description: `${body.summary?.importedCount ?? 0} imported, ${body.summary?.needsReviewCount ?? 0} needs review`,
+      })
+      // Drop the cached log so it's re-fetched with this run's rows next time it's opened.
+      setMessagesByAccount((prev) => {
+        const { [accountId]: _dropped, ...rest } = prev
+        return rest
       })
       await loadSettings()
     } finally {
@@ -375,7 +424,8 @@ export function InboundEmailSettings() {
               <p className="text-sm text-muted-foreground">No inbound mailboxes configured.</p>
             )}
             {accounts.map((account) => (
-              <div key={account.id} className="flex items-center justify-between gap-3 rounded-md border p-3">
+              <div key={account.id} className="rounded-md border">
+              <div className="flex items-center justify-between gap-3 p-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <Inbox className="h-4 w-4 text-muted-foreground" />
@@ -440,6 +490,25 @@ export function InboundEmailSettings() {
                         type="button"
                         size="icon"
                         variant="ghost"
+                        onClick={() => toggleMessageLog(account.id)}
+                        aria-label={expandedAccountId === account.id ? "Hide recent messages" : "Show recent messages"}
+                        aria-expanded={expandedAccountId === account.id}
+                      >
+                        {expandedAccountId === account.id ? (
+                          <ChevronUp className="h-4 w-4" />
+                        ) : (
+                          <ChevronDown className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Recent messages</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
                         disabled={busyId === account.id}
                         onClick={() => deleteAccount(account.id)}
                         aria-label="Delete mailbox"
@@ -450,6 +519,12 @@ export function InboundEmailSettings() {
                     <TooltipContent>Delete mailbox</TooltipContent>
                   </Tooltip>
                 </div>
+              </div>
+              {expandedAccountId === account.id && (
+                <div className="border-t p-3">
+                  <MessageLog messages={messagesByAccount[account.id]} loading={loadingMessages} />
+                </div>
+              )}
               </div>
             ))}
           </div>
@@ -559,6 +634,60 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div className="space-y-1.5">
       <Label className="text-xs">{label}</Label>
       {children}
+    </div>
+  )
+}
+
+const BODY_PART_LABEL: Record<string, string> = {
+  text: "text/plain",
+  html: "html (fallback)",
+  none: "empty",
+}
+
+function MessageLog({ messages, loading }: { messages: InboundMessage[] | undefined; loading: boolean }) {
+  if (loading && !messages) {
+    return <p className="text-sm text-muted-foreground">Loading recent messages...</p>
+  }
+  if (!messages || messages.length === 0) {
+    return <p className="text-sm text-muted-foreground">No messages recorded yet for this mailbox.</p>
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-muted-foreground">Last {messages.length} message(s) seen by this mailbox, most recent first.</p>
+      <div className="space-y-2">
+        {messages.map((message) => (
+          <div key={message.id} className="rounded-md border p-2 text-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="truncate font-medium">{message.subject}</span>
+              <Badge variant="outline" className="text-[10px]">{message.status}</Badge>
+              {message.bodyPart && (
+                <Badge variant="secondary" className="text-[10px]">
+                  body: {BODY_PART_LABEL[message.bodyPart] ?? message.bodyPart}
+                </Badge>
+              )}
+            </div>
+            <p className="mt-1 text-muted-foreground">
+              {message.fromAddress ?? "unknown sender"}
+              {message.receivedAt ? ` · ${new Date(message.receivedAt).toLocaleString()}` : ""}
+            </p>
+            {message.missingFields.length > 0 && (
+              <p className="mt-1 text-amber-600 dark:text-amber-400">Missing: {message.missingFields.join(", ")}</p>
+            )}
+            {message.error && <p className="mt-1 text-destructive">{message.error}</p>}
+            {message.altBodyExcerpt && (
+              <details className="mt-1">
+                <summary className="cursor-pointer text-muted-foreground">
+                  Show the body part that was NOT used
+                </summary>
+                <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-muted p-2">
+                  {message.altBodyExcerpt}
+                </pre>
+              </details>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

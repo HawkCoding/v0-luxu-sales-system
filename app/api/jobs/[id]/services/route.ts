@@ -68,6 +68,9 @@ const selectionUnitSchema = z.object({
   /** Hotel legs only: this room's typed price per room per night, replacing its rate card for
    * this booking. Rejected on any other supplier kind — see the guard in PATCH. */
   manualRoomPrice: z.number().nonnegative().nullable().optional(),
+  /** Hotel legs only: the hotel gifted this room's first night, so the quote charges nights - 1
+   * at whatever the room's per-night price is. Rejected on any other supplier kind. */
+  complimentaryFirstNight: z.boolean().optional(),
 })
 
 const updateServiceSchema = z.object({
@@ -120,7 +123,7 @@ type BookingServiceUnitInsert = Database["public"]["Tables"]["booking_service_un
 const SERVICES_WITH_UNITS_SELECT =
   "id, booking_id, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, date_anchor, rate_type_id, notes, selected, origin, price_currency, updated_at, " +
   "departure_time, arrival_date, arrival_time, flight_number, departure_airport_code, arrival_airport_code, hand_luggage_kg, checked_luggage_kg, " +
-  "units:booking_service_units(id, suite_type_id, bedroom_type_id, bedroom_layout_id, bathroom_type_id, adult_count, child_count, infant_count, sort_order, manual_adult_price, manual_child_price, manual_infant_price, manual_room_price, manual_room_price_set_at)"
+  "units:booking_service_units(id, suite_type_id, bedroom_type_id, bedroom_layout_id, bathroom_type_id, adult_count, child_count, infant_count, sort_order, manual_adult_price, manual_child_price, manual_infant_price, manual_room_price, manual_room_price_set_at, complimentary_first_night)"
 
 interface ServiceUnitRow {
   id: string
@@ -137,6 +140,7 @@ interface ServiceUnitRow {
   manual_infant_price: number | null
   manual_room_price: number | null
   manual_room_price_set_at: string | null
+  complimentary_first_night: boolean
 }
 
 interface ServiceWithUnitsRow {
@@ -380,6 +384,18 @@ export async function PATCH(req: Request, { params }: RouteParams) {
       })
     }
 
+    // Same reasoning for the gifted first night: only a hotel stay is priced per night, so
+    // dropping a night from anything else would quietly change what the line means.
+    if (
+      supplierKind !== "hotel_property" &&
+      selection.units.some((unit) => unit.complimentaryFirstNight === true)
+    ) {
+      return jsonError("A complimentary first night is only available on hotel services", 400, {
+        packageLegId: selection.packageLegId,
+        supplierKind,
+      })
+    }
+
     for (const [unitIndex, unit] of selection.units.entries()) {
       const suiteTypeId = unit.suiteTypeId
       if (!suiteTypeId) continue
@@ -516,6 +532,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
         manual_child_price: unit.manualChildPrice ?? null,
         manual_infant_price: unit.manualInfantPrice ?? null,
         manual_room_price: roomPrice,
+        complimentary_first_night: unit.complimentaryFirstNight ?? false,
         manual_room_price_set_at: roomPrice === null ? null : unchanged ? previous?.setAt ?? savedAt : savedAt,
         manual_room_price_set_by: roomPrice === null ? null : unchanged ? previous?.setBy ?? user.id : user.id,
         origin: "consultant" as const,

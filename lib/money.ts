@@ -22,7 +22,7 @@ export function normaliseCurrency(value: string | null | undefined): SupportedCu
  * The single money formatter for the whole app — screens, PDFs and email tokens all go through
  * here so a currency change lands everywhere at once.
  *
- * Emits the symbol itself (`R 1 234,50`, `$1 234,50`), so callers must never prefix their own.
+ * Emits the symbol itself (`R1 234,50`, `$1 234,50`), so callers must never prefix their own.
  * Two migrations exist purely to strip a literal "R" that was typed in front of a token which
  * already carried one; see `20260810120000_fix_double_rand_templates_all_rows.sql`.
  */
@@ -34,13 +34,24 @@ export function formatMoney(
   const code = (currency ?? "").trim().toUpperCase() || BASE_CURRENCY
   const fractionDigits = options?.decimals === false ? 0 : 2
   try {
-    return new Intl.NumberFormat("en-ZA", {
+    const parts = new Intl.NumberFormat("en-ZA", {
       style: "currency",
       currency: code,
       currencyDisplay: "narrowSymbol",
       minimumFractionDigits: fractionDigits,
       maximumFractionDigits: fractionDigits,
-    }).format(amount)
+    }).formatToParts(amount)
+    // en-ZA inserts a space between the currency symbol and the first digit — drop just that
+    // one, leaving thousands-separator spaces elsewhere in the number untouched. Found relative
+    // to the currency part (not a fixed index) so a leading minus sign doesn't shift it.
+    const currencyIndex = parts.findIndex((part) => part.type === "currency")
+    return parts
+      .filter(
+        (part, index) =>
+          !(index === currencyIndex + 1 && part.type === "literal" && /^\s+$/.test(part.value)),
+      )
+      .map((part) => part.value)
+      .join("")
   } catch {
     // An unknown ISO code makes Intl throw. Degrade to a readable "USD 1234.50" rather than
     // losing the number entirely.

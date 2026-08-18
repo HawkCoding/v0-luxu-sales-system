@@ -10,7 +10,11 @@ import { formatMoney } from "@/lib/money"
 import { deriveFlightCapPerPerson, deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
 import { resolvePrimaryRoute, resolvePrimarySupplierId } from "@/lib/quotes/resolve-primary-route"
 import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
-import { complimentaryLegIdsFromLineItems, legIdsFromLineItems } from "@/lib/quotes/accepted-quote-scope"
+import {
+  complimentaryLegIdsFromLineItems,
+  firstNightComplimentaryLegIdsFromLineItems,
+  legIdsFromLineItems,
+} from "@/lib/quotes/accepted-quote-scope"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import type { PricingSnapshot } from "@/lib/types"
@@ -114,6 +118,7 @@ export async function POST(req: Request, { params }: RouteParams) {
   // back to unfiltered (today's behavior) rather than rendering an empty itinerary.
   const quoteLegIds = legIdsFromLineItems(lineItems)
   const complimentaryLegIds = complimentaryLegIdsFromLineItems(lineItems)
+  const firstNightComplimentaryLegIds = firstNightComplimentaryLegIdsFromLineItems(lineItems)
 
   // Itinerary degrades to an omitted section rather than failing the preview.
   let itineraryBlocks: VoucherServiceBlock[] = []
@@ -123,6 +128,7 @@ export async function POST(req: Request, { params }: RouteParams) {
       additionalServicesDetails: null,
       legIds: quoteLegIds.size > 0 ? quoteLegIds : undefined,
       complimentaryLegIds,
+      firstNightComplimentaryLegIds,
     })
     itineraryBlocks = blocks
   } catch {

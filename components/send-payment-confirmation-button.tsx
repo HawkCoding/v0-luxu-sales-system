@@ -16,6 +16,9 @@ interface SendPaymentConfirmationButtonProps {
   onOpenChange?: (open: boolean) => void
   /** Set false to hide the built-in trigger button and rely on `open`/`onOpenChange`. */
   trigger?: boolean
+  /** Called when the email could not be prepared, so a caller driving this
+   *  dialog from a stage move can abandon that move instead of hanging. */
+  onError?: (message: string) => void
 }
 
 interface PreparedEmail {
@@ -45,6 +48,7 @@ export function SendPaymentConfirmationButton({
   open,
   onOpenChange,
   trigger = true,
+  onError,
 }: SendPaymentConfirmationButtonProps) {
   const [preparing, setPreparing] = useState(false)
   const [prepared, setPrepared] = useState<PreparedEmail | null>(null)
@@ -61,11 +65,17 @@ export function SendPaymentConfirmationButton({
       setPrepared(body)
       setPreviewOpen(true)
     } catch (error) {
-      toast.error(
+      // This runs unattended in controlled mode (the stage-transition "Next"
+      // path opens the dialog, which prepares on mount), and a failure here
+      // closes the dialog again — so the toast is the only thing the user ever
+      // sees. It has to carry the server's reason and stay up long enough to
+      // read, or the click looks like it did nothing at all.
+      const message =
         error instanceof Error && error.message
           ? error.message
-          : "Could not prepare the payment confirmation",
-      )
+          : "Could not prepare the payment confirmation"
+      toast.error(message, { duration: 8000 })
+      onError?.(message)
       setPreviewOpen(false)
     } finally {
       setPreparing(false)

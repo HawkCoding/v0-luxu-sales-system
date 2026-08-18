@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { HotelDateAnchor, PackageLeg, RateType, SupplierRateCard } from "@/lib/types"
+import type { PackageLeg, RateType, ServiceDateAnchor, SupplierRateCard } from "@/lib/types"
 import {
   getSupplierVocabulary,
   isOptionalPackageLegKind,
@@ -114,6 +114,7 @@ interface RoomPriceOverrideProps {
   quoteCurrency: string
   formatInQuoteCurrency: (amount: number, from: string) => string | null
   onChange: (next: number | null) => void
+  onComplimentaryChange: (next: boolean) => void
 }
 
 /**
@@ -135,64 +136,89 @@ function RoomPriceOverride({
   quoteCurrency,
   formatInQuoteCurrency,
   onChange,
+  onComplimentaryChange,
 }: RoomPriceOverrideProps) {
   const currency = baseRateCard?.currency ?? fallbackCurrency
   // 0 is a real price (a comped room), so this is a null check, not a truthiness one.
   const overridden = unit.manualRoomPrice !== null && unit.manualRoomPrice !== undefined
-  // A comped room is an override whose typed price happens to be zero — the client sees
+  // A fully comped room is an override whose typed price happens to be zero — the client sees
   // "Complimentary" instead of "R0.00" and it's exempted from the missing-pricing check
   // (see isMissingPricing in lib/quotes/pricing-engine.ts).
   const isComplimentary = overridden && unit.manualRoomPrice === 0
+  // The far commoner deal: the hotel gifts the first night and charges the rest. Independent of
+  // the override, so a gifted night composes with either the rate card price or a typed one.
+  const firstNightFree = unit.complimentaryFirstNight === true
   // Derived rather than synced: a leg loaded with a saved override opens expanded on first paint,
   // and reverting collapses it again, so the two can never drift apart.
   const [requested, setRequested] = useState(false)
   const expanded = requested || overridden
 
   const price = unit.manualRoomPrice ?? 0
-  const stayTotal = Math.round(price * nights * 100) / 100
+  const chargedNights = firstNightFree ? Math.max(0, nights - 1) : nights
+  const stayTotal = Math.round(price * chargedNights * 100) / 100
   const convertedStayTotal = formatInQuoteCurrency(stayTotal, currency)
-  const nightLabel = `${nights} ${nights === 1 ? "night" : "nights"}`
+  const nightLabel = `${chargedNights} ${chargedNights === 1 ? "night" : "nights"}`
+  // What the quote will actually charge, whichever price the room is running on.
+  const effectivePrice = overridden ? price : baseRateCard?.pricePerPerson ?? null
+  const complimentarySummary =
+    effectivePrice === null
+      ? `First night complimentary · ${chargedNights} of ${nights} nights charged`
+      : `First night complimentary · ${chargedNights} of ${nights} nights at ${formatMoney(
+          effectivePrice,
+          currency,
+        )} = ${formatMoney(Math.round(effectivePrice * chargedNights * 100) / 100, currency)}`
+
+  const complimentaryToggle = (
+    <Button
+      type="button"
+      size="sm"
+      variant="link"
+      className={`h-auto gap-1 p-0 text-xs ${
+        firstNightFree
+          ? "text-muted-foreground hover:text-foreground"
+          : "text-emerald-600 hover:text-emerald-700"
+      }`}
+      aria-pressed={firstNightFree}
+      onClick={() => onComplimentaryChange(!firstNightFree)}
+    >
+      <Gift className="h-3.5 w-3.5" />
+      {firstNightFree ? "Charge the first night" : "First night complimentary"}
+    </Button>
+  )
 
   if (!expanded) {
     return (
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3 md:col-span-2 xl:col-span-3">
-        <span className="text-xs text-muted-foreground">
-          {baseRateCard ? (
-            <>
-              Rate card{" "}
-              <span className="font-medium tabular-nums text-foreground">
-                {formatMoney(baseRateCard.pricePerPerson, baseRateCard.currency)}
-              </span>{" "}
-              per room per night
-            </>
-          ) : (
-            "No rate card price for this room yet"
-          )}
-        </span>
-        <div className="flex items-center gap-3">
-          <Button
-            type="button"
-            size="sm"
-            variant="link"
-            className="h-auto p-0 text-xs"
-            onClick={() => setRequested(true)}
-          >
-            Override price
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="link"
-            className="h-auto gap-1 p-0 text-xs text-emerald-600 hover:text-emerald-700"
-            onClick={() => {
-              setRequested(true)
-              onChange(0)
-            }}
-          >
-            <Gift className="h-3.5 w-3.5" />
-            Mark complimentary
-          </Button>
+      <div className="space-y-1.5 border-t pt-3 md:col-span-2 xl:col-span-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs text-muted-foreground">
+            {baseRateCard ? (
+              <>
+                Rate card{" "}
+                <span className="font-medium tabular-nums text-foreground">
+                  {formatMoney(baseRateCard.pricePerPerson, baseRateCard.currency)}
+                </span>{" "}
+                per room per night
+              </>
+            ) : (
+              "No rate card price for this room yet"
+            )}
+          </span>
+          <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              size="sm"
+              variant="link"
+              className="h-auto p-0 text-xs"
+              onClick={() => setRequested(true)}
+            >
+              Override price
+            </Button>
+            {complimentaryToggle}
+          </div>
         </div>
+        {firstNightFree ? (
+          <p className="text-xs text-emerald-600 dark:text-emerald-500">{complimentarySummary}</p>
+        ) : null}
       </div>
     )
   }
@@ -221,15 +247,22 @@ function RoomPriceOverride({
             </TooltipContent>
           </Tooltip>
         </div>
-        {isComplimentary ? (
-          <Badge className="h-5 text-[10px] bg-emerald-100 text-emerald-700 hover:bg-emerald-100 border-emerald-200">
-            Complimentary
-          </Badge>
-        ) : overridden ? (
-          <Badge variant="secondary" className="h-5 text-[10px]">
-            Overridden
-          </Badge>
-        ) : null}
+        <div className="flex items-center gap-1.5">
+          {firstNightFree ? (
+            <Badge className="h-5 text-[10px] bg-emerald-100 text-emerald-700 hover:bg-emerald-100 border-emerald-200">
+              First night free
+            </Badge>
+          ) : null}
+          {isComplimentary ? (
+            <Badge className="h-5 text-[10px] bg-emerald-100 text-emerald-700 hover:bg-emerald-100 border-emerald-200">
+              Complimentary
+            </Badge>
+          ) : overridden ? (
+            <Badge variant="secondary" className="h-5 text-[10px]">
+              Overridden
+            </Badge>
+          ) : null}
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -271,6 +304,7 @@ function RoomPriceOverride({
         >
           Revert
         </Button>
+        {complimentaryToggle}
       </div>
 
       {overridden ? (
@@ -278,6 +312,9 @@ function RoomPriceOverride({
           <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs text-muted-foreground">
             <span className="font-medium tabular-nums text-foreground">
               {formatMoney(stayTotal, currency)} for {nightLabel}
+              {/* The gifted night is not in the charged count above, so say so rather than let
+                  the figure read as the whole stay. */}
+              {firstNightFree ? ` of ${nights} (first night complimentary)` : ""}
             </span>
             {convertedStayTotal ? <span className="tabular-nums">≈ {convertedStayTotal}</span> : null}
           </div>
@@ -290,9 +327,14 @@ function RoomPriceOverride({
           </p>
         </div>
       ) : (
-        <p className="text-xs text-muted-foreground">
-          Leave blank to keep pricing this room off the rate card.
-        </p>
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground">
+            Leave blank to keep pricing this room off the rate card.
+          </p>
+          {firstNightFree ? (
+            <p className="text-xs text-emerald-600 dark:text-emerald-500">{complimentarySummary}</p>
+          ) : null}
+        </div>
       )}
     </div>
   )
@@ -315,7 +357,7 @@ interface SuiteLegEditorProps {
   fxRates?: FxRateMap
 }
 
-const ANCHOR_OPTIONS: { value: HotelDateAnchor; label: string; hint: string }[] = [
+const ANCHOR_OPTIONS: { value: ServiceDateAnchor; label: string; hint: string }[] = [
   { value: "pre", label: "Pre-train", hint: "Night(s) before the train departs" },
   { value: "post", label: "Post-train", hint: "From the day the train arrives" },
   { value: "custom", label: "Custom date", hint: "Pick the check-in date manually" },
@@ -423,7 +465,7 @@ export function SuiteLegEditor({
   const missingTrainDuration =
     value.dateAnchor === "post" && anchorContext != null && anchorContext.durationDays == null
 
-  function setAnchor(next: HotelDateAnchor) {
+  function setAnchor(next: ServiceDateAnchor) {
     onChange({ ...value, dateAnchor: next })
   }
 
@@ -920,8 +962,8 @@ export function SuiteLegEditor({
                   ) : null}
                 </div>
 
-                {/* TODO: bedroom_types/bathroom_types vocab is hidden (hotel_property only) but still
-                    fully wired in the DB/quote/voucher layers — see suite-vocabulary-card.tsx. */}
+                {/* TODO: bedroom_types vocab is hidden (hotel_property only) but still fully wired
+                    in the DB/quote/voucher layers — see suite-vocabulary-card.tsx. */}
                 {!isHotel && bedroomTypeIds.length > 0 ? (
                   <div className="space-y-1.5">
                     <Label>Bed configuration</Label>
@@ -966,7 +1008,7 @@ export function SuiteLegEditor({
                   </div>
                 ) : null}
 
-                {!isHotel && bathroomTypeIds.length > 0 ? (
+                {bathroomTypeIds.length > 0 ? (
                   <div className="space-y-1.5">
                     <Label>Bathroom type</Label>
                     <Select
@@ -1036,6 +1078,9 @@ export function SuiteLegEditor({
                     quoteCurrency={quoteCurrency}
                     formatInQuoteCurrency={formatInQuoteCurrency}
                     onChange={(next) => updateUnit(unit.id, { manualRoomPrice: next })}
+                    onComplimentaryChange={(next) =>
+                      updateUnit(unit.id, { complimentaryFirstNight: next })
+                    }
                   />
                 ) : null}
 

@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -10,6 +11,7 @@ import { Button } from "@/components/ui/button"
 import type { DocRecord, Enquiry, Job, Customer } from "@/lib/types"
 import { AlertCircle, ClipboardList, FileOutput, FileText } from "lucide-react"
 import { GenerateVoucherDialog } from "@/components/generate-voucher-dialog"
+import { useJobLegReferences } from "@/lib/use-data"
 import { formatDisplayDateTime } from "@/lib/date-format"
 
 const VOUCHER_STAGES = new Set(["final_paid", "voucher_sent", "closed"])
@@ -35,8 +37,16 @@ export function JobDocumentsTab({
 }: JobDocumentsTabProps) {
   const [voucherOpen, setVoucherOpen] = useState(false)
   const [generatingWorksheet, setGeneratingWorksheet] = useState(false)
+  const router = useRouter()
 
   const canGenerateVoucher = job && enquiry && customer && VOUCHER_STAGES.has(job.stage ?? "")
+
+  // Preflight so this card states the blocker up front rather than offering a Generate button that
+  // opens a dialog only to report the same thing. Fetched only on the stages where it's offered.
+  const { data: legReferences } = useJobLegReferences(canGenerateVoucher ? job?.id : null)
+  const missingReferenceCount = (legReferences?.rows ?? []).filter(
+    (row) => !row.supplierReference?.trim(),
+  ).length
 
   async function downloadWorksheet() {
     if (!job) return
@@ -129,17 +139,32 @@ export function JobDocumentsTab({
       )}
 
       {canGenerateVoucher && (
-        <Card className="border-primary/20 bg-primary/5">
+        <Card className={missingReferenceCount > 0 ? "border-destructive/30 bg-destructive/5" : "border-primary/20 bg-primary/5"}>
           <CardContent className="p-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-4">
               <div>
                 <p className="text-sm font-medium text-foreground">Generate Travel Voucher</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Create, preview, and send the PDF voucher</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {missingReferenceCount > 0
+                    ? `${missingReferenceCount} ${missingReferenceCount === 1 ? "leg is" : "legs are"} missing a supplier reference number`
+                    : "Create, preview, and send the PDF voucher"}
+                </p>
               </div>
-              <Button size="sm" onClick={() => setVoucherOpen(true)}>
-                <FileOutput data-icon="inline-start" />
-                Generate Voucher
-              </Button>
+              {missingReferenceCount > 0 ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => router.push(`/app/bookings/${job.id}?tab=references`)}
+                >
+                  <AlertCircle data-icon="inline-start" />
+                  Add reference numbers
+                </Button>
+              ) : (
+                <Button size="sm" onClick={() => setVoucherOpen(true)}>
+                  <FileOutput data-icon="inline-start" />
+                  Generate Voucher
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>

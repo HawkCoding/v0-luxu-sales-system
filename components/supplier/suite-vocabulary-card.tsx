@@ -45,7 +45,7 @@ const VOCABULARY_COPY: Partial<Record<SupplierKind, VocabularyCopy>> = {
   train_operator: TRAIN_COPY,
   hotel_property: {
     cardTitle: "Room Vocabulary",
-    cardDescription: "Configure the bedroom layouts this property offers. Drag to reorder.",
+    cardDescription: "Configure the bedroom layouts and bathroom types this property offers. Drag to reorder.",
     bedroomTypes: {
       title: "Bedroom Types",
       description: "e.g. Single, Twin, Double, King.",
@@ -61,8 +61,8 @@ const VOCABULARY_COPY: Partial<Record<SupplierKind, VocabularyCopy>> = {
   },
 }
 
-// TODO: Bedroom Types and Bathroom Types are hidden for hotel_property below (UI-only —
-// tables, columns, and quote/voucher logic are still fully wired). Revisit for full removal.
+// TODO: Bedroom Types is hidden for hotel_property below (UI-only — tables, columns, and
+// quote/voucher logic are still fully wired). Revisit for full removal.
 
 export interface SuiteVocabularyCardProps {
   kind: SupplierKind
@@ -212,7 +212,7 @@ export function SuiteVocabularyCard({
   isEditing,
 }: SuiteVocabularyCardProps) {
   const copy = VOCABULARY_COPY[kind] ?? TRAIN_COPY
-  const hideBedroomAndBathroomTypes = kind === "hotel_property"
+  const hideBedroomTypes = kind === "hotel_property"
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -220,7 +220,7 @@ export function SuiteVocabularyCard({
         <p className="text-sm text-muted-foreground">{copy.cardDescription}</p>
       </CardHeader>
       <CardContent className="space-y-5">
-        {!hideBedroomAndBathroomTypes ? (
+        {!hideBedroomTypes ? (
           <VocabularySection
             title={copy.bedroomTypes.title}
             description={copy.bedroomTypes.description}
@@ -236,15 +236,13 @@ export function SuiteVocabularyCard({
           onChange={onChangeBedroomLayouts}
           isEditing={isEditing}
         />
-        {!hideBedroomAndBathroomTypes ? (
-          <VocabularySection
-            title={copy.bathroomTypes.title}
-            description={copy.bathroomTypes.description}
-            values={bathroomTypes}
-            onChange={onChangeBathroomTypes}
-            isEditing={isEditing}
-          />
-        ) : null}
+        <VocabularySection
+          title={copy.bathroomTypes.title}
+          description={copy.bathroomTypes.description}
+          values={bathroomTypes}
+          onChange={onChangeBathroomTypes}
+          isEditing={isEditing}
+        />
       </CardContent>
     </Card>
   )

@@ -97,7 +97,10 @@ export function serviceDateSpan(input: SpanInput): ServiceDateSpan | null {
   return { start, end: trainArrivalDate(start, input.routeDurationDays) }
 }
 
-function selectedRouteDurationDays(leg: PackageLeg | undefined, routeId: string | null): number | null {
+/** The durationDays of a leg's chosen route (or its only route, when there's just the one) — the
+ *  same fallback `serviceDateSpan` callers use, exported for the transfer date anchor (see
+ *  lib/packages/transfer-dates.ts), which reads it for the leg a transfer anchors to. */
+export function selectedRouteDurationDays(leg: PackageLeg | undefined, routeId: string | null): number | null {
   if (!leg) return null
   const route = leg.routes.find((candidate) => candidate.id === routeId) ?? (leg.routes.length === 1 ? leg.routes[0] : undefined)
   return route?.durationDays ?? null

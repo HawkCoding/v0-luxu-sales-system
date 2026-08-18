@@ -28,6 +28,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import type { Template } from "@/lib/types"
+import { useDirtyCloseGuard } from "@/hooks/use-dirty-close-guard"
+import { DiscardChangesDialog } from "@/components/discard-changes-dialog"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
 import { VoucherTemplateEditor } from "@/components/voucher-template-editor"
 import { BrandBlockSettingsEditor } from "@/components/brand-block-settings-editor"
@@ -143,6 +145,18 @@ export default function TemplatesPage() {
     }
   }, [preview])
 
+  const isEditDirty = editing !== null && (editSubject !== editing.subject || editBody !== editing.bodyHtml)
+  const editCloseGuard = useDirtyCloseGuard({
+    isDirty: isEditDirty,
+    onConfirmedClose: () => setEditing(null),
+  })
+  const isCreateDirty =
+    createName.trim() !== "" || createSubject.trim() !== "" || createBody.trim() !== ""
+  const createCloseGuard = useDirtyCloseGuard({
+    isDirty: isCreateDirty,
+    onConfirmedClose: () => setCreating(false),
+  })
+
   if (isLoading || !templates) {
     return <div className="p-6"><div className="animate-pulse space-y-3">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-24 bg-secondary rounded-lg" />)}</div></div>
   }
@@ -157,13 +171,21 @@ export default function TemplatesPage() {
     if (!editing) return
     setSaving(true)
     try {
-      await fetch("/api/templates", {
+      const res = await fetch("/api/templates", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: editing.id, subject: editSubject, bodyHtml: editBody }),
       })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        toast.error(body.error ?? "Failed to save template")
+        return
+      }
+      toast.success("Template saved")
       mutate()
       setEditing(null)
+    } catch {
+      toast.error("Failed to save template")
     } finally {
       setSaving(false)
     }
@@ -225,15 +247,21 @@ export default function TemplatesPage() {
       return
     }
     try {
-      await fetch("/api/templates", {
+      const res = await fetch("/api/templates", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, name }),
       })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        toast.error(body.error ?? "Failed to rename template")
+        handleRenameLocal(id, original.name)
+        return
+      }
       mutate()
     } catch {
       toast.error("Failed to rename template")
-      mutate()
+      handleRenameLocal(id, original.name)
     }
   }
 
@@ -249,7 +277,7 @@ export default function TemplatesPage() {
       return original && original.sortOrder !== index
     })
     try {
-      await Promise.all(
+      const results = await Promise.all(
         changed.map((t) =>
           fetch("/api/templates", {
             method: "PATCH",
@@ -258,6 +286,9 @@ export default function TemplatesPage() {
           }),
         ),
       )
+      if (results.some((res) => !res.ok)) {
+        toast.error("Failed to save new template order")
+      }
       mutate()
     } catch {
       toast.error("Failed to save new template order")
@@ -475,8 +506,16 @@ export default function TemplatesPage() {
       </Tabs>
 
       {/* Edit Email Template Dialog */}
-      <Dialog open={!!editing} onOpenChange={(open) => !open && setEditing(null)}>
-        <DialogContent className="max-w-2xl">
+      <Dialog
+        open={!!editing}
+        onOpenChange={(open) => (open ? undefined : editCloseGuard.handleOpenChange(false))}
+      >
+        <DialogContent className="max-w-2xl" {...editCloseGuard.contentProps}>
+          <DiscardChangesDialog
+            open={editCloseGuard.confirming}
+            onKeepEditing={editCloseGuard.cancelDiscard}
+            onDiscard={editCloseGuard.confirmDiscard}
+          />
           <DialogHeader>
             <DialogTitle>Edit Template</DialogTitle>
             <DialogDescription>Modify the template subject and body.</DialogDescription>
@@ -517,7 +556,7 @@ export default function TemplatesPage() {
               </div>
             )}
             <div className="flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={() => setEditing(null)}>Cancel</Button>
+              <Button variant="outline" size="sm" onClick={() => editCloseGuard.handleOpenChange(false)}>Cancel</Button>
               <Button size="sm" onClick={handleSave} disabled={saving}>{saving ? "Saving..." : "Save"}</Button>
             </div>
           </div>
@@ -525,8 +564,16 @@ export default function TemplatesPage() {
       </Dialog>
 
       {/* Create Email Template Dialog */}
-      <Dialog open={creating} onOpenChange={(open) => !open && setCreating(false)}>
-        <DialogContent className="max-w-2xl">
+      <Dialog
+        open={creating}
+        onOpenChange={(open) => (open ? undefined : createCloseGuard.handleOpenChange(false))}
+      >
+        <DialogContent className="max-w-2xl" {...createCloseGuard.contentProps}>
+          <DiscardChangesDialog
+            open={createCloseGuard.confirming}
+            onKeepEditing={createCloseGuard.cancelDiscard}
+            onDiscard={createCloseGuard.confirmDiscard}
+          />
           <DialogHeader>
             <DialogTitle>New Template</DialogTitle>
             <DialogDescription>Create a custom email template. Use placeholder tokens for live data.</DialogDescription>
@@ -552,7 +599,7 @@ export default function TemplatesPage() {
               </div>
             </div>
             <div className="flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={() => setCreating(false)}>Cancel</Button>
+              <Button variant="outline" size="sm" onClick={() => createCloseGuard.handleOpenChange(false)}>Cancel</Button>
               <Button
                 size="sm"
                 onClick={handleCreate}

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
-import { staleVersionResponse } from "@/lib/concurrency"
+import { requireVersionTokenOrForce, staleVersionResponse, versionTokenShape } from "@/lib/concurrency"
 import { calculateQuoteTotals, isMissingPricing, isPricingEngineLineItem, roundMoney } from "@/lib/quotes/pricing-engine"
 import { syncBookingRoute } from "@/lib/quotes/resolve-primary-route"
 import type { Json } from "@/lib/supabase/types"
@@ -19,7 +19,7 @@ const lineItemSchema = z.object({
 const patchQuoteSchema = z.object({
   lineItems: z.array(lineItemSchema).min(1),
   overrideReason: z.string().trim().min(1).max(500).optional(),
-  expectedUpdatedAt: z.string().datetime({ offset: true }).optional(),
+  ...versionTokenShape,
 })
 
 interface RouteParams {
@@ -50,6 +50,12 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   } catch {
     return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
   }
+
+  // This PATCH replaces the whole line-item set, so a save built from a stale copy deletes the
+  // lines someone else added rather than failing to merge them. The version token is therefore
+  // mandatory — see requireVersionTokenOrForce for the force: true escape hatch.
+  const missingVersionToken = requireVersionTokenOrForce(parsed)
+  if (missingVersionToken) return missingVersionToken
 
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
@@ -154,10 +160,23 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     return NextResponse.json({ error: routeSyncError }, { status: 500 })
   }
 
-  if (isManualPricing && overrideReason) {
+  // override_reason used to be write-only: nothing ever nulled it, so a "PRICING OVERRIDE" banner
+  // from a one-off manual line stuck to the quote forever — even once every line was replaced with
+  // ordinary rate-card pricing. It's cleared once no line is manual any more, but an unchanged
+  // carry-over manual line (isManualPricing is false for those, by design — see the comment above)
+  // must not clear a reason that's still true: the banner tracks "is any line on this quote
+  // hand-priced", not "did this particular save introduce one".
+  const hasManualLine = normalizedLineItems.some((li) => !isPricingEngineLineItem(li))
+  const nextOverrideReason =
+    isManualPricing && overrideReason
+      ? overrideReason
+      : hasManualLine
+        ? quote.override_reason
+        : null
+  if (nextOverrideReason !== quote.override_reason) {
     const { error: quoteOverrideError } = await supabase
       .from("quotes")
-      .update({ override_reason: overrideReason })
+      .update({ override_reason: nextOverrideReason })
       .eq("id", id)
 
     if (quoteOverrideError) {

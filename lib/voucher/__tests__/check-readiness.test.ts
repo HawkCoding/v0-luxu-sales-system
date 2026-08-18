@@ -269,6 +269,53 @@ describe("checkVoucherReadiness", () => {
     expect(result.warnings).toEqual([])
   })
 
+  it.each(["transfer", "airline"] as const)(
+    "does not warn about a missing street address or city for a %s block — the voucher never prints one",
+    (serviceType) => {
+      const result = checkVoucherReadiness({
+        ...readyInput,
+        serviceBlocks: [
+          {
+            title: "Airport Transfer",
+            serviceType,
+            supplierContactName: "Pierre",
+            streetAddress: null,
+            location: null,
+            startTime: "09:00",
+            endTime: "10:00",
+            arrivalDate: "2026-06-01",
+            hasGuestBreakdown: true,
+            cabin: "Economy",
+            departureAirportCode: "CPT",
+            arrivalAirportCode: "JNB",
+            handLuggageKg: 7,
+            checkedLuggageKg: 23,
+          },
+        ],
+      })
+      expect(result.warnings.map((w) => w.code)).not.toContain("supplier_address_missing")
+      expect(result.warnings.map((w) => w.code)).not.toContain("supplier_location_missing")
+    },
+  )
+
+  it("warns about a missing street address and city for a tour block — its only printed location", () => {
+    const result = checkVoucherReadiness({
+      ...readyInput,
+      serviceBlocks: [
+        {
+          title: "Cape Peninsula Full Day",
+          serviceType: "tour",
+          supplierContactName: "Reservations",
+          streetAddress: null,
+          location: null,
+          hasGuestBreakdown: false,
+        },
+      ],
+    })
+    expect(result.warnings.map((w) => w.code)).toEqual(["supplier_address_missing", "supplier_location_missing"])
+    expect(result.warnings.every((w) => w.message.includes("Cape Peninsula Full Day"))).toBe(true)
+  })
+
   it("flags an airline block missing cabin, airport codes or baggage allowance", () => {
     const result = checkVoucherReadiness({
       ...readyInput,

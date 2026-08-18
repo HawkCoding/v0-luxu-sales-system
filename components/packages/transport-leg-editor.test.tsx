@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { TransportLegEditor } from "./transport-leg-editor"
-import type { TransportLegState } from "@/lib/packages/apply-dialog-state"
+import type { TransferAnchorContext, TransportLegState } from "@/lib/packages/apply-dialog-state"
 import type { BookingTransportRequest, PackageLeg } from "@/lib/types"
 
 const transferLeg: PackageLeg = {
@@ -79,6 +79,7 @@ function makeRequest(overrides: Partial<BookingTransportRequest> = {}): BookingT
     pickupPoint: "Cape Town Station",
     dropoffPoint: "Hotel",
     pickupAt: "2026-09-24T11:00:00.000Z",
+    dateAnchor: "custom",
     rentalDetails: null,
     passengerCount: 2,
     luggageCount: 2,
@@ -241,5 +242,105 @@ describe("TransportLegEditor price override", () => {
 
     // 24-27 Sept is 3 billable days.
     expect(screen.getByText(/for 3 days/i)).toBeInTheDocument()
+  })
+})
+
+describe("TransportLegEditor date anchor", () => {
+  const trainAnchor: TransferAnchorContext = {
+    legLabel: "Blue Train",
+    legKind: "train_operator",
+    startDate: "2026-09-24",
+    endDate: "2026-09-26",
+    endDateAssumed: false,
+  }
+
+  it("disables Pre/Post with no anchor context, leaving Custom's date picker live", () => {
+    render(
+      <TransportLegEditor
+        leg={transferLeg}
+        value={makeLegState([makeRequest({ dateAnchor: "custom" })])}
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole("button", { name: "Pre" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Post" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Custom" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: /pickup date/i })).toBeEnabled()
+    expect(screen.getByText(/nothing above this transfer has a date to anchor to/i)).toBeInTheDocument()
+  })
+
+  it("resolves Post to the anchor leg's end date and disables the date half", () => {
+    render(
+      <TransportLegEditor
+        leg={transferLeg}
+        value={makeLegState([makeRequest({ dateAnchor: "post" })])}
+        onChange={vi.fn()}
+        anchorContext={trainAnchor}
+      />,
+    )
+
+    expect(screen.getByRole("button", { name: "Post" })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByRole("button", { name: /pickup date/i })).toBeDisabled()
+    expect(screen.getByText(/26-09-2026/)).toBeInTheDocument()
+    expect(screen.getByText(/blue train/i)).toBeInTheDocument()
+  })
+
+  it("switches to Custom and re-enables the date picker", () => {
+    const onChange = vi.fn()
+    render(
+      <TransportLegEditor
+        leg={transferLeg}
+        value={makeLegState([makeRequest({ dateAnchor: "post" })])}
+        onChange={onChange}
+        anchorContext={trainAnchor}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Custom" }))
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requests: [expect.objectContaining({ dateAnchor: "custom" })],
+      }),
+    )
+  })
+
+  it("shows the missing-duration warning only when Post's date is assumed", () => {
+    render(
+      <TransportLegEditor
+        leg={transferLeg}
+        value={makeLegState([makeRequest({ dateAnchor: "post" })])}
+        onChange={vi.fn()}
+        anchorContext={{ ...trainAnchor, endDate: trainAnchor.startDate, endDateAssumed: true }}
+      />,
+    )
+
+    expect(screen.getByText(/has no journey length set/i)).toBeInTheDocument()
+  })
+
+  it("renders no anchor buttons on a vehicle rental — pickup and return stay manual", () => {
+    const rentalRequest = makeRequest({
+      id: "req-rental-1",
+      serviceType: "rental",
+      rentalDetails: {
+        transportRequestId: "req-rental-1",
+        returnAt: "2026-09-27T11:00:00.000Z",
+        returnCutoffTime: null,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+      },
+    })
+    render(
+      <TransportLegEditor
+        leg={rentalLeg}
+        value={makeLegState([rentalRequest], { legId: "leg-rental", supplierKind: "vehicle_rental" })}
+        onChange={vi.fn()}
+        anchorContext={trainAnchor}
+      />,
+    )
+
+    expect(screen.queryByRole("button", { name: "Pre" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Post" })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /pickup date/i })).toBeEnabled()
   })
 })

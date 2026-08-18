@@ -54,9 +54,12 @@ export interface VoucherServiceBlockData {
   roomType?: string | null
   nights?: number | null
   mealPlan?: string | null
-  /** Hotel-only: true when the consultant marked this room's quote line complimentary. Drives a
+  /** Hotel-only: true when the whole stay was comped (its room price was typed as R0). Drives a
    *  client-facing "COMPLIMENTARY" callout on the itinerary line. */
   isComplimentary?: boolean | null
+  /** Hotel-only: true when the hotel gifted the first night and charged the rest. The line still
+   *  states the full stay length; the callout reads "FIRST NIGHT COMPLIMENTARY". */
+  isFirstNightComplimentary?: boolean | null
   vehicleType?: string | null
   pickup?: string | null
   dropoff?: string | null
@@ -260,7 +263,7 @@ function buildServiceBlocksSection(data: VoucherData): string {
 
   const blocksHtml = sortedVoucherServiceBlocks(blocks)
     .map((block) => {
-      const contactLine = voucherProviderContactLine(block.contactDetails)
+      const contactLine = voucherProviderContactLine(block.contactDetails, block.serviceType)
       const heading = block.contactDetails.name || block.title || voucherServiceTypeLabel(block.serviceType)
       const footnote = block.serviceData.footnote
       return `

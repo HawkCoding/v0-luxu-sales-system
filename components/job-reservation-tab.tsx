@@ -678,17 +678,13 @@ export function JobReservationTab({
                       />
                       <Label htmlFor={`primary-${traveller.key}`} className="text-xs">Primary guest</Label>
                     </div>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Input
-                          placeholder="Residence"
-                          value={traveller.residence}
-                          onChange={(e) => updateTraveller(traveller.key, { residence: e.target.value })}
-                          className="sm:col-span-2"
-                        />
-                      </TooltipTrigger>
-                      <TooltipContent>Country of residence</TooltipContent>
-                    </Tooltip>
+                    <Input
+                      placeholder="ID / Passport number *"
+                      value={traveller.idPassport}
+                      onChange={(e) => updateTraveller(traveller.key, { idPassport: e.target.value })}
+                      className="sm:col-span-2"
+                      required
+                    />
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Input
@@ -708,13 +704,17 @@ export function JobReservationTab({
                       </TooltipTrigger>
                       <TooltipContent>Day first — 12/05/1980 or 1980-05-12</TooltipContent>
                     </Tooltip>
-                    <Input
-                      placeholder="ID / Passport number *"
-                      value={traveller.idPassport}
-                      onChange={(e) => updateTraveller(traveller.key, { idPassport: e.target.value })}
-                      className="sm:col-span-2"
-                      required
-                    />
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Input
+                          placeholder="Residence"
+                          value={traveller.residence}
+                          onChange={(e) => updateTraveller(traveller.key, { residence: e.target.value })}
+                          className="sm:col-span-2"
+                        />
+                      </TooltipTrigger>
+                      <TooltipContent>Country of residence</TooltipContent>
+                    </Tooltip>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Input

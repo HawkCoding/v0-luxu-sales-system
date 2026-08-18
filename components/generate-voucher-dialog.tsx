@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { FileOutput, TriangleAlert } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { AlertCircle, FileOutput, TriangleAlert } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -15,12 +16,42 @@ import {
 } from "@/components/ui/dialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import type { DocRecord } from "@/lib/types"
+import { useJobLegReferences } from "@/lib/use-data"
 import { SendVoucherButton } from "@/components/send-voucher-button"
 
 interface VoucherReadinessWarning {
   code: string
   message: string
   fixHint: string
+}
+
+interface VoucherReadinessFailure {
+  code: string
+  message: string
+}
+
+interface VoucherErrorResponse {
+  error?: string
+  details?: { failures?: VoucherReadinessFailure[] }
+}
+
+/** Surfaces a "Fix now" action on the toast when the failure is missing supplier
+ * reference numbers, jumping straight to the Voucher Details tab instead of
+ * leaving the consultant to hunt for it. */
+function showVoucherError(
+  payload: VoucherErrorResponse,
+  fallbackMessage: string,
+  onFixReferences: () => void,
+) {
+  const message = payload.error ?? fallbackMessage
+  const hasMissingReferences = payload.details?.failures?.some(
+    (failure) => failure.code === "leg_references_missing",
+  )
+  if (hasMissingReferences) {
+    toast.error(message, { action: { label: "Fix now", onClick: onFixReferences } })
+    return
+  }
+  toast.error(message)
 }
 
 interface GenerateVoucherDialogProps {
@@ -60,6 +91,8 @@ interface GenerateVoucherResponse {
   }
   readinessWarnings?: VoucherReadinessWarning[]
   error?: string
+  /** Present only on a 422 — the readiness failures that blocked generation. */
+  details?: { failures?: VoucherReadinessFailure[] }
 }
 
 export function GenerateVoucherDialog({
@@ -80,6 +113,21 @@ export function GenerateVoucherDialog({
   const [generated, setGenerated] = useState<GenerateVoucherResponse | null>(null)
   const dialogOpen = open ?? internalOpen
   const setDialogOpen = onOpenChange ?? setInternalOpen
+  const router = useRouter()
+
+  // Preflight, so a missing reference is on screen the moment the dialog opens instead of after a
+  // Generate click that can only 422. Same scope as the server gate — this endpoint and
+  // `checkVoucherReadiness` both filter through resolveAcceptedQuoteScope — so the two agree.
+  const { data: legReferences } = useJobLegReferences(dialogOpen ? jobId : null)
+  const missingReferenceLabels = (legReferences?.rows ?? [])
+    .filter((row) => !row.supplierReference?.trim())
+    .map((row) => row.label)
+  const blockedOnReferences = missingReferenceLabels.length > 0
+
+  function goToVoucherReferences() {
+    setDialogOpen(false)
+    router.push(`/app/bookings/${jobId}?tab=references`)
+  }
 
   async function generateVoucher(): Promise<GenerateVoucherResponse | null> {
     setGenerating(true)
@@ -91,7 +139,7 @@ export function GenerateVoucherDialog({
       })
       const payload = (await response.json().catch(() => ({}))) as GenerateVoucherResponse
       if (!response.ok) {
-        toast.error(payload.error ?? "Voucher could not be generated")
+        showVoucherError(payload, "Voucher could not be generated", goToVoucherReferences)
         return null
       }
       setGenerated(payload)
@@ -114,11 +162,14 @@ export function GenerateVoucherDialog({
       return
     }
     if (!autoPreview || autoPreviewFired.current || generating || generated) return
+    // Wait for the preflight before firing: auto-generating into a known-422 would replace the
+    // blocker Alert below with a bare error toast.
+    if (!legReferences || blockedOnReferences) return
     autoPreviewFired.current = true
     void generateVoucher()
-    // Only re-run when the dialog opens.
+    // Only re-run when the dialog opens or the preflight resolves.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dialogOpen, autoPreview])
+  }, [dialogOpen, autoPreview, legReferences, blockedOnReferences])
 
   async function handleSent() {
     await onSent()
@@ -143,6 +194,32 @@ export function GenerateVoucherDialog({
             itinerary — the itinerary is generated automatically if it doesn't exist yet.
           </DialogDescription>
         </DialogHeader>
+
+        {blockedOnReferences ? (
+          <Alert variant="destructive">
+            <AlertCircle className="size-4" />
+            <AlertTitle>
+              {missingReferenceLabels.length}{" "}
+              {missingReferenceLabels.length === 1 ? "leg is" : "legs are"} missing a supplier
+              reference number
+            </AlertTitle>
+            <AlertDescription>
+              <div className="flex flex-col items-start gap-3">
+                <div>
+                  <p>A voucher can&apos;t be generated until every leg has one:</p>
+                  <ul className="mt-1 list-disc pl-4">
+                    {missingReferenceLabels.map((label) => (
+                      <li key={label}>{label}</li>
+                    ))}
+                  </ul>
+                </div>
+                <Button size="sm" variant="outline" onClick={goToVoucherReferences}>
+                  Add reference numbers
+                </Button>
+              </div>
+            </AlertDescription>
+          </Alert>
+        ) : null}
 
         {generated?.readinessWarnings && generated.readinessWarnings.length > 0 ? (
           <Alert className="border-amber-200 bg-amber-50 text-amber-900 [&>svg]:text-amber-600">
@@ -169,7 +246,9 @@ export function GenerateVoucherDialog({
             />
           ) : (
             <div className="flex h-[420px] items-center justify-center p-6 text-center text-sm text-muted-foreground">
-              Generate to preview the voucher PDF before sending.
+              {blockedOnReferences
+                ? "Add the missing reference numbers above to generate this voucher."
+                : "Generate to preview the voucher PDF before sending."}
             </div>
           )}
         </div>
@@ -178,7 +257,7 @@ export function GenerateVoucherDialog({
           <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={generating}>
             Close
           </Button>
-          <Button onClick={generateVoucher} disabled={generating || disabled}>
+          <Button onClick={generateVoucher} disabled={generating || disabled || blockedOnReferences}>
             {generating ? "Generating…" : generated ? "Regenerate PDF" : "Generate PDF"}
           </Button>
           <SendVoucherButton
@@ -193,7 +272,8 @@ export function GenerateVoucherDialog({
             }
             bookingNumber={bookingNumber}
             invoiceNumber={invoiceNumber}
-            disabled={generating}
+            disabled={generating || blockedOnReferences}
+            onFixReferences={goToVoucherReferences}
             onSent={async () => {
               setDialogOpen(false)
               await handleSent()

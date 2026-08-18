@@ -212,7 +212,7 @@ describe("validateTransition", () => {
     expect(failures.map((f) => f.gateId)).not.toContain("invoice_number_required")
   })
 
-  it("marks missing invoice document as an auto-fixable confirmation", () => {
+  it("blocks outright when there is no invoice, with no autofix on offer", () => {
     const failures = validateTransition({
       ...baseInput,
       booking: { ...baseInput.booking, stage: "accepted" },
@@ -223,10 +223,10 @@ describe("validateTransition", () => {
     expect(failures).toEqual([
       expect.objectContaining({
         gateId: "invoice_document",
-        severity: "confirm",
-        autoFixable: "create_invoice_25pct",
+        severity: "block",
       }),
     ])
+    expect(failures[0]?.autoFixable).toBeUndefined()
   })
 
   it("requires an actual send when the deposit invoice is only generated", () => {
@@ -297,7 +297,7 @@ describe("validateTransition", () => {
       quotes: [{ status: "accepted", total: 1000 }],
       documents: [{ kind: "invoice_pdf", status: "generated" }],
       correspondences: [],
-      manualConfirmations: { createDepositInvoice: true },
+      manualConfirmations: { finalPaymentReceived: true },
     })
 
     expect(failures).toEqual([
@@ -403,6 +403,55 @@ describe("validateTransition", () => {
         autoFixable: "create_voucher_pdf",
       }),
     )
+  })
+
+  it("blocks voucher sent while a leg is missing its supplier reference", () => {
+    const failures = validateTransition({
+      ...baseInput,
+      booking: { ...baseInput.booking, stage: "final_paid" },
+      targetStage: "voucher_sent",
+      legReferences: [
+        { label: "Rovos Rail — Pretoria to Cape Town", supplierReference: "RR-114" },
+        { label: "Transfer: OR Tambo → Rovos Station", supplierReference: null },
+        { label: "Table Bay Hotel", supplierReference: "   " },
+      ],
+    })
+
+    const referenceFailure = failures.find((failure) => failure.gateId === "leg_references")
+    expect(referenceFailure).toMatchObject({ severity: "block" })
+    // Named so the modal tells the consultant which legs to chase, and blank-but-present
+    // references count as missing.
+    expect(referenceFailure?.message).toContain("Transfer: OR Tambo → Rovos Station")
+    expect(referenceFailure?.message).toContain("Table Bay Hotel")
+    expect(referenceFailure?.message).not.toContain("Rovos Rail")
+    // Ordered ahead of the PDF gate: generating is impossible until references exist.
+    expect(failures[0].gateId).toBe("leg_references")
+  })
+
+  it("does not raise the reference gate when every leg has one", () => {
+    const failures = validateTransition({
+      ...baseInput,
+      booking: { ...baseInput.booking, stage: "final_paid" },
+      targetStage: "voucher_sent",
+      legReferences: [{ label: "Rovos Rail", supplierReference: "RR-114" }],
+    })
+
+    expect(failures.map((failure) => failure.gateId)).not.toContain("leg_references")
+  })
+
+  it("skips the reference gate for moves that do not cross voucher sent", () => {
+    const failures = validateTransition({
+      ...baseInput,
+      booking: { ...baseInput.booking, stage: "deposit_paid" },
+      targetStage: "final_paid",
+      quotes: [{ status: "accepted", total: 1000 }],
+      invoices: [{ kind: "final", status: "sent" }],
+      correspondences: [{ kind: "invoice", subject: "Final invoice BT-2026-0001-FIN1", status: "sent" }],
+      manualConfirmations: { finalPaymentReceived: true },
+      legReferences: [{ label: "Rovos Rail", supplierReference: null }],
+    })
+
+    expect(failures).toEqual([])
   })
 
   it("requires cancellation and refund capture from paid stages", () => {

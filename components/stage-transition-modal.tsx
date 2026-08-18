@@ -34,6 +34,7 @@ const GATE_TAB_CONFIG: Record<string, { path: string; label: string }> = {
   deposit_received_confirmation: { path: "?tab=payments", label: "Payments" },
   final_invoice: { path: "?tab=documents", label: "Documents" },
   final_invoice_correspondence: { path: "?tab=correspondence", label: "Emails Sent" },
+  leg_references: { path: "?tab=references", label: "Voucher Details" },
   voucher_document: { path: "?tab=documents", label: "Documents" },
   voucher_correspondence: { path: "?tab=correspondence", label: "Emails Sent" },
   email_import_review: { path: "?tab=enquiry", label: "Enquiry" },
@@ -98,7 +99,6 @@ export function gateIdToTabLabel(gateId: string): string {
 }
 
 export function confirmationKeyForFailure(failure: GateFailure): keyof ManualConfirmations | null {
-  if (failure.autoFixable === "create_invoice_25pct") return "createDepositInvoice"
   if (failure.gateId === "final_payment_confirmation") return "finalPaymentReceived"
   return null
 }

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
-import { staleVersionResponse } from "@/lib/concurrency"
+import { requireVersionTokenOrForce, staleVersionResponse, versionTokenShape } from "@/lib/concurrency"
 import { applyCommissionBonus } from "@/lib/quotes/apply-commission-bonus"
 import { calculateQuoteTotals } from "@/lib/quotes/pricing-engine"
 import type { Json } from "@/lib/supabase/types"
@@ -15,7 +15,7 @@ const MAX_COMMISSION_BONUS = 1_000_000
 
 const patchSchema = z.object({
   bonus: z.number().min(-MAX_COMMISSION_BONUS).max(MAX_COMMISSION_BONUS),
-  expectedUpdatedAt: z.string().datetime({ offset: true }).optional(),
+  ...versionTokenShape,
 })
 
 interface RouteParams {
@@ -42,6 +42,11 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   } catch {
     return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
   }
+
+  // The bonus is re-folded into a rebuilt line-item set, so the same stale-write hazard as
+  // PATCH /api/quotes/[id] applies. Same contract: a version token, or an explicit force.
+  const missingVersionToken = requireVersionTokenOrForce(parsed)
+  if (missingVersionToken) return missingVersionToken
 
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")

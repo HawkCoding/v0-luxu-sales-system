@@ -1,4 +1,4 @@
-import type { HotelDateAnchor, PackageLeg } from "@/lib/types"
+import type { PackageLeg, ServiceDateAnchor } from "@/lib/types"
 
 /**
  * Hotel stay dates derived from the train leg they hang off.
@@ -44,7 +44,7 @@ export interface HotelStayDates {
 /** Check-in/check-out for an anchored hotel stay, or null when the anchor can't be resolved
  * (no train leg, no departure date yet, or a manual/custom date). */
 export function resolveHotelStayDates(
-  anchor: HotelDateAnchor | null,
+  anchor: ServiceDateAnchor | null,
   nights: number,
   train: AnchorTrain | null,
 ): HotelStayDates | null {
@@ -69,7 +69,7 @@ export function resolveHotelStayDates(
 export function findAnchorTrainLeg(
   legs: PackageLeg[],
   hotelLegId: string,
-  anchor: HotelDateAnchor | null,
+  anchor: ServiceDateAnchor | null,
 ): PackageLeg | null {
   const ordered = legs.slice().sort((a, b) => a.sortOrder - b.sortOrder)
   const hotelIndex = ordered.findIndex((leg) => leg.id === hotelLegId)

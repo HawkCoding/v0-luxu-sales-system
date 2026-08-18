@@ -137,4 +137,16 @@ describe("describeInvoiceLine", () => {
       "Transfer Cape Town Station to The President Hotel (Child)",
     )
   })
+
+  it("explains a hotel line billed for fewer nights than the stay", () => {
+    const snapshot = makeSnapshot({
+      supplierName: "Table Bay Hotel",
+      routeName: "Bed & Breakfast",
+      complimentaryNights: 1,
+      stayNights: 4,
+    })
+    expect(describeInvoiceLine("Table Bay Hotel - Bed & Breakfast — Deluxe Room", snapshot)).toBe(
+      "Table Bay Hotel — Bed & Breakfast (first night complimentary)",
+    )
+  })
 })

@@ -1415,7 +1415,6 @@ insert into public.app_settings (key,value,updated_at) values
   ('backup_storage_bucket','backups','2026-05-26T10:48:44.602608+00:00'),
   ('read_only_exports_allowed','false','2026-05-26T10:48:44.602608+00:00'),
   ('payment_reference_required','false','2026-05-26T10:48:44.602608+00:00'),
-  ('quote_acceptance_after_expiry','blocked','2026-05-26T10:48:44.602608+00:00'),
   ('attachment_max_size_mb','10','2026-05-26T10:48:48.544463+00:00'),
   ('attachment_allowed_mime_types','["application/pdf","image/jpeg","image/png","image/webp","application/vnd.openxmlformats-officedocument.wordprocessingml.document","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]','2026-05-26T10:48:48.544463+00:00'),
   ('default_infant_max_age','2','2026-05-26T10:48:52.327451+00:00'),

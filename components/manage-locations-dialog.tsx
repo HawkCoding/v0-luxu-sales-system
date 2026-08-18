@@ -17,6 +17,8 @@ import { Input } from "@/components/ui/input"
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useLocations } from "@/lib/use-data"
 import type { Location } from "@/lib/types"
+import { useDirtyCloseGuard } from "@/hooks/use-dirty-close-guard"
+import { DiscardChangesDialog } from "@/components/discard-changes-dialog"
 
 interface ManageLocationsDialogProps {
   open: boolean
@@ -51,6 +53,12 @@ export function ManageLocationsDialog({ open, onOpenChange }: ManageLocationsDia
     setCountry("South Africa")
     setRegionCode("")
   }
+
+  const isDirty = name.trim() !== "" || country.trim() !== "South Africa" || regionCode.trim() !== ""
+  const closeGuard = useDirtyCloseGuard({
+    isDirty,
+    onConfirmedClose: () => onOpenChange(false),
+  })
 
   const handleCreateLocation = async () => {
     const normalizedName = name.trim()
@@ -117,8 +125,13 @@ export function ManageLocationsDialog({ open, onOpenChange }: ManageLocationsDia
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl">
+    <Dialog open={open} onOpenChange={(next) => (next ? onOpenChange(true) : closeGuard.handleOpenChange(false))}>
+      <DialogContent className="max-w-4xl" {...closeGuard.contentProps}>
+        <DiscardChangesDialog
+          open={closeGuard.confirming}
+          onKeepEditing={closeGuard.cancelDiscard}
+          onDiscard={closeGuard.confirmDiscard}
+        />
         <DialogHeader>
           <DialogTitle>Manage Locations</DialogTitle>
           <DialogDescription>
@@ -205,7 +218,7 @@ export function ManageLocationsDialog({ open, onOpenChange }: ManageLocationsDia
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => closeGuard.handleOpenChange(false)}>
             Close
           </Button>
         </DialogFooter>

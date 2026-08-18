@@ -2,9 +2,7 @@ import type { PipelineStage } from "@/lib/types"
 
 export type GateSeverity = "block" | "confirm"
 
-export type GateAutoFix =
-  | "create_invoice_25pct"
-  | "create_voucher_pdf"
+export type GateAutoFix = "create_voucher_pdf"
 
 export interface GateFailure {
   gateId: string
@@ -58,8 +56,13 @@ export interface TransitionCorrespondence {
   status?: string | null
 }
 
+/** One leg/trip that prints as its own voucher block, scoped to the accepted quote. */
+export interface TransitionLegReference {
+  label: string
+  supplierReference?: string | null
+}
+
 export interface ManualConfirmations {
-  createDepositInvoice?: boolean
   finalPaymentReceived?: boolean
 }
 
@@ -80,6 +83,13 @@ export interface ValidateTransitionInput {
   invoices?: TransitionInvoice[]
   correspondences?: TransitionCorrespondence[]
   payments?: TransitionPayment[]
+  /**
+   * Legs on the accepted quote, used only by the `voucher_sent` reference gate. Callers load it
+   * lazily (see `loadTransitionLegReferences`) because it is two extra queries that no other
+   * stage needs. Omitting it skips the gate — the same generate/send-time readiness check in
+   * `lib/voucher/check-readiness.ts` is still the backstop.
+   */
+  legReferences?: TransitionLegReference[]
   manualConfirmations?: ManualConfirmations
   lostContext?: LostContext
 }
@@ -110,6 +120,31 @@ function canonicalStage(stage: PipelineStage): PipelineStage {
 
 function stageIndex(stage: PipelineStage): number {
   return FORWARD_STAGES.indexOf(canonicalStage(stage))
+}
+
+/**
+ * `lost` is the one stage that sits off the ladder, so `stageIndex` returns -1
+ * for it. Reopening a cancelled booking used to skip every gate for that
+ * reason: `lost -> anything` hit the `fromIndex === -1` bail-out and moved with
+ * zero checks, leaving records like
+ * `stage=accepted, outcome=Cancelled, cancelled_at=<set>`.
+ *
+ * A reopen re-enters the ladder from the bottom, so -1 is the right index —
+ * it just has to mean "before enquiry" rather than "give up". Every stage from
+ * `enquiry` up to and including the target is then crossed, and every gate on
+ * it has to hold.
+ */
+export function isReopenFromCancelled(stage: PipelineStage): boolean {
+  return canonicalStage(stage) === "lost"
+}
+
+/**
+ * Compares two stages by their canonical value, so the aliases (`quoted`,
+ * `form_done`, `payment_schedule`, `trip_active`) count as the stage they map
+ * to rather than as a separate place to move to.
+ */
+export function isSameStage(left: PipelineStage, right: PipelineStage): boolean {
+  return canonicalStage(left) === canonicalStage(right)
 }
 
 function isPresent(value: string | null | undefined): boolean {
@@ -220,10 +255,12 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
     return lostFailures(input)
   }
 
-  const fromIndex = stageIndex(input.booking.stage)
+  const reopening = isReopenFromCancelled(input.booking.stage)
+  // -1 means "below enquiry" for a reopen, so every gate on the way up runs.
+  const fromIndex = reopening ? -1 : stageIndex(input.booking.stage)
   const toIndex = stageIndex(targetStage)
 
-  if (fromIndex === -1 || toIndex === -1 || toIndex <= fromIndex) {
+  if (toIndex === -1 || (!reopening && (fromIndex === -1 || toIndex <= fromIndex))) {
     return []
   }
 
@@ -309,13 +346,18 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
         (invoice.status === "sent" || invoice.status === "paid"),
     )
     const hasInvoiceDocument = hasDocument(documents, "invoice_pdf")
-    if (!hasDepositInvoice && !hasInvoiceDocument && !manualConfirmations.createDepositInvoice) {
+    // Hard block, not a tick-to-confirm. This gate used to offer a
+    // `create_invoice_25pct` autofix that inserted an empty `invoice_pdf`
+    // document row and nothing else — no `invoices` row, no invoice number, no
+    // deposit percentage — while the copy promised a deposit invoice. There is
+    // exactly one way to make a real one (the deposit-invoice dialog, backed by
+    // POST /api/invoices/deposit), so the gate now sends the user there.
+    if (!hasDepositInvoice && !hasInvoiceDocument) {
       failures.push({
         gateId: "invoice_document",
         message: "A deposit invoice is required before requesting the deposit.",
-        fixHint: "Generate the deposit invoice, preview it, and send it to the customer.",
-        severity: "confirm",
-        autoFixable: "create_invoice_25pct",
+        fixHint: "Generate the deposit invoice on the Invoices tab, preview it, and send it to the customer.",
+        severity: "block",
       })
     } else if (
       (hasDepositInvoice || hasInvoiceDocument) &&
@@ -381,6 +423,23 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
   }
 
   if (crossedStages.includes("voucher_sent")) {
+    // Checked before the PDF gate on purpose. A voucher cannot be generated at all while a leg is
+    // missing its supplier reference (/api/voucher/generate 422s), so surfacing `voucher_document`
+    // first sent the user into the voucher dialog to click a Generate button that could only fail.
+    // This gate names the real blocker and points at the tab that fixes it.
+    const missingReferences = (input.legReferences ?? [])
+      .filter((leg) => !isPresent(leg.supplierReference))
+      .map((leg) => leg.label)
+
+    if (missingReferences.length > 0) {
+      failures.push({
+        gateId: "leg_references",
+        message: `Supplier reference numbers are missing for: ${missingReferences.join(", ")}.`,
+        fixHint: "Add a reference number for every leg on the Voucher Details tab.",
+        severity: "block",
+      })
+    }
+
     if (!hasDocument(documents, "voucher_pdf")) {
       failures.push({
         gateId: "voucher_document",
@@ -405,10 +464,14 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
 }
 
 export function getCrossedForwardStages(fromStage: PipelineStage, targetStage: PipelineStage): PipelineStage[] {
-  const fromIndex = stageIndex(fromStage)
+  // Same reopen rule as validateTransition: coming off `lost` re-enters the
+  // ladder below `enquiry`, so the side effects for every stage up to the
+  // target are applied, not skipped.
+  const reopening = isReopenFromCancelled(fromStage)
+  const fromIndex = reopening ? -1 : stageIndex(fromStage)
   const toIndex = stageIndex(targetStage)
 
-  if (fromIndex === -1 || toIndex === -1 || toIndex <= fromIndex) {
+  if (toIndex === -1 || (!reopening && (fromIndex === -1 || toIndex <= fromIndex))) {
     return []
   }
 

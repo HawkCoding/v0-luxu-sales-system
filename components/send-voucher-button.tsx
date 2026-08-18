@@ -17,6 +17,10 @@ interface SendVoucherButtonProps {
   bookingNumber: string
   invoiceNumber?: string | null
   disabled?: boolean
+  /** Called instead of a plain toast when the prepare-send call fails because
+   * supplier reference numbers are missing — lets the caller jump the user
+   * straight to the Voucher Details tab to fix it. */
+  onFixReferences?: () => void
   onSent?: () => Promise<void> | void
 }
 
@@ -37,6 +41,7 @@ interface PreparedVoucherSend {
     contentType?: string
   }>
   error?: string
+  details?: { failures?: Array<{ code: string; message: string }> }
 }
 
 export function SendVoucherButton({
@@ -45,6 +50,7 @@ export function SendVoucherButton({
   bookingNumber,
   invoiceNumber,
   disabled,
+  onFixReferences,
   onSent,
 }: SendVoucherButtonProps) {
   const displayNumber = invoiceNumber || bookingNumber
@@ -64,7 +70,16 @@ export function SendVoucherButton({
       const response = await fetch(`/api/vouchers/${id}/prepare-send`, { method: "POST" })
       const payload = (await response.json().catch(() => ({}))) as PreparedVoucherSend
       if (!response.ok) {
-        throw new Error(payload.error ?? "Voucher email could not be prepared")
+        const message = payload.error ?? "Voucher email could not be prepared"
+        const hasMissingReferences = payload.details?.failures?.some(
+          (failure) => failure.code === "leg_references_missing",
+        )
+        if (hasMissingReferences && onFixReferences) {
+          toast.error(message, { action: { label: "Fix now", onClick: onFixReferences } })
+        } else {
+          toast.error(message)
+        }
+        return
       }
       setPrepared(payload)
       setPreviewOpen(true)

@@ -67,6 +67,28 @@ describe("sortItineraryBlocksChronologically", () => {
     ])
   })
 
+  it("keeps builder order even when a later block's clock time is earlier", () => {
+    // Regression: the transfer that delivers guests to the TAJ Hotel carries a real captured
+    // pickup time (18h00); the hotel's start time is just its default check-in policy (15h00), not
+    // an event. Sorting on clock time made the hotel print first — wrong, since the transfer has
+    // to happen before check-in. Builder order (train, transfer, hotel) must win.
+    const hotel = block({
+      serviceType: "hotel",
+      title: "TAJ Hotel",
+      displayOrder: 2,
+      serviceData: { departureDate: "2026-11-25", startTime: "15:00" },
+    })
+    const transfer = block({
+      serviceType: "transfer",
+      title: "Station Transfer",
+      displayOrder: 1,
+      serviceData: { departureDate: "2026-11-25", startTime: "18:00" },
+    })
+
+    const sorted = sortItineraryBlocksChronologically([hotel, transfer])
+    expect(sorted.map((b) => b.title)).toEqual(["Station Transfer", "TAJ Hotel"])
+  })
+
   it("places undated blocks after dated ones", () => {
     const extras = block({
       serviceType: "additional_service",

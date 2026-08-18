@@ -7,7 +7,12 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { toast } from "sonner"
 import type { Quote } from "@/lib/types"
-import { isComplimentaryRoom, isMissingPricing } from "@/lib/quotes/pricing-engine"
+import {
+  hasComplimentaryNight,
+  isComplimentaryRoom,
+  isMissingPricing,
+  stayNights,
+} from "@/lib/quotes/pricing-engine"
 import { useRole } from "@/lib/role-context"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { formatMoney } from "@/lib/money"
@@ -229,34 +234,6 @@ export function JobQuotesTab({
                           onConverted={mutate}
                         />
                       )}
-                      {["draft", "pricing_incomplete", "ready", "sent"].includes(q.status) && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={cancellingQuoteId === q.id}
-                          onClick={() => void cancelQuote(q.id)}
-                        >
-                          {cancellingQuoteId === q.id ? (
-                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <X className="mr-1.5 h-3.5 w-3.5" />
-                          )}
-                          Cancel
-                        </Button>
-                      )}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={generatingPdfForId === q.id}
-                        onClick={() => void downloadPdf(q.id)}
-                      >
-                        {generatingPdfForId === q.id ? (
-                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <FileDown className="mr-1.5 h-3.5 w-3.5" />
-                        )}
-                        PDF
-                      </Button>
                       {BUILDABLE_QUOTE_STATUSES.includes(q.status) && (
                         <BuildBookingDialog
                           jobId={jobId}
@@ -273,6 +250,34 @@ export function JobQuotesTab({
                             onAutoOpenBuildBookingHandled?.()
                           }}
                         />
+                      )}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={generatingPdfForId === q.id}
+                        onClick={() => void downloadPdf(q.id)}
+                      >
+                        {generatingPdfForId === q.id ? (
+                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <FileDown className="mr-1.5 h-3.5 w-3.5" />
+                        )}
+                        PDF
+                      </Button>
+                      {["draft", "pricing_incomplete", "ready", "sent"].includes(q.status) && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={cancellingQuoteId === q.id}
+                          onClick={() => void cancelQuote(q.id)}
+                        >
+                          {cancellingQuoteId === q.id ? (
+                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <X className="mr-1.5 h-3.5 w-3.5" />
+                          )}
+                          Cancel
+                        </Button>
                       )}
                     </>
                   )}
@@ -322,6 +327,13 @@ export function JobQuotesTab({
                           <div>{li.qty}</div>
                           {li.pricingSnapshot?.unit ? (
                             <div className="text-[10px] text-muted-foreground">{li.pricingSnapshot.unit}</div>
+                          ) : null}
+                          {/* qty is the charged nights once a night was gifted — the stay itself
+                              is longer, and the client documents still say so. */}
+                          {hasComplimentaryNight(li) ? (
+                            <div className="text-[10px] text-emerald-600 dark:text-emerald-500">
+                              of {stayNights(li)}
+                            </div>
                           ) : null}
                         </td>
                         <td

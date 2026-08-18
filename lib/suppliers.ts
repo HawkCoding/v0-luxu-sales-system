@@ -10,6 +10,7 @@ import type {
   Supplier,
   BookingTransportRequest,
   RateType,
+  ServiceDateAnchor,
   SupplierDetail,
   SupplierEmail,
   SupplierKind,
@@ -69,6 +70,10 @@ function normalizeSupplierStatus(value: string): Supplier["status"] {
 function normalizeTransportRequestServiceType(value: string | null): TransportRequestServiceType | null {
   if (value === "transfer" || value === "rental") return value
   return null
+}
+
+function normalizeServiceDateAnchor(value: string | null | undefined): ServiceDateAnchor | null {
+  return value === "pre" || value === "post" || value === "custom" ? value : null
 }
 
 function normalizeBookingScheduleSupplierKind(value: string): BookingScheduleSupplierKind | null {
@@ -296,6 +301,7 @@ export function mapBookingTransportRequest(row: BookingTransportRequestWithRenta
     dropoffPoint: row.dropoff_point,
     pickupAt: row.pickup_at ?? null,
     pickupAtDisplay: formatDisplayDateTime(row.pickup_at),
+    dateAnchor: normalizeServiceDateAnchor(row.date_anchor),
     rentalDetails: mapBookingVehicleRentalDetails(row.rental_details),
     passengerCount: row.passenger_count ?? null,
     luggageCount: row.luggage_count ?? null,

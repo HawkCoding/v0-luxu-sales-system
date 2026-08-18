@@ -315,12 +315,11 @@ export async function priceExtraLineItems(
   } else {
     addLine(`${description} - Adult`, adultCount, unit, "adult")
     addLine(`${description} - Child`, childCount, card.child_price ?? unit, "child")
-    addLine(
-      `${description} - Infant`,
-      infantCount,
-      card.infant_price ?? card.child_price ?? unit,
-      "infant",
-    )
+    // A card with no infant rate charges nothing for infants. It used to fall through to the
+    // child rate, which made "the supplier set no infant price" and "the supplier charges the
+    // child price for infants" indistinguishable — with the expensive reading winning by default
+    // and nobody asked to confirm it. Zero is the reading a consultant can spot on the quote.
+    addLine(`${description} - Infant`, infantCount, card.infant_price ?? 0, "infant")
   }
 
   return { lineItems }
