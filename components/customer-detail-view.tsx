@@ -30,7 +30,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useRole } from "@/lib/role-context"
 import { getPipelineStageLabel, PIPELINE_STAGES } from "@/lib/types"
 import { useCustomerDetail } from "@/lib/use-data"
-import { COUNTRIES } from "@/lib/form-data"
+import { COUNTRIES, TITLES } from "@/lib/form-data"
 import { PHONE_VALIDATION_MESSAGE, isPlausiblePhone } from "@/lib/phone-format"
 import { formatDisplayDate } from "@/lib/date-format"
 import { useRecordPresence } from "@/hooks/use-record-presence"
@@ -41,6 +41,9 @@ type Presentation = "page" | "modal"
 interface CustomerPatchPayload {
   notes: string
   email: string
+  first_name: string
+  last_name: string
+  title: string | null
   phone: string | null
   fax: string | null
   country: string | null
@@ -61,6 +64,9 @@ interface CustomerPatchPayload {
 interface CustomerPatchResponse {
   notes: string | null
   email: string
+  firstName: string
+  lastName: string
+  title: string | null
   phone: string | null
   country: string | null
   province: string | null
@@ -90,6 +96,9 @@ export function CustomerDetailView({
   const canEditCustomers = can("edit:customers")
   const canCreateBooking = can("create:enquiry")
   const [newBookingOpen, setNewBookingOpen] = useState(false)
+  const [firstNameDraft, setFirstNameDraft] = useState("")
+  const [lastNameDraft, setLastNameDraft] = useState("")
+  const [titleDraft, setTitleDraft] = useState("")
   const [emailDraft, setEmailDraft] = useState("")
   const [phoneDraft, setPhoneDraft] = useState("")
   const [faxDraft, setFaxDraft] = useState("")
@@ -152,6 +161,9 @@ export function CustomerDetailView({
       }
 
       if (!isEditing) {
+        setFirstNameDraft(data.customer.firstName ?? "")
+        setLastNameDraft(data.customer.lastName ?? "")
+        setTitleDraft(data.customer.title ?? "")
         setEmailDraft(data.customer.email)
         setPhoneDraft(data.customer.phone ?? "")
         setFaxDraft(data.customer.fax ?? "")
@@ -235,7 +247,12 @@ export function CustomerDetailView({
   const isRepeatClient = (customer.isRepeatClient ?? false) || completedBookings > 0
   const phoneDraftError =
     phoneDraft.trim().length > 0 && !isPlausiblePhone(phoneDraft) ? PHONE_VALIDATION_MESSAGE : null
+  const firstNameDraftError = isEditing && firstNameDraft.trim().length === 0 ? "First name is required" : null
+  const lastNameDraftError = isEditing && lastNameDraft.trim().length === 0 ? "Last name is required" : null
   const hasChanges =
+    firstNameDraft !== (customer.firstName ?? "") ||
+    lastNameDraft !== (customer.lastName ?? "") ||
+    titleDraft !== (customer.title ?? "") ||
     emailDraft !== customer.email ||
     phoneDraft !== (customer.phone ?? "") ||
     faxDraft !== (customer.fax ?? "") ||
@@ -258,6 +275,9 @@ export function CustomerDetailView({
     return {
       notes: notesDraft,
       email: emailDraft,
+      first_name: firstNameDraft.trim(),
+      last_name: lastNameDraft.trim(),
+      title: titleDraft || null,
       phone: phoneDraft || null,
       fax: faxDraft || null,
       country: countryDraft || null,
@@ -315,6 +335,11 @@ export function CustomerDetailView({
 
     if (phoneDraftError) {
       toast.error(phoneDraftError)
+      return
+    }
+
+    if (firstNameDraftError || lastNameDraftError) {
+      toast.error(firstNameDraftError ?? lastNameDraftError ?? "Please fix the highlighted fields")
       return
     }
 
@@ -486,6 +511,9 @@ export function CustomerDetailView({
                 <>
                   <Button
                     onClick={() => {
+                      setFirstNameDraft(customer.firstName ?? "")
+                      setLastNameDraft(customer.lastName ?? "")
+                      setTitleDraft(customer.title ?? "")
                       setEmailDraft(customer.email)
                       setPhoneDraft(customer.phone ?? "")
                       setFaxDraft(customer.fax ?? "")
@@ -513,7 +541,16 @@ export function CustomerDetailView({
                   >
                     Cancel
                   </Button>
-                  <Button onClick={saveNotes} disabled={!hasChanges || isSaving || Boolean(phoneDraftError)}>
+                  <Button
+                    onClick={saveNotes}
+                    disabled={
+                      !hasChanges ||
+                      isSaving ||
+                      Boolean(phoneDraftError) ||
+                      Boolean(firstNameDraftError) ||
+                      Boolean(lastNameDraftError)
+                    }
+                  >
                     <Save className="mr-2 h-4 w-4" />
                     {isSaving ? "Saving..." : "Save changes"}
                   </Button>
@@ -609,6 +646,54 @@ export function CustomerDetailView({
           <CardTitle>Customer information</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-[120px_1fr_1fr]">
+            <div className="space-y-2">
+              <Label htmlFor="customer-title">Title</Label>
+              {canEditCustomers && isEditing ? (
+                <Select value={titleDraft} onValueChange={setTitleDraft} disabled={isSaving}>
+                  <SelectTrigger id="customer-title" className="h-9">
+                    <SelectValue placeholder="Title" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TITLES.map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {t}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input value={titleDraft || "Not provided"} readOnly disabled={isSaving} />
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="customer-first-name">First name</Label>
+              <Input
+                id="customer-first-name"
+                value={firstNameDraft}
+                onChange={(event) => setFirstNameDraft(event.target.value)}
+                readOnly={!canEditCustomers || !isEditing}
+                disabled={isSaving}
+                aria-invalid={Boolean(firstNameDraftError)}
+                className={firstNameDraftError ? "border-destructive focus-visible:ring-destructive" : undefined}
+              />
+              {firstNameDraftError && <p className="text-xs text-destructive">{firstNameDraftError}</p>}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="customer-last-name">Last name</Label>
+              <Input
+                id="customer-last-name"
+                value={lastNameDraft}
+                onChange={(event) => setLastNameDraft(event.target.value)}
+                readOnly={!canEditCustomers || !isEditing}
+                disabled={isSaving}
+                aria-invalid={Boolean(lastNameDraftError)}
+                className={lastNameDraftError ? "border-destructive focus-visible:ring-destructive" : undefined}
+              />
+              {lastNameDraftError && <p className="text-xs text-destructive">{lastNameDraftError}</p>}
+            </div>
+          </div>
+
           <div className="grid gap-3 md:grid-cols-2">
             <div className="space-y-2">
               <Label>Email</Label>

@@ -21,6 +21,9 @@ function baseCustomerRow(overrides: MockRow = {}): MockRow {
     id: CUSTOMER_ID,
     notes: "original notes",
     email: "jane@example.com",
+    first_name: "Jane",
+    last_name: "Doe",
+    title: null,
     phone: "0110000000",
     fax: null,
     country: null,
@@ -78,6 +81,8 @@ function validPatchBody(overrides: Record<string, unknown> = {}) {
   return {
     notes: "original notes",
     email: "jane@example.com",
+    first_name: "Jane",
+    last_name: "Doe",
     phone: "0110000000",
     vip_status: false,
     ...overrides,
@@ -192,7 +197,13 @@ describe("PATCH /api/customers/[id]", () => {
     supabaseMocks.createSessionClient.mockResolvedValue(supabase)
 
     const response = await PATCH(
-      patchRequest({ notes: "just a note", email: "jane@example.com", phone: "0110000000" }),
+      patchRequest({
+        notes: "just a note",
+        email: "jane@example.com",
+        first_name: "Jane",
+        last_name: "Doe",
+        phone: "0110000000",
+      }),
       routeParams(),
     )
 

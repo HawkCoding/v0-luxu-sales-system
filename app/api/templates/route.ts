@@ -9,7 +9,7 @@ const templatePatchSchema = z
   .object({
     id: z.string().uuid(),
     name: z.string().trim().min(1).max(120).optional(),
-    subject: z.string().max(500).optional(),
+    subject: z.string().trim().min(1, "Subject is required").max(500).optional(),
     bodyHtml: z.string().max(200_000).optional(),
     active: z.boolean().optional(),
     sortOrder: z.number().int().nonnegative().optional(),

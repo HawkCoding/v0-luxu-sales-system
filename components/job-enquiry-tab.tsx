@@ -28,6 +28,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { useActiveSuppliers, useBookingSupplierSchedules } from "@/lib/use-data"
 import { useRole } from "@/lib/role-context"
 import { getSupplierVocabulary } from "@/lib/types"
@@ -46,7 +47,7 @@ import type { GateFailure } from "@/lib/pipeline/validate-transition"
 import { formatDisplayDate } from "@/lib/date-format"
 import { describeReviewReasons, REVIEW_REASON } from "@/lib/inbound-email/review-reasons"
 import Link from "next/link"
-import { Check, Pencil, Plus, Save, Trash2, TriangleAlert } from "lucide-react"
+import { Check, ChevronDown, Pencil, Plus, Save, Trash2, TriangleAlert } from "lucide-react"
 import { EnquiryParsedFieldsEditor } from "@/components/enquiry-parsed-fields-editor"
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
@@ -161,6 +162,7 @@ export function JobEnquiryTab({
   const [editingSupplierScheduleIds, setEditingSupplierScheduleIds] = useState<Set<string>>(new Set())
   const [isSavingSupplierSchedules, setIsSavingSupplierSchedules] = useState(false)
   const [isStartingQuote, setIsStartingQuote] = useState(false)
+  const [isRawTextOpen, setIsRawTextOpen] = useState(false)
   const [startQuoteFailures, setStartQuoteFailures] = useState<GateFailure[]>([])
   const [startQuoteDialogOpen, setStartQuoteDialogOpen] = useState(false)
   const [startQuoteValidityUntil, setStartQuoteValidityUntil] = useState<string>(
@@ -586,16 +588,23 @@ export function JobEnquiryTab({
       {/* Raw text if paste or email import */}
       {enquiry.rawText && (
         <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              Original Text <Badge variant="secondary" className="text-[10px]">{enquiry.source === "email" ? "email import" : "paste import"}</Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <pre className="text-xs text-muted-foreground whitespace-pre-wrap bg-secondary/50 rounded-md p-3 leading-relaxed" style={{ fontFamily: "var(--font-inter)" }}>
-              {enquiry.rawText}
-            </pre>
-          </CardContent>
+          <Collapsible open={isRawTextOpen} onOpenChange={setIsRawTextOpen}>
+            <CollapsibleTrigger asChild>
+              <CardHeader className="pb-2 cursor-pointer select-none">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${isRawTextOpen ? "" : "-rotate-90"}`} />
+                  Original Text <Badge variant="secondary" className="text-[10px]">{enquiry.source === "email" ? "email import" : "paste import"}</Badge>
+                </CardTitle>
+              </CardHeader>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <CardContent>
+                <pre className="text-xs text-muted-foreground whitespace-pre-wrap bg-secondary/50 rounded-md p-3 leading-relaxed" style={{ fontFamily: "var(--font-inter)" }}>
+                  {enquiry.rawText}
+                </pre>
+              </CardContent>
+            </CollapsibleContent>
+          </Collapsible>
         </Card>
       )}
 

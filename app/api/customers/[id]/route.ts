@@ -17,6 +17,9 @@ const allowedRoles = new Set(["admin", "manager", "consultant"])
 const patchCustomerSchema = z.object({
   notes: z.string().max(5000),
   email: z.string().trim().toLowerCase().email().max(255),
+  first_name: z.string().trim().min(1).max(100),
+  last_name: z.string().trim().min(1).max(100),
+  title: z.string().trim().max(20).nullable().optional(),
   phone: z
     .string()
     .max(50)
@@ -47,12 +50,15 @@ const patchCustomerSchema = z.object({
 })
 
 const CUSTOMER_PATCH_SELECT =
-  "id, notes, email, phone, fax, country, province, company_name, address_line1, address_line2, city, postal_code, vat_number, date_of_birth, id_passport, vip_status, preferences, communication_preferences, first_travel_date, last_travel_date, updated_at"
+  "id, notes, email, phone, fax, country, province, company_name, address_line1, address_line2, city, postal_code, vat_number, date_of_birth, id_passport, vip_status, preferences, communication_preferences, first_travel_date, last_travel_date, updated_at, first_name, last_name, title"
 
 interface CustomerPatchRow {
   id: string
   notes: string | null
   email: string
+  first_name: string
+  last_name: string
+  title: string | null
   phone: string | null
   fax: string | null
   country: string | null
@@ -319,6 +325,8 @@ export async function PATCH(
 
   const normalizedNotes = parsed.notes.trim()
   const normalizedEmail = parsed.email.trim().toLowerCase()
+  const normalizedFirstName = parsed.first_name.trim()
+  const normalizedLastName = parsed.last_name.trim()
   const normalizedPhone = parsed.phone?.trim()
   const normalizedProvince = parsed.province?.trim()
   const normalizedPreferences = parsed.preferences?.trim()
@@ -353,7 +361,10 @@ export async function PATCH(
   const patchValues: {
     notes: string | null
     email: string
+    first_name: string
+    last_name: string
     phone: string | null
+    title?: string | null
     country?: string | null
     province?: string | null
     date_of_birth?: string | null
@@ -371,10 +382,13 @@ export async function PATCH(
   } = {
     notes: normalizedNotes ? normalizedNotes : null,
     email: normalizedEmail,
+    first_name: normalizedFirstName,
+    last_name: normalizedLastName,
     phone: normalizedPhone ? normalizedPhone : null,
     // Only write a field when the client actually sent it, so a partial patch
     // never wipes a value the edit form did not include. Sending null or ""
     // still clears the column — that's how the UI clears a field.
+    ...(parsed.title !== undefined ? { title: blankToNull(parsed.title) } : {}),
     ...(parsed.country !== undefined ? { country: blankToNull(parsed.country) } : {}),
     ...(parsed.province !== undefined ? { province: normalizedProvince ? normalizedProvince : null } : {}),
     ...(parsed.date_of_birth !== undefined ? { date_of_birth: parsed.date_of_birth } : {}),
@@ -490,6 +504,9 @@ export async function PATCH(
   return NextResponse.json({
     notes: updated.notes,
     email: updated.email,
+    firstName: updated.first_name,
+    lastName: updated.last_name,
+    title: updated.title,
     phone: updated.phone,
     fax: updated.fax,
     country: updated.country,
