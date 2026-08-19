@@ -3,9 +3,7 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
 import { mapRateType } from "@/lib/suppliers"
-
-// Admin only — same gate as the Settings page link and GET /api/rate-types.
-const ALLOWED_ROLES = new Set(["admin"])
+import { SETTINGS_WRITE_ROLES } from "@/lib/permissions"
 
 const patchSchema = z
   .object({
@@ -27,7 +25,7 @@ async function authenticate() {
     .select("clearance_level")
     .eq("user_id", user.id)
     .single()
-  if (profileError || !profile || !ALLOWED_ROLES.has(profile.clearance_level)) {
+  if (profileError || !profile || !(SETTINGS_WRITE_ROLES as readonly string[]).includes(profile.clearance_level)) {
     return { ok: false as const, response: NextResponse.json({ error: "Forbidden" }, { status: 403 }) }
   }
   return { ok: true as const, value: { supabase } }

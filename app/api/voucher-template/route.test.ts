@@ -112,12 +112,21 @@ describe("PATCH /api/voucher-template", () => {
     expect(response.status).toBe(401)
   })
 
-  it("returns 403 for non-admins", async () => {
+  it("returns 403 for consultants", async () => {
     createSessionClientMock.mockResolvedValue(createSupabase({ role: "consultant" }))
 
     const response = await PATCH(createPatchRequest({ font_family: "Arial, sans-serif" }))
 
     expect(response.status).toBe(403)
+  })
+
+  it("allows managers to edit the voucher template", async () => {
+    const supabase = createSupabase({ role: "manager" })
+    createSessionClientMock.mockResolvedValue(supabase)
+
+    const response = await PATCH(createPatchRequest({ font_family: "Arial, sans-serif" }))
+
+    expect(response.status).toBe(200)
   })
 
   it("returns 400 for invalid input", async () => {

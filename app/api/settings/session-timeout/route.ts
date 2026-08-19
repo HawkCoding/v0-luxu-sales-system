@@ -10,6 +10,7 @@ import {
 } from "@/lib/session-timeout"
 import { createSessionClient } from "@/lib/supabase/server"
 import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
+import { SETTINGS_WRITE_ROLES } from "@/lib/permissions"
 
 const patchSchema = z.object({
   sessionTimeoutMinutes: z
@@ -58,7 +59,7 @@ async function getAuthenticatedContext() {
       supabase,
       userId: user.id,
       actorName,
-      canEdit: profile.clearance_level === "admin",
+      canEdit: (SETTINGS_WRITE_ROLES as readonly string[]).includes(profile.clearance_level),
     },
   }
 }

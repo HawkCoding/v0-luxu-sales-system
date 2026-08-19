@@ -106,8 +106,8 @@ describe("/api/settings/session-timeout", () => {
     expect(response.status).toBe(401)
   })
 
-  it("PATCH rejects non-admin users", async () => {
-    supabaseMocks.createSessionClient.mockResolvedValue(createSupabase({ role: "manager" }))
+  it("PATCH rejects consultants (settings write is admin+manager only)", async () => {
+    supabaseMocks.createSessionClient.mockResolvedValue(createSupabase({ role: "consultant" }))
 
     const response = await PATCH(
       new Request("http://localhost/api/settings/session-timeout", {

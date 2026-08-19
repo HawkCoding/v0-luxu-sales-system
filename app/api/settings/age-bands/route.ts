@@ -4,11 +4,7 @@ import { z } from "zod"
 import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 import { createSessionClient } from "@/lib/supabase/server"
 import { AGE_SETTINGS_KEYS, DEFAULT_AGE_BUCKETS } from "@/lib/pricing/age-buckets"
-
-// Admin-only, matching "edit:settings" in lib/role-context.tsx, the card copy
-// ("Only admins can change these defaults") and the sibling
-// train-child-price-ratio / session-timeout routes.
-const ALLOWED_ROLES = new Set(["admin"])
+import { SETTINGS_WRITE_ROLES } from "@/lib/permissions"
 
 const patchSchema = z
   .object({
@@ -38,7 +34,7 @@ async function getAuthenticatedContext() {
     ok: true as const,
     value: {
       supabase,
-      canEdit: ALLOWED_ROLES.has(profile.clearance_level),
+      canEdit: (SETTINGS_WRITE_ROLES as readonly string[]).includes(profile.clearance_level),
       userId: user.id,
       actorName:
         [profile.name, profile.surname].filter(Boolean).join(" ").trim() ||

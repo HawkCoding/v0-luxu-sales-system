@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { encryptCredential } from "@/lib/inbound-email/crypto"
-import { requireAdminSettingsAccess } from "@/lib/settings-access"
+import { requireSettingsWrite } from "@/lib/settings-access"
 
 const accountSchema = z.object({
   email: z.string().trim().email(),
@@ -52,7 +52,7 @@ function mapAccount(row: {
 }
 
 export async function GET() {
-  const auth = await requireAdminSettingsAccess()
+  const auth = await requireSettingsWrite()
   if (!auth.ok) return auth.response
 
   const { data, error } = await auth.value.supabase
@@ -66,7 +66,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const auth = await requireAdminSettingsAccess()
+  const auth = await requireSettingsWrite()
   if (!auth.ok) return auth.response
 
   const result = accountSchema.safeParse(await request.json())

@@ -3,10 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 // ── Hoisted mocks ──────────────────────────────────────────────────────────
 
 const accessMocks = vi.hoisted(() => ({
-  requireAdminSettingsAccess: vi.fn(),
+  requireSettingsWrite: vi.fn(),
 }))
 vi.mock("@/lib/settings-access", () => ({
-  requireAdminSettingsAccess: accessMocks.requireAdminSettingsAccess,
+  requireSettingsWrite: accessMocks.requireSettingsWrite,
 }))
 
 const auditMocks = vi.hoisted(() => ({
@@ -82,7 +82,7 @@ function makeServiceClient(overrides: {
 }
 
 function setAdminAuth(sessionClient: ReturnType<typeof makeSessionClient>) {
-  accessMocks.requireAdminSettingsAccess.mockResolvedValue({
+  accessMocks.requireSettingsWrite.mockResolvedValue({
     ok: true,
     value: {
       supabase: sessionClient,
@@ -105,14 +105,14 @@ function makeRequest(body: unknown) {
 
 describe("POST /api/backups/restore", () => {
   beforeEach(() => {
-    accessMocks.requireAdminSettingsAccess.mockReset()
+    accessMocks.requireSettingsWrite.mockReset()
     auditMocks.writeAuditLog.mockReset()
     errorLogMocks.logError.mockReset()
     serviceMocks.createServiceClient.mockReset()
   })
 
   it("returns 401 when unauthenticated", async () => {
-    accessMocks.requireAdminSettingsAccess.mockResolvedValue({
+    accessMocks.requireSettingsWrite.mockResolvedValue({
       ok: false,
       response: new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 }),
     })
@@ -121,7 +121,7 @@ describe("POST /api/backups/restore", () => {
   })
 
   it("returns 403 when Manager (not Admin) calls restore", async () => {
-    accessMocks.requireAdminSettingsAccess.mockResolvedValue({
+    accessMocks.requireSettingsWrite.mockResolvedValue({
       ok: false,
       response: new Response(JSON.stringify({ error: "Forbidden" }), { status: 403 }),
     })

@@ -13,10 +13,6 @@ vi.mock("@/lib/supabase/server", () => ({
   ),
 }))
 
-vi.mock("@/lib/settings-access", () => ({
-  getReadOnlyExportsAllowed: vi.fn(() => Promise.resolve(false)),
-}))
-
 function makeParams(report: string) {
   return { params: Promise.resolve({ report }) }
 }
@@ -50,7 +46,7 @@ describe("GET /api/reports/[report]/export", () => {
     expect(res.status).toBe(401)
   })
 
-  it("returns 403 for readonly role when read_only_exports_allowed is false", async () => {
+  it("returns 403 for readonly role", async () => {
     mockGetUser.mockResolvedValue({ data: { user: { id: "u1" } }, error: null })
     const profileChain = mockChain({ clearance_level: "readonly" })
     const bookingsChain = mockChain([])
@@ -69,13 +65,31 @@ describe("GET /api/reports/[report]/export", () => {
     expect(res.status).toBe(403)
   })
 
-  it("returns 403 for consultant role when read_only_exports_allowed is false", async () => {
+  it("returns CSV for consultant role (reporting is open to every active role)", async () => {
     mockGetUser.mockResolvedValue({ data: { user: { id: "u1" } }, error: null })
+
     const profileChain = mockChain({ clearance_level: "consultant" })
-    mockFrom.mockReturnValue(profileChain)
+
+    mockFrom.mockImplementation((table: string) => {
+      if (table === "profiles") return profileChain
+      if (table === "bookings") {
+        return {
+          select: vi.fn().mockResolvedValue({ data: [], error: null }),
+          gte: vi.fn().mockReturnThis(),
+          lte: vi.fn().mockReturnThis(),
+          ilike: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+        }
+      }
+      return {
+        select: vi.fn().mockReturnThis(),
+        gt: vi.fn().mockResolvedValue({ data: [], error: null }),
+      }
+    })
 
     const res = await GET(makeRequest("sales-per-salesperson"), makeParams("sales-per-salesperson"))
-    expect(res.status).toBe(403)
+    expect(res.status).not.toBe(401)
+    expect(res.status).not.toBe(403)
   })
 
   it("returns CSV for manager role without checking setting", async () => {

@@ -4,7 +4,7 @@ import {
   FOOTER_BRAND_BUCKET,
   FOOTER_BRAND_OBJECT_PATH,
 } from "@/lib/assets/footer-brand"
-import { requireAdminSettingsAccess } from "@/lib/settings-access"
+import { requireSettingsWrite } from "@/lib/settings-access"
 import { MAX_IMAGE_BYTES, MAX_IMAGE_MB } from "@/lib/upload-limits"
 
 const LOGO_SETTING_KEY = "brand_block_logo_url"
@@ -12,7 +12,7 @@ const LOGO_SETTING_KEY = "brand_block_logo_url"
 // The upload converges on the same bucket object the committed asset is mirrored
 // to, so the disk copy and an uploaded copy never diverge in location.
 export async function POST(req: Request) {
-  const auth = await requireAdminSettingsAccess()
+  const auth = await requireSettingsWrite()
   if (!auth.ok) return auth.response
 
   const { supabase } = auth.value

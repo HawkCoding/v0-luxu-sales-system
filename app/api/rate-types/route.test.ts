@@ -112,10 +112,24 @@ describe("GET /api/rate-types", () => {
     ])
   })
 
-  it("gives managers read access without canEdit", async () => {
+  it("gives managers read access with canEdit", async () => {
     sessionMocks.getUser.mockResolvedValue({ data: { user: { id: USER_ID } }, error: null })
     sessionMocks.from.mockImplementation((table: string) => {
       if (table === "profiles") return profileQuery("manager")
+      if (table === "rate_types") return listQuery([])
+      throw new Error(`Unexpected table ${table}`)
+    })
+
+    const response = await GET()
+    const payload = await response.json()
+    expect(response.status).toBe(200)
+    expect(payload.canEdit).toBe(true)
+  })
+
+  it("gives consultants read access without canEdit", async () => {
+    sessionMocks.getUser.mockResolvedValue({ data: { user: { id: USER_ID } }, error: null })
+    sessionMocks.from.mockImplementation((table: string) => {
+      if (table === "profiles") return profileQuery("consultant")
       if (table === "rate_types") return listQuery([])
       throw new Error(`Unexpected table ${table}`)
     })
@@ -149,10 +163,10 @@ describe("POST /api/rate-types", () => {
     expect(response.status).toBe(403)
   })
 
-  it("rejects managers with 403", async () => {
+  it("rejects consultants with 403", async () => {
     sessionMocks.getUser.mockResolvedValue({ data: { user: { id: USER_ID } }, error: null })
     sessionMocks.from.mockImplementation((table: string) => {
-      if (table === "profiles") return profileQuery("manager")
+      if (table === "profiles") return profileQuery("consultant")
       throw new Error(`Unexpected table ${table}`)
     })
 
@@ -163,6 +177,44 @@ describe("POST /api/rate-types", () => {
       }),
     )
     expect(response.status).toBe(403)
+  })
+
+  it("allows managers to create a rate type", async () => {
+    sessionMocks.getUser.mockResolvedValue({ data: { user: { id: USER_ID } }, error: null })
+    sessionMocks.from.mockImplementation((table: string) => {
+      if (table === "profiles") return profileQuery("manager")
+      if (table === "rate_types") {
+        return {
+          select: maxSortQuery(0).select,
+          insert: () => ({
+            select: () => ({
+              single: async () => ({
+                data: {
+                  id: RATE_TYPE_ID,
+                  code: "TRADE",
+                  name: "Trade Rate",
+                  sort_order: 1,
+                  is_default: false,
+                  archived_at: null,
+                  created_at: "2026-01-01T00:00:00.000Z",
+                  updated_at: "2026-01-01T00:00:00.000Z",
+                },
+                error: null,
+              }),
+            }),
+          }),
+        }
+      }
+      throw new Error(`Unexpected table ${table}`)
+    })
+
+    const response = await POST(
+      new Request("http://localhost/api/rate-types", {
+        method: "POST",
+        body: JSON.stringify({ code: "TRADE", name: "Trade Rate" }),
+      }),
+    )
+    expect(response.status).toBe(201)
   })
 
   it("rejects invalid code", async () => {

@@ -13,7 +13,7 @@ describe("parseStageTransitionFailurePayload", () => {
             severity: "block",
           },
         ],
-        isManager: true,
+        canOverride: true,
       }),
     ).toEqual({
       failures: [
@@ -24,7 +24,7 @@ describe("parseStageTransitionFailurePayload", () => {
           severity: "block",
         },
       ],
-      isManager: true,
+      canOverride: true,
     })
   })
 
@@ -46,7 +46,7 @@ describe("parseStageTransitionFailurePayload", () => {
               severity: "block",
             },
           ],
-          isManager: false,
+          canOverride: false,
         },
       }),
     ).toEqual({
@@ -58,7 +58,7 @@ describe("parseStageTransitionFailurePayload", () => {
           severity: "block",
         },
       ],
-      isManager: false,
+      canOverride: false,
     })
   })
 })

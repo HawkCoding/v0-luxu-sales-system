@@ -36,7 +36,7 @@ interface BackupRecordWithCreator extends BackupRecord {
   created_by_name?: string
 }
 
-export function BackupSettings({ isAdmin }: { isAdmin: boolean }) {
+export function BackupSettings() {
   const [backups, setBackups] = useState<BackupRecordWithCreator[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -202,18 +202,16 @@ export function BackupSettings({ isAdmin }: { isAdmin: boolean }) {
                       <Download className="h-3.5 w-3.5" />
                       Download
                     </Button>
-                    {isAdmin && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="gap-1.5 border-amber-300 text-amber-700 hover:bg-amber-50"
-                        onClick={() => openRestoreDialog(backup)}
-                        aria-label="Restore from backup"
-                      >
-                        <AlertTriangle className="h-3.5 w-3.5" />
-                        Restore
-                      </Button>
-                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="gap-1.5 border-amber-300 text-amber-700 hover:bg-amber-50"
+                      onClick={() => openRestoreDialog(backup)}
+                      aria-label="Restore from backup"
+                    >
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      Restore
+                    </Button>
                     <Button
                       size="icon"
                       variant="ghost"

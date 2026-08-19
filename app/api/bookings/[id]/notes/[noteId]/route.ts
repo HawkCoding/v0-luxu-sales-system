@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { requireRole } from "@/lib/api/auth"
+import { requireAnyRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 
 const updateNoteSchema = z.object({
@@ -8,19 +8,14 @@ const updateNoteSchema = z.object({
 
 type Params = { params: Promise<{ id: string; noteId: string }> }
 
-function canManageNote(note: { author_id: string | null }, userId: string, role: string): boolean {
-  if (note.author_id === userId) return true
-  return role === "admin" || role === "manager"
-}
-
 export async function PATCH(req: Request, { params }: Params) {
-  const auth = await requireRole(["admin", "manager", "consultant"])
+  const auth = await requireAnyRole()
   if (!auth.ok) return auth.response
 
   const { id: bookingId, noteId } = await params
   if (!bookingId || !noteId) return jsonError("Booking id and note id are required", 400)
 
-  const { supabase, user, profile } = auth.value
+  const { supabase } = auth.value
 
   let payload: unknown
   try {
@@ -39,10 +34,6 @@ export async function PATCH(req: Request, { params }: Params) {
     .maybeSingle()
   if (fetchError) return safeSupabaseError("bookings:notes:patch:fetch", fetchError)
   if (!existing) return jsonError("Note not found", 404)
-
-  if (!canManageNote(existing, user.id, profile.clearanceLevel)) {
-    return jsonError("Forbidden", 403)
-  }
 
   const { data: updated, error: updateError } = await supabase
     .from("booking_notes")
@@ -64,13 +55,13 @@ export async function PATCH(req: Request, { params }: Params) {
 }
 
 export async function DELETE(_req: Request, { params }: Params) {
-  const auth = await requireRole(["admin", "manager", "consultant"])
+  const auth = await requireAnyRole()
   if (!auth.ok) return auth.response
 
   const { id: bookingId, noteId } = await params
   if (!bookingId || !noteId) return jsonError("Booking id and note id are required", 400)
 
-  const { supabase, user, profile } = auth.value
+  const { supabase } = auth.value
 
   const { data: existing, error: fetchError } = await supabase
     .from("booking_notes")
@@ -80,10 +71,6 @@ export async function DELETE(_req: Request, { params }: Params) {
     .maybeSingle()
   if (fetchError) return safeSupabaseError("bookings:notes:delete:fetch", fetchError)
   if (!existing) return jsonError("Note not found", 404)
-
-  if (!canManageNote(existing, user.id, profile.clearanceLevel)) {
-    return jsonError("Forbidden", 403)
-  }
 
   const { error: deleteError } = await supabase.from("booking_notes").delete().eq("id", noteId)
   if (deleteError) return safeSupabaseError("bookings:notes:delete:row", deleteError)

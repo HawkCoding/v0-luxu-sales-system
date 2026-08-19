@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { requireRole } from "@/lib/api/auth"
+import { requireAnyRole } from "@/lib/api/auth"
 import { jsonError } from "@/lib/api/responses"
 import { loadBrandLogo } from "@/lib/pdf/brand-logo"
 import {
@@ -43,7 +43,7 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ type: string }> },
 ) {
-  const auth = await requireRole(["admin", "manager"])
+  const auth = await requireAnyRole()
   if (!auth.ok) return auth.response
 
   const { type: rawType } = await params

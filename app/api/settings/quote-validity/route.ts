@@ -4,12 +4,11 @@ import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
 import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 import { DEFAULT_QUOTE_VALIDITY_DAYS } from "@/lib/quotes/quote-validity"
+import { SETTINGS_WRITE_ROLES } from "@/lib/permissions"
 
 // app_settings key consumed by POST /api/quotes (app/api/quotes/route.ts) and
 // POST /api/jobs/[id]/start-quote to set each new quote's validity_until.
 const QUOTE_VALIDITY_DAYS_SETTING_KEY = "quote_validity_days"
-
-const allowedRoles = new Set(["admin", "manager"])
 
 const patchSchema = z.object({
   quoteValidityDays: z.number().int().min(1).max(365),
@@ -61,7 +60,7 @@ async function getAuthenticatedContext() {
       supabase,
       userId: user.id,
       actorName,
-      canEdit: allowedRoles.has(profile.clearance_level),
+      canEdit: (SETTINGS_WRITE_ROLES as readonly string[]).includes(profile.clearance_level),
     },
   }
 }

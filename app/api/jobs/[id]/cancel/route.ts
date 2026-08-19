@@ -64,14 +64,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   if (!booking) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
-  if (role === "consultant") {
-    const isOwner = booking.owner_user_id === user.id
-    const isAssigned = booking.assigned_salesperson_id === user.id
-    if (!isOwner && !isAssigned) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-    }
-  }
-
   const { data: reason } = await supabase
     .from("outcome_reasons")
     .select("id, label, applies_to, active")

@@ -17,8 +17,7 @@ vi.mock("@/lib/settings-access", () => ({
     "image/jpeg",
     "image/png",
   ]),
-  requireAdminSettingsAccess: vi.fn(),
-  requireManagerSettingsAccess: vi.fn(),
+  requireSettingsWrite: vi.fn(),
 }))
 
 const auditMocks = vi.hoisted(() => ({ writeAuditLog: vi.fn(async () => ({ error: null })) }))

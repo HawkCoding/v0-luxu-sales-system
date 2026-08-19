@@ -2,16 +2,24 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { NextResponse } from "next/server"
 
 const settingsAccessMocks = vi.hoisted(() => ({
-  requireAdminSettingsAccess: vi.fn(),
+  requireSettingsWrite: vi.fn(),
+}))
+
+const authMocks = vi.hoisted(() => ({
+  requireAnyRole: vi.fn(),
 }))
 
 vi.mock("@/lib/settings-access", async () => {
   const actual = await vi.importActual<typeof import("@/lib/settings-access")>("@/lib/settings-access")
   return {
     ...actual,
-    requireAdminSettingsAccess: settingsAccessMocks.requireAdminSettingsAccess,
+    requireSettingsWrite: settingsAccessMocks.requireSettingsWrite,
   }
 })
+
+vi.mock("@/lib/api/auth", () => ({
+  requireAnyRole: authMocks.requireAnyRole,
+}))
 
 const auditMocks = vi.hoisted(() => ({
   writeAuditLog: vi.fn(async () => ({ error: null })),
@@ -46,13 +54,22 @@ function makeAuth(overrides: { supabaseUpsertError?: { message: string } | null 
     }),
   }
 
-  settingsAccessMocks.requireAdminSettingsAccess.mockResolvedValue({
+  settingsAccessMocks.requireSettingsWrite.mockResolvedValue({
     ok: true,
     value: {
       supabase,
       userId: USER_ID,
       actorName: "Admin User",
       role: "admin",
+    },
+  })
+
+  authMocks.requireAnyRole.mockResolvedValue({
+    ok: true,
+    value: {
+      supabase,
+      user: { id: USER_ID },
+      profile: { clearanceLevel: "admin", actorName: "Admin User" },
     },
   })
 
@@ -69,11 +86,11 @@ function makeRequest(body: unknown) {
 
 describe("GET /api/settings/document-brand", () => {
   beforeEach(() => {
-    settingsAccessMocks.requireAdminSettingsAccess.mockReset()
+    authMocks.requireAnyRole.mockReset()
   })
 
   it("returns the auth failure response when access is denied", async () => {
-    settingsAccessMocks.requireAdminSettingsAccess.mockResolvedValue({
+    authMocks.requireAnyRole.mockResolvedValue({
       ok: false,
       response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
     })
@@ -100,13 +117,13 @@ describe("GET /api/settings/document-brand", () => {
 
 describe("PATCH /api/settings/document-brand", () => {
   beforeEach(() => {
-    settingsAccessMocks.requireAdminSettingsAccess.mockReset()
+    settingsAccessMocks.requireSettingsWrite.mockReset()
     auditMocks.writeAuditLog.mockReset()
     auditMocks.writeAuditLog.mockResolvedValue({ error: null })
   })
 
   it("returns 401/403 passthrough when access is denied", async () => {
-    settingsAccessMocks.requireAdminSettingsAccess.mockResolvedValue({
+    settingsAccessMocks.requireSettingsWrite.mockResolvedValue({
       ok: false,
       response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
     })

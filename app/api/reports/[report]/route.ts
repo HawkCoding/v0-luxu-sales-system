@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
+import { isRole } from "@/lib/role-utils"
 import { salesPerSalesperson } from "@/lib/reports/sales-per-salesperson"
 import { conversionRate } from "@/lib/reports/conversion-rate"
 import { revenuePerProduct } from "@/lib/reports/revenue-per-product"
@@ -43,16 +44,13 @@ export async function GET(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  // Mirrors "view:reporting" in lib/role-context.tsx. Unlike the sibling export
-  // route there is no read_only_exports_allowed escape hatch here: that setting
-  // governs CSV downloads, not who may see revenue figures at all.
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select("clearance_level")
     .eq("user_id", user.id)
     .single()
 
-  if (profileError || !profile || !["admin", "manager"].includes(profile.clearance_level)) {
+  if (profileError || !profile || !isRole(profile.clearance_level)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 

@@ -94,11 +94,11 @@ describe("POST /api/error-logs/[id]/resolve", () => {
     expect(res.status).toBe(401)
   })
 
-  it("returns 403 for consultant role", async () => {
+  it("allows consultant role to resolve an error log", async () => {
     supabaseMocks.createSessionClient.mockResolvedValue(createSupabase({ role: "consultant" }))
     const { req, params } = makePostRequest(LOG_ID)
     const res = await POST(req, { params })
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(200)
   })
 
   it("returns 403 for readonly role", async () => {

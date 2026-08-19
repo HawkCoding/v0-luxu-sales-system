@@ -96,7 +96,7 @@ export default function PipelinePage() {
   
   const [transitionModalOpen, setTransitionModalOpen] = useState(false)
   const [transitionFailures, setTransitionFailures] = useState<GateFailure[]>([])
-  const [transitionIsManager, setTransitionIsManager] = useState(false)
+  const [transitionCanOverride, setTransitionCanOverride] = useState(false)
   const [transitionSubmitting, setTransitionSubmitting] = useState(false)
   const [pendingJobId, setPendingJobId] = useState<string | null>(null)
   const [pendingToStage, setPendingToStage] = useState<PipelineStage | null>(null)
@@ -133,7 +133,7 @@ export default function PipelinePage() {
   const resetPendingTransition = () => {
     setTransitionModalOpen(false)
     setTransitionFailures([])
-    setTransitionIsManager(false)
+    setTransitionCanOverride(false)
     setPendingJobId(null)
     setPendingToStage(null)
   }
@@ -160,7 +160,7 @@ export default function PipelinePage() {
       const stageGatePayload = response.status === 400 ? parseStageTransitionFailurePayload(payload) : null
       if (stageGatePayload) {
         setTransitionFailures(stageGatePayload.failures)
-        setTransitionIsManager(stageGatePayload.isManager)
+        setTransitionCanOverride(stageGatePayload.canOverride)
         setPendingJobId(jobId)
         setPendingToStage(toStage)
         setTransitionModalOpen(true)
@@ -214,7 +214,7 @@ export default function PipelinePage() {
       }
 
       setTransitionFailures(payload.failures)
-      setTransitionIsManager(Boolean(payload.isManager))
+      setTransitionCanOverride(Boolean(payload.canOverride))
       setPendingJobId(jobId)
       setPendingToStage(toStage)
       setTransitionModalOpen(true)
@@ -544,7 +544,7 @@ export default function PipelinePage() {
         jobNumber={(jobs as PipelineJob[]).find((j) => j.id === pendingJobId)?.bookingNumber || ""}
         targetStage={pendingToStage}
         failures={transitionFailures}
-        isManager={transitionIsManager}
+        canOverride={transitionCanOverride}
         submitting={transitionSubmitting}
         onCancel={resetPendingTransition}
         onProceed={async (manualConfirmations) => {

@@ -21,27 +21,18 @@ describe("canRolePerform", () => {
     }
   })
 
-  it("enforces the expected manager restrictions", () => {
-    expect(canRolePerform("manager", "view:reporting")).toBe(true)
-    expect(canRolePerform("manager", "edit:suppliers")).toBe(true)
-    // Managers manage email/voucher templates (matches PATCH /api/templates).
-    expect(canRolePerform("manager", "view:templates")).toBe(true)
-    expect(canRolePerform("manager", "edit:templates")).toBe(true)
-    // Mirrors requireManagerSettingsAccess() guarding /api/error-logs.
-    expect(canRolePerform("manager", "view:error_logs")).toBe(true)
-    expect(canRolePerform("manager", "edit:products")).toBe(false)
-    expect(canRolePerform("manager", "edit:settings")).toBe(false)
-    expect(canRolePerform("manager", "manage:users")).toBe(false)
+  it("grants manager everything except user management", () => {
+    for (const action of allActions) {
+      const expected = action !== "manage:users"
+      expect(canRolePerform("manager", action)).toBe(expected)
+    }
   })
 
-  it("blocks consultant access to admin and manager-only actions", () => {
-    expect(canRolePerform("consultant", "import:customers")).toBe(false)
-    expect(canRolePerform("consultant", "view:templates")).toBe(false)
-    expect(canRolePerform("consultant", "view:reporting")).toBe(false)
-    expect(canRolePerform("consultant", "view:audit")).toBe(false)
-    expect(canRolePerform("consultant", "view:settings")).toBe(false)
-    expect(canRolePerform("consultant", "view:error_logs")).toBe(false)
-    expect(canRolePerform("consultant", "edit:quotes")).toBe(true)
+  it("grants consultant everything except settings writes and user management", () => {
+    for (const action of allActions) {
+      const expected = action !== "edit:settings" && action !== "manage:users"
+      expect(canRolePerform("consultant", action)).toBe(expected)
+    }
   })
 
   it("grants nothing to a retired or unknown clearance level", () => {

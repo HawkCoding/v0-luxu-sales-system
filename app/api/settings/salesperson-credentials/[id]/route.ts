@@ -7,7 +7,8 @@ import {
   signatureFieldsSchema,
   upsertEmailSignature,
 } from "@/lib/email/signature-admin"
-import { requireManagerSettingsAccess } from "@/lib/settings-access"
+import { SETTINGS_WRITE_ROLES } from "@/lib/permissions"
+import { requireSettingsWrite } from "@/lib/settings-access"
 import { createSessionClient } from "@/lib/supabase/server"
 import { extractRoleFromJwt } from "@/lib/role-utils"
 import type { Database } from "@/lib/supabase/types"
@@ -69,8 +70,28 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  const auth = await requireManagerSettingsAccess()
-  if (!auth.ok) return auth.response
+
+  // Admin/manager may edit any row; a consultant may edit only their own —
+  // mirrors the GET handler's isManagerOrAbove scoping above.
+  const supabase = await createSessionClient()
+  const { data: { user }, error: authError } = await supabase.auth.getUser()
+  if (authError || !user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
+  const role = extractRoleFromJwt(user)
+  if (!role || !["admin", "manager", "consultant"].includes(role)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
+
+  if (!(SETTINGS_WRITE_ROLES as readonly string[]).includes(role)) {
+    const { data: existing } = await supabase
+      .from("salesperson_credentials")
+      .select("profile_id")
+      .eq("id", id)
+      .maybeSingle()
+    if (!existing || existing.profile_id !== user.id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+    }
+  }
 
   const result = updateSchema.safeParse(await request.json())
   if (!result.success) return jsonZodError(result.error, "Invalid request payload")
@@ -87,7 +108,7 @@ export async function PATCH(
   if (parsed.imap_sent_folder !== undefined) updates.imap_sent_folder = parsed.imap_sent_folder
   if (parsed.password) updates.encrypted_password = encryptCredential(parsed.password)
 
-  const { data, error } = await auth.value.supabase
+  const { data, error } = await supabase
     .from("salesperson_credentials")
     .update(updates)
     .eq("id", id)
@@ -96,10 +117,10 @@ export async function PATCH(
 
   if (error || !data) return safeSupabaseError("salesperson-credentials:update", error, "Failed to update credential")
 
-  const { error: signatureError } = await upsertEmailSignature(auth.value.supabase, data.profile_id, parsed)
+  const { error: signatureError } = await upsertEmailSignature(supabase, data.profile_id, parsed)
   if (signatureError) return safeSupabaseError("salesperson-credentials:signature", signatureError)
 
-  const signatures = await getEmailSignaturesByProfileIds(auth.value.supabase, [data.profile_id])
+  const signatures = await getEmailSignaturesByProfileIds(supabase, [data.profile_id])
 
   return NextResponse.json({ credential: { ...data, signature: signatures.get(data.profile_id) ?? null } })
 }
@@ -109,7 +130,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  const auth = await requireManagerSettingsAccess()
+  const auth = await requireSettingsWrite()
   if (!auth.ok) return auth.response
 
   const { error } = await auth.value.supabase

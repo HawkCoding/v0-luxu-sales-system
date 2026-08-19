@@ -49,11 +49,10 @@ describe("GET /api/reports/[report]", () => {
     expect(res.status).toBe(401)
   })
 
-  // Revenue, pipeline value and outstanding balance are manager-level figures:
-  // "view:reporting" excludes consultant and readonly.
-  it.each(["consultant", "readonly"])("returns 403 for %s role", async (role) => {
+  // `readonly` is the retired clearance level — no role grants it access.
+  it("returns 403 for readonly role", async () => {
     mockGetUser.mockResolvedValue({ data: { user: { id: "u1" } }, error: null })
-    mockFrom.mockReturnValue(profileChain(role))
+    mockFrom.mockReturnValue(profileChain("readonly"))
 
     const res = await GET(makeRequest("sales-per-salesperson"), makeParams("sales-per-salesperson"))
     expect(res.status).toBe(403)
@@ -67,7 +66,7 @@ describe("GET /api/reports/[report]", () => {
     expect(res.status).toBe(403)
   })
 
-  it.each(["admin", "manager"])("returns report data for %s role", async (role) => {
+  it.each(["admin", "manager", "consultant"])("returns report data for %s role", async (role) => {
     mockGetUser.mockResolvedValue({ data: { user: { id: "u1" } }, error: null })
     mockFrom.mockReturnValue(profileChain(role))
 

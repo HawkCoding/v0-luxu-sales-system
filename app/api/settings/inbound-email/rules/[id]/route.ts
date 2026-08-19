@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { jsonZodError, safeSupabaseError } from "@/lib/api/responses"
-import { requireAdminSettingsAccess } from "@/lib/settings-access"
+import { requireSettingsWrite } from "@/lib/settings-access"
 import { isValidSubjectPattern, type InboundRuleMatchType } from "@/lib/inbound-email/rules"
 
 const patchRuleSchema = z.object({
@@ -16,7 +16,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  const auth = await requireAdminSettingsAccess()
+  const auth = await requireSettingsWrite()
   if (!auth.ok) return auth.response
 
   const result = patchRuleSchema.safeParse(await request.json())
@@ -75,7 +75,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  const auth = await requireAdminSettingsAccess()
+  const auth = await requireSettingsWrite()
   if (!auth.ok) return auth.response
 
   const { error } = await auth.value.supabase

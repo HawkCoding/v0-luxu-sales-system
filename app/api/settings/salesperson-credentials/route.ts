@@ -8,7 +8,7 @@ import {
   upsertEmailSignature,
   type SignatureRow,
 } from "@/lib/email/signature-admin"
-import { requireManagerSettingsAccess } from "@/lib/settings-access"
+import { requireSettingsWrite } from "@/lib/settings-access"
 import type { Database } from "@/lib/supabase/types"
 
 type SalespersonCredentialInsert = Database["public"]["Tables"]["salesperson_credentials"]["Insert"]
@@ -66,7 +66,7 @@ const SAFE_COLUMNS =
   "id, profile_id, email_address, smtp_host, smtp_port, smtp_encryption, imap_host, imap_port, imap_encryption, imap_sent_folder, created_at, updated_at"
 
 export async function GET() {
-  const auth = await requireManagerSettingsAccess()
+  const auth = await requireSettingsWrite()
   if (!auth.ok) return auth.response
 
   const { data, error } = await auth.value.supabase
@@ -88,7 +88,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const auth = await requireManagerSettingsAccess()
+  const auth = await requireSettingsWrite()
   if (!auth.ok) return auth.response
 
   const result = createSchema.safeParse(await request.json())

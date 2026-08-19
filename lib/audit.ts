@@ -2,7 +2,8 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { formatDisplayDateTime } from "@/lib/date-format"
 import { createSessionClient } from "@/lib/supabase/server"
-import { CONSULTANTS, type AuditLog } from "@/lib/types"
+import { CONSULTANTS, type AuditLog, type Role } from "@/lib/types"
+import { isRole } from "@/lib/role-utils"
 
 export const AUDIT_ACTIVE_RETENTION_MONTHS = 24
 
@@ -22,7 +23,7 @@ export type AuditListQuery = z.infer<typeof auditListQuerySchema>
 export interface AuditAccessContext {
   supabase: Awaited<ReturnType<typeof createSessionClient>>
   userId: string
-  role: "admin" | "manager"
+  role: Role
 }
 
 export interface AuditListResult {
@@ -113,11 +114,7 @@ export async function requireAuditAccess(): Promise<
     .eq("user_id", user.id)
     .single()
 
-  if (
-    profileError ||
-    !profile ||
-    (profile.clearance_level !== "admin" && profile.clearance_level !== "manager")
-  ) {
+  if (profileError || !profile || !isRole(profile.clearance_level)) {
     return {
       ok: false,
       response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),

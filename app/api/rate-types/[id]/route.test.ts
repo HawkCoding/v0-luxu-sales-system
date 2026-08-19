@@ -86,14 +86,29 @@ describe("PATCH /api/rate-types/[id]", () => {
     sessionMocks.getUser.mockResolvedValue({ data: { user: { id: USER_ID } }, error: null })
   })
 
-  it("rejects managers with 403", async () => {
+  it("rejects consultants with 403", async () => {
     sessionMocks.from.mockImplementation((table: string) => {
-      if (table === "profiles") return profileQuery("manager")
+      if (table === "profiles") return profileQuery("consultant")
       throw new Error(`Unexpected table ${table}`)
     })
 
     const response = await patchRequest({ archived: true })
     expect(response.status).toBe(403)
+  })
+
+  it("allows managers to archive when no rate cards reference the type", async () => {
+    let observed: Record<string, unknown> | null = null
+    sessionMocks.from.mockImplementation((table: string) => {
+      if (table === "profiles") return profileQuery("manager")
+      if (table === "rate_types") return rateTypesQuery((row) => { observed = row })
+      if (table === "rate_cards") return rateCardsCountQuery(0)
+      throw new Error(`Unexpected table ${table}`)
+    })
+
+    const response = await patchRequest({ archived: true })
+    expect(response.status).toBe(200)
+    expect(observed).not.toBeNull()
+    expect(observed!.archived_at).toEqual(expect.any(String))
   })
 
   it("blocks archiving while rate cards still reference the type", async () => {

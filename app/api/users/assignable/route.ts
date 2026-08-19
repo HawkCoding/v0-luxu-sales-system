@@ -1,11 +1,11 @@
-import { requireRole } from "@/lib/api/auth"
+import { requireAnyRole } from "@/lib/api/auth"
 import { safeSupabaseError } from "@/lib/api/responses"
 
-// Lightweight list of staff a job can be assigned to. Available to admins and
-// managers (the full /api/users endpoint is admin-only) so the job-page
-// reassignment control can populate its picker.
+// Lightweight list of staff a job can be assigned to (the full /api/users
+// endpoint is admin-only) so the job-page reassignment control can populate
+// its picker.
 export async function GET() {
-  const auth = await requireRole(["admin", "manager"])
+  const auth = await requireAnyRole()
   if (!auth.ok) return auth.response
 
   const { data, error } = await auth.value.supabase

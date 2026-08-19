@@ -134,10 +134,10 @@ describe("GET /api/error-logs", () => {
     expect(res.status).toBe(401)
   })
 
-  it("returns 403 for consultant role", async () => {
+  it("allows consultant role to view error logs", async () => {
     supabaseMocks.createSessionClient.mockResolvedValue(createSessionSupabase({ role: "consultant" }))
     const res = await GET(makeGetRequest())
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(200)
   })
 
   it("returns 403 for readonly role", async () => {

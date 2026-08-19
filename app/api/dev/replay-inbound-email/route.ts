@@ -5,7 +5,7 @@ import { parseEmailDraft } from "@/lib/import/parseEmailDraft"
 import { assessEnquiryPlausibility, getEmailImportReviewMetadata } from "@/lib/inbound-email/review"
 import { createEmailBookingFromParsedDraft } from "@/lib/inbound-email/import-booking"
 import { createServiceClient } from "@/lib/supabase/server"
-import { requireAdminSettingsAccess } from "@/lib/settings-access"
+import { requireSettingsWrite } from "@/lib/settings-access"
 
 const DEMO_ACCOUNT_ID = "00000000-0000-0000-0000-00000000ea01"
 const FIXTURE_PATH = path.join(
@@ -21,7 +21,7 @@ export async function POST(): Promise<NextResponse> {
   // The production guard alone let anyone who could reach a dev or preview host write real
   // customers, bookings and quotes with no login at all. Same admin gate as every other inbound-
   // email endpoint -- it writes the same rows the real importer does.
-  const auth = await requireAdminSettingsAccess()
+  const auth = await requireSettingsWrite()
   if (!auth.ok) return auth.response
 
   const fixture = JSON.parse(fs.readFileSync(FIXTURE_PATH, "utf8")) as {

@@ -5,14 +5,14 @@ import {
   APP_LOGO_OBJECT_PATH,
   APP_LOGO_SETTING_KEY,
 } from "@/lib/branding/app-logo"
-import { requireAdminSettingsAccess } from "@/lib/settings-access"
+import { requireSettingsWrite } from "@/lib/settings-access"
 import { MAX_IMAGE_BYTES, MAX_IMAGE_MB } from "@/lib/upload-limits"
 
 // Mirrors app/api/settings/brand-logo/route.ts — same bucket, same shape,
 // different setting key and object path. This logo drives the app shell
 // (sidebar, favicon, login screen), not client-facing PDFs/emails.
 export async function POST(req: Request) {
-  const auth = await requireAdminSettingsAccess()
+  const auth = await requireSettingsWrite()
   if (!auth.ok) return auth.response
 
   const { supabase } = auth.value
@@ -84,7 +84,7 @@ export async function POST(req: Request) {
 // Reverts to the company-name text fallback used by the sidebar, favicon and
 // login screen when no logo is uploaded.
 export async function DELETE() {
-  const auth = await requireAdminSettingsAccess()
+  const auth = await requireSettingsWrite()
   if (!auth.ok) return auth.response
 
   const { supabase } = auth.value

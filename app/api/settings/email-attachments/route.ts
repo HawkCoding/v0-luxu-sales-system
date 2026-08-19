@@ -5,7 +5,7 @@ import { writeAuditLog } from "@/lib/audit-write"
 import {
   getAttachmentAllowedMimeTypes,
   getAttachmentMaxSizeMb,
-  requireManagerSettingsAccess,
+  requireSettingsWrite,
 } from "@/lib/settings-access"
 import {
   ATTACHMENTS_BUCKET,
@@ -116,7 +116,7 @@ const supplierKindSchema = z.enum(
 )
 
 export async function POST(req: Request) {
-  const auth = await requireManagerSettingsAccess()
+  const auth = await requireSettingsWrite()
   if (!auth.ok) return auth.response
 
   const { supabase } = auth.value

@@ -67,7 +67,7 @@ interface StageTransitionModalProps {
   jobNumber: string
   targetStage: PipelineStage | null
   failures: GateFailure[]
-  isManager: boolean
+  canOverride: boolean
   submitting: boolean
   onCancel: () => void
   onProceed: (manualConfirmations: ManualConfirmations) => Promise<void>
@@ -109,7 +109,7 @@ export function StageTransitionModal({
   jobNumber,
   targetStage,
   failures,
-  isManager,
+  canOverride,
   submitting,
   onCancel,
   onProceed,
@@ -277,7 +277,7 @@ export function StageTransitionModal({
           })}
         </div>
 
-        {isManager && (
+        {canOverride && (
           <>
             <Separator />
             <div className="flex flex-col gap-3">
@@ -306,7 +306,7 @@ export function StageTransitionModal({
               Confirm and move
             </Button>
           )}
-          {isManager && (
+          {canOverride && (
             <Button variant="destructive" onClick={handleOverride} disabled={submitting || !overrideReason.trim()}>
               Force move
             </Button>

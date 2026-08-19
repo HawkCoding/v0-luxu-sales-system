@@ -2064,10 +2064,9 @@ function QuoteValidityCard({ canEdit }: { canEdit: boolean }) {
 }
 
 export default function SettingsPage() {
-  const { can, role } = useRole()
+  const { can } = useRole()
   const { data: systemInfo } = useSystemInfo()
   const canEditSettings = can("edit:settings")
-  const canEditDepositSettings = role === "admin" || role === "manager"
 
   return (
     <div className="p-6 space-y-6 max-w-3xl">
@@ -2076,7 +2075,13 @@ export default function SettingsPage() {
         <p className="text-sm text-muted-foreground mt-1">System configuration</p>
       </div>
 
-      <CompanyInfoCard canEdit={canEditSettings} canEditLogo={role === "admin"} />
+      {!canEditSettings && (
+        <p className="rounded-md border border-muted bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+          You can view these settings, but only admins and managers can change them.
+        </p>
+      )}
+
+      <CompanyInfoCard canEdit={canEditSettings} canEditLogo={canEditSettings} />
 
       <Card>
         <CardHeader className="pb-2">
@@ -2086,7 +2091,7 @@ export default function SettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <BankingSettingsEditor canEdit={canEditDepositSettings} />
+          <BankingSettingsEditor canEdit={canEditSettings} />
         </CardContent>
       </Card>
 
@@ -2099,21 +2104,21 @@ export default function SettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <InvoiceStatusSettingsEditor canEdit={canEditDepositSettings} />
+          <InvoiceStatusSettingsEditor canEdit={canEditSettings} />
         </CardContent>
       </Card>
 
-      <DepositSettingsCard canEdit={canEditDepositSettings} />
+      <DepositSettingsCard canEdit={canEditSettings} />
 
-      <DefaultCommissionSettingsCard canEdit={canEditDepositSettings} />
+      <DefaultCommissionSettingsCard canEdit={canEditSettings} />
 
-      <HotelDefaultTimesCard canEdit={canEditDepositSettings} />
+      <HotelDefaultTimesCard canEdit={canEditSettings} />
 
-      {QUOTE_VALIDITY_ENABLED && <QuoteValidityCard canEdit={canEditDepositSettings} />}
+      {QUOTE_VALIDITY_ENABLED && <QuoteValidityCard canEdit={canEditSettings} />}
 
-      <TrainChildPriceRatioCard canEdit={role === "admin"} />
+      <TrainChildPriceRatioCard canEdit={canEditSettings} />
 
-      <DefaultAgeBandsCard canEdit={role === "admin"} />
+      <DefaultAgeBandsCard canEdit={canEditSettings} />
 
       <SessionTimeoutSettingsCard canEdit={canEditSettings} />
 
@@ -2136,77 +2141,67 @@ export default function SettingsPage() {
         </Card>
       )}
 
-      {canEditSettings && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Rate Types</CardTitle>
-            <CardDescription className="text-xs">
-              Manage RAC / STO / NETT / Resident and other rate types used on supplier rate cards.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button asChild size="sm" variant="outline" className="gap-2">
-              <Link href="/app/settings/rate-types">
-                <Tag className="h-4 w-4" />
-                Manage Rate Types
-              </Link>
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">Rate Types</CardTitle>
+          <CardDescription className="text-xs">
+            Manage RAC / STO / NETT / Resident and other rate types used on supplier rate cards.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button asChild size="sm" variant="outline" className="gap-2">
+            <Link href="/app/settings/rate-types">
+              <Tag className="h-4 w-4" />
+              Manage Rate Types
+            </Link>
+          </Button>
+        </CardContent>
+      </Card>
 
-      {canEditDepositSettings && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Error Log</CardTitle>
-            <CardDescription className="text-xs">
-              View and resolve system errors, warnings, and info events logged by the application.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button asChild size="sm" variant="outline" className="gap-2">
-              <Link href="/app/settings/error-log">
-                <AlertTriangle className="h-4 w-4" />
-                View Error Log
-              </Link>
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">Error Log</CardTitle>
+          <CardDescription className="text-xs">
+            View and resolve system errors, warnings, and info events logged by the application.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button asChild size="sm" variant="outline" className="gap-2">
+            <Link href="/app/settings/error-log">
+              <AlertTriangle className="h-4 w-4" />
+              View Error Log
+            </Link>
+          </Button>
+        </CardContent>
+      </Card>
 
-      {canEditDepositSettings && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Outcome Reasons</CardTitle>
-            <CardDescription className="text-xs">
-              Manage the selectable reasons shown when a booking outcome is set to Lost or Cancelled.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button asChild size="sm" variant="outline" className="gap-2">
-              <Link href="/app/settings/outcome-reasons">
-                <ListChecks className="h-4 w-4" />
-                Manage Outcome Reasons
-              </Link>
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-medium">Outcome Reasons</CardTitle>
+          <CardDescription className="text-xs">
+            Manage the selectable reasons shown when a booking outcome is set to Lost or Cancelled.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button asChild size="sm" variant="outline" className="gap-2">
+            <Link href="/app/settings/outcome-reasons">
+              <ListChecks className="h-4 w-4" />
+              Manage Outcome Reasons
+            </Link>
+          </Button>
+        </CardContent>
+      </Card>
 
-      {canEditDepositSettings && (
-        <QuoteFollowUpSettingsCard canEdit={canEditDepositSettings} />
-      )}
+      <QuoteFollowUpSettingsCard canEdit={canEditSettings} />
 
       {can("manage:users") && <UserManagementCard />}
 
-      {(canEditDepositSettings || canEditSettings) && (
-        <EmailAccountsSettings
-          canManageOutbound={canEditDepositSettings}
-          canManageInbound={canEditSettings}
-        />
-      )}
+      <EmailAccountsSettings
+        canManageOutbound={canEditSettings}
+        canManageInbound={canEditSettings}
+      />
 
-      {BACKUPS_ENABLED && canEditDepositSettings && <BackupSettings isAdmin={role === "admin"} />}
+      {BACKUPS_ENABLED && canEditSettings && <BackupSettings />}
 
       <Card className={canEditSettings ? undefined : "opacity-70"}>
         <CardHeader className="pb-2">

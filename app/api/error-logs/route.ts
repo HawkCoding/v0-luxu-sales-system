@@ -1,7 +1,7 @@
 import { safeSupabaseError } from "@/lib/api/responses"
 import { NextResponse } from "next/server"
 import { z } from "zod"
-import { requireManagerSettingsAccess } from "@/lib/settings-access"
+import { requireAnyRole } from "@/lib/api/auth"
 
 const querySchema = z.object({
   severity: z.enum(["Critical", "Warning", "Info"]).optional(),
@@ -10,7 +10,7 @@ const querySchema = z.object({
 })
 
 export async function GET(req: Request) {
-  const auth = await requireManagerSettingsAccess()
+  const auth = await requireAnyRole()
   if (!auth.ok) return auth.response
 
   const { searchParams } = new URL(req.url)

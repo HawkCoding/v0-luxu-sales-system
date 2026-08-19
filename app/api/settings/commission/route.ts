@@ -9,8 +9,7 @@ import {
 } from "@/lib/pricing/default-commission"
 import { createSessionClient } from "@/lib/supabase/server"
 import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
-
-const allowedRoles = new Set(["admin", "manager"])
+import { SETTINGS_WRITE_ROLES } from "@/lib/permissions"
 
 // A percent commission is bounded here rather than left to normalizeCommissionValue's clamp:
 // clamping happens after validation, so 250 would save as 100 and report 200 OK — the admin
@@ -69,7 +68,7 @@ async function getAuthenticatedContext() {
       supabase,
       userId: user.id,
       actorName,
-      canEdit: allowedRoles.has(profile.clearance_level),
+      canEdit: (SETTINGS_WRITE_ROLES as readonly string[]).includes(profile.clearance_level),
     },
   }
 }

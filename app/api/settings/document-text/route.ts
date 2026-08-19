@@ -1,14 +1,15 @@
 import { z } from "zod"
+import { requireAnyRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 import {
   DOCUMENT_TEXT_SETTING_KEYS,
   getDocumentTextSettings,
-  requireManagerSettingsAccess,
+  requireSettingsWrite,
 } from "@/lib/settings-access"
 
 export async function GET() {
-  const auth = await requireManagerSettingsAccess()
+  const auth = await requireAnyRole()
   if (!auth.ok) return auth.response
 
   const settings = await getDocumentTextSettings(auth.value.supabase)
@@ -39,7 +40,7 @@ const patchSchema = z
   })
 
 export async function PATCH(req: Request) {
-  const auth = await requireManagerSettingsAccess()
+  const auth = await requireSettingsWrite()
   if (!auth.ok) return auth.response
 
   let raw: unknown

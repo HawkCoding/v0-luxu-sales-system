@@ -1,13 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const accessMocks = vi.hoisted(() => ({
-  requireManagerSettingsAccess: vi.fn(),
+  requireSettingsWrite: vi.fn(),
   getQuoteFollowUpSettings: vi.fn(),
 }))
 
+const authMocks = vi.hoisted(() => ({
+  requireAnyRole: vi.fn(),
+}))
+
 vi.mock("@/lib/settings-access", () => ({
-  requireManagerSettingsAccess: accessMocks.requireManagerSettingsAccess,
+  requireSettingsWrite: accessMocks.requireSettingsWrite,
   getQuoteFollowUpSettings: accessMocks.getQuoteFollowUpSettings,
+}))
+
+vi.mock("@/lib/api/auth", () => ({
+  requireAnyRole: authMocks.requireAnyRole,
 }))
 
 const auditMocks = vi.hoisted(() => ({
@@ -38,9 +46,13 @@ function createSupabase(rows: { key: string; value: string }[] = []) {
 }
 
 function grantAccess(supabase: ReturnType<typeof createSupabase>) {
-  accessMocks.requireManagerSettingsAccess.mockResolvedValue({
+  accessMocks.requireSettingsWrite.mockResolvedValue({
     ok: true,
     value: { supabase, userId: USER_ID, actorName: "Test User", role: "admin" },
+  })
+  authMocks.requireAnyRole.mockResolvedValue({
+    ok: true,
+    value: { supabase, user: { id: USER_ID }, profile: { clearanceLevel: "admin", actorName: "Test User" } },
   })
 }
 
@@ -54,7 +66,8 @@ function makeRequest(body: unknown) {
 
 describe("/api/settings/quote-follow-up", () => {
   beforeEach(() => {
-    accessMocks.requireManagerSettingsAccess.mockReset()
+    accessMocks.requireSettingsWrite.mockReset()
+    authMocks.requireAnyRole.mockReset()
     accessMocks.getQuoteFollowUpSettings.mockReset()
     auditMocks.writeAuditLog.mockReset()
     auditMocks.writeAuditLog.mockResolvedValue({ error: null })

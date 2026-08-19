@@ -1,6 +1,7 @@
 "use client"
 
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react"
+import { ALL_ROLES, SETTINGS_WRITE_ROLES, USER_ADMIN_ROLES } from "@/lib/permissions"
 import type { Role } from "./types"
 
 interface RoleContextValue {
@@ -12,50 +13,46 @@ interface RoleContextValue {
 const RoleContext = createContext<RoleContextValue | null>(null)
 
 export const permissions: Record<string, Role[]> = {
-  "view:dashboard": ["admin", "manager", "consultant"],
-  "view:pipeline": ["admin", "manager", "consultant"],
-  "edit:pipeline": ["admin", "manager", "consultant"],
-  "cancel:booking": ["admin", "manager", "consultant"],
-  "view:enquiries": ["admin", "manager", "consultant"],
-  "create:enquiry": ["admin", "manager", "consultant"],
-  "view:jobs": ["admin", "manager", "consultant"],
-  "edit:jobs": ["admin", "manager", "consultant"],
-  "view:customers": ["admin", "manager", "consultant"],
-  "edit:customers": ["admin", "manager", "consultant"],
-  "import:customers": ["admin", "manager"],
-  "view:quotes": ["admin", "manager", "consultant"],
-  "edit:quotes": ["admin", "manager", "consultant"],
-  "view:payments": ["admin", "manager", "consultant"],
-  "edit:payments": ["admin", "manager", "consultant"],
-  "view:documents": ["admin", "manager", "consultant"],
-  "upload:documents": ["admin", "manager", "consultant"],
-  "delete:documents": ["admin", "manager"],
-  "view:notes": ["admin", "manager", "consultant"],
-  "create:notes": ["admin", "manager", "consultant"],
-  "manage:notes": ["admin", "manager"],
-  "view:correspondence": ["admin", "manager", "consultant"],
-  "send:correspondence": ["admin", "manager", "consultant"],
-  "view:suppliers": ["admin", "manager", "consultant"],
-  "edit:suppliers": ["admin", "manager"],
-  "delete:suppliers": ["admin"],
-  "create:temporary-supplier": ["admin", "manager", "consultant"],
-  "view:packages": ["admin", "manager", "consultant"],
-  "view:products": ["admin", "manager", "consultant"],
-  "edit:products": ["admin"],
-  "view:templates": ["admin", "manager"],
-  "edit:templates": ["admin", "manager"],
-  "view:reporting": ["admin", "manager"],
-  "export:reporting": ["admin", "manager"],
-  "view:audit": ["admin", "manager"],
-  // Mirrors the manager/admin check on PATCH /api/jobs/[id] (resolveEmailImportReview) and
-  // POST /api/jobs/[id]/clear-import-review. Keep in sync or the button 403s for consultants.
-  "resolve:import_review": ["admin", "manager"],
-  // Mirrors requireManagerSettingsAccess() in lib/settings-access.ts, which guards
-  // /api/error-logs. Keep the two in sync or client fetches 403 in the background.
-  "view:error_logs": ["admin", "manager"],
-  "view:settings": ["admin", "manager"],
-  "edit:settings": ["admin"],
-  "manage:users": ["admin"],
+  "view:dashboard": [...ALL_ROLES],
+  "view:pipeline": [...ALL_ROLES],
+  "edit:pipeline": [...ALL_ROLES],
+  "cancel:booking": [...ALL_ROLES],
+  "view:enquiries": [...ALL_ROLES],
+  "create:enquiry": [...ALL_ROLES],
+  "view:jobs": [...ALL_ROLES],
+  "edit:jobs": [...ALL_ROLES],
+  "view:customers": [...ALL_ROLES],
+  "edit:customers": [...ALL_ROLES],
+  "import:customers": [...ALL_ROLES],
+  "view:quotes": [...ALL_ROLES],
+  "edit:quotes": [...ALL_ROLES],
+  "view:payments": [...ALL_ROLES],
+  "edit:payments": [...ALL_ROLES],
+  "view:documents": [...ALL_ROLES],
+  "upload:documents": [...ALL_ROLES],
+  "delete:documents": [...ALL_ROLES],
+  "view:notes": [...ALL_ROLES],
+  "create:notes": [...ALL_ROLES],
+  "manage:notes": [...ALL_ROLES],
+  "view:correspondence": [...ALL_ROLES],
+  "send:correspondence": [...ALL_ROLES],
+  "view:suppliers": [...ALL_ROLES],
+  "edit:suppliers": [...ALL_ROLES],
+  "delete:suppliers": [...ALL_ROLES],
+  "create:temporary-supplier": [...ALL_ROLES],
+  "view:packages": [...ALL_ROLES],
+  "view:products": [...ALL_ROLES],
+  "edit:products": [...ALL_ROLES],
+  "view:templates": [...ALL_ROLES],
+  "edit:templates": [...ALL_ROLES],
+  "view:reporting": [...ALL_ROLES],
+  "export:reporting": [...ALL_ROLES],
+  "view:audit": [...ALL_ROLES],
+  "resolve:import_review": [...ALL_ROLES],
+  "view:error_logs": [...ALL_ROLES],
+  "view:settings": [...ALL_ROLES],
+  "edit:settings": [...SETTINGS_WRITE_ROLES],
+  "manage:users": [...USER_ADMIN_ROLES],
 }
 
 export function canRolePerform(role: Role, action: string) {

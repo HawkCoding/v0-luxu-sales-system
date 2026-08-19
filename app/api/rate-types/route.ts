@@ -3,10 +3,7 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
 import { mapRateType } from "@/lib/suppliers"
-
-// Admin only, matching the Settings page gate (edit:settings) that surfaces the Rate Types link.
-// Managers keep read access — the page renders read-only off canEdit.
-const ALLOWED_ROLES = new Set(["admin"])
+import { SETTINGS_WRITE_ROLES } from "@/lib/permissions"
 
 const postSchema = z.object({
   code: z
@@ -36,7 +33,7 @@ async function authenticate() {
     ok: true as const,
     value: {
       supabase,
-      canEdit: ALLOWED_ROLES.has(profile.clearance_level),
+      canEdit: (SETTINGS_WRITE_ROLES as readonly string[]).includes(profile.clearance_level),
     },
   }
 }

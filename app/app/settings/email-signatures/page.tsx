@@ -29,8 +29,8 @@ interface BrandsResponse {
 }
 
 export default function EmailSignaturesPage() {
-  const { role } = useRole()
-  const canEdit = role === "admin" || role === "manager"
+  const { can } = useRole()
+  const canEdit = can("edit:settings")
   const { data: defaults } = useEmailSignatureSettings()
 
   const [brands, setBrands] = useState<AdminSignatureBrand[]>([])
@@ -313,7 +313,7 @@ export default function EmailSignaturesPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <EmailSignatureSettingsEditor canEdit={role === "admin"} />
+              <EmailSignatureSettingsEditor canEdit={canEdit} />
             </CardContent>
           </Card>
         </TabsContent>

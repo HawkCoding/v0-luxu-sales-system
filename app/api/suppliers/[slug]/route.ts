@@ -197,7 +197,7 @@ export async function DELETE(
     .eq("user_id", user.id)
     .single()
 
-  if (profileError || !profile || profile.clearance_level !== "admin") {
+  if (profileError || !profile || !allowedRoles.has(profile.clearance_level)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { requireAdminSettingsAccess } from "@/lib/settings-access"
+import { requireSettingsWrite } from "@/lib/settings-access"
 
 // Most-recent-first log of what a mailbox sync actually did with each message, including which
 // body part it read (body_part) and a preview of whichever candidate lost (alt_body_preview) --
@@ -48,7 +48,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params
-  const auth = await requireAdminSettingsAccess()
+  const auth = await requireSettingsWrite()
   if (!auth.ok) return auth.response
 
   const { data, error } = await auth.value.supabase

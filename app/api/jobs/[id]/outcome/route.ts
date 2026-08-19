@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { requireUser } from "@/lib/api/auth"
+import { requireAnyRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 
 const outcomeSchema = z.object({
@@ -8,20 +8,12 @@ const outcomeSchema = z.object({
   outcomeNotes: z.string().optional(),
 })
 
-const ALLOWED_ROLES = new Set(["consultant", "manager", "admin"])
-const MANAGER_ROLES = new Set(["manager", "admin"])
-
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await requireUser()
+  const auth = await requireAnyRole()
   if (!auth.ok) return auth.response
 
   const { id } = await params
   const { supabase, user, profile } = auth.value
-  const role = profile.clearanceLevel
-
-  if (!ALLOWED_ROLES.has(role)) {
-    return jsonError("Forbidden: read-only users cannot set outcome", 403)
-  }
 
   let raw: unknown
   try {
@@ -44,16 +36,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   if (bookingError) return safeSupabaseError("jobs:outcome-load", bookingError)
   if (!booking) return jsonError("Booking not found", 404)
-
-  // Consultants can only set outcome on bookings they own
-  if (role === "consultant") {
-    const isOwner =
-      booking.assigned_salesperson_id === user.id ||
-      booking.owner_user_id === user.id
-    if (!isOwner) {
-      return jsonError("Forbidden: consultants can only set outcome on their own bookings", 403)
-    }
-  }
 
   const { outcome, reasonId, outcomeNotes } = body
 
