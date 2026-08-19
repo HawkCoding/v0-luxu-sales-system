@@ -1,4 +1,4 @@
-import { requireRole, requireUser } from "@/lib/api/auth"
+import { requireAnyRole, requireUser } from "@/lib/api/auth"
 import { writeAuditLog } from "@/lib/audit-write"
 import { jsonError, safeSupabaseError } from "@/lib/api/responses"
 
@@ -61,7 +61,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 }
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await requireRole(["admin", "manager"])
+  const auth = await requireAnyRole()
   if (!auth.ok) return auth.response
 
   const { id } = await params

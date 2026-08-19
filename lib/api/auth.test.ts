@@ -8,7 +8,7 @@ vi.mock("@/lib/supabase/server", () => ({
   createSessionClient: supabaseMocks.createSessionClient,
 }))
 
-import { requireRole, requireUser } from "./auth"
+import { requireAnyRole, requireRole, requireUser } from "./auth"
 
 const USER_ID = "00000000-0000-4000-8000-000000000001"
 
@@ -120,5 +120,30 @@ describe("requireRole", () => {
     supabaseMocks.createSessionClient.mockResolvedValue(createMock())
     const result = await requireRole(["admin", "manager"])
     expect(result.ok).toBe(true)
+  })
+})
+
+describe("requireAnyRole", () => {
+  beforeEach(() => {
+    supabaseMocks.createSessionClient.mockReset()
+  })
+
+  it("allows admin, manager, and consultant", async () => {
+    for (const clearance_level of ["admin", "manager", "consultant"]) {
+      supabaseMocks.createSessionClient.mockResolvedValue(
+        createMock({ profile: { clearance_level, is_active: true, name: "Jane", surname: "Doe", email: "u@example.com" } }),
+      )
+      const result = await requireAnyRole()
+      expect(result.ok).toBe(true)
+    }
+  })
+
+  it("rejects the retired readonly clearance level", async () => {
+    supabaseMocks.createSessionClient.mockResolvedValue(
+      createMock({ profile: { clearance_level: "readonly", is_active: true, name: null, surname: null, email: null } }),
+    )
+    const result = await requireAnyRole()
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.response.status).toBe(403)
   })
 })

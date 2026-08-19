@@ -1,17 +1,15 @@
 import { z } from "zod"
+import { requireAnyRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 import {
   BRAND_BLOCK_POSITIONS,
   getDocumentBrandSettings,
-  requireAdminSettingsAccess,
+  requireSettingsWrite,
 } from "@/lib/settings-access"
 
 export async function GET() {
-  // Admin-only: app_settings' RLS write policy admits admins alone, so gating
-  // reads the same way keeps the editor's Save from surfacing to users who
-  // would then be rejected at the database.
-  const auth = await requireAdminSettingsAccess()
+  const auth = await requireAnyRole()
   if (!auth.ok) return auth.response
 
   const settings = await getDocumentBrandSettings(auth.value.supabase)
@@ -35,7 +33,7 @@ const patchSchema = z
 type BrandPatchKey = keyof z.infer<typeof patchSchema>
 
 export async function PATCH(req: Request) {
-  const auth = await requireAdminSettingsAccess()
+  const auth = await requireSettingsWrite()
   if (!auth.ok) return auth.response
 
   let raw: unknown

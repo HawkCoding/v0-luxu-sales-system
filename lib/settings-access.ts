@@ -15,6 +15,7 @@ import {
   parseInvoiceStatusOptions,
   type InvoiceStatusOption,
 } from "@/lib/invoices/invoice-status-options"
+import { SETTINGS_WRITE_ROLES } from "@/lib/permissions"
 import { createServiceClient, createSessionClient } from "@/lib/supabase/server"
 import type { Database } from "@/lib/supabase/types"
 
@@ -25,7 +26,8 @@ export interface SettingsAccessContext {
   role: string
 }
 
-export async function requireAdminSettingsAccess(): Promise<
+/** Writing global configuration — admin + manager. Consultants read settings, never write. */
+export async function requireSettingsWrite(): Promise<
   | { ok: true; value: SettingsAccessContext }
   | { ok: false; response: NextResponse }
 > {
@@ -48,48 +50,11 @@ export async function requireAdminSettingsAccess(): Promise<
     .eq("user_id", user.id)
     .single()
 
-  if (profileError || !profile || profile.clearance_level !== "admin") {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
-    }
-  }
-
-  return {
-    ok: true,
-    value: {
-      supabase,
-      userId: user.id,
-      role: profile.clearance_level,
-      actorName: [profile.name, profile.surname].filter(Boolean).join(" ").trim() || profile.email,
-    },
-  }
-}
-
-export async function requireManagerSettingsAccess(): Promise<
-  | { ok: true; value: SettingsAccessContext }
-  | { ok: false; response: NextResponse }
-> {
-  const supabase = await createSessionClient()
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-
-  if (userError || !user) {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
-    }
-  }
-
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("name, surname, email, clearance_level")
-    .eq("user_id", user.id)
-    .single()
-
-  if (profileError || !profile || !["admin", "manager"].includes(profile.clearance_level)) {
+  if (
+    profileError ||
+    !profile ||
+    !(SETTINGS_WRITE_ROLES as readonly string[]).includes(profile.clearance_level)
+  ) {
     return {
       ok: false,
       response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
@@ -149,17 +114,6 @@ export async function getDepositRefundable(
     .from("app_settings")
     .select("value")
     .eq("key", "deposit_refundable")
-    .maybeSingle()
-  return data?.value === "true"
-}
-
-export async function getReadOnlyExportsAllowed(
-  supabase: SupabaseClient<Database>,
-): Promise<boolean> {
-  const { data } = await supabase
-    .from("app_settings")
-    .select("value")
-    .eq("key", "read_only_exports_allowed")
     .maybeSingle()
   return data?.value === "true"
 }

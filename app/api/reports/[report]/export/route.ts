@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
 import { formatDisplayDate } from "@/lib/date-format"
-import { getReadOnlyExportsAllowed } from "@/lib/settings-access"
+import { isRole } from "@/lib/role-utils"
 import { salesPerSalesperson } from "@/lib/reports/sales-per-salesperson"
 import { conversionRate } from "@/lib/reports/conversion-rate"
 import { revenuePerProduct } from "@/lib/reports/revenue-per-product"
@@ -102,16 +102,8 @@ export async function GET(
     .eq("user_id", user.id)
     .single()
 
-  if (profileError || !profile) {
+  if (profileError || !profile || !isRole(profile.clearance_level)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-  }
-
-  const role = profile.clearance_level
-  if (!["admin", "manager"].includes(role)) {
-    const allowed = await getReadOnlyExportsAllowed(supabase)
-    if (!allowed) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-    }
   }
 
   const { report } = await params

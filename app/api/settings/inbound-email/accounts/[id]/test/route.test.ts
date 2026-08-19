@@ -2,14 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { NextResponse } from "next/server"
 
 const settingsMocks = vi.hoisted(() => ({
-  requireAdminSettingsAccess: vi.fn(),
+  requireSettingsWrite: vi.fn(),
 }))
 const syncMocks = vi.hoisted(() => ({
   testInboundEmailConnection: vi.fn(),
 }))
 
 vi.mock("@/lib/settings-access", () => ({
-  requireAdminSettingsAccess: settingsMocks.requireAdminSettingsAccess,
+  requireSettingsWrite: settingsMocks.requireSettingsWrite,
 }))
 
 vi.mock("@/lib/inbound-email/sync", () => ({
@@ -69,7 +69,7 @@ describe("POST /api/settings/inbound-email/accounts/[id]/test", () => {
   })
 
   it("returns 403 when the caller is not an admin", async () => {
-    settingsMocks.requireAdminSettingsAccess.mockResolvedValue({
+    settingsMocks.requireSettingsWrite.mockResolvedValue({
       ok: false,
       response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
     })
@@ -79,7 +79,7 @@ describe("POST /api/settings/inbound-email/accounts/[id]/test", () => {
   })
 
   it("returns 404 when the account does not exist", async () => {
-    settingsMocks.requireAdminSettingsAccess.mockResolvedValue({
+    settingsMocks.requireSettingsWrite.mockResolvedValue({
       ok: true,
       value: { supabase: buildSupabase({ account: null, error: { message: "not found" } }) },
     })
@@ -89,7 +89,7 @@ describe("POST /api/settings/inbound-email/accounts/[id]/test", () => {
   })
 
   it("returns 200 with mailbox count when the connection succeeds", async () => {
-    settingsMocks.requireAdminSettingsAccess.mockResolvedValue({
+    settingsMocks.requireSettingsWrite.mockResolvedValue({
       ok: true,
       value: { supabase: buildSupabase() },
     })
@@ -106,7 +106,7 @@ describe("POST /api/settings/inbound-email/accounts/[id]/test", () => {
   })
 
   it("returns 400 with the connection error when it fails", async () => {
-    settingsMocks.requireAdminSettingsAccess.mockResolvedValue({
+    settingsMocks.requireSettingsWrite.mockResolvedValue({
       ok: true,
       value: { supabase: buildSupabase() },
     })

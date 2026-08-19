@@ -2,7 +2,7 @@ import type { GateFailure } from "@/lib/pipeline/validate-transition"
 
 export interface StageTransitionFailurePayload {
   failures: GateFailure[]
-  isManager: boolean
+  canOverride: boolean
 }
 
 function isGateFailure(value: unknown): value is GateFailure {
@@ -29,7 +29,7 @@ export function parseStageTransitionFailurePayload(payload: unknown): StageTrans
 
   return {
     failures: failureSource.failures,
-    isManager: Boolean(failureSource.isManager),
+    canOverride: Boolean(failureSource.canOverride),
   }
 }
 

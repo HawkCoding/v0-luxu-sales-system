@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const authMocks = vi.hoisted(() => ({ requireUser: vi.fn() }))
-vi.mock("@/lib/api/auth", () => ({ requireUser: authMocks.requireUser }))
+const authMocks = vi.hoisted(() => ({ requireAnyRole: vi.fn() }))
+vi.mock("@/lib/api/auth", () => ({ requireAnyRole: authMocks.requireAnyRole }))
 
 import { PATCH } from "./route"
 
@@ -83,21 +83,29 @@ function mockAuth(opts: MockOptions = {}) {
     }),
   }
 
-  authMocks.requireUser.mockResolvedValue({
-    ok: true,
-    value: {
-      supabase,
-      user: { id: USER_ID, email: "test@example.com" },
-      profile: {
-        clearanceLevel: role,
-        isActive: true,
-        name: "Test",
-        surname: "User",
-        email: "test@example.com",
-        actorName: "Test User",
+  // Mirrors the real requireAnyRole: only a recognised, non-retired role is granted access.
+  if (["admin", "manager", "consultant"].includes(role)) {
+    authMocks.requireAnyRole.mockResolvedValue({
+      ok: true,
+      value: {
+        supabase,
+        user: { id: USER_ID, email: "test@example.com" },
+        profile: {
+          clearanceLevel: role,
+          isActive: true,
+          name: "Test",
+          surname: "User",
+          email: "test@example.com",
+          actorName: "Test User",
+        },
       },
-    },
-  })
+    })
+  } else {
+    authMocks.requireAnyRole.mockResolvedValue({
+      ok: false,
+      response: Response.json({ error: "Forbidden" }, { status: 403 }),
+    })
+  }
 
   return supabase
 }
@@ -106,7 +114,7 @@ describe("PATCH /api/jobs/[id]/outcome", () => {
   beforeEach(() => { vi.clearAllMocks() })
 
   it("returns 401 when unauthenticated", async () => {
-    authMocks.requireUser.mockResolvedValue({
+    authMocks.requireAnyRole.mockResolvedValue({
       ok: false,
       response: Response.json({ error: "Unauthorized" }, { status: 401 }),
     })
@@ -178,10 +186,10 @@ describe("PATCH /api/jobs/[id]/outcome", () => {
     expect(res.status).toBe(200)
   })
 
-  it("returns 403 when consultant tries to set outcome on another's booking", async () => {
+  it("returns 200 when consultant sets outcome on another's booking (ownership scoping removed)", async () => {
     mockAuth({ role: "consultant", bookingOwnerId: "other-user", assignedSalespersonId: null })
     const res = await PATCH(patchJson({ outcome: "Open" }), makeParams())
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(200)
   })
 
   it("allows manager to set outcome on any booking", async () => {

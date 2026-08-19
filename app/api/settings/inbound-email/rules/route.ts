@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { jsonZodError, safeSupabaseError } from "@/lib/api/responses"
-import { requireAdminSettingsAccess } from "@/lib/settings-access"
+import { requireSettingsWrite } from "@/lib/settings-access"
 import { isValidSubjectPattern } from "@/lib/inbound-email/rules"
 
 const ruleSchema = z
@@ -43,7 +43,7 @@ function mapRule(row: {
 }
 
 export async function GET() {
-  const auth = await requireAdminSettingsAccess()
+  const auth = await requireSettingsWrite()
   if (!auth.ok) return auth.response
 
   const { data, error } = await auth.value.supabase
@@ -57,7 +57,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const auth = await requireAdminSettingsAccess()
+  const auth = await requireSettingsWrite()
   if (!auth.ok) return auth.response
 
   const result = ruleSchema.safeParse(await request.json())

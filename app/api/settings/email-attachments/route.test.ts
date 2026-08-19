@@ -9,7 +9,7 @@ const authMocks = vi.hoisted(() => ({
   requireRole: vi.fn(),
 }))
 const settingsMocks = vi.hoisted(() => ({
-  requireManagerSettingsAccess: vi.fn(),
+  requireSettingsWrite: vi.fn(),
   getAttachmentMaxSizeMb: vi.fn(),
   getAttachmentAllowedMimeTypes: vi.fn(),
 }))
@@ -22,7 +22,7 @@ vi.mock("@/lib/api/auth", () => ({
 }))
 
 vi.mock("@/lib/settings-access", () => ({
-  requireManagerSettingsAccess: settingsMocks.requireManagerSettingsAccess,
+  requireSettingsWrite: settingsMocks.requireSettingsWrite,
   getAttachmentMaxSizeMb: settingsMocks.getAttachmentMaxSizeMb,
   getAttachmentAllowedMimeTypes: settingsMocks.getAttachmentAllowedMimeTypes,
 }))
@@ -209,7 +209,7 @@ function buildUploadSupabase({ insertError = null as unknown } = {}) {
     },
   }
 
-  settingsMocks.requireManagerSettingsAccess.mockResolvedValue({
+  settingsMocks.requireSettingsWrite.mockResolvedValue({
     ok: true,
     value: { supabase, actorName: "Jane", userId: "u1" },
   })
@@ -246,7 +246,7 @@ describe("POST /api/settings/email-attachments", () => {
   })
 
   it("returns 403 for non-manager users", async () => {
-    settingsMocks.requireManagerSettingsAccess.mockResolvedValue({
+    settingsMocks.requireSettingsWrite.mockResolvedValue({
       ok: false,
       response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
     })

@@ -46,8 +46,8 @@ function severityBadge(severity: Severity) {
 }
 
 export default function ErrorLogPage() {
-  const { role } = useRole()
-  const canResolve = role === "admin" || role === "manager"
+  const { can } = useRole()
+  const canResolve = can("edit:settings")
 
   const [severityFilter, setSeverityFilter] = useState<string>("all")
   const [showResolved, setShowResolved] = useState(false)

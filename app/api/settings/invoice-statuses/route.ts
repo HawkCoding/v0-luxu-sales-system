@@ -1,10 +1,11 @@
 import { z } from "zod"
+import { requireAnyRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
-import { getInvoiceStatusOptions, requireManagerSettingsAccess } from "@/lib/settings-access"
+import { getInvoiceStatusOptions, requireSettingsWrite } from "@/lib/settings-access"
 
 export async function GET() {
-  const auth = await requireManagerSettingsAccess()
+  const auth = await requireAnyRole()
   if (!auth.ok) return auth.response
 
   const options = await getInvoiceStatusOptions(auth.value.supabase)
@@ -26,7 +27,7 @@ const putSchema = z.object({
 })
 
 export async function PUT(req: Request) {
-  const auth = await requireManagerSettingsAccess()
+  const auth = await requireSettingsWrite()
   if (!auth.ok) return auth.response
 
   let raw: unknown

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { safeSupabaseError } from "@/lib/api/responses"
 import { BACKUPS_ENABLED } from "@/lib/feature-flags"
-import { requireManagerSettingsAccess } from "@/lib/settings-access"
+import { requireSettingsWrite } from "@/lib/settings-access"
 
 const BACKUP_BUCKET = "backups"
 const SIGNED_URL_EXPIRY_SECONDS = 300
@@ -15,7 +15,7 @@ export async function GET(
 ) {
   if (!BACKUPS_ENABLED) return disabledResponse()
   const { id } = await params
-  const auth = await requireManagerSettingsAccess()
+  const auth = await requireSettingsWrite()
   if (!auth.ok) return auth.response
 
   const { data: record, error: fetchError } = await auth.value.supabase
@@ -45,7 +45,7 @@ export async function DELETE(
 ) {
   if (!BACKUPS_ENABLED) return disabledResponse()
   const { id } = await params
-  const auth = await requireManagerSettingsAccess()
+  const auth = await requireSettingsWrite()
   if (!auth.ok) return auth.response
 
   const { data: record, error: fetchError } = await auth.value.supabase

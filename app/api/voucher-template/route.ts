@@ -5,6 +5,7 @@ import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
 import { VOUCHER_FONT_OPTIONS } from "@/lib/voucher/voucher-fonts"
+import { SETTINGS_WRITE_ROLES } from "@/lib/permissions"
 
 const VOUCHER_FONT_VALUES = VOUCHER_FONT_OPTIONS.map((o) => o.value) as [string, ...string[]]
 
@@ -51,7 +52,7 @@ export async function PATCH(req: Request) {
     .eq("user_id", user.id)
     .single()
 
-  if (!profile || profile.clearance_level !== "admin") {
+  if (!profile || !(SETTINGS_WRITE_ROLES as readonly string[]).includes(profile.clearance_level)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 

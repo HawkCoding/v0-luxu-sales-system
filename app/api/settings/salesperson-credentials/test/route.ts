@@ -4,7 +4,7 @@ import nodemailer from "nodemailer"
 import { ImapFlow } from "imapflow"
 import { jsonZodError } from "@/lib/api/responses"
 import { decryptCredential } from "@/lib/inbound-email/crypto"
-import { requireManagerSettingsAccess } from "@/lib/settings-access"
+import { requireSettingsWrite } from "@/lib/settings-access"
 
 const bodySchema = z.object({
   id: z.string().uuid(),
@@ -14,7 +14,7 @@ const CREDENTIAL_COLUMNS =
   "id, email_address, smtp_host, smtp_port, smtp_encryption, imap_host, imap_port, imap_encryption, imap_sent_folder, encrypted_password"
 
 export async function POST(request: Request) {
-  const auth = await requireManagerSettingsAccess()
+  const auth = await requireSettingsWrite()
   if (!auth.ok) return auth.response
 
   const result = bodySchema.safeParse(await request.json())

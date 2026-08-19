@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
+import { ALL_ROLES } from "@/lib/permissions"
 
-const allowedRoles = new Set(["admin", "manager"])
+const allowedRoles = new Set<string>(ALL_ROLES)
 
 const createSupplierEmailLabelSchema = z.object({
   name: z.string().trim().min(1, "Label is required").max(100),

@@ -2,12 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { NextResponse } from "next/server"
 
 const authMocks = vi.hoisted(() => ({
-  requireRole: vi.fn(),
+  requireAnyRole: vi.fn(),
   requireUser: vi.fn(),
 }))
 
 vi.mock("@/lib/api/auth", () => ({
-  requireRole: authMocks.requireRole,
+  requireAnyRole: authMocks.requireAnyRole,
   requireUser: authMocks.requireUser,
 }))
 
@@ -63,7 +63,7 @@ function makeManagerAuth(doc: DocRow | null) {
   const removeFn = vi.fn(async () => ({ error: null }))
   const documentsDelete = vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) }))
   const paymentsUpdate = vi.fn(() => ({ eq: vi.fn(async () => ({ error: null })) }))
-  authMocks.requireRole.mockResolvedValue({
+  authMocks.requireAnyRole.mockResolvedValue({
     ok: true,
     value: {
       supabase: {
@@ -97,7 +97,7 @@ const params = Promise.resolve({ id: DOC_ID })
 describe("GET /api/documents/[id]", () => {
   beforeEach(() => {
     authMocks.requireUser.mockReset()
-    authMocks.requireRole.mockReset()
+    authMocks.requireAnyRole.mockReset()
   })
 
   it("returns 401 when unauthenticated", async () => {
@@ -133,12 +133,12 @@ describe("GET /api/documents/[id]", () => {
 
 describe("DELETE /api/documents/[id]", () => {
   beforeEach(() => {
-    authMocks.requireRole.mockReset()
+    authMocks.requireAnyRole.mockReset()
     auditMocks.writeAuditLog.mockClear()
   })
 
-  it("returns 403 when role not manager+", async () => {
-    authMocks.requireRole.mockResolvedValue({
+  it("returns 403 when the caller has no recognised role", async () => {
+    authMocks.requireAnyRole.mockResolvedValue({
       ok: false,
       response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
     })

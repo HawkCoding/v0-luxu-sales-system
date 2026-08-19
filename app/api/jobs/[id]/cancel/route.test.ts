@@ -269,10 +269,10 @@ describe("POST /api/jobs/[id]/cancel", () => {
     expect(body.error).toMatch(/refundStatus is required/i)
   })
 
-  it("returns 403 when consultant tries to cancel another user's booking", async () => {
+  it("returns 200 when consultant cancels another user's booking (ownership scoping removed)", async () => {
     createSupabaseMock({ role: "consultant", bookingOwnerId: OTHER_USER_ID, assignedSalespersonId: null })
     const res = await POST(postJson({ outcomeReasonId: REASON_ID }), makeParams())
-    expect(res.status).toBe(403)
+    expect(res.status).toBe(200)
   })
 
   it("returns 200 when consultant cancels own booking (owner match)", async () => {

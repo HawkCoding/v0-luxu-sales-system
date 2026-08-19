@@ -8,6 +8,7 @@ import {
   normalizeTrainChildPriceRatio,
   parseTrainChildPriceRatio,
 } from "@/lib/suppliers/auto-child-price"
+import { SETTINGS_WRITE_ROLES } from "@/lib/permissions"
 
 const patchSchema = z.object({
   ratio: z.number().min(0).max(1),
@@ -44,7 +45,7 @@ async function getAuthenticatedContext() {
     ok: true as const,
     value: {
       supabase,
-      canEdit: profile.clearance_level === "admin",
+      canEdit: (SETTINGS_WRITE_ROLES as readonly string[]).includes(profile.clearance_level),
       userId: user.id,
       actorName:
         [profile.name, profile.surname].filter(Boolean).join(" ").trim() ||

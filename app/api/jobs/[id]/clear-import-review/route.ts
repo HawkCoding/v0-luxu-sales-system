@@ -1,8 +1,8 @@
-﻿import { requireRole } from "@/lib/api/auth"
+﻿import { requireAnyRole } from "@/lib/api/auth"
 import { jsonError, safeSupabaseError } from "@/lib/api/responses"
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const auth = await requireRole(["admin", "manager"])
+  const auth = await requireAnyRole()
   if (!auth.ok) return auth.response
 
   const { id } = await params

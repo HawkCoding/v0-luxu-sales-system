@@ -128,8 +128,8 @@ describe("POST /api/supplier-email-labels", () => {
     expect(response.status).toBe(401)
   })
 
-  it("returns 403 when user lacks role", async () => {
-    createSessionClientMock.mockResolvedValue(createSupabase({ role: "consultant" }))
+  it("returns 403 when user lacks a recognised role", async () => {
+    createSessionClientMock.mockResolvedValue(createSupabase({ role: "readonly" }))
     const response = await POST(
       new Request("http://localhost/api/supplier-email-labels", {
         method: "POST",
@@ -203,8 +203,8 @@ describe("DELETE /api/supplier-email-labels", () => {
     expect(response.status).toBe(401)
   })
 
-  it("returns 403 when user lacks role", async () => {
-    createSessionClientMock.mockResolvedValue(createSupabase({ role: "consultant" }))
+  it("returns 403 when user lacks a recognised role", async () => {
+    createSessionClientMock.mockResolvedValue(createSupabase({ role: "readonly" }))
     const response = await DELETE(
       new Request("http://localhost/api/supplier-email-labels", {
         method: "DELETE",

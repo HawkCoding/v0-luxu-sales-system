@@ -3,12 +3,12 @@ import { NextResponse } from "next/server"
 
 const authMocks = vi.hoisted(() => ({
   requireUser: vi.fn(),
-  requireRole: vi.fn(),
+  requireAnyRole: vi.fn(),
 }))
 
 vi.mock("@/lib/api/auth", () => ({
   requireUser: authMocks.requireUser,
-  requireRole: authMocks.requireRole,
+  requireAnyRole: authMocks.requireAnyRole,
 }))
 
 import { GET, PATCH } from "./route"
@@ -70,11 +70,11 @@ function buildAuth({ role = "manager" }: { role?: string } = {}) {
 describe("GET /api/templates", () => {
   beforeEach(() => {
     authMocks.requireUser.mockReset()
-    authMocks.requireRole.mockReset()
+    authMocks.requireAnyRole.mockReset()
   })
 
   it("returns 401 when unauthenticated", async () => {
-    authMocks.requireRole.mockResolvedValue({
+    authMocks.requireAnyRole.mockResolvedValue({
       ok: false,
       response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
     })
@@ -82,17 +82,17 @@ describe("GET /api/templates", () => {
     expect(res.status).toBe(401)
   })
 
-  // Subjects and bodies are internal copy — "view:templates" is admin+manager,
-  // so reading the list needs the same gate as editing it.
-  it("asks for the admin/manager gate rather than any signed-in user", async () => {
-    authMocks.requireRole.mockResolvedValue(buildAuth().context)
+  // "view:templates" is open to any active role now — GET only requires a
+  // recognised profile, not requireUser's lighter is_active-only check.
+  it("uses the any-role gate rather than requireUser", async () => {
+    authMocks.requireAnyRole.mockResolvedValue(buildAuth().context)
     await GET()
-    expect(authMocks.requireRole).toHaveBeenCalledWith(["admin", "manager"])
+    expect(authMocks.requireAnyRole).toHaveBeenCalledWith()
     expect(authMocks.requireUser).not.toHaveBeenCalled()
   })
 
   it("returns 403 when the role gate rejects", async () => {
-    authMocks.requireRole.mockResolvedValue({
+    authMocks.requireAnyRole.mockResolvedValue({
       ok: false,
       response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
     })
@@ -101,7 +101,7 @@ describe("GET /api/templates", () => {
   })
 
   it("returns the template list for a permitted role", async () => {
-    authMocks.requireRole.mockResolvedValue(buildAuth().context)
+    authMocks.requireAnyRole.mockResolvedValue(buildAuth().context)
     const res = await GET()
     expect(res.status).toBe(200)
     const body = await res.json()
@@ -113,11 +113,11 @@ describe("GET /api/templates", () => {
 describe("PATCH /api/templates", () => {
   beforeEach(() => {
     authMocks.requireUser.mockReset()
-    authMocks.requireRole.mockReset()
+    authMocks.requireAnyRole.mockReset()
   })
 
   it("returns 401 when unauthenticated", async () => {
-    authMocks.requireRole.mockResolvedValue({
+    authMocks.requireAnyRole.mockResolvedValue({
       ok: false,
       response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
     })
@@ -131,7 +131,7 @@ describe("PATCH /api/templates", () => {
   })
 
   it("returns 403 when role is not allowed", async () => {
-    authMocks.requireRole.mockResolvedValue({
+    authMocks.requireAnyRole.mockResolvedValue({
       ok: false,
       response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
     })
@@ -145,7 +145,7 @@ describe("PATCH /api/templates", () => {
   })
 
   it("returns 400 on invalid body", async () => {
-    authMocks.requireRole.mockResolvedValue(buildAuth().context)
+    authMocks.requireAnyRole.mockResolvedValue(buildAuth().context)
     const req = new Request("http://localhost/api/templates", {
       method: "PATCH",
       body: JSON.stringify({}),
@@ -157,7 +157,7 @@ describe("PATCH /api/templates", () => {
 
   it("bumps the version and writes an audit log on success", async () => {
     const built = buildAuth()
-    authMocks.requireRole.mockResolvedValue(built.context)
+    authMocks.requireAnyRole.mockResolvedValue(built.context)
     const req = new Request("http://localhost/api/templates", {
       method: "PATCH",
       body: JSON.stringify({ id: TEMPLATE_ID, subject: "Subject" }),
@@ -172,7 +172,7 @@ describe("PATCH /api/templates", () => {
 
   it("does not bump the version for a rename-only or reorder-only update", async () => {
     const built = buildAuth()
-    authMocks.requireRole.mockResolvedValue(built.context)
+    authMocks.requireAnyRole.mockResolvedValue(built.context)
     const req = new Request("http://localhost/api/templates", {
       method: "PATCH",
       body: JSON.stringify({ id: TEMPLATE_ID, name: "Quote Sent", sortOrder: 3 }),

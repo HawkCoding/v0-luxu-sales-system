@@ -2,8 +2,9 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
 import { mapLocation } from "@/lib/suppliers"
+import { ALL_ROLES } from "@/lib/permissions"
 
-const allowedRoles = new Set(["admin", "manager"])
+const allowedRoles = new Set<string>(ALL_ROLES)
 
 const createLocationSchema = z.object({
   name: z.string().trim().min(2, "Location name must be at least 2 characters").max(200),

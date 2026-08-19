@@ -8,8 +8,7 @@ import {
 import { createSessionClient } from "@/lib/supabase/server"
 import { getDepositRefundable } from "@/lib/settings-access"
 import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
-
-const allowedRoles = new Set(["admin", "manager"])
+import { SETTINGS_WRITE_ROLES } from "@/lib/permissions"
 
 /** Read by app/api/jobs/[id]/cancel to decide whether a cancelled booking's paid deposit is
  * refunded or kept as the cancellation fee (lib/settings-access.ts, getDepositRefundable). */
@@ -66,7 +65,7 @@ async function getAuthenticatedContext() {
       supabase,
       userId: user.id,
       actorName,
-      canEdit: allowedRoles.has(profile.clearance_level),
+      canEdit: (SETTINGS_WRITE_ROLES as readonly string[]).includes(profile.clearance_level),
     },
   }
 }

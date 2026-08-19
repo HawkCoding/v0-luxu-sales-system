@@ -1,7 +1,8 @@
+import { requireAnyRole } from "@/lib/api/auth"
 import { safeSupabaseError } from "@/lib/api/responses"
 import { NextResponse } from "next/server"
 import { z } from "zod"
-import { getQuoteFollowUpSettings, requireManagerSettingsAccess } from "@/lib/settings-access"
+import { getQuoteFollowUpSettings, requireSettingsWrite } from "@/lib/settings-access"
 import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
 
 // Follow-up email wording is edited on the Templates page (templates table,
@@ -23,7 +24,7 @@ const patchSchema = z.object({
 })
 
 export async function GET() {
-  const access = await requireManagerSettingsAccess()
+  const access = await requireAnyRole()
   if (!access.ok) return access.response
 
   // Read through the same helper the worker uses, so the card can never claim "enabled"
@@ -34,7 +35,7 @@ export async function GET() {
 }
 
 export async function PATCH(req: Request) {
-  const access = await requireManagerSettingsAccess()
+  const access = await requireSettingsWrite()
   if (!access.ok) return access.response
 
   const { supabase, userId, actorName } = access.value

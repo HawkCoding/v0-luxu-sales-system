@@ -2,6 +2,7 @@ import { z } from "zod"
 import { requireRole, requireUser } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
+import { SETTINGS_WRITE_ROLES } from "@/lib/permissions"
 
 // app_logo_url is read-only here — it's written by /api/settings/app-logo,
 // which owns validation and storage for the upload. Included in GET so the
@@ -41,7 +42,7 @@ const patchSchema = z
   })
 
 export async function PATCH(req: Request) {
-  const auth = await requireRole(["admin"])
+  const auth = await requireRole(SETTINGS_WRITE_ROLES)
   if (!auth.ok) return auth.response
 
   let raw: unknown

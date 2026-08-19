@@ -11,8 +11,7 @@ import {
 } from "@/lib/suppliers/hotel-default-times"
 import { createSessionClient } from "@/lib/supabase/server"
 import { settingAuditMeta, writeAuditLog } from "@/lib/audit-write"
-
-const allowedRoles = new Set(["admin", "manager"])
+import { SETTINGS_WRITE_ROLES } from "@/lib/permissions"
 
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/
 
@@ -60,7 +59,7 @@ async function getAuthenticatedContext() {
       supabase,
       userId: user.id,
       actorName,
-      canEdit: allowedRoles.has(profile.clearance_level),
+      canEdit: (SETTINGS_WRITE_ROLES as readonly string[]).includes(profile.clearance_level),
     },
   }
 }

@@ -181,7 +181,7 @@ describe("POST /api/suppliers", () => {
     expect(response.status).toBe(401)
   })
 
-  it("returns 403 when user lacks write role", async () => {
+  it("returns 403 when user lacks a recognised role", async () => {
     helperMocks.requireAuthenticatedUser.mockResolvedValue({
       supabase: {
         from: vi.fn((table: string) => {
@@ -190,7 +190,8 @@ describe("POST /api/suppliers", () => {
             select: vi.fn(() => ({
               eq: vi.fn(() => ({
                 single: vi.fn(async () => ({
-                  data: { clearance_level: "consultant" },
+                  // `readonly` is the retired clearance level — no role grants it write access.
+                  data: { clearance_level: "readonly" },
                   error: null,
                 })),
               })),

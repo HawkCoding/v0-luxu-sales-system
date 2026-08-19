@@ -91,7 +91,7 @@ const VOUCHER_PLACEHOLDERS = [
 export default function TemplatesPage() {
   const { data: templates, isLoading, mutate } = useTemplates()
   const { data: voucherTemplate, isLoading: voucherLoading } = useVoucherTemplate()
-  const { can, role } = useRole()
+  const { can } = useRole()
   const [editing, setEditing] = useState<Template | null>(null)
   const [editSubject, setEditSubject] = useState("")
   const [editBody, setEditBody] = useState("")
@@ -401,7 +401,7 @@ export default function TemplatesPage() {
               </p>
             </CardHeader>
             <CardContent className="pb-6">
-              <EmailAttachmentLibraryEditor canEdit={role === "admin" || role === "manager"} />
+              <EmailAttachmentLibraryEditor canEdit={can("edit:settings")} />
             </CardContent>
           </Card>
 
@@ -499,7 +499,7 @@ export default function TemplatesPage() {
               </p>
             </CardHeader>
             <CardContent className="pb-6">
-              <BrandBlockSettingsEditor canEdit={role === "admin"} />
+              <BrandBlockSettingsEditor canEdit={can("edit:settings")} />
             </CardContent>
           </Card>
         </TabsContent>

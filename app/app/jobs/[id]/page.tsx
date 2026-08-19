@@ -172,7 +172,7 @@ export default function JobDetailPage() {
   const searchParams = useSearchParams()
   const { id } = useParams<{ id: string }>()
   const { data, isLoading, error, mutate } = useJobDetail(id)
-  const { can, role } = useRole()
+  const { can } = useRole()
   const { user: authUser } = useAuth()
   const { others, setEditing } = useRecordPresence("job", id)
   const hasLoadError = Boolean(error)
@@ -180,7 +180,7 @@ export default function JobDetailPage() {
   const [changeCustomerOpen, setChangeCustomerOpen] = useState(false)
   const [transitionModalOpen, setTransitionModalOpen] = useState(false)
   const [transitionFailures, setTransitionFailures] = useState<GateFailure[]>([])
-  const [transitionIsManager, setTransitionIsManager] = useState(false)
+  const [transitionCanOverride, setTransitionCanOverride] = useState(false)
   const [transitionSubmitting, setTransitionSubmitting] = useState(false)
   const [depositInvoiceOpen, setDepositInvoiceOpen] = useState(false)
   const [depositInvoiceAutoPreview, setDepositInvoiceAutoPreview] = useState(false)
@@ -358,7 +358,7 @@ export default function JobDetailPage() {
     forwardTargetIsDepositPaid && hasAnyPayment && invoices.length === 0 && !needsEmailReview
   const assignedSalespersonName = job.assignedSalespersonName ?? "Unassigned"
   const assignedSalespersonId = (job as { assignedSalespersonId?: string | null }).assignedSalespersonId ?? null
-  const canReassign = role === "manager" || role === "admin"
+  const canReassign = can("edit:jobs")
   // Self-serve owner controls for consultants: take an unassigned job, release one they own.
   const isOwnedByMe = Boolean(assignedSalespersonId) && assignedSalespersonId === authUser?.id
   const canTake = can("edit:jobs") && !assignedSalespersonId
@@ -495,7 +495,7 @@ export default function JobDetailPage() {
   const resetPendingTransition = () => {
     setTransitionModalOpen(false)
     setTransitionFailures([])
-    setTransitionIsManager(false)
+    setTransitionCanOverride(false)
     setPendingStage(null)
     setDepositInvoiceAutoPreview(false)
     setVoucherAutoPreview(false)
@@ -532,7 +532,7 @@ export default function JobDetailPage() {
         if (canGenerateDepositInvoice) {
           setPendingStage(targetStage)
           setTransitionFailures(stageGatePayload.failures)
-          setTransitionIsManager(stageGatePayload.isManager)
+          setTransitionCanOverride(stageGatePayload.canOverride)
           setDepositInvoiceOpen(true)
           return
         }
@@ -547,7 +547,7 @@ export default function JobDetailPage() {
         if (canGenerateVoucher) {
           setPendingStage(targetStage)
           setTransitionFailures(stageGatePayload.failures)
-          setTransitionIsManager(stageGatePayload.isManager)
+          setTransitionCanOverride(stageGatePayload.canOverride)
           setVoucherOpen(true)
           return
         }
@@ -559,7 +559,7 @@ export default function JobDetailPage() {
         if (pendingSendAction === "deposit_invoice") {
           setPendingStage(targetStage)
           setTransitionFailures(stageGatePayload.failures)
-          setTransitionIsManager(stageGatePayload.isManager)
+          setTransitionCanOverride(stageGatePayload.canOverride)
           setDepositInvoiceAutoPreview(true)
           setDepositInvoiceOpen(true)
           return
@@ -567,21 +567,21 @@ export default function JobDetailPage() {
         if (pendingSendAction === "payment_confirmation" && payments.length > 0) {
           setPendingStage(targetStage)
           setTransitionFailures(stageGatePayload.failures)
-          setTransitionIsManager(stageGatePayload.isManager)
+          setTransitionCanOverride(stageGatePayload.canOverride)
           setPaymentConfirmationOpen(true)
           return
         }
         if (pendingSendAction === "voucher") {
           setPendingStage(targetStage)
           setTransitionFailures(stageGatePayload.failures)
-          setTransitionIsManager(stageGatePayload.isManager)
+          setTransitionCanOverride(stageGatePayload.canOverride)
           setVoucherAutoPreview(true)
           setVoucherOpen(true)
           return
         }
 
         setTransitionFailures(stageGatePayload.failures)
-        setTransitionIsManager(stageGatePayload.isManager)
+        setTransitionCanOverride(stageGatePayload.canOverride)
         setPendingStage(targetStage)
         setTransitionModalOpen(true)
         return
@@ -1194,7 +1194,7 @@ export default function JobDetailPage() {
         jobNumber={job.jobNumber}
         targetStage={pendingStage}
         failures={transitionFailures}
-        isManager={transitionIsManager}
+        canOverride={transitionCanOverride}
         submitting={transitionSubmitting}
         onCancel={resetPendingTransition}
         onProceed={async (manualConfirmations) => {

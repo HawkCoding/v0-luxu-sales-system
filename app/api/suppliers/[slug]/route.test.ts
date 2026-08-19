@@ -11,7 +11,7 @@ const helperMocks = vi.hoisted(() => ({
 }))
 
 vi.mock("../helpers", () => ({
-  allowedRoles: new Set(["admin", "manager"]),
+  allowedRoles: new Set(["admin", "manager", "consultant"]),
   deleteInChunks: helperMocks.deleteInChunks,
   checkDeletionDependencies: helperMocks.checkDeletionDependencies,
   loadSupplierDetail: helperMocks.loadSupplierDetail,
@@ -232,8 +232,9 @@ describe("PATCH /api/suppliers/[slug]", () => {
     helperMocks.makeUuid.mockReturnValue("00000000-0000-4000-8000-000000000099")
   })
 
-  it("returns 403 for consultant role (supplier categories are manager/admin only)", async () => {
+  it("does not 403 a consultant (supplier edits are open to every active role)", async () => {
     mockAuth()
+    mockSupplierDetail()
     helperMocks.supabaseFrom.mockImplementation((table: string) => {
       if (table === "profiles") return profileQuery("consultant")
       if (table === "supplier_rate_adjustments") {
@@ -246,12 +247,26 @@ describe("PATCH /api/suppliers/[slug]", () => {
       new Request("http://localhost/api/suppliers/test", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "X", kind: "hotel_property", email: "", phone: "", website: "", location: "", notes: "", active: true, emails: [], suiteTypes: [] }),
+        body: JSON.stringify({
+          name: "Supplier Updated",
+          kind: "hotel_property",
+          email: "ops@example.com",
+          phone: "",
+          website: "",
+          location: "",
+          notes: "",
+          active: true,
+          emails: [{ id: EMAIL_ID, email: "ops@example.com", label: "General" }],
+          suiteTypes: [{ id: SUITE_TYPE_ID, name: "Suite", active: true }],
+          expectedUpdatedAt: "2026-01-01T00:00:00.000Z",
+        }),
       }),
       { params: Promise.resolve({ slug: "test" }) },
     )
 
-    expect(response.status).toBe(403)
+    // The role gate no longer blocks consultants; the concurrency check still
+    // fires because expectedUpdatedAt doesn't match supplierRow.updated_at.
+    expect(response.status).toBe(409)
   })
 
   it("returns 409 on optimistic concurrency mismatch", async () => {

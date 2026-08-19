@@ -1,13 +1,13 @@
 import { safeSupabaseError } from "@/lib/api/responses"
 import { NextResponse } from "next/server"
-import { requireManagerSettingsAccess } from "@/lib/settings-access"
+import { requireAnyRole } from "@/lib/api/auth"
 
 interface RouteParams {
   params: Promise<{ id: string }>
 }
 
 export async function POST(_req: Request, { params }: RouteParams) {
-  const auth = await requireManagerSettingsAccess()
+  const auth = await requireAnyRole()
   if (!auth.ok) return auth.response
 
   const { id } = await params
@@ -31,7 +31,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
     .from("error_logs")
     .update({
       resolved: true,
-      resolved_by: auth.value.userId,
+      resolved_by: auth.value.user.id,
       resolved_at: new Date().toISOString(),
     })
     .eq("id", id)

@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
-import { extractRoleFromJwt } from "@/lib/role-utils"
 import { createSessionClient } from "@/lib/supabase/server"
 import type { PipelineStage } from "@/lib/types"
 import { validateTransition } from "@/lib/pipeline/validate-transition"
@@ -67,7 +66,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (bookingError || !booking) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
   const [
-    { data: profile },
     { data: customer },
     { data: quotes },
     { data: documents },
@@ -75,7 +73,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     { data: correspondences },
     { data: payments },
   ] = await Promise.all([
-    supabase.from("profiles").select("clearance_level").eq("user_id", user.id).maybeSingle(),
     supabase
       .from("customers")
       .select("first_name, last_name, email, phone, country")
@@ -92,8 +89,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     supabase.from("payments").select("amount").eq("booking_id", id),
   ])
 
-  const role = extractRoleFromJwt(user) ?? profile?.clearance_level ?? null
-  const isManager = role === "manager" || role === "admin"
+  // Any authenticated role may override a blocked stage transition.
+  const canOverride = true
 
   // Fails open: the generate/send readiness check still blocks a voucher with missing references,
   // so a lookup hiccup here costs a clearer message, never a wrongly-permitted move.
@@ -135,5 +132,5 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   // `create_invoice_25pct` shortcut. Nothing consumed it, and there is no
   // auto-creatable invoice any more — the gate sends the user to the real
   // deposit-invoice dialog instead.
-  return NextResponse.json({ failures, isManager })
+  return NextResponse.json({ failures, canOverride })
 }

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { ALL_ROLES } from "@/lib/permissions"
 import { createSessionClient } from "@/lib/supabase/server"
 import type { Role } from "@/lib/types"
 
@@ -73,4 +74,9 @@ export async function requireRole(roles: ReadonlyArray<Role | string>): Promise<
   }
 
   return auth
+}
+
+/** Any active profile with a recognised role. The default API gate. */
+export async function requireAnyRole(): Promise<ApiAuthResult> {
+  return requireRole(ALL_ROLES)
 }

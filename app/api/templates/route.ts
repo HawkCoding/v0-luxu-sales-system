@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { requireRole } from "@/lib/api/auth"
+import { requireAnyRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { humanizeTemplateKey } from "@/lib/templates/humanize-key"
 
@@ -27,7 +27,7 @@ const templatePatchSchema = z
 // Mirrors "view:templates" in lib/role-context.tsx — template subjects and
 // bodies are internal copy, not consultant- or readonly-visible.
 export async function GET() {
-  const auth = await requireRole(["admin", "manager"])
+  const auth = await requireAnyRole()
   if (!auth.ok) return auth.response
 
   const { data: templates, error } = await auth.value.supabase
@@ -75,7 +75,7 @@ function slugifyKey(name: string): string {
 }
 
 export async function POST(req: Request) {
-  const auth = await requireRole(["admin", "manager"])
+  const auth = await requireAnyRole()
   if (!auth.ok) return auth.response
 
   let raw: unknown
@@ -155,7 +155,7 @@ export async function POST(req: Request) {
 }
 
 export async function PATCH(req: Request) {
-  const auth = await requireRole(["admin", "manager"])
+  const auth = await requireAnyRole()
   if (!auth.ok) return auth.response
 
   let raw: unknown

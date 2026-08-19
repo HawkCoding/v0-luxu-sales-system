@@ -2,14 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { NextResponse } from "next/server"
 
 const settingsAccessMocks = vi.hoisted(() => ({
-  requireAdminSettingsAccess: vi.fn(),
+  requireSettingsWrite: vi.fn(),
 }))
 
 vi.mock("@/lib/settings-access", async () => {
   const actual = await vi.importActual<typeof import("@/lib/settings-access")>("@/lib/settings-access")
   return {
     ...actual,
-    requireAdminSettingsAccess: settingsAccessMocks.requireAdminSettingsAccess,
+    requireSettingsWrite: settingsAccessMocks.requireSettingsWrite,
   }
 })
 
@@ -81,7 +81,7 @@ function makeAuth({
     }),
   }
 
-  settingsAccessMocks.requireAdminSettingsAccess.mockResolvedValue({
+  settingsAccessMocks.requireSettingsWrite.mockResolvedValue({
     ok: true,
     value: {
       supabase,
@@ -96,13 +96,13 @@ function makeAuth({
 
 describe("POST /api/settings/brand-logo", () => {
   beforeEach(() => {
-    settingsAccessMocks.requireAdminSettingsAccess.mockReset()
+    settingsAccessMocks.requireSettingsWrite.mockReset()
     auditMocks.writeAuditLog.mockReset()
     auditMocks.writeAuditLog.mockResolvedValue({ error: null })
   })
 
   it("returns 401/403 passthrough when access is denied", async () => {
-    settingsAccessMocks.requireAdminSettingsAccess.mockResolvedValue({
+    settingsAccessMocks.requireSettingsWrite.mockResolvedValue({
       ok: false,
       response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
     })

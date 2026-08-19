@@ -2,9 +2,10 @@ import { NextResponse } from "next/server"
 import { createSessionClient } from "@/lib/supabase/server"
 import { buildSupplierSlugBase } from "@/lib/suppliers"
 import { SUPPLIER_KIND_LABELS, type SupplierKind } from "@/lib/types"
+import { ALL_ROLES } from "@/lib/permissions"
 import type { Database } from "@/lib/supabase/types"
 
-export const allowedRoles = new Set(["admin", "manager"])
+export const allowedRoles = new Set<string>(ALL_ROLES)
 
 export type SessionClient = Awaited<ReturnType<typeof createSessionClient>>
 

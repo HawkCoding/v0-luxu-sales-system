@@ -5,8 +5,9 @@ import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
 import { createSessionClient } from "@/lib/supabase/server"
 import { allocateJobNumberBlock } from "@/lib/job-numbering"
 import { importRowSchema, payloadSchema } from "./schemas"
+import { ALL_ROLES } from "@/lib/permissions"
 
-const allowedRoles = new Set(["admin", "manager"])
+const allowedRoles = new Set<string>(ALL_ROLES)
 const EMAIL_LOOKUP_BATCH_SIZE = 100
 const LOOKUP_BY_CUSTOMER_BATCH_SIZE = 100
 

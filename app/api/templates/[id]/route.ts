@@ -1,5 +1,5 @@
 import { z } from "zod"
-import { requireRole } from "@/lib/api/auth"
+import { requireAnyRole } from "@/lib/api/auth"
 import { jsonError, safeSupabaseError } from "@/lib/api/responses"
 import { createServiceClient } from "@/lib/supabase/server"
 
@@ -15,7 +15,7 @@ const idSchema = z.string().uuid()
 // use the service client intentionally and enforce the system-template guard
 // here in code.
 export async function DELETE(_req: Request, { params }: RouteParams) {
-  const auth = await requireRole(["admin", "manager"])
+  const auth = await requireAnyRole()
   if (!auth.ok) return auth.response
 
   const { id } = await params

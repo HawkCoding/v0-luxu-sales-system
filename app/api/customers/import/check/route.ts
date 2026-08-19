@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
+import { ALL_ROLES } from "@/lib/permissions"
 
-const allowedRoles = new Set(["admin", "manager"])
+const allowedRoles = new Set<string>(ALL_ROLES)
 const PRECHECK_MAX_EMAILS = 10000
 const requestSchema = z.object({
   emails: z.array(z.string().trim().toLowerCase().email().max(255)).min(1).max(PRECHECK_MAX_EMAILS),

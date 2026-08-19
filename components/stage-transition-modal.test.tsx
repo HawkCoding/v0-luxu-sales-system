@@ -44,7 +44,7 @@ function renderModal(failures: GateFailure[]) {
       jobNumber="LTT-2026-0025"
       targetStage="deposit_paid"
       failures={failures}
-      isManager={false}
+      canOverride={false}
       submitting={false}
       onCancel={() => {}}
       onProceed={noop}

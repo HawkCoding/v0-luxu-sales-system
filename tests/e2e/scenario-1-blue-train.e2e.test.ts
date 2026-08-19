@@ -9,6 +9,9 @@ const authMocks = vi.hoisted(() => ({ requireRole: vi.fn() }))
 
 vi.mock("@/lib/api/auth", () => ({
   requireRole: authMocks.requireRole,
+  // Same mock fn as requireRole: any route that switched to the any-role gate
+  // (e.g. clear-import-review) resolves through the same mockAuth() setup.
+  requireAnyRole: authMocks.requireRole,
 }))
 
 import { POST as clearImportReview } from "@/app/api/jobs/[id]/clear-import-review/route"

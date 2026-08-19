@@ -41,8 +41,8 @@ async function errorMessage(res: Response, fallback: string): Promise<string> {
 }
 
 export default function OutcomeReasonsPage() {
-  const { role } = useRole()
-  const isManager = role === "manager" || role === "admin"
+  const { can } = useRole()
+  const isManager = can("edit:settings")
 
   const [reasons, setReasons] = useState<OutcomeReason[]>([])
   const [loading, setLoading] = useState(true)

@@ -4,11 +4,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { NextResponse } from "next/server"
 
 const authMocks = vi.hoisted(() => ({
-  requireRole: vi.fn(),
+  requireAnyRole: vi.fn(),
 }))
 
 vi.mock("@/lib/api/auth", () => ({
-  requireRole: authMocks.requireRole,
+  requireAnyRole: authMocks.requireAnyRole,
 }))
 
 import { GET } from "./route"
@@ -38,7 +38,7 @@ function makeSupabase() {
 }
 
 function mockAuthOk() {
-  authMocks.requireRole.mockResolvedValue({
+  authMocks.requireAnyRole.mockResolvedValue({
     ok: true,
     value: { supabase: makeSupabase() },
   })
@@ -52,11 +52,11 @@ const req = new Request("http://localhost/api/pdf-preview/voucher")
 
 describe("GET /api/pdf-preview/[type]", () => {
   beforeEach(() => {
-    authMocks.requireRole.mockReset()
+    authMocks.requireAnyRole.mockReset()
   })
 
   it("passes through 401 when unauthenticated", async () => {
-    authMocks.requireRole.mockResolvedValue({
+    authMocks.requireAnyRole.mockResolvedValue({
       ok: false,
       response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
     })

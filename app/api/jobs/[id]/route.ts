@@ -24,7 +24,6 @@ import { mapPostgrestError } from "@/lib/api/responses"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { buildSupplierRouteSchedules } from "@/lib/routes/route-schedule"
 import { firstRecord } from "@/lib/utils"
-import { CONSULTANTS } from "@/lib/types"
 import type { PipelineStage } from "@/lib/types"
 import { extractRoleFromJwt } from "@/lib/role-utils"
 import { applyTransition, StaleTransitionError } from "@/lib/pipeline/apply-transition"
@@ -663,17 +662,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
 
   if (body.resolveEmailImportReview === true) {
-    const { data: actorProfile } = await supabase
-      .from("profiles")
-      .select("clearance_level")
-      .eq("user_id", user.id)
-      .maybeSingle()
-
-    const role = extractRoleFromJwt(user) ?? actorProfile?.clearance_level ?? null
-    if (role !== "manager" && role !== "admin") {
-      return NextResponse.json({ error: "Manager access required to clear import review" }, { status: 403 })
-    }
-
     updates.email_import_needs_review = false
     updates.email_import_review_resolved_at = new Date().toISOString()
     updates.email_import_review_resolved_by = user?.id ?? null
@@ -720,8 +708,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
     const profileName = [profile?.name, profile?.surname].filter(Boolean).join(" ").trim()
     const actorName = profileName || user.email || "System"
-    const role = extractRoleFromJwt(user) ?? profile?.clearance_level ?? null
-    const isManager = role === "manager" || role === "admin"
+    // Any authenticated role may override a blocked stage transition.
+    const canOverride = true
     const overrideReason = body.overrideReason?.trim() ?? ""
     const reopenReason = (body.reopenReason ?? body.closedReopenReason)?.trim() ?? ""
     const lostContext = { ...body.lostContext }
@@ -790,15 +778,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     })
 
     if (body.override === true) {
-      if (!isManager) {
-        return NextResponse.json({ error: "Manager access required for override" }, { status: 403 })
-      }
       if (!overrideReason) {
         return NextResponse.json({ error: "Override reason is required" }, { status: 400 })
       }
     } else if (failures.length > 0) {
       return NextResponse.json(
-        { error: "Stage transition blocked", details: { failures, isManager } },
+        { error: "Stage transition blocked", details: { failures, canOverride } },
         { status: 400 },
       )
     }
@@ -937,27 +922,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       .select("name, surname, email, clearance_level")
       .eq("user_id", user.id)
       .maybeSingle()
-
-    const role = extractRoleFromJwt(user) ?? actorProfile?.clearance_level ?? null
-    const isManagerOrAdmin = role === "manager" || role === "admin"
-    const canSelfAssign = isManagerOrAdmin || role === "consultant"
-
-    // Self-assign + manager override: a salesperson may take an unassigned job or
-    // release one they already own; assigning to anyone else, or taking a job
-    // owned by another, requires a manager/admin. Read-only roles cannot assign.
-    const currentOwner = booking.assigned_salesperson_id ?? null
-    const target = body.assignedSalespersonId ?? null
-    const isSelfAssign =
-      canSelfAssign &&
-      ((target === user.id && (currentOwner === null || currentOwner === user.id)) ||
-        (target === null && currentOwner === user.id))
-
-    if (!isManagerOrAdmin && !isSelfAssign) {
-      return NextResponse.json(
-        { error: "Manager access required to assign this job to another salesperson" },
-        { status: 403 },
-      )
-    }
 
     if (body.assignedSalespersonId) {
       const { data: targetProfile } = await supabase
@@ -1102,19 +1066,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
 
   if (body.consultant !== undefined || body.ownerUser !== undefined) {
-    const role = extractRoleFromJwt(user) ?? patchActorRole
-    const isManagerOrAdmin = role === "manager" || role === "admin"
-    const isConsultant = role === "consultant"
-    if (!isManagerOrAdmin && !isConsultant) {
-      return NextResponse.json({ error: "Insufficient permissions to change the consultant" }, { status: 403 })
-    }
     const incoming = body.consultant ?? body.ownerUser ?? null
-    if (isConsultant && incoming !== null && incoming !== "") {
-      const validKeys: Set<string> = new Set(CONSULTANTS.map((c) => c.key))
-      if (!validKeys.has(incoming)) {
-        return NextResponse.json({ error: "Invalid consultant key" }, { status: 400 })
-      }
-    }
     // Both fields map to the same DB column; consultant takes precedence if both are sent.
     updates.consultant = incoming || null
   }
@@ -1203,6 +1155,17 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   } = await supabase.auth.getUser()
 
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+
+  const { data: deleteActorProfile } = await supabase
+    .from("profiles")
+    .select("clearance_level")
+    .eq("user_id", user.id)
+    .maybeSingle()
+
+  const deleteActorRole = extractRoleFromJwt(user) ?? deleteActorProfile?.clearance_level ?? null
+  if (!["admin", "manager", "consultant"].includes(deleteActorRole ?? "")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
 
   const { data: booking } = await supabase
     .from("bookings")
