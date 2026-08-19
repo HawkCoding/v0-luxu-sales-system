@@ -4,7 +4,7 @@ import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { depositPercentageToRate, getDefaultDepositPercentage } from "@/lib/pipeline/constants"
 
 const BOOKING_COLUMNS =
-  "id, booking_number, customer_invoice_number, customer_id, stage, consultant, purpose, source, departure_date, duration_nights, trip_end_date, created_at, updated_at, route:routes(name)"
+  "id, booking_number, customer_invoice_number, customer_id, stage, consultant, assigned_salesperson_id, purpose, source, departure_date, duration_nights, trip_end_date, created_at, updated_at, route:routes(name)"
 
 function addDaysToDateString(value: string, days: number): string {
   const [year = "1970", month = "1", day = "1"] = value.split("-")
@@ -27,6 +27,7 @@ export async function GET() {
     { data: payments, error: paymentsError },
     { data: quotes, error: quotesError },
     { data: thankYous, error: thankYousError },
+    { data: profiles, error: profilesError },
   ] = await Promise.all([
     supabase
       .from("bookings")
@@ -39,11 +40,19 @@ export async function GET() {
       .from("correspondences")
       .select("booking_id, scheduled_at, created_at")
       .eq("kind", "thank_you"),
+    supabase.from("profiles").select("user_id, name, surname"),
   ])
 
   const firstError =
-    bookingsError ?? customersError ?? paymentsError ?? quotesError ?? thankYousError
+    bookingsError ?? customersError ?? paymentsError ?? quotesError ?? thankYousError ?? profilesError
   if (firstError) return safeSupabaseError("pipeline:load", firstError)
+
+  const profileByUserId = new Map(
+    (profiles ?? []).map((profile) => [
+      profile.user_id,
+      [profile.name, profile.surname].filter(Boolean).join(" ").trim() || null,
+    ]),
+  )
 
   const enriched = (bookings ?? []).map((booking) => {
     const customer = (customers ?? []).find((c) => c.id === booking.customer_id)
@@ -74,6 +83,10 @@ export async function GET() {
       customerId: booking.customer_id,
       stage: booking.stage,
       consultant: booking.consultant,
+      assignedSalespersonId: booking.assigned_salesperson_id,
+      assignedSalespersonName: booking.assigned_salesperson_id
+        ? profileByUserId.get(booking.assigned_salesperson_id) ?? null
+        : null,
       purpose: booking.purpose,
       source: booking.source,
       customerName: customer

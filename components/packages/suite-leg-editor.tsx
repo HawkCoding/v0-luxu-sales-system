@@ -29,7 +29,8 @@ import {
 import { cn } from "@/lib/utils"
 import { formatDisplayDate } from "@/lib/date-format"
 import { distributePassengerTotals, type PassengerTotals } from "@/lib/packages/passenger-totals"
-import { resolveHotelStayDates } from "@/lib/packages/hotel-dates"
+import { addDays, resolveHotelStayDates } from "@/lib/packages/hotel-dates"
+import { resolveTransferPickupDate } from "@/lib/packages/transfer-dates"
 import { AnchorDateSection } from "@/components/packages/anchor-date-section"
 import {
   createDraftUnit,
@@ -38,8 +39,9 @@ import {
   type HotelAnchorContext,
   type SuiteLegState,
   type SuiteUnitState,
+  type TransferAnchorContext,
 } from "@/lib/packages/apply-dialog-state"
-import { resolveDirectedRouteName } from "@/lib/routes/route-name"
+import { resolveDirectedEndpointCodes, resolveDirectedRouteName } from "@/lib/routes/route-name"
 import { findRateCardCandidates, hasAnyRateCardFor, selectRateCard } from "@/lib/rate-cards/resolve"
 import { RateTypeSelect } from "@/components/rate-type-select"
 import { CurrencySelect } from "@/components/currency-select"
@@ -341,6 +343,168 @@ function RoomPriceOverride({
   )
 }
 
+interface TourPriceOverrideProps {
+  unit: SuiteUnitState
+  index: number
+  /** The card this unit would otherwise price off, or null when none covers it. */
+  baseRateCard: SupplierRateCard | null
+  /** Used for the override's currency when no rate card covers the unit. */
+  fallbackCurrency: string
+  quoteCurrency: string
+  formatInQuoteCurrency: (amount: number, from: string) => string | null
+  onChange: (next: number | null) => void
+}
+
+/**
+ * A tour operator sometimes quotes a flat figure for a booking that doesn't decompose cleanly
+ * into adult/child/infant rates — a negotiated group rate, a one-off deal. Rather than force that
+ * back into per-passenger fares, the consultant types one flat amount that replaces the whole
+ * tour unit's rate-card-computed total. Unlike a hotel room, there's no per-night multiplication
+ * here — the typed figure is exactly what the line charges.
+ *
+ * The typed figure is deliberately not validated against the rate card: the card is shown beside
+ * it so a mistake is visible, but the number that goes out is the one that was typed. It applies
+ * to this booking only and is never read back as a rate for a later one.
+ */
+function TourPriceOverride({
+  unit,
+  index,
+  baseRateCard,
+  fallbackCurrency,
+  quoteCurrency,
+  formatInQuoteCurrency,
+  onChange,
+}: TourPriceOverrideProps) {
+  const currency = baseRateCard?.currency ?? fallbackCurrency
+  // 0 is a real price (a comped tour), so this is a null check, not a truthiness one.
+  const overridden = unit.manualTourPrice !== null && unit.manualTourPrice !== undefined
+  // Derived rather than synced: a leg loaded with a saved override opens expanded on first paint,
+  // and reverting collapses it again, so the two can never drift apart.
+  const [requested, setRequested] = useState(false)
+  const expanded = requested || overridden
+
+  const price = unit.manualTourPrice ?? 0
+  const convertedPrice = formatInQuoteCurrency(price, currency)
+
+  if (!expanded) {
+    return (
+      <div className="space-y-1.5 border-t pt-3 md:col-span-2 xl:col-span-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs text-muted-foreground">
+            {baseRateCard ? (
+              <>
+                Rate card{" "}
+                <span className="font-medium tabular-nums text-foreground">
+                  {formatMoney(baseRateCard.pricePerPerson, baseRateCard.currency)}
+                </span>{" "}
+                per adult
+              </>
+            ) : (
+              "No rate card price for this tour yet"
+            )}
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="link"
+            className="h-auto p-0 text-xs"
+            onClick={() => setRequested(true)}
+          >
+            Override price
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3 rounded-md border bg-muted/40 p-3 md:col-span-2 xl:col-span-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <Label>Price override</Label>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                aria-label="About price overrides"
+                className="text-muted-foreground transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 rounded-sm"
+              >
+                <Info className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent className="max-w-64">
+              The client sees only the amount. This price applies to this booking alone and is
+              never saved as a rate.
+              {unit.manualTourPriceSetAt ? ` Last set ${formatDisplayDate(unit.manualTourPriceSetAt)}.` : ""}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+        {overridden ? (
+          <Badge variant="secondary" className="h-5 text-[10px]">
+            Overridden
+          </Badge>
+        ) : null}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <InputGroup className="w-full sm:w-64">
+          <InputGroupAddon align="inline-start">
+            <InputGroupText className="text-xs font-medium">{currency}</InputGroupText>
+          </InputGroupAddon>
+          <NumericInput
+            min="0"
+            step="0.01"
+            nullable
+            data-slot="input-group-control"
+            className="flex-1 rounded-none border-0 bg-transparent text-right tabular-nums shadow-none focus-visible:ring-0 dark:bg-transparent [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+            placeholder={
+              baseRateCard
+                ? baseRateCard.pricePerPerson.toLocaleString("en-ZA", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })
+                : "Flat price"
+            }
+            aria-label={`Price override for tour unit ${index + 1}`}
+            value={unit.manualTourPrice ?? null}
+            onValueChange={onChange}
+          />
+        </InputGroup>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-8 px-2 text-xs"
+          onClick={() => {
+            setRequested(false)
+            onChange(null)
+          }}
+        >
+          Revert
+        </Button>
+      </div>
+
+      {overridden ? (
+        <div className="space-y-1">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 text-xs text-muted-foreground">
+            <span className="font-medium tabular-nums text-foreground">{formatMoney(price, currency)}</span>
+            {convertedPrice ? <span className="tabular-nums">≈ {convertedPrice}</span> : null}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {baseRateCard
+              ? `Replaces the rate card's ${formatMoney(baseRateCard.pricePerPerson, baseRateCard.currency)} per adult.`
+              : "No rate card covers this tour, so nothing is being replaced."}
+          </p>
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Leave blank to keep pricing this tour off the rate card.
+        </p>
+      )}
+    </div>
+  )
+}
+
 interface SuiteLegEditorProps {
   leg: PackageLeg
   value: SuiteLegState
@@ -349,6 +513,10 @@ interface SuiteLegEditorProps {
   expectedTotals?: PassengerTotals | null
   /** Hotel legs only — absent when the package has no train leg to anchor to. */
   anchorContext?: HotelAnchorContext | null
+  /** Airline legs only — the leg directly above this one in the itinerary (skipping past transport/
+   *  transfer legs), same resolver a transfer's pickup date anchors to. Absent when nothing dated
+   *  precedes it. */
+  flightAnchorContext?: TransferAnchorContext | null
   /** Active (non-archived) rate types — shows the per-leg rate type selector when non-empty. */
   rateTypes?: RateType[]
   /** The quote's currency. Typed fares in another currency are previewed converted into it. */
@@ -364,17 +532,34 @@ const ANCHOR_OPTIONS: { value: ServiceDateAnchor; label: string; hint: string }[
   { value: "custom", label: "Custom date", hint: "Pick the check-in date manually" },
 ]
 
+const AIRLINE_ANCHOR_OPTIONS: { value: ServiceDateAnchor; label: string; hint: string }[] = [
+  { value: "pre", label: "Pre", hint: "The day the service above starts" },
+  { value: "post", label: "Post", hint: "The day the service above ends" },
+  { value: "custom", label: "Custom date", hint: "Pick the departure date manually" },
+]
+
+type ArrivalOffsetMode = "same" | "plus1" | "plus2" | "custom"
+
+const ARRIVAL_OFFSET_OPTIONS: { value: ArrivalOffsetMode; label: string; hint: string }[] = [
+  { value: "same", label: "Same day", hint: "Arrives the day it departs" },
+  { value: "plus1", label: "+1 day", hint: "Arrives the day after it departs" },
+  { value: "plus2", label: "+2 days", hint: "Arrives two days after it departs" },
+  { value: "custom", label: "Custom date", hint: "Pick the arrival date manually" },
+]
+
 export function SuiteLegEditor({
   leg,
   value,
   onChange,
   expectedTotals,
   anchorContext,
+  flightAnchorContext,
   rateTypes = [],
   quoteCurrency = BASE_CURRENCY,
   fxRates = { [BASE_CURRENCY]: 1 },
 }: SuiteLegEditorProps) {
   const isHotel = leg.supplierKind === "hotel_property"
+  const isTour = leg.supplierKind === "tour_operator"
   const isAirline = leg.supplierKind === "airline"
   const vocab = getSupplierVocabulary(leg.supplierKind)
   const optional = isOptionalPackageLegKind(leg.supplierKind)
@@ -399,6 +584,38 @@ export function SuiteLegEditor({
   const landsNextDay = Boolean(
     isAirline && value.arrivalDate && value.serviceDate && value.arrivalDate > value.serviceDate,
   )
+  // Arrival is almost always same-day or the next day, so a Same day/+1/+2 toggle covers the
+  // real cases without making someone click through a calendar every time. "Custom" is only
+  // shown once requested, or once the stored offset doesn't match any of the quick options
+  // (e.g. legacy data with a multi-day layover).
+  const arrivalOffsetDays =
+    value.serviceDate && value.arrivalDate
+      ? Math.round(
+          (Date.parse(`${value.arrivalDate}T00:00:00Z`) - Date.parse(`${value.serviceDate}T00:00:00Z`)) /
+            86_400_000,
+        )
+      : null
+  const arrivalOffsetMode: ArrivalOffsetMode | null =
+    arrivalOffsetDays === null
+      ? null
+      : arrivalOffsetDays === 0
+        ? "same"
+        : arrivalOffsetDays === 1
+          ? "plus1"
+          : arrivalOffsetDays === 2
+            ? "plus2"
+            : "custom"
+  const [arrivalCustomRequested, setArrivalCustomRequested] = useState(false)
+  const showArrivalDatePicker = arrivalOffsetMode === "custom" || arrivalCustomRequested
+  const setArrivalOffset = (mode: ArrivalOffsetMode) => {
+    if (mode === "custom") {
+      setArrivalCustomRequested(true)
+      return
+    }
+    setArrivalCustomRequested(false)
+    const days = mode === "same" ? 0 : mode === "plus1" ? 1 : 2
+    onChange({ ...value, arrivalDate: addDays(value.serviceDate!, days) })
+  }
   const pricesByTypeOnly = isTypePricedSupplier(leg.supplierKind)
   const activeSuiteTypes = leg.suiteTypes.filter((suiteType) => suiteType.active)
 
@@ -427,16 +644,19 @@ export function SuiteLegEditor({
         : unit,
     )
 
-    // An itinerary belongs to one tour type, so changing the type strands the chosen itinerary.
-    const nextSuiteTypeIds = new Set(units.flatMap((unit) => (unit.suiteTypeId ? [unit.suiteTypeId] : [])))
-    const chosenRoute = leg.routes.find((route) => route.id === value.routeId)
-    const routeStranded =
-      pricesByTypeOnly &&
-      patch.suiteTypeId !== undefined &&
-      Boolean(chosenRoute) &&
-      (!chosenRoute?.suiteTypeId || !nextSuiteTypeIds.has(chosenRoute.suiteTypeId))
+    // Itinerary is descriptive-only for a tour operator and belongs to exactly one tour type, so
+    // it's never picked by the user (see legFields below) — re-derive it from the chosen type(s)
+    // instead of just clearing it when the type changes.
+    let routePatch: { routeId?: string | null } = {}
+    if (pricesByTypeOnly && patch.suiteTypeId !== undefined) {
+      const nextSuiteTypeIds = new Set(units.flatMap((unit) => (unit.suiteTypeId ? [unit.suiteTypeId] : [])))
+      const matchingRoutes = leg.routes.filter(
+        (route) => route.suiteTypeId && nextSuiteTypeIds.has(route.suiteTypeId),
+      )
+      routePatch = { routeId: matchingRoutes.length === 1 ? matchingRoutes[0].id : null }
+    }
 
-    onChange({ ...value, units, ...(routeStranded ? { routeId: null } : {}) })
+    onChange({ ...value, units, ...routePatch })
   }
 
   const splitSummed = value.units.reduce(
@@ -465,6 +685,14 @@ export function SuiteLegEditor({
   // route's length — without it we'd silently check the guest in on the departure day.
   const missingTrainDuration =
     value.dateAnchor === "post" && anchorContext != null && anchorContext.durationDays == null
+
+  const flightAnchored = value.dateAnchor === "pre" || value.dateAnchor === "post"
+  const flightAnchoredDate = flightAnchorContext
+    ? resolveTransferPickupDate(value.dateAnchor, {
+        start: flightAnchorContext.startDate,
+        end: flightAnchorContext.endDate,
+      })
+    : null
 
   function setAnchor(next: ServiceDateAnchor) {
     onChange({ ...value, dateAnchor: next })
@@ -507,17 +735,17 @@ export function SuiteLegEditor({
         : "Select route"
 
   /**
-   * The card this room would price off today — shown next to a typed override so the consultant
-   * can see what they are replacing, and read for the override's currency (a typed price is in
-   * the same money as the rate it stands in for). Null when nothing covers the room, which is a
-   * legitimate reason to type a price rather than a blocker.
+   * The card this room/tour unit would price off today — shown next to a typed override so the
+   * consultant can see what they are replacing, and read for the override's currency (a typed
+   * price is in the same money as the rate it stands in for). Null when nothing covers the unit,
+   * which is a legitimate reason to type a price rather than a blocker.
    *
    * The system-default rate type isn't loaded client-side, so the last inherited tier is skipped
-   * here; a room that only prices off the system default shows no base rate and still overrides
+   * here; a unit that only prices off the system default shows no base rate and still overrides
    * correctly — the server resolves the real card when it stamps the snapshot.
    */
   function resolveRoomRateCard(suiteTypeId: string | null) {
-    if (!isHotel || !suiteTypeId || !value.serviceDate) return null
+    if (!(isHotel || isTour) || !suiteTypeId || !value.serviceDate) return null
     const candidates = findRateCardCandidates(
       leg.rateCards,
       value.routeId ?? "",
@@ -538,71 +766,102 @@ export function SuiteLegEditor({
     }
   }
 
-  const legFields = (
-    <div className="grid gap-3 md:grid-cols-2">
+  // A tour operator's itinerary belongs to exactly one tour type and carries no price of its own,
+  // so it's never a separate choice here — it's auto-derived (see updateUnit) from the tour type
+  // picked below and shown only as description text when one exists. Tours show this at the bottom
+  // (it's descriptive, not a decision), everything else shows its route picker up top.
+  const routeOrItineraryField = pricesByTypeOnly ? (
+    selectedRoute?.description ? (
       <div className="space-y-1.5">
-        <Label>{isHotel ? "Meal plan" : vocab.route}</Label>
-        <div className="flex items-center gap-2">
-          <Select
-            value={value.routeId ?? ""}
-            disabled={routeOptions.length === 0}
-            onValueChange={(routeId) =>
+        <Label>{vocab.route}</Label>
+        <p className="text-xs text-muted-foreground">{selectedRoute.description}</p>
+      </div>
+    ) : null
+  ) : (
+    <div className="space-y-1.5">
+      <Label>{isHotel ? "Meal plan" : vocab.route}</Label>
+      <div className="flex items-center gap-2">
+        <Select
+          value={value.routeId ?? ""}
+          disabled={routeOptions.length === 0}
+          onValueChange={(routeId) => {
+            const nextReversed = isRouteReversible(leg, routeId) ? value.reversed : false
+            // Airline routes are named as their own airport-code pair (e.g. "CPT > ORT") — the one
+            // place that pair exists, since locations carry no IATA/ICAO code. An unparseable name
+            // (a prose route) leaves From/To exactly as they were.
+            const endpointCodes = isAirline
+              ? resolveDirectedEndpointCodes(
+                  routeOptions.find((route) => route.id === routeId)?.name,
+                  nextReversed,
+                )
+              : null
+            onChange({
+              ...value,
+              routeId,
+              reversed: nextReversed,
+              ...(endpointCodes
+                ? {
+                    departureAirportCode: endpointCodes.departure,
+                    arrivalAirportCode: endpointCodes.arrival,
+                  }
+                : null),
+            })
+          }}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder={routePlaceholder} />
+          </SelectTrigger>
+          <SelectContent>
+            {routeOptions.map((route) => (
+              <SelectItem key={route.id} value={route.id}>
+                {route.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {canFlipDirection ? (
+          <Button
+            type="button"
+            size="icon"
+            variant={value.reversed ? "default" : "outline"}
+            className="h-9 w-9 shrink-0"
+            aria-pressed={value.reversed}
+            aria-label="Flip travel direction"
+            title="Flip travel direction"
+            onClick={() => {
+              const nextReversed = !value.reversed
+              // Prefer re-deriving from the route name; fall back to swapping whatever From/To
+              // already hold so flipping still works for a route whose name doesn't parse.
+              const endpointCodes = isAirline
+                ? (resolveDirectedEndpointCodes(selectedRoute?.name, nextReversed) ?? {
+                    departure: value.arrivalAirportCode,
+                    arrival: value.departureAirportCode,
+                  })
+                : null
               onChange({
                 ...value,
-                routeId,
-                reversed: isRouteReversible(leg, routeId) ? value.reversed : false,
+                reversed: nextReversed,
+                ...(endpointCodes
+                  ? {
+                      departureAirportCode: endpointCodes.departure,
+                      arrivalAirportCode: endpointCodes.arrival,
+                    }
+                  : null),
               })
-            }
+            }}
           >
-            <SelectTrigger>
-              <SelectValue placeholder={routePlaceholder} />
-            </SelectTrigger>
-            <SelectContent>
-              {routeOptions.map((route) => (
-                <SelectItem key={route.id} value={route.id}>
-                  {route.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {canFlipDirection ? (
-            <Button
-              type="button"
-              size="icon"
-              variant={value.reversed ? "default" : "outline"}
-              className="h-9 w-9 shrink-0"
-              aria-pressed={value.reversed}
-              aria-label="Flip travel direction"
-              title="Flip travel direction"
-              onClick={() => onChange({ ...value, reversed: !value.reversed })}
-            >
-              <ArrowLeftRight className="h-4 w-4" />
-            </Button>
-          ) : null}
-        </div>
-        {directedRouteLabel ? (
-          <p className="text-xs text-muted-foreground">{directedRouteLabel}</p>
-        ) : null}
-        {pricesByTypeOnly && selectedRoute?.description ? (
-          <p className="text-xs text-muted-foreground">{selectedRoute.description}</p>
+            <ArrowLeftRight className="h-4 w-4" />
+          </Button>
         ) : null}
       </div>
-
-      {isHotel ? (
-        <div className="space-y-1.5">
-          <Label htmlFor={`nights-${leg.id}`}>Nights</Label>
-          <Input
-            id={`nights-${leg.id}`}
-            type="number"
-            min={1}
-            value={value.nights ?? 1}
-            onChange={(event) =>
-              onChange({ ...value, nights: Math.max(1, Math.floor(Number(event.target.value) || 1)) })
-            }
-          />
-        </div>
+      {directedRouteLabel ? (
+        <p className="text-xs text-muted-foreground">{directedRouteLabel}</p>
       ) : null}
+    </div>
+  )
 
+  const rateAndCurrencyFields = (
+    <>
       <RateTypeSelect
         rateTypes={rateTypes}
         allowedRateTypeIds={leg.applicableRateTypeIds}
@@ -626,6 +885,31 @@ export function SuiteLegEditor({
           onChange={(priceCurrency) => onChange({ ...value, priceCurrency })}
         />
       ) : null}
+    </>
+  )
+
+  // Tours show the rate type inside the tour-type card (see the units.map below) and the itinerary
+  // at the bottom instead of here — everything else keeps the original single grid up top.
+  const legFields = pricesByTypeOnly ? null : (
+    <div className="grid gap-3 md:grid-cols-2">
+      {routeOrItineraryField}
+
+      {isHotel ? (
+        <div className="space-y-1.5">
+          <Label htmlFor={`nights-${leg.id}`}>Nights</Label>
+          <Input
+            id={`nights-${leg.id}`}
+            type="number"
+            min={1}
+            value={value.nights ?? 1}
+            onChange={(event) =>
+              onChange({ ...value, nights: Math.max(1, Math.floor(Number(event.target.value) || 1)) })
+            }
+          />
+        </div>
+      ) : null}
+
+      {rateAndCurrencyFields}
     </div>
   )
 
@@ -729,7 +1013,7 @@ export function SuiteLegEditor({
             </AnchorDateSection>
           ) : null}
 
-          {pricesByTypeOnly ? null : legFields}
+          {legFields}
 
           {isAirline ? (
             <div className="space-y-3 rounded-md border bg-muted/40 p-3">
@@ -787,22 +1071,68 @@ export function SuiteLegEditor({
 
               <div className="flex flex-wrap items-end gap-3">
                 <div className="space-y-1.5">
-                  <Label className="text-xs" htmlFor={`service-date-${leg.id}`}>Departure date</Label>
-                  <DatePicker
-                    id={`service-date-${leg.id}`}
-                    value={value.serviceDate ?? ""}
-                    onChange={(date) =>
-                      onChange({
-                        ...value,
-                        serviceDate: date || null,
-                        // Most flights land the day they take off, so the arrival date follows the
-                        // departure until someone says otherwise — an overnight flight is then a single
-                        // deliberate edit rather than two fields to fill every time.
-                        ...(date && !value.arrivalDate ? { arrivalDate: date } : {}),
-                      })
-                    }
-                    className="w-40"
-                  />
+                  <AnchorDateSection
+                    label="Departure date"
+                    options={AIRLINE_ANCHOR_OPTIONS}
+                    value={value.dateAnchor}
+                    onChange={setAnchor}
+                    disabledValues={flightAnchorContext ? [] : ["pre", "post"]}
+                  >
+                    {flightAnchored ? (
+                      <p
+                        className={cn(
+                          "text-xs",
+                          flightAnchoredDate ? "text-muted-foreground" : "text-destructive",
+                        )}
+                      >
+                        {flightAnchoredDate ? (
+                          <>
+                            Departs{" "}
+                            <span className="font-medium text-foreground">
+                              {formatDisplayDate(flightAnchoredDate)}
+                            </span>
+                            {flightAnchorContext
+                              ? ` (${value.dateAnchor === "pre" ? "start" : "end"} of ${flightAnchorContext.legLabel})`
+                              : ""}
+                          </>
+                        ) : (
+                          `Set ${flightAnchorContext?.legLabel}'s date to work out this flight's departure.`
+                        )}
+                      </p>
+                    ) : (
+                      <DatePicker
+                        id={`service-date-${leg.id}`}
+                        aria-label="Departure date"
+                        value={value.serviceDate ?? ""}
+                        onChange={(date) =>
+                          onChange({
+                            ...value,
+                            serviceDate: date || null,
+                            // Most flights land the day they take off, so the arrival date follows the
+                            // departure until someone says otherwise — an overnight flight is then a
+                            // single deliberate edit rather than two fields to fill every time.
+                            ...(date && !value.arrivalDate ? { arrivalDate: date } : {}),
+                          })
+                        }
+                        className="w-40"
+                      />
+                    )}
+
+                    {!flightAnchorContext ? (
+                      <p className="text-xs text-muted-foreground">
+                        Nothing above this flight has a date to anchor to — pick the departure date
+                        manually.
+                      </p>
+                    ) : null}
+
+                    {value.dateAnchor === "post" && flightAnchorContext?.endDateAssumed ? (
+                      <p className="text-xs text-amber-600 dark:text-amber-500">
+                        {flightAnchorContext.legLabel} has no journey length set, so the departure falls
+                        on its start day. Set the route&apos;s duration in Suppliers, or pick a custom
+                        date.
+                      </p>
+                    ) : null}
+                  </AnchorDateSection>
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs" htmlFor={`departure-time-${leg.id}`}>Departs at</Label>
@@ -814,14 +1144,36 @@ export function SuiteLegEditor({
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-xs" htmlFor={`arrival-date-${leg.id}`}>Arrives on</Label>
-                  <DatePicker
-                    id={`arrival-date-${leg.id}`}
-                    aria-label="Flight arrival date"
-                    value={value.arrivalDate ?? ""}
-                    onChange={(date) => onChange({ ...value, arrivalDate: date || null })}
-                    className="w-40"
-                  />
+                  <AnchorDateSection
+                    label="Arrives on"
+                    options={ARRIVAL_OFFSET_OPTIONS}
+                    value={arrivalOffsetMode}
+                    onChange={setArrivalOffset}
+                    disabledValues={value.serviceDate ? [] : ["same", "plus1", "plus2"]}
+                  >
+                    {showArrivalDatePicker ? (
+                      <DatePicker
+                        id={`arrival-date-${leg.id}`}
+                        aria-label="Flight arrival date"
+                        value={value.arrivalDate ?? ""}
+                        onChange={(date) => onChange({ ...value, arrivalDate: date || null })}
+                        className="w-40"
+                      />
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        {value.arrivalDate ? (
+                          <>
+                            Arrives{" "}
+                            <span className="font-medium text-foreground">
+                              {formatDisplayDate(value.arrivalDate)}
+                            </span>
+                          </>
+                        ) : (
+                          "Set the departure date to work out the arrival."
+                        )}
+                      </p>
+                    )}
+                  </AnchorDateSection>
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs" htmlFor={`arrival-time-${leg.id}`}>Arrives at</Label>
@@ -948,6 +1300,10 @@ export function SuiteLegEditor({
                   ) : null}
                 </div>
 
+                {/* Rate type is a leg-level value, not per-unit, so it's shown once — on the first
+                    card — rather than repeated on every suite/tour type added. */}
+                {pricesByTypeOnly && index === 0 ? rateAndCurrencyFields : null}
+
                 {/* TODO: bedroom_types vocab is hidden (hotel_property only) but still fully wired
                     in the DB/quote/voucher layers — see suite-vocabulary-card.tsx. */}
                 {!isHotel && bedroomTypeIds.length > 0 ? (
@@ -1070,6 +1426,18 @@ export function SuiteLegEditor({
                   />
                 ) : null}
 
+                {isTour && leg.pricingMode !== "manual" ? (
+                  <TourPriceOverride
+                    unit={unit}
+                    index={index}
+                    baseRateCard={resolveRoomRateCard(unit.suiteTypeId)}
+                    fallbackCurrency={value.priceCurrency}
+                    quoteCurrency={quoteCurrency}
+                    formatInQuoteCurrency={formatInQuoteCurrency}
+                    onChange={(next) => updateUnit(unit.id, { manualTourPrice: next })}
+                  />
+                ) : null}
+
                 {leg.pricingMode === "manual" ? (
                   <div className="flex flex-wrap items-end gap-3 md:col-span-2 xl:col-span-3">
                     <div className="space-y-1.5">
@@ -1143,7 +1511,7 @@ export function SuiteLegEditor({
             )
           })}
 
-          {pricesByTypeOnly ? legFields : null}
+          {pricesByTypeOnly ? routeOrItineraryField : null}
 
           <div className="space-y-1.5">
             <Label>Special requests / allergies</Label>

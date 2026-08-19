@@ -1,6 +1,6 @@
 "use client"
 
-import { usePipeline, useData } from "@/lib/use-data"
+import { usePipeline, useData, useAssignableUsers } from "@/lib/use-data"
 import { formatDisplayDate } from "@/lib/date-format"
 import { depositPercentageToRate } from "@/lib/pipeline/constants"
 import { bookingDisplayReference } from "@/lib/invoices/invoice-status"
@@ -9,9 +9,7 @@ import {
   getPipelineStageLabel,
   PIPELINE_STAGES,
   KANBAN_STAGES,
-  CONSULTANTS,
   type PipelineStage,
-  type ConsultantAbbreviation,
 } from "@/lib/types"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -43,7 +41,8 @@ interface PipelineJob {
   direction: string
   departureDate: string
   stage: PipelineStage
-  consultant: ConsultantAbbreviation
+  consultant: string | null
+  assignedSalespersonId: string | null
   paymentColor: string
   totalPaid: number
   quoteTotal: number
@@ -85,6 +84,7 @@ export default function PipelinePage() {
   const router = useRouter()
   const { data: jobs, isLoading: loadingJobs, error: jobsError, mutate: mutateJobs } = usePipeline()
   const { data, isLoading: loadingAll, error: allDataError, mutate: mutateAll } = useData(["auditLogs", "bookings", "customers", "payments", "quotes", "settings"])
+  const { data: assignableData } = useAssignableUsers()
   const { can } = useRole()
   const [draggedJob, setDraggedJob] = useState<string | null>(null)
   const [dragOverStage, setDragOverStage] = useState<string | null>(null)
@@ -92,7 +92,7 @@ export default function PipelinePage() {
   const [stageFilter, setStageFilter] = useState("all")
   const [newEnquiryOpen, setNewEnquiryOpen] = useState(false)
   const [showAllItems, setShowAllItems] = useState(false)
-  const [consultantFilter, setConsultantFilter] = useState<"all" | ConsultantAbbreviation>("all")
+  const [consultantFilter, setConsultantFilter] = useState<"all" | "unassigned" | string>("all")
   
   const [transitionModalOpen, setTransitionModalOpen] = useState(false)
   const [transitionFailures, setTransitionFailures] = useState<GateFailure[]>([])
@@ -261,10 +261,14 @@ export default function PipelinePage() {
     return null
   }
 
-  // Filter jobs by consultant before grouping
-  const filteredJobs = consultantFilter === "all" 
+  // Filter jobs by assigned salesperson before grouping
+  const filteredJobs = consultantFilter === "all"
     ? (jobs as PipelineJob[])
-    : ((jobs as PipelineJob[]) || []).filter((j: any) => j.consultant === consultantFilter)
+    : ((jobs as PipelineJob[]) || []).filter((j) =>
+        consultantFilter === "unassigned"
+          ? !j.assignedSalespersonId
+          : j.assignedSalespersonId === consultantFilter,
+      )
 
   // Group jobs by configured Kanban stages
   const grouped = KANBAN_STAGES.reduce(
@@ -430,8 +434,9 @@ export default function PipelinePage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Consultants</SelectItem>
-                {CONSULTANTS.map(c => (
-                  <SelectItem key={c.key} value={c.key}>{c.key} - {c.name}</SelectItem>
+                <SelectItem value="unassigned">Unassigned</SelectItem>
+                {(assignableData?.users ?? []).map(u => (
+                  <SelectItem key={u.userId} value={u.userId}>{u.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>

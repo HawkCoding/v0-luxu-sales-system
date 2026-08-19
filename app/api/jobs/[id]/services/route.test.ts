@@ -49,9 +49,12 @@ interface MockState {
   /** Stored rooms, read back to carry a room override's provenance across the replace-set. */
   existingUnits?: Array<{
     id: string
-    manual_room_price: number | null
-    manual_room_price_set_at: string | null
-    manual_room_price_set_by: string | null
+    manual_room_price?: number | null
+    manual_room_price_set_at?: string | null
+    manual_room_price_set_by?: string | null
+    manual_tour_price?: number | null
+    manual_tour_price_set_at?: string | null
+    manual_tour_price_set_by?: string | null
   }>
 }
 
@@ -293,6 +296,27 @@ describe("PATCH /api/jobs/[id]/services", () => {
     expect((await res.json()).error).toMatch(/only available on hotel services/)
   })
 
+  it("rejects a tour price override on a non-tour service", async () => {
+    mockAuth({ validServiceIds: [SERVICE_A], serviceKinds: { [SERVICE_A]: "train_operator" } })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          selections: [
+            {
+              packageLegId: SERVICE_A,
+              units: [{ suiteTypeId: SUITE_A, adultCount: 2, childCount: 1, manualTourPrice: 2000 }],
+            },
+          ],
+        }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/only available on tour services/)
+  })
+
   it("persists a flight schedule on an airline service, uppercasing the airport codes", async () => {
     const built = mockAuth({
       validServiceIds: [SERVICE_A],
@@ -516,6 +540,61 @@ describe("PATCH /api/jobs/[id]/services", () => {
     expect(built.unitInserts[0].manual_room_price).toBeNull()
     expect(built.unitInserts[0].manual_room_price_set_at).toBeNull()
     expect(built.unitInserts[0].manual_room_price_set_by).toBeNull()
+  })
+
+  it("stamps who set a tour price override and when, and leaves an unchanged one alone", async () => {
+    const built = mockAuth({
+      validServiceIds: [SERVICE_A],
+      serviceKinds: { [SERVICE_A]: "tour_operator" },
+      // Tours are passenger-split; zeroed booking totals match the units' default zero counts
+      // below so the sum-mismatch guard doesn't fire — irrelevant to what this test checks.
+      noOfAdults: 0,
+      noOfChildren: 0,
+      childAges: [],
+      existingUnits: [
+        {
+          id: UNIT_A,
+          manual_tour_price: 2000,
+          manual_tour_price_set_at: "2026-08-01T08:00:00.000Z",
+          manual_tour_price_set_by: "someone-else",
+        },
+        {
+          id: UNIT_B,
+          manual_tour_price: 2500,
+          manual_tour_price_set_at: "2026-08-01T08:00:00.000Z",
+          manual_tour_price_set_by: "someone-else",
+        },
+      ],
+    })
+
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          selections: [
+            {
+              packageLegId: SERVICE_A,
+              units: [
+                // Untouched: keeps the original stamp.
+                { id: UNIT_A, suiteTypeId: SUITE_A, manualTourPrice: 2000 },
+                // Changed: re-stamped with this save's actor.
+                { id: UNIT_B, suiteTypeId: SUITE_A, manualTourPrice: 3000 },
+              ],
+            },
+          ],
+        }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(200)
+    const [untouched, changed] = built.unitInserts
+    expect(untouched.manual_tour_price).toBe(2000)
+    expect(untouched.manual_tour_price_set_at).toBe("2026-08-01T08:00:00.000Z")
+    expect(untouched.manual_tour_price_set_by).toBe("someone-else")
+    expect(changed.manual_tour_price).toBe(3000)
+    expect(changed.manual_tour_price_set_at).not.toBe("2026-08-01T08:00:00.000Z")
+    expect(changed.manual_tour_price_set_by).toBe("u1")
   })
 
   it("updates leg-level fields directly on booking_services, tagged origin: consultant", async () => {

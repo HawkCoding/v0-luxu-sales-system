@@ -2,8 +2,8 @@ import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
 import { jsonError } from "@/lib/api/responses"
 import { loadBrandLogo } from "@/lib/pdf/brand-logo"
+import { getPaymentMethod } from "@/lib/payment-methods"
 import {
-  getBankingSettings,
   getDocumentBrandSettings,
   getDocumentTextSettings,
   resolveDocumentBrand,
@@ -102,13 +102,13 @@ export async function GET(
         brandLogo,
       })
     } else {
-      const [banking, documentText] = await Promise.all([
-        getBankingSettings(supabase),
+      const [method, documentText] = await Promise.all([
+        getPaymentMethod(supabase, null),
         getDocumentTextSettings(supabase),
       ])
       buffer = await renderInvoicePdf({
         ...sampleInvoicePdfData(),
-        banking,
+        banking: method.banking,
         footerText: documentText.invoice_doc_footer_text,
         paymentNote: documentText.invoice_doc_payment_note,
         bankChargesNote: documentText.invoice_doc_bank_charges_note,

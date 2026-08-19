@@ -35,6 +35,7 @@ function buildSupabase() {
                   customer_id: "c1",
                   stage: "quote_sent",
                   consultant: "LB",
+                  assigned_salesperson_id: "u1",
                   purpose: "quote",
                   source: "email",
                   departure_date: "2026-08-01",
@@ -65,6 +66,14 @@ function buildSupabase() {
       }
       if (table === "correspondences") {
         return { select: vi.fn(() => ({ eq: vi.fn(async () => ({ data: [], error: null })) })) }
+      }
+      if (table === "profiles") {
+        return {
+          select: vi.fn(async () => ({
+            data: [{ user_id: "u1", name: "Jane", surname: "Doe" }],
+            error: null,
+          })),
+        }
       }
       throw new Error(`Unexpected table ${table}`)
     }),
@@ -104,6 +113,8 @@ describe("GET /api/pipeline", () => {
       bookingNumber: "BT-2026-0001",
       customerInvoiceNumber: "244453",
       customerName: "Jane Smith",
+      assignedSalespersonId: "u1",
+      assignedSalespersonName: "Jane Doe",
     })
   })
 })

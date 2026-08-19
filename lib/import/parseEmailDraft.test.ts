@@ -301,6 +301,17 @@ I have read and accept the Terms and Conditions*
     expect(draft.confidence).toEqual({})
     expect(draft.termsAccepted).toBe(true)
   })
+
+  // Seeding notes with the whole email made the review modal's "Additional Notes" box look like it
+  // already held the enquiry, and everything typed over it was dropped on save. The email itself
+  // lives in rawText, which the modal and the booking's "Original Text" card both render.
+  it("leaves notes empty and keeps the full text in rawText", () => {
+    const text = "Rovos Rail\nDirection: Pretoria to Cape Town\nName: Jane Doe"
+    const draft = parseEmailDraft(text)
+
+    expect(draft.notes).toBe("")
+    expect(draft.rawText).toBe(text)
+  })
 })
 
 describe("validateDraft", () => {
@@ -690,6 +701,58 @@ I decline the Terms and Conditions
     expect(draft.confidence["trip.route"]).toBe("high")
     expect(draft.trip.departureDate).toBe("2027-08-25")
     expect(draft.confidence["trip.departureDate"]).toBe("high")
+  })
+
+  it("reads the FIRST date of a Rovos-style date range as the departure date, not the last", () => {
+    // Regression test for the reported bug: the Southern Cross Rovos itinerary is stated as a
+    // range ("02 - 13 September 2027" -- the trip's first and last day), and the old day-month-year
+    // pattern matched whichever day number happened to sit immediately before the month name,
+    // which was the RETURN date (13th). The booking then imported as departing on the 13th instead
+    // of the 2nd.
+    const draft = parseEmailDraft(`
+Date: SC - Pretoria to Vic Falls
+02 - 13 September 2027
+`)
+
+    expect(draft.trip.departureDate).toBe("2027-09-02")
+    expect(draft.confidence["trip.departureDate"]).toBe("high")
+  })
+
+  it("reads a date range with an en dash and abbreviated month", () => {
+    const draft = parseEmailDraft("Departure Date\n02 – 13 Sept 2027")
+
+    expect(draft.trip.departureDate).toBe("2027-09-02")
+  })
+
+  it("reads a date range written as '<day> to <day> <month> <year>'", () => {
+    const draft = parseEmailDraft("Departure Date\n02 to 13 September 2027")
+
+    expect(draft.trip.departureDate).toBe("2027-09-02")
+  })
+
+  it("reads the first date of a range that crosses a month boundary within the same year", () => {
+    const draft = parseEmailDraft("Departure Date\n28 September - 03 October 2027")
+
+    expect(draft.trip.departureDate).toBe("2027-09-28")
+  })
+
+  it("rolls back to the prior year for a range that crosses New Year's with only the end year stated", () => {
+    const draft = parseEmailDraft("Departure Date\n28 December - 05 January 2028")
+
+    expect(draft.trip.departureDate).toBe("2027-12-28")
+  })
+
+  it("reads the first date of a range with both endpoints fully dated, month and year on each side", () => {
+    const draft = parseEmailDraft("Departure Date\n28 December 2027 - 05 January 2028")
+
+    expect(draft.trip.departureDate).toBe("2027-12-28")
+  })
+
+  it("reads a date range found in free prose as low confidence, same as any other inferred date", () => {
+    const draft = parseEmailDraft("We're looking at travelling 02 - 13 September 2027 on Rovos Rail.")
+
+    expect(draft.trip.departureDate).toBe("2027-09-02")
+    expect(draft.confidence["trip.departureDate"]).toBe("low")
   })
 
   it("does not let a plain same-line 'Date: <date>' label get shadowed by the glued-label pattern", () => {

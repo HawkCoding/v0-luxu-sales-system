@@ -4,12 +4,11 @@ import { requireRole } from "@/lib/api/auth"
 import { buildPackageQuoteLineItems } from "@/lib/quotes/build-from-package"
 import { priceExtraLineItems } from "@/lib/quotes/price-extra-line"
 import { loadBookingServicesPackageDetail } from "@/lib/quotes/adapters/from-booking-services"
-import { loadRoomOverrideProvenance } from "@/lib/quotes/room-override-provenance"
-import { safeSupabaseError } from "@/lib/api/responses"
+import { loadRoomOverrideProvenance, loadTourOverrideProvenance } from "@/lib/quotes/room-override-provenance"
+import { jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { getCachedRates } from "@/lib/fx/rates"
-import { BASE_CURRENCY, normaliseCurrency } from "@/lib/money"
-import { MissingFxRateError } from "@/lib/pricing/convert-currency"
-import { SUPPORTED_CURRENCY_VALUES } from "@/lib/types"
+import { BASE_CURRENCY, isSupportedCurrency, normaliseCurrency } from "@/lib/money"
+import { MissingFxRateError, roundFxRate } from "@/lib/pricing/convert-currency"
 
 /**
  * Build Booking's equivalent of POST /api/packages/[slug]/apply: prices booking_services instead
@@ -27,7 +26,8 @@ const commissionOverrideSchema = z
 
 const extraSchema = z.object({
   supplierId: z.string().uuid(),
-  routeId: z.string().uuid(),
+  // Optional for a type-priced supplier (tour operator) — no itinerary is required to price it.
+  routeId: z.string().uuid().nullable().optional(),
   suiteTypeId: z.string().uuid(),
   quantity: z.number().int().positive().optional(),
   rateTypeId: z.string().uuid().optional(),
@@ -53,6 +53,8 @@ const unitSelectionSchema = z.object({
   manualRoomPrice: z.number().nonnegative().nullable().optional(),
   /** Hotel legs only: the hotel gifted this room's first night, so the line prices nights - 1. */
   complimentaryFirstNight: z.boolean().optional(),
+  /** Tour legs only: the typed flat price that replaces this unit's rate-card-computed total. */
+  manualTourPrice: z.number().nonnegative().nullable().optional(),
 })
 
 const applyServicesSchema = z.object({
@@ -72,8 +74,15 @@ const applyServicesSchema = z.object({
         nights: z.number().int().positive().optional(),
         rateTypeId: z.string().uuid().optional(),
         /** Manual-pricing legs and transfer/rental overrides: the currency the typed fares on
-         * this leg are in. Rate-card legs ignore it and use the card's own currency. */
-        priceCurrency: z.enum(SUPPORTED_CURRENCY_VALUES).optional(),
+         * this leg are in. Rate-card legs ignore it and use the card's own currency. Read
+         * straight off booking_services.price_currency, a free-text column with no CHECK
+         * constraint, so this normalises rather than rejects — a legacy/unsupported code must
+         * not 400 the whole quote build. */
+        priceCurrency: z
+          .string()
+          .nullable()
+          .optional()
+          .transform((value) => (value ? normaliseCurrency(value) : undefined)),
         commissionOverride: commissionOverrideSchema,
       }),
     )
@@ -84,10 +93,11 @@ const applyServicesSchema = z.object({
    * the server's cache so a hand-nudged rate is the one the quote is actually priced at —
    * otherwise the preview and the saved lines would disagree.
    *
-   * Bounded rather than free: a fat-fingered decimal point would otherwise mis-price a booking
-   * by an order of magnitude with no other guard in the path.
+   * Any currency the server doesn't support, or an out-of-range rate (a fat-fingered decimal
+   * point), is dropped rather than failing the whole request — this is convenience data the
+   * cache already has a fallback for, not something worth blocking a save over.
    */
-  fxRates: z.record(z.enum(SUPPORTED_CURRENCY_VALUES), z.number().positive().max(10_000)).optional(),
+  fxRates: z.record(z.string(), z.number()).optional(),
 })
 
 interface RouteParams {
@@ -101,12 +111,12 @@ export async function POST(req: Request, { params }: RouteParams) {
   const { supabase } = auth.value
   const { id } = await params
 
-  let parsed: z.infer<typeof applyServicesSchema>
-  try {
-    parsed = applyServicesSchema.parse(await req.json())
-  } catch {
-    return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
+  const rawBody: unknown = await req.json().catch(() => null)
+  const parseResult = applyServicesSchema.safeParse(rawBody)
+  if (!parseResult.success) {
+    return jsonZodError(parseResult.error, "Invalid request payload", "jobs:services-apply")
   }
+  const parsed = parseResult.data
 
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
@@ -137,9 +147,17 @@ export async function POST(req: Request, { params }: RouteParams) {
   // Cached only: a slow or unreachable FX provider must not add latency to Build Booking. The
   // dialog refreshes rates explicitly through /api/fx/rates instead.
   const fx = await getCachedRates(supabase)
+  // Only a currency the server actually supports, with a sane positive rate, overrides the cache
+  // — anything else (an unsupported code, a zero/negative/absurd rate) is dropped rather than
+  // failing the whole request, and the cached rate is kept instead.
+  const clientRates = Object.fromEntries(
+    Object.entries(parsed.fxRates ?? {}).filter(
+      ([currency, rate]) => isSupportedCurrency(currency) && Number.isFinite(rate) && rate > 0 && rate <= 10_000,
+    ).map(([currency, rate]) => [currency, roundFxRate(rate)]),
+  )
   // What the salesperson saw wins over the cache, so the preview they approved is the price that
   // gets saved. The base currency is pinned to 1 regardless of what the client sent.
-  const effectiveRates = { ...fx.rates, ...(parsed.fxRates ?? {}), [BASE_CURRENCY]: 1 }
+  const effectiveRates = { ...fx.rates, ...clientRates, [BASE_CURRENCY]: 1 }
 
   const { detail } = await loadBookingServicesPackageDetail(
     supabase,
@@ -151,21 +169,25 @@ export async function POST(req: Request, { params }: RouteParams) {
   // The dialog saves the rooms (PATCH /services) before asking for this preview, so the stored
   // provenance is already current. Read it here rather than trusting the payload — the price is
   // the salesperson's to type, but who typed it is the server's to say.
-  const roomOverrideProvenance = await loadRoomOverrideProvenance(
-    supabase,
-    parsed.selections.flatMap((selection) =>
-      (selection.units ?? []).map((unit) => unit.unitId).filter((unitId): unitId is string => Boolean(unitId)),
-    ),
+  const unitIds = parsed.selections.flatMap((selection) =>
+    (selection.units ?? []).map((unit) => unit.unitId).filter((unitId): unitId is string => Boolean(unitId)),
   )
+  const [roomOverrideProvenance, tourOverrideProvenance] = await Promise.all([
+    loadRoomOverrideProvenance(supabase, unitIds),
+    loadTourOverrideProvenance(supabase, unitIds),
+  ])
 
   const selections = parsed.selections.map((selection) => ({
     ...selection,
     units: selection.units?.map((unit) => {
-      const provenance = unit.unitId ? roomOverrideProvenance.get(unit.unitId) : undefined
+      const roomProvenance = unit.unitId ? roomOverrideProvenance.get(unit.unitId) : undefined
+      const tourProvenance = unit.unitId ? tourOverrideProvenance.get(unit.unitId) : undefined
       return {
         ...unit,
-        manualRoomPriceSetAt: provenance?.setAt ?? null,
-        manualRoomPriceSetByName: provenance?.setByName ?? null,
+        manualRoomPriceSetAt: roomProvenance?.setAt ?? null,
+        manualRoomPriceSetByName: roomProvenance?.setByName ?? null,
+        manualTourPriceSetAt: tourProvenance?.setAt ?? null,
+        manualTourPriceSetByName: tourProvenance?.setByName ?? null,
       }
     }),
   }))

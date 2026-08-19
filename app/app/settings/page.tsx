@@ -7,7 +7,6 @@ import { toast } from "sonner"
 import { AppLogo } from "@/components/app-logo"
 import { EmailAccountsSettings } from "@/components/email-accounts-settings"
 import { BackupSettings } from "@/components/backup-settings"
-import { BankingSettingsEditor } from "@/components/banking-settings-editor"
 import { InvoiceStatusSettingsEditor } from "@/components/invoice-status-settings-editor"
 import { BACKUPS_ENABLED, QUOTE_VALIDITY_ENABLED } from "@/lib/feature-flags"
 import { Badge } from "@/components/ui/badge"
@@ -59,7 +58,7 @@ import type { CommissionKind, Role } from "@/lib/types"
 import { APP_VERSION } from "@/lib/version"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
-import { AlertTriangle, Clock, KeyRound, ListChecks, MoreHorizontal, Pencil, ShieldCheck, Tag, Trash2, Upload, UserCheck, UserPlus, UserX } from "lucide-react"
+import { AlertTriangle, ArrowRight, Clock, KeyRound, ListChecks, MoreHorizontal, Pencil, ShieldCheck, Tag, Trash2, Upload, UserCheck, UserPlus, UserX } from "lucide-react"
 
 interface AppUser {
   userId: string
@@ -2080,13 +2079,19 @@ export default function SettingsPage() {
 
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">Banking Details</CardTitle>
+          <CardTitle className="text-sm font-medium">Payment Methods</CardTitle>
           <CardDescription className="text-xs">
-            Shown on invoice PDFs and in invoice/reminder emails ({"{{bankingDetails}}"} template token).
+            Bank and company details shown on invoice PDFs and in invoice/reminder emails ({"{{bankingDetails}}"}{" "}
+            template token). Configure several and switch between them per invoice or send.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <BankingSettingsEditor canEdit={canEditDepositSettings} />
+          <Link href="/app/settings/payment-methods">
+            <Button variant="outline" size="sm">
+              {canEditDepositSettings ? "Manage payment methods" : "View payment methods"}
+              <ArrowRight data-icon="inline-end" />
+            </Button>
+          </Link>
         </CardContent>
       </Card>
 

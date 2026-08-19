@@ -33,6 +33,7 @@ import { isMissingPricing } from "@/lib/quotes/pricing-engine"
 import type { IncompleteLeg } from "@/lib/quotes/build-from-package"
 import { useRecordPresence } from "@/hooks/use-record-presence"
 import { useVersionedSave } from "@/hooks/use-versioned-save"
+import { appendFieldDetails } from "@/lib/format-error-details"
 import { CommissionControl, type CommissionControlValue } from "@/components/supplier/commission-control"
 import { CommissionBadge } from "@/components/quotes/commission-badge"
 import { SuiteLegEditor } from "@/components/packages/suite-leg-editor"
@@ -41,6 +42,7 @@ import { FxRateBanner } from "@/components/quotes/fx-rate-banner"
 import { FxProvenanceNote } from "@/components/quotes/fx-provenance-note"
 import { RoomOverrideNote } from "@/components/quotes/room-override-note"
 import { TransportOverrideNote } from "@/components/quotes/transport-override-note"
+import { TourOverrideNote } from "@/components/quotes/tour-override-note"
 import { useFxRates } from "@/lib/fx/use-fx-rates"
 import { BASE_CURRENCY, formatMoney } from "@/lib/money"
 import { formatDisplayDateTime } from "@/lib/date-format"
@@ -884,7 +886,8 @@ export function BuildBookingDialog({
       })
       const payload = await res.json()
       if (!res.ok) {
-        setBuildError(typeof payload?.error === "string" ? payload.error : "Validation failed")
+        const baseMessage = typeof payload?.error === "string" ? payload.error : "Validation failed"
+        setBuildError(appendFieldDetails(baseMessage, payload))
         return
       }
       setPreviewLineItems(payload.lineItems as QuoteLineItem[])
@@ -1145,6 +1148,7 @@ export function BuildBookingDialog({
                         onChange={updateLegState}
                         expectedTotals={totalsBySupplierId[leg.supplierId] ?? null}
                         anchorContext={hotelAnchorContext(leg.id)}
+                        flightAnchorContext={transferAnchorContext(leg.id)}
                         rateTypes={rateTypes}
                         quoteCurrency={quoteCurrency}
                         fxRates={fxRates}
@@ -1365,6 +1369,7 @@ export function BuildBookingDialog({
                         <FxProvenanceNote snapshot={li.pricingSnapshot ?? null} />
                         <RoomOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={quoteCurrency} />
                         <TransportOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={quoteCurrency} />
+                        <TourOverrideNote snapshot={li.pricingSnapshot ?? null} quoteCurrency={quoteCurrency} />
                         <CommissionBadge
                           commission={li.pricingSnapshot?.commission ?? null}
                           currency={quoteCurrency}

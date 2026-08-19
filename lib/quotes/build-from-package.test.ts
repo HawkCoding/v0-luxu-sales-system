@@ -643,6 +643,147 @@ describe("buildPackageQuoteLineItems", () => {
     }
   })
 
+  it("prices a tour unit off its typed override instead of the rate card, and says so internally", async () => {
+    const tourLeg = leg({
+      id: "leg-tour",
+      supplierKind: "tour_operator",
+      routes: [route("route-day-pass", "supplier-leg-tour", "Cape Town - One Day Pass")],
+      suiteTypes: [suiteType("tour-classic", "supplier-leg-tour", "Classic Hop-on-Hop-off Ticket")],
+      rateCards: [rateCard({ id: "rc-classic", routeId: null, suiteTypeId: "tour-classic", pricePerPerson: 850 })],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase(),
+      packageDetail: detail([tourLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-tour",
+          selected: true,
+          routeId: "route-day-pass",
+          units: [
+            {
+              suiteTypeId: "tour-classic",
+              adultCount: 2,
+              childCount: 1,
+              infantCount: 0,
+              manualTourPrice: 2000,
+              manualTourPriceSetAt: "2026-08-14T09:00:00Z",
+              manualTourPriceSetByName: "Carmen de Jager",
+            },
+          ],
+        },
+      ],
+    })
+
+    // A flat override replaces the whole unit's computed total with a single line, not the usual
+    // adult/child/infant decomposition.
+    expect(lineItems).toHaveLength(1)
+    expect(lineItems[0].qty).toBe(1)
+    expect(lineItems[0].unitPrice).toBe(2000)
+    expect(lineItems[0].total).toBe(2000)
+    expect(lineItems[0].pricingSnapshot?.manualTourPrice).toBe(2000)
+    expect(lineItems[0].pricingSnapshot?.manualTourPriceBase).toBe(850)
+    expect(lineItems[0].pricingSnapshot?.manualTourPriceSetByName).toBe("Carmen de Jager")
+  })
+
+  it("lets a tour override price a unit no rate card covers", async () => {
+    const tourLeg = leg({
+      id: "leg-tour",
+      supplierKind: "tour_operator",
+      routes: [route("route-day-pass", "supplier-leg-tour", "Cape Town - One Day Pass")],
+      suiteTypes: [suiteType("tour-classic", "supplier-leg-tour", "Classic Hop-on-Hop-off Ticket")],
+      rateCards: [],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase(),
+      packageDetail: detail([tourLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-tour",
+          selected: true,
+          routeId: "route-day-pass",
+          priceCurrency: "ZAR",
+          units: [
+            { suiteTypeId: "tour-classic", adultCount: 2, childCount: 1, infantCount: 0, manualTourPrice: 1500 },
+          ],
+        },
+      ],
+    })
+
+    expect(lineItems).toHaveLength(1)
+    expect(lineItems[0].unitPrice).toBe(1500)
+    expect(lineItems[0].pricingSnapshot?.manualTourPriceBase).toBeNull()
+  })
+
+  it("prices a tour type with zero itineraries — a valid, unfinished setup, not an incomplete leg", async () => {
+    const tourLeg = leg({
+      id: "leg-tour-no-itinerary",
+      supplierKind: "tour_operator",
+      routes: [],
+      suiteTypes: [suiteType("tour-heli", "supplier-leg-tour", "Helicopter Flight")],
+      rateCards: [rateCard({ id: "rc-heli", routeId: null, suiteTypeId: "tour-heli", pricePerPerson: 1200 })],
+    })
+
+    const { lineItems, incompleteLegs } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase(),
+      packageDetail: detail([tourLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-tour-no-itinerary",
+          selected: true,
+          units: [{ suiteTypeId: "tour-heli", adultCount: 2, childCount: 1, infantCount: 0 }],
+        },
+      ],
+    })
+
+    expect(incompleteLegs).toHaveLength(0)
+    expect(lineItems.every((li) => li.unitPrice === 1200)).toBe(true)
+  })
+
+  it("never substitutes another tour type's itinerary when the chosen type has none of its own", async () => {
+    const tourLeg = leg({
+      id: "leg-tour-mismatch",
+      supplierKind: "tour_operator",
+      routes: [
+        { ...route("route-day-pass", "supplier-leg-tour", "Cape Town - One Day Pass"), suiteTypeId: "tour-classic" },
+      ] as PackageLeg["routes"],
+      suiteTypes: [
+        suiteType("tour-classic", "supplier-leg-tour", "Classic Hop-on-Hop-off Ticket"),
+        suiteType("tour-heli", "supplier-leg-tour", "Helicopter Flight"),
+      ],
+      rateCards: [
+        rateCard({ id: "rc-classic", routeId: null, suiteTypeId: "tour-classic", pricePerPerson: 850 }),
+        rateCard({ id: "rc-heli", routeId: null, suiteTypeId: "tour-heli", pricePerPerson: 1200 }),
+      ],
+    })
+
+    const { lineItems, incompleteLegs } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase(),
+      packageDetail: detail([tourLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-tour-mismatch",
+          selected: true,
+          // No routeId selected — the leg's only itinerary belongs to "Classic", not "Helicopter".
+          units: [{ suiteTypeId: "tour-heli", adultCount: 2, childCount: 1, infantCount: 0 }],
+        },
+      ],
+    })
+
+    expect(incompleteLegs).toHaveLength(0)
+    expect(lineItems.every((li) => li.unitPrice === 1200)).toBe(true)
+    expect(lineItems.every((li) => li.pricingSnapshot?.routeId !== "route-day-pass")).toBe(true)
+  })
+
   it("rejects hotel legs without units (the old dialog payload shape)", async () => {
     const hotelLeg = leg({
       id: "leg-hotel",

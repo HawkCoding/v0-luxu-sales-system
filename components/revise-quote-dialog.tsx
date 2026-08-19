@@ -68,17 +68,16 @@ export function ReviseQuoteDialog({ quoteId, quoteNumber, onRevised }: ReviseQuo
       const response = await fetch(`/api/quotes/${quoteId}/revise`, { method: "POST" })
       const payload = (await response.json().catch(() => ({}))) as {
         error?: string
-        reset?: { voidedInvoiceCount: number; reopenedInvoiceCount: number }
+        reset?: { voidedInvoiceCount: number }
       }
       if (!response.ok) throw new Error(payload.error ?? "Failed to revise quote")
 
       const voided = payload.reset?.voidedInvoiceCount ?? 0
-      const reopened = payload.reset?.reopenedInvoiceCount ?? 0
-      const notes = [
-        voided > 0 ? `${voided} invoice${voided === 1 ? "" : "s"} voided` : null,
-        reopened > 0 ? `${reopened} invoice${reopened === 1 ? "" : "s"} reopened` : null,
-      ].filter(Boolean)
-      toast.success(notes.length > 0 ? `Quote revision created. ${notes.join(", ")}.` : "Quote revision created.")
+      toast.success(
+        voided > 0
+          ? `Quote revision created. ${voided} invoice${voided === 1 ? "" : "s"} voided.`
+          : "Quote revision created.",
+      )
       setOpen(false)
       onRevised()
     } catch (error) {
@@ -124,7 +123,7 @@ export function ReviseQuoteDialog({ quoteId, quoteNumber, onRevised }: ReviseQuo
           <div className="space-y-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3">
             <p className="flex items-center gap-2 text-sm font-medium text-amber-700 dark:text-amber-400">
               <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden="true" />
-              This booking is already far along
+              This booking has payments recorded
             </p>
             <label className="flex items-start gap-2 text-sm text-muted-foreground">
               <Checkbox
@@ -132,8 +131,9 @@ export function ReviseQuoteDialog({ quoteId, quoteNumber, onRevised }: ReviseQuo
                 onCheckedChange={(checked) => setFarAlongConfirmed(checked === true)}
                 className="mt-0.5"
               />
-              I understand this booking already progressed past Paid in Full and that revising it requires
-              manually re-billing the difference once the new quote is accepted.
+              I understand this booking will move back to Enquiry, its invoice(s) will be voided, and the
+              deposit will no longer be marked as paid — the payments stay on record and the balance is
+              rebilled once the revised quote is accepted.
             </label>
           </div>
         )}

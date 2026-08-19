@@ -29,6 +29,7 @@ interface PreparedEmail {
     bodyContentHtml?: string
     signatureProfileId?: string | null
     signatureBrandId?: string | null
+    paymentMethodId?: string | null
   }
   attachment?: {
     filename: string
@@ -117,6 +118,7 @@ export function SendPaymentConfirmationButton({
           bodyContentHtml={prepared.email.bodyContentHtml}
           signatureProfileId={prepared.email.signatureProfileId}
           signatureBrandId={prepared.email.signatureBrandId}
+          paymentMethodId={prepared.email.paymentMethodId}
           kind="payment_received"
           to={prepared.email.to}
           attachments={prepared.attachment ? [prepared.attachment] : undefined}

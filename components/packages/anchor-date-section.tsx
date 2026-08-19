@@ -1,34 +1,34 @@
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import type { ServiceDateAnchor } from "@/lib/types"
 
-interface AnchorOption {
-  value: ServiceDateAnchor
+interface AnchorOption<T extends string> {
+  value: T
   label: string
   hint: string
 }
 
-interface AnchorDateSectionProps {
+interface AnchorDateSectionProps<T extends string> {
   label: string
-  options: AnchorOption[]
-  value: ServiceDateAnchor | null
-  onChange: (next: ServiceDateAnchor) => void
-  /** Anchor values that can't be picked right now (e.g. no leg above to anchor to) — "custom" is
+  options: AnchorOption<T>[]
+  value: T | null
+  onChange: (next: T) => void
+  /** Option values that can't be picked right now (e.g. no leg above to anchor to) — "custom" is
    *  never disabled since it never depends on context. */
-  disabledValues?: ServiceDateAnchor[]
+  disabledValues?: T[]
   children: React.ReactNode
 }
 
-/** Shared chrome for a Pre/Post/Custom date-anchor toggle, used by both the hotel stay-dates
- *  picker and the transfer pickup-date picker so the two look like one pattern. */
-export function AnchorDateSection({
+/** Shared chrome for a pill-toggle + resolved-date box, used by the hotel stay-dates picker, the
+ *  transfer pickup-date picker, and the flight departure/arrival date pickers so they all look
+ *  like one pattern. */
+export function AnchorDateSection<T extends string>({
   label,
   options,
   value,
   onChange,
   disabledValues = [],
   children,
-}: AnchorDateSectionProps) {
+}: AnchorDateSectionProps<T>) {
   return (
     <div className="space-y-2 rounded-md border bg-muted/40 p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">

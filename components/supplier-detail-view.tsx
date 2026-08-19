@@ -3958,6 +3958,7 @@ export function SupplierDetailView({
         archivedAt: value.archivedAt ?? null,
       }))
     const suiteTypeIds = new Set(cleanedSuiteTypes.map((suiteType) => suiteType.id))
+    const isItineraryKind = isTypePricedSupplier(form.kind)
     const activeRateTypeIds = new Set(
       (supplier?.rateTypes ?? []).filter((rt) => !rt.archivedAt).map((rt) => rt.id),
     )
@@ -3984,7 +3985,8 @@ export function SupplierDetailView({
             route.destinationLocationId ||
             route.pickupPoint ||
             route.dropoffPoint ||
-            activeRateCards.some((rateCard) => rateCard.routeId === route.id),
+            activeRateCards.some((rateCard) => rateCard.routeId === route.id) ||
+            (isItineraryKind && (route.suiteTypeId || route.description.trim())),
         ),
         rateCards: activeRateCards,
       },
@@ -4057,22 +4059,20 @@ export function SupplierDetailView({
       return
     }
 
-    const isItineraryKind = isTypePricedSupplier(form.kind)
-
     if (isItineraryKind) {
       const unassignedItinerary = routeRateGroup.routes.find(
-        (route) => route.name.trim() && !route.suiteTypeId,
+        (route) => (route.name.trim() || route.description.trim()) && !route.suiteTypeId,
       )
       if (unassignedItinerary) {
         toast.error(
-          `Pick a ${vocabulary.suiteType.toLowerCase()} for "${unassignedItinerary.name.trim()}" — every ${vocabulary.route.toLowerCase()} belongs to one.`,
+          `Pick a ${vocabulary.suiteType.toLowerCase()} for "${unassignedItinerary.name.trim() || "this itinerary"}" — every ${vocabulary.route.toLowerCase()} belongs to one.`,
         )
         return
       }
     }
 
     const cleanedRoutes = routeRateGroup.routes
-      .filter((route) => route.name.trim())
+      .filter((route) => route.name.trim() || (isItineraryKind && route.suiteTypeId))
       .map((route) => ({
         id: route.id,
         name: route.name.trim(),
@@ -5298,7 +5298,7 @@ export function SupplierDetailView({
                       </p>
                     ) : null}
                   </div>
-                  {isEditing && (
+                  {isEditing && !isItineraryKind && (
                     <Button type="button" size="sm" variant="outline" onClick={() => addRoute(0)}>
                       <Plus className="mr-2 h-4 w-4" />
                       {`Add ${activeVocabulary.route.toLowerCase()}`}

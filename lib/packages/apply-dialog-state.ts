@@ -14,6 +14,7 @@ import type { ServiceDateSpan } from "@/lib/packages/trip-date-range"
 import { dateOnly, selectedRouteDurationDays, serviceDateSpan } from "@/lib/packages/trip-date-range"
 import { splitLocalDateTime, joinLocalDateTime } from "@/lib/date-time-field"
 import { toHoursMinutes } from "@/lib/routes/route-schedule"
+import { resolveDirectedEndpointCodes } from "@/lib/routes/route-name"
 import { BASE_CURRENCY } from "@/lib/money"
 import {
   findRateCardCandidates,
@@ -66,6 +67,12 @@ export interface SuiteUnitState {
   /** Hotel legs only: the hotel gifted this room's first night, so the quote charges nights - 1
    *  at the room's per-night price (its rate card's, or manualRoomPrice when one was typed). */
   complimentaryFirstNight: boolean
+  /** Tour legs only: a consultant-typed flat price that replaces this unit's rate-card-computed
+   *  total. Null leaves the unit priced off its card. Booking-scoped and one-shot, same posture
+   *  as manualRoomPrice. */
+  manualTourPrice: number | null
+  /** Read-only provenance for the override, stamped server-side. Never sent back on save. */
+  manualTourPriceSetAt?: string | null
 }
 
 export interface SuiteLegState {
@@ -89,7 +96,9 @@ export interface SuiteLegState {
   arrivalAirportCode: string | null
   handLuggageKg: number | null
   checkedLuggageKg: number | null
-  /** Hotel legs only: `pre`/`post` derive serviceDate from the train leg, `custom` leaves it manual. */
+  /** Hotel and airline legs only. Hotel: `pre`/`post` derive serviceDate from the train leg.
+   *  Airline: `pre`/`post` derive serviceDate (departure) from the leg above it, same as a
+   *  transfer's pickup date. `custom` leaves it manual either way. */
   dateAnchor: ServiceDateAnchor | null
   notes: string | null
   /** Explicit per-leg rate type; null inherits the supplier's quoted rate at pricing time. */
@@ -142,6 +151,8 @@ export interface SavedSelectionUnitRow {
   manual_room_price?: number | null
   manual_room_price_set_at?: string | null
   complimentary_first_night?: boolean | null
+  manual_tour_price?: number | null
+  manual_tour_price_set_at?: string | null
 }
 
 export interface SavedSelectionRow {
@@ -208,6 +219,8 @@ export function createDraftUnit(totals?: PassengerTotals): SuiteUnitState {
     manualRoomPrice: null,
     manualRoomPriceSetAt: null,
     complimentaryFirstNight: false,
+    manualTourPrice: null,
+    manualTourPriceSetAt: null,
   }
 }
 
@@ -301,13 +314,21 @@ function buildRawDefaultLegStates(
       : undefined
 
     const isHotel = leg.supplierKind === "hotel_property"
+    const isAirline = leg.supplierKind === "airline"
+    const routeId = defaultRouteId(leg)
+    // Airport codes are the one part of a flight the system already knows, once a route is
+    // resolved unambiguously (a single route on the leg) — its name is the code pair itself
+    // (see lib/routes/route-name.ts). Everything else about the flight is still never guessed.
+    const defaultEndpointCodes = isAirline
+      ? resolveDirectedEndpointCodes(leg.routes.find((route) => route.id === routeId)?.name, false)
+      : null
 
     return {
       kind: "suite",
       legId: leg.id,
       supplierKind: leg.supplierKind,
       selected: leg.supplierKind === "train_operator",
-      routeId: defaultRouteId(leg),
+      routeId,
       reversed: false,
       serviceDate: options.tripStartDate,
       nights: isHotel ? 1 : null,
@@ -317,12 +338,13 @@ function buildRawDefaultLegStates(
       arrivalDate: null,
       arrivalTime: null,
       flightNumber: null,
-      departureAirportCode: null,
-      arrivalAirportCode: null,
+      departureAirportCode: defaultEndpointCodes?.departure ?? null,
+      arrivalAirportCode: defaultEndpointCodes?.arrival ?? null,
       handLuggageKg: null,
       checkedLuggageKg: null,
-      // An un-anchored hotel keeps today's behaviour: a manually picked service date.
-      dateAnchor: isHotel ? leg.dateAnchor ?? "custom" : null,
+      // An un-anchored hotel/airline keeps today's behaviour: a manually picked service date.
+      // Airline package legs never carry a template anchor, so this always falls back to "custom".
+      dateAnchor: isHotel || isAirline ? leg.dateAnchor ?? "custom" : null,
       notes: null,
       rateTypeId: null,
       priceCurrency: options.quoteCurrency ?? BASE_CURRENCY,
@@ -497,12 +519,40 @@ export function applyAnchoredTransferDates(
   })
 }
 
-/** Runs the hotel and transfer date-anchor recomputes in the order that makes chaining work: a
- * transfer can anchor to a hotel, so the hotel's dates must already be settled before transfers
- * are resolved against it. Neither recompute reads the other's kind of leg, so one pass each
- * (rather than repeating to a fixed point) is enough. */
+/** Recomputes the departure date of every pre/post-anchored airline leg from the leg above it —
+ * same "nearest dated leg above, skipping transport/transfer" resolver a transfer's pickup date
+ * uses, since a flight has no single canonical service (like a hotel's train) to hang off. Only
+ * `serviceDate` (departure) is derived; `arrivalDate`/times stay independent manual fields. */
+export function applyAnchoredAirlineDates(
+  detail: PackageDetail,
+  states: ApplyLegState[],
+): ApplyLegState[] {
+  return states.map((state) => {
+    if (state.kind !== "suite" || state.supplierKind !== "airline") return state
+    if (state.dateAnchor !== "pre" && state.dateAnchor !== "post") return state
+
+    const context = getTransferAnchorContext(detail, states, state.legId)
+    const anchorDates: AnchorLegDates | null = context
+      ? { start: context.span?.start ?? null, end: context.span?.end ?? null }
+      : null
+    const targetDate = resolveTransferPickupDate(state.dateAnchor, anchorDates)
+    if (!targetDate || targetDate === state.serviceDate) return state
+
+    return { ...state, serviceDate: targetDate }
+  })
+}
+
+/** Runs the hotel, airline, and transfer date-anchor recomputes in the order that makes chaining
+ * work: a hotel anchors only to a train, so it settles first; an airline can anchor to that
+ * now-settled hotel (or a train, or another leg above it), so it settles second; a transfer can
+ * anchor to any of those, including a now-settled airline leg, so it settles last. Each recompute
+ * reads only already-settled kinds ahead of it in this chain, so one pass each (rather than
+ * repeating to a fixed point) is enough. */
 export function applyAnchoredDates(detail: PackageDetail, states: ApplyLegState[]): ApplyLegState[] {
-  return applyAnchoredTransferDates(detail, applyAnchoredHotelDates(detail, states))
+  return applyAnchoredTransferDates(
+    detail,
+    applyAnchoredAirlineDates(detail, applyAnchoredHotelDates(detail, states)),
+  )
 }
 
 /** Hydrates dialog state from the booking's saved selections and transport requests. Legs with
@@ -557,6 +607,8 @@ export function hydrateFromSaved(
         manualRoomPrice: unit.manual_room_price ?? null,
         manualRoomPriceSetAt: unit.manual_room_price_set_at ?? null,
         complimentaryFirstNight: unit.complimentary_first_night ?? false,
+        manualTourPrice: unit.manual_tour_price ?? null,
+        manualTourPriceSetAt: unit.manual_tour_price_set_at ?? null,
       }))
 
     const isHotel = fallback.supplierKind === "hotel_property"
@@ -582,7 +634,8 @@ export function hydrateFromSaved(
       handLuggageKg: isAirline ? row.hand_luggage_kg ?? null : null,
       checkedLuggageKg: isAirline ? row.checked_luggage_kg ?? null : null,
       // No saved anchor (pre-existing booking, or seeded by intake) falls back to the package's.
-      dateAnchor: isHotel ? normalizeSavedAnchor(row.date_anchor) ?? fallback.dateAnchor : null,
+      dateAnchor:
+        isHotel || isAirline ? normalizeSavedAnchor(row.date_anchor) ?? fallback.dateAnchor : null,
       notes: row.notes,
       rateTypeId: row.rate_type_id ?? fallback.rateTypeId,
       priceCurrency: row.price_currency ?? fallback.priceCurrency,
@@ -636,6 +689,8 @@ export interface PackageSelectionsPatchBody {
       manualRoomPrice: number | null
       /** Hotel legs only — the gifted first night, same server-side restriction. */
       complimentaryFirstNight: boolean
+      /** Tour legs only — the server rejects it on any other supplier kind. */
+      manualTourPrice: number | null
     }>
   }>
 }
@@ -675,7 +730,10 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
               checkedLuggageKg: state.checkedLuggageKg,
             }
           : {}),
-        dateAnchor: state.supplierKind === "hotel_property" ? state.dateAnchor : null,
+        dateAnchor:
+          state.supplierKind === "hotel_property" || state.supplierKind === "airline"
+            ? state.dateAnchor
+            : null,
         rateTypeId: state.rateTypeId,
         priceCurrency: state.priceCurrency,
         notes: state.notes,
@@ -695,6 +753,7 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
           manualRoomPrice: state.supplierKind === "hotel_property" ? unit.manualRoomPrice : null,
           complimentaryFirstNight:
             state.supplierKind === "hotel_property" ? unit.complimentaryFirstNight : false,
+          manualTourPrice: state.supplierKind === "tour_operator" ? unit.manualTourPrice : null,
         })),
       }
     }),
@@ -799,6 +858,8 @@ export interface ApplyLegSelectionPayload {
     manualRoomPrice: number | null
     /** Hotel legs only: the gifted first night, dropping one night from the charged count. */
     complimentaryFirstNight: boolean
+    /** Tour legs only: replaces the rate-card-computed total for this unit. */
+    manualTourPrice: number | null
   }>
   nights?: number
   /** Per-leg rate type override; omitted falls back to the system default. */
@@ -854,6 +915,7 @@ export function toApplySelections(
           manualRoomPrice: state.supplierKind === "hotel_property" ? unit.manualRoomPrice : null,
           complimentaryFirstNight:
             state.supplierKind === "hotel_property" ? unit.complimentaryFirstNight : false,
+          manualTourPrice: state.supplierKind === "tour_operator" ? unit.manualTourPrice : null,
         })),
       nights:
         state.supplierKind === "hotel_property" ? Math.max(1, state.nights ?? 1) : undefined,
@@ -1007,6 +1069,7 @@ export function validateConfigureState(
       } else if (
         leg.pricingMode !== "manual" &&
         (unit.manualRoomPrice ?? null) === null &&
+        (unit.manualTourPrice ?? null) === null &&
         state.routeId &&
         state.serviceDate
       ) {
@@ -1014,8 +1077,8 @@ export function validateConfigureState(
         // in, and a blank one is allowed here (flagged as pricing_incomplete on the quote
         // instead of blocking the itinerary from being built).
         //
-        // A room with its own typed price is the same situation one room at a time: it never
-        // reads the card, so a missing one is not an error to raise against it.
+        // A room or tour unit with its own typed override price is the same situation one unit
+        // at a time: it never reads the card, so a missing one is not an error to raise against it.
         const pricingError = describeMissingRateCard(
           leg,
           state.routeId,

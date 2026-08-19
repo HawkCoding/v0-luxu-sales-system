@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react"
 import { broadcast } from "@/lib/cross-tab"
+import { appendFieldDetails } from "@/lib/format-error-details"
 import type { StaleVersionConflictPayload, FieldConflictPayload } from "@/lib/concurrency"
 
 type VersionedEntity = "job" | "quote" | "customer"
@@ -122,7 +123,7 @@ export function useVersionedSave<TPayload extends object, TResponse extends Save
             responsePayload && typeof responsePayload === "object" && "error" in responsePayload
               ? String((responsePayload as { error?: unknown }).error)
               : "Request failed"
-          throw new Error(errorMessage)
+          throw new Error(appendFieldDetails(errorMessage, responsePayload))
         }
 
         const typedPayload = responsePayload as TResponse

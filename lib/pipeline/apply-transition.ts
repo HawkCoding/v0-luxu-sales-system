@@ -44,8 +44,12 @@ export interface ApplyTransitionInput {
   manualConfirmations?: ManualConfirmations
   lostContext?: LostContext
   quotes?: Pick<QuoteRow, "id" | "status" | "total" | "created_at">[]
-  documents?: Pick<DocumentRow, "id" | "kind" | "status">[]
-  correspondences?: Pick<CorrespondenceRow, "id" | "kind" | "subject" | "status">[]
+  // `created_at` is optional here even though the underlying rows always have one -- these two
+  // fields are unused inside applyTransition itself (validateTransition is what reads them, and it
+  // is always called separately, before this), so existing callers that only ever selected
+  // id/kind/status shouldn't have to add a column they don't need to pass through.
+  documents?: (Pick<DocumentRow, "id" | "kind" | "status"> & { created_at?: string | null })[]
+  correspondences?: (Pick<CorrespondenceRow, "id" | "kind" | "subject" | "status"> & { created_at?: string | null })[]
   now?: Date
 }
 

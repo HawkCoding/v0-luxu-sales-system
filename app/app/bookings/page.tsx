@@ -1,6 +1,6 @@
 "use client"
 
-import { useData } from "@/lib/use-data"
+import { useData, useAssignableUsers } from "@/lib/use-data"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Search, CalendarCheck, Filter, X } from "lucide-react"
 import Link from "next/link"
 import { useState } from "react"
-import { CONSULTANTS, getPipelineStageLabel, type ConsultantAbbreviation } from "@/lib/types"
+import { getPipelineStageLabel } from "@/lib/types"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar } from "@/components/ui/calendar"
 import { formatDisplayDate } from "@/lib/date-format"
@@ -18,10 +18,11 @@ import { BASE_CURRENCY, formatMoney } from "@/lib/money"
 
 export default function BookingsPage() {
   const { data, isLoading, error, mutate } = useData(["bookings", "customers", "payments", "quotes"])
+  const { data: assignableData } = useAssignableUsers()
   const [search, setSearch] = useState("")
   const [supplierFilter, setSupplierFilter] = useState("all")
   const [paymentStatusFilter, setPaymentStatusFilter] = useState("all")
-  const [consultantFilter, setConsultantFilter] = useState<"all" | ConsultantAbbreviation>("all")
+  const [consultantFilter, setConsultantFilter] = useState<"all" | "unassigned" | string>("all")
   const [createdDateFrom, setCreatedDateFrom] = useState<Date | undefined>(undefined)
   const [createdDateTo, setCreatedDateTo] = useState<Date | undefined>(undefined)
   const [departureDateFrom, setDepartureDateFrom] = useState<Date | undefined>(undefined)
@@ -117,7 +118,11 @@ export default function BookingsPage() {
       paymentStatusFilter === "all" || booking.paymentStatus === paymentStatusFilter
 
     // Consultant filter
-    const matchConsultant = consultantFilter === "all" || booking.consultant === consultantFilter
+    const matchConsultant =
+      consultantFilter === "all" ||
+      (consultantFilter === "unassigned"
+        ? !booking.assignedSalespersonId
+        : booking.assignedSalespersonId === consultantFilter)
 
     // Created date range filter
     const createdDate = new Date(booking.createdAt)
@@ -225,9 +230,10 @@ export default function BookingsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Consultants</SelectItem>
-                  {CONSULTANTS.map((c) => (
-                    <SelectItem key={c.key} value={c.key}>
-                      {c.key} - {c.name}
+                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                  {(assignableData?.users ?? []).map((u) => (
+                    <SelectItem key={u.userId} value={u.userId}>
+                      {u.name}
                     </SelectItem>
                   ))}
                 </SelectContent>

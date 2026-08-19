@@ -1,4 +1,4 @@
-export type Json =
+﻿export type Json =
   | string
   | number
   | boolean
@@ -492,6 +492,9 @@ export type Database = {
           manual_room_price: number | null
           manual_room_price_set_at: string | null
           manual_room_price_set_by: string | null
+          manual_tour_price: number | null
+          manual_tour_price_set_at: string | null
+          manual_tour_price_set_by: string | null
           origin: Database["public"]["Enums"]["service_origin"]
           service_id: string
           sort_order: number
@@ -514,6 +517,9 @@ export type Database = {
           manual_room_price?: number | null
           manual_room_price_set_at?: string | null
           manual_room_price_set_by?: string | null
+          manual_tour_price?: number | null
+          manual_tour_price_set_at?: string | null
+          manual_tour_price_set_by?: string | null
           origin?: Database["public"]["Enums"]["service_origin"]
           service_id: string
           sort_order?: number
@@ -536,6 +542,9 @@ export type Database = {
           manual_room_price?: number | null
           manual_room_price_set_at?: string | null
           manual_room_price_set_by?: string | null
+          manual_tour_price?: number | null
+          manual_tour_price_set_at?: string | null
+          manual_tour_price_set_by?: string | null
           origin?: Database["public"]["Enums"]["service_origin"]
           service_id?: string
           sort_order?: number
@@ -1084,6 +1093,7 @@ export type Database = {
           refund_status: string | null
           refunded_at: string | null
           reservation_form_received_at: string | null
+          revision_reset_at: string | null
           route_id: string | null
           route_reversed: boolean
           services_confirmed_at: string | null
@@ -1156,6 +1166,7 @@ export type Database = {
           refund_status?: string | null
           refunded_at?: string | null
           reservation_form_received_at?: string | null
+          revision_reset_at?: string | null
           route_id?: string | null
           route_reversed?: boolean
           services_confirmed_at?: string | null
@@ -1228,6 +1239,7 @@ export type Database = {
           refund_status?: string | null
           refunded_at?: string | null
           reservation_form_received_at?: string | null
+          revision_reset_at?: string | null
           route_id?: string | null
           route_reversed?: boolean
           services_confirmed_at?: string | null
@@ -2063,6 +2075,7 @@ export type Database = {
           id: string
           invoice_number: string
           kind: string
+          payment_method_id: string | null
           pdf_document_id: string | null
           quote_id: string | null
           sent_at: string | null
@@ -2081,6 +2094,7 @@ export type Database = {
           id?: string
           invoice_number: string
           kind: string
+          payment_method_id?: string | null
           pdf_document_id?: string | null
           quote_id?: string | null
           sent_at?: string | null
@@ -2099,6 +2113,7 @@ export type Database = {
           id?: string
           invoice_number?: string
           kind?: string
+          payment_method_id?: string | null
           pdf_document_id?: string | null
           quote_id?: string | null
           sent_at?: string | null
@@ -2111,6 +2126,13 @@ export type Database = {
             columns: ["booking_id"]
             isOneToOne: false
             referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invoices_payment_method_id_fkey"
+            columns: ["payment_method_id"]
+            isOneToOne: false
+            referencedRelation: "payment_methods"
             referencedColumns: ["id"]
           },
           {
@@ -2226,6 +2248,75 @@ export type Database = {
           created_at?: string
           id?: string
           label?: string
+        }
+        Relationships: []
+      }
+      payment_methods: {
+        Row: {
+          bank_account_name: string | null
+          bank_account_number: string | null
+          bank_branch_code: string | null
+          bank_name: string | null
+          bank_swift_code: string | null
+          company_address: string | null
+          company_cell: string | null
+          company_email: string | null
+          company_fax: string | null
+          company_reg_number: string | null
+          company_tel: string | null
+          company_vat_number: string | null
+          company_website: string | null
+          created_at: string
+          enabled: boolean
+          id: string
+          is_default: boolean
+          name: string
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          bank_account_name?: string | null
+          bank_account_number?: string | null
+          bank_branch_code?: string | null
+          bank_name?: string | null
+          bank_swift_code?: string | null
+          company_address?: string | null
+          company_cell?: string | null
+          company_email?: string | null
+          company_fax?: string | null
+          company_reg_number?: string | null
+          company_tel?: string | null
+          company_vat_number?: string | null
+          company_website?: string | null
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          is_default?: boolean
+          name: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          bank_account_name?: string | null
+          bank_account_number?: string | null
+          bank_branch_code?: string | null
+          bank_name?: string | null
+          bank_swift_code?: string | null
+          company_address?: string | null
+          company_cell?: string | null
+          company_email?: string | null
+          company_fax?: string | null
+          company_reg_number?: string | null
+          company_tel?: string | null
+          company_vat_number?: string | null
+          company_website?: string | null
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          is_default?: boolean
+          name?: string
+          sort_order?: number
+          updated_at?: string
         }
         Relationships: []
       }

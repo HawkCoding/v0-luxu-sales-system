@@ -23,6 +23,7 @@ interface PreparedReminder {
     warnings?: string[]
     signatureProfileId?: string | null
     signatureBrandId?: string | null
+    paymentMethodId?: string | null
   }
   attachment: {
     filename: string
@@ -90,6 +91,8 @@ export function SendPaymentReminderButton({
           bodyContentHtml={prepared.email.bodyContentHtml}
           signatureProfileId={prepared.email.signatureProfileId}
           signatureBrandId={prepared.email.signatureBrandId}
+          paymentMethodId={prepared.email.paymentMethodId}
+          invoiceNumber={invoiceNumber}
           to={prepared.email.to}
           kind="payment_reminder"
           attachments={[prepared.attachment]}
