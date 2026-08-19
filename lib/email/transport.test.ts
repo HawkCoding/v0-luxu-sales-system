@@ -14,6 +14,17 @@ vi.mock("nodemailer", () => ({
   },
 }))
 
+// Test mode is read from app_settings on every send; keep it off by default so
+// the existing provider-selection tests exercise the live path.
+const { getEmailTestMode } = vi.hoisted(() => ({
+  getEmailTestMode: vi.fn(async () => ({ enabled: false, recipients: [] as string[] })),
+}))
+
+vi.mock("@/lib/email/test-mode", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/email/test-mode")>()
+  return { ...actual, getEmailTestMode }
+})
+
 const ORIGINAL_URL = process.env.MAILPIT_SMTP_URL
 const ORIGINAL_HOST = process.env.MAILPIT_SMTP_HOST
 const ORIGINAL_PORT = process.env.MAILPIT_SMTP_PORT
@@ -127,6 +138,88 @@ describe("sendEmail production fallback guard", () => {
 
     expect(result).toMatchObject({ success: true, provider: "mailpit" })
     expect(sendMail).toHaveBeenCalledOnce()
+  })
+})
+
+describe("sendEmail test mode redirect", () => {
+  const message = {
+    from: "office@example.com",
+    to: "customer@example.com",
+    subject: "Your quote",
+    text: "Hi",
+  }
+
+  beforeEach(() => {
+    sendMail.mockReset()
+    sendMail.mockResolvedValue({ messageId: "local-1" })
+    getEmailTestMode.mockResolvedValue({ enabled: false, recipients: [] })
+    vi.stubEnv("NODE_ENV", "development")
+    vi.stubEnv("RESEND_API_KEY", "")
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    getEmailTestMode.mockResolvedValue({ enabled: false, recipients: [] })
+  })
+
+  it("sends to the real recipient when test mode is off", async () => {
+    const result = await sendEmail(message)
+
+    expect(sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({ to: ["customer@example.com"], subject: "Your quote" }),
+    )
+    expect(result.testModeRedirectedFrom).toBeNull()
+  })
+
+  it("redirects to the test inbox and prefixes the subject", async () => {
+    getEmailTestMode.mockResolvedValue({ enabled: true, recipients: ["qa@example.com"] })
+
+    const result = await sendEmail(message)
+
+    expect(sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: ["qa@example.com"],
+        subject: "[TEST -> customer@example.com] Your quote",
+      }),
+    )
+    expect(result).toMatchObject({
+      success: true,
+      testModeRedirectedFrom: ["customer@example.com"],
+      deliveredTo: ["qa@example.com"],
+      effectiveSubject: "[TEST -> customer@example.com] Your quote",
+    })
+  })
+
+  it("redirects every recipient of a multi-address send", async () => {
+    getEmailTestMode.mockResolvedValue({ enabled: true, recipients: ["qa@example.com"] })
+
+    await sendEmail({ ...message, to: ["a@client.com", "b@client.com"] })
+
+    expect(sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: ["qa@example.com"],
+        subject: "[TEST -> a@client.com, b@client.com] Your quote",
+      }),
+    )
+  })
+
+  it("refuses to send when test mode is on without a test inbox", async () => {
+    getEmailTestMode.mockResolvedValue({ enabled: true, recipients: [] })
+
+    const result = await sendEmail(message)
+
+    expect(sendMail).not.toHaveBeenCalled()
+    expect(result.success).toBe(false)
+    expect(result.error).toMatch(/no test inbox is configured/i)
+  })
+
+  it("refuses to send when the test-mode lookup fails, rather than mailing the customer", async () => {
+    getEmailTestMode.mockRejectedValue(new Error("db down"))
+
+    const result = await sendEmail(message)
+
+    expect(sendMail).not.toHaveBeenCalled()
+    expect(result.success).toBe(false)
   })
 })
 

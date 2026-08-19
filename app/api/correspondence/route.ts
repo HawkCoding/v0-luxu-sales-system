@@ -368,10 +368,13 @@ export async function POST(req: Request) {
       : [recipient]
     : null
 
+  // `recipients` stays the intended customer address — scheduled follow-ups
+  // resend from it — while the stored subject carries the test-mode prefix so
+  // a redirected send is never mistaken for one the customer received.
   const correspondenceValues = {
     channel: parsed.data.channel ?? "email",
     kind: parsed.data.kind ?? null,
-    subject,
+    subject: sendResult.effectiveSubject ?? subject,
     body_html: bodyHtml,
     status: success ? ("sent" as const) : ("failed" as const),
     sent_at: success ? parsed.data.sentAt ?? now : null,

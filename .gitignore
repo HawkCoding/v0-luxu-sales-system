@@ -21,6 +21,9 @@ tmp-*.sql
 tmp-db-sync/
 tmp/
 
+# Pre-wipe database dumps - contain customer PII, never commit
+backup-*.sql
+
 # Cursor IDE
 .cursor/debug-*.log
 .cursor/plans/

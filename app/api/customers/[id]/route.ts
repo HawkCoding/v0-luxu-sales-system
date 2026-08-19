@@ -4,7 +4,7 @@ import type { PostgrestError } from "@supabase/supabase-js"
 import { createSessionClient } from "@/lib/supabase/server"
 import { CUSTOMER_COLUMNS } from "@/lib/supabase/columns"
 import { detectFieldConflicts, fieldConflictResponse, staleVersionResponse } from "@/lib/concurrency"
-import { mapPostgrestError, safeSupabaseError } from "@/lib/api/responses"
+import { jsonError, jsonZodError, mapPostgrestError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { PHONE_VALIDATION_MESSAGE, isPlausiblePhone } from "@/lib/phone-format"
 import {
@@ -310,12 +310,16 @@ export async function PATCH(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
-  let parsed: z.infer<typeof patchCustomerSchema>
+  let raw: unknown
   try {
-    parsed = patchCustomerSchema.parse(await req.json())
+    raw = await req.json()
   } catch {
-    return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
+    return jsonError("Invalid JSON body", 400)
   }
+
+  const result = patchCustomerSchema.safeParse(raw)
+  if (!result.success) return jsonZodError(result.error)
+  const parsed = result.data
 
   let current = await supabase.from("customers").select(CUSTOMER_PATCH_SELECT).eq("id", id).maybeSingle()
 

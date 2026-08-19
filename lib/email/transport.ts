@@ -1,6 +1,12 @@
 import nodemailer from "nodemailer"
 import { Resend } from "resend"
 import { sendViaSalespersonSmtp } from "@/lib/email/smtp-transport"
+import {
+  applyEmailTestMode,
+  EmailTestModeError,
+  EMAIL_TEST_MODE_LOOKUP_ERROR,
+  getEmailTestMode,
+} from "@/lib/email/test-mode"
 
 export interface SendEmailAttachment {
   filename: string
@@ -14,6 +20,12 @@ export interface SendEmailResult {
   providerMessageId: string | null
   error: string | null
   sentAppendFailed?: boolean
+  /** Addresses the email would have gone to, when test mode redirected it. */
+  testModeRedirectedFrom?: string[] | null
+  /** Addresses actually delivered to — the test inbox when redirected. */
+  deliveredTo?: string[]
+  /** Subject as actually sent, carrying the `[TEST -> ...]` prefix when redirected. */
+  effectiveSubject?: string
 }
 
 function normalizeRecipients(to: string | string[]): string[] {
@@ -174,16 +186,59 @@ export interface SendEmailOptions {
   salespersonCredentialId?: string | null
 }
 
+/**
+ * The single choke point every outbound email passes through. Test mode is
+ * enforced here — before any provider is chosen — so no send path, present or
+ * future, can reach a customer while the switch is on.
+ */
 export async function sendEmail(options: SendEmailOptions): Promise<SendEmailResult> {
-  const recipients = normalizeRecipients(options.to)
+  const intendedRecipients = normalizeRecipients(options.to)
+  const fallbackProvider = options.salespersonCredentialId
+    ? "smtp"
+    : process.env.RESEND_API_KEY
+      ? "resend"
+      : "mailpit"
 
-  if (recipients.length === 0) {
+  if (intendedRecipients.length === 0) {
     return {
       success: false,
-      provider: options.salespersonCredentialId ? "smtp" : process.env.RESEND_API_KEY ? "resend" : "mailpit",
+      provider: fallbackProvider,
       providerMessageId: null,
       error: "Email recipient is required",
     }
+  }
+
+  let redirect: ReturnType<typeof applyEmailTestMode> = null
+  try {
+    redirect = applyEmailTestMode(
+      await getEmailTestMode(),
+      intendedRecipients,
+      options.subject,
+    )
+  } catch (err) {
+    const error = err instanceof EmailTestModeError ? err.message : EMAIL_TEST_MODE_LOOKUP_ERROR
+    console.error("[email] refusing to send:", error)
+    return {
+      success: false,
+      provider: fallbackProvider,
+      providerMessageId: null,
+      error,
+      testModeRedirectedFrom: intendedRecipients,
+    }
+  }
+
+  const recipients = redirect?.recipients ?? intendedRecipients
+  const subject = redirect?.subject ?? options.subject
+  const testModeFields = {
+    testModeRedirectedFrom: redirect ? intendedRecipients : null,
+    deliveredTo: recipients,
+    effectiveSubject: subject,
+  }
+
+  if (redirect) {
+    console.info(
+      `[email] TEST MODE: redirected ${intendedRecipients.join(", ")} -> ${recipients.join(", ")}`,
+    )
   }
 
   if (options.salespersonCredentialId) {
@@ -191,7 +246,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<SendEmailRes
       const result = await sendViaSalespersonSmtp({
         credentialId: options.salespersonCredentialId,
         to: recipients,
-        subject: options.subject,
+        subject,
         htmlBody: options.html ?? "",
         textBody: options.text ?? undefined,
         attachments: options.attachments?.map((a) => ({
@@ -206,6 +261,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<SendEmailRes
         providerMessageId: result.messageId,
         error: null,
         sentAppendFailed: result.sentAppendFailed,
+        ...testModeFields,
       }
     } catch (err) {
       return {
@@ -213,12 +269,16 @@ export async function sendEmail(options: SendEmailOptions): Promise<SendEmailRes
         provider: "smtp",
         providerMessageId: null,
         error: err instanceof Error ? err.message : "SMTP send failed",
+        ...testModeFields,
       }
     }
   }
 
   const apiKey = process.env.RESEND_API_KEY?.trim()
-  if (apiKey) return sendWithResend({ ...options, to: recipients }, apiKey)
+  if (apiKey) {
+    const result = await sendWithResend({ ...options, to: recipients, subject }, apiKey)
+    return { ...result, ...testModeFields }
+  }
 
   // The Mailpit fallback exists for local development only. In production it
   // would silently dial 127.0.0.1:1025 and surface as ECONNREFUSED, hiding the
@@ -230,8 +290,10 @@ export async function sendEmail(options: SendEmailOptions): Promise<SendEmailRes
       provider: "mailpit",
       providerMessageId: null,
       error: EMAIL_NOT_CONFIGURED_ERROR,
+      ...testModeFields,
     }
   }
 
-  return sendWithMailpit({ ...options, to: recipients })
+  const result = await sendWithMailpit({ ...options, to: recipients, subject })
+  return { ...result, ...testModeFields }
 }

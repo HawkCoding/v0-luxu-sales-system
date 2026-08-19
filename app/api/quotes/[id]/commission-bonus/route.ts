@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
+import { jsonError, jsonZodError } from "@/lib/api/responses"
 import { requireVersionTokenOrForce, staleVersionResponse, versionTokenShape } from "@/lib/concurrency"
 import { applyCommissionBonus } from "@/lib/quotes/apply-commission-bonus"
 import { calculateQuoteTotals } from "@/lib/quotes/pricing-engine"
@@ -36,12 +37,16 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   const { supabase, user, profile } = auth.value
   const { id } = await params
 
-  let parsed
+  let raw: unknown
   try {
-    parsed = patchSchema.parse(await req.json())
+    raw = await req.json()
   } catch {
-    return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
+    return jsonError("Invalid JSON body", 400)
   }
+
+  const result = patchSchema.safeParse(raw)
+  if (!result.success) return jsonZodError(result.error)
+  const parsed = result.data
 
   // The bonus is re-folded into a rebuilt line-item set, so the same stale-write hazard as
   // PATCH /api/quotes/[id] applies. Same contract: a version token, or an explicit force.

@@ -5,7 +5,7 @@ import { buildPackageQuoteLineItems } from "@/lib/quotes/build-from-package"
 import { priceExtraLineItems } from "@/lib/quotes/price-extra-line"
 import { loadBookingServicesPackageDetail } from "@/lib/quotes/adapters/from-booking-services"
 import { loadRoomOverrideProvenance } from "@/lib/quotes/room-override-provenance"
-import { safeSupabaseError } from "@/lib/api/responses"
+import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { getCachedRates } from "@/lib/fx/rates"
 import { BASE_CURRENCY, normaliseCurrency } from "@/lib/money"
 import { MissingFxRateError } from "@/lib/pricing/convert-currency"
@@ -101,12 +101,16 @@ export async function POST(req: Request, { params }: RouteParams) {
   const { supabase } = auth.value
   const { id } = await params
 
-  let parsed: z.infer<typeof applyServicesSchema>
+  let raw: unknown
   try {
-    parsed = applyServicesSchema.parse(await req.json())
+    raw = await req.json()
   } catch {
-    return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
+    return jsonError("Invalid JSON body", 400)
   }
+
+  const result = applyServicesSchema.safeParse(raw)
+  if (!result.success) return jsonZodError(result.error)
+  const parsed = result.data
 
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")

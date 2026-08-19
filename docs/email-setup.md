@@ -20,6 +20,26 @@ Production checklist for the SMTP path:
 - `EMAIL_CREDENTIAL_ENCRYPTION_KEY` set in the production environment
 - every booking that sends correspondence has `assigned_salesperson_id` populated
 
+## Email Test Mode (client UAT)
+
+Lets the client drive the full production pipeline — quote, invoice, reminders, voucher, automatic follow-ups — without a single email reaching a customer.
+
+**Turn on:** Settings → Email Test Mode. Enter a test inbox, flip the switch, Save. Admins and managers only.
+
+**Turn off (go live):** flip the same switch off and Save. That is the entire reversal — no redeploy, no code change.
+
+While it is on:
+
+- every recipient of every outbound email is replaced with the configured test inbox
+- the subject is prefixed `[TEST -> customer@example.com]` so the intended recipient is never lost
+- an amber banner sits above the app on every page for every user
+- the `correspondences` record stores the prefixed subject, but keeps `recipients` as the real customer address so a scheduled follow-up still resends correctly once test mode is off
+- every change to the switch is written to the audit log
+
+Enforcement lives in `sendEmail` (`lib/email/transport.ts`), the one function every send path goes through, so cron follow-ups and staff password-reset notices are covered too. It **fails closed**: if the switch is on with no inbox configured, or the setting cannot be read, the send is refused rather than falling through to the customer.
+
+Settings keys: `email_test_mode_enabled`, `email_test_mode_recipient` (`app_settings`).
+
 ## Resend (optional)
 
 Before enabling live sending through Resend, verify the customer's sending domain and configure the production environment variables.

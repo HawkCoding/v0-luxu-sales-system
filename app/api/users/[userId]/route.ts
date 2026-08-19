@@ -10,6 +10,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { adminAuthErrorResponse, requireAdmin } from "@/lib/api/require-admin"
+import { jsonError, jsonZodError } from "@/lib/api/responses"
 import { createServiceClient } from "@/lib/supabase/server"
 
 const roleSchema = z.enum(["admin", "manager", "consultant"])
@@ -49,12 +50,16 @@ export async function PATCH(
     return NextResponse.json({ error: "Missing userId" }, { status: 400 })
   }
 
-  let payload: z.infer<typeof patchSchema>
+  let raw: unknown
   try {
-    payload = patchSchema.parse(await request.json())
+    raw = await request.json()
   } catch {
-    return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
+    return jsonError("Invalid JSON body", 400)
   }
+
+  const result = patchSchema.safeParse(raw)
+  if (!result.success) return jsonZodError(result.error)
+  const payload = result.data
 
   if (userId === auth.value.adminUserId) {
     if (payload.clearanceLevel !== undefined) {
