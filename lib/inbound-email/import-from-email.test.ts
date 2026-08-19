@@ -240,6 +240,34 @@ describe("inbound email import: rovos-rail-availability-hotel.json", () => {
   })
 })
 
+describe("inbound email import: rovos-rail-date-range.json (regression)", () => {
+  // Regression fixture for the reported bug: this template states the departure field as a date
+  // RANGE ("02 - 13 September 2027", the trip's first and last day) rather than a single date.
+  // The parser used to pick up the LAST day in the range (the return date, 13th) instead of the
+  // FIRST (the departure, 2nd), so the booking imported a week and a half late.
+  const fixture = loadFixture("rovos-rail-date-range.json")
+  const rawText = getMessageBody(fixture.text, fixture.html).body
+  const draft = parseEmailDraft(rawText)
+  const payload = buildEnquiryImportPayload(draft)
+
+  it("reads the FIRST date of the range as the departure date, at high confidence", () => {
+    expect(draft.trip.departureDate).toBe("2027-09-02")
+    expect(draft.confidence["trip.departureDate"]).toBe("high")
+    expect(payload.departureDate).toBe("2027-09-02")
+  })
+
+  it("extracts the rest of the trip fields unaffected by the range parsing", () => {
+    expect(draft.trip.purpose).toBe("availability")
+    expect(draft.guests.adults).toBe(2)
+    expect(draft.guests.suites).toBe(1)
+    expect(draft.guests.suitePhrases).toEqual(["Pullman Twin Suite"])
+    expect(draft.trip.hotelPhase).toBe("pre")
+    expect(draft.trip.hotelOption).toBe("Apogee Hotel & Spa - Pretoria")
+    expect(draft.trip.extendStay).toBe(false)
+    expect(draft.additionalServices.requested).toBe(false)
+  })
+})
+
 describe("inbound email import: blue-train-flowed-text-part.json (regression)", () => {
   // The production incident this guards against: switching the mailbox from a personal Gmail
   // test account to info@sarail.co.za changed nothing about the Gravity Forms template, but the

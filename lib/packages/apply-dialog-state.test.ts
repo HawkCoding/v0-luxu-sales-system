@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { BookingTransportRequest, PackageDetail, PackageLeg, SupplierKind } from "@/lib/types"
 import { joinLocalDateTime, splitLocalDateTime } from "@/lib/date-time-field"
 import {
+  applyAnchoredAirlineDates,
   applyAnchoredDates,
   applyAnchoredTransferDates,
   buildDefaultLegStates,
@@ -191,6 +192,70 @@ describe("buildDefaultLegStates", () => {
     expect(transfer.routeId).toBe("route-transfer-1")
     expect(transfer.requests[0].pickupPoint).toBe("Cape Town Airport")
     expect(transfer.requests[0].dropoffPoint).toBe("V&A Waterfront")
+  })
+
+  it("seeds a new airline leg's From/To from its one route's code-pair name, times still null", () => {
+    const airlineLeg = leg({
+      id: "leg-airline",
+      supplierKind: "airline",
+      sortOrder: 4,
+      pricingMode: "manual",
+      routes: [
+        {
+          id: "route-airline-1",
+          supplierId: "supplier-leg-airline",
+          name: "CPT > ORT",
+          originLocationId: "loc-cpt",
+          destinationLocationId: "loc-ort",
+          directionMode: "round_trip",
+          active: true,
+          createdAt: "",
+          updatedAt: "",
+        },
+      ] as PackageLeg["routes"],
+    })
+
+    const states = buildDefaultLegStates(detail([...pkg.legs, airlineLeg]), {
+      tripStartDate: "2026-09-01",
+    })
+    const airline = suiteState(states, "leg-airline")
+
+    expect(airline.routeId).toBe("route-airline-1")
+    expect(airline.departureAirportCode).toBe("CPT")
+    expect(airline.arrivalAirportCode).toBe("ORT")
+    expect(airline.departureTime).toBeNull()
+    expect(airline.arrivalDate).toBeNull()
+    expect(airline.arrivalTime).toBeNull()
+  })
+
+  it("leaves an airline leg's From/To null when its route name isn't a code pair", () => {
+    const airlineLeg = leg({
+      id: "leg-airline-prose",
+      supplierKind: "airline",
+      sortOrder: 4,
+      pricingMode: "manual",
+      routes: [
+        {
+          id: "route-airline-prose",
+          supplierId: "supplier-leg-airline-prose",
+          name: "Cape Town to Johannesburg",
+          originLocationId: "loc-cpt",
+          destinationLocationId: "loc-ort",
+          directionMode: "round_trip",
+          active: true,
+          createdAt: "",
+          updatedAt: "",
+        },
+      ] as PackageLeg["routes"],
+    })
+
+    const states = buildDefaultLegStates(detail([...pkg.legs, airlineLeg]), {
+      tripStartDate: "2026-09-01",
+    })
+    const airline = suiteState(states, "leg-airline-prose")
+
+    expect(airline.departureAirportCode).toBeNull()
+    expect(airline.arrivalAirportCode).toBeNull()
   })
 
   it("createDraftTransportRequest pre-fills from an explicitly passed route on multi-route legs", () => {
@@ -597,6 +662,100 @@ describe("transfer date anchors", () => {
   })
 })
 
+// Train(1) -> Hotel(2, 2 nights) -> Airline(3) -> Transfer(4), so the airline anchors to the hotel
+// above it and the transfer anchors to the airline above it — covers the three-stage chain order
+// in applyAnchoredDates (hotel settles, then airline, then transfer).
+describe("airline date anchors", () => {
+  // A 3-day route, unlike the bare trainLeg fixture (no durationDays), so a post-hotel/post-airline
+  // anchor resolves to a real arrival day rather than immediately hitting the same-day fallback.
+  const chainTrain = {
+    ...trainLeg,
+    routes: [{ ...trainLeg.routes[0], durationDays: 3 }] as PackageLeg["routes"],
+  }
+  const chainHotel2 = { ...hotelLeg, sortOrder: 2 }
+  const chainAirline = leg({ id: "leg-airline", supplierKind: "airline", sortOrder: 3 })
+  const chainTransfer = leg({ id: "leg-transfer-3", supplierKind: "transfers", sortOrder: 4 })
+  const chainPkg = detail([chainTrain, chainHotel2, chainAirline, chainTransfer])
+
+  it("defaults dateAnchor to custom and round-trips a saved anchor for an airline leg", () => {
+    const defaults = buildDefaultLegStates(chainPkg, { tripStartDate: "2026-09-01" })
+    expect(suiteState(defaults, "leg-airline").dateAnchor).toBe("custom")
+
+    const saved: SavedPackageState = {
+      packageId: "pkg-1",
+      tripStartDate: "2026-09-01",
+      tripEndDate: null,
+      selections: [
+        {
+          id: "sel-airline",
+          package_leg_id: "leg-airline",
+          date_anchor: "pre",
+          selected: true,
+          supplier_id: "supplier-leg-airline",
+          route_id: null,
+          route_reversed: null,
+          suite_type_id: null,
+          service_date: "2026-09-03",
+          nights: null,
+          rate_type_id: null,
+          notes: null,
+          units: [],
+        },
+      ],
+    }
+    const hydrated = hydrateFromSaved(chainPkg, saved, [], { tripStartDate: "2026-09-01" })
+    expect(suiteState(hydrated, "leg-airline").dateAnchor).toBe("pre")
+
+    const patch = toPackageSelectionsPatch(hydrated)
+    expect(patch.selections.find((s) => s.packageLegId === "leg-airline")?.dateAnchor).toBe("pre")
+  })
+
+  it("applyAnchoredAirlineDates resolves departure from the leg above, leaving arrivalDate untouched", () => {
+    const states = buildDefaultLegStates(chainPkg, { tripStartDate: "2026-09-01" })
+    suiteState(states, "leg-train").serviceDate = "2026-09-01"
+    const hotel = suiteState(states, "leg-hotel")
+    hotel.selected = true
+    hotel.dateAnchor = "custom"
+    hotel.serviceDate = "2026-09-02"
+    hotel.nights = 2
+
+    const airline = suiteState(states, "leg-airline")
+    airline.selected = true
+    airline.dateAnchor = "post"
+    airline.arrivalDate = "2026-09-01" // untouched sentinel
+
+    const recomputed = applyAnchoredAirlineDates(chainPkg, states)
+    // Post-hotel: departs the hotel's check-out day (check-in 09-02 + 2 nights = 09-04).
+    expect(suiteState(recomputed, "leg-airline").serviceDate).toBe("2026-09-04")
+    expect(suiteState(recomputed, "leg-airline").arrivalDate).toBe("2026-09-01")
+  })
+
+  it("chains hotel -> airline -> transfer through applyAnchoredDates", () => {
+    let states = buildDefaultLegStates(chainPkg, { tripStartDate: "2026-09-01" })
+    suiteState(states, "leg-train").serviceDate = "2026-09-01"
+    const hotel = suiteState(states, "leg-hotel")
+    hotel.selected = true
+    hotel.dateAnchor = "post"
+    hotel.nights = 2
+
+    const airline = suiteState(states, "leg-airline")
+    airline.selected = true
+    airline.dateAnchor = "post"
+
+    const transfer = transportState(states, "leg-transfer-3")
+    transfer.selected = true
+    transfer.requests[0] = { ...transfer.requests[0], dateAnchor: "pre" }
+
+    states = applyAnchoredDates(chainPkg, states)
+
+    expect(suiteState(states, "leg-hotel").serviceDate).toBe("2026-09-03") // train arrival day
+    expect(suiteState(states, "leg-airline").serviceDate).toBe("2026-09-05") // hotel check-out day
+    expect(splitLocalDateTime(transportState(states, "leg-transfer-3").requests[0].pickupAt).date).toBe(
+      "2026-09-05",
+    ) // pre-airline: pickup on the flight's own departure day
+  })
+})
+
 describe("toApplySelections", () => {
   it("sends units for suite legs and a fallback vehicle category for transport legs", () => {
     const states = buildDefaultLegStates(pkg, { tripStartDate: null, totalsBySupplierId: totals })
@@ -615,11 +774,13 @@ describe("toApplySelections", () => {
     const trainSel = selections.find((s) => s.legId === "leg-train")
     expect(trainSel?.units).toEqual([
       {
-        // A draft room has no persisted id to send, and a train leg never carries a room override
-        // or a gifted night — both are hotel-only and the server rejects them elsewhere.
+        // A draft room has no persisted id to send, and a train leg never carries a room or tour
+        // override or a gifted night — those are hotel/tour-only and the server rejects them
+        // elsewhere.
         unitId: undefined,
         manualRoomPrice: null,
         complimentaryFirstNight: false,
+        manualTourPrice: null,
         suiteTypeId: "suite-1",
         bedroomTypeId: null,
         bedroomLayoutId: null,

@@ -1,4 +1,4 @@
-import { isOptionalPackageLegKind, SUPPLIER_VOCABULARY } from "@/lib/types"
+import { isOptionalPackageLegKind, isTypePricedSupplier, SUPPLIER_VOCABULARY } from "@/lib/types"
 import { resolveDirectedRouteName } from "@/lib/routes/route-name"
 import type { CommissionKind, PackageDetail, PricingSnapshot, QuoteLineItem } from "@/lib/types"
 import type { SupabaseClient } from "@supabase/supabase-js"
@@ -54,6 +54,13 @@ export interface PackageUnitSelection {
    *  `nights - 1` at the room's per-night price. Composes with manualRoomPrice rather than
    *  replacing it — the room keeps a real rate and simply loses a night from the count. */
   complimentaryFirstNight?: boolean | null
+  /** Tour legs only: a consultant-typed flat price that replaces this unit's rate-card-computed
+   *  total (which would otherwise split across adult/child/infant lines). Denominated in the
+   *  card's own currency (falling back to the leg's priceCurrency when nothing covers it). */
+  manualTourPrice?: number | null
+  /** Server-resolved provenance for manualTourPrice, same posture as manualRoomPriceSetAt/-Name. */
+  manualTourPriceSetAt?: string | null
+  manualTourPriceSetByName?: string | null
 }
 
 export interface PackageLegSelection {
@@ -449,6 +456,16 @@ export async function buildPackageQuoteLineItems({
       setAt: string | null
       setByName: string | null
     } | null
+    /** Tours only: this line's price was typed by a consultant rather than read off the card.
+     * Internal-only, same posture as roomOverride/transportOverride. */
+    tourOverride?: {
+      /** The typed flat price, in sourceCurrency. */
+      price: number
+      /** What the rate card would have charged, same currency. Null when no card covered the unit. */
+      basePrice: number | null
+      setAt: string | null
+      setByName: string | null
+    } | null
     /** Hotels only: nights of this room's stay the hotel gifted, and the stay they were taken
      * from. `qty` is already the charged nights; these are carried so the quote view, the
      * worksheet and the client documents can still speak about the full stay. */
@@ -482,6 +499,7 @@ export async function buildPackageQuoteLineItems({
     sourceCurrency,
     roomOverride,
     transportOverride,
+    tourOverride,
     complimentary,
   }: AddLineItemOptions) {
     // A stay whose every night was gifted still has to reach the quote: the client documents read
@@ -589,6 +607,14 @@ export async function buildPackageQuoteLineItems({
               manualTransportPriceSetByName: transportOverride.setByName,
             }
           : {}),
+        ...(tourOverride
+          ? {
+              manualTourPrice: tourOverride.price,
+              manualTourPriceBase: tourOverride.basePrice,
+              manualTourPriceSetAt: tourOverride.setAt,
+              manualTourPriceSetByName: tourOverride.setByName,
+            }
+          : {}),
       }
     }
 
@@ -602,10 +628,22 @@ export async function buildPackageQuoteLineItems({
 
   function getRequiredRouteId(
     leg: PackageDetail["legs"][number],
-    selection: { routeId?: string },
+    selection: { routeId?: string; units?: PackageUnitSelection[] },
   ): string | null {
     if (selection.routeId) {
       return selection.routeId
+    }
+    // A tour operator's itinerary is descriptive only and belongs to exactly one tour type, so
+    // auto-picking one is only safe when it actually matches a chosen tour type — never blindly
+    // grab the supplier's only itinerary if it happens to describe a different tour type.
+    if (isTypePricedSupplier(leg.supplierKind)) {
+      const chosenSuiteTypeIds = new Set(
+        (selection.units ?? []).flatMap((unit) => (unit.suiteTypeId ? [unit.suiteTypeId] : [])),
+      )
+      const matching = leg.routes.filter(
+        (route) => route.suiteTypeId && chosenSuiteTypeIds.has(route.suiteTypeId),
+      )
+      return matching.length === 1 ? matching[0].id : null
     }
     if (leg.routes.length === 1) {
       return leg.routes[0].id
@@ -625,6 +663,9 @@ export async function buildPackageQuoteLineItems({
     const legLabel = leg.label ?? leg.supplierName
     const routeId = getRequiredRouteId(leg, selection)
     if (!routeId) {
+      // A tour operator prices the tour type, not the itinerary — its rate cards carry no route,
+      // so a leg with zero (or several) itineraries is still priceable without one selected.
+      if (isTypePricedSupplier(leg.supplierKind)) return null
       return `No ${leg.supplierKind === "hotel_property" ? "meal plan" : "route"} selected for leg: ${legLabel}`
     }
     if (!leg.routes.some((route) => route.id === routeId)) {
@@ -739,6 +780,7 @@ export async function buildPackageQuoteLineItems({
     for (const leg of packageDetail.legs) {
       const selection = getLegSelection(leg)
       const isHotel = leg.supplierKind === "hotel_property"
+      const isTour = leg.supplierKind === "tour_operator"
       const isTransfer = leg.supplierKind === "transfers"
       const isVehicleRental = leg.supplierKind === "vehicle_rental"
       const isOptional = isOptionalPackageLegKind(leg.supplierKind)
@@ -758,14 +800,17 @@ export async function buildPackageQuoteLineItems({
       }
 
       // Both guards are unreachable after describeLegConfigIssue — kept so a future caller that
-      // skips the pre-check still fails loudly instead of pricing a leg with no route.
+      // skips the pre-check still fails loudly instead of pricing a leg with no route. A type-priced
+      // supplier (tour operator) is the one exception: its rate cards carry no route, so a leg with
+      // no itinerary selected/available still prices, keyed off "" (coversRoute treats any routeId
+      // string against a NULL-route card as a match).
       const requiredRouteId = getRequiredRouteId(leg, selection)
-      if (!requiredRouteId) {
+      if (!requiredRouteId && !isTypePricedSupplier(leg.supplierKind)) {
         throw new Error(`No ${isHotel ? "meal plan" : "route"} selected for leg: ${leg.label ?? leg.supplierName}`)
       }
-      const routeId: string = requiredRouteId
+      const routeId: string = requiredRouteId ?? ""
 
-      const routeBelongsToLeg = leg.routes.some((route) => route.id === routeId)
+      const routeBelongsToLeg = routeId === "" || leg.routes.some((route) => route.id === routeId)
       if (!routeBelongsToLeg) {
         throw new Error(`Selected route is not available for leg: ${leg.label ?? leg.supplierName}`)
       }
@@ -1047,17 +1092,24 @@ export async function buildPackageQuoteLineItems({
         // passenger type instead of splitting per room, even if their bed/bathroom setup differs.
         // Manual-pricing legs group by suite type *and* typed fare too -- two cabins of the same
         // class quoted at different fares (e.g. two separately-ticketed Business seats) must not
-        // silently merge into one averaged line.
+        // silently merge into one averaged line. A tour unit carrying a flat price override is
+        // never merged with anything else, even another unit of the same type -- it prices as a
+        // single line at the typed amount, not decomposed per passenger type (see below).
         const unitsBySuiteType = new Map<string, PackageUnitSelection[]>()
+        let tourOverrideGroupCounter = 0
         for (const unitSelection of units) {
-          const groupKey = isManualPricing
-            ? [
-                unitSelection.suiteTypeId,
-                unitSelection.manualAdultPrice ?? "",
-                unitSelection.manualChildPrice ?? "",
-                unitSelection.manualInfantPrice ?? "",
-              ].join("::")
-            : unitSelection.suiteTypeId
+          const hasTourOverride =
+            isTour && unitSelection.manualTourPrice !== null && unitSelection.manualTourPrice !== undefined
+          const groupKey = hasTourOverride
+            ? `tour-override::${tourOverrideGroupCounter++}`
+            : isManualPricing
+              ? [
+                  unitSelection.suiteTypeId,
+                  unitSelection.manualAdultPrice ?? "",
+                  unitSelection.manualChildPrice ?? "",
+                  unitSelection.manualInfantPrice ?? "",
+                ].join("::")
+              : unitSelection.suiteTypeId
           const group = unitsBySuiteType.get(groupKey) ?? []
           group.push(unitSelection)
           unitsBySuiteType.set(groupKey, group)
@@ -1065,6 +1117,42 @@ export async function buildPackageQuoteLineItems({
 
         for (const groupUnits of unitsBySuiteType.values()) {
           const suiteTypeId = groupUnits[0].suiteTypeId
+
+          // A typed flat price replaces the whole tour unit's computed total (which would
+          // otherwise split into separate adult/child/infant lines) -- same posture as the hotel
+          // room override above, just without the per-night multiplication tours have no concept of.
+          const tourOverridePrice =
+            isTour &&
+            groupUnits[0].manualTourPrice !== null &&
+            groupUnits[0].manualTourPrice !== undefined
+              ? groupUnits[0].manualTourPrice
+              : null
+          if (tourOverridePrice !== null) {
+            const unitSelection = groupUnits[0]
+            const { validRateCard, rateTypeInherited, description, suiteTypeName } =
+              resolveOverriddenUnit(suiteTypeId)
+            activeRateCard = validRateCard
+            activeRateCardInherited = rateTypeInherited ?? false
+            const overrideCurrency = validRateCard?.currency ?? selection.priceCurrency ?? targetCurrency
+            addLineItem({
+              description,
+              qty: 1,
+              unitPrice: tourOverridePrice,
+              supplierDescription,
+              suiteTypeId,
+              suiteTypeName,
+              unit,
+              hideRoomConfig: true,
+              sourceCurrency: overrideCurrency,
+              tourOverride: {
+                price: tourOverridePrice,
+                basePrice: validRateCard?.pricePerPerson ?? null,
+                setAt: unitSelection.manualTourPriceSetAt ?? null,
+                setByName: unitSelection.manualTourPriceSetByName ?? null,
+              },
+            })
+            continue
+          }
 
           let description: string
           let suiteTypeName: string | null

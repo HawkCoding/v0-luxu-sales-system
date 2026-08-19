@@ -233,6 +233,8 @@ export function bookingServicesToLegSelections(
         // (see lib/quotes/room-override-provenance.ts); this pure mapper only carries the stamp.
         manualRoomPriceSetAt: unit.manual_room_price_set_at,
         complimentaryFirstNight: unit.complimentary_first_night,
+        manualTourPrice: unit.manual_tour_price,
+        manualTourPriceSetAt: unit.manual_tour_price_set_at,
       }))
 
     const selection: PackageLegSelection = {

@@ -20,14 +20,16 @@ import {
   supplierMatchesDestination,
 } from "@/lib/packages/location-filter"
 import type { Location, SupplierDetail, SupplierKind, SupplierRoute, SupplierSuiteType } from "@/lib/types"
-import { SUPPLIER_KIND_LABELS } from "@/lib/types"
+import { isTypePricedSupplier, SUPPLIER_KIND_LABELS } from "@/lib/types"
 
 export interface QuoteExtraSelection {
   supplierId: string
   supplierName: string
   supplierKind: SupplierKind
-  routeId: string
-  routeName: string
+  /** Optional for a type-priced supplier (tour operator) — its rate cards key off the tour type
+   * alone, so no itinerary is required to price it. */
+  routeId?: string
+  routeName?: string
   suiteTypeId: string
   suiteTypeName: string
   quantity?: number
@@ -144,20 +146,26 @@ export function QuoteLineSupplierPicker({
   const routes: SupplierRoute[] = (detail?.routes ?? []).filter((route) => route.active)
   const suiteTypes: SupplierSuiteType[] = (detail?.suiteTypes ?? []).filter((suiteType) => suiteType.active)
 
-  const canAdd = Boolean(supplierId && routeId && suiteTypeId)
+  // A tour operator's itinerary belongs to exactly one tour type and carries no price of its own,
+  // so it's never a separate choice here — it's derived from the chosen type instead.
+  const pricesByTypeOnly = isTypePricedSupplier(kind)
+  const derivedRoute = pricesByTypeOnly
+    ? routes.find((route) => route.suiteTypeId === suiteTypeId)
+    : routes.find((route) => route.id === routeId)
+
+  const canAdd = Boolean(supplierId && suiteTypeId && (pricesByTypeOnly || routeId))
   const quantityLabel = quantityLabelFor(kind)
 
   function handleAdd() {
     if (!selectedSupplier || !canAdd) return
-    const route = routes.find((r) => r.id === routeId)
     const suiteType = suiteTypes.find((s) => s.id === suiteTypeId)
-    if (!route || !suiteType) return
+    if (!suiteType) return
     onAdd({
       supplierId: selectedSupplier.id,
       supplierName: selectedSupplier.name,
       supplierKind: selectedSupplier.kind,
-      routeId,
-      routeName: route.name,
+      routeId: derivedRoute?.id,
+      routeName: derivedRoute?.name,
       suiteTypeId,
       suiteTypeName: suiteType.name,
       quantity: quantityLabel && quantity ? quantity : undefined,
@@ -267,32 +275,41 @@ export function QuoteLineSupplierPicker({
 
       {selectedSupplier ? (
         <div className="grid gap-3 md:grid-cols-2">
-          <div className="space-y-1.5 min-w-0">
-            <Label>{routeLabelFor(kind)}</Label>
-            <Select value={routeId || ""} onValueChange={setRouteId} disabled={loadingDetail}>
-              <SelectTrigger
-                className={compactSelectTriggerClass}
-                title={routes.find((route) => route.id === routeId)?.name}
-              >
-                <SelectValue placeholder={loadingDetail ? "Loading…" : `Select ${routeLabelFor(kind).toLowerCase()}`} />
-              </SelectTrigger>
-              <SelectContent>
-                {routes.length === 0 ? (
-                  <div className="px-2 py-1.5 text-xs text-muted-foreground">No routes configured</div>
-                ) : (
-                  routes.map((route) => {
-                    const location = describeLocation(locations, route)
-                    return (
-                      <SelectItem key={route.id} value={route.id}>
-                        {route.name}
-                        {location ? ` · ${location}` : ""}
-                      </SelectItem>
-                    )
-                  })
-                )}
-              </SelectContent>
-            </Select>
-          </div>
+          {pricesByTypeOnly ? (
+            derivedRoute?.description ? (
+              <div className="space-y-1.5 min-w-0">
+                <Label>{routeLabelFor(kind)}</Label>
+                <p className="text-xs text-muted-foreground">{derivedRoute.description}</p>
+              </div>
+            ) : null
+          ) : (
+            <div className="space-y-1.5 min-w-0">
+              <Label>{routeLabelFor(kind)}</Label>
+              <Select value={routeId || ""} onValueChange={setRouteId} disabled={loadingDetail}>
+                <SelectTrigger
+                  className={compactSelectTriggerClass}
+                  title={routes.find((route) => route.id === routeId)?.name}
+                >
+                  <SelectValue placeholder={loadingDetail ? "Loading…" : `Select ${routeLabelFor(kind).toLowerCase()}`} />
+                </SelectTrigger>
+                <SelectContent>
+                  {routes.length === 0 ? (
+                    <div className="px-2 py-1.5 text-xs text-muted-foreground">No routes configured</div>
+                  ) : (
+                    routes.map((route) => {
+                      const location = describeLocation(locations, route)
+                      return (
+                        <SelectItem key={route.id} value={route.id}>
+                          {route.name}
+                          {location ? ` · ${location}` : ""}
+                        </SelectItem>
+                      )
+                    })
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div className="space-y-1.5 min-w-0">
             <Label>{suiteLabelFor(kind)}</Label>
             <Select value={suiteTypeId || ""} onValueChange={setSuiteTypeId} disabled={loadingDetail}>

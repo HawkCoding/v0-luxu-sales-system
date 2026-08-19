@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { resolveEnquiryCustomer } from "./route"
+import { mergeEnquiryFormFields, resolveEnquiryCustomer } from "./route"
 import { createSupabaseMock } from "@/lib/testing/supabase-mock"
 import {
   legacySuiteNamesToUnits,
@@ -245,6 +245,48 @@ describe("POST /api/enquiries suite units", () => {
   })
 })
 
+describe("mergeEnquiryFormFields", () => {
+  const parsedSnapshot = {
+    direction: "Pretoria to Cape Town",
+    supplier: "Rovos Rail",
+    departureDateRaw: "2027-09-02",
+    packageOption: "",
+  }
+
+  // The bug: the consultant corrects the route on the review screen, it matches no `routes` row,
+  // and the Enquiry tab's formFields fallback then renders the ORIGINAL parsed wording instead.
+  it("replaces the parsed direction with the consultant's correction", () => {
+    const merged = mergeEnquiryFormFields(parsedSnapshot, { direction: "Pretoria to Victoria Falls" })
+
+    expect(merged.direction).toBe("Pretoria to Victoria Falls")
+  })
+
+  it("keeps the parsed direction when the caller submits none", () => {
+    expect(mergeEnquiryFormFields(parsedSnapshot, {}).direction).toBe("Pretoria to Cape Town")
+    expect(mergeEnquiryFormFields(parsedSnapshot, { direction: "" }).direction).toBe(
+      "Pretoria to Cape Town",
+    )
+  })
+
+  // A paste import sends `supplierId`, never free-text `supplier`; blanking the parsed wording
+  // would lose what the customer actually named when the id fails to resolve.
+  it("leaves the parsed supplier wording alone unless free text was submitted", () => {
+    expect(mergeEnquiryFormFields(parsedSnapshot, {}).supplier).toBe("Rovos Rail")
+    expect(mergeEnquiryFormFields(parsedSnapshot, { supplier: "Blue Train" }).supplier).toBe(
+      "Blue Train",
+    )
+  })
+
+  it("preserves snapshot keys it does not own and tolerates a missing snapshot", () => {
+    expect(mergeEnquiryFormFields(parsedSnapshot, {}).departureDateRaw).toBe("2027-09-02")
+    expect(mergeEnquiryFormFields(null, { direction: "Alpha to Beta" })).toMatchObject({
+      direction: "Alpha to Beta",
+      province: null,
+      packageOption: null,
+    })
+  })
+})
+
 describe("POST /api/enquiries customer CRM matching", () => {
   it("links an existing customer by email", async () => {
     const state = createMockState({ completedBookingCustomerIds: new Set() })
@@ -345,6 +387,61 @@ describe("POST /api/enquiries customer CRM matching", () => {
       phone: "+27 82 000 0000",
       title: "Ms",
     })
+  })
+
+  // Customer detail -> New Enquiry opens the review screen with this customer prefilled and lets
+  // the consultant correct it. The preset branch used to return before writing, so every
+  // correction made there was silently thrown away.
+  it("writes the corrections an enquiry carries onto a preset linked customer", async () => {
+    const state = createMockState({
+      customersByEmail: new Map([[CUSTOMER_ID, { id: CUSTOMER_ID }]]),
+    })
+    const supabase = createSupabase(state)
+
+    const result = await resolveEnquiryCustomer(
+      supabase as never,
+      enquiryCustomerInput({
+        existingCustomerId: CUSTOMER_ID,
+        normalizedEmail: undefined,
+        phone: "+49 30 111 2222",
+        country: "Germany",
+      }),
+    )
+
+    expect(result.customerId).toBe(CUSTOMER_ID)
+    expect(state.customerInsertRows).toHaveLength(0)
+    expect(state.customerUpdateRows[0]).toMatchObject({
+      id: CUSTOMER_ID,
+      payload: expect.objectContaining({ phone: "+49 30 111 2222", country: "Germany" }),
+    })
+  })
+
+  it("does not null out a preset linked customer's details the enquiry did not carry", async () => {
+    const state = createMockState({
+      customersByEmail: new Map([[CUSTOMER_ID, { id: CUSTOMER_ID }]]),
+    })
+    const supabase = createSupabase(state)
+
+    await resolveEnquiryCustomer(
+      supabase as never,
+      enquiryCustomerInput({
+        existingCustomerId: CUSTOMER_ID,
+        normalizedEmail: undefined,
+        country: null,
+        province: null,
+        phone: null,
+        title: null,
+      }),
+    )
+
+    expect(state.customerUpdateRows[0]?.payload).toEqual(
+      expect.not.objectContaining({
+        country: expect.anything(),
+        province: expect.anything(),
+        phone: expect.anything(),
+        title: expect.anything(),
+      }),
+    )
   })
 
   it("preserves CRM notes and preferences during existing-customer updates", async () => {

@@ -30,7 +30,8 @@ import {
   legIdsFromLineItems,
 } from "@/lib/quotes/accepted-quote-scope"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
-import { getBankingSettings, getDocumentTextSettings } from "@/lib/settings-access"
+import { getPaymentMethod } from "@/lib/payment-methods"
+import { getDocumentTextSettings } from "@/lib/settings-access"
 
 const PLACEHOLDER = "—"
 
@@ -155,7 +156,7 @@ export async function resolveSharedEmailTokens(
   supabase: SupabaseClient<Database>,
   bookingId: string,
 ): Promise<SharedEmailTokens> {
-  const [booking, quotes, invoices, vouchers, correspondences, travellers, suiteSelections, bankingSettings, supplierName] =
+  const [booking, quotes, invoices, vouchers, correspondences, travellers, suiteSelections, paymentMethod, supplierName] =
     await Promise.all([
       safeQuery<BookingRow>(() =>
         supabase
@@ -187,7 +188,10 @@ export async function resolveSharedEmailTokens(
           .eq("booking_id", bookingId),
       ),
       safely(() => loadSuiteSelections(supabase, bookingId), []),
-      safely(() => getBankingSettings(supabase), {} as Awaited<ReturnType<typeof getBankingSettings>>),
+      safely(
+        () => getPaymentMethod(supabase, null),
+        { id: "", name: "", enabled: true, isDefault: false, sortOrder: 0, banking: {} as Awaited<ReturnType<typeof getPaymentMethod>>["banking"] },
+      ),
       safely(() => resolveBookingSupplierName(supabase, bookingId), "Supplier"),
     ])
 
@@ -355,7 +359,7 @@ export async function resolveSharedEmailTokens(
   }
 
   const blocks: Record<string, string> = {
-    bankingDetails: orPlaceholder(buildBankingDetailsBlock(bankingSettings, tokens.invoiceNumber)),
+    bankingDetails: orPlaceholder(buildBankingDetailsBlock(paymentMethod.banking, tokens.invoiceNumber)),
     guestInfo,
     quoteSummaryTable,
   }

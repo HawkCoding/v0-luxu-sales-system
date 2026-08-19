@@ -58,7 +58,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
     .select(
-      "id, stage, source, customer_id, email_import_needs_review, email_import_review_resolved_at, reservation_form_received_at, customer_invoice_number",
+      "id, stage, source, customer_id, email_import_needs_review, email_import_review_resolved_at, reservation_form_received_at, revision_reset_at, customer_invoice_number",
     )
     .eq("id", id)
     .single()
@@ -83,9 +83,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       .select("status, total, created_at")
       .eq("booking_id", id)
       .order("created_at", { ascending: false }),
-    supabase.from("documents").select("kind, status").eq("booking_id", id),
+    supabase.from("documents").select("kind, status, created_at").eq("booking_id", id),
     supabase.from("invoices").select("kind, status").eq("booking_id", id),
-    supabase.from("correspondences").select("kind, subject, status").eq("booking_id", id),
+    supabase.from("correspondences").select("kind, subject, status, created_at").eq("booking_id", id),
     supabase.from("payments").select("amount").eq("booking_id", id),
   ])
 
@@ -115,6 +115,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       email_import_needs_review: booking.email_import_needs_review,
       email_import_review_resolved_at: booking.email_import_review_resolved_at,
       reservation_form_received_at: booking.reservation_form_received_at,
+      revision_reset_at: booking.revision_reset_at,
     },
     customer,
     targetStage: body.targetStage as PipelineStage,

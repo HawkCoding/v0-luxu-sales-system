@@ -23,7 +23,8 @@ export const runtime = "nodejs"
  * hydrateFromSaved, SavedPackageState) are shared unmodified between both flows.
  */
 
-import { isOptionalPackageLegKind, SUPPORTED_CURRENCY_VALUES, type SupplierKind } from "@/lib/types"
+import { isOptionalPackageLegKind, type SupplierKind } from "@/lib/types"
+import { normaliseCurrency } from "@/lib/money"
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/
 const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/
@@ -71,6 +72,9 @@ const selectionUnitSchema = z.object({
   /** Hotel legs only: the hotel gifted this room's first night, so the quote charges nights - 1
    * at whatever the room's per-night price is. Rejected on any other supplier kind. */
   complimentaryFirstNight: z.boolean().optional(),
+  /** Tour legs only: this unit's typed flat price, replacing its rate-card-computed total.
+   * Rejected on any other supplier kind — see the guard in PATCH. */
+  manualTourPrice: z.number().nonnegative().nullable().optional(),
 })
 
 const updateServiceSchema = z.object({
@@ -104,8 +108,15 @@ const updateServiceSchema = z.object({
   rateTypeId: z.string().uuid().nullable().optional(),
   notes: z.string().nullable().optional(),
   /** The currency this leg's hand-typed prices are in — manual-pricing fares and transfer/
-   * rental overrides. Rate-card legs price off the card's own currency and ignore this. */
-  priceCurrency: z.enum(SUPPORTED_CURRENCY_VALUES).optional(),
+   * rental overrides. Rate-card legs price off the card's own currency and ignore this. Dialog
+   * state can carry forward a pre-enum legacy value from price_currency (free text, no CHECK
+   * constraint) even when this particular save has nothing to do with currency, so this
+   * normalises rather than rejects — an unrelated edit must not be blocked by stale data. */
+  priceCurrency: z
+    .string()
+    .nullable()
+    .optional()
+    .transform((value) => (value ? normaliseCurrency(value) : undefined)),
   units: z.array(selectionUnitSchema).optional(),
 })
 
@@ -396,6 +407,19 @@ export async function PATCH(req: Request, { params }: RouteParams) {
       })
     }
 
+    // The tour price override replaces a tour unit's whole rate-card-computed total. Every other
+    // passenger-split kind (trains, airlines) prices strictly per person off its own rate card or
+    // typed fare, so an override there would silently mean something different from what was typed.
+    if (
+      supplierKind !== "tour_operator" &&
+      selection.units.some((unit) => unit.manualTourPrice !== null && unit.manualTourPrice !== undefined)
+    ) {
+      return jsonError("A tour price override is only available on tour services", 400, {
+        packageLegId: selection.packageLegId,
+        supplierKind,
+      })
+    }
+
     for (const [unitIndex, unit] of selection.units.entries()) {
       const suiteTypeId = unit.suiteTypeId
       if (!suiteTypeId) continue
@@ -484,10 +508,13 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   // one is stamped with this save. Without this, re-saving a leg for an unrelated reason would
   // keep re-dating an override nobody touched.
   const existingUnitProvenance = new Map<string, { price: number | null; setAt: string | null; setBy: string | null }>()
+  const existingTourProvenance = new Map<string, { price: number | null; setAt: string | null; setBy: string | null }>()
   if (servicesWithUnits.length > 0) {
     const { data: existingUnits, error: existingUnitsError } = await supabase
       .from("booking_service_units")
-      .select("id, manual_room_price, manual_room_price_set_at, manual_room_price_set_by")
+      .select(
+        "id, manual_room_price, manual_room_price_set_at, manual_room_price_set_by, manual_tour_price, manual_tour_price_set_at, manual_tour_price_set_by",
+      )
       .in(
         "service_id",
         servicesWithUnits.map((selection) => selection.packageLegId),
@@ -500,6 +527,11 @@ export async function PATCH(req: Request, { params }: RouteParams) {
         price: unit.manual_room_price,
         setAt: unit.manual_room_price_set_at,
         setBy: unit.manual_room_price_set_by,
+      })
+      existingTourProvenance.set(unit.id, {
+        price: unit.manual_tour_price,
+        setAt: unit.manual_tour_price_set_at,
+        setBy: unit.manual_tour_price_set_by,
       })
     }
   }
@@ -518,6 +550,9 @@ export async function PATCH(req: Request, { params }: RouteParams) {
       const roomPrice = unit.manualRoomPrice ?? null
       const previous = unit.id ? existingUnitProvenance.get(unit.id) : undefined
       const unchanged = roomPrice !== null && previous?.price === roomPrice
+      const tourPrice = unit.manualTourPrice ?? null
+      const previousTour = unit.id ? existingTourProvenance.get(unit.id) : undefined
+      const tourUnchanged = tourPrice !== null && previousTour?.price === tourPrice
       return {
         service_id: selection.packageLegId,
         suite_type_id: unit.suiteTypeId,
@@ -535,6 +570,11 @@ export async function PATCH(req: Request, { params }: RouteParams) {
         complimentary_first_night: unit.complimentaryFirstNight ?? false,
         manual_room_price_set_at: roomPrice === null ? null : unchanged ? previous?.setAt ?? savedAt : savedAt,
         manual_room_price_set_by: roomPrice === null ? null : unchanged ? previous?.setBy ?? user.id : user.id,
+        manual_tour_price: tourPrice,
+        manual_tour_price_set_at:
+          tourPrice === null ? null : tourUnchanged ? previousTour?.setAt ?? savedAt : savedAt,
+        manual_tour_price_set_by:
+          tourPrice === null ? null : tourUnchanged ? previousTour?.setBy ?? user.id : user.id,
         origin: "consultant" as const,
       }
     })

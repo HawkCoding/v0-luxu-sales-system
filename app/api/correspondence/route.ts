@@ -155,7 +155,7 @@ export async function POST(req: Request) {
   const { data: booking, error: bookingError } = await supabase
     .from("bookings")
     .select(
-      "id, booking_number, stage, source, raw_text, updated_at, customer_id, consultant, departure_date, duration_nights, invoice_balance, assigned_salesperson_id, customer_invoice_number, email_import_needs_review, email_import_review_resolved_at, reservation_form_received_at, customer:customers(email, title, first_name, last_name, phone, country)",
+      "id, booking_number, stage, source, raw_text, updated_at, customer_id, consultant, departure_date, duration_nights, invoice_balance, assigned_salesperson_id, customer_invoice_number, email_import_needs_review, email_import_review_resolved_at, reservation_form_received_at, revision_reset_at, customer:customers(email, title, first_name, last_name, phone, country)",
     )
     .eq("id", bookingId)
     .single()
@@ -191,6 +191,7 @@ export async function POST(req: Request) {
         email_import_needs_review: booking.email_import_needs_review,
         email_import_review_resolved_at: booking.email_import_review_resolved_at,
         customer_invoice_number: booking.customer_invoice_number,
+        revision_reset_at: booking.revision_reset_at,
       },
       customer: customerRecord ?? null,
       targetStage: parsed.data.moveStage,
@@ -504,10 +505,10 @@ export async function POST(req: Request) {
 
     const [quotesRes, documentsRes, correspondencesRes, versionRes] = await Promise.all([
       supabase.from("quotes").select("id, status, total, created_at").eq("booking_id", bookingId),
-      supabase.from("documents").select("id, kind, status").eq("booking_id", bookingId),
+      supabase.from("documents").select("id, kind, status, created_at").eq("booking_id", bookingId),
       supabase
         .from("correspondences")
-        .select("id, kind, subject, status")
+        .select("id, kind, subject, status, created_at")
         .eq("booking_id", bookingId),
       // applyTransition guards the write on this stamp, and the send above may
       // already have bumped it (the reservation-form backstop writes to the

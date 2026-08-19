@@ -10,11 +10,12 @@ import { calculateInvoiceBalance } from "@/lib/invoices/calculate-balance"
 import { ensureInvoicePdf } from "@/lib/invoices/ensure-invoice-pdf"
 import { clientInvoiceNumber, resolveInvoiceStatusLabel, unifiedInvoiceNumber } from "@/lib/invoices/invoice-status"
 import { logError } from "@/lib/error-log"
+import { getPaymentMethod } from "@/lib/payment-methods"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import { buildGuestInfoBlock } from "@/lib/templates/guest-info-block"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
-import { getBankingSettings, getInvoiceStatusOptions } from "@/lib/settings-access"
+import { getInvoiceStatusOptions } from "@/lib/settings-access"
 
 export const runtime = "nodejs"
 
@@ -24,6 +25,8 @@ const depositInvoiceSchema = z.object({
   mode: z.enum(["deposit", "full"]).default("deposit"),
   /** Full-payment mode only: overrides the default +48h due date. */
   dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  /** Bank/company details this invoice's PDF and email are generated with; omitted resolves to the account default. */
+  paymentMethodId: z.string().uuid().nullish(),
 })
 
 const updateDepositInvoiceSchema = z.object({
@@ -134,8 +137,19 @@ export async function POST(req: Request) {
   const kindMismatch = existingInvoice !== null && existingInvoice.kind !== invoiceKind
   const stalePricing = existingInvoice !== null && existingInvoice.quote_id !== quote.id
 
+  // Resolves to the requested method, else the invoice's own prior method
+  // (an amend keeps its bank details unless the salesperson changes them),
+  // else the account default. Stamped as a concrete id below so the PDF
+  // keeps rendering the same bank details even if the default later changes.
+  const method = await getPaymentMethod(
+    supabase,
+    parsed.data.paymentMethodId ?? existingInvoice?.payment_method_id ?? null,
+  )
+
   const invoice = await (async () => {
-    if (existingInvoice && !kindMismatch && !stalePricing) return existingInvoice
+    if (existingInvoice && !kindMismatch && !stalePricing && parsed.data.paymentMethodId === undefined) {
+      return existingInvoice
+    }
 
     if (existingInvoice && !kindMismatch) {
       const { data, error } = await supabase
@@ -148,6 +162,7 @@ export async function POST(req: Request) {
           // quote priced in another currency, and the two must never disagree.
           currency: balance.currency,
           due_date: dueDate,
+          payment_method_id: method.id || null,
           updated_at: new Date().toISOString(),
         })
         .eq("id", existingInvoice.id)
@@ -181,6 +196,7 @@ export async function POST(req: Request) {
         // never asked to pay in a currency they didn't accept.
         currency: balance.currency,
         due_date: dueDate,
+        payment_method_id: method.id || null,
         created_by: user.id,
       })
       .select()
@@ -232,6 +248,7 @@ export async function POST(req: Request) {
         due_date: invoice.due_date,
         created_at: invoice.created_at,
         status: invoice.status,
+        payment_method_id: invoice.payment_method_id,
       },
       bookingNumber: booking.booking_number,
       displayInvoiceNumber,
@@ -244,7 +261,7 @@ export async function POST(req: Request) {
     return jsonError("Deposit invoice PDF could not be generated", 500)
   }
 
-  const banking = await getBankingSettings(supabase)
+  const banking = method.banking
   const guests = (travellers ?? [])
     .map((traveller) => ({
       name: [traveller.prefix, traveller.first_name, traveller.last_name].filter(Boolean).join(" ").trim(),
@@ -327,6 +344,7 @@ export async function POST(req: Request) {
       warnings: composed.warnings,
       signatureProfileId: composed.signatureProfileId,
       signatureBrandId: composed.signatureBrandId,
+      paymentMethodId: method.id || null,
     },
     attachment: {
       filename: pdf.filename,

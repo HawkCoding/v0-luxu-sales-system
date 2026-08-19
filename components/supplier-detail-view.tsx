@@ -3959,6 +3959,7 @@ export function SupplierDetailView({
         archivedAt: value.archivedAt ?? null,
       }))
     const suiteTypeIds = new Set(cleanedSuiteTypes.map((suiteType) => suiteType.id))
+    const isItineraryKind = isTypePricedSupplier(form.kind)
     const activeRateTypeIds = new Set(
       (supplier?.rateTypes ?? []).filter((rt) => !rt.archivedAt).map((rt) => rt.id),
     )
@@ -3985,7 +3986,8 @@ export function SupplierDetailView({
             route.destinationLocationId ||
             route.pickupPoint ||
             route.dropoffPoint ||
-            activeRateCards.some((rateCard) => rateCard.routeId === route.id),
+            activeRateCards.some((rateCard) => rateCard.routeId === route.id) ||
+            (isItineraryKind && (route.suiteTypeId || route.description.trim())),
         ),
         rateCards: activeRateCards,
       },
@@ -4057,8 +4059,6 @@ export function SupplierDetailView({
       )
       return
     }
-
-    const isItineraryKind = isTypePricedSupplier(form.kind)
 
     if (isItineraryKind) {
       // An itinerary has no name field of its own, so the guard keys off everything that would
@@ -5302,7 +5302,7 @@ export function SupplierDetailView({
                       </p>
                     ) : null}
                   </div>
-                  {isEditing && (
+                  {isEditing && !isItineraryKind && (
                     <Button type="button" size="sm" variant="outline" onClick={() => addRoute(0)}>
                       <Plus className="mr-2 h-4 w-4" />
                       {`Add ${activeVocabulary.route.toLowerCase()}`}

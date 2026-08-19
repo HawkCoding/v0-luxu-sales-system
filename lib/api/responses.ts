@@ -14,7 +14,15 @@ export function flattenZod(error: ZodError): Record<string, string[] | undefined
   return error.flatten().fieldErrors
 }
 
-export function jsonZodError(error: ZodError, message = "Invalid request body"): NextResponse<ApiErrorBody> {
+export function jsonZodError(
+  error: ZodError,
+  message = "Invalid request body",
+  scope?: string,
+): NextResponse<ApiErrorBody> {
+  // Mirrors safeSupabaseError below: a validation 400 must name its field in the runtime log, not
+  // just in the (often-discarded) response body — otherwise a rejected payload is undiagnosable
+  // after the fact.
+  console.error(`zod:${scope ?? "unscoped"}`, error.flatten().fieldErrors)
   return jsonError(message, 400, flattenZod(error))
 }
 

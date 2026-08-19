@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { SuiteLegEditor } from "./suite-leg-editor"
-import type { SuiteLegState } from "@/lib/packages/apply-dialog-state"
+import type { SuiteLegState, TransferAnchorContext } from "@/lib/packages/apply-dialog-state"
 import type { PackageLeg } from "@/lib/types"
 import type { PassengerTotals } from "@/lib/packages/passenger-totals"
 
@@ -72,6 +72,7 @@ const mismatchedUnits: SuiteLegState["units"] = [
     manualInfantPrice: null,
     manualRoomPrice: null,
     complimentaryFirstNight: false,
+    manualTourPrice: null,
   },
 ]
 
@@ -234,6 +235,226 @@ describe("SuiteLegEditor room price override", () => {
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({
         units: [expect.objectContaining({ manualRoomPrice: null })],
+      }),
+    )
+  })
+})
+
+const airlineRoutes: PackageLeg["routes"] = [
+  {
+    id: "route-cpt-ort",
+    supplierId: "supplier-airline",
+    name: "CPT > ORT",
+    originLocationId: "loc-cpt",
+    destinationLocationId: "loc-ort",
+    directionMode: "round_trip",
+    active: true,
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+  },
+  {
+    id: "route-dur-ort",
+    supplierId: "supplier-airline",
+    name: "DUR > ORT",
+    originLocationId: "loc-dur",
+    destinationLocationId: "loc-ort",
+    directionMode: "one_way",
+    active: true,
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+  },
+  {
+    id: "route-prose",
+    supplierId: "supplier-airline",
+    name: "Cape Town to Johannesburg",
+    originLocationId: "loc-cpt",
+    destinationLocationId: "loc-ort",
+    directionMode: "one_way",
+    active: true,
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+  },
+]
+
+const airlineLeg: PackageLeg = {
+  ...leg,
+  id: "leg-airline",
+  supplierId: "supplier-airline",
+  supplierName: "Fly Safair",
+  supplierKind: "airline",
+  label: "Fly Safair",
+  pricingMode: "manual",
+  routes: airlineRoutes,
+}
+
+function makeAirlineState(overrides: Partial<SuiteLegState> = {}): SuiteLegState {
+  return {
+    kind: "suite",
+    legId: "leg-airline",
+    supplierKind: "airline",
+    selected: true,
+    routeId: null,
+    reversed: false,
+    serviceDate: "2026-09-24",
+    nights: null,
+    ...noFlightSchedule,
+    dateAnchor: "custom",
+    notes: null,
+    rateTypeId: null,
+    priceCurrency: "ZAR",
+    units: [{ ...mismatchedUnits[0], adultCount: 2 }],
+    origin: "consultant",
+    ...overrides,
+  }
+}
+
+const flightAnchorContext: TransferAnchorContext = {
+  legLabel: "Table Bay Hotel",
+  legKind: "hotel_property",
+  startDate: "2026-09-24",
+  endDate: "2026-09-27",
+  endDateAssumed: false,
+}
+
+describe("SuiteLegEditor flight date anchor", () => {
+  it("renders the pre/post/custom toggle on a flight and shows the manual picker on custom", () => {
+    render(<SuiteLegEditor leg={airlineLeg} value={makeAirlineState()} onChange={vi.fn()} />)
+
+    expect(screen.getByRole("button", { name: "Pre" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Post" })).toBeInTheDocument()
+    expect(screen.getByLabelText(/departure date/i)).toBeInTheDocument()
+  })
+
+  it("disables pre/post when there's no leg above to anchor to", () => {
+    render(<SuiteLegEditor leg={airlineLeg} value={makeAirlineState()} onChange={vi.fn()} />)
+
+    expect(screen.getByRole("button", { name: "Pre" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Post" })).toBeDisabled()
+    expect(screen.getByText(/nothing above this flight has a date to anchor to/i)).toBeInTheDocument()
+  })
+
+  it("shows the resolved departure date instead of a picker once anchored, given context", () => {
+    render(
+      <SuiteLegEditor
+        leg={airlineLeg}
+        value={makeAirlineState({ dateAnchor: "post" })}
+        onChange={vi.fn()}
+        flightAnchorContext={flightAnchorContext}
+      />,
+    )
+
+    expect(screen.queryByLabelText(/^departure date$/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/end of table bay hotel/i)).toBeInTheDocument()
+  })
+
+  it("setting the anchor updates dateAnchor without touching other flight fields", () => {
+    const onChange = vi.fn()
+    render(
+      <SuiteLegEditor
+        leg={airlineLeg}
+        value={makeAirlineState()}
+        onChange={onChange}
+        flightAnchorContext={flightAnchorContext}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Pre" }))
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ dateAnchor: "pre" }))
+  })
+})
+
+/** Radix Select opens on keydown, which jsdom handles -- pointer events on the trigger do not. The
+ * route select is always the first combobox on an airline leg (rate type and currency follow). */
+function openRouteMenu() {
+  fireEvent.keyDown(screen.getAllByRole("combobox")[0], { key: "Enter" })
+}
+
+describe("SuiteLegEditor flight From/To auto-fill", () => {
+  it("fills From/To with the route's airport codes when a route is chosen", () => {
+    const onChange = vi.fn()
+    render(<SuiteLegEditor leg={airlineLeg} value={makeAirlineState()} onChange={onChange} />)
+
+    openRouteMenu()
+    fireEvent.click(screen.getByRole("option", { name: "CPT > ORT" }))
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routeId: "route-cpt-ort",
+        departureAirportCode: "CPT",
+        arrivalAirportCode: "ORT",
+      }),
+    )
+  })
+
+  it("swaps From/To when the flip button is pressed", () => {
+    const onChange = vi.fn()
+    render(
+      <SuiteLegEditor
+        leg={airlineLeg}
+        value={makeAirlineState({
+          routeId: "route-cpt-ort",
+          departureAirportCode: "CPT",
+          arrivalAirportCode: "ORT",
+        })}
+        onChange={onChange}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /flip travel direction/i }))
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reversed: true,
+        departureAirportCode: "ORT",
+        arrivalAirportCode: "CPT",
+      }),
+    )
+  })
+
+  it("leaves a hand-typed code alone when picking a route whose name doesn't parse as codes", () => {
+    const onChange = vi.fn()
+    render(
+      <SuiteLegEditor
+        leg={airlineLeg}
+        value={makeAirlineState({ departureAirportCode: "HLA", arrivalAirportCode: "CPT" })}
+        onChange={onChange}
+      />,
+    )
+
+    openRouteMenu()
+    fireEvent.click(screen.getByRole("option", { name: "Cape Town to Johannesburg" }))
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routeId: "route-prose",
+        departureAirportCode: "HLA",
+        arrivalAirportCode: "CPT",
+      }),
+    )
+  })
+
+  it("overwrites a hand-typed code when a new route is chosen", () => {
+    const onChange = vi.fn()
+    render(
+      <SuiteLegEditor
+        leg={airlineLeg}
+        value={makeAirlineState({
+          routeId: "route-cpt-ort",
+          departureAirportCode: "HLA",
+          arrivalAirportCode: "CPT",
+        })}
+        onChange={onChange}
+      />,
+    )
+
+    openRouteMenu()
+    fireEvent.click(screen.getByRole("option", { name: "DUR > ORT" }))
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        routeId: "route-dur-ort",
+        departureAirportCode: "DUR",
+        arrivalAirportCode: "ORT",
       }),
     )
   })

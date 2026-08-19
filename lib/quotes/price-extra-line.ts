@@ -23,7 +23,9 @@ import { BASE_CURRENCY, normaliseCurrency } from "@/lib/money"
 
 export interface ExtraLineSelection {
   supplierId: string
-  routeId: string
+  /** Optional for a type-priced supplier (tour operator) — its rate cards key off the tour type
+   * alone, so no itinerary is required to price it. */
+  routeId?: string | null
   suiteTypeId: string
   /** Hotel nights or rental days; defaults to 1. Ignored for transfers and pax-based legs. */
   quantity?: number
@@ -130,13 +132,19 @@ export async function priceExtraLineItems(
   const rateTypeMetaById = new Map((rateTypeRows ?? []).map((row) => [row.id, row]))
   const rateTypeLabel = (id: string) => rateTypeMetaById.get(id)?.name ?? id
 
-  const { data: route, error: routeError } = await supabase
-    .from("routes")
-    .select("id, name, supplier_id, direction_mode")
-    .eq("id", routeId)
-    .single()
-  if (routeError || !route) throw new Error("Route not found")
-  if (route.supplier_id !== supplierId) throw new Error("Route does not belong to this supplier")
+  let route: { id: string; name: string; supplier_id: string; direction_mode: string } | null = null
+  if (routeId) {
+    const { data: routeRow, error: routeError } = await supabase
+      .from("routes")
+      .select("id, name, supplier_id, direction_mode")
+      .eq("id", routeId)
+      .single()
+    if (routeError || !routeRow) throw new Error("Route not found")
+    if (routeRow.supplier_id !== supplierId) throw new Error("Route does not belong to this supplier")
+    route = routeRow
+  } else if (!isTypePricedSupplier(supplier.kind)) {
+    throw new Error("Route is required")
+  }
 
   const { data: suiteType, error: suiteTypeError } = await supabase
     .from("suite_types")
@@ -148,21 +156,23 @@ export async function priceExtraLineItems(
 
   // A tour operator prices the type across every itinerary, so its cards carry no route id —
   // match those as well as cards written against this route (see lib/rate-cards/resolve.ts).
-  const { data: rateCards } = await supabase
+  const rateCardsQuery = supabase
     .from("rate_cards")
     .select("id, rate_type_id, price_per_person, child_price, infant_price, currency, valid_from, valid_to")
-    .or(`route_id.eq.${routeId},route_id.is.null`)
     .eq("suite_type_id", suiteTypeId)
     .order("valid_from", { ascending: true })
+  const { data: rateCards } = route
+    ? await rateCardsQuery.or(`route_id.eq.${route.id},route_id.is.null`)
+    : await rateCardsQuery.is("route_id", null)
 
   const validCards = (rateCards ?? []).filter((card) =>
     isRateCardValidOn({ validFrom: card.valid_from, validTo: card.valid_to }, travelDate),
   )
   // Naming the itinerary in a tour operator's error would send the user hunting for a price that
   // was never keyed to it.
-  const where = isTypePricedSupplier(supplier.kind)
-    ? `"${suiteType.name}" (${supplier.name})`
-    : `"${suiteType.name}" on "${route.name}" (${supplier.name})`
+  const where = route
+    ? `"${suiteType.name}" on "${route.name}" (${supplier.name})`
+    : `"${suiteType.name}" (${supplier.name})`
 
   if (validCards.length === 0) {
     // The query above is already scoped to this route + type, so a non-empty `rateCards` means
@@ -181,7 +191,7 @@ export async function priceExtraLineItems(
   const selected = selectRateCard(
     validCards.map((candidate) => ({
       ...candidate,
-      routeId,
+      routeId: route?.id ?? null,
       suiteTypeId,
       rateTypeId: candidate.rate_type_id,
       validFrom: candidate.valid_from,
@@ -230,7 +240,7 @@ export async function priceExtraLineItems(
   const routeRow = route
   const suiteRow = suiteType
   const kind = supplierRow.kind as SupplierKind
-  const description = [supplierRow.name, suiteRow.name, routeRow.name].filter(Boolean).join(" - ")
+  const description = [supplierRow.name, suiteRow.name, routeRow?.name].filter(Boolean).join(" - ")
   const lineItems: QuoteLineItem[] = []
 
   const cardCurrency = normaliseCurrency(card.currency)
@@ -278,8 +288,8 @@ export async function priceExtraLineItems(
         supplierId: supplierRow.id,
         supplierName: supplierRow.name,
         supplierKind: kind,
-        routeId: routeRow.id,
-        routeName: routeRow.name,
+        routeId: routeRow?.id ?? null,
+        routeName: routeRow?.name ?? null,
         suiteTypeId: suiteRow.id,
         suiteTypeName: suiteRow.name,
         rateCardId: card.id,

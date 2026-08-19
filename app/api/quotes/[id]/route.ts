@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
-import { jsonError, jsonZodError } from "@/lib/api/responses"
+import { jsonZodError } from "@/lib/api/responses"
 import { requireVersionTokenOrForce, staleVersionResponse, versionTokenShape } from "@/lib/concurrency"
 import { calculateQuoteTotals, isMissingPricing, isPricingEngineLineItem, roundMoney } from "@/lib/quotes/pricing-engine"
 import { syncBookingRoute } from "@/lib/quotes/resolve-primary-route"
@@ -11,7 +11,10 @@ import type { QuoteLineItem } from "@/lib/types"
 const lineItemSchema = z.object({
   description: z.string().min(1),
   supplierDescription: z.string().nullable().optional(),
-  qty: z.number().int().positive(),
+  // A fully complimentary night (or other gifted charge) is a finished line priced at qty 0, not
+  // an unpriced one — see isMissingPricing. Rejecting it here would block Apply on exactly the
+  // line build-from-package.ts deliberately emits for a comped stay.
+  qty: z.number().int().nonnegative(),
   unitPrice: z.number().nonnegative(),
   total: z.number().nonnegative(),
   pricingSnapshot: z.unknown().nullable().optional(),
@@ -45,16 +48,12 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   const { supabase, user, profile } = auth.value
   const { id } = await params
 
-  let raw: unknown
-  try {
-    raw = await req.json()
-  } catch {
-    return jsonError("Invalid JSON body", 400)
+  const rawBody: unknown = await req.json().catch(() => null)
+  const parseResult = patchQuoteSchema.safeParse(rawBody)
+  if (!parseResult.success) {
+    return jsonZodError(parseResult.error, "Invalid request payload", "quotes:patch")
   }
-
-  const result = patchQuoteSchema.safeParse(raw)
-  if (!result.success) return jsonZodError(result.error)
-  const parsed = result.data
+  const parsed = parseResult.data
 
   // This PATCH replaces the whole line-item set, so a save built from a stale copy deletes the
   // lines someone else added rather than failing to merge them. The version token is therefore

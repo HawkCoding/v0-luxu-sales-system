@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 const pipelinePageMocks = vi.hoisted(() => ({
   useData: vi.fn(),
   usePipeline: vi.fn(),
+  useAssignableUsers: vi.fn(),
 }))
 
 vi.mock("@/lib/use-data", () => pipelinePageMocks)
@@ -57,6 +58,7 @@ const pipelineJob = {
   departureDate: "2026-06-01",
   stage: "quote_sent",
   consultant: "LB",
+  assignedSalespersonId: null as string | null,
   paymentColor: "red",
   totalPaid: 0,
   quoteTotal: 1000,
@@ -72,6 +74,8 @@ describe("PipelinePage Kanban accessibility", () => {
   beforeEach(() => {
     pipelinePageMocks.usePipeline.mockReset()
     pipelinePageMocks.useData.mockReset()
+    pipelinePageMocks.useAssignableUsers.mockReset()
+    pipelinePageMocks.useAssignableUsers.mockReturnValue({ data: { users: [] } })
     pipelinePageMocks.usePipeline.mockReturnValue({
       data: [pipelineJob],
       isLoading: false,
@@ -158,6 +162,8 @@ describe("PipelinePage reference display", () => {
   beforeEach(() => {
     pipelinePageMocks.usePipeline.mockReset()
     pipelinePageMocks.useData.mockReset()
+    pipelinePageMocks.useAssignableUsers.mockReset()
+    pipelinePageMocks.useAssignableUsers.mockReturnValue({ data: { users: [] } })
     localStorage.setItem("pipeline_showAllItems", "true")
   })
 

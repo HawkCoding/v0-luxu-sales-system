@@ -52,6 +52,19 @@ function draft(overrides: Partial<ParsedDraft> = {}): ParsedDraft {
   } as ParsedDraft
 }
 
+describe("buildEnquiryImportPayload notes", () => {
+  // The review modal's "Additional Notes" box was editable but its value never left the browser.
+  it("carries the review-screen notes through to the API body", () => {
+    expect(buildEnquiryImportPayload(draft({ notes: "  Wants a lower berth  " })).notes).toBe(
+      "Wants a lower berth",
+    )
+  })
+
+  it("omits notes the consultant left blank", () => {
+    expect(buildEnquiryImportPayload(draft({ notes: "   " })).notes).toBeUndefined()
+  })
+})
+
 describe("buildEnquiryImportPayload lead source", () => {
   it("carries the consultant's chosen lead source through to the API body", () => {
     expect(buildEnquiryImportPayload(draft({ source: "phone_call" })).source).toBe("phone_call")

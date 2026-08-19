@@ -323,6 +323,58 @@ describe("POST /api/jobs/[id]/services/apply", () => {
     )
   })
 
+  it("normalises a legacy priceCurrency instead of 400ing the whole request", async () => {
+    // booking_services.price_currency is free text with no CHECK constraint — a pre-enum row
+    // (or a lowercase code) must not block every other leg's pricing.
+    const response = await postApply({
+      jobId: JOB_ID,
+      quoteId: QUOTE_ID,
+      travelDate: "2026-06-01",
+      selections: [
+        {
+          legId: TRAIN_SERVICE_ID,
+          selected: true,
+          priceCurrency: "R",
+          units: [{ suiteTypeId: TRAIN_SUITE_ID, adultCount: 2, childCount: 0, infantCount: 0 }],
+        },
+      ],
+    })
+
+    expect(response.status).toBe(200)
+  })
+
+  it("drops an unusable client fx rate instead of 400ing the whole request", async () => {
+    const response = await postApply({
+      jobId: JOB_ID,
+      quoteId: QUOTE_ID,
+      travelDate: "2026-06-01",
+      selections: [
+        {
+          legId: TRAIN_SERVICE_ID,
+          selected: true,
+          units: [{ suiteTypeId: TRAIN_SUITE_ID, adultCount: 2, childCount: 0, infantCount: 0 }],
+        },
+      ],
+      fxRates: { ZAR: 1, XYZ: 12, USD: -5 },
+    })
+
+    expect(response.status).toBe(200)
+  })
+
+  it("returns which field failed on a malformed payload instead of a bare 400", async () => {
+    const response = await postApply({
+      jobId: JOB_ID,
+      quoteId: QUOTE_ID,
+      travelDate: "not-a-date",
+      selections: [],
+    })
+    const payload = await response.json()
+
+    expect(response.status).toBe(400)
+    expect(payload.error).toBe("Invalid request payload")
+    expect(payload.details).toBeDefined()
+  })
+
   it("prices the configured legs and reports the unconfigured one (F10-8)", async () => {
     helperMocks.loadBookingServicesPackageDetail.mockResolvedValue({
       detail: withUnconfiguredHotelLeg(buildDetail()),

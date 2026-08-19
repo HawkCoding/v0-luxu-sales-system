@@ -533,10 +533,53 @@ const MONTH_ABBREVIATIONS: { [key: string]: string } = {
   jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
 }
 
-/** Parses the first recognisable date out of `text` (ISO, "15 Mar 2026", or "15/03/2026"). */
+const MONTH_NAME = String.raw`(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*`
+const YEAR = String.raw`(202[4-9]|203[0-9])`
+// Hyphen / en dash / em dash, or a spelled-out separator. Every use has digits on both sides, so
+// the "to" alternative can't fire on route wording like "Pretoria to Vic Falls".
+const RANGE_SEP = String.raw`(?:[ \t]*[-–—][ \t]*|[ \t]+(?:to|until|till|through)[ \t]+)`
+
+// Rovos Rail states the departure field as a date RANGE ("02 - 13 September 2027", the trip's
+// first and last day) rather than a single date. The first date in a range is always the
+// departure; the second is the return -- but the plain day-month-year pattern below has no
+// concept of a range and, given two day numbers sharing one month/year, matches whichever one
+// happens to sit immediately before the month name. For "02 - 13 September 2027" that's the
+// return date, so the booking silently imported with the wrong departure. These two range
+// patterns run first so the shared month/year (or the end month, for a month-boundary range) is
+// paired with the FIRST day instead.
+const DATE_RANGE_SHARED_MONTH = new RegExp(
+  String.raw`\b([0-3]?\d)${RANGE_SEP}[0-3]?\d[ \t]+${MONTH_NAME}[\s,]+${YEAR}\b`, 'i',
+)
+const DATE_RANGE_CROSS_MONTH = new RegExp(
+  String.raw`\b([0-3]?\d)[ \t]+${MONTH_NAME}${RANGE_SEP}[0-3]?\d[ \t]+${MONTH_NAME}[\s,]+${YEAR}\b`, 'i',
+)
+
+/** Parses the first recognisable date out of `text` (ISO, a date range, "15 Mar 2026", or "15/03/2026"). */
 function extractDateString(text: string): string {
   const isoMatch = text.match(/\b(202[4-9]|203[0-9])-([0-1][0-9])-([0-3][0-9])\b/)
   if (isoMatch) return isoMatch[0]
+
+  const sharedMonthRange = text.match(DATE_RANGE_SHARED_MONTH)
+  if (sharedMonthRange) {
+    const day = sharedMonthRange[1].padStart(2, '0')
+    const month = MONTH_ABBREVIATIONS[sharedMonthRange[2].toLowerCase().slice(0, 3)]
+    const year = sharedMonthRange[3]
+    if (month) return `${year}-${month}-${day}`
+  }
+
+  const crossMonthRange = text.match(DATE_RANGE_CROSS_MONTH)
+  if (crossMonthRange) {
+    const day = crossMonthRange[1].padStart(2, '0')
+    const startMonthNum = parseInt(MONTH_ABBREVIATIONS[crossMonthRange[2].toLowerCase().slice(0, 3)], 10)
+    const endMonthNum = parseInt(MONTH_ABBREVIATIONS[crossMonthRange[3].toLowerCase().slice(0, 3)], 10)
+    // A range that crosses a month boundary states only the END year ("28 December - 05 January
+    // 2028" departs in 2027) -- roll back a year whenever the start month sorts after the end
+    // month, since that can only happen when the range wrapped across New Year's.
+    const endYear = parseInt(crossMonthRange[4], 10)
+    const year = String(startMonthNum > endMonthNum ? endYear - 1 : endYear)
+    const month = String(startMonthNum).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
 
   const dateMatch = text.match(/\b([0-3]?[0-9])\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[\s,]+?(202[4-9]|203[0-9])\b/i)
   if (dateMatch) {
@@ -891,8 +934,11 @@ export function parseEmailDraft(text: string, options?: ParseEmailDraftOptions):
   const termsAccepted = acceptanceValue ? /accept/i.test(acceptanceValue) : true
   if (acceptanceValue) confidence['termsAccepted'] = 'high'
 
-  // Notes: everything not explicitly extracted
-  const notes = text
+  // Notes start empty. Seeding them with the whole email made the review modal's "Additional
+  // Notes" box look like it already held the enquiry, while `rawText` below carries the same text
+  // verbatim (shown read-only right underneath it, and again in the booking's "Original Text"
+  // card). What the consultant types here is theirs, and is saved as a booking note.
+  const notes = ''
 
   return {
     customer: {

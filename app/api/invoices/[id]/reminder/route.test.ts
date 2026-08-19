@@ -37,6 +37,21 @@ vi.mock("@/lib/templates/compose-email", () => ({
 }))
 
 vi.mock("@/lib/settings-access", () => ({
+  BANKING_SETTING_KEYS: [
+    "bank_name",
+    "bank_account_name",
+    "bank_account_number",
+    "bank_branch_code",
+    "bank_swift_code",
+    "company_address",
+    "company_reg_number",
+    "company_vat_number",
+    "company_tel",
+    "company_cell",
+    "company_fax",
+    "company_email",
+    "company_website",
+  ],
   getBankingSettings: vi.fn(async () => ({
     bank_name: "Example Bank",
     bank_account_name: "",

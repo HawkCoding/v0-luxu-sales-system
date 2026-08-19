@@ -515,4 +515,78 @@ describe("validateTransition", () => {
 
     expect(failures).toContainEqual(expect.objectContaining({ gateId: "customer_complete" }))
   })
+
+  describe("revision_reset_at boundary", () => {
+    it("ignores a deposit invoice email sent before the revision reset", () => {
+      // Invoice status is `draft`, not `sent` -- a real post-revision invoice would be
+      // re-issued at `draft` too, since the old one was voided by the reset. `hasSentDepositInvoice`
+      // must come from the (boundary-filtered) correspondence, not the invoice row's own status.
+      const failures = validateTransition({
+        ...baseInput,
+        booking: {
+          ...baseInput.booking,
+          stage: "accepted",
+          revision_reset_at: "2026-06-01T00:00:00Z",
+        },
+        targetStage: "deposit_requested",
+        quotes: [{ status: "accepted", total: 1000 }],
+        invoices: [{ kind: "deposit", status: "draft" }],
+        correspondences: [
+          { kind: "invoice", subject: "Deposit invoice", status: "sent", created_at: "2026-05-01T00:00:00Z" },
+        ],
+      })
+
+      expect(failures).toContainEqual(
+        expect.objectContaining({ gateId: "invoice_correspondence", severity: "block" }),
+      )
+    })
+
+    it("still counts a deposit invoice email sent after the revision reset", () => {
+      const failures = validateTransition({
+        ...baseInput,
+        booking: {
+          ...baseInput.booking,
+          stage: "accepted",
+          revision_reset_at: "2026-06-01T00:00:00Z",
+        },
+        targetStage: "deposit_requested",
+        quotes: [{ status: "accepted", total: 1000 }],
+        invoices: [{ kind: "deposit", status: "draft" }],
+        correspondences: [
+          { kind: "invoice", subject: "Deposit invoice", status: "sent", created_at: "2026-06-15T00:00:00Z" },
+        ],
+      })
+
+      expect(failures).toEqual([])
+    })
+
+    it("ignores a voucher document generated before the revision reset", () => {
+      const failures = validateTransition({
+        ...baseInput,
+        booking: { ...baseInput.booking, stage: "final_paid", revision_reset_at: "2026-06-01T00:00:00Z" },
+        targetStage: "voucher_sent",
+        documents: [{ kind: "voucher_pdf", status: "sent", created_at: "2026-05-01T00:00:00Z" }],
+        correspondences: [
+          { kind: "voucher", subject: "Your voucher", status: "sent", created_at: "2026-05-01T00:00:00Z" },
+        ],
+      })
+
+      expect(failures.map((failure) => failure.gateId)).toEqual(["voucher_document", "voucher_correspondence"])
+    })
+
+    it("does not filter anything when no revision has ever happened", () => {
+      const failures = validateTransition({
+        ...baseInput,
+        booking: { ...baseInput.booking, stage: "accepted", revision_reset_at: null },
+        targetStage: "deposit_requested",
+        quotes: [{ status: "accepted", total: 1000 }],
+        invoices: [{ kind: "deposit", status: "sent" }],
+        correspondences: [
+          { kind: "invoice", subject: "Deposit invoice", status: "sent", created_at: "2020-01-01T00:00:00Z" },
+        ],
+      })
+
+      expect(failures).toEqual([])
+    })
+  })
 })
