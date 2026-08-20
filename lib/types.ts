@@ -709,6 +709,14 @@ export interface PricingSnapshot {
   manualTransportPriceBase?: number | null
   manualTransportPriceSetAt?: string | null
   manualTransportPriceSetByName?: string | null
+  /** Tour legs only: the consultant-typed flat price that replaced the rate card for this unit,
+   *  in sourceCurrency. Internal-only, same posture as manualRoomPrice/manualTransportPrice. */
+  manualTourPrice?: number | null
+  /** The rate card price the override replaced, in the same currency. Null when the unit had no
+   *  valid card at all (an override is allowed to price a tour the rate cards don't cover). */
+  manualTourPriceBase?: number | null
+  manualTourPriceSetAt?: string | null
+  manualTourPriceSetByName?: string | null
   /** Display-only quantity basis shown next to the qty (e.g. "per person", "per room per night"). */
   unit?: string | null
 }
@@ -734,9 +742,10 @@ export interface SupplierPackage {
  * Where a dated service sits relative to the service it hangs off.
  *
  * A hotel anchors to its train leg (`pre` = the night(s) before departure, `post` = from the day
- * the train arrives). A transfer anchors to the leg above it in the itinerary (`pre` = the day that
- * leg starts, `post` = the day it ends). `custom` is a booking-level override only — a package leg
- * stores `pre`/`post`, or null when the service isn't anchored at all.
+ * the train arrives). A transfer or an airline anchors to the leg above it in the itinerary
+ * (`pre` = the day that leg starts, `post` = the day it ends) — skipping past any transport/
+ * transfer legs in between. `custom` is a booking-level override only — a package leg stores
+ * `pre`/`post`, or null when the service isn't anchored at all.
  */
 export type ServiceDateAnchor = "pre" | "post" | "custom"
 

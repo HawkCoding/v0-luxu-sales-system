@@ -8,10 +8,11 @@ import { calculateInvoiceBalance } from "@/lib/invoices/calculate-balance"
 import { ensureInvoicePdf } from "@/lib/invoices/ensure-invoice-pdf"
 import { clientInvoiceNumber, resolveInvoiceStatusLabel } from "@/lib/invoices/invoice-status"
 import type { InvoiceTotals } from "@/lib/invoices/pdf/invoice-document"
+import { getPaymentMethod } from "@/lib/payment-methods"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import { formatCustomerSalutation } from "@/lib/person-name-format"
-import { getBankingSettings, getInvoiceStatusOptions } from "@/lib/settings-access"
+import { getInvoiceStatusOptions } from "@/lib/settings-access"
 
 export const runtime = "nodejs"
 
@@ -41,7 +42,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
   const { data: invoice, error: invoiceError } = await supabase
     .from("invoices")
     .select(
-      "id, booking_id, quote_id, kind, status, invoice_number, amount, currency, due_date, created_at, deposit_percentage, display_status",
+      "id, booking_id, quote_id, kind, status, invoice_number, amount, currency, due_date, created_at, deposit_percentage, display_status, payment_method_id",
     )
     .eq("id", id)
     .single()
@@ -122,6 +123,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
         due_date: invoice.due_date,
         created_at: invoice.created_at,
         status: invoice.status,
+        payment_method_id: invoice.payment_method_id,
       },
       bookingNumber: booking.booking_number,
       displayInvoiceNumber,
@@ -135,7 +137,8 @@ export async function POST(_req: Request, { params }: RouteParams) {
   }
 
   const overdue = daysOverdue(invoice.due_date)
-  const banking = await getBankingSettings(supabase)
+  const method = await getPaymentMethod(supabase, invoice.payment_method_id)
+  const banking = method.banking
   const shared = await resolveSharedEmailTokens(supabase, booking.id)
   const composed = await composeEmail(supabase, "payment_reminder", {
     tokens: {
@@ -169,6 +172,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
       warnings: composed.warnings,
       signatureProfileId: composed.signatureProfileId,
       signatureBrandId: composed.signatureBrandId,
+      paymentMethodId: method.id || null,
     },
     attachment: {
       filename: pdf.filename,

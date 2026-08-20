@@ -152,6 +152,38 @@ describe("PATCH /api/quotes/[id]", () => {
     expect(rpc).toHaveBeenCalled()
   })
 
+  it("saves a qty: 0 line — a fully complimentary night is a finished line, not an unpriced one", async () => {
+    // qty/unitPrice match the stored line exactly, so this is an unchanged carry-over and needs
+    // no override reason — the point under test is purely that qty: 0 clears the Zod schema.
+    const { rpc } = buildAuth([
+      prevLine({ description: "Standard Room", qty: 0, unit_price: 3000, total: 0 }),
+    ])
+
+    const res = await PATCH(
+      patchReq({
+        lineItems: [{ description: "Standard Room", qty: 0, unitPrice: 3000, total: 0 }],
+      }),
+      routeParams,
+    )
+
+    expect(res.status).toBe(200)
+    expect(rpc).toHaveBeenCalled()
+  })
+
+  it("returns which field failed on a malformed payload instead of a bare 400", async () => {
+    buildAuth([prevLine()])
+
+    const res = await PATCH(
+      patchReq({ lineItems: [{ description: "The Blue Train", qty: -1, unitPrice: 5000, total: 5000 }] }),
+      routeParams,
+    )
+
+    expect(res.status).toBe(400)
+    const body = await res.json()
+    expect(body.error).toBe("Invalid request payload")
+    expect(body.details).toBeDefined()
+  })
+
   it("deletes a line from an all-snapshot-less quote without an override reason", async () => {
     const { rpc, quoteUpdate } = buildAuth([
       prevLine({ description: "The Blue Train", unit_price: 0, sort_order: 0 }),

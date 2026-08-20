@@ -429,6 +429,18 @@ export function useSignatureBrands() {
   )
 }
 
+export interface PaymentMethodSummary {
+  id: string
+  name: string
+  enabled: boolean
+  isDefault: boolean
+  sortOrder: number
+}
+
+export function usePaymentMethods() {
+  return useSWR<{ methods: PaymentMethodSummary[] }>("/api/settings/payment-methods", fetcher, swrOptions)
+}
+
 export interface SystemInfo {
   dataMode: string
   emailProvider: string

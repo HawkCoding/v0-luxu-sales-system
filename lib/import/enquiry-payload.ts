@@ -42,6 +42,8 @@ export interface EnquiryImportPayload {
   province?: string
   linkedCustomerId?: string
   source?: StaffLeadSource
+  /** Free text the consultant typed on the review screen; stored as the booking's first note. */
+  notes?: string
   extractedJson: {
     parsedFrom: "email_draft"
     formFields: ParsedDraft["formFields"]
@@ -118,6 +120,7 @@ export function buildEnquiryImportPayload(draft: ParsedDraft): EnquiryImportPayl
     flightDepartureDate: draft.trip.flightDepartureDate || undefined,
     province: draft.customer.province || undefined,
     linkedCustomerId: draft.linkedCustomerId || undefined,
+    notes: draft.notes.trim() || undefined,
     extractedJson: {
       parsedFrom: "email_draft",
       formFields: draft.formFields,

@@ -33,31 +33,17 @@ import { cn } from "@/lib/utils"
 import { replaceContentSlot } from "@/lib/templates/content-slot"
 import { replaceSignatureSlot } from "@/lib/templates/signature-slot"
 import { formatQuoteDisplayLabel } from "@/lib/quotes/quote-number"
-import {
-  draftStorageKey,
-  readDraftEnvelope,
-  readRawDraft,
-  removeDraft,
-  serializeDraft,
-  writeDraft,
-} from "@/lib/drafts/draft-storage"
 import { useDirtyCloseGuard } from "@/hooks/use-dirty-close-guard"
 import { DiscardChangesDialog } from "@/components/discard-changes-dialog"
 
-/** Bump whenever this shape changes -- see lib/drafts/draft-storage.ts. */
-const EMAIL_DRAFT_SCHEMA_VERSION = 1
-const EMAIL_DRAFT_DEBOUNCE_MS = 1500
-
-interface EmailComposerDraft {
+/** In-memory only -- compared against `serverBaseline` to detect unsent edits for the
+ *  discard-on-close prompt. Never persisted (see the removed localStorage autosave: ticking an
+ *  attachment before the preview landed could write `content: null`, which then hid the body
+ *  editor on every future reopen for that quote). */
+interface ComposerState {
   subject: string
   content: string | null
   libraryAttachmentIds: string[]
-}
-
-function isEmailComposerDraft(data: unknown): data is EmailComposerDraft {
-  if (!data || typeof data !== "object") return false
-  const candidate = data as Partial<EmailComposerDraft>
-  return typeof candidate.subject === "string" && Array.isArray(candidate.libraryAttachmentIds)
 }
 
 const HtmlBodyEditor = dynamic(
@@ -117,12 +103,11 @@ export function QuotePreviewSendDialog({
   // What the server last rendered, so a hand-edit can be told apart from the template's own wording
   // -- reopening this dialog re-fetches the preview (moveStage/signature defaults can have changed),
   // and that used to silently overwrite whatever was typed the first time.
-  const [serverBaseline, setServerBaseline] = useState<EmailComposerDraft>({
+  const [serverBaseline, setServerBaseline] = useState<ComposerState>({
     subject: "",
     content: null,
     libraryAttachmentIds: [],
   })
-  const draftKey = draftStorageKey("email-quote", quote.id)
   const isDirty =
     JSON.stringify({ subject, content, libraryAttachmentIds }) !== JSON.stringify(serverBaseline)
 
@@ -133,27 +118,8 @@ export function QuotePreviewSendDialog({
 
   const closeGuard = useDirtyCloseGuard({
     isDirty,
-    onConfirmedClose: () => {
-      removeDraft(draftKey)
-      setOpen(false)
-    },
+    onConfirmedClose: () => setOpen(false),
   })
-
-  // Debounced autosave of the hand-edited subject/body/attachments while they differ from what the
-  // server rendered.
-  useEffect(() => {
-    if (!open || !isDirty) return
-    const timeout = window.setTimeout(() => {
-      writeDraft(
-        draftKey,
-        serializeDraft<EmailComposerDraft>(
-          { subject, content, libraryAttachmentIds },
-          { version: EMAIL_DRAFT_SCHEMA_VERSION, recordUpdatedAt: null },
-        ),
-      )
-    }, EMAIL_DRAFT_DEBOUNCE_MS)
-    return () => window.clearTimeout(timeout)
-  }, [open, isDirty, draftKey, subject, content, libraryAttachmentIds])
 
   // The email is composed server-side from the quote_email template; edits
   // here are spliced into the branded wrapper for this send only. Content
@@ -196,22 +162,11 @@ export function QuotePreviewSendDialog({
       const renderedContent = payload.bodyContentHtml ?? null
       setServerBaseline({ subject: renderedSubject, content: renderedContent, libraryAttachmentIds: [] })
 
-      // Subject always comes from the current template render, never from a stored draft --
-      // a stale/corrupted snapshot (e.g. saved mid-load, or from before a template edit) must
-      // never be able to win over what the template renders right now.
+      // Subject always comes from the current template render -- reopening the dialog always
+      // starts from a clean server render, never from anything left over from a previous open.
       setSubject(renderedSubject)
-
-      const stored = readDraftEnvelope<EmailComposerDraft>(readRawDraft(draftStorageKey("email-quote", quote.id)), {
-        version: EMAIL_DRAFT_SCHEMA_VERSION,
-        isValid: isEmailComposerDraft,
-      })
-      if (stored) {
-        setContent(stored.data.content)
-        setLibraryAttachmentIds(stored.data.libraryAttachmentIds)
-        toast.success("Restored your unsent draft for this quote email.")
-      } else {
-        setContent(renderedContent)
-      }
+      setContent(renderedContent)
+      setLibraryAttachmentIds([])
       setWarnings(payload.warnings ?? [])
     } catch (previewError) {
       const message = previewError instanceof Error ? previewError.message : "Failed to render quote preview"
@@ -277,7 +232,6 @@ export function QuotePreviewSendDialog({
     })
 
     if (result.ok) {
-      removeDraft(draftKey)
       onSent()
     }
   }

@@ -4,8 +4,8 @@ import { buildInvoiceView } from "@/lib/invoices/build-invoice-view"
 import type { InvoiceTotals } from "@/lib/invoices/pdf/invoice-document"
 import { renderInvoicePdf } from "@/lib/invoices/render-invoice-pdf"
 import { loadBrandLogo } from "@/lib/pdf/brand-logo"
+import { getPaymentMethod } from "@/lib/payment-methods"
 import {
-  getBankingSettings,
   getDocumentBrandSettings,
   getDocumentTextSettings,
   resolveDocumentBrand,
@@ -29,6 +29,8 @@ export interface EnsureInvoicePdfInput {
     due_date: string | null
     created_at: string
     status: string
+    /** Bank/company details this invoice was generated with; omitted resolves to the account default. */
+    payment_method_id?: string | null
   }
   bookingNumber: string
   /**
@@ -67,11 +69,12 @@ export async function ensureInvoicePdf(
   supabase: SupabaseClient<Database>,
   { invoice, bookingNumber, displayInvoiceNumber, customerName, statusLabel, totals }: EnsureInvoicePdfInput,
 ): Promise<EnsuredInvoicePdf> {
-  const [banking, documentText, documentBrand] = await Promise.all([
-    getBankingSettings(supabase),
+  const [method, documentText, documentBrand] = await Promise.all([
+    getPaymentMethod(supabase, invoice.payment_method_id ?? null),
     getDocumentTextSettings(supabase),
     getDocumentBrandSettings(supabase),
   ])
+  const banking = method.banking
   const { brand, position } = resolveDocumentBrand(documentBrand)
   const brandLogo = await loadBrandLogo(brand.logoUrl)
 

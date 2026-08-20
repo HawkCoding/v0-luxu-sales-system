@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server"
 import { requireRole, type ApiAuthContext } from "@/lib/api/auth"
+import { staleVersionResponse } from "@/lib/concurrency"
+import { StaleTransitionError } from "@/lib/pipeline/apply-transition"
 import { reviseQuoteNumber } from "@/lib/quotes/quote-number"
 import { applyRevisionReset, planRevisionReset, type RevisionResetPlan } from "@/lib/quotes/revision-reset"
 import type { PipelineStage } from "@/lib/types"
@@ -14,6 +16,7 @@ const REVISABLE_STATUSES = ["sent", "accepted", "expired"]
 interface RevisionContext {
   bookingId: string
   bookingNumber: string
+  bookingUpdatedAt: string
   stage: PipelineStage
   plan: RevisionResetPlan
 }
@@ -45,7 +48,7 @@ async function loadRevisionContext(
     await Promise.all([
       supabase
         .from("bookings")
-        .select("id, booking_number, stage, deposit_paid, deposit_confirmed_manually, outcome")
+        .select("id, booking_number, stage, updated_at, deposit_paid, deposit_confirmed_manually, outcome")
         .eq("id", quote.booking_id)
         .single(),
       supabase.from("payments").select("amount").eq("booking_id", quote.booking_id),
@@ -65,6 +68,7 @@ async function loadRevisionContext(
     context: {
       bookingId: booking.id,
       bookingNumber: booking.booking_number,
+      bookingUpdatedAt: booking.updated_at,
       stage,
       plan: planRevisionReset({
         stage,
@@ -97,7 +101,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
 
   const loaded = await loadRevisionContext(supabase, id)
   if ("response" in loaded) return loaded.response
-  const { bookingId, bookingNumber, stage, plan } = loaded.context
+  const { bookingId, bookingNumber, bookingUpdatedAt, stage, plan } = loaded.context
 
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
@@ -129,9 +133,12 @@ export async function POST(_req: Request, { params }: RouteParams) {
       validity_until: quote.validity_until,
       subtotal: quote.subtotal,
       total: quote.total,
+      currency: quote.currency,
       commission_bonus: quote.commission_bonus,
       quote_number: quoteNumber,
       parent_quote_id: quote.id,
+      title: quote.title,
+      follow_ups_disabled: quote.follow_ups_disabled,
     })
     .select()
     .single()
@@ -162,8 +169,9 @@ export async function POST(_req: Request, { params }: RouteParams) {
     }
   }
 
-  // Rewind the pipeline so the salesperson re-walks send → accept → deposit
-  // against the revised numbers, and void the invoices built off the old total.
+  // Rewind the pipeline so the salesperson re-walks every step -- send,
+  // reservation form, accept, deposit -- against the revised numbers, and
+  // void the invoices built off the old total.
   let reset
   try {
     reset = await applyRevisionReset(supabase, {
@@ -173,8 +181,12 @@ export async function POST(_req: Request, { params }: RouteParams) {
       fromStage: stage,
       actorName: profile.actorName,
       actorUserId: user.id,
+      expectedUpdatedAt: bookingUpdatedAt,
     })
   } catch (error) {
+    if (error instanceof StaleTransitionError) {
+      return staleVersionResponse("booking", error.currentUpdatedAt)
+    }
     console.error("quote-revise:reset", error)
     return NextResponse.json({ error: "Quote revised but the pipeline reset failed" }, { status: 500 })
   }
@@ -199,9 +211,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
     reset: {
       targetStage: plan.targetStage,
       stageChanged: reset.stageChanged,
-      keptDeposit: plan.keepsDeposit,
       voidedInvoiceCount: reset.voidedInvoiceIds.length,
-      reopenedInvoiceCount: reset.reopenedInvoiceIds.length,
       summary: plan.summary,
     },
   })

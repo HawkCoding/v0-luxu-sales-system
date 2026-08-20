@@ -66,6 +66,7 @@ export class MockQueryBuilder implements PromiseLike<{ data: unknown; error: unk
   private selectAfterWrite = false
   private resolved = false
   private conflictColumns: string[] = []
+  private wantCount = false
 
   constructor(
     private readonly table: string,
@@ -75,10 +76,11 @@ export class MockQueryBuilder implements PromiseLike<{ data: unknown; error: unk
 
   // --- query configuration -------------------------------------------------
 
-  select(columns = "*"): this {
+  select(columns = "*", opts?: { count?: "exact" | "planned" | "estimated"; head?: boolean }): this {
     if (this.op !== "insert" && this.op !== "update") this.op = "select"
     this.selectColumns = columns
     this.selectAfterWrite = true
+    if (opts?.count) this.wantCount = true
     return this
   }
 
@@ -182,13 +184,16 @@ export class MockQueryBuilder implements PromiseLike<{ data: unknown; error: unk
     return { data: rows[0], error: null }
   }
 
-  then<TResult1 = { data: unknown; error: unknown }, TResult2 = never>(
-    onfulfilled?: ((value: { data: unknown; error: unknown }) => TResult1 | PromiseLike<TResult1>) | null,
+  then<TResult1 = { data: unknown; error: unknown; count: number | null }, TResult2 = never>(
+    onfulfilled?:
+      | ((value: { data: unknown; error: unknown; count: number | null }) => TResult1 | PromiseLike<TResult1>)
+      | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
   ): Promise<TResult1 | TResult2> {
     const { rows, error } = this.run()
     const data = this.op === "select" || this.selectAfterWrite ? rows : null
-    return Promise.resolve({ data, error }).then(onfulfilled, onrejected)
+    const count = this.wantCount ? rows.length : null
+    return Promise.resolve({ data, error, count }).then(onfulfilled, onrejected)
   }
 
   // --- execution -----------------------------------------------------------
@@ -315,7 +320,7 @@ export class MockQueryBuilder implements PromiseLike<{ data: unknown; error: unk
 }
 
 export interface MockFrom {
-  select(columns?: string): MockQueryBuilder
+  select(columns?: string, opts?: { count?: "exact" | "planned" | "estimated"; head?: boolean }): MockQueryBuilder
   insert(values: Row | Row[]): MockQueryBuilder
   update(values: Row): MockQueryBuilder
   upsert(values: Row | Row[], opts?: { onConflict?: string }): MockQueryBuilder
@@ -362,7 +367,8 @@ export function createSupabaseMock(seed: Record<string, Row[]> = {}): SupabaseMo
     from(table: string): MockFrom {
       const builder = new MockQueryBuilder(table, store, nextId)
       return {
-        select: (columns?: string) => builder.select(columns),
+        select: (columns?: string, opts?: { count?: "exact" | "planned" | "estimated"; head?: boolean }) =>
+          builder.select(columns, opts),
         insert: (values: Row | Row[]) => builder.insert(values),
         update: (values: Row) => builder.update(values),
         upsert: (values: Row | Row[], opts?: { onConflict?: string }) => builder.upsert(values, opts),

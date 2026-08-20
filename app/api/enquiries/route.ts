@@ -239,6 +239,8 @@ const enquiryBodySchema = z.object({
   country: z.string().trim().max(120).nullish(),
   province: z.string().trim().max(120).nullish(),
   rawText: z.string().max(100_000).nullish(),
+  // Free text typed on the review screen; saved as the booking's first internal note.
+  notes: z.string().trim().max(5000).nullish(),
   // Only honoured for authenticated sessions — see POST below.
   linkedCustomerId: z.string().uuid().nullish().catch(null),
   direction: z.string().trim().max(255).nullish(),
@@ -288,6 +290,50 @@ const enquiryBodySchema = z.object({
   childTravellers: z.array(travellerInputSchema).max(100).nullish(),
   transportRequests: z.array(transportRequestInputSchema).max(50).nullish(),
 })
+
+interface EnquiryFormFieldEdits {
+  province?: string | null
+  packageOption?: string | null
+  hotelOption?: string | null
+  flightBooking?: string | null
+  flightDepartureDate?: string | null
+  direction?: string | null
+  supplier?: string | null
+}
+
+/**
+ * Folds the values the caller actually submitted back into the parser's raw-wording snapshot.
+ *
+ * The review modal edits the structured draft (`trip.route`, `customer.province`, …) but never
+ * `formFields`, and `app/api/jobs/[id]/route.ts` falls back to `formFields` whenever a value could
+ * not be resolved to a foreign key. Without this merge a consultant's correction to a route that
+ * matches no `routes` row read back as the ORIGINALLY PARSED wording, so the edit looked lost.
+ * `raw_text` still holds the customer's own words verbatim.
+ */
+export function mergeEnquiryFormFields(
+  existing: unknown,
+  edits: EnquiryFormFieldEdits,
+): Record<string, unknown> {
+  const existingFormFields =
+    existing && typeof existing === "object" && !Array.isArray(existing)
+      ? (existing as Record<string, unknown>)
+      : {}
+
+  return {
+    ...existingFormFields,
+    province: edits.province || null,
+    packageOption: edits.packageOption || null,
+    hotelOption: edits.hotelOption || null,
+    flightBooking: edits.flightBooking || null,
+    flightDepartureDate: edits.flightDepartureDate || null,
+    direction:
+      edits.direction ||
+      (typeof existingFormFields.direction === "string" ? existingFormFields.direction : null),
+    // Only the public web form sends free-text `supplier` -- the review modal resolves a supplier
+    // id instead -- so a paste import must not blank the parsed supplier wording.
+    ...(edits.supplier ? { supplier: edits.supplier } : {}),
+  }
+}
 
 export async function POST(req: Request) {
   // Callers are either logged-in staff (paste import / internal forms) or the
@@ -441,20 +487,9 @@ export async function POST(req: Request) {
     body.extractedJson && typeof body.extractedJson === "object" && !Array.isArray(body.extractedJson)
       ? body.extractedJson as Record<string, unknown>
       : {}
-  const existingFormFields =
-    existingExtractedJson.formFields && typeof existingExtractedJson.formFields === "object" && !Array.isArray(existingExtractedJson.formFields)
-      ? existingExtractedJson.formFields as Record<string, unknown>
-      : {}
   const extractedJson = {
     ...existingExtractedJson,
-    formFields: {
-      ...existingFormFields,
-      province: body.province || null,
-      packageOption: body.packageOption || null,
-      hotelOption: body.hotelOption || null,
-      flightBooking: body.flightBooking || null,
-      flightDepartureDate: body.flightDepartureDate || null,
-    },
+    formFields: mergeEnquiryFormFields(existingExtractedJson.formFields, body),
     resolvedReferences: {
       routeId,
       hotelSupplierId,
@@ -498,6 +533,18 @@ export async function POST(req: Request) {
 
   if (bookingError || !booking) {
     return NextResponse.json({ error: "Failed to create booking" }, { status: 500 })
+  }
+
+  // Whatever the consultant typed into "Additional Notes" on the review screen. It used to be
+  // dropped on save. Best-effort, like every other write below: a note must never fail an enquiry.
+  const enquiryNote = body.notes?.trim()
+  if (enquiryNote) {
+    const { error: noteError } = await supabase.from("booking_notes").insert({
+      booking_id: booking.id,
+      author_id: user?.id ?? null,
+      body: enquiryNote,
+    })
+    if (noteError) console.error("enquiries:bookingNote", noteError)
   }
 
   // --- 3. Insert booking_suites ---
@@ -750,6 +797,32 @@ interface ResolveEnquiryCustomerInput {
   existingCustomerId?: string | null
 }
 
+/**
+ * Writes the corrections an intake carries onto a customer that already exists.
+ *
+ * Only what this enquiry actually carries: an intake without a country must not null out the
+ * country an existing customer already has, which `customer_complete` then blocks every forward
+ * stage move on.
+ */
+async function applyCustomerIntakeUpdates(
+  supabase: ServiceClient,
+  customerId: string,
+  input: ResolveEnquiryCustomerInput,
+): Promise<void> {
+  await supabase
+    .from("customers")
+    .update({
+      first_name: input.firstName ?? undefined,
+      last_name: input.lastName ?? undefined,
+      phone: input.phone ?? undefined,
+      country: input.country ?? undefined,
+      province: input.province ?? undefined,
+      title: input.title ?? undefined,
+      updated_at: input.nowIso,
+    })
+    .eq("id", customerId)
+}
+
 export async function resolveEnquiryCustomer(
   supabase: ServiceClient,
   input: ResolveEnquiryCustomerInput,
@@ -768,6 +841,9 @@ export async function resolveEnquiryCustomer(
         .eq("customer_id", presetCustomer.id)
         .in("stage", COMPLETED_REPEAT_BOOKING_STAGES)
         .limit(1)
+      // The review modal prefills this customer's details and lets the consultant correct them.
+      // Returning here without writing them back threw every one of those corrections away.
+      await applyCustomerIntakeUpdates(supabase, presetCustomer.id, input)
       return {
         customerId: presetCustomer.id,
         customerIsRepeatClient: (priorCompletedBookings ?? []).length > 0,
@@ -792,21 +868,7 @@ export async function resolveEnquiryCustomer(
       .limit(1)
     const customerIsRepeatClient = (priorCompletedBookings ?? []).length > 0
 
-    // Only write what this enquiry actually carries: an intake without a country
-    // must not null out the country an existing customer already has, which
-    // `customer_complete` then blocks every forward stage move on.
-    await supabase
-      .from("customers")
-      .update({
-        first_name: input.firstName ?? undefined,
-        last_name: input.lastName ?? undefined,
-        phone: input.phone ?? undefined,
-        country: input.country ?? undefined,
-        province: input.province ?? undefined,
-        title: input.title ?? undefined,
-        updated_at: input.nowIso,
-      })
-      .eq("id", existingCustomer.id)
+    await applyCustomerIntakeUpdates(supabase, existingCustomer.id, input)
 
     return { customerId: existingCustomer.id, customerIsRepeatClient }
   }

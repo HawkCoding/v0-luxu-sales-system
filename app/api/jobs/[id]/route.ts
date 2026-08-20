@@ -599,7 +599,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const { data: booking } = await supabase
     .from("bookings")
     .select(
-      "id, stage, booking_number, customer_id, consultant, assigned_salesperson_id, source, raw_text, email_import_needs_review, email_import_review_resolved_at, reservation_form_received_at, updated_at, cancelled_at, departure_date, duration_nights, deposit_paid, invoice_balance, no_of_adults, no_of_children, no_of_suites, child_ages, customer_invoice_number",
+      "id, stage, booking_number, customer_id, consultant, assigned_salesperson_id, source, raw_text, email_import_needs_review, email_import_review_resolved_at, reservation_form_received_at, revision_reset_at, updated_at, cancelled_at, departure_date, duration_nights, deposit_paid, invoice_balance, no_of_adults, no_of_children, no_of_suites, child_ages, customer_invoice_number",
     )
     .eq("id", id)
     .single()
@@ -732,9 +732,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         .select("id, status, total, created_at")
         .eq("booking_id", id)
         .order("created_at", { ascending: false }),
-      supabase.from("documents").select("id, kind, status").eq("booking_id", id),
+      supabase.from("documents").select("id, kind, status, created_at").eq("booking_id", id),
       supabase.from("invoices").select("id, kind, status").eq("booking_id", id),
-      supabase.from("correspondences").select("id, kind, subject, status").eq("booking_id", id),
+      supabase.from("correspondences").select("id, kind, subject, status, created_at").eq("booking_id", id),
       supabase.from("payments").select("amount").eq("booking_id", id),
     ])
 
@@ -753,6 +753,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         body.reservationFormReceived !== undefined
           ? (updates.reservation_form_received_at as string | null)
           : booking.reservation_form_received_at,
+      revision_reset_at: booking.revision_reset_at,
     }
     // Fails open: the generate/send readiness check still blocks a voucher with missing
     // references, so a lookup hiccup here costs a clearer message, never a wrongly-permitted move.

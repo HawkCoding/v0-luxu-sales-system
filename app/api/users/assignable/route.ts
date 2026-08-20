@@ -1,9 +1,12 @@
 import { requireAnyRole } from "@/lib/api/auth"
 import { safeSupabaseError } from "@/lib/api/responses"
 
-// Lightweight list of staff a job can be assigned to (the full /api/users
-// endpoint is admin-only) so the job-page reassignment control can populate
-// its picker.
+// Lightweight list of staff a job can be assigned to. Available to admins,
+// managers, and consultants (the full /api/users endpoint is admin-only) so
+// the job-page reassignment control and the Pipeline/Bookings consultant
+// filters can populate their pickers. Consultants already see every booking
+// via "view:pipeline"/"view:jobs" with no ownership scoping, so this list
+// exposes nothing they can't already see through the bookings themselves.
 export async function GET() {
   const auth = await requireAnyRole()
   if (!auth.ok) return auth.response

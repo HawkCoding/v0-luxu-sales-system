@@ -74,3 +74,42 @@ export async function loadRoomOverrideProvenance(
 
   return provenance
 }
+
+/**
+ * Who put a tour unit's manual price there, and when — read from booking_service_units rather
+ * than taken from the request, same reasoning as loadRoomOverrideProvenance.
+ *
+ * Safe to call with an empty id list. Units with no override (or ids that don't resolve) are
+ * simply absent from the map; a missing entry is never an error, it just means the line renders
+ * the amount without a "set by" note.
+ */
+export async function loadTourOverrideProvenance(
+  supabase: SupabaseClient<Database>,
+  unitIds: readonly string[],
+): Promise<Map<string, RoomOverrideProvenance>> {
+  const provenance = new Map<string, RoomOverrideProvenance>()
+  const ids = Array.from(new Set(unitIds.filter(Boolean)))
+  if (ids.length === 0) return provenance
+
+  const { data: units, error } = await supabase
+    .from("booking_service_units")
+    .select("id, manual_tour_price_set_at, manual_tour_price_set_by")
+    .in("id", ids)
+    .not("manual_tour_price", "is", null)
+
+  if (error || !units || units.length === 0) return provenance
+
+  const nameByUserId = await resolveOverrideSetterNames(
+    supabase,
+    units.map((unit) => unit.manual_tour_price_set_by),
+  )
+
+  for (const unit of units) {
+    provenance.set(unit.id, {
+      setAt: unit.manual_tour_price_set_at,
+      setByName: unit.manual_tour_price_set_by ? nameByUserId.get(unit.manual_tour_price_set_by) ?? null : null,
+    })
+  }
+
+  return provenance
+}

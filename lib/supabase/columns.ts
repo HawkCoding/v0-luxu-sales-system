@@ -56,3 +56,6 @@ export const AUDIT_LOG_COLUMNS =
 
 export const SIGNATURE_BRAND_COLUMNS =
   "id, slug, name, banner_url, banner_width, banner_height, badges, enabled, sort_order, company_line, registration_line, trading_hours, divisions_line, confidentiality, office_address, created_at, updated_at"
+
+export const PAYMENT_METHOD_COLUMNS =
+  "id, name, enabled, is_default, sort_order, bank_name, bank_account_name, bank_account_number, bank_branch_code, bank_swift_code, company_address, company_reg_number, company_vat_number, company_tel, company_cell, company_fax, company_email, company_website, created_at, updated_at"

@@ -20,6 +20,13 @@ export interface TransitionBooking {
   email_import_review_resolved_at?: string | null
   reservation_form_received_at?: string | null
   customer_invoice_number?: string | null
+  /**
+   * Stamped by a quote revision (see `applyRevisionReset`). Documents and
+   * correspondences created at or before this timestamp are pre-revision
+   * history — they must not silently satisfy the gates below on the re-walk
+   * back up the ladder.
+   */
+  revision_reset_at?: string | null
 }
 
 export interface TransitionCustomer {
@@ -39,6 +46,7 @@ export interface TransitionQuote {
 export interface TransitionDocument {
   kind: string
   status?: string | null
+  created_at?: string | null
 }
 
 export interface TransitionInvoice {
@@ -54,6 +62,7 @@ export interface TransitionCorrespondence {
   kind?: string | null
   subject?: string | null
   status?: string | null
+  created_at?: string | null
 }
 
 /** One leg/trip that prints as its own voucher block, scoped to the accepted quote. */
@@ -282,10 +291,19 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
   }
 
   const quotes = input.quotes ?? []
-  const documents = input.documents ?? []
   const invoices = input.invoices ?? []
-  const correspondences = input.correspondences ?? []
   const payments = input.payments ?? []
+
+  // A revision rewinds the booking so these gates have to be earned again;
+  // documents/correspondences from before the reset must not count toward
+  // them even though the rows themselves are kept as history.
+  const revisionResetAt = input.booking.revision_reset_at
+  function afterRevisionReset<T extends { created_at?: string | null }>(rows: T[]): T[] {
+    if (!revisionResetAt) return rows
+    return rows.filter((row) => Boolean(row.created_at) && row.created_at! > revisionResetAt)
+  }
+  const documents = afterRevisionReset(input.documents ?? [])
+  const correspondences = afterRevisionReset(input.correspondences ?? [])
   const manualConfirmations = input.manualConfirmations ?? {}
   const crossedStages = FORWARD_STAGES.slice(fromIndex + 1, toIndex + 1)
   const hasSentOrAcceptedQuote = quotes.some((quote) => quote.status === "sent" || quote.status === "accepted")

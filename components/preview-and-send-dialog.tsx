@@ -19,7 +19,9 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useOptimisticSend } from "@/hooks/use-optimistic-send"
 import { EmailAttachmentPicker } from "@/components/email-attachment-picker"
 import { SignaturePicker } from "@/components/signature-picker"
+import { PaymentMethodPicker } from "@/components/payment-method-picker"
 import { extractContentSlot, replaceContentSlot } from "@/lib/templates/content-slot"
+import { replaceBankingBlock } from "@/lib/templates/banking-block-slot"
 import { replaceSignatureSlot } from "@/lib/templates/signature-slot"
 import { useDirtyCloseGuard } from "@/hooks/use-dirty-close-guard"
 import { DiscardChangesDialog } from "@/components/discard-changes-dialog"
@@ -55,6 +57,10 @@ interface PreviewAndSendDialogProps {
   signatureProfileId?: string | null
   /** Brand compose originally resolved into the signature; the picker's initial selection. */
   signatureBrandId?: string | null
+  /** Payment method compose originally resolved into the banking-details block; the picker's initial selection. */
+  paymentMethodId?: string | null
+  /** Customer-facing invoice number, used as the bank reference line when the payment method is switched. */
+  invoiceNumber?: string
   attachments?: Array<{
     filename: string
     contentBase64: string
@@ -80,6 +86,8 @@ export function PreviewAndSendDialog({
   scheduledCorrespondenceId,
   signatureProfileId = null,
   signatureBrandId = null,
+  paymentMethodId = null,
+  invoiceNumber,
   attachments,
   onSent,
 }: PreviewAndSendDialogProps) {
@@ -258,6 +266,16 @@ export function PreviewAndSendDialog({
             onSignatureHtmlChange={setSignatureHtml}
             disabled={sending}
           />
+
+          {canEditBody ? (
+            <PaymentMethodPicker
+              contentHtml={content ?? ""}
+              initialPaymentMethodId={paymentMethodId}
+              invoiceNumber={invoiceNumber}
+              onBlockHtmlChange={(html) => setContent((prev) => replaceBankingBlock(prev ?? "", html) ?? prev)}
+              disabled={sending}
+            />
+          ) : null}
 
           {canEditBody ? (
             <Tabs defaultValue="preview">

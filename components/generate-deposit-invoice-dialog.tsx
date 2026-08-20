@@ -15,10 +15,12 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { PreviewAndSendDialog } from "@/components/preview-and-send-dialog"
 import type { Invoice, Quote } from "@/lib/types"
 import { formatMoney } from "@/lib/money"
+import { usePaymentMethods } from "@/lib/use-data"
 
 interface GenerateDepositInvoiceDialogProps {
   open?: boolean
@@ -65,6 +67,7 @@ interface GenerateDepositInvoiceResponse {
     warnings?: string[]
     signatureProfileId?: string | null
     signatureBrandId?: string | null
+    paymentMethodId?: string | null
   }
   attachment?: {
     filename: string
@@ -124,6 +127,14 @@ export function GenerateDepositInvoiceDialog({
   const insideSixtyDays = useMemo(() => isInsideSixtyDays(departureDate), [departureDate])
   const [payInFull, setPayInFull] = useState(insideSixtyDays)
   const [fullDueDate, setFullDueDate] = useState(() => addDays(new Date(), 2))
+  const { data: paymentMethodsData } = usePaymentMethods()
+  const paymentMethods = (paymentMethodsData?.methods ?? []).filter((m) => m.enabled)
+  const [paymentMethodId, setPaymentMethodId] = useState<string | null>(null)
+  useEffect(() => {
+    if (paymentMethodId || paymentMethods.length === 0) return
+    setPaymentMethodId(paymentMethods.find((m) => m.isDefault)?.id ?? paymentMethods[0].id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentMethods.length])
   const [generating, setGenerating] = useState(false)
   const [discarding, setDiscarding] = useState(false)
   // Set by "Change amount": the draft has been voided, so the dialog leaves
@@ -190,6 +201,7 @@ export function GenerateDepositInvoiceDialog({
               ? draftInvoice?.depositPercentage ?? defaultDepositPercentage
               : validPercentage,
           ...(isFullMode && !resumingDraft ? { dueDate: fullDueDate } : {}),
+          ...(!resumingDraft && paymentMethodId ? { paymentMethodId } : {}),
         }),
       })
       const payload = (await response.json()) as GenerateDepositInvoiceResponse
@@ -318,6 +330,23 @@ export function GenerateDepositInvoiceDialog({
                 />
               </div>
             ) : null}
+            {!resumingDraft && paymentMethods.length > 1 ? (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="invoice-payment-method">Payment method</Label>
+                <Select value={paymentMethodId ?? undefined} onValueChange={setPaymentMethodId}>
+                  <SelectTrigger id="invoice-payment-method">
+                    <SelectValue placeholder="Choose a payment method" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {paymentMethods.map((method) => (
+                      <SelectItem key={method.id} value={method.id}>
+                        {method.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
             <div className="rounded-md border p-3 text-sm">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-muted-foreground">Customer</span>
@@ -391,6 +420,8 @@ export function GenerateDepositInvoiceDialog({
           bodyContentHtml={generated.email.bodyContentHtml}
           signatureProfileId={generated.email.signatureProfileId}
           signatureBrandId={generated.email.signatureBrandId}
+          paymentMethodId={generated.email.paymentMethodId}
+          invoiceNumber={generated.invoice.invoiceNumber}
           to={generated.email.to}
           kind="invoice"
           moveStage="deposit_requested"
