@@ -3,6 +3,7 @@ import { z } from "zod"
 import { loadCountryAliasMap, normalizeCountry } from "@/lib/countries"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
 import { createSessionClient } from "@/lib/supabase/server"
+import { jsonError, jsonZodError } from "@/lib/api/responses"
 import { allocateJobNumberBlock } from "@/lib/job-numbering"
 import { importRowSchema, payloadSchema } from "./schemas"
 import { ALL_ROLES } from "@/lib/permissions"
@@ -151,12 +152,16 @@ export async function POST(req: Request) {
   if (profileError || !profile || !allowedRoles.has(profile.clearance_level))
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 
-  let parsed: z.infer<typeof payloadSchema>
+  let raw: unknown
   try {
-    parsed = payloadSchema.parse(await req.json())
+    raw = await req.json()
   } catch {
-    return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
+    return jsonError("Invalid JSON body", 400)
   }
+
+  const result = payloadSchema.safeParse(raw)
+  if (!result.success) return jsonZodError(result.error)
+  const parsed = result.data
 
   let countryAliasMap
   try {

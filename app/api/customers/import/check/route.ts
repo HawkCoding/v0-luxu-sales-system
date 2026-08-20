@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
+import { jsonError, jsonZodError } from "@/lib/api/responses"
 import { ALL_ROLES } from "@/lib/permissions"
 
 const allowedRoles = new Set<string>(ALL_ROLES)
@@ -31,12 +32,16 @@ export async function POST(req: Request) {
   if (profileError || !profile || !allowedRoles.has(profile.clearance_level))
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
 
-  let parsed: z.infer<typeof requestSchema>
+  let raw: unknown
   try {
-    parsed = requestSchema.parse(await req.json())
+    raw = await req.json()
   } catch {
-    return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
+    return jsonError("Invalid JSON body", 400)
   }
+
+  const result = requestSchema.safeParse(raw)
+  if (!result.success) return jsonZodError(result.error)
+  const parsed = result.data
 
   const uniqueEmails = Array.from(new Set(parsed.emails.map((email) => email.trim().toLowerCase())))
   const existingRows: Array<{ id: string; email: string }> = []

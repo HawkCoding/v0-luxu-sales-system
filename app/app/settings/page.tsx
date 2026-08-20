@@ -59,7 +59,7 @@ import type { CommissionKind, Role } from "@/lib/types"
 import { APP_VERSION } from "@/lib/version"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
-import { AlertTriangle, Clock, KeyRound, ListChecks, MoreHorizontal, Pencil, ShieldCheck, Tag, Trash2, Upload, UserCheck, UserPlus, UserX } from "lucide-react"
+import { AlertTriangle, Clock, FlaskConical, KeyRound, ListChecks, MoreHorizontal, Pencil, ShieldCheck, Tag, Trash2, Upload, UserCheck, UserPlus, UserX } from "lucide-react"
 
 interface AppUser {
   userId: string
@@ -1959,6 +1959,131 @@ function QuoteFollowUpSettingsCard({ canEdit }: { canEdit: boolean }) {
   )
 }
 
+function EmailTestModeCard({ canEdit }: { canEdit: boolean }) {
+  const [enabled, setEnabled] = useState(false)
+  const [recipientInput, setRecipientInput] = useState("")
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch("/api/settings/email-test-mode")
+      .then((r) => r.json())
+      .then((d: { enabled?: boolean; recipients?: string[] }) => {
+        if (cancelled) return
+        if (typeof d.enabled === "boolean") setEnabled(d.enabled)
+        if (Array.isArray(d.recipients)) setRecipientInput(d.recipients.join(", "))
+      })
+      .catch(() => toast.error("Failed to load email test mode"))
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [])
+
+  const parsedRecipients = recipientInput
+    .split(/[,;]/)
+    .map((value) => value.trim())
+    .filter((value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))
+  const hasRecipient = parsedRecipients.length > 0
+  // Turning it on without a destination would block sending outright, so the
+  // API rejects it — mirror that rule here instead of failing after a click.
+  const isValid = !enabled || hasRecipient
+
+  const handleSave = async () => {
+    if (!isValid) return
+    setSaving(true)
+    try {
+      const res = await fetch("/api/settings/email-test-mode", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled, recipient: recipientInput }),
+      })
+      const payload = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(payload?.error ?? "")
+      setRecipientInput((payload?.recipients ?? parsedRecipients).join(", "))
+      toast.success(
+        enabled
+          ? "Test mode on — customer emails are being redirected"
+          : "Test mode off — emails now go to customers",
+      )
+      mutate("/api/settings/email-test-mode")
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : "Failed to save email test mode")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card className={!canEdit ? "opacity-80" : undefined}>
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-sm font-medium">
+          <FlaskConical className="h-4 w-4" />
+          Email Test Mode
+        </CardTitle>
+        <CardDescription className="text-xs">
+          Redirects every outbound email — quotes, invoices, reminders, vouchers and automatic
+          follow-ups — to a test inbox instead of the customer. Everything else behaves exactly as
+          it does live, so the full pipeline can be run through end to end. Switch it off to go live.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex items-center gap-3">
+          <Switch
+            id="email-test-mode-enabled"
+            checked={enabled}
+            onCheckedChange={setEnabled}
+            disabled={!canEdit || loading}
+            aria-label="Enable email test mode"
+          />
+          <Label htmlFor="email-test-mode-enabled" className="text-sm">
+            {enabled ? "Test mode on — customers receive nothing" : "Test mode off — emails go to customers"}
+          </Label>
+        </div>
+
+        <div className="space-y-1">
+          <Label htmlFor="email-test-mode-recipient" className="text-xs font-medium text-muted-foreground">
+            Test inbox (comma-separated for several)
+          </Label>
+          <Input
+            id="email-test-mode-recipient"
+            type="text"
+            value={recipientInput}
+            onChange={(e) => setRecipientInput(e.target.value)}
+            placeholder="e.g. testing@luxustravel.co.za"
+            readOnly={!canEdit}
+            disabled={loading}
+            aria-invalid={!isValid}
+            className="sm:max-w-md"
+          />
+          {!isValid && (
+            <p className="text-xs text-destructive">
+              Enter a valid test inbox address before turning test mode on.
+            </p>
+          )}
+        </div>
+
+        {enabled && hasRecipient && (
+          <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
+            Every email is delivered to {parsedRecipients.join(", ")} with the real recipient shown in
+            the subject line as <span className="font-mono">[TEST -&gt; customer@example.com]</span>.
+          </p>
+        )}
+
+        {canEdit && (
+          <Button size="sm" onClick={handleSave} disabled={loading || saving || !isValid}>
+            {saving ? "Saving..." : "Save"}
+          </Button>
+        )}
+        {!canEdit && (
+          <p className="text-xs text-muted-foreground">
+            Only managers and admins can change email test mode.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 function QuoteValidityCard({ canEdit }: { canEdit: boolean }) {
   const [quoteValidityDays, setQuoteValidityDays] = useState("14")
   const [loading, setLoading] = useState(true)
@@ -2193,6 +2318,8 @@ export default function SettingsPage() {
       </Card>
 
       <QuoteFollowUpSettingsCard canEdit={canEditSettings} />
+
+      <EmailTestModeCard canEdit={canEditSettings} />
 
       {can("manage:users") && <UserManagementCard />}
 

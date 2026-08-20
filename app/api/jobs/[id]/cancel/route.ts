@@ -1,4 +1,4 @@
-import { safeSupabaseError } from "@/lib/api/responses"
+import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
@@ -36,12 +36,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  let body: z.infer<typeof cancelSchema>
+  let raw: unknown
   try {
-    body = cancelSchema.parse(await req.json())
+    raw = await req.json()
   } catch {
-    return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
+    return jsonError("Invalid JSON body", 400)
   }
+
+  const result = cancelSchema.safeParse(raw)
+  if (!result.success) return jsonZodError(result.error)
+  const body = result.data
 
   const { data: actorProfile } = await supabase
     .from("profiles")

@@ -19,6 +19,7 @@ import { useTheme } from "next-themes"
 import { Button } from "@/components/ui/button"
 import { AuthHashErrorNotice } from "@/components/auth-hash-error-notice"
 import { ConnectionErrorBanner } from "@/components/connection-error-banner"
+import { EmailTestModeBanner } from "@/components/email-test-mode-banner"
 import { SessionTimeoutGuard } from "@/components/session-timeout-guard"
 import { useEnquiryCount } from "@/lib/use-data"
 import { useRealtimeSync } from "@/hooks/use-realtime-sync"
@@ -455,6 +456,7 @@ export default function AppClientLayout({
       <RoleProvider initialRole={initialUser?.role}>
         <AuthHashErrorNotice />
         <div className="flex flex-col h-svh overflow-hidden">
+          <EmailTestModeBanner />
           <AppShell>{children}</AppShell>
         </div>
       </RoleProvider>

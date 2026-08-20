@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { requireRole } from "@/lib/api/auth"
+import { jsonError, jsonZodError } from "@/lib/api/responses"
 import { requireVersionTokenOrForce, staleVersionResponse, versionTokenShape } from "@/lib/concurrency"
 import { calculateQuoteTotals, isMissingPricing, isPricingEngineLineItem, roundMoney } from "@/lib/quotes/pricing-engine"
 import { syncBookingRoute } from "@/lib/quotes/resolve-primary-route"
@@ -44,12 +45,16 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   const { supabase, user, profile } = auth.value
   const { id } = await params
 
-  let parsed
+  let raw: unknown
   try {
-    parsed = patchQuoteSchema.parse(await req.json())
+    raw = await req.json()
   } catch {
-    return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
+    return jsonError("Invalid JSON body", 400)
   }
+
+  const result = patchQuoteSchema.safeParse(raw)
+  if (!result.success) return jsonZodError(result.error)
+  const parsed = result.data
 
   // This PATCH replaces the whole line-item set, so a save built from a stale copy deletes the
   // lines someone else added rather than failing to merge them. The version token is therefore

@@ -272,6 +272,23 @@ describe("POST /api/jobs/[id]/services/apply", () => {
     expect(response.status).toBe(404)
   })
 
+  // The schema failure used to be caught and thrown away, leaving the Build Booking dialog with a
+  // bare "Invalid request payload" and no way — client- or server-side — to tell which field was
+  // wrong. The 400 now names the field, matching every other Zod-validated route.
+  it("returns 400 naming the field that failed validation", async () => {
+    const response = await postApply({
+      jobId: JOB_ID,
+      quoteId: QUOTE_ID,
+      travelDate: "01/06/2026",
+      selections: [],
+    })
+    const body = (await response.json()) as { error: string; details?: Record<string, string[]> }
+
+    expect(response.status).toBe(400)
+    expect(body.details?.travelDate).toBeDefined()
+    expect(body.details?.travelDate?.[0]).toContain("YYYY-MM-DD")
+  })
+
   it("prices a booking_services selection via the adapter + shared pricing engine", async () => {
     const response = await postApply({
       jobId: JOB_ID,

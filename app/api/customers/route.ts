@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
+import { jsonError, jsonZodError } from "@/lib/api/responses"
 import { CUSTOMER_COLUMNS } from "@/lib/supabase/columns"
 import { normalizeFirstName, normalizeLastName } from "@/lib/person-name-format"
 import { PHONE_VALIDATION_MESSAGE, isPlausiblePhone } from "@/lib/phone-format"
@@ -117,12 +118,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 })
   }
 
-  let parsed: z.infer<typeof createCustomerSchema>
+  let raw: unknown
   try {
-    parsed = createCustomerSchema.parse(await request.json())
+    raw = await request.json()
   } catch {
-    return NextResponse.json({ error: "Invalid request payload" }, { status: 400 })
+    return jsonError("Invalid JSON body", 400)
   }
+
+  const result = createCustomerSchema.safeParse(raw)
+  if (!result.success) return jsonZodError(result.error)
+  const parsed = result.data
 
   const { data: existing } = await supabase
     .from("customers")

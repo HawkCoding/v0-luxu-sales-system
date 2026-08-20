@@ -87,6 +87,7 @@ import {
   shouldAutoFillChild,
   shouldPromptChildUpdate,
 } from "@/lib/suppliers/auto-child-price"
+import { shouldSendRoute } from "@/lib/suppliers/itinerary-payload"
 import { readSupplierDraft, serializeSupplierDraft } from "@/lib/suppliers/supplier-draft-storage"
 import { AgeRangeChip } from "@/components/ui/age-range-chip"
 import {
@@ -4060,19 +4061,22 @@ export function SupplierDetailView({
     const isItineraryKind = isTypePricedSupplier(form.kind)
 
     if (isItineraryKind) {
+      // An itinerary has no name field of its own, so the guard keys off everything that would
+      // send it: a row with copy but no tour type has to be flagged, not silently dropped.
       const unassignedItinerary = routeRateGroup.routes.find(
-        (route) => route.name.trim() && !route.suiteTypeId,
+        (route) => shouldSendRoute(route, true) && !route.suiteTypeId,
       )
       if (unassignedItinerary) {
+        const itineraryLabel = unassignedItinerary.name.trim() || vocabulary.route.toLowerCase()
         toast.error(
-          `Pick a ${vocabulary.suiteType.toLowerCase()} for "${unassignedItinerary.name.trim()}" — every ${vocabulary.route.toLowerCase()} belongs to one.`,
+          `Pick a ${vocabulary.suiteType.toLowerCase()} for "${itineraryLabel}" — every ${vocabulary.route.toLowerCase()} belongs to one.`,
         )
         return
       }
     }
 
     const cleanedRoutes = routeRateGroup.routes
-      .filter((route) => route.name.trim())
+      .filter((route) => shouldSendRoute(route, isItineraryKind))
       .map((route) => ({
         id: route.id,
         name: route.name.trim(),
