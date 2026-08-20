@@ -18,10 +18,19 @@ export interface LegReferenceRow {
   supplierName: string | null
   supplierReference: string | null
   /** Named contact next to the reference, e.g. "Carla" — falls back to the supplier's own
-   * default_contact_name when the leg hasn't set its own. */
+   * default_contact_name when the leg hasn't set its own. Not shown for airline rows — see
+   * `isAirline`. */
   supplierContactName: string | null
   /** One-off operational caveat, e.g. "Check in IRENE COUNTRY LODGE 2h prior to departure". */
   voucherFootnote: string | null
+  /** True for an airline package leg or a flight transport request — these rows show a "Flight
+   * number" box instead of "Contact name" on the Voucher Details tab, and print "Booking
+   * Reference" (no folded-in contact) on the voucher. */
+  isAirline: boolean
+  /** Only meaningful when `isAirline` — the flight this row is on. Same column Build Booking's
+   * airline leg editor and the Flight & Transfer Times tab already write, so editing it here
+   * round-trips everywhere else it's shown. */
+  flightNumber: string | null
   /** Only meaningful for "service" rows on a train leg — excursions are otherwise always []. Not
    * currently editable or shown anywhere (see `job-references-tab.tsx`); kept on the read model
    * only so the column round-trips unchanged when other fields on the row are saved. */
@@ -37,6 +46,7 @@ interface BookingServiceRow {
   supplier_contact_name: string | null
   voucher_footnote: string | null
   excursions: string[] | null
+  flight_number: string | null
   suppliers:
     | { name: string | null; kind: string | null; default_contact_name: string | null }
     | { name: string | null; kind: string | null; default_contact_name: string | null }[]
@@ -54,6 +64,7 @@ interface TransportRequestRow {
   supplier_reference: string | null
   supplier_contact_name: string | null
   voucher_footnote: string | null
+  flight_number: string | null
   suppliers:
     | { name: string | null; default_contact_name: string | null }
     | { name: string | null; default_contact_name: string | null }[]
@@ -94,14 +105,14 @@ export async function loadLegReferenceRows(
     supabase
       .from("booking_services")
       .select(
-        "id, label, sort_order, selected, supplier_reference, supplier_contact_name, voucher_footnote, excursions, suppliers(name, kind, default_contact_name)",
+        "id, label, sort_order, selected, supplier_reference, supplier_contact_name, voucher_footnote, excursions, flight_number, suppliers(name, kind, default_contact_name)",
       )
       .eq("booking_id", bookingId)
       .eq("selected", true),
     supabase
       .from("booking_transport_requests")
       .select(
-        "id, service_id, service_type, pickup_point, dropoff_point, sort_order, supplier_reference, supplier_contact_name, voucher_footnote, suppliers(name, default_contact_name)",
+        "id, service_id, service_type, pickup_point, dropoff_point, sort_order, supplier_reference, supplier_contact_name, voucher_footnote, flight_number, suppliers(name, default_contact_name)",
       )
       .eq("booking_id", bookingId)
       .order("sort_order", { ascending: true }),
@@ -122,6 +133,7 @@ export async function loadLegReferenceRows(
     })
     .map((row) => {
       const supplier = firstRecord(row.suppliers)
+      const isAirline = supplier?.kind === "airline"
       return {
         row: {
           key: `service:${row.id}`,
@@ -133,6 +145,8 @@ export async function loadLegReferenceRows(
           supplierContactName: row.supplier_contact_name ?? supplier?.default_contact_name ?? null,
           voucherFootnote: row.voucher_footnote ?? null,
           excursions: row.excursions ?? [],
+          isAirline,
+          flightNumber: row.flight_number,
         },
         sortOrder: row.sort_order,
       }
@@ -160,6 +174,8 @@ export async function loadLegReferenceRows(
         supplierContactName: request.supplier_contact_name ?? supplier?.default_contact_name ?? null,
         voucherFootnote: request.voucher_footnote ?? null,
         excursions: [],
+        isAirline: request.service_type === "flight",
+        flightNumber: request.flight_number,
       }
     })
 

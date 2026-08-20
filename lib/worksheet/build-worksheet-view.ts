@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { firstRecord } from "@/lib/utils"
+import { clientInvoiceNumber } from "@/lib/invoices/invoice-status"
 import {
   buildWorksheetServiceLines,
   type WorksheetScheduleRow,
@@ -71,7 +72,7 @@ export async function buildWorksheetView(
     supabase
       .from("bookings")
       .select(
-        `id, booking_number, assigned_salesperson_id, departure_date, trip_end_date, no_of_adults, no_of_children,
+        `id, booking_number, customer_invoice_number, assigned_salesperson_id, departure_date, trip_end_date, no_of_adults, no_of_children,
          voucher_sent_at, deposit_paid_at, final_paid_at, invoice_balance,
          customer:customers(title, first_name, last_name, email, phone, country)`,
       )
@@ -187,6 +188,7 @@ export async function buildWorksheetView(
 
   return {
     bookingNumber: bookingRaw.booking_number,
+    invoiceNumber: clientInvoiceNumber(bookingRaw),
     serviceName,
     consultant,
     arriveDate,

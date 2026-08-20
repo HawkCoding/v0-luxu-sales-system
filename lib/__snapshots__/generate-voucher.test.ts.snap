@@ -128,8 +128,8 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
     }
     .info-value { color: #2B2B2B; font-size: 9pt; flex: 1; }
 
-    .cell-group { display: flex; flex: 1; gap: 16pt; }
-    .cell { flex: 1; }
+    .cell-group { display: flex; flex: 1; }
+    .cell { box-sizing: border-box; padding-right: 16pt; }
     .cell-label {
       font-family: Arial, sans-serif;
       font-size: 6.5pt;
@@ -151,12 +151,14 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
       font-weight: 700;
       color: #0B2A3A;
       margin-bottom: 1.5pt;
+      text-align: center;
     }
     .provider-contact {
       font-family: Arial, sans-serif;
       font-size: 7pt;
       color: #6B6B6B;
       margin-bottom: 5pt;
+      text-align: center;
     }
     .provider-description {
       font-family: Arial, sans-serif;

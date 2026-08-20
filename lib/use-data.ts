@@ -245,6 +245,8 @@ export interface JobLegReferenceRow {
   supplierContactName: string | null
   voucherFootnote: string | null
   excursions: string[]
+  isAirline: boolean
+  flightNumber: string | null
 }
 
 export function useJobLegReferences(bookingId: string | null | undefined) {

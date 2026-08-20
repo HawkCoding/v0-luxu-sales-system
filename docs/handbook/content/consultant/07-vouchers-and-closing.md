@@ -16,6 +16,11 @@ Open the booking and select **Voucher Details**. Each leg gets its own card:
   shown elsewhere. It prints on the voucher, under that supplier's details. *"Check in at
   Irene Country Lodge 2 hours before departure"* is the kind of thing that belongs here.
 
+For an **airline** leg or flight, the second box is different — there's no supplier
+contact to name for a flight, so it's a **Flight number** field instead (e.g. *"FA212"*),
+and the first box is labelled **Booking number**. The voucher then prints "Booking
+Reference" for that leg, without folding in a contact name.
+
 Type into a leg's fields and click **Save** — each leg saves independently. A banner at
 the top of the tab counts how many legs are still missing a reference, or confirms all
 legs have one.

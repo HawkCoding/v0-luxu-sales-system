@@ -54,6 +54,9 @@ export interface WorksheetContact {
 
 export interface WorksheetPdfData {
   bookingNumber: string
+  /** The reference the client sees on invoices - `bookings.customer_invoice_number`, falling back
+   * to the internal auto number. Printed in the sheet's top-right cell. */
+  invoiceNumber: string
   /** The rail operator on this booking - "The Blue Train" / "Rovos Rail" - or null when it has none. */
   serviceName: string | null
   /** Full name of the salesperson assigned to the job; null when nobody is assigned. */
@@ -109,7 +112,7 @@ function dateOrBlank(value: string | null | undefined): string {
 const styles = StyleSheet.create({
   page: {
     fontFamily: "Arimo",
-    fontSize: 7,
+    fontSize: 8,
     padding: 20,
     color: "#1a1a1a",
     backgroundColor: "#ffffff",
@@ -131,38 +134,50 @@ const styles = StyleSheet.create({
   },
   // minHeight matters: an empty <Text> collapses to zero height, and most cells on this sheet
   // print empty by design - without it a blank row would draw as a hairline.
+  //
+  // alignItems must stay "stretch": a cell's flex direction is column, so centring the cross axis
+  // would shrink the <Text> to its content and centre the box, leaving textAlign nothing to align
+  // inside. Stretching makes the Text span the cell, so a column's `align` actually takes effect.
   cell: {
     borderRightWidth: 0.5,
     borderRightColor: "#000000",
     paddingVertical: 2,
     paddingHorizontal: 3,
-    minHeight: 13,
-    alignItems: "center",
+    minHeight: 15,
+    alignItems: "stretch",
     justifyContent: "center",
   },
   cellLast: {
     paddingVertical: 2,
     paddingHorizontal: 3,
-    minHeight: 13,
-    alignItems: "center",
+    minHeight: 15,
+    alignItems: "stretch",
     justifyContent: "center",
   },
   /** Taller than a data row - these are written into by hand. */
   fillCell: {
-    minHeight: 18,
+    minHeight: 20,
+  },
+  /** Drops the divider between the cells a merged summary span covers. The 0.5 the border no
+   * longer occupies moves into paddingRight: padding and border both sit outside a cell's
+   * `flexBasis: 0`, so keeping the total identical is what makes the surviving dividers land on
+   * exactly the same x as the columns above. */
+  cellSpanned: {
+    borderRightWidth: 0,
+    paddingRight: 3.5,
   },
   headCell: {
     backgroundColor: "#e5e5e5",
   },
   headText: {
-    fontSize: 6,
+    fontSize: 7,
     fontFamily: "Arimo",
     fontWeight: 700,
     textAlign: "center",
     textTransform: "uppercase",
   },
   bodyText: {
-    fontSize: 7,
+    fontSize: 8,
     textAlign: "center",
   },
   bold: {
@@ -172,9 +187,12 @@ const styles = StyleSheet.create({
   sectionGap: {
     marginBottom: 6,
   },
+  // The one cell whose child is an <Image> rather than a full-width <Text>, so it opts back in to
+  // cross-axis centring that `cell` deliberately gives up.
   brandCell: {
     width: 86,
     paddingVertical: 4,
+    alignItems: "center",
   },
   brandLogoImg: {
     width: 72,
@@ -278,6 +296,68 @@ function TableRow({
   )
 }
 
+/** One merged run of columns on a summary row. `label` prints in the span's last cell. */
+interface SummarySpan {
+  span: number
+  label?: string
+  fill?: boolean
+}
+
+/**
+ * A totals-style row that stays pixel-aligned with the table above it.
+ *
+ * Building these rows out of fewer, wider flex cells does NOT line up: paddingHorizontal and
+ * borderRightWidth sit outside each cell's `flexBasis: 0`, so a three-cell row has less fixed
+ * overhead than a four-cell one and distributes the remaining space differently - the dividers
+ * drift a few points off the columns above. Instead we always emit one cell per column and merge a
+ * span by dropping the interior dividers, which leaves the surviving ones exactly on the column
+ * boundaries. The label goes in the span's LAST cell, right-aligned, so it sits next to the amount
+ * it belongs to rather than stranded at the far side of a wide cell.
+ */
+function SummaryRow({
+  columns,
+  spans,
+  last = false,
+  head = false,
+}: {
+  columns: Column[]
+  spans: SummarySpan[]
+  last?: boolean
+  head?: boolean
+}) {
+  const cells = spans.flatMap((s) =>
+    Array.from({ length: s.span }, (_, i) => ({ spec: s, isSpanEnd: i === s.span - 1 })),
+  )
+  return (
+    <View
+      style={[styles.row, !last ? styles.rowDivider : {}, head ? styles.headCell : {}]}
+      wrap={false}
+    >
+      {cells.map((cell, i) => (
+        <View
+          key={columns[i]?.key ?? i}
+          style={[
+            i === cells.length - 1 ? styles.cellLast : styles.cell,
+            columnStyle(columns[i] ?? { key: String(i), label: EMPTY }),
+            !cell.isSpanEnd ? styles.cellSpanned : {},
+            cell.spec.fill ? styles.fillCell : {},
+          ]}
+        >
+          <Text
+            style={
+              cell.spec.label
+                ? [styles.headText, { textAlign: "right" as const }]
+                : [styles.bodyText, { textAlign: "right" as const }]
+            }
+          >
+            {cell.isSpanEnd ? (cell.spec.label ?? EMPTY) : EMPTY}
+          </Text>
+        </View>
+      ))}
+    </View>
+  )
+}
+
 /** The written-in part of a hand-finished table. */
 function FillRows({ columns, count = FILL_ROW_COUNT }: { columns: Column[]; count?: number }) {
   return (
@@ -325,6 +405,7 @@ const PAYMENT_COLUMNS: Column[] = [
 
 export function WorksheetDocument({
   bookingNumber,
+  invoiceNumber,
   serviceName,
   consultant,
   arriveDate,
@@ -382,7 +463,7 @@ export function WorksheetDocument({
             </View>
             <View style={[styles.cellLast, { width: 110 }]}>
               <Text style={styles.headText}>Booking No.</Text>
-              <Text style={[styles.bodyText, styles.bold]}>{bookingNumber}</Text>
+              <Text style={[styles.bodyText, styles.bold]}>{invoiceNumber}</Text>
             </View>
           </View>
         </View>
@@ -496,25 +577,16 @@ export function WorksheetDocument({
             />
           ))}
           <FillRows columns={PAYMENT_COLUMNS} />
-          <View style={[styles.row, styles.rowDivider, styles.headCell]} wrap={false}>
-            <View style={[styles.cell, { flex: 2, flexBasis: 0 }]}>
-              <Text style={styles.headText}>Totals</Text>
-            </View>
-            <View style={[styles.cell, styles.fillCell, { flex: 1, flexBasis: 0 }]}>
-              <Text style={[styles.bodyText, { textAlign: "right" }]}>{EMPTY}</Text>
-            </View>
-            <View style={[styles.cellLast, styles.fillCell, { flex: 1, flexBasis: 0 }]}>
-              <Text style={[styles.bodyText, { textAlign: "right" }]}>{EMPTY}</Text>
-            </View>
-          </View>
-          <View style={styles.row} wrap={false}>
-            <View style={[styles.cell, { flex: 3, flexBasis: 0 }]}>
-              <Text style={styles.headText}>Gross Profit</Text>
-            </View>
-            <View style={[styles.cellLast, styles.fillCell, { flex: 1, flexBasis: 0 }]}>
-              <Text style={[styles.bodyText, { textAlign: "right" }]}>{EMPTY}</Text>
-            </View>
-          </View>
+          <SummaryRow
+            head
+            columns={PAYMENT_COLUMNS}
+            spans={[{ span: 2, label: "Totals" }, { span: 1, fill: true }, { span: 1, fill: true }]}
+          />
+          <SummaryRow
+            last
+            columns={PAYMENT_COLUMNS}
+            spans={[{ span: 3, label: "Gross Profit" }, { span: 1, fill: true }]}
+          />
         </View>
       </Page>
     </Document>

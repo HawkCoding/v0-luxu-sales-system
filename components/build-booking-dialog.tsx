@@ -939,7 +939,7 @@ export function BuildBookingDialog({
           Edit Quote
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-4xl" {...closeGuard.contentProps}>
+      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-[95vw] lg:max-w-6xl" {...closeGuard.contentProps}>
         <DiscardChangesDialog
           open={closeGuard.confirming}
           onKeepEditing={closeGuard.cancelDiscard}

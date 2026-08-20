@@ -34,6 +34,24 @@ describe("voucherRowsForBlock", () => {
     expect(rows[0]).toEqual({ label: "Your Reference", value: "38562 – Carla" })
   })
 
+  it("airline block: prints Booking Reference instead of Your Reference, with no contact name folded in", () => {
+    const rows = voucherRowsForBlock(
+      block({
+        serviceType: "airline",
+        supplierReference: "FO53TR",
+        supplierContactName: "Carla",
+        serviceData: { flightNumber: "FA212" },
+      }),
+    )
+    expect(rows[0]).toEqual({ label: "Booking Reference", value: "FO53TR" })
+    expect(rows.find((r) => r.label === "Flight")).toEqual({ label: "Flight", value: "FA212" })
+  })
+
+  it("airline block: falls back to an em dash when the booking reference is unset", () => {
+    const rows = voucherRowsForBlock(block({ serviceType: "airline", supplierReference: null }))
+    expect(rows[0]).toEqual({ label: "Booking Reference", value: "—" })
+  })
+
   it("train block: never prints an Excursion row, even when excursions data is present; the footnote is not a table row either", () => {
     const rows = voucherRowsForBlock(
       block({
@@ -187,10 +205,30 @@ describe("voucherRowsForBlock", () => {
     )
     const suiteRow = rows.find((r) => r.label === "Suite Type")
     expect(suiteRow?.cells).toEqual([
-      { label: "Suite Type", value: "Twin bedded Deluxe Suite with a shower" },
+      { label: "Suite Type", value: "Twin bedded Deluxe Suite with a shower", span: 2 },
       { label: "Qty", value: 1 },
     ])
     expect(suiteRow?.value).toBeUndefined()
+  })
+
+  it("train block: suite name spans 2 of the row's 3 columns so Qty lines up with Infant", () => {
+    const rows = voucherRowsForBlock(
+      block({
+        serviceType: "train",
+        serviceData: {
+          suiteType: "Twin bedded Deluxe Suite with a shower",
+          numberOfSuites: 1,
+          guestBreakdown: { adults: 2, children: 0, infants: 0 },
+        },
+      }),
+    )
+    const suiteRow = rows.find((r) => r.label === "Suite Type")
+    const guestsRow = rows.find((r) => r.label === "Guests")
+    const suiteColumns = suiteRow?.cells?.reduce((sum, cell) => sum + (cell.span ?? 1), 0) ?? 0
+    const qtyStart = (suiteRow?.cells?.[0]?.span ?? 1) / suiteColumns
+    const guestsColumns = guestsRow?.cells?.reduce((sum, cell) => sum + (cell.span ?? 1), 0) ?? 0
+    const infantStart = 2 / guestsColumns // Adults + Children precede Infant, each span 1
+    expect(qtyStart).toBeCloseTo(infantStart)
   })
 
   it("train block: suite type prints as a plain single-value row when no unit count is known", () => {
@@ -261,7 +299,7 @@ describe("voucherRowsForBlock", () => {
       }),
     )
     expect(rows.find((r) => r.label === "Room Type")?.cells).toEqual([
-      { label: "Room Type", value: "Milkwood Room" },
+      { label: "Room Type", value: "Milkwood Room", span: 2 },
       { label: "Qty", value: 1 },
     ])
     expect(rows.find((r) => r.label === "Check-In")?.value).toBe("09 September 2026 at 14h00")
@@ -398,7 +436,7 @@ describe("voucherRowsForBlock", () => {
         },
       }),
     )
-    expect(labels(rows)).toEqual(["Your Reference", "Route", "Cabin", "Flight", "Departure", "Arrival"])
+    expect(labels(rows)).toEqual(["Booking Reference", "Route", "Cabin", "Flight", "Departure", "Arrival"])
   })
 
   it("additional_service block: only reference and notes, no type-specific rows", () => {
@@ -422,7 +460,7 @@ describe("voucherRowsForBlock", () => {
 })
 
 describe("voucherProviderContactLine", () => {
-  it("joins phone, email and location with a bullet for a hotel block", () => {
+  it("joins phone and location with a bullet for a hotel block, and never prints the supplier email", () => {
     const line = voucherProviderContactLine(
       {
         phone: "084 604 1454",
@@ -431,7 +469,7 @@ describe("voucherProviderContactLine", () => {
       },
       "hotel",
     )
-    expect(line).toBe("Tel: 084 604 1454 • Email: ops@theroyalportfolio.co.za • Cape Town")
+    expect(line).toBe("Tel: 084 604 1454 • Cape Town")
   })
 
   it("returns null when no contact fields are set", () => {
@@ -491,7 +529,7 @@ describe("voucherProviderContactLine", () => {
         },
         serviceType,
       )
-      expect(line).toBe("Tel: 012 653 0018 • Email: res@supplier.co.za")
+      expect(line).toBe("Tel: 012 653 0018")
     },
   )
 })
