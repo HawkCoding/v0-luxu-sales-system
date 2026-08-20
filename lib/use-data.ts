@@ -5,7 +5,6 @@ import type {
   AuditLog,
   Booking,
   BookingNote,
-  BookingSupplierSchedule,
   Customer,
   CustomerLinkedAccount,
   Location,
@@ -167,14 +166,6 @@ export function useBookingNotes(bookingId: string | null | undefined) {
   )
 }
 
-export function useBookingSupplierSchedules(bookingId: string | null | undefined) {
-  return useSWR<BookingSupplierSchedule[]>(
-    bookingId ? `/api/jobs/${bookingId}/supplier-schedules` : null,
-    fetcher,
-    swrOptions,
-  )
-}
-
 export interface JobTraveller {
   id: string
   prefix: string
@@ -245,6 +236,8 @@ export interface JobLegReferenceRow {
   supplierContactName: string | null
   voucherFootnote: string | null
   excursions: string[]
+  isAirline: boolean
+  flightNumber: string | null
 }
 
 export function useJobLegReferences(bookingId: string | null | undefined) {

@@ -53,6 +53,10 @@ function makeLegState(units: SuiteLegState["units"]): SuiteLegState {
     rateTypeId: null,
     priceCurrency: "ZAR",
     units,
+    bookingDate: null,
+    confirmationDate: null,
+    paymentMadeDate: null,
+    paidWith: null,
     origin: "consultant",
   }
 }
@@ -187,6 +191,10 @@ function makeHotelState(overrides: Partial<SuiteLegState["units"][number]> = {})
     rateTypeId: null,
     priceCurrency: "ZAR",
     units: [{ ...mismatchedUnits[0], suiteTypeId: "suite-1", adultCount: 2, ...overrides }],
+    bookingDate: null,
+    confirmationDate: null,
+    paymentMadeDate: null,
+    paidWith: null,
     origin: "consultant",
   }
 }
@@ -303,6 +311,10 @@ function makeAirlineState(overrides: Partial<SuiteLegState> = {}): SuiteLegState
     rateTypeId: null,
     priceCurrency: "ZAR",
     units: [{ ...mismatchedUnits[0], adultCount: 2 }],
+    bookingDate: null,
+    confirmationDate: null,
+    paymentMadeDate: null,
+    paidWith: null,
     origin: "consultant",
     ...overrides,
   }

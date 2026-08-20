@@ -38,5 +38,10 @@ export function describeInvoiceLine(
   if (gifted > 0) {
     return `${base} (${gifted === 1 ? "first night complimentary" : `${gifted} nights complimentary`})`
   }
+
+  if (snapshot?.isComplimentaryTransport === true) {
+    return `${base} (complimentary)`
+  }
+
   return base
 }

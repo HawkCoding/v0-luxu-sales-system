@@ -56,6 +56,10 @@ interface BuildContext {
   /** Leg ids where only the first night was gifted — flags the softer "FIRST NIGHT
    * COMPLIMENTARY" callout, since the rest of the stay is still charged. */
   firstNightComplimentaryLegIds?: Set<string>
+  /** Request ids whose trip was deliberately marked complimentary — flags the transfer block's
+   * "COMPLIMENTARY" callout. Per-request, not per-leg: one transfer leg can have several captured
+   * trips, only some of which are comped. */
+  complimentaryTransportRequestIds?: Set<string>
   /** Transport requests tied to neither a package leg nor a booking service are never priced
    * into a quote (see `findTransportRequestsForLeg` in lib/quotes/build-from-package.ts), so on
    * a surface scoped to the accepted quote they would be the one thing `legIds` cannot filter.
@@ -473,6 +477,8 @@ interface TransportBlockContext {
   supplierReference: string | null
   /** See `BuildContext.travellerNames` — only read for flight requests. */
   travellerNames: string[] | null
+  /** Request ids marked complimentary — see `BuildContext.complimentaryTransportRequestIds`. */
+  complimentaryTransportRequestIds?: Set<string>
 }
 
 /** One captured transfer/rental/flight trip → one client-facing block. Flights reuse this same
@@ -560,6 +566,7 @@ function transportRequestBlock(
       footnote: request.voucher_footnote,
       inclusions: cleanList(blockContext.supplier?.inclusions),
       exclusions: cleanList(blockContext.supplier?.exclusions),
+      isComplimentary: blockContext.complimentaryTransportRequestIds?.has(request.id) ?? false,
     },
     displayOrder: blockContext.displayOrder,
   }
@@ -672,6 +679,7 @@ export async function buildVoucherServiceBlocks(
             fallbackRoute: legRouteName,
             supplierReference: request.supplier_reference ?? null,
             travellerNames: context.travellerNames ?? null,
+            complimentaryTransportRequestIds: context.complimentaryTransportRequestIds,
           }),
         )
       }

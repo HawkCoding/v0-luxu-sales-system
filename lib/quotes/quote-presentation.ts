@@ -255,7 +255,7 @@ function describeBlock(block: VoucherServiceBlock): string {
             : null
       return joinSentence(
         ["Transfer", leg, d.vehicleType ? `(${d.vehicleType})` : null],
-        [start ? `at ${start}` : null],
+        [start ? `at ${start}` : null, d.isComplimentary ? "COMPLIMENTARY" : null],
       )
     }
     case "tour": {

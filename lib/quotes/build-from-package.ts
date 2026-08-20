@@ -90,6 +90,7 @@ export interface PackageLegSelection {
 }
 
 interface TransportRequestRow {
+  id: string
   service_type: "transfer" | "rental"
   route_id: string | null
   suite_type_id: string | null
@@ -102,6 +103,7 @@ interface TransportRequestRow {
   price_override: number | null
   price_override_set_at: string | null
   price_override_set_by: string | null
+  complimentary: boolean
   rental_details?: { return_at: string | null } | { return_at: string | null }[] | null
 }
 
@@ -182,7 +184,7 @@ export async function buildPackageQuoteLineItems({
 
   const { data: transportRequests } = await supabase
     .from("booking_transport_requests")
-    .select("service_type, route_id, suite_type_id, service_id, pickup_point, dropoff_point, pickup_at, price_override, price_override_set_at, price_override_set_by, rental_details:booking_vehicle_rental_details(return_at)")
+    .select("id, service_type, route_id, suite_type_id, service_id, pickup_point, dropoff_point, pickup_at, price_override, price_override_set_at, price_override_set_by, complimentary, rental_details:booking_vehicle_rental_details(return_at)")
     .eq("booking_id", jobId)
     .order("sort_order", { ascending: true })
 
@@ -473,6 +475,12 @@ export async function buildPackageQuoteLineItems({
       nights: number
       stayNights: number
     } | null
+    /** Transfers/rentals only: true when the trip was marked complimentary — the line prices at 0
+     * regardless of transportOverride/the rate card. See booking_transport_requests.complimentary. */
+    isComplimentaryTransport?: boolean
+    /** Transfers/rentals only: the booking_transport_requests row this line priced, so the voucher
+     * builder can match the complimentary flag back to the specific captured trip. */
+    transportRequestId?: string | null
   }
 
   function formatSingleSupplementSuffix(pct: number): string {
@@ -501,6 +509,8 @@ export async function buildPackageQuoteLineItems({
     transportOverride,
     tourOverride,
     complimentary,
+    isComplimentaryTransport,
+    transportRequestId,
   }: AddLineItemOptions) {
     // A stay whose every night was gifted still has to reach the quote: the client documents read
     // their itinerary off the priced legs, so dropping the line would drop the hotel entirely.
@@ -613,6 +623,12 @@ export async function buildPackageQuoteLineItems({
               manualTourPriceBase: tourOverride.basePrice,
               manualTourPriceSetAt: tourOverride.setAt,
               manualTourPriceSetByName: tourOverride.setByName,
+            }
+          : {}),
+        ...(isComplimentaryTransport
+          ? {
+              isComplimentaryTransport: true,
+              transportRequestId: transportRequestId ?? null,
             }
           : {}),
       }
@@ -1000,8 +1016,12 @@ export async function buildPackageQuoteLineItems({
           // A per-request price override beats the rate card (odd trips, after-hours, etc.). A
           // missing card is no longer fatal once an override is set — see resolveOverriddenUnit.
           const overridePrice = transportRequest?.price_override ?? null
+          // Complimentary takes the same non-fatal path as an override (a comped trip needs no
+          // rate card either), and forces the charged price to 0 regardless of what price_override
+          // holds — the two fields are independent, mirroring the hotel first-night flag.
+          const isComplimentary = transportRequest?.complimentary === true
 
-          if (overridePrice !== null) {
+          if (overridePrice !== null || isComplimentary) {
             const { validRateCard, rateTypeInherited, description, suiteTypeName } = resolveOverriddenUnit(
               suiteTypeId,
               requestPricingDate,
@@ -1019,19 +1039,26 @@ export async function buildPackageQuoteLineItems({
             addLineItem({
               description: transportDescription,
               qty,
-              unitPrice: overridePrice,
+              unitPrice: isComplimentary ? 0 : overridePrice ?? 0,
               supplierDescription,
               suiteTypeId,
               suiteTypeName,
               unit,
               hideVariantSuffix: isTransfer,
               sourceCurrency: overrideCurrency,
-              transportOverride: {
-                price: overridePrice,
-                basePrice: validRateCard?.pricePerPerson ?? null,
-                setAt: transportRequest?.price_override_set_at ?? null,
-                setByName: transportOverrideSetByName.get(transportRequest?.price_override_set_by ?? "") ?? null,
-              },
+              ...(overridePrice !== null
+                ? {
+                    transportOverride: {
+                      price: overridePrice,
+                      basePrice: validRateCard?.pricePerPerson ?? null,
+                      setAt: transportRequest?.price_override_set_at ?? null,
+                      setByName:
+                        transportOverrideSetByName.get(transportRequest?.price_override_set_by ?? "") ?? null,
+                    },
+                  }
+                : {}),
+              isComplimentaryTransport: isComplimentary,
+              transportRequestId: transportRequest?.id ?? null,
             })
             continue
           }

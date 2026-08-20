@@ -12,6 +12,7 @@ import { resolvePrimaryRoute, resolvePrimarySupplierId } from "@/lib/quotes/reso
 import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
 import {
   complimentaryLegIdsFromLineItems,
+  complimentaryTransportRequestIdsFromLineItems,
   firstNightComplimentaryLegIdsFromLineItems,
   legIdsFromLineItems,
 } from "@/lib/quotes/accepted-quote-scope"
@@ -119,6 +120,7 @@ export async function POST(req: Request, { params }: RouteParams) {
   const quoteLegIds = legIdsFromLineItems(lineItems)
   const complimentaryLegIds = complimentaryLegIdsFromLineItems(lineItems)
   const firstNightComplimentaryLegIds = firstNightComplimentaryLegIdsFromLineItems(lineItems)
+  const complimentaryTransportRequestIds = complimentaryTransportRequestIdsFromLineItems(lineItems)
 
   // Itinerary degrades to an omitted section rather than failing the preview.
   let itineraryBlocks: VoucherServiceBlock[] = []
@@ -129,6 +131,7 @@ export async function POST(req: Request, { params }: RouteParams) {
       legIds: quoteLegIds.size > 0 ? quoteLegIds : undefined,
       complimentaryLegIds,
       firstNightComplimentaryLegIds,
+      complimentaryTransportRequestIds,
     })
     itineraryBlocks = blocks
   } catch {

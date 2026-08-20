@@ -4,6 +4,7 @@ import { renderQuotePdf } from "@/lib/quotes/render-quote-pdf"
 import { deriveFlightCapPerPerson, deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
 import {
   complimentaryLegIdsFromLineItems,
+  complimentaryTransportRequestIdsFromLineItems,
   firstNightComplimentaryLegIdsFromLineItems,
   legIdsFromLineItems,
 } from "@/lib/quotes/accepted-quote-scope"
@@ -130,6 +131,7 @@ export async function ensureQuotePdf(
   const quoteLegIds = legIdsFromLineItems(lineItems)
   const complimentaryLegIds = complimentaryLegIdsFromLineItems(lineItems)
   const firstNightComplimentaryLegIds = firstNightComplimentaryLegIdsFromLineItems(lineItems)
+  const complimentaryTransportRequestIds = complimentaryTransportRequestIdsFromLineItems(lineItems)
 
   // Itinerary degrades to an empty section rather than blocking the PDF —
   // correspondence relies on a quote email never going out without its PDF.
@@ -141,6 +143,7 @@ export async function ensureQuotePdf(
       legIds: quoteLegIds.size > 0 ? quoteLegIds : undefined,
       complimentaryLegIds,
       firstNightComplimentaryLegIds,
+      complimentaryTransportRequestIds,
     })
     itineraryBlocks = blocks
   } catch (err) {

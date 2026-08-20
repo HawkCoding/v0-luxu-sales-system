@@ -48,6 +48,7 @@ function buildSupabase(state: MockState = {}) {
         sort_order: 0,
         selected: true,
         supplier_reference: null,
+        flight_number: null,
         suppliers: { name: "Rovos Rail", kind: "train_operator" },
       },
     ]
@@ -63,6 +64,7 @@ function buildSupabase(state: MockState = {}) {
         dropoff_point: "Hotel",
         sort_order: 0,
         supplier_reference: "REF-123",
+        flight_number: null,
         suppliers: { name: "ABC Transfers" },
       },
     ]
@@ -186,6 +188,8 @@ describe("GET /api/jobs/[id]/leg-references", () => {
         supplierContactName: null,
         voucherFootnote: null,
         excursions: [],
+        isAirline: false,
+        flightNumber: null,
       },
       {
         key: `transport_request:${TRANSPORT_ID}`,
@@ -197,6 +201,8 @@ describe("GET /api/jobs/[id]/leg-references", () => {
         supplierContactName: null,
         voucherFootnote: null,
         excursions: [],
+        isAirline: false,
+        flightNumber: null,
       },
     ])
   })
@@ -210,6 +216,7 @@ describe("GET /api/jobs/[id]/leg-references", () => {
           sort_order: 0,
           selected: true,
           supplier_reference: null,
+          flight_number: null,
           suppliers: { name: "Rovos Rail", kind: "train_operator" },
         },
       ],
@@ -229,6 +236,8 @@ describe("GET /api/jobs/[id]/leg-references", () => {
         supplierContactName: null,
         voucherFootnote: null,
         excursions: [],
+        isAirline: false,
+        flightNumber: null,
       },
     ])
   })
@@ -242,6 +251,7 @@ describe("GET /api/jobs/[id]/leg-references", () => {
           sort_order: 0,
           selected: true,
           supplier_reference: null,
+          flight_number: null,
           suppliers: { name: "ABC Transfers", kind: "transfers" },
         },
       ],
@@ -250,6 +260,65 @@ describe("GET /api/jobs/[id]/leg-references", () => {
     const res = await GET(new Request("http://localhost"), makeParams())
     const body = await res.json()
     expect(body.rows).toEqual([])
+  })
+
+  it("marks an airline service row and a flight transport row as isAirline with their flight number", async () => {
+    mockAuthUser({
+      serviceRows: [
+        {
+          id: SERVICE_ID,
+          label: "FlySafair",
+          sort_order: 0,
+          selected: true,
+          supplier_reference: "FO53TR",
+          flight_number: "FA212",
+          suppliers: { name: "FlySafair", kind: "airline" },
+        },
+      ],
+      transportRows: [
+        {
+          id: TRANSPORT_ID,
+          service_id: null,
+          service_type: "flight",
+          pickup_point: "JNB",
+          dropoff_point: "CPT",
+          sort_order: 0,
+          supplier_reference: "T2I999",
+          flight_number: "FA305",
+          suppliers: { name: "FlySafair" },
+        },
+      ],
+    })
+    const res = await GET(new Request("http://localhost"), makeParams())
+    const body = await res.json()
+    expect(body.rows).toEqual([
+      {
+        key: `service:${SERVICE_ID}`,
+        kind: "service",
+        id: SERVICE_ID,
+        label: "FlySafair",
+        supplierName: "FlySafair",
+        supplierReference: "FO53TR",
+        supplierContactName: null,
+        voucherFootnote: null,
+        excursions: [],
+        isAirline: true,
+        flightNumber: "FA212",
+      },
+      {
+        key: `transport_request:${TRANSPORT_ID}`,
+        kind: "transport_request",
+        id: TRANSPORT_ID,
+        label: "Flight: JNB → CPT",
+        supplierName: "FlySafair",
+        supplierReference: "T2I999",
+        supplierContactName: null,
+        voucherFootnote: null,
+        excursions: [],
+        isAirline: true,
+        flightNumber: "FA305",
+      },
+    ])
   })
 })
 
@@ -372,6 +441,40 @@ describe("PATCH /api/jobs/[id]/leg-references", () => {
           excursions: ["Kimberley **Weather & Time Permitted"],
         },
       },
+    ])
+  })
+
+  it("writes flight_number for an airline service row", async () => {
+    const { serviceUpdateCalls } = mockAuthRole()
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          updates: [{ kind: "service", id: LEG_A, supplierReference: "FO53TR", flightNumber: "FA212" }],
+        }),
+      }),
+      makeParams(),
+    )
+    expect(res.status).toBe(200)
+    expect(serviceUpdateCalls).toEqual([
+      { serviceId: LEG_A, payload: { supplier_reference: "FO53TR", flight_number: "FA212" } },
+    ])
+  })
+
+  it("writes flight_number for a flight transport_request row and accepts an explicit null to clear it", async () => {
+    const { transportUpdateCalls } = mockAuthRole()
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          updates: [{ kind: "transport_request", id: TRANSPORT_ID, supplierReference: "T2I999", flightNumber: null }],
+        }),
+      }),
+      makeParams(),
+    )
+    expect(res.status).toBe(200)
+    expect(transportUpdateCalls).toEqual([
+      { requestId: TRANSPORT_ID, payload: { supplier_reference: "T2I999", flight_number: null } },
     ])
   })
 

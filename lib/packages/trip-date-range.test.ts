@@ -176,6 +176,10 @@ function suiteState(overrides: Partial<SuiteLegState> & { legId: string }): Suit
     rateTypeId: null,
     priceCurrency: "ZAR",
     units: [],
+    bookingDate: null,
+    confirmationDate: null,
+    paymentMadeDate: null,
+    paidWith: null,
     origin: "consultant",
     ...overrides,
   }
@@ -201,6 +205,10 @@ describe("deriveTripDateRangeFromStates", () => {
             rentalDetails: { returnAt: "2026-07-22T09:00:00+00:00" },
           } as TransportLegState["requests"][number],
         ],
+        bookingDate: null,
+        confirmationDate: null,
+        paymentMadeDate: null,
+        paidWith: null,
         origin: "consultant",
       },
     ]

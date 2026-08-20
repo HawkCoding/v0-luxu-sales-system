@@ -191,9 +191,10 @@ export function voucherStyles({
       flex: 1,
       flexDirection: "row",
     },
+    // No `flex` — cells are sized by an explicit percentage width per row (see CellRow), so a
+    // 2-of-3-column cell can line up with a 1-of-3-column cell in the row below it.
     cell: {
-      flex: 1,
-      marginRight: d.cell.marginRight,
+      paddingRight: d.cell.marginRight,
     },
     cellLabel: {
       color: t.inkMuted,
@@ -221,12 +222,14 @@ export function voucherStyles({
       fontSize: d.providerName.fontSize,
       fontWeight: 700,
       marginBottom: d.providerName.marginBottom,
+      textAlign: "center",
     },
     providerContact: {
       color: t.inkMuted,
       fontFamily: fonts.sans,
       fontSize: d.providerContact.fontSize,
       marginBottom: d.providerContact.marginBottom,
+      textAlign: "center",
     },
     providerDescription: {
       color: t.inkMuted,

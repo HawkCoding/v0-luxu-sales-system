@@ -228,6 +228,38 @@ describe("PUT /api/jobs/[id]/transport-requests", () => {
     })
   })
 
+  it("threads complimentary through to the replace RPC, defaulting omitted to false", async () => {
+    const supabase = buildSupabase()
+    authMocks.requireRole.mockResolvedValue({
+      ok: true,
+      value: {
+        supabase,
+        user: { id: "u1", email: "u@example.com" },
+        profile: { clearanceLevel: "consultant", actorName: "Jane", name: "Jane", surname: "D", email: "u@example.com" },
+      },
+    })
+    const req = new Request("http://localhost", {
+      method: "PUT",
+      body: JSON.stringify({
+        transportRequests: [
+          { serviceType: "transfer", pickupPoint: "A", dropoffPoint: "B", complimentary: true },
+          { serviceType: "transfer", pickupPoint: "C", dropoffPoint: "D" },
+        ],
+      }),
+      headers: { "Content-Type": "application/json" },
+    })
+    const res = await PUT(req, { params })
+    expect(res.status).toBe(200)
+    expect(supabase.replaceTransportRequests).toHaveBeenCalledWith({
+      p_booking_id: BOOKING_ID,
+      p_transport_requests: [
+        expect.objectContaining({ complimentary: true }),
+        expect.objectContaining({ complimentary: false }),
+      ],
+      p_rental_details: [],
+    })
+  })
+
   it("saves vehicle rental details for rental requests", async () => {
     const supabase = buildSupabase()
     authMocks.requireRole.mockResolvedValue({

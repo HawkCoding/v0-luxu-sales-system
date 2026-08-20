@@ -594,8 +594,10 @@ export type Database = {
           arrival_airport_code: string | null
           arrival_date: string | null
           arrival_time: string | null
+          booking_date: string | null
           booking_id: string
           checked_luggage_kg: number | null
+          confirmation_date: string | null
           created_at: string
           date_anchor: string | null
           departure_airport_code: string | null
@@ -608,6 +610,8 @@ export type Database = {
           nights: number | null
           notes: string | null
           origin: Database["public"]["Enums"]["service_origin"]
+          paid_with: string | null
+          payment_made_date: string | null
           price_currency: string
           rate_type_id: string | null
           route_id: string | null
@@ -626,8 +630,10 @@ export type Database = {
           arrival_airport_code?: string | null
           arrival_date?: string | null
           arrival_time?: string | null
+          booking_date?: string | null
           booking_id: string
           checked_luggage_kg?: number | null
+          confirmation_date?: string | null
           created_at?: string
           date_anchor?: string | null
           departure_airport_code?: string | null
@@ -640,6 +646,8 @@ export type Database = {
           nights?: number | null
           notes?: string | null
           origin?: Database["public"]["Enums"]["service_origin"]
+          paid_with?: string | null
+          payment_made_date?: string | null
           price_currency?: string
           rate_type_id?: string | null
           route_id?: string | null
@@ -658,8 +666,10 @@ export type Database = {
           arrival_airport_code?: string | null
           arrival_date?: string | null
           arrival_time?: string | null
+          booking_date?: string | null
           booking_id?: string
           checked_luggage_kg?: number | null
+          confirmation_date?: string | null
           created_at?: string
           date_anchor?: string | null
           departure_airport_code?: string | null
@@ -672,6 +682,8 @@ export type Database = {
           nights?: number | null
           notes?: string | null
           origin?: Database["public"]["Enums"]["service_origin"]
+          paid_with?: string | null
+          payment_made_date?: string | null
           price_currency?: string
           rate_type_id?: string | null
           route_id?: string | null
@@ -886,6 +898,7 @@ export type Database = {
       booking_transport_requests: {
         Row: {
           booking_id: string
+          complimentary: boolean
           created_at: string
           date_anchor: string | null
           dropoff_point: string
@@ -912,6 +925,7 @@ export type Database = {
         }
         Insert: {
           booking_id: string
+          complimentary?: boolean
           created_at?: string
           date_anchor?: string | null
           dropoff_point: string
@@ -938,6 +952,7 @@ export type Database = {
         }
         Update: {
           booking_id?: string
+          complimentary?: boolean
           created_at?: string
           date_anchor?: string | null
           dropoff_point?: string

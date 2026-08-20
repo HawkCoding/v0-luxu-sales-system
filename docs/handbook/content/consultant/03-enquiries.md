@@ -116,35 +116,39 @@ Open a booking and select the **Enquiry** tab.
   Stay, Extra Nights, Additional Services, Service Details, Promo Code. Only the fields
   that have a value are shown; the whole card is hidden if none do.
 
-## Transport requests
+## Requested services
 
-The **Transport Requests** card captures transfers and vehicle rentals tied to this
-booking.
+[[shot:03-requested-services|The Requested services readiness panel]]
 
-[[shot:03-transport-request|A transport request row being edited]]
+The **Requested services** panel sits above Email Source / Original Text and is the bridge
+between the enquiry and the quote. It is read-only — every change happens in Build Booking —
+and has three parts:
 
-1. Click **Add** to create a row, or **Edit** on an existing one.
-2. Choose **Service**: Transfer or Vehicle rental.
-3. Fill in pickup and drop-off point (rental calls these Rental pickup / Return point),
-   pickup date and time, passenger count, luggage count, and flight number.
-4. For a vehicle rental, also set the return date/time and a **Return by (time)** cutoff —
-   a return after that time on the same day counts as the next day.
-5. Click **Save**.
+- **Booked as** — one row per service actually built on this booking (train, hotel,
+  transfers, and so on), with its date, nights, and suite/room count. A row badged
+  **Auto-filled** was created automatically from the enquiry and has not yet been reviewed
+  by a consultant; a row badged **Not included in quote** exists but is unticked in Build
+  Booking. Nothing here is editable — click through to Build Booking to change any of it.
+- **Asked for, not built** — things the customer's enquiry mentioned that nothing on the
+  booking accounts for yet: a suite count higher than what was built, a suite phrase that
+  couldn't be matched to a real suite type, a requested hotel stay with no hotel leg, extra
+  nights beyond what the hotel is booked for, or additional services (transfers, rentals,
+  tours) with nothing built for them. **Transfers, vehicle rentals, tours and flights are
+  never built automatically** — every one of them is a manual add in Build Booking, step 1.
+- **Before the quote can go out** — hard blockers: no services built at all, an unresolved
+  needs-review flag, a missing customer field, a service with no date, a train leg with no
+  route, or a suite/room with no suite type chosen.
 
-Click **Remove** on a row to delete it — this only takes effect once you click **Save**.
+The panel's state badge tracks where the booking is: **Not built yet** (nothing exists),
+**Auto-filled — needs review** (services exist but a consultant hasn't confirmed them), or
+**Confirmed** (a consultant hit Confirm services in Build Booking). The button beside it —
+**Start Quote**, **Review services**, or **Open Build Booking** depending on the state — is
+the one way to act on anything the panel shows.
 
-> [!WARNING]
-> A vehicle rental cannot be saved without a return date and time.
-
-## Supplier schedules
-
-Below Transport Requests, three sections — **Hotel Stays**, **Train Journeys**, **Vehicle
-Rentals** — capture supplier-facing scheduling detail: which supplier, the stay or journey
-dates and times, when it was booked and confirmed with the supplier, and what was paid or is
-receivable. Each works the same way as Transport Requests: **Add**, fill in the fields,
-**Save**. These are separate from the customer-facing Journey Details above — they exist
-so the booking has a record of the supplier-side arrangement, not just the customer's
-request.
+> [!NOTE]
+> The needs-review banner that used to appear only on email-imported enquiries now shows
+> here for every source — a pasted or hand-typed enquiry flagged for review is no longer
+> invisible on the job page.
 
 ## Original email text
 

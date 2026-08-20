@@ -72,6 +72,23 @@ export function firstNightComplimentaryLegIdsFromLineItems(
   )
 }
 
+/**
+ * Transport request ids whose trip was deliberately marked complimentary (see the toggle in
+ * transport-leg-editor.tsx / booking_transport_requests.complimentary). Unlike hotels, a
+ * complimentary transfer is per-request, not per-leg — one leg can have several captured trips,
+ * only some of which are comped — so this keys off `transportRequestId`, not `legId`.
+ */
+export function complimentaryTransportRequestIdsFromLineItems(
+  lineItems: readonly LineItemSnapshotRow[] | null,
+): Set<string> {
+  return new Set(
+    (lineItems ?? [])
+      .filter((item) => (item.pricing_snapshot as PricingSnapshot | null)?.isComplimentaryTransport === true)
+      .map((item) => (item.pricing_snapshot as PricingSnapshot | null)?.transportRequestId)
+      .filter((requestId): requestId is string => Boolean(requestId)),
+  )
+}
+
 /** Best client-facing name per priced leg, preferring the leg's own label over its supplier. */
 function legLabelsFromLineItems(lineItems: readonly LineItemSnapshotRow[] | null): Map<string, string> {
   const labels = new Map<string, string>()

@@ -26,6 +26,7 @@ import { formatMoney, normaliseCurrency } from "@/lib/money"
 import { deriveFlightCapPerPerson, deriveJourneyFromBlocks } from "@/lib/quotes/quote-presentation"
 import {
   complimentaryLegIdsFromLineItems,
+  complimentaryTransportRequestIdsFromLineItems,
   firstNightComplimentaryLegIdsFromLineItems,
   legIdsFromLineItems,
 } from "@/lib/quotes/accepted-quote-scope"
@@ -251,6 +252,7 @@ export async function resolveSharedEmailTokens(
       const legIds = legIdsFromLineItems(lineItems)
       const complimentaryLegIds = complimentaryLegIdsFromLineItems(lineItems)
       const firstNightComplimentaryLegIds = firstNightComplimentaryLegIdsFromLineItems(lineItems)
+      const complimentaryTransportRequestIds = complimentaryTransportRequestIdsFromLineItems(lineItems)
 
       const { blocks: itineraryBlocks } = await buildVoucherServiceBlocks(supabase, {
         bookingId,
@@ -258,6 +260,7 @@ export async function resolveSharedEmailTokens(
         legIds: legIds.size > 0 ? legIds : undefined,
         complimentaryLegIds,
         firstNightComplimentaryLegIds,
+        complimentaryTransportRequestIds,
       })
 
       const journey = deriveJourneyFromBlocks(itineraryBlocks) ?? { start: null, end: null }

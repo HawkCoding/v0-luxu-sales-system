@@ -52,7 +52,7 @@ export async function ensureWorksheetPdf(
     throw new Error("Worksheet PDF could not be rendered")
   }
 
-  const safeNumber = sanitizePath(view.bookingNumber)
+  const safeNumber = sanitizePath(view.invoiceNumber)
   const filename = `worksheet-${safeNumber}.pdf`
   const objectPath = `${safeNumber}/${filename}`
 

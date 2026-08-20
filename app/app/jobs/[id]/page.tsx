@@ -35,7 +35,7 @@ import { AlertCircle, ArrowLeft, CheckCircle2, ChevronRight, ChevronLeft as Chev
 import type { DocRecord, Invoice, Outcome, OutcomeReason } from "@/lib/types"
 import Link from "next/link"
 import { JobEnquiryTab } from "@/components/job-enquiry-tab"
-import { JobQuotesTab } from "@/components/job-quotes-tab"
+import { BUILDABLE_QUOTE_STATUSES, JobQuotesTab } from "@/components/job-quotes-tab"
 import { JobReservationTab } from "@/components/job-reservation-tab"
 import { JobReferencesTab } from "@/components/job-references-tab"
 import { JobTransferTimesTab } from "@/components/job-transfer-times-tab"
@@ -326,6 +326,7 @@ export default function JobDetailPage() {
     job,
     customer,
     enquiry,
+    readiness,
     itineraries,
     quotes,
     payments,
@@ -381,6 +382,13 @@ export default function JobDetailPage() {
   // the revised total — without this the strip below stays hidden on
   // `hasSentDepositInvoice` and the amended invoice can never be sent.
   const quoteRows = quotes as Array<{ id: string; status: string; parentQuoteId?: string | null }>
+  // The readiness panel's primary action opens Build Booking on whichever quote can still take an
+  // edit — same rule the Quotes tab uses to show its own "Edit Quote" button. Prefer the draft so
+  // a booking with several quotes doesn't jump into an already-sent one.
+  const buildBookingQuoteId =
+    quoteRows.find((quote) => quote.status === "draft")?.id ??
+    quoteRows.find((quote) => BUILDABLE_QUOTE_STATUSES.includes(quote.status))?.id ??
+    null
   const invoiceNeedsAmendment = invoices.some(
     (invoice: { kind: string; status: string; quoteId?: string | null }) =>
       (invoice.kind === "deposit" || invoice.kind === "full") &&
@@ -1007,8 +1015,13 @@ export default function JobDetailPage() {
               setActiveTab("quotes")
               setAutoOpenBuildBookingQuoteId(quoteId)
             }}
-            onTransportRequestsChange={mutate}
             onFieldsUpdated={mutate}
+            readiness={readiness ?? null}
+            buildBookingQuoteId={buildBookingQuoteId}
+            onOpenBuildBooking={(quoteId) => {
+              setActiveTab("quotes")
+              setAutoOpenBuildBookingQuoteId(quoteId)
+            }}
           />
         </TabsContent>
         <TabsContent value="quotes">

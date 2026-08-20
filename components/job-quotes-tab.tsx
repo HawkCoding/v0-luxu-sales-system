@@ -10,6 +10,7 @@ import type { Quote } from "@/lib/types"
 import {
   hasComplimentaryNight,
   isComplimentaryRoom,
+  isComplimentaryTransport,
   isMissingPricing,
   stayNights,
 } from "@/lib/quotes/pricing-engine"
@@ -35,8 +36,9 @@ const EDITABLE_QUOTE_STATUSES = ["draft", "pricing_incomplete", "ready"]
 
 /** Statuses whose services can still be rebuilt. Mirrors LOCKED_QUOTE_STATUSES in
  * app/api/quotes/[id]/route.ts — an accepted quote is the record of what was sold, so changing
- * it goes through Revise instead. */
-const BUILDABLE_QUOTE_STATUSES = [...EDITABLE_QUOTE_STATUSES, "sent", "expired"]
+ * it goes through Revise instead. Exported so the Enquiry tab's readiness panel can find a quote
+ * to send Build Booking's primary action to, without re-deriving this rule. */
+export const BUILDABLE_QUOTE_STATUSES = [...EDITABLE_QUOTE_STATUSES, "sent", "expired"]
 
 const STATUS_BADGE: Record<string, { variant: "default" | "secondary" | "outline" | "destructive"; label: string; className?: string }> = {
   draft: { variant: "secondary", label: "Provisional" },
@@ -300,7 +302,7 @@ export function JobQuotesTab({
                   <tbody>
                     {q.lineItems.map((li, i) => {
                       const isExtra = li.pricingSnapshot?.isExtra === true
-                      const isComplimentary = isComplimentaryRoom(li)
+                      const isComplimentary = isComplimentaryRoom(li) || isComplimentaryTransport(li)
                       const lineBonus = getCommissionBonus(li)
                       return (
                       <tr key={i} className="border-b border-border/50 last:border-0">

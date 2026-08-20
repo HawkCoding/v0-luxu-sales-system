@@ -40,6 +40,7 @@ const updateSchema = z.object({
         supplierContactName: z.string().trim().max(200).nullable().optional(),
         voucherFootnote: z.string().trim().max(500).nullable().optional(),
         excursions: z.array(z.string().trim().max(300)).max(20).optional(),
+        flightNumber: z.string().trim().min(2).max(20).nullable().optional(),
       }),
     )
     .min(1, "At least one update is required"),
@@ -79,6 +80,9 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     }
     if (update.voucherFootnote !== undefined) {
       payload.voucher_footnote = update.voucherFootnote?.trim() || null
+    }
+    if (update.flightNumber !== undefined) {
+      payload.flight_number = update.flightNumber?.trim() || null
     }
     // Excursions only exist on the leg tables -- a transport_request (transfer/rental/flight)
     // has no column for them.

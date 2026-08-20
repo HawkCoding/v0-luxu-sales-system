@@ -54,8 +54,9 @@ export interface VoucherServiceBlockData {
   roomType?: string | null
   nights?: number | null
   mealPlan?: string | null
-  /** Hotel-only: true when the whole stay was comped (its room price was typed as R0). Drives a
-   *  client-facing "COMPLIMENTARY" callout on the itinerary line. */
+  /** Hotel: true when the whole stay was comped (its room price was typed as R0). Transfer: true
+   *  when the trip was marked complimentary (booking_transport_requests.complimentary). Either
+   *  way it drives a client-facing "COMPLIMENTARY" callout on the itinerary line. */
   isComplimentary?: boolean | null
   /** Hotel-only: true when the hotel gifted the first night and charged the rest. The line still
    *  states the full stay length; the callout reads "FIRST NIGHT COMPLIMENTARY". */
@@ -209,16 +210,20 @@ function infoRow(label: string, value: string | number, opts: { shaded?: boolean
 
 // Shares .info-row's shape (fixed label gutter, flex:1 value area) so a cell row lines up on
 // the same grid as every plain row in a provider box — see the PDF twin, sections/info-row.tsx.
+// Each cell is sized as a percentage of the row's total span count (default span 1 each), not an
+// equal share, so a cell spanning more columns in one row (the suite name) can still leave its
+// neighbour ("Qty") lined up with the same-position cell in a different row below it ("Infant").
 function cellRow(
   label: string,
-  cells: Array<{ label: string; value: string | number }>,
+  cells: Array<{ label: string; value: string | number; span?: number }>,
   opts: { dotted?: boolean } = {},
 ): string {
   const classes = ["info-row", opts.dotted ? "info-row-dotted" : ""].filter(Boolean).join(" ")
+  const columns = cells.reduce((sum, cell) => sum + (cell.span ?? 1), 0)
   const cellsHtml = cells
     .map(
       (cell) => `
-        <div class="cell">
+        <div class="cell" style="width: ${(((cell.span ?? 1) / columns) * 100).toFixed(4)}%">
           <div class="cell-label">${escapeHtml(cell.label)}</div>
           <div class="cell-value">${escapeHtml(cell.value)}</div>
         </div>`,
@@ -252,7 +257,9 @@ ${rows.join("\n")}
 }
 
 function buildServiceBlockBodyRows(block: VoucherServiceBlock): string {
-  return voucherRowsForBlock(block)
+  // Inclusions are quote-and-itinerary copy; the voucher stays operational. Kept in sync with the
+  // matching `showInclusions={false}` on the PDF voucher's ServiceBlock.
+  return voucherRowsForBlock(block, { showInclusions: false })
     .map((row) => (row.cells ? cellRow(row.label, row.cells, { dotted: true }) : infoRow(row.label, row.value ?? "", { dotted: true })))
     .join("\n")
 }
@@ -476,8 +483,8 @@ export function generateVoucherHTML(
     }
     .info-value { color: #2B2B2B; font-size: 9pt; flex: 1; }
 
-    .cell-group { display: flex; flex: 1; gap: 16pt; }
-    .cell { flex: 1; }
+    .cell-group { display: flex; flex: 1; }
+    .cell { box-sizing: border-box; padding-right: 16pt; }
     .cell-label {
       font-family: ${fontFamily};
       font-size: 6.5pt;
@@ -499,12 +506,14 @@ export function generateVoucherHTML(
       font-weight: 700;
       color: ${t.accent_colour};
       margin-bottom: 1.5pt;
+      text-align: center;
     }
     .provider-contact {
       font-family: ${fontFamily};
       font-size: 7pt;
       color: #6B6B6B;
       margin-bottom: 5pt;
+      text-align: center;
     }
     .provider-description {
       font-family: ${fontFamily};

@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Info, Plus, Trash2 } from "lucide-react"
+import { Gift, Info, Plus, Trash2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -27,6 +27,7 @@ import {
 } from "@/lib/packages/apply-dialog-state"
 import { resolveTransferPickupDate } from "@/lib/packages/transfer-dates"
 import { AnchorDateSection } from "@/components/packages/anchor-date-section"
+import { ServiceAdminDates } from "@/components/packages/service-admin-dates"
 import { dateOnly } from "@/lib/packages/trip-date-range"
 import { getBillableRentalDays } from "@/lib/packages/rental-days"
 import { findRateCardCandidates, selectRateCard } from "@/lib/rate-cards/resolve"
@@ -59,6 +60,8 @@ interface RequestPriceOverrideProps {
   quoteCurrency: string
   formatInQuoteCurrency: (amount: number, from: string) => string | null
   onChange: (next: number | null) => void
+  complimentary: boolean
+  onComplimentaryChange: (next: boolean) => void
 }
 
 /**
@@ -77,6 +80,8 @@ function RequestPriceOverride({
   quoteCurrency,
   formatInQuoteCurrency,
   onChange,
+  complimentary,
+  onComplimentaryChange,
 }: RequestPriceOverrideProps) {
   const currency = baseRateCard?.currency ?? fallbackCurrency
   // 0 is a real price (a comped trip), so this is a null check, not a truthiness one.
@@ -95,6 +100,22 @@ function RequestPriceOverride({
   const dayLabel = `${billableDays} ${billableDays === 1 ? "day" : "days"}`
   const tripNoun = isRental ? "vehicle" : "transfer"
 
+  const complimentaryToggle = (
+    <Button
+      type="button"
+      size="sm"
+      variant="link"
+      className={`h-auto gap-1 p-0 text-xs ${
+        complimentary ? "text-muted-foreground hover:text-foreground" : "text-emerald-600 hover:text-emerald-700"
+      }`}
+      aria-pressed={complimentary}
+      onClick={() => onComplimentaryChange(!complimentary)}
+    >
+      <Gift className="h-3.5 w-3.5" />
+      {complimentary ? `Charge for this ${tripNoun}` : "Mark complimentary"}
+    </Button>
+  )
+
   if (!expanded) {
     return (
       <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3 md:col-span-2 xl:col-span-3">
@@ -111,15 +132,18 @@ function RequestPriceOverride({
             noCardMessage
           )}
         </span>
-        <Button
-          type="button"
-          size="sm"
-          variant="link"
-          className="h-auto p-0 text-xs"
-          onClick={() => setRequested(true)}
-        >
-          Override price
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button
+            type="button"
+            size="sm"
+            variant="link"
+            className="h-auto p-0 text-xs"
+            onClick={() => setRequested(true)}
+          >
+            Override price
+          </Button>
+          {complimentaryToggle}
+        </div>
       </div>
     )
   }
@@ -146,11 +170,18 @@ function RequestPriceOverride({
             </TooltipContent>
           </Tooltip>
         </div>
-        {overridden ? (
-          <Badge variant="secondary" className="h-5 text-[10px]">
-            Overridden
-          </Badge>
-        ) : null}
+        <div className="flex items-center gap-1.5">
+          {complimentary ? (
+            <Badge className="h-5 text-[10px] bg-emerald-100 text-emerald-700 hover:bg-emerald-100 border-emerald-200">
+              Complimentary
+            </Badge>
+          ) : overridden ? (
+            <Badge variant="secondary" className="h-5 text-[10px]">
+              Overridden
+            </Badge>
+          ) : null}
+          {complimentaryToggle}
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -596,6 +627,8 @@ export function TransportLegEditor({
                 quoteCurrency={quoteCurrency}
                 formatInQuoteCurrency={formatInQuoteCurrency}
                 onChange={(next) => updateRequest(request.id, { priceOverride: next })}
+                complimentary={request.complimentary}
+                onComplimentaryChange={(next) => updateRequest(request.id, { complimentary: next })}
               />
               <div className="space-y-1.5 md:col-span-2">
                 <Label>Special requests / allergies</Label>
@@ -622,6 +655,16 @@ export function TransportLegEditor({
             </div>
           ))
         : null}
+
+      <ServiceAdminDates
+        value={{
+          bookingDate: value.bookingDate,
+          confirmationDate: value.confirmationDate,
+          paymentMadeDate: value.paymentMadeDate,
+          paidWith: value.paidWith,
+        }}
+        onChange={(next) => onChange({ ...value, ...next })}
+      />
     </div>
   )
 }

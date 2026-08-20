@@ -5,6 +5,11 @@ import { formatBulletLinesInline } from "@/lib/inclusions/bullet-lines"
 export interface VoucherRowCell {
   label: string
   value: string | number
+  /** How many of the row's columns this cell occupies. Cell rows are laid out on a grid whose
+   * column count is the sum of the row's spans, so a two-cell row can still line its last cell up
+   * with the last cell of a three-cell row below it — that's how "Qty" prints directly above
+   * "Infant". Defaults to 1. */
+  span?: number
 }
 
 export interface VoucherRow {
@@ -40,6 +45,13 @@ function houseTime(time: string): string {
   return `${hours}h${minutes}`
 }
 
+export interface VoucherRowOptions {
+  /** Print the supplier's "Included" list on train and hotel blocks. The voucher turns this off —
+   * it's operational paperwork handed over at travel time, and the inclusions were already sold on
+   * the quote and the itinerary — the itinerary PDF keeps it on. */
+  showInclusions?: boolean
+}
+
 /**
  * The single source of truth for a service block's printed rows — consumed by both the
  * react-pdf voucher (`sections/service-block.tsx`) and the HTML live preview
@@ -47,12 +59,21 @@ function houseTime(time: string): string {
  * drifted (the PDF printed a "Duration" row for train blocks the preview didn't); keeping one
  * function here means the two documents can never again disagree on what a voucher shows.
  */
-export function voucherRowsForBlock(block: VoucherServiceBlock): VoucherRow[] {
+export function voucherRowsForBlock(
+  block: VoucherServiceBlock,
+  { showInclusions = true }: VoucherRowOptions = {},
+): VoucherRow[] {
   const rows: VoucherRow[] = []
   const d = block.serviceData
   const departureDate = fmt(d.departureDate)
   const arrivalDate = fmt(d.arrivalDate)
-  rows.push({ label: "Your Reference", value: referenceWithContact(block.supplierReference, block.supplierContactName) })
+  // Airline bookings have no named contact — a flight's "reference" is its booking number, and
+  // the flight number gets its own row below (see the airline branch).
+  rows.push(
+    block.serviceType === "airline"
+      ? { label: "Booking Reference", value: block.supplierReference || "—" }
+      : { label: "Your Reference", value: referenceWithContact(block.supplierReference, block.supplierContactName) },
+  )
 
   if (block.serviceType === "train") {
     if (d.route) rows.push({ label: "Route", value: d.route })
@@ -70,7 +91,7 @@ export function voucherRowsForBlock(block: VoucherServiceBlock): VoucherRow[] {
     if (d.mealPlan) rows.push({ label: "Meal Basis", value: d.mealPlan })
     // Subheadings can't have their own line in a single-value row, so their items are grouped
     // behind them: "Onboard: a, b; Off-train: c".
-    const included = formatBulletLinesInline(d.inclusions)
+    const included = showInclusions ? formatBulletLinesInline(d.inclusions) : null
     if (included) rows.push({ label: "Included", value: included })
     // Smoking preference and meal seating are train-specific — the hotel branch below prints
     // dietary and occasion instead, the pair a hotel actually acts on.
@@ -86,7 +107,7 @@ export function voucherRowsForBlock(block: VoucherServiceBlock): VoucherRow[] {
     if (arrivalDate) rows.push({ label: "Check-Out", value: fmtWithTime(arrivalDate, d.endTime) ?? arrivalDate })
     // Subheadings can't have their own line in a single-value row, so their items are grouped
     // behind them: "Onboard: a, b; Off-train: c".
-    const included = formatBulletLinesInline(d.inclusions)
+    const included = showInclusions ? formatBulletLinesInline(d.inclusions) : null
     if (included) rows.push({ label: "Included", value: included })
     // Dietary and occasion are the preferences a hotel acts on — smoking/meal seating print on
     // the train block instead.
@@ -173,10 +194,12 @@ function referenceWithContact(reference: string | null | undefined, contactName:
 }
 
 /** "Suite Type | Qty" / "Room Type | Qty" — a single two-cell row when a count is known, or a
- * plain single-value row when it isn't (legacy pre-cutover legs with no unit rows to count). */
+ * plain single-value row when it isn't (legacy pre-cutover legs with no unit rows to count). The
+ * name cell spans 2 of the row's 3 columns so "Qty" lines up with "Infant" in the Guests row
+ * below it, instead of splitting the value area in half. */
 function suiteRow(label: string, name: string, qty: number | null | undefined): VoucherRow {
   if (qty == null) return { label, value: name }
-  return { label, cells: [{ label, value: name }, { label: "Qty", value: qty }] }
+  return { label, cells: [{ label, value: name, span: 2 }, { label: "Qty", value: qty }] }
 }
 
 /** "Adults | Children | Infant" — the per-block guest breakdown, tabled the way the legacy
@@ -198,9 +221,11 @@ function guestsRow(breakdown: { adults: number; children: number; infants: numbe
  * the Boarding Point / Arrival Point rows above, resolved from `supplier_station_addresses`). */
 const ADDRESS_IS_A_DESTINATION: ReadonlySet<VoucherServiceType> = new Set(["hotel", "tour"])
 
-/** "Tel: … – Emergency: … • Email: … • {street address}, {location}" — printed as a single small
+/** "Tel: … – Emergency: … • {website} • {street address}, {location}" — printed as a single small
  * line under the provider name, not as a table row; matches the legacy voucher's contact line
  * directly under each supplier's heading rather than buried at the bottom of the details table.
+ * The supplier's email is deliberately never printed here — it's not something client-facing
+ * paperwork should expose, even though it's still selected and typed on `contact` for other uses.
  * The address segment only prints for categories where that address is somewhere the guest goes —
  * see `ADDRESS_IS_A_DESTINATION`. */
 export function voucherProviderContactLine(
@@ -213,7 +238,6 @@ export function voucherProviderContactLine(
   } else if (contact.emergencyPhone) {
     parts.push(`Emergency: ${contact.emergencyPhone}`)
   }
-  if (contact.email) parts.push(`Email: ${contact.email}`)
   if (contact.website) parts.push(contact.website)
   if (ADDRESS_IS_A_DESTINATION.has(serviceType)) {
     const address = [contact.streetAddress, contact.location].filter(Boolean).join(", ")
