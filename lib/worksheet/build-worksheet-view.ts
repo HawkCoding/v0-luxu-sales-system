@@ -1,10 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
-import { firstRecord } from "@/lib/utils"
 import { clientInvoiceNumber } from "@/lib/invoices/invoice-status"
+import { firstRecord } from "@/lib/utils"
 import {
   buildWorksheetServiceLines,
-  type WorksheetScheduleRow,
   type WorksheetServiceRow,
   type WorksheetTransportRow,
 } from "@/lib/worksheet/service-lines"
@@ -53,7 +52,7 @@ export interface BuildWorksheetViewOptions {
  * Loads everything the internal booking worksheet describes. This is the
  * per-job "place of record" PDF's data source — deliberately its own query
  * (not the shared job-detail aggregate) so it can pull the tables that
- * aggregate omits: reservation details, supplier schedules, transport legs.
+ * aggregate omits: reservation details, service admin dates, transport legs.
  */
 export async function buildWorksheetView(
   supabase: SupabaseClient<Database>,
@@ -64,7 +63,6 @@ export async function buildWorksheetView(
     { data: travellers },
     { data: reservationDetails },
     { data: services },
-    { data: schedules },
     { data: transportRequests },
     { data: invoices },
     { data: payments },
@@ -88,13 +86,14 @@ export async function buildWorksheetView(
       .select("meal_seating, smoking_preference, dietary, medical, occasion")
       .eq("booking_id", bookingId)
       .maybeSingle(),
-    // The booking's real itinerary. The Suppliers tab (booking_supplier_schedules, below) only
-    // ever held the admin dates staff type by hand, so reading it alone left every train, hotel
-    // and flight off the sheet.
+    // The booking's real itinerary, including each leg's own supplier-admin dates (when it was
+    // placed, confirmed and paid with the supplier) — reading services alone used to leave those
+    // dates off the sheet; they lived on a separate per-supplier table with no link to the leg.
     supabase
       .from("booking_services")
       .select(
         `id, supplier_id, sort_order, service_date, nights, arrival_date, supplier_reference, notes, route_reversed,
+         booking_date, confirmation_date, payment_made_date, paid_with,
          suppliers(name, kind),
          routes(duration_days, name, direction_mode, origin:locations!routes_origin_location_id_fkey(name), destination:locations!routes_destination_location_id_fkey(name)),
          suite_types(name),
@@ -104,13 +103,8 @@ export async function buildWorksheetView(
       .eq("selected", true)
       .order("sort_order"),
     supabase
-      .from("booking_supplier_schedules")
-      .select("supplier_id, booking_date, confirmation_date, payment_made_date, paid_with")
-      .eq("booking_id", bookingId)
-      .order("sort_order"),
-    supabase
       .from("booking_transport_requests")
-      .select("service_id, supplier_id, sort_order, pickup_at, notes, supplier_reference, suppliers(name)")
+      .select("service_id, supplier_id, sort_order, pickup_at, notes, supplier_reference, complimentary, suppliers(name)")
       .eq("booking_id", bookingId)
       .order("sort_order"),
     supabase
@@ -169,13 +163,21 @@ export async function buildWorksheetView(
   const serviceLines = buildWorksheetServiceLines({
     services: serviceRows,
     transportRequests: (transportRequests ?? []) as unknown as WorksheetTransportRow[],
-    schedules: (schedules ?? []) as unknown as WorksheetScheduleRow[],
   })
 
   // The header's "Service" cell names the rail operator this job is built around — in practice
-  // The Blue Train or Rovos Rail — and stays blank on a booking with no train.
-  const trainService = serviceRows.find((row) => firstRecord(row.suppliers)?.kind === "train_operator")
-  const serviceName = firstRecord(trainService?.suppliers)?.name ?? null
+  // The Blue Train or Rovos Rail — and stays blank on a booking with no train. The same leg also
+  // supplies the header's "Departure Date"; a multi-train booking is resolved by earliest
+  // service_date rather than by query order, so both cells stay stable across reloads.
+  const trainServices = serviceRows.filter(
+    (row) => firstRecord(row.suppliers)?.kind === "train_operator",
+  )
+  const datedTrains = trainServices
+    .filter((row) => Boolean(row.service_date))
+    .sort((a, b) => (a.service_date ?? "").localeCompare(b.service_date ?? ""))
+  // A train leg with no date still names the Service cell — it just cannot supply a departure date.
+  const serviceName = firstRecord((datedTrains[0] ?? trainServices[0])?.suppliers)?.name ?? null
+  const trainDepartureDate = datedTrains[0]?.service_date ?? null
 
   const paymentRows: WorksheetPayment[] = (payments ?? []).map((p) => ({
     date: p.received_at,
@@ -188,8 +190,12 @@ export async function buildWorksheetView(
 
   return {
     bookingNumber: bookingRaw.booking_number,
-    invoiceNumber: clientInvoiceNumber(bookingRaw),
+    invoiceNumber: clientInvoiceNumber({
+      customer_invoice_number: bookingRaw.customer_invoice_number,
+      booking_number: bookingRaw.booking_number,
+    }),
     serviceName,
+    trainDepartureDate,
     consultant,
     arriveDate,
     departDate,
@@ -197,9 +203,7 @@ export async function buildWorksheetView(
     contact: {
       title: customer?.title ?? null,
       name: [customer?.first_name, customer?.last_name].filter(Boolean).join(" ").trim() || "Guest",
-      shortName: customer?.first_name
-        ? `${customer.first_name.trim().charAt(0).toUpperCase()}. ${customer?.last_name ?? ""}`.trim()
-        : (customer?.last_name ?? "Guest"),
+      shortName: customer?.last_name?.trim() || "Guest",
       nationality: customer?.country ?? null,
       email: customer?.email ?? null,
       phone: customer?.phone ?? null,

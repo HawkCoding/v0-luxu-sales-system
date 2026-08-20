@@ -370,6 +370,7 @@ describe("hydrateFromSaved", () => {
     flightNumber: "SA123",
     priceOverride: null,
     priceOverrideSetAt: null,
+    complimentary: false,
     notes: null,
     supplierReference: null,
     sortOrder: 0,
@@ -534,6 +535,21 @@ describe("toTransportRequestsPut", () => {
 
     const body = toTransportRequestsPut(states, [])
     expect(body.transportRequests[0].priceOverride).toBe(1250.5)
+  })
+
+  it("round-trips the per-request complimentary flag", () => {
+    const states = buildDefaultLegStates(pkg, { tripStartDate: null })
+    const transfer = transportState(states, "leg-transfer")
+    transfer.selected = true
+    transfer.requests[0] = {
+      ...transfer.requests[0],
+      pickupPoint: "Airport",
+      dropoffPoint: "Hotel",
+      complimentary: true,
+    }
+
+    const body = toTransportRequestsPut(states, [])
+    expect(body.transportRequests[0].complimentary).toBe(true)
   })
 
   it("sends dateAnchor for a transfer request, always null for a rental", () => {

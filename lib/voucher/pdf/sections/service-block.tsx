@@ -20,6 +20,10 @@ interface ServiceBlockProps {
   /** Print the client-facing supplier blurb. The voucher turns this off — it's operational
    * paperwork, not sales copy — the itinerary keeps it on since it sells the property. */
   showDescription?: boolean
+  /** Print the "Included" row on train and hotel blocks. The voucher turns this off for the same
+   * reason as the blurb above — what the package includes was already sold on the quote and the
+   * itinerary; the voucher only needs what was booked and where to be. */
+  showInclusions?: boolean
 }
 
 function rowChars(row: VoucherRow): number {
@@ -32,9 +36,16 @@ function fitsOnOnePage(rows: VoucherRow[], extra: string, charBudget: number): b
   return chars <= charBudget
 }
 
-export function ServiceBlock({ block, styles, density = "comfortable", showEyebrow = true, showDescription = true }: ServiceBlockProps) {
+export function ServiceBlock({
+  block,
+  styles,
+  density = "comfortable",
+  showEyebrow = true,
+  showDescription = true,
+  showInclusions = true,
+}: ServiceBlockProps) {
   const title = block.title || voucherServiceTypeLabel(block.serviceType)
-  const rows = voucherRowsForBlock(block)
+  const rows = voucherRowsForBlock(block, { showInclusions })
   const name = block.contactDetails.name ?? ""
   const contactLine = voucherProviderContactLine(block.contactDetails, block.serviceType)
   const footnote = block.serviceData.footnote

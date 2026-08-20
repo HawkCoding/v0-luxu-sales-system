@@ -139,6 +139,8 @@ const TABLES_TO_SNAPSHOT = [
   "booking_suites",
   "booking_notes",
   "booking_supplier_schedules",
+  "booking_services",
+  "booking_service_units",
   "booking_transport_requests",
   "booking_vehicle_rental_details",
   "vehicle_rental_route_details",

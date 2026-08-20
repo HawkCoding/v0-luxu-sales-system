@@ -45,6 +45,13 @@ function houseTime(time: string): string {
   return `${hours}h${minutes}`
 }
 
+export interface VoucherRowOptions {
+  /** Print the supplier's "Included" list on train and hotel blocks. The voucher turns this off —
+   * it's operational paperwork handed over at travel time, and the inclusions were already sold on
+   * the quote and the itinerary — the itinerary PDF keeps it on. */
+  showInclusions?: boolean
+}
+
 /**
  * The single source of truth for a service block's printed rows — consumed by both the
  * react-pdf voucher (`sections/service-block.tsx`) and the HTML live preview
@@ -52,7 +59,10 @@ function houseTime(time: string): string {
  * drifted (the PDF printed a "Duration" row for train blocks the preview didn't); keeping one
  * function here means the two documents can never again disagree on what a voucher shows.
  */
-export function voucherRowsForBlock(block: VoucherServiceBlock): VoucherRow[] {
+export function voucherRowsForBlock(
+  block: VoucherServiceBlock,
+  { showInclusions = true }: VoucherRowOptions = {},
+): VoucherRow[] {
   const rows: VoucherRow[] = []
   const d = block.serviceData
   const departureDate = fmt(d.departureDate)
@@ -81,7 +91,7 @@ export function voucherRowsForBlock(block: VoucherServiceBlock): VoucherRow[] {
     if (d.mealPlan) rows.push({ label: "Meal Basis", value: d.mealPlan })
     // Subheadings can't have their own line in a single-value row, so their items are grouped
     // behind them: "Onboard: a, b; Off-train: c".
-    const included = formatBulletLinesInline(d.inclusions)
+    const included = showInclusions ? formatBulletLinesInline(d.inclusions) : null
     if (included) rows.push({ label: "Included", value: included })
     // Smoking preference and meal seating are train-specific — the hotel branch below prints
     // dietary and occasion instead, the pair a hotel actually acts on.
@@ -97,7 +107,7 @@ export function voucherRowsForBlock(block: VoucherServiceBlock): VoucherRow[] {
     if (arrivalDate) rows.push({ label: "Check-Out", value: fmtWithTime(arrivalDate, d.endTime) ?? arrivalDate })
     // Subheadings can't have their own line in a single-value row, so their items are grouped
     // behind them: "Onboard: a, b; Off-train: c".
-    const included = formatBulletLinesInline(d.inclusions)
+    const included = showInclusions ? formatBulletLinesInline(d.inclusions) : null
     if (included) rows.push({ label: "Included", value: included })
     // Dietary and occasion are the preferences a hotel acts on — smoking/meal seating print on
     // the train block instead.

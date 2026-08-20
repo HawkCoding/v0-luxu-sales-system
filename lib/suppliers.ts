@@ -3,8 +3,6 @@ import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
 import { normalizeRouteDirectionMode } from "@/lib/routes/route-name"
 import { toHoursMinutes } from "@/lib/routes/route-schedule"
 import type {
-  BookingScheduleSupplierKind,
-  BookingSupplierSchedule,
   BookingVehicleRentalDetails,
   Location,
   Supplier,
@@ -27,7 +25,6 @@ import type {
 import { resolveSupplierRateTiers } from "@/lib/rate-types/supplier-rate-tiers"
 
 type BookingTransportRequestRow = Database["public"]["Tables"]["booking_transport_requests"]["Row"]
-type BookingSupplierScheduleRow = Database["public"]["Tables"]["booking_supplier_schedules"]["Row"]
 type BookingVehicleRentalDetailsRow = Database["public"]["Tables"]["booking_vehicle_rental_details"]["Row"]
 type BookingTransportRequestWithRentalDetails = BookingTransportRequestRow & {
   rental_details?: BookingVehicleRentalDetailsRow | BookingVehicleRentalDetailsRow[] | null
@@ -74,11 +71,6 @@ function normalizeTransportRequestServiceType(value: string | null): TransportRe
 
 function normalizeServiceDateAnchor(value: string | null | undefined): ServiceDateAnchor | null {
   return value === "pre" || value === "post" || value === "custom" ? value : null
-}
-
-function normalizeBookingScheduleSupplierKind(value: string): BookingScheduleSupplierKind | null {
-  if (value === "hotel_property" || value === "train_operator") return value
-  return null
 }
 
 function mapVehicleRentalRouteDetails(
@@ -308,6 +300,7 @@ export function mapBookingTransportRequest(row: BookingTransportRequestWithRenta
     flightNumber: row.flight_number ?? null,
     priceOverride: row.price_override ?? null,
     priceOverrideSetAt: row.price_override_set_at ?? null,
+    complimentary: row.complimentary ?? false,
     notes: row.notes ?? null,
     supplierReference: row.supplier_reference ?? null,
     sortOrder: row.sort_order,
@@ -315,37 +308,6 @@ export function mapBookingTransportRequest(row: BookingTransportRequestWithRenta
     updatedAt: row.updated_at,
     createdAtDisplay: formatDisplayDateTime(row.created_at),
     updatedAtDisplay: formatDisplayDateTime(row.updated_at),
-  }
-}
-
-export function mapBookingSupplierSchedule(row: BookingSupplierScheduleRow): BookingSupplierSchedule {
-  return {
-    id: row.id,
-    bookingId: row.booking_id,
-    supplierId: row.supplier_id ?? null,
-    supplierKind: normalizeBookingScheduleSupplierKind(row.supplier_kind) ?? "train_operator",
-    label: row.label ?? null,
-    dateFrom: row.date_from ?? "",
-    dateFromDisplay: formatDisplayDate(row.date_from),
-    dateTo: row.date_to ?? "",
-    dateToDisplay: formatDisplayDate(row.date_to),
-    timeStart: row.time_start ?? null,
-    timeEnd: row.time_end ?? null,
-    notes: row.notes ?? null,
-    sortOrder: row.sort_order,
-    createdAt: row.created_at,
-    createdAtDisplay: formatDisplayDateTime(row.created_at),
-    updatedAt: row.updated_at,
-    updatedAtDisplay: formatDisplayDateTime(row.updated_at),
-    bookingDate: row.booking_date ?? null,
-    bookingDateDisplay: formatDisplayDate(row.booking_date),
-    confirmationDate: row.confirmation_date ?? null,
-    confirmationDateDisplay: formatDisplayDate(row.confirmation_date),
-    paymentMadeDate: row.payment_made_date ?? null,
-    paymentMadeDateDisplay: formatDisplayDate(row.payment_made_date),
-    paidWith: row.paid_with ?? null,
-    amountPayable: row.amount_payable ?? null,
-    amountReceivable: row.amount_receivable ?? null,
   }
 }
 

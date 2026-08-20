@@ -16,6 +16,8 @@ From a new enquiry landing in the queue to a draft quote existing. Stops at **St
   **Open Job**, **Mark reviewed**, **Reject Import**, the audit download
 - `app/app/pipeline/page.tsx` — the **Draft enquiries** tab
 - `components/job-enquiry-tab.tsx` — the whole Enquiry tab
+- `components/enquiry-readiness-panel.tsx`, `lib/enquiry/build-readiness.ts` — the Requested
+  services panel and what it flags
 - `components/enquiry-parsed-fields-editor.tsx` — journey details editing
 - `lib/job-numbering.ts` — booking number format and prefix
 - `lib/import/parseEmailDraft.ts` — what gets parsed out of an inbound email
@@ -37,11 +39,13 @@ From a new enquiry landing in the queue to a draft quote existing. Stops at **St
    can reassign.
 7. **The Enquiry tab, section by section** — Customer Contact (read-only, and where to fix
    it), Journey Details, Trip Details, Hotel and Additional Services.
-8. **Transport requests** — adding, editing and removing transfers and vehicle rentals:
-   pickup and return date and time, passenger count, luggage, flight number.
-9. **Supplier schedules** — what the section is for.
-10. **Original email text** — where to find the source email on an imported enquiry.
-11. **Start Quote** — what it creates, and that the app jumps straight to the Quotes tab
+8. **The Requested services panel** — the three sections (Booked as / Asked for, not built /
+   Before the quote can go out), what **Auto-filled** vs **Confirmed** means, and that it is
+   read-only — everything changes in Build Booking, not here. Note that transfers, rentals,
+   tours and flights are never built automatically. Note that the needs-review banner now
+   shows here for every source, not only email imports.
+9. **Original email text** — where to find the source email on an imported enquiry.
+10. **Start Quote** — what it creates, and that the app jumps straight to the Quotes tab
     and opens Build Booking. Hand off to Chapter 4.
 
 ## Screenshots to capture
@@ -51,7 +55,7 @@ From a new enquiry landing in the queue to a draft quote existing. Stops at **St
 | `03-enquiry-queue` | The queue with filter chips visible |
 | `03-new-enquiry` | The New Enquiry dialog |
 | `03-enquiry-tab` | A populated Enquiry tab |
-| `03-transport-request` | A transport request row being edited |
+| `03-requested-services` | The Requested services panel on a booking with an auto-built service list |
 | `03-needs-review` | An imported enquiry flagged for review |
 
 ## Done when

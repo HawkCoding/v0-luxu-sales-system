@@ -6,8 +6,9 @@ import type { WorksheetPdfData } from "./worksheet-document"
 export function sampleWorksheetData(): Omit<WorksheetPdfData, "brandLogo"> {
   return {
     bookingNumber: "LTT-2026-0042",
-    invoiceNumber: "INV-2026-0042",
+    invoiceNumber: "LTT-2026-0042-INV",
     serviceName: "The Blue Train",
+    trainDepartureDate: "2026-12-14",
     consultant: "Leonie Bisschoff",
     arriveDate: "2026-12-13",
     departDate: "2026-12-20",

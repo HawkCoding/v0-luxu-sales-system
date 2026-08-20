@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
   buildWorksheetServiceLines,
-  type WorksheetScheduleRow,
   type WorksheetServiceRow,
   type WorksheetTransportRow,
 } from "@/lib/worksheet/service-lines"
@@ -15,6 +14,10 @@ function service(overrides: Partial<WorksheetServiceRow> & { id: string }): Work
     arrival_date: null,
     supplier_reference: null,
     notes: null,
+    booking_date: null,
+    confirmation_date: null,
+    payment_made_date: null,
+    paid_with: null,
     suppliers: null,
     routes: null,
     ...overrides,
@@ -29,6 +32,7 @@ function transport(overrides: Partial<WorksheetTransportRow> = {}): WorksheetTra
     pickup_at: null,
     notes: null,
     supplier_reference: null,
+    complimentary: false,
     suppliers: null,
     ...overrides,
   }
@@ -77,7 +81,6 @@ describe("buildWorksheetServiceLines", () => {
     const lines = buildWorksheetServiceLines({
       services: [TRAIN, HOTEL, FLIGHT, TRANSFER],
       transportRequests: [],
-      schedules: [],
     })
 
     expect(lines.map((l) => l.description)).toEqual([
@@ -92,7 +95,6 @@ describe("buildWorksheetServiceLines", () => {
     const [line] = buildWorksheetServiceLines({
       services: [HOTEL],
       transportRequests: [],
-      schedules: [],
     })
 
     expect(line.description).toBe("Commodore Hotel")
@@ -102,7 +104,6 @@ describe("buildWorksheetServiceLines", () => {
     const lines = buildWorksheetServiceLines({
       services: [TRAIN, HOTEL, FLIGHT],
       transportRequests: [],
-      schedules: [],
     })
 
     // Train: duration_days counts the departure day, so a 2-day run arrives the next day.
@@ -120,7 +121,6 @@ describe("buildWorksheetServiceLines", () => {
         }),
       ],
       transportRequests: [],
-      schedules: [],
     })
 
     expect(line.toDate).toBeNull()
@@ -141,7 +141,6 @@ describe("buildWorksheetServiceLines", () => {
         }),
       ],
       transportRequests: [],
-      schedules: [],
     })
 
     expect(line.description).toBe("The Blue Train — Pretoria → Cape Town")
@@ -162,7 +161,6 @@ describe("buildWorksheetServiceLines", () => {
         }),
       ],
       transportRequests: [],
-      schedules: [],
     })
 
     expect(line.description).toBe("Table Bay Hotel — Deluxe Suite")
@@ -181,7 +179,6 @@ describe("buildWorksheetServiceLines", () => {
         }),
       ],
       transportRequests: [],
-      schedules: [],
     })
 
     expect(line.notes).toBe("First night complimentary — Late check-out requested")
@@ -200,7 +197,6 @@ describe("buildWorksheetServiceLines", () => {
         }),
       ],
       transportRequests: [],
-      schedules: [],
     })
 
     expect(line.notes).toBe("Late check-out requested")
@@ -225,7 +221,6 @@ describe("buildWorksheetServiceLines", () => {
           suppliers: { name: "Cape Executive Transfers" },
         }),
       ],
-      schedules: [],
     })
 
     expect(lines).toHaveLength(2)
@@ -233,11 +228,34 @@ describe("buildWorksheetServiceLines", () => {
     expect(lines.map((l) => l.fromDate)).toEqual(["2026-10-20", "2026-10-21"])
   })
 
+  it("prefixes a complimentary trip's notes without touching the charged trip on the same leg", () => {
+    const lines = buildWorksheetServiceLines({
+      services: [TRANSFER],
+      transportRequests: [
+        transport({
+          service_id: "transfer",
+          sort_order: 0,
+          complimentary: true,
+          notes: "Extra luggage",
+          suppliers: { name: "Cape Executive Transfers" },
+        }),
+        transport({
+          service_id: "transfer",
+          sort_order: 1,
+          complimentary: false,
+          notes: null,
+          suppliers: { name: "Cape Executive Transfers" },
+        }),
+      ],
+    })
+
+    expect(lines.map((l) => l.notes)).toEqual(["Complimentary — Extra luggage", null])
+  })
+
   it("keeps a transfer service that has no captured trips", () => {
     const lines = buildWorksheetServiceLines({
       services: [TRANSFER],
       transportRequests: [],
-      schedules: [],
     })
 
     expect(lines).toEqual([expect.objectContaining({ description: "Cape Executive Transfers" })])
@@ -252,27 +270,24 @@ describe("buildWorksheetServiceLines", () => {
           suppliers: { name: "Airport Shuttle" },
         }),
       ],
-      schedules: [],
     })
 
     expect(lines.map((l) => l.description)).toEqual(["Airport Shuttle", "The Blue Train"])
   })
 
-  it("carries the Suppliers tab's admin dates across by supplier", () => {
-    const schedules: WorksheetScheduleRow[] = [
-      {
-        supplier_id: "supplier-train",
-        booking_date: "2026-08-01",
-        confirmation_date: "2026-08-03",
-        payment_made_date: "2026-08-10",
-        paid_with: "EFT",
-      },
-    ]
-
+  it("carries each service's own admin dates onto its line", () => {
     const [train, hotel] = buildWorksheetServiceLines({
-      services: [TRAIN, HOTEL],
+      services: [
+        service({
+          ...TRAIN,
+          booking_date: "2026-08-01",
+          confirmation_date: "2026-08-03",
+          payment_made_date: "2026-08-10",
+          paid_with: "EFT",
+        }),
+        HOTEL,
+      ],
       transportRequests: [],
-      schedules,
     })
 
     expect(train).toMatchObject({
@@ -284,11 +299,67 @@ describe("buildWorksheetServiceLines", () => {
     expect(hotel).toMatchObject({ bookingDate: null, paidWith: null })
   })
 
+  it("carries a captured trip's parent transfer leg's admin dates onto its line", () => {
+    const transferWithAdminDates = service({
+      ...TRANSFER,
+      booking_date: "2026-09-01",
+      confirmation_date: "2026-09-02",
+      payment_made_date: "2026-09-05",
+      paid_with: "Cash",
+    })
+
+    const lines = buildWorksheetServiceLines({
+      services: [transferWithAdminDates],
+      transportRequests: [
+        transport({ service_id: "transfer", sort_order: 0, suppliers: { name: "Cape Executive Transfers" } }),
+        transport({ service_id: "transfer", sort_order: 1, suppliers: { name: "Cape Executive Transfers" } }),
+      ],
+    })
+
+    expect(lines).toHaveLength(2)
+    for (const line of lines) {
+      expect(line).toMatchObject({
+        bookingDate: "2026-09-01",
+        confirmationDate: "2026-09-02",
+        paymentMadeDate: "2026-09-05",
+        paidWith: "Cash",
+      })
+    }
+  })
+
+  it("gives a trip with no parent service no admin dates, and never borrows another leg's", () => {
+    const [orphan, train] = buildWorksheetServiceLines({
+      services: [
+        service({
+          ...TRAIN,
+          booking_date: "2026-08-01",
+          confirmation_date: "2026-08-03",
+          payment_made_date: "2026-08-10",
+          paid_with: "EFT",
+        }),
+      ],
+      transportRequests: [
+        transport({
+          pickup_at: "2026-10-13T14:00:00+02:00",
+          suppliers: { name: "Airport Shuttle" },
+        }),
+      ],
+    })
+
+    expect(orphan).toMatchObject({
+      description: "Airport Shuttle",
+      bookingDate: null,
+      confirmationDate: null,
+      paymentMadeDate: null,
+      paidWith: null,
+    })
+    expect(train).toMatchObject({ bookingDate: "2026-08-01" })
+  })
+
   it("sorts by start date and pushes undated lines to the end", () => {
     const lines = buildWorksheetServiceLines({
       services: [HOTEL, service({ id: "tbc", suppliers: { name: "TBC Tour", kind: "tour_operator" } }), TRAIN],
       transportRequests: [],
-      schedules: [],
     })
 
     expect(lines.map((l) => l.description)).toEqual(["The Blue Train", "Commodore Hotel", "TBC Tour"])
@@ -298,7 +369,6 @@ describe("buildWorksheetServiceLines", () => {
     const [line] = buildWorksheetServiceLines({
       services: [service({ id: "orphan", service_date: "2026-10-14" })],
       transportRequests: [],
-      schedules: [],
     })
 
     expect(line.description).toBe("")

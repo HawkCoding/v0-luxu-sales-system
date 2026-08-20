@@ -42,6 +42,15 @@ export function isComplimentaryTour(lineItem: QuoteLineItem): boolean {
 }
 
 /**
+ * True when a transfer/rental trip was deliberately marked complimentary — a dedicated flag,
+ * independent of `manualTransportPrice`, so a comped trip is distinguishable from one that was
+ * simply typed as R0. See the toggle in transport-leg-editor.tsx.
+ */
+export function isComplimentaryTransport(lineItem: QuoteLineItem): boolean {
+  return lineItem.pricingSnapshot?.isComplimentaryTransport === true
+}
+
+/**
  * Nights of a hotel room's stay the supplier gifted. Today the "Mark first night complimentary"
  * action in suite-leg-editor.tsx only ever gifts one, but the count is what the line's qty was
  * derived from, so it is read back as a number rather than a flag.
@@ -81,6 +90,7 @@ export function isMissingPricing(lineItem: QuoteLineItem): boolean {
     // A one-night stay with its only night gifted charges nothing and prices nothing — that is a
     // finished line, not an unpriced one.
     !hasComplimentaryNight(lineItem) &&
+    !isComplimentaryTransport(lineItem) &&
     !isFreeInfant(lineItem)
   )
 }

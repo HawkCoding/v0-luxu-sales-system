@@ -54,8 +54,9 @@ export interface VoucherServiceBlockData {
   roomType?: string | null
   nights?: number | null
   mealPlan?: string | null
-  /** Hotel-only: true when the whole stay was comped (its room price was typed as R0). Drives a
-   *  client-facing "COMPLIMENTARY" callout on the itinerary line. */
+  /** Hotel: true when the whole stay was comped (its room price was typed as R0). Transfer: true
+   *  when the trip was marked complimentary (booking_transport_requests.complimentary). Either
+   *  way it drives a client-facing "COMPLIMENTARY" callout on the itinerary line. */
   isComplimentary?: boolean | null
   /** Hotel-only: true when the hotel gifted the first night and charged the rest. The line still
    *  states the full stay length; the callout reads "FIRST NIGHT COMPLIMENTARY". */
@@ -256,7 +257,9 @@ ${rows.join("\n")}
 }
 
 function buildServiceBlockBodyRows(block: VoucherServiceBlock): string {
-  return voucherRowsForBlock(block)
+  // Inclusions are quote-and-itinerary copy; the voucher stays operational. Kept in sync with the
+  // matching `showInclusions={false}` on the PDF voucher's ServiceBlock.
+  return voucherRowsForBlock(block, { showInclusions: false })
     .map((row) => (row.cells ? cellRow(row.label, row.cells, { dotted: true }) : infoRow(row.label, row.value ?? "", { dotted: true })))
     .join("\n")
 }

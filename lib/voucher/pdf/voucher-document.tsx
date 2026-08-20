@@ -49,6 +49,7 @@ function sectionFor(key: VoucherSectionKey, data: VoucherData, template: Voucher
             density="compact"
             showEyebrow={false}
             showDescription={false}
+            showInclusions={false}
           />
         ))}
         <Text style={styles.endOfServices}>End of Services</Text>

@@ -269,6 +269,42 @@ describe("voucherRowsForBlock", () => {
     expect(rows.find((r) => r.label === "Occasion")).toBeUndefined()
   })
 
+  // The voucher passes showInclusions: false; the itinerary PDF leaves it at its default. Only the
+  // "Included" row may differ between the two — everything else has to stay identical.
+  it("train block: showInclusions false drops only the Included row", () => {
+    const serviceData = {
+      route: "Pretoria → Cape Town",
+      departureDate: "2026-09-07",
+      suiteType: "Twin bedded Deluxe Suite with a shower",
+      inclusions: ["High Tea", "Butler service"],
+      requestsLine: "1st seating meals; Nonsmoking",
+    }
+    const withInclusions = voucherRowsForBlock(block({ serviceType: "train", serviceData }))
+    const without = voucherRowsForBlock(block({ serviceType: "train", serviceData }), {
+      showInclusions: false,
+    })
+    expect(labels(withInclusions)).toContain("Included")
+    expect(labels(without)).not.toContain("Included")
+    expect(without).toEqual(withInclusions.filter((r) => r.label !== "Included"))
+  })
+
+  it("hotel block: prints Included by default and drops it when showInclusions is false", () => {
+    const serviceData = {
+      roomType: "Luxury Suite",
+      nights: 2,
+      departureDate: "2026-09-07",
+      inclusions: ["Breakfast", "Airport shuttle"],
+      dietary: "No shellfish",
+    }
+    const withInclusions = voucherRowsForBlock(block({ serviceType: "hotel", serviceData }))
+    const without = voucherRowsForBlock(block({ serviceType: "hotel", serviceData }), {
+      showInclusions: false,
+    })
+    expect(withInclusions.find((r) => r.label === "Included")?.value).toBe("Breakfast, Airport shuttle")
+    expect(labels(without)).not.toContain("Included")
+    expect(without.find((r) => r.label === "Dietary")?.value).toBe("No shellfish")
+  })
+
   it("train block: drops Route and Suite Type entirely when unset, instead of printing an em dash", () => {
     const rows = voucherRowsForBlock(
       block({ serviceType: "train", serviceData: { departureDate: "2026-08-21" } }),

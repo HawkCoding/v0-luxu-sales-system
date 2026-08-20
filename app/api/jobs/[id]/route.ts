@@ -22,9 +22,9 @@ import { requireUser } from "@/lib/api/auth"
 import { detectFieldConflicts, fieldConflictResponse, staleVersionResponse } from "@/lib/concurrency"
 import { mapPostgrestError } from "@/lib/api/responses"
 import { formatDisplayDate, formatDisplayDateTime } from "@/lib/date-format"
-import { buildSupplierRouteSchedules } from "@/lib/routes/route-schedule"
 import { firstRecord } from "@/lib/utils"
-import type { PipelineStage } from "@/lib/types"
+import type { PipelineStage, SupplierKind } from "@/lib/types"
+import { buildEnquiryReadiness } from "@/lib/enquiry/build-readiness"
 import { extractRoleFromJwt } from "@/lib/role-utils"
 import { applyTransition, StaleTransitionError } from "@/lib/pipeline/apply-transition"
 import { calculateRefund } from "@/lib/invoices/calculate-refund"
@@ -168,7 +168,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     { data: documentsData },
     { data: correspondenceData },
     { data: auditData },
-    { data: trainLegsData },
+    { data: bookingServicesData },
   ] = await Promise.all([
     getDefaultDepositPercentage(supabase),
     supabase.from("customers").select(CUSTOMER_COLUMNS).eq("id", booking.customer_id).single(),
@@ -189,13 +189,14 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     supabase.from("documents").select(DOCUMENT_COLUMNS).eq("booking_id", id).order("created_at"),
     supabase.from("correspondences").select(CORRESPONDENCE_COLUMNS).eq("booking_id", id).order("created_at"),
     supabase.from("audit_logs").select(AUDIT_LOG_COLUMNS).eq("entity_id", id).order("created_at", { ascending: false }),
-    // Each leg carries its own route_reversed, set at intake. bookings.route_reversed is only
-    // written once a quote exists (lib/quotes/resolve-primary-route.ts), so reading the leg is the
-    // only way an enquiry-stage reversed journey prefills its real departure time.
+    // The booking's built services, for the Enquiry tab's readiness panel — what it's built as vs
+    // what the customer asked for (see lib/enquiry/build-readiness.ts).
     supabase
       .from("booking_services")
       .select(
-        "supplier_id, route_reversed, sort_order, suppliers(kind), routes(departure_time, arrival_time, return_departure_time, return_arrival_time)",
+        `id, supplier_id, route_id, selected, origin, service_date, nights, sort_order,
+         suppliers(name, kind),
+         units:booking_service_units(id, suite_type_id)`,
       )
       .eq("booking_id", id)
       .order("sort_order"),
@@ -292,14 +293,74 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const resolvedSupplier = route?.supplier?.name ?? null
   const resolvedHotelOption = hotelSupplier?.name ?? null
 
-  const routeSchedules = buildSupplierRouteSchedules(
-    (trainLegsData ?? []).map((leg) => ({
-      supplier_id: leg.supplier_id,
-      route_reversed: leg.route_reversed,
-      supplierKind: firstRecord(leg.suppliers)?.kind ?? null,
-      route: firstRecord(leg.routes),
-    })),
+  // Who confirmed the service list and when, resolved the same way GET /api/jobs/[id]/services
+  // does — reusing the profiles list already loaded for the whole page rather than a second query.
+  const servicesConfirmedByName = booking.services_confirmed_by
+    ? allProfiles.find((profile) => profile.id === booking.services_confirmed_by)?.name ?? null
+    : null
+
+  // The newest booking_auto_built audit row's reason nothing was built at intake -- the one gap
+  // no current-state check can explain on its own (see lib/enquiry/build-readiness.ts). auditData
+  // is already ordered newest-first for the Audit Log tab, so the first match here is the latest.
+  const autoBuildAudit = (auditData ?? []).find(
+    (entry) => entry.entity_type === "Booking" && entry.action === "booking_auto_built",
   )
+  const autoBuildSkipped = (autoBuildAudit?.meta_json as { skipped?: string[] } | null)?.skipped
+  const autoBuildSkipReason = autoBuildSkipped && autoBuildSkipped.length > 0 ? autoBuildSkipped[0] : null
+
+  const readiness = buildEnquiryReadiness({
+    services: (bookingServicesData ?? []).map((leg) => {
+      const supplierKind = firstRecord(leg.suppliers)?.kind as SupplierKind | null | undefined
+      const units = Array.isArray(leg.units) ? leg.units : leg.units ? [leg.units] : []
+      return {
+        id: leg.id,
+        supplierId: leg.supplier_id,
+        supplierName: firstRecord(leg.suppliers)?.name ?? null,
+        supplierKind: supplierKind ?? null,
+        selected: leg.selected,
+        origin: leg.origin,
+        serviceDate: leg.service_date,
+        serviceDateDisplay: formatDisplayDate(leg.service_date),
+        nights: leg.nights,
+        routeId: leg.route_id,
+        sortOrder: leg.sort_order,
+        unitCount: units.length,
+        unitsMissingSuiteType: units.filter((unit) => !unit.suite_type_id).length,
+      }
+    }),
+    suites: (bookingSuites ?? []).map((suite) => ({
+      suiteTypeId: suite.suite_type_id,
+      sourcePhrase: suite.source_phrase,
+    })),
+    noOfSuites: booking.no_of_suites,
+    hotelOptionResolved: resolvedHotelOption ?? (readFormField(booking.extracted_json, "hotelOption") || null),
+    hotelPhase: booking.hotel_phase !== "none" ? booking.hotel_phase : null,
+    extendStay: booking.extend_stay ?? false,
+    extraNights: booking.extra_nights ?? null,
+    additionalServicesRequested: booking.additional_services ?? false,
+    additionalServicesDetails: booking.additional_services_details ?? null,
+    packageOption: readFormField(booking.extracted_json, "packageOption") || null,
+    flightBookingRaw: readFormField(booking.extracted_json, "flightBooking") || null,
+    supplierResolved: Boolean(resolvedSupplier),
+    supplierRaw: resolvedSupplier ?? (readFormField(booking.extracted_json, "supplier") || null),
+    customer: customer
+      ? {
+          firstName: customer.first_name,
+          lastName: customer.last_name,
+          email: customer.email,
+          phone: customer.phone,
+          country: customer.country,
+        }
+      : null,
+    emailImportNeedsReview: booking.email_import_needs_review ?? false,
+    emailImportMissingFields: booking.email_import_missing_fields ?? [],
+    emailImportWarnings: booking.email_import_warnings ?? [],
+    emailImportDuplicateOfBookingId: booking.email_import_duplicate_of_booking_id ?? null,
+    emailImportReviewResolvedAt: booking.email_import_review_resolved_at ?? null,
+    servicesConfirmedAt: booking.services_confirmed_at ?? null,
+    servicesConfirmedByName,
+    autoBuildSkipReason,
+  })
 
   const enquiry = {
     id: booking.id,
@@ -325,7 +386,6 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     country: customer?.country ?? "",
     direction: resolvedDirection ?? readFormField(booking.extracted_json, "direction"),
     directionResolved: Boolean(resolvedDirection),
-    routeSchedules,
     supplier: resolvedSupplier ?? (readFormField(booking.extracted_json, "supplier") || undefined),
     supplierResolved: Boolean(resolvedSupplier),
     departureDate: booking.departure_date ?? "",
@@ -551,6 +611,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     job,
     customer: customerOut,
     enquiry,
+    readiness,
     itineraries,
     quotes,
     payments,

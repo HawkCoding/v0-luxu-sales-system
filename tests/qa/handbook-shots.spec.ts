@@ -251,7 +251,7 @@ test.describe("ch03 enquiries", () => {
     await context.close()
   })
 
-  test("03 transport request", async ({ browser }) => {
+  test("03 requested services", async ({ browser }) => {
     loadQaEnv()
     const supabase = createQaSupabase()
     const { data: booking, error } = await supabase
@@ -267,11 +267,9 @@ test.describe("ch03 enquiries", () => {
     const context = await browser.newContext({ storageState: HANDBOOK_USERS.consultant.storageState })
     const page = await context.newPage()
     await page.goto(`/app/bookings/${booking.id}?tab=enquiry`)
-    await expect(page.getByText("Transport Requests")).toBeVisible({ timeout: 60_000 })
-    await page.getByText("Transport Requests").scrollIntoViewIfNeeded()
-    await page.getByRole("button", { name: /^add$/i }).first().click()
-    await expect(page.getByText("Pickup date/time").first()).toBeVisible()
-    await shot(page, "03-transport-request")
+    await expect(page.getByText("Requested services")).toBeVisible({ timeout: 60_000 })
+    await page.getByText("Requested services").scrollIntoViewIfNeeded()
+    await shot(page, "03-requested-services")
     await context.close()
   })
 

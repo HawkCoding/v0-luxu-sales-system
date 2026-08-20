@@ -86,6 +86,7 @@ function makeRequest(overrides: Partial<BookingTransportRequest> = {}): BookingT
     flightNumber: null,
     priceOverride: null,
     priceOverrideSetAt: null,
+    complimentary: false,
     notes: null,
     supplierReference: null,
     sortOrder: 0,
@@ -108,6 +109,10 @@ function makeLegState(
     rateTypeId: null,
     priceCurrency: "ZAR",
     requests,
+    bookingDate: null,
+    confirmationDate: null,
+    paymentMadeDate: null,
+    paidWith: null,
     origin: "consultant",
     ...overrides,
   }
@@ -170,6 +175,37 @@ describe("TransportLegEditor price override", () => {
         requests: [expect.objectContaining({ priceOverride: null })],
       }),
     )
+  })
+
+  it("toggles complimentary independently of the price override", () => {
+    const onChange = vi.fn()
+    render(
+      <TransportLegEditor
+        leg={transferLeg}
+        value={makeLegState([makeRequest({ priceOverride: 850 })])}
+        onChange={onChange}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /mark complimentary/i }))
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requests: [expect.objectContaining({ complimentary: true, priceOverride: 850 })],
+      }),
+    )
+  })
+
+  it("shows a Complimentary badge instead of Overridden when the trip is marked complimentary", () => {
+    render(
+      <TransportLegEditor
+        leg={transferLeg}
+        value={makeLegState([makeRequest({ priceOverride: 850, complimentary: true })])}
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText("Complimentary")).toBeInTheDocument()
+    expect(screen.queryByText("Overridden")).not.toBeInTheDocument()
   })
 
   it("still lets an override be typed when no rate card covers this vehicle category", () => {

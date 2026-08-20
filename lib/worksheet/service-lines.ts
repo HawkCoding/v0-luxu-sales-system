@@ -27,6 +27,12 @@ export interface WorksheetServiceRow {
   supplier_reference: string | null
   notes: string | null
   route_reversed?: boolean | null
+  /** The supplier-booking record for this leg — when it was placed, confirmed and paid with the
+   * supplier. Internal only; feeds this grid's admin-date columns. */
+  booking_date: string | null
+  confirmation_date: string | null
+  payment_made_date: string | null
+  paid_with: string | null
   suppliers: Join<{ name: string; kind: string }>
   routes: Join<WorksheetRouteJoin>
   /** Legacy pre-cutover hotel rows with no per-room units — see resolveRoomNames. */
@@ -36,7 +42,8 @@ export interface WorksheetServiceRow {
   units?: Join<{ complimentary_first_night: boolean; suite_types?: WorksheetSuiteJoin }>
 }
 
-/** A captured transfer/rental/flight trip. `service_id` links it back to its service row. */
+/** A captured transfer/rental/flight trip. `service_id` links it back to its service row, whose
+ * admin dates it inherits — a trip has no supplier-booking record of its own. */
 export interface WorksheetTransportRow {
   service_id: string | null
   supplier_id: string | null
@@ -44,22 +51,13 @@ export interface WorksheetTransportRow {
   pickup_at: string | null
   notes: string | null
   supplier_reference: string | null
+  complimentary: boolean
   suppliers: Join<{ name: string }>
-}
-
-/** The Suppliers tab's manually-captured admin dates, keyed by supplier. */
-export interface WorksheetScheduleRow {
-  supplier_id: string | null
-  booking_date: string | null
-  confirmation_date: string | null
-  payment_made_date: string | null
-  paid_with: string | null
 }
 
 export interface BuildWorksheetServiceLinesInput {
   services: readonly WorksheetServiceRow[]
   transportRequests: readonly WorksheetTransportRow[]
-  schedules: readonly WorksheetScheduleRow[]
 }
 
 /**
@@ -105,6 +103,13 @@ function complimentaryNote(
   return notes?.trim() ? `${note} — ${notes.trim()}` : note
 }
 
+/** Prefixes a transfer trip's notes with "Complimentary" when the trip was marked comped — same
+ * reasoning as complimentaryNote for hotels, just per-request rather than per-room. */
+function complimentaryTransportNote(request: WorksheetTransportRow, notes: string | null): string | null {
+  if (!request.complimentary) return notes
+  return notes?.trim() ? `Complimentary — ${notes.trim()}` : "Complimentary"
+}
+
 /** Room type name(s) booked on a hotel leg, deduped — per-room `units` when present, falling back
  * to the leg's own `suite_type_id` for legacy pre-cutover rows with no unit children (mirrors the
  * fallback in `resolveLegSuiteNames`, minus the bed/bathroom composition the worksheet doesn't need). */
@@ -139,37 +144,30 @@ function resolveServiceDescription(service: WorksheetServiceRow, serviceType: st
  *
  * The worksheet is an internal hand-finished document: the description is the supplier name, plus
  * the route booked (trains) or room booked (hotels) — everything financial is left blank for pen.
- * Only the admin dates the Suppliers tab already captured are carried over, matched by supplier.
+ * The admin dates come from the service row itself; a captured trip inherits its parent leg's.
  */
 export function buildWorksheetServiceLines({
   services,
   transportRequests,
-  schedules,
 }: BuildWorksheetServiceLinesInput): WorksheetServiceLine[] {
-  const scheduleBySupplier = new Map<string, WorksheetScheduleRow>()
-  for (const schedule of schedules) {
-    if (schedule.supplier_id && !scheduleBySupplier.has(schedule.supplier_id)) {
-      scheduleBySupplier.set(schedule.supplier_id, schedule)
-    }
-  }
+  const serviceById = new Map(services.map((service) => [service.id, service]))
 
-  const adminDates = (supplierId: string | null) => {
-    const schedule = supplierId ? scheduleBySupplier.get(supplierId) : undefined
-    return {
-      bookingDate: schedule?.booking_date ?? null,
-      confirmationDate: schedule?.confirmation_date ?? null,
-      paymentMadeDate: schedule?.payment_made_date ?? null,
-      paidWith: schedule?.paid_with ?? null,
-    }
-  }
+  const adminDatesOf = (service: WorksheetServiceRow | undefined) => ({
+    bookingDate: service?.booking_date ?? null,
+    confirmationDate: service?.confirmation_date ?? null,
+    paymentMadeDate: service?.payment_made_date ?? null,
+    paidWith: service?.paid_with ?? null,
+  })
 
   const transportLine = (request: WorksheetTransportRow): WorksheetServiceLine => ({
     fromDate: request.pickup_at ? request.pickup_at.slice(0, 10) : null,
     toDate: null,
     description: firstRecord(request.suppliers)?.name ?? "",
     reservationReference: request.supplier_reference,
-    notes: request.notes,
-    ...adminDates(request.supplier_id),
+    notes: complimentaryTransportNote(request, request.notes),
+    // An orphan trip (no service_id, or one outside this booking) gets no admin dates — nobody
+    // recorded a supplier booking for it. It does not fall back to any other leg's.
+    ...adminDatesOf(request.service_id ? serviceById.get(request.service_id) : undefined),
   })
 
   const orderedServices = [...services].sort((a, b) => a.sort_order - b.sort_order)
@@ -199,7 +197,7 @@ export function buildWorksheetServiceLines({
         description: resolveServiceDescription(service, serviceType, supplier?.name ?? ""),
         reservationReference: service.supplier_reference,
         notes: complimentaryNote(service, serviceType, service.notes),
-        ...adminDates(service.supplier_id),
+        ...adminDatesOf(service),
       },
     ]
   })

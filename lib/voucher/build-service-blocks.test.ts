@@ -262,6 +262,50 @@ describe("buildVoucherServiceBlocks", () => {
     expect(Math.floor(first.displayOrder)).toBe(2)
   })
 
+  it("flags only the request marked complimentary, keyed by request id not leg id", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [transferSelection()],
+        transportRequests: [
+          {
+            id: "req-comped",
+            service_id: "leg-transfer",
+            service_type: "transfer",
+            pickup_point: "Cape Town International Airport",
+            dropoff_point: "The Silo Hotel",
+            pickup_at: "2026-09-01T06:30:00.000Z",
+            flight_number: null,
+            notes: null,
+            sort_order: 0,
+            suppliers: supplier(),
+            suite_types: null,
+            rental_details: null,
+          },
+          {
+            id: "req-charged",
+            service_id: "leg-transfer",
+            service_type: "transfer",
+            pickup_point: "The Silo Hotel",
+            dropoff_point: "Cape Town Station",
+            pickup_at: "2026-09-03T12:00:00.000Z",
+            flight_number: null,
+            notes: null,
+            sort_order: 1,
+            suppliers: supplier(),
+            suite_types: null,
+            rental_details: null,
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID, complimentaryTransportRequestIds: new Set(["req-comped"]) },
+    )
+
+    expect(blocks).toHaveLength(2)
+    const [first, second] = blocks
+    expect(first.serviceData.isComplimentary).toBe(true)
+    expect(second.serviceData.isComplimentary).toBe(false)
+  })
+
   // QA 11, F11-5. A priced transfer used to print as "Date to be confirmed — Transfer", with no
   // route and no points, whenever its trip row was still blank — even though the leg itself
   // carried both a service_date and a route. The trip is authoritative where it says something;

@@ -3,6 +3,7 @@ import type { QuoteLineItem } from "@/lib/types"
 import {
   complimentaryNights,
   hasComplimentaryNight,
+  isComplimentaryTransport,
   isMissingPricing,
   stayNights,
 } from "@/lib/quotes/pricing-engine"
@@ -46,6 +47,38 @@ describe("isMissingPricing", () => {
       pricingSnapshot: { pricingMode: "rate_card", manualRoomPrice: 0 } as QuoteLineItem["pricingSnapshot"],
     })
     expect(isMissingPricing(comped)).toBe(false)
+  })
+
+  it("does not flag a transfer marked complimentary", () => {
+    const comped = line({
+      unitPrice: 0,
+      pricingSnapshot: { pricingMode: "rate_card", isComplimentaryTransport: true } as QuoteLineItem["pricingSnapshot"],
+    })
+    expect(isMissingPricing(comped)).toBe(false)
+  })
+})
+
+describe("isComplimentaryTransport", () => {
+  it("reads the dedicated flag, independent of manualTransportPrice", () => {
+    const comped: QuoteLineItem = {
+      description: "Transfer",
+      qty: 1,
+      unitPrice: 0,
+      total: 0,
+      pricingSnapshot: { pricingMode: "rate_card", isComplimentaryTransport: true } as QuoteLineItem["pricingSnapshot"],
+    }
+    expect(isComplimentaryTransport(comped)).toBe(true)
+  })
+
+  it("does not flag a plain manual R0 transfer price as complimentary", () => {
+    const zeroOverride: QuoteLineItem = {
+      description: "Transfer",
+      qty: 1,
+      unitPrice: 0,
+      total: 0,
+      pricingSnapshot: { pricingMode: "rate_card", manualTransportPrice: 0 } as QuoteLineItem["pricingSnapshot"],
+    }
+    expect(isComplimentaryTransport(zeroOverride)).toBe(false)
   })
 })
 

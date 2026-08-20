@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -208,15 +209,20 @@ export function JobReferencesTab({ bookingId }: JobReferencesTabProps) {
                 </div>
 
                 <div className="space-y-1">
-                  <Label htmlFor={`footnote-${row.key}`}>Special note for this leg</Label>
+                  <Label htmlFor={`footnote-${row.key}`}>
+                    {row.isAirline ? "Special note for this flight" : "Special note for this leg"}
+                  </Label>
                   <p className="text-xs text-muted-foreground">
                     Anything the guest needs to know that isn&apos;t already shown above. It prints on
-                    the voucher, under this supplier&apos;s details.
+                    the voucher, under this {row.isAirline ? "flight" : "supplier"}&apos;s details.
                     <br />
-                    Example: &quot;Check in at Irene Country Lodge 2 hours before departure&quot;
+                    {row.isAirline
+                      ? "Example: “Check in 3 hours before departure — international counters, Terminal A”"
+                      : "Example: “Check in at Irene Country Lodge 2 hours before departure”"}
                   </p>
-                  <Input
+                  <Textarea
                     id={`footnote-${row.key}`}
+                    rows={2}
                     value={draft.footnote}
                     onChange={(event) => updateDraft(row.key, { footnote: event.target.value })}
                   />

@@ -36,6 +36,7 @@ const transportRequestSchema = z.object({
   luggageCount: z.number().int().nonnegative().nullable().optional(),
   flightNumber: z.string().trim().max(100).nullable().optional(),
   priceOverride: z.number().nonnegative().nullable().optional(),
+  complimentary: z.boolean().optional(),
   notes: z.string().trim().max(2000).nullable().optional(),
   sortOrder: z.number().int().nonnegative().optional(),
 }).superRefine((request, context) => {
@@ -165,6 +166,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
       price_override: priceOverride,
       price_override_set_at: priceOverride === null ? null : unchanged ? previous?.setAt ?? savedAt : savedAt,
       price_override_set_by: priceOverride === null ? null : unchanged ? previous?.setBy ?? user.id : user.id,
+      complimentary: request.complimentary ?? false,
       notes: normalizeNullableText(request.notes),
       sort_order: request.sortOrder ?? index,
     }

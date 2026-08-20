@@ -283,6 +283,100 @@ describe("buildPackageQuoteLineItems", () => {
     expect(lineItems[0].pricingSnapshot?.manualTransportPriceSetAt).toBe("2026-08-14T09:00:00Z")
   })
 
+  it("prices a complimentary transfer at 0 regardless of the rate card, leaving the other request charged", async () => {
+    const transferLeg = leg({
+      id: "leg-transfer",
+      supplierKind: "transfers",
+      routes: [route("route-t", "supplier-leg-transfer", "Airport transfers")],
+      suiteTypes: [suiteType("vehicle-sedan", "supplier-leg-transfer", "Sedan")],
+      rateCards: [rateCard({ id: "rc-sedan", routeId: "route-t", suiteTypeId: "vehicle-sedan", pricePerPerson: 500 })],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({
+        transportRequests: [
+          {
+            id: "request-comped",
+            service_type: "transfer",
+            route_id: null,
+            suite_type_id: "vehicle-sedan",
+            service_id: "leg-transfer",
+            pickup_point: "Airport",
+            dropoff_point: "Hotel",
+            pickup_at: null,
+            price_override: null,
+            complimentary: true,
+            rental_details: null,
+          },
+          {
+            id: "request-charged",
+            service_type: "transfer",
+            route_id: null,
+            suite_type_id: "vehicle-sedan",
+            service_id: "leg-transfer",
+            pickup_point: "Hotel",
+            dropoff_point: "Station",
+            pickup_at: null,
+            price_override: null,
+            complimentary: false,
+            rental_details: null,
+          },
+        ],
+      }),
+      packageDetail: detail([transferLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [{ legId: "leg-transfer", selected: true, suiteTypeId: "vehicle-sedan" }],
+    })
+
+    expect(lineItems).toHaveLength(2)
+    const [comped, charged] = lineItems
+    expect(comped.unitPrice).toBe(0)
+    expect(comped.pricingSnapshot?.isComplimentaryTransport).toBe(true)
+    expect(comped.pricingSnapshot?.transportRequestId).toBe("request-comped")
+    expect(isMissingPricing(comped)).toBe(false)
+    expect(charged.unitPrice).toBe(500)
+    expect(charged.pricingSnapshot?.isComplimentaryTransport).toBeUndefined()
+  })
+
+  it("prices a complimentary transfer at 0 with no rate card at all, unlike a plain unpriced request", async () => {
+    const transferLeg = leg({
+      id: "leg-transfer",
+      supplierKind: "transfers",
+      routes: [route("route-t", "supplier-leg-transfer", "Airport transfers")],
+      suiteTypes: [suiteType("vehicle-sedan", "supplier-leg-transfer", "Sedan")],
+      rateCards: [],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({
+        transportRequests: [
+          {
+            id: "request-comped",
+            service_type: "transfer",
+            route_id: null,
+            suite_type_id: "vehicle-sedan",
+            service_id: "leg-transfer",
+            pickup_point: "Airport",
+            dropoff_point: "Private villa, Bantry Bay",
+            pickup_at: null,
+            price_override: null,
+            complimentary: true,
+            rental_details: null,
+          },
+        ],
+      }),
+      packageDetail: detail([transferLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [{ legId: "leg-transfer", selected: true, suiteTypeId: "vehicle-sedan", priceCurrency: "ZAR" }],
+    })
+
+    expect(lineItems).toHaveLength(1)
+    expect(lineItems[0].unitPrice).toBe(0)
+    expect(lineItems[0].pricingSnapshot?.isComplimentaryTransport).toBe(true)
+  })
+
   it("prices a vehicle rental override per day, using the billable day count", async () => {
     const rentalLeg = leg({
       id: "leg-rental",

@@ -709,6 +709,13 @@ export interface PricingSnapshot {
   manualTransportPriceBase?: number | null
   manualTransportPriceSetAt?: string | null
   manualTransportPriceSetByName?: string | null
+  /** Transfer/rental legs only: true when the trip was marked complimentary, forcing the line to
+   *  price at 0 independent of manualTransportPrice. See booking_transport_requests.complimentary. */
+  isComplimentaryTransport?: boolean | null
+  /** Transfer/rental legs only: the booking_transport_requests row this line priced, so the
+   *  voucher builder can match a complimentary flag back to the specific captured trip (unlike
+   *  hotels, whose complimentary flag is per-leg, transfers are per-request). */
+  transportRequestId?: string | null
   /** Tour legs only: the consultant-typed flat price that replaced the rate card for this unit,
    *  in sourceCurrency. Internal-only, same posture as manualRoomPrice/manualTransportPrice. */
   manualTourPrice?: number | null
@@ -953,6 +960,9 @@ export interface BookingTransportRequest {
   priceOverride: number | null
   /** When priceOverride was last set, server-stamped. Null when there is no override. */
   priceOverrideSetAt: string | null
+  /** When true this trip is not charged, independent of priceOverride. Mirrors
+   *  booking_service_units.complimentary_first_night for hotels. */
+  complimentary: boolean
   notes: string | null
   supplierReference: string | null
   sortOrder: number
@@ -969,37 +979,6 @@ export interface BookingVehicleRentalDetails {
   returnCutoffTime: string | null
   createdAt: string
   updatedAt: string
-}
-
-export type BookingScheduleSupplierKind = "hotel_property" | "train_operator" | "vehicle_rental"
-
-export interface BookingSupplierSchedule {
-  id: string
-  bookingId: string
-  supplierId: string | null
-  supplierKind: BookingScheduleSupplierKind
-  label: string | null
-  dateFrom: string
-  dateFromDisplay?: string
-  dateTo: string
-  dateToDisplay?: string
-  timeStart: string | null
-  timeEnd: string | null
-  notes: string | null
-  sortOrder: number
-  createdAt: string
-  createdAtDisplay?: string
-  updatedAt: string
-  updatedAtDisplay?: string
-  bookingDate: string | null
-  bookingDateDisplay?: string
-  confirmationDate: string | null
-  confirmationDateDisplay?: string
-  paymentMadeDate: string | null
-  paymentMadeDateDisplay?: string
-  paidWith: string | null
-  amountPayable: number | null
-  amountReceivable: number | null
 }
 
 // Legacy alias — kept so existing components that reference Job still compile
@@ -1056,10 +1035,6 @@ export interface Enquiry {
   direction: string
   /** False when `direction` is the customer's raw wording, not a route the system could resolve. */
   directionResolved?: boolean
-  /** HH:MM schedule per train operator on this booking, already resolved for the direction that
-   * operator's leg travels (see lib/routes/route-schedule.ts). Prefills a train journey's schedule
-   * row; absent operators simply have no times captured on their route. */
-  routeSchedules?: { supplierId: string; departureTime: string | null; arrivalTime: string | null }[]
   /** Train operator name, resolved if possible, otherwise the raw wording the customer used. */
   supplier?: string
   supplierResolved?: boolean

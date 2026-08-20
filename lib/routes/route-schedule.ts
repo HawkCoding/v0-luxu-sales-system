@@ -50,39 +50,3 @@ export function resolveRouteSchedule(
 export function routeHasReturnLeg(directionMode: RouteDirectionMode | null | undefined): boolean {
   return directionMode === "round_trip"
 }
-
-/** A train operator's times for the leg a booking travels with them. */
-export interface SupplierRouteSchedule {
-  supplierId: string
-  departureTime: string | null
-  arrivalTime: string | null
-}
-
-export interface TrainLegRow {
-  supplier_id: string | null
-  route_reversed: boolean | null
-  supplierKind: string | null
-  route: Partial<RouteScheduleColumns> | null
-}
-
-/**
- * One schedule per train operator on a booking, each resolved for the direction *that leg* travels.
- *
- * The leg's own `route_reversed` is the only trustworthy source at enquiry stage:
- * `bookings.route_reversed` is not written until a quote exists (lib/quotes/resolve-primary-route.ts),
- * so reading the booking would prefill the outbound times onto a reversed journey.
- *
- * Legs arrive in sort order and the first leg per operator wins; the times are a starting point a
- * consultant can overwrite, so guessing between two legs of the same operator is not worth it.
- */
-export function buildSupplierRouteSchedules(legs: TrainLegRow[]): SupplierRouteSchedule[] {
-  const schedules: SupplierRouteSchedule[] = []
-  for (const leg of legs) {
-    if (leg.supplierKind !== "train_operator" || !leg.supplier_id) continue
-    if (schedules.some((entry) => entry.supplierId === leg.supplier_id)) continue
-    const { startTime, endTime } = resolveRouteSchedule(leg.route, leg.route_reversed ?? false)
-    if (!startTime && !endTime) continue
-    schedules.push({ supplierId: leg.supplier_id, departureTime: startTime, arrivalTime: endTime })
-  }
-  return schedules
-}

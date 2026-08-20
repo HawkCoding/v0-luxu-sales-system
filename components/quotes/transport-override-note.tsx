@@ -15,10 +15,21 @@ interface TransportOverrideNoteProps {
  * rate card said, and who decided otherwise, is ours. Do not add this to
  * lib/quotes/pdf/quote-document.tsx, lib/quotes/quote-summary-block.ts, or any email token.
  *
- * Renders nothing for a line with no override, so it can be dropped into a line-item table
+ * Also states a complimentary trip ("Complimentary transfer"), since isComplimentaryTransport is
+ * independent of manualTransportPrice — see isComplimentaryTransport in lib/quotes/pricing-engine.ts.
+ *
+ * Renders nothing for a line with none of the above, so it can be dropped into a line-item table
  * unguarded.
  */
 export function TransportOverrideNote({ snapshot, quoteCurrency }: TransportOverrideNoteProps) {
+  if (snapshot?.isComplimentaryTransport === true) {
+    return (
+      <div className="text-[11px] text-emerald-600 dark:text-emerald-500">
+        Complimentary {snapshot.serviceType === "rental" ? "rental" : "transfer"}
+      </div>
+    )
+  }
+
   // 0 is a real override (a comped trip), so this is a null check, not a truthiness one.
   if (snapshot?.manualTransportPrice === null || snapshot?.manualTransportPrice === undefined) return null
 

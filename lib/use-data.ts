@@ -5,7 +5,6 @@ import type {
   AuditLog,
   Booking,
   BookingNote,
-  BookingSupplierSchedule,
   Customer,
   CustomerLinkedAccount,
   Location,
@@ -162,14 +161,6 @@ export function useJobDetail(id: string) {
 export function useBookingNotes(bookingId: string | null | undefined) {
   return useSWR<{ notes: BookingNote[] }>(
     bookingId ? `/api/bookings/${bookingId}/notes` : null,
-    fetcher,
-    swrOptions,
-  )
-}
-
-export function useBookingSupplierSchedules(bookingId: string | null | undefined) {
-  return useSWR<BookingSupplierSchedule[]>(
-    bookingId ? `/api/jobs/${bookingId}/supplier-schedules` : null,
     fetcher,
     swrOptions,
   )
