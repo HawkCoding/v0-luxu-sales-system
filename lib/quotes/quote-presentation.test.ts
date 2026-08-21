@@ -177,6 +177,37 @@ describe("buildQuoteItineraryLines", () => {
     })
   })
 
+  it("appends a luggage-storage note to the check-out line when the hotel offers it", () => {
+    const lines = buildQuoteItineraryLines([
+      { ...hotelBlock, serviceData: { ...hotelBlock.serviceData, hasLuggageStorage: true } },
+    ])
+
+    expect(lines[1]).toEqual({
+      dateISO: "2026-07-20",
+      text: "Check out at 10h00 | Guests can store their luggage at reception.",
+      bullets: [],
+    })
+  })
+
+  it("still notes luggage storage when there is no check-out time", () => {
+    const lines = buildQuoteItineraryLines([
+      {
+        ...hotelBlock,
+        serviceData: { ...hotelBlock.serviceData, endTime: null, hasLuggageStorage: true },
+      },
+    ])
+
+    expect(lines[1].text).toBe("Check out | Guests can store their luggage at reception.")
+  })
+
+  it("omits the luggage-storage note when the hotel does not offer it", () => {
+    const lines = buildQuoteItineraryLines([
+      { ...hotelBlock, serviceData: { ...hotelBlock.serviceData, hasLuggageStorage: false } },
+    ])
+
+    expect(lines[1].text).toBe("Check out at 10h00")
+  })
+
   it("appends a COMPLIMENTARY callout to a hotel line marked complimentary", () => {
     const lines = buildQuoteItineraryLines([
       { ...hotelBlock, serviceData: { ...hotelBlock.serviceData, isComplimentary: true } },
@@ -294,7 +325,7 @@ describe("buildQuoteItineraryLines", () => {
 
     expect(nov25).toEqual([
       "Arrival at Cape Town station at 18h00",
-      "Transfer from the Cape Town Station to the TAJ Hotel | at 18h00",
+      "Transfer from the Cape Town Station to the TAJ Hotel at 18h00",
       "Two nights at the TAJ Hotel, Cape Town in a Luxury City View Room incl. Bed & Breakfast | Check in from 15h00",
     ])
     expect(lines.find((line) => line.text === "Check out at 12h00")?.dateISO).toBe("2026-11-27")
@@ -310,7 +341,7 @@ describe("buildQuoteItineraryLines", () => {
         displayOrder: 1,
       },
     ])
-    expect(line.text).toBe("Transfer from the hotel to the station | at 10h00")
+    expect(line.text).toBe("Transfer from the hotel to the station at 10h00")
   })
 
   it("names the booked itinerary on a tour and leads its bullets with the itinerary's copy", () => {
@@ -343,6 +374,16 @@ describe("buildQuoteItineraryLines", () => {
   it("omits the closing line when there is no end date", () => {
     const lines = buildQuoteItineraryLines([
       { ...hotelBlock, serviceData: { ...hotelBlock.serviceData, arrivalDate: null } },
+    ])
+    expect(lines).toHaveLength(1)
+  })
+
+  it("drops the luggage-storage note along with the closing line when there is no end date", () => {
+    const lines = buildQuoteItineraryLines([
+      {
+        ...hotelBlock,
+        serviceData: { ...hotelBlock.serviceData, arrivalDate: null, hasLuggageStorage: true },
+      },
     ])
     expect(lines).toHaveLength(1)
   })

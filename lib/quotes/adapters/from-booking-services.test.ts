@@ -32,6 +32,7 @@ function service(partial: Partial<BookingServiceRow> & Pick<BookingServiceRow, "
     arrival_airport_code: null,
     hand_luggage_kg: null,
     checked_luggage_kg: null,
+    luggage_storage_available: false,
     booking_date: null,
     confirmation_date: null,
     payment_made_date: null,

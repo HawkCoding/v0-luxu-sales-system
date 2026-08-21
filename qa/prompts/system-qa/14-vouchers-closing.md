@@ -118,15 +118,21 @@ booking or by temporarily breaking the QA booking and restoring it.
       against the values recorded in QA 05 check 14),
     - `voucher_sent_at` stamped.
 
-### Closing & reopening
+### Closing (terminal — no reopening)
 
 23. Move `voucher_sent → closed`. `closed_at` stamped, no gates fire.
 24. From `closed`, attempt a forward move → nothing further exists; confirm the
     UI says so rather than offering a dead button.
-25. **Reopen** from `closed` — requires `closedReopenReason`. Attempt without one
-    → rejected. With one → reopened, reason recorded in the audit trail.
-26. After reopening, confirm the booking is coherent: documents still linked,
-    balance still 0, outcome still Won or deliberately cleared. Record which.
+25. **`closed` and `lost` are permanently terminal** (product decision, F12-4,
+    2026-08-21 — no reopening, ever; the business rule is "start a new enquiry
+    instead"). Confirm: any `PATCH stage=<anything else>` from `closed` returns
+    400 `"This booking is closed and cannot be reopened. Start a new enquiry
+    instead."`, and the same from `lost` returns the cancelled-booking variant
+    of that message — in both cases even with `override: true` set (the rule
+    is structural, not an overridable gate). Confirm `POST
+    .../validate-stage-move` agrees (`failures: [{gateId: "terminal_stage"}],
+    canOverride: false`). Confirm the UI shows no Back/Next control at all on
+    a `closed` or `lost` booking.
 
 ## Probes
 

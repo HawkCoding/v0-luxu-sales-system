@@ -173,6 +173,7 @@ function suiteState(overrides: Partial<SuiteLegState> & { legId: string }): Suit
     checkedLuggageKg: null,
     dateAnchor: null,
     notes: null,
+    luggageStorageAvailable: false,
     rateTypeId: null,
     priceCurrency: "ZAR",
     units: [],

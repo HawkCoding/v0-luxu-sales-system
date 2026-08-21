@@ -42,7 +42,7 @@ function isPostgrestError(error: unknown): error is PostgrestError {
     "hint" in error
   )
 }
-import { isReopenFromCancelled, isSameStage, validateTransition } from "@/lib/pipeline/validate-transition"
+import { isReopenFromCancelled, isSameStage, isTerminalPipelineStage, validateTransition } from "@/lib/pipeline/validate-transition"
 import { loadTransitionLegReferences } from "@/lib/pipeline/transition-leg-references"
 import { mapBookingTransportRequest } from "@/lib/suppliers"
 import { getDefaultDepositPercentage } from "@/lib/pipeline/constants"
@@ -69,11 +69,7 @@ const patchJobSchema = z.object({
   resolveEmailImportReview: z.boolean().optional(),
   stage: pipelineStageSchema.optional(),
   override: z.boolean().optional(),
-  overrideReason: z.string().optional(),
-  closedReopenReason: z.string().optional(),
-  // Same thing as `closedReopenReason`, for the other terminal stage: moving a
-  // booking off `lost` is a reopen too and needs the same justification.
-  reopenReason: z.string().optional(),
+  overrideReason: z.string().max(1000).optional(),
   manualConfirmations: z
     .object({
       finalPaymentReceived: z.boolean().optional(),
@@ -761,18 +757,35 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (body.stage) {
     const fromStage = booking.stage as PipelineStage
     const targetStage = body.stage as PipelineStage
+
+    // `lost` and `closed` are permanently terminal (F12-4, 2026-08-21): once a
+    // booking is cancelled or closed it stays that way, no exceptions — the
+    // business rule is "start a fresh enquiry instead", not "reopen this one".
+    // This sits ahead of every other check, including override, since it is a
+    // structural rule about the stage machine, not a gate someone can sign off
+    // on bypassing.
+    if (isTerminalPipelineStage(fromStage) && targetStage !== fromStage) {
+      const noun = isReopenFromCancelled(fromStage) ? "cancelled" : "closed"
+      return NextResponse.json(
+        { error: `This booking is ${noun} and cannot be reopened. Start a new enquiry instead.` },
+        { status: 400 },
+      )
+    }
+
     const { data: profile } = await supabase
       .from("profiles")
-      .select("name, surname, clearance_level")
+      .select("name, surname")
       .eq("user_id", user.id)
       .maybeSingle()
 
     const profileName = [profile?.name, profile?.surname].filter(Boolean).join(" ").trim()
     const actorName = profileName || user.email || "System"
-    // Any authenticated role may override a blocked stage transition.
+    // Deliberate product decision (#122): any authenticated role may override a
+    // blocked stage transition. The control is the audit trail, not a role gate
+    // — every override is written to audit_logs with actor, reason, and the
+    // gates it bypassed (see the `stage_change_override` insert below).
     const canOverride = true
     const overrideReason = body.overrideReason?.trim() ?? ""
-    const reopenReason = (body.reopenReason ?? body.closedReopenReason)?.trim() ?? ""
     const lostContext = { ...body.lostContext }
 
     const [
@@ -839,27 +852,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       lostContext,
     })
 
-    if (body.override === true) {
+    // An override reason is only required when there is something to override —
+    // `override: true` sent alongside a clean transition is a no-op, not a bypass.
+    if (body.override === true && failures.length > 0) {
       if (!overrideReason) {
         return NextResponse.json({ error: "Override reason is required" }, { status: 400 })
       }
-    } else if (failures.length > 0) {
+    } else if (body.override !== true && failures.length > 0) {
       return NextResponse.json(
         { error: "Stage transition blocked", details: { failures, canOverride } },
         { status: 400 },
       )
-    }
-
-    if (fromStage === "closed" && targetStage !== "closed" && !reopenReason) {
-      return NextResponse.json({ error: "Reason required when reopening a closed booking" }, { status: 400 })
-    }
-
-    // `lost` is the other terminal stage, and until now it was the unguarded
-    // one: a cancelled booking could be PATCHed straight back into any stage
-    // with no reason and no gates. It is now held to the same rule as `closed`,
-    // and validateTransition re-runs the whole ladder for the reopen.
-    if (isReopenFromCancelled(fromStage) && targetStage !== "lost" && !reopenReason) {
-      return NextResponse.json({ error: "Reason required when reopening a cancelled booking" }, { status: 400 })
     }
 
     try {
@@ -933,7 +936,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       return safeSupabaseError("jobs/[id]:audit_logs", stageAudit.error, "Failed to record stage change")
     }
 
-    if (body.override === true) {
+    // Only a real bypass gets an override audit row — `override: true` sent on
+    // a transition that had nothing to bypass is just a normal move.
+    if (body.override === true && failures.length > 0) {
       const overrideAudit = await supabase.from("audit_logs").insert({
         actor: actorName,
         actor_user_id: user.id,
@@ -959,23 +964,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       }
     }
 
-    const reopenedFromClosed = fromStage === "closed" && targetStage !== "closed"
-    const reopenedFromCancelled = isReopenFromCancelled(fromStage) && targetStage !== "lost"
-    if (reopenedFromClosed || reopenedFromCancelled) {
-      const reopenAudit = await supabase.from("audit_logs").insert({
-        actor: actorName,
-        actor_user_id: user.id,
-        entity_type: "Booking",
-        entity_id: id,
-        action: reopenedFromCancelled ? "cancelled_booking_reopened" : "closed_booking_reopened",
-        before_json: { stage: fromStage },
-        after_json: { stage: targetStage },
-        meta_json: { reason: reopenReason },
-      })
-      if (reopenAudit.error) {
-        return safeSupabaseError("jobs/[id]:audit_logs", reopenAudit.error, "Failed to record reopen")
-      }
-    }
   }
 
   if (body.assignedSalespersonId !== undefined) {

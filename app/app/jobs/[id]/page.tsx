@@ -865,7 +865,10 @@ export default function JobDetailPage() {
             </div>
           </div>
         </div>
-        {can("edit:pipeline") && (
+        {/* `lost` and `closed` are permanently terminal by product decision (F12-4,
+            2026-08-21): no reopening, so there is nothing to step between and no
+            button to offer once a booking lands on either. */}
+        {can("edit:pipeline") && currentStage !== "lost" && currentStage !== "closed" && (
           <div className="flex flex-col items-end gap-1">
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" disabled={currentStageIdx <= 0 || transitionSubmitting} onClick={() => moveStage("back")}>

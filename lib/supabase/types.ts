@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -607,6 +607,7 @@ export type Database = {
           hand_luggage_kg: number | null
           id: string
           label: string | null
+          luggage_storage_available: boolean
           nights: number | null
           notes: string | null
           origin: Database["public"]["Enums"]["service_origin"]
@@ -643,6 +644,7 @@ export type Database = {
           hand_luggage_kg?: number | null
           id?: string
           label?: string | null
+          luggage_storage_available?: boolean
           nights?: number | null
           notes?: string | null
           origin?: Database["public"]["Enums"]["service_origin"]
@@ -679,6 +681,7 @@ export type Database = {
           hand_luggage_kg?: number | null
           id?: string
           label?: string | null
+          luggage_storage_available?: boolean
           nights?: number | null
           notes?: string | null
           origin?: Database["public"]["Enums"]["service_origin"]

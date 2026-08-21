@@ -1011,6 +1011,16 @@ export function SuiteLegEditor({
                   This package has no train leg to anchor to — pick the check-in date manually.
                 </p>
               ) : null}
+
+              <label className="flex items-center gap-1.5 text-xs">
+                <Checkbox
+                  checked={value.luggageStorageAvailable}
+                  onCheckedChange={(checked) =>
+                    onChange({ ...value, luggageStorageAvailable: checked === true })
+                  }
+                />
+                Luggage storage available at reception
+              </label>
             </AnchorDateSection>
           ) : null}
 

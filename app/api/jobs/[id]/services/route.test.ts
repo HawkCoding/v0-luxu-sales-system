@@ -375,6 +375,38 @@ describe("PATCH /api/jobs/[id]/services", () => {
     expect((await res.json()).error).toMatch(/only available on airline services/)
   })
 
+  it("persists the luggage-storage flag on a hotel service", async () => {
+    const built = mockAuth({ validServiceIds: [SERVICE_A], serviceKinds: { [SERVICE_A]: "hotel_property" } })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          selections: [{ packageLegId: SERVICE_A, luggageStorageAvailable: true }],
+        }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(200)
+    expect(built.updateCalls[0].payload).toMatchObject({ luggage_storage_available: true })
+  })
+
+  it("rejects the luggage-storage flag on a non-hotel service", async () => {
+    mockAuth({ validServiceIds: [SERVICE_A], serviceKinds: { [SERVICE_A]: "train_operator" } })
+    const res = await PATCH(
+      new Request("http://localhost", {
+        method: "PATCH",
+        body: JSON.stringify({
+          selections: [{ packageLegId: SERVICE_A, luggageStorageAvailable: true }],
+        }),
+      }),
+      makeParams(),
+    )
+
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toMatch(/only available on hotel services/)
+  })
+
   it("rejects an arrival date before the departure date", async () => {
     mockAuth({ validServiceIds: [SERVICE_A], serviceKinds: { [SERVICE_A]: "airline" } })
     const res = await PATCH(

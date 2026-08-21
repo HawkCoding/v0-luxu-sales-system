@@ -101,6 +101,9 @@ export interface SuiteLegState {
    *  transfer's pickup date. `custom` leaves it manual either way. */
   dateAnchor: ServiceDateAnchor | null
   notes: string | null
+  /** Hotel legs only: the property lets guests store luggage at reception, printed as a suffix on
+   *  the quote itinerary's check-out line. */
+  luggageStorageAvailable: boolean
   /** Explicit per-leg rate type; null inherits the supplier's quoted rate at pricing time. */
   rateTypeId: string | null
   /** The currency this leg's hand-typed fares are in (manual-pricing legs only). Rate-card legs
@@ -191,6 +194,8 @@ export interface SavedSelectionRow {
   checked_luggage_kg?: number | null
   /** Absent on a catalogue selection row; present on a booking_services row. */
   price_currency?: string | null
+  /** Hotel legs only; absent on a catalogue selection row. */
+  luggage_storage_available?: boolean | null
   /** Absent on a catalogue selection row; present on a booking_services row. */
   booking_date?: string | null
   confirmation_date?: string | null
@@ -368,6 +373,7 @@ function buildRawDefaultLegStates(
       // Airline package legs never carry a template anchor, so this always falls back to "custom".
       dateAnchor: isHotel || isAirline ? leg.dateAnchor ?? "custom" : null,
       notes: null,
+      luggageStorageAvailable: false,
       rateTypeId: null,
       priceCurrency: options.quoteCurrency ?? BASE_CURRENCY,
       units: [createDraftUnit(totals)],
@@ -667,6 +673,7 @@ export function hydrateFromSaved(
       dateAnchor:
         isHotel || isAirline ? normalizeSavedAnchor(row.date_anchor) ?? fallback.dateAnchor : null,
       notes: row.notes,
+      luggageStorageAvailable: isHotel ? row.luggage_storage_available ?? false : false,
       rateTypeId: row.rate_type_id ?? fallback.rateTypeId,
       priceCurrency: row.price_currency ?? fallback.priceCurrency,
       units: units.length > 0 ? units : fallback.units,
@@ -706,6 +713,8 @@ export interface PackageSelectionsPatchBody {
     rateTypeId?: string | null
     priceCurrency?: string
     notes?: string | null
+    /** Hotel legs only — the server rejects it on any other supplier kind. */
+    luggageStorageAvailable?: boolean
     bookingDate?: string | null
     confirmationDate?: string | null
     paymentMadeDate?: string | null
@@ -779,6 +788,11 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
         rateTypeId: state.rateTypeId,
         priceCurrency: state.priceCurrency,
         notes: state.notes,
+        // Sent only for hotels: the server refuses this field on any other kind (see the guard
+        // in PATCH /api/jobs/[id]/services).
+        ...(state.supplierKind === "hotel_property"
+          ? { luggageStorageAvailable: state.luggageStorageAvailable }
+          : {}),
         bookingDate: state.bookingDate,
         confirmationDate: state.confirmationDate,
         paymentMadeDate: state.paymentMadeDate,

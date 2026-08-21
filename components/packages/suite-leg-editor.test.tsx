@@ -50,6 +50,7 @@ function makeLegState(units: SuiteLegState["units"]): SuiteLegState {
     ...noFlightSchedule,
     dateAnchor: null,
     notes: null,
+    luggageStorageAvailable: false,
     rateTypeId: null,
     priceCurrency: "ZAR",
     units,
@@ -188,6 +189,7 @@ function makeHotelState(overrides: Partial<SuiteLegState["units"][number]> = {})
     ...noFlightSchedule,
     dateAnchor: "custom",
     notes: null,
+    luggageStorageAvailable: false,
     rateTypeId: null,
     priceCurrency: "ZAR",
     units: [{ ...mismatchedUnits[0], suiteTypeId: "suite-1", adultCount: 2, ...overrides }],
@@ -198,6 +200,45 @@ function makeHotelState(overrides: Partial<SuiteLegState["units"][number]> = {})
     origin: "consultant",
   }
 }
+
+describe("SuiteLegEditor luggage storage", () => {
+  it("renders unticked for a hotel leg with no saved flag", () => {
+    render(<SuiteLegEditor leg={hotelLeg} value={makeHotelState()} onChange={vi.fn()} />)
+
+    expect(screen.getByLabelText(/luggage storage available at reception/i)).not.toBeChecked()
+  })
+
+  it("reflects a saved flag and toggles it via onChange", () => {
+    const onChange = vi.fn()
+    render(
+      <SuiteLegEditor
+        leg={hotelLeg}
+        value={{ ...makeHotelState(), luggageStorageAvailable: true }}
+        onChange={onChange}
+      />,
+    )
+
+    const checkbox = screen.getByLabelText(/luggage storage available at reception/i)
+    expect(checkbox).toBeChecked()
+
+    fireEvent.click(checkbox)
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ luggageStorageAvailable: false }),
+    )
+  })
+
+  it("is not rendered for a non-hotel leg", () => {
+    render(
+      <SuiteLegEditor
+        leg={leg}
+        value={makeLegState(mismatchedUnits)}
+        onChange={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByLabelText(/luggage storage available at reception/i)).not.toBeInTheDocument()
+  })
+})
 
 describe("SuiteLegEditor room price override", () => {
   it("stays collapsed on a room with no override, showing the rate card it prices off", () => {
@@ -308,6 +349,7 @@ function makeAirlineState(overrides: Partial<SuiteLegState> = {}): SuiteLegState
     ...noFlightSchedule,
     dateAnchor: "custom",
     notes: null,
+    luggageStorageAvailable: false,
     rateTypeId: null,
     priceCurrency: "ZAR",
     units: [{ ...mismatchedUnits[0], adultCount: 2 }],

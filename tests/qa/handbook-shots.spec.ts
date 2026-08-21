@@ -1467,7 +1467,8 @@ test.describe("ch08 pipeline", () => {
     const supabase = createQaSupabase()
     const reference = await boardReference(supabase, CH08_UNPAID_BOOKING)
 
-    // Consultants never see the override box — this one figure needs a manager.
+    // Any role can reach the override panel now — it starts collapsed, so the
+    // shot expands it first rather than needing a manager session.
     const context = await browser.newContext({ storageState: HANDBOOK_USERS.manager.storageState })
     const page = await context.newPage()
     await page.goto("/app/pipeline")
@@ -1476,7 +1477,8 @@ test.describe("ch08 pipeline", () => {
     await page.getByRole("option", { name: "Deposit Paid" }).click()
 
     const dialog = page.getByRole("dialog")
-    await expect(dialog.getByText("Manager override")).toBeVisible({ timeout: 30_000 })
+    await expect(dialog.getByText("Override gates")).toBeVisible({ timeout: 30_000 })
+    await dialog.getByText("Override gates").click()
     await dialog
       .getByPlaceholder("Reason for forcing this stage move...")
       .fill("Client paid by EFT on 14 August; proof of payment received, capture to follow.")
