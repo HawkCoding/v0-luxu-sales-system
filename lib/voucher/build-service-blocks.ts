@@ -205,6 +205,8 @@ interface SelectionJoinRow {
   arrival_airport_code: string | null
   hand_luggage_kg: number | null
   checked_luggage_kg: number | null
+  /** Hotel legs only — prints a suffix on the quote itinerary's check-out line. */
+  luggage_storage_available: boolean | null
   package_legs: { sort_order: number; label: string | null } | { sort_order: number; label: string | null }[] | null
   suppliers: SupplierJoin | SupplierJoin[] | null
   routes: RouteJoin | RouteJoin[] | null
@@ -238,6 +240,8 @@ interface BookingServiceJoinRow {
   arrival_airport_code: string | null
   hand_luggage_kg: number | null
   checked_luggage_kg: number | null
+  /** Hotel legs only — prints a suffix on the quote itinerary's check-out line. */
+  luggage_storage_available: boolean | null
   suppliers: SupplierJoin | SupplierJoin[] | null
   routes: RouteJoin | RouteJoin[] | null
   suite_types: { name: string | null } | { name: string | null }[] | null
@@ -275,6 +279,7 @@ function serviceRowToSelectionRow(row: BookingServiceJoinRow): SelectionJoinRow 
     arrival_airport_code: row.arrival_airport_code,
     hand_luggage_kg: row.hand_luggage_kg,
     checked_luggage_kg: row.checked_luggage_kg,
+    luggage_storage_available: row.luggage_storage_available,
     package_legs: { sort_order: row.sort_order, label: row.label },
     suppliers: row.suppliers,
     routes: row.routes,
@@ -592,7 +597,7 @@ export async function buildVoucherServiceBlocks(
     .from("booking_services")
     .select(
       `id, label, sort_order, selected, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, notes, supplier_reference, supplier_contact_name, voucher_footnote, excursions,
-       departure_time, arrival_date, arrival_time, flight_number, departure_airport_code, arrival_airport_code, hand_luggage_kg, checked_luggage_kg,
+       departure_time, arrival_date, arrival_time, flight_number, departure_airport_code, arrival_airport_code, hand_luggage_kg, checked_luggage_kg, luggage_storage_available,
        suppliers(name, phone, email, website, location, location_id, city:locations!suppliers_location_id_fkey(name), description, street_address, emergency_phone, default_contact_name, kind, default_time_start, default_time_end, inclusions, exclusions, station_addresses:supplier_station_addresses(location_id, station_name, street_address)),
        routes(name, description, duration_days, direction_mode, departure_time, arrival_time, return_departure_time, return_arrival_time, default_excursions, origin:locations!routes_origin_location_id_fkey(id, name), destination:locations!routes_destination_location_id_fkey(id, name)),
        suite_types(name),
@@ -753,6 +758,7 @@ export async function buildVoucherServiceBlocks(
       isFirstNightComplimentary: isHotel
         ? context.firstNightComplimentaryLegIds?.has(row.package_leg_id) ?? false
         : null,
+      hasLuggageStorage: isHotel ? row.luggage_storage_available ?? false : null,
       vehicleType: serviceType === "transfer" ? suite?.name ?? null : null,
       // A flight's cabin is the booked suite type — SUITE_NOUN_KINDS deliberately excludes airline,
       // so the name reads as typed ("Economy") and feeds the itinerary's "in Economy".

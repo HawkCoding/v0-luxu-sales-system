@@ -172,7 +172,7 @@ export function getAuditDisplay(log: AuditLog, context?: AuditDisplayContext): A
       // than leaving it buried in a column nobody reads back.
       description:
         log.action === "stage_change_override"
-          ? `Manager override${log.overrideReason ? ` — ${log.overrideReason}` : ""}`
+          ? `Gate override${log.overrideReason ? ` — ${log.overrideReason}` : ""}`
           : "Stage change",
       entityLabel: label,
       actorLabel: actor,

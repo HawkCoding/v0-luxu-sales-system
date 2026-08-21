@@ -61,6 +61,9 @@ export interface VoucherServiceBlockData {
   /** Hotel-only: true when the hotel gifted the first night and charged the rest. The line still
    *  states the full stay length; the callout reads "FIRST NIGHT COMPLIMENTARY". */
   isFirstNightComplimentary?: boolean | null
+  /** Hotel-only: the property lets guests store luggage at reception. Prints a suffix on the quote
+   *  itinerary's check-out line only — never shown on the voucher. */
+  hasLuggageStorage?: boolean | null
   vehicleType?: string | null
   pickup?: string | null
   dropoff?: string | null

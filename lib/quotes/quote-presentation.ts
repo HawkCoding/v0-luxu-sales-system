@@ -84,6 +84,9 @@ export function formatTotalLabel(pax: QuotePax): string {
  */
 export const VAT_INCLUSIVE_SUFFIX = "(incl.VAT)"
 
+/** Suffix on a hotel's check-out line when the property lets guests store luggage at reception. */
+const LUGGAGE_STORAGE_NOTE = "Guests can store their luggage at reception."
+
 /**
  * The reassurance line shown under the flight itinerary bullet: "flights won't cost the client
  * more than this." One combined line for the whole quote, at the highest adult flight fare —
@@ -197,10 +200,11 @@ function withLeadingThe(value: string): string {
 function joinSentence(
   parts: Array<string | null | undefined>,
   suffixes: Array<string | null | undefined>,
+  separator = " | ",
 ): string {
   const main = parts.filter((part): part is string => Boolean(part?.trim())).join(" ")
   const tail = suffixes.filter((part): part is string => Boolean(part?.trim()))
-  return tail.length > 0 ? `${main} | ${tail.join(" – ")}` : main
+  return tail.length > 0 ? `${main}${separator}${tail.join(" – ")}` : main
 }
 
 function describeBlock(block: VoucherServiceBlock): string {
@@ -256,6 +260,7 @@ function describeBlock(block: VoucherServiceBlock): string {
       return joinSentence(
         ["Transfer", leg, d.vehicleType ? `(${d.vehicleType})` : null],
         [start ? `at ${start}` : null, d.isComplimentary ? "COMPLIMENTARY" : null],
+        " ",
       )
     }
     case "tour": {
@@ -304,7 +309,10 @@ function describeEndLine(block: VoucherServiceBlock): QuoteItineraryLine | null 
   if (block.serviceType === "hotel") {
     return {
       dateISO: d.arrivalDate,
-      text: end ? `Check out at ${end}` : "Check out",
+      text: joinSentence(
+        [end ? `Check out at ${end}` : "Check out"],
+        [d.hasLuggageStorage ? LUGGAGE_STORAGE_NOTE : null],
+      ),
       bullets: [],
     }
   }

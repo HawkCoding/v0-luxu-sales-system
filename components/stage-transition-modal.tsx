@@ -1,12 +1,13 @@
 "use client"
 
 import Link from "next/link"
-import { useMemo, useState } from "react"
-import { CheckCircle2, FileText, Info, Send, ShieldAlert, Wand2 } from "lucide-react"
+import { useMemo, useRef, useState } from "react"
+import { CheckCircle2, ChevronDown, FileText, Info, Send, ShieldAlert, Wand2 } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   Dialog,
   DialogContent,
@@ -119,6 +120,8 @@ export function StageTransitionModal({
 }: StageTransitionModalProps) {
   const [confirmations, setConfirmations] = useState<ManualConfirmations>({})
   const [overrideReason, setOverrideReason] = useState("")
+  const [overrideOpen, setOverrideOpen] = useState(false)
+  const overrideTextareaRef = useRef<HTMLTextAreaElement>(null)
   const confirmationFailures = useMemo(
     () => failures.filter((failure) => failure.severity === "confirm"),
     [failures],
@@ -144,6 +147,17 @@ export function StageTransitionModal({
   const handleOverride = async () => {
     await onOverride(overrideReason)
     setOverrideReason("")
+  }
+
+  const handleOverrideOpenChange = (nextOpen: boolean) => {
+    setOverrideOpen(nextOpen)
+    if (!nextOpen) {
+      // Collapsing clears the reason so a stale draft can't be submitted
+      // from a panel the user closed without meaning to force anything.
+      setOverrideReason("")
+    } else {
+      requestAnimationFrame(() => overrideTextareaRef.current?.focus())
+    }
   }
 
   return (
@@ -280,19 +294,32 @@ export function StageTransitionModal({
         {canOverride && (
           <>
             <Separator />
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center gap-2">
-                <ShieldAlert data-icon="inline-start" />
-                <p className="text-sm font-medium">Manager override</p>
-              </div>
-              <Textarea
-                value={overrideReason}
-                onChange={(event) => setOverrideReason(event.target.value)}
-                placeholder="Reason for forcing this stage move..."
-                rows={3}
-                className="resize-none"
-              />
-            </div>
+            <Collapsible open={overrideOpen} onOpenChange={handleOverrideOpenChange}>
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 text-left"
+                  aria-expanded={overrideOpen}
+                >
+                  <ShieldAlert data-icon="inline-start" />
+                  <p className="text-sm font-medium">Override gates</p>
+                  <ChevronDown
+                    className={`ml-auto text-muted-foreground transition-transform ${overrideOpen ? "" : "-rotate-90"}`}
+                  />
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="flex flex-col gap-3 pt-3">
+                <Textarea
+                  ref={overrideTextareaRef}
+                  value={overrideReason}
+                  onChange={(event) => setOverrideReason(event.target.value)}
+                  placeholder="Reason for forcing this stage move..."
+                  rows={3}
+                  maxLength={1000}
+                  className="resize-none"
+                />
+              </CollapsibleContent>
+            </Collapsible>
           </>
         )}
 
@@ -306,7 +333,7 @@ export function StageTransitionModal({
               Confirm and move
             </Button>
           )}
-          {canOverride && (
+          {canOverride && overrideOpen && (
             <Button variant="destructive" onClick={handleOverride} disabled={submitting || !overrideReason.trim()}>
               Force move
             </Button>

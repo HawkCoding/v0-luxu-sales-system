@@ -41,8 +41,8 @@ This chapter is the reference the whole handbook points back to.
    gates the system can resolve itself.
 6. **When the modal does not appear** — if the only thing outstanding is an unsent document,
    the app opens the send dialog directly. Explain this so it does not feel like a glitch.
-7. **Manager override** — that it exists, that it requires a reason, and that it is recorded.
-   Written for a consultant who will be *asking* for one.
+7. **Override gates** — that any role including consultants can use it, that it starts
+   collapsed, that it requires a reason, and that it is recorded against the actor's name.
 8. **What a successful move changes** — timestamps, the quote flipping to accepted, deposit
    paid being set, balance zeroing, outcome being set to Won at Voucher Sent.
 9. **The lost and cancelled branch** — the Outcome pill, the Set Outcome dialog, the

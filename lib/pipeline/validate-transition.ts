@@ -148,6 +148,19 @@ export function isReopenFromCancelled(stage: PipelineStage): boolean {
 }
 
 /**
+ * `lost` and `closed` are permanently terminal by product decision (F12-4,
+ * 2026-08-21): once a booking is cancelled or closed it stays that way — no
+ * reopening, start a fresh enquiry instead. `apply-transition.ts` and the
+ * `reopening` branch above still know how to re-enter the ladder from `lost`,
+ * but nothing calls that path any more — `app/api/jobs/[id]/route.ts` blocks
+ * the move at the API boundary before either function ever runs.
+ */
+export function isTerminalPipelineStage(stage: PipelineStage): boolean {
+  const canonical = canonicalStage(stage)
+  return canonical === "lost" || canonical === "closed"
+}
+
+/**
  * Compares two stages by their canonical value, so the aliases (`quoted`,
  * `form_done`, `payment_schedule`, `trip_active`) count as the stage they map
  * to rather than as a separate place to move to.
@@ -385,7 +398,7 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
       failures.push({
         gateId: "invoice_correspondence",
         message: "The deposit invoice is ready but hasn't been sent yet.",
-        fixHint: "Send it to the customer to continue. A manager can also move this booking on with a reason.",
+        fixHint: "Send it to the customer to continue. This can be overridden with a recorded reason.",
         severity: "block",
       })
     }
@@ -425,7 +438,7 @@ export function validateTransition(input: ValidateTransitionInput): GateFailure[
       failures.push({
         gateId: "final_invoice_correspondence",
         message: "The payment confirmation hasn't gone out yet.",
-        fixHint: "Send the payment confirmation email to continue. A manager can also move this booking on with a reason.",
+        fixHint: "Send the payment confirmation email to continue. This can be overridden with a recorded reason.",
         severity: "block",
       })
     }

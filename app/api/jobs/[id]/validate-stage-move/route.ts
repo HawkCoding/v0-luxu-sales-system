@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 import { z } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
 import type { PipelineStage } from "@/lib/types"
-import { validateTransition } from "@/lib/pipeline/validate-transition"
+import { isReopenFromCancelled, isTerminalPipelineStage, validateTransition } from "@/lib/pipeline/validate-transition"
 import { loadTransitionLegReferences } from "@/lib/pipeline/transition-leg-references"
 
 const pipelineStageSchema = z.enum([
@@ -65,6 +65,24 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   if (bookingError || !booking) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
+  // `lost` and `closed` are permanently terminal (F12-4, 2026-08-21) — mirrors
+  // the hard block in the real PATCH so a dry-run never reports "clear" for a
+  // move the real transition will refuse outright, override or not.
+  if (isTerminalPipelineStage(booking.stage as PipelineStage) && body.targetStage !== booking.stage) {
+    const noun = isReopenFromCancelled(booking.stage as PipelineStage) ? "cancelled" : "closed"
+    return NextResponse.json({
+      failures: [
+        {
+          gateId: "terminal_stage",
+          message: `This booking is ${noun} and cannot be reopened.`,
+          fixHint: "Start a new enquiry instead.",
+          severity: "block",
+        },
+      ],
+      canOverride: false,
+    })
+  }
+
   const [
     { data: customer },
     { data: quotes },
@@ -89,7 +107,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     supabase.from("payments").select("amount").eq("booking_id", id),
   ])
 
-  // Any authenticated role may override a blocked stage transition.
+  // Deliberate product decision (#122): any authenticated role may override a
+  // blocked stage transition. The control is the audit trail, not a role gate —
+  // see the `stage_change_override` insert in PATCH /api/jobs/[id]/route.ts.
   const canOverride = true
 
   // Fails open: the generate/send readiness check still blocks a voucher with missing references,

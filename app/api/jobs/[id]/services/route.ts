@@ -107,13 +107,10 @@ const updateServiceSchema = z.object({
   dateAnchor: z.enum(["pre", "post", "custom"]).nullable().optional(),
   rateTypeId: z.string().uuid().nullable().optional(),
   notes: z.string().nullable().optional(),
-  /** Internal supplier-booking record — when this leg was placed, confirmed and paid with the
-   * supplier. Never shown to the customer, feeds the booking worksheet. Available on every
-   * supplier kind: an admin fact about the booking, not about how the leg prices. */
-  bookingDate: z.string().regex(datePattern, "Expected YYYY-MM-DD").nullable().optional(),
-  confirmationDate: z.string().regex(datePattern, "Expected YYYY-MM-DD").nullable().optional(),
-  paymentMadeDate: z.string().regex(datePattern, "Expected YYYY-MM-DD").nullable().optional(),
-  paidWith: z.string().trim().max(100).nullable().optional(),
+  /** Hotel legs only: the property lets guests store luggage at reception, printed as a suffix on
+   * the quote itinerary's check-out line. Rejected on any other supplier kind — see the guard in
+   * PATCH. */
+  luggageStorageAvailable: z.boolean().optional(),
   /** The currency this leg's hand-typed prices are in — manual-pricing fares and transfer/
    * rental overrides. Rate-card legs price off the card's own currency and ignore this. Dialog
    * state can carry forward a pre-enum legacy value from price_currency (free text, no CHECK
@@ -141,7 +138,7 @@ type BookingServiceUnitInsert = Database["public"]["Tables"]["booking_service_un
 const SERVICES_WITH_UNITS_SELECT =
   "id, booking_id, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, date_anchor, rate_type_id, notes, selected, origin, price_currency, updated_at, " +
   "departure_time, arrival_date, arrival_time, flight_number, departure_airport_code, arrival_airport_code, hand_luggage_kg, checked_luggage_kg, " +
-  "booking_date, confirmation_date, payment_made_date, paid_with, " +
+  "luggage_storage_available, " +
   "units:booking_service_units(id, suite_type_id, bedroom_type_id, bedroom_layout_id, bathroom_type_id, adult_count, child_count, infant_count, sort_order, manual_adult_price, manual_child_price, manual_infant_price, manual_room_price, manual_room_price_set_at, complimentary_first_night)"
 
 interface ServiceUnitRow {
@@ -182,10 +179,7 @@ interface ServiceWithUnitsRow {
   arrival_airport_code: string | null
   hand_luggage_kg: number | null
   checked_luggage_kg: number | null
-  booking_date: string | null
-  confirmation_date: string | null
-  payment_made_date: string | null
-  paid_with: string | null
+  luggage_storage_available: boolean
   selected: boolean
   origin: "auto" | "consultant"
   price_currency: string
@@ -276,7 +270,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
   const serviceIds = parsed.data.selections.map((selection) => selection.packageLegId)
   const { data: validServices, error: servicesLoadError } = await supabase
     .from("booking_services")
-    .select("id, supplier_id, updated_at, service_date, booking_date, suppliers(kind)")
+    .select("id, supplier_id, updated_at, service_date, suppliers(kind)")
     .eq("booking_id", id)
     .in("id", serviceIds)
 
@@ -374,19 +368,18 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     }
   }
 
-  // A supplier booking cannot be confirmed before it was placed. payment_made_date is left
-  // unconstrained — prepayments happen. An omitted bookingDate means the stored value still
-  // applies, same convention as the flight-date guard above.
+  // A hotel property's luggage-storage note is a fact about that property, so setting it on any
+  // other supplier kind would be a stored value nothing reads — same reasoning as the flight
+  // schedule guard above.
   for (const selection of parsed.data.selections) {
-    if (selection.confirmationDate === undefined) continue
+    if (selection.luggageStorageAvailable === undefined) continue
     const service = serviceById.get(selection.packageLegId)
-    const bookingDate =
-      selection.bookingDate !== undefined ? selection.bookingDate : service?.booking_date ?? null
-    if (selection.confirmationDate && bookingDate && selection.confirmationDate < bookingDate) {
-      return jsonError("A supplier booking cannot be confirmed before it was placed.", 400, {
+    const supplier = Array.isArray(service?.suppliers) ? service.suppliers[0] : service?.suppliers
+    const supplierKind = supplier?.kind
+    if (supplierKind !== "hotel_property") {
+      return jsonError("Luggage storage is only available on hotel services", 400, {
         packageLegId: selection.packageLegId,
-        bookingDate,
-        confirmationDate: selection.confirmationDate,
+        supplierKind,
       })
     }
   }
@@ -515,10 +508,9 @@ export async function PATCH(req: Request, { params }: RouteParams) {
     }
     if (selection.handLuggageKg !== undefined) updatePayload.hand_luggage_kg = selection.handLuggageKg
     if (selection.checkedLuggageKg !== undefined) updatePayload.checked_luggage_kg = selection.checkedLuggageKg
-    if (selection.bookingDate !== undefined) updatePayload.booking_date = selection.bookingDate
-    if (selection.confirmationDate !== undefined) updatePayload.confirmation_date = selection.confirmationDate
-    if (selection.paymentMadeDate !== undefined) updatePayload.payment_made_date = selection.paymentMadeDate
-    if (selection.paidWith !== undefined) updatePayload.paid_with = selection.paidWith
+    if (selection.luggageStorageAvailable !== undefined) {
+      updatePayload.luggage_storage_available = selection.luggageStorageAvailable
+    }
 
     // Origin flips to 'consultant' the moment a human writes to this row, mirroring the
     // FieldFlags/editedAxes convention: an auto-filled value stops being auto-filled on edit.

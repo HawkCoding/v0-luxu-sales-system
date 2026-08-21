@@ -128,18 +128,28 @@ over **every stage crossed**, so a skip runs all intermediate gates.
     Sev-1 if it happens.
 23. Two simultaneous PATCHes to the same booking → one wins, one errors cleanly.
 
-### Manager override
+### Override gates
 
-24. As **consultant**, attempt `override: true` → must be rejected (admin/manager
-    only).
-25. As **manager**, `override: true` with an empty `overrideReason` → rejected.
-26. As manager, `override: true` with a reason → the transition applies despite
-    failing gates, and a `stage_change_override` audit entry is written
-    containing the reason and the actor. Confirm the reason is stored, not just
-    logged to the console.
-27. Confirm the override is visible after the fact — a manager overriding a gate
-    must be discoverable in the booking's audit tab, not only in the global audit
-    log.
+Deliberate product decision (#122): any authenticated role, including consultant,
+may override a blocked stage transition. There is no role gate on this path — the
+control is the audit trail, not permission. Do not flag the absence of a role
+check here; it is intentional.
+
+24. As **consultant**, `override: true` on a blocked transition with a non-empty
+    `overrideReason` → succeeds, and a `stage_change_override` audit entry is
+    written naming the consultant as actor.
+25. As **consultant** (or any role), `override: true` on a blocked transition with
+    an empty `overrideReason` → rejected with 400.
+26. `override: true` with a reason on a transition that has no failing gates →
+    the move applies as a normal transition and **no** `stage_change_override`
+    audit row is written (only the regular `stage_change` row). The override log
+    should only ever contain real bypasses.
+27. `override: true` with a reason on a blocked transition → the transition
+    applies despite failing gates, and a `stage_change_override` audit entry is
+    written containing the reason, the actor, and the gates it bypassed. Confirm
+    the reason is stored, not just logged to the console.
+28. Confirm the override is visible after the fact — an override must be
+    discoverable in the booking's audit tab, not only in the global audit log.
 
 ### UI
 

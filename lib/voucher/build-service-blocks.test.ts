@@ -1080,6 +1080,61 @@ describe("buildVoucherServiceBlocks", () => {
     expect(blocks[0].contactDetails.location).toBe("Cape Town")
   })
 
+  it("carries a hotel's luggage-storage flag through to serviceData", async () => {
+    const hotelLeg = {
+      id: "svc-hotel-luggage",
+      label: "The Silo Hotel",
+      sort_order: 0,
+      selected: true,
+      supplier_id: "supplier-hotel",
+      route_id: null,
+      service_date: "2026-08-01",
+      nights: 2,
+      notes: null,
+      supplier_reference: null,
+      luggage_storage_available: true,
+      suppliers: supplier({ kind: "hotel_property", name: "The Silo Hotel" }),
+      routes: { name: "Bed & Breakfast", duration_days: null },
+      suite_types: { name: "Ocean Suite" },
+      units: null,
+    }
+
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({ services: [hotelLeg] }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceData.hasLuggageStorage).toBe(true)
+  })
+
+  it("leaves hasLuggageStorage null for a non-hotel supplier", async () => {
+    const trainLeg = {
+      id: "svc-train-luggage",
+      label: "Blue Train",
+      sort_order: 0,
+      selected: true,
+      supplier_id: "supplier-blue-train",
+      route_id: "route-blue-train",
+      suite_type_id: null,
+      service_date: "2026-08-01",
+      nights: null,
+      notes: null,
+      supplier_reference: null,
+      luggage_storage_available: true,
+      suppliers: supplier({ kind: "train_operator", name: "Blue Train" }),
+      routes: { name: "Pretoria ↔ Cape Town", duration_days: 1, direction_mode: null, origin: null, destination: null },
+      suite_types: { name: "Royal Suite" },
+      units: null,
+    }
+
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({ services: [trainLeg] }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceData.hasLuggageStorage).toBeNull()
+  })
+
   it("resolves a train operator's printed location from its free-text location, ignoring city", async () => {
     const trainLeg = {
       id: "svc-blue-train-location",

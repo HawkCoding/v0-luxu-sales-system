@@ -173,15 +173,6 @@ it is exempt from the missing-pricing check.
 > price. The panel says which is the case: no vehicle category selected, no route template, no
 > pickup date, or a genuine gap in the rate cards.
 
-### Supplier admin dates
-
-Every service — including transfers and rentals, where it applies to the whole leg rather
-than one trip — has a collapsed **Supplier admin** section: **Booking date**, **Confirmation
-date**, **Payment made date**, and **Paid with**. These record when the leg was placed,
-confirmed and paid with the supplier. They are internal only — never shown to the customer —
-and feed the booking worksheet's service-lines grid. Filling one in on an auto-filled service
-also clears its **Auto-filled** chip, the same as editing any other field on the leg.
-
 ### Exchange rates
 
 [[shot:04-fx-banner|The exchange-rate banner on Build Booking]]

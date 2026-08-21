@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { StageTransitionModal, gateIdToTabPath } from "./stage-transition-modal"
 import type { GateFailure } from "@/lib/pipeline/validate-transition"
 
@@ -36,7 +36,7 @@ describe("gateIdToTabPath", () => {
 
 const noop = async () => {}
 
-function renderModal(failures: GateFailure[]) {
+function renderModal(failures: GateFailure[], options: { canOverride?: boolean; onOverride?: (reason: string) => Promise<void> } = {}) {
   return render(
     <StageTransitionModal
       open
@@ -44,11 +44,11 @@ function renderModal(failures: GateFailure[]) {
       jobNumber="LTT-2026-0025"
       targetStage="deposit_paid"
       failures={failures}
-      canOverride={false}
+      canOverride={options.canOverride ?? false}
       submitting={false}
       onCancel={() => {}}
       onProceed={noop}
-      onOverride={noop}
+      onOverride={options.onOverride ?? noop}
     />,
   )
 }
@@ -120,12 +120,55 @@ describe("StageTransitionModal", () => {
       {
         gateId: "invoice_correspondence",
         message: "The deposit invoice is ready but hasn't been sent yet.",
-        fixHint: "Send it to the customer to continue. A manager can also move this booking on with a reason.",
+        fixHint: "Send it to the customer to continue. This can be overridden with a recorded reason.",
         severity: "block",
       },
     ])
     expect(screen.getByText("One more step first")).toBeInTheDocument()
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /Confirm and move/i })).not.toBeInTheDocument()
+  })
+})
+
+describe("StageTransitionModal override panel", () => {
+  it("starts collapsed: no reason field and no Force move button until expanded", () => {
+    renderModal([depositGate], { canOverride: true })
+    expect(screen.getByText("Override gates")).toBeInTheDocument()
+    expect(screen.queryByPlaceholderText("Reason for forcing this stage move...")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Force move" })).not.toBeInTheDocument()
+  })
+
+  it("expanding the trigger reveals the reason field and a disabled Force move button", () => {
+    renderModal([depositGate], { canOverride: true })
+    fireEvent.click(screen.getByText("Override gates"))
+    expect(screen.getByPlaceholderText("Reason for forcing this stage move...")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Force move" })).toBeDisabled()
+  })
+
+  it("typing a reason enables Force move", () => {
+    renderModal([depositGate], { canOverride: true })
+    fireEvent.click(screen.getByText("Override gates"))
+    fireEvent.change(screen.getByPlaceholderText("Reason for forcing this stage move..."), {
+      target: { value: "Confirmed with client by phone." },
+    })
+    expect(screen.getByRole("button", { name: "Force move" })).toBeEnabled()
+  })
+
+  it("collapsing the panel again clears the typed reason", () => {
+    renderModal([depositGate], { canOverride: true })
+    const trigger = screen.getByText("Override gates")
+    fireEvent.click(trigger)
+    fireEvent.change(screen.getByPlaceholderText("Reason for forcing this stage move..."), {
+      target: { value: "Confirmed with client by phone." },
+    })
+    fireEvent.click(trigger)
+    fireEvent.click(trigger)
+    expect(screen.getByPlaceholderText("Reason for forcing this stage move...")).toHaveValue("")
+  })
+
+  it("renders nothing override-related when canOverride is false", () => {
+    renderModal([depositGate], { canOverride: false })
+    expect(screen.queryByText("Override gates")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Force move" })).not.toBeInTheDocument()
   })
 })

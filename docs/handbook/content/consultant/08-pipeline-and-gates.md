@@ -191,23 +191,20 @@ the booking advances by itself.
 This only happens when the unsent email is the single blocker. Anything else outstanding —
 a missing phone number, a missing invoice number — and you get the modal as normal.
 
-## Manager override
+## Override gates
 
-[[shot:08-override|The manager override reason box in the modal]]
+[[shot:08-override|The override gates reason box in the modal, expanded]]
 
-Managers and administrators see a **Manager override** box at the foot of the modal, with
-a reason field and a red **Force move** button. It pushes the booking through regardless
-of what is blocking it.
-
-If you are a consultant you will not see it. What you do instead is ask: tell the manager
-which booking, which stage you are trying to reach, and which gate is in the way — the
-exact wording off the modal. Two gate messages say so outright: *"A manager can also move
-this booking on with a reason."*
+Every role, including consultants, can force a blocked move through an **Override gates**
+panel at the foot of the modal. It is collapsed by default — click it to reveal a reason
+field and a red **Force move** button that pushes the booking through regardless of what
+is blocking it.
 
 The reason is mandatory — **Force move** stays disabled until something is typed — and it
 is written to the booking's audit trail alongside the stage change, under
-`stage_change_override`, with the manager's name. Anyone can read it later on the **Audit
-Log** tab. Write a reason that will still make sense in six months.
+`stage_change_override`, with your name against it. Anyone can read it later on the
+**Audit Log** tab, so write a reason that will still make sense in six months: this is
+what stands in for a permission check, so a vague reason is the whole gap.
 
 ## What a successful move changes
 
