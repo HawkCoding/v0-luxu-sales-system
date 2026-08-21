@@ -110,6 +110,12 @@ export interface SuiteLegState {
    *  ignore it and price off the card's own currency. */
   priceCurrency: string
   units: SuiteUnitState[]
+  /** Internal supplier-booking record — when this leg was placed, confirmed and paid with the
+   *  supplier. Never shown to the customer; feeds the booking worksheet. */
+  bookingDate: string | null
+  confirmationDate: string | null
+  paymentMadeDate: string | null
+  paidWith: string | null
   /** 'auto' drives the "Auto-filled" chip — cleared (by the caller, in updateLegState) the
    *  moment any field on this leg is edited, mirroring FieldFlags' dirty-suppresses-badge rule. */
   origin: "auto" | "consultant"
@@ -130,6 +136,12 @@ export interface TransportLegState {
    *  the rate card and ignore it. */
   priceCurrency: string
   requests: BookingTransportRequest[]
+  /** See SuiteLegState.bookingDate/confirmationDate/paymentMadeDate/paidWith — the supplier
+   *  booking record for the transfer/rental supplier itself, not any one trip. */
+  bookingDate: string | null
+  confirmationDate: string | null
+  paymentMadeDate: string | null
+  paidWith: string | null
   origin: "auto" | "consultant"
   /** See SuiteLegState.updatedAt. */
   updatedAt?: string | null
@@ -184,6 +196,11 @@ export interface SavedSelectionRow {
   price_currency?: string | null
   /** Hotel legs only; absent on a catalogue selection row. */
   luggage_storage_available?: boolean | null
+  /** Absent on a catalogue selection row; present on a booking_services row. */
+  booking_date?: string | null
+  confirmation_date?: string | null
+  payment_made_date?: string | null
+  paid_with?: string | null
   units: SavedSelectionUnitRow[]
   /** Absent for a catalogue selection row (which has no such concept); present for a
    *  booking_services row. Missing/undefined is treated as 'consultant' -- never surface a chip
@@ -311,6 +328,10 @@ function buildRawDefaultLegStates(
         // explicit act (the leg's currency dropdown), never a default.
         priceCurrency: options.quoteCurrency ?? BASE_CURRENCY,
         requests: [createDraftTransportRequest(leg)],
+        bookingDate: null,
+        confirmationDate: null,
+        paymentMadeDate: null,
+        paidWith: null,
         origin: "consultant",
       } satisfies TransportLegState
     }
@@ -356,6 +377,10 @@ function buildRawDefaultLegStates(
       rateTypeId: null,
       priceCurrency: options.quoteCurrency ?? BASE_CURRENCY,
       units: [createDraftUnit(totals)],
+      bookingDate: null,
+      confirmationDate: null,
+      paymentMadeDate: null,
+      paidWith: null,
       origin: "consultant",
     } satisfies SuiteLegState
   })
@@ -589,6 +614,10 @@ export function hydrateFromSaved(
         rateTypeId: row?.rate_type_id ?? fallback.rateTypeId,
         priceCurrency: row?.price_currency ?? fallback.priceCurrency,
         requests: legRequests.length > 0 ? legRequests : fallback.requests,
+        bookingDate: row?.booking_date ?? fallback.bookingDate,
+        confirmationDate: row?.confirmation_date ?? fallback.confirmationDate,
+        paymentMadeDate: row?.payment_made_date ?? fallback.paymentMadeDate,
+        paidWith: row?.paid_with ?? fallback.paidWith,
         origin: row?.origin ?? fallback.origin,
         updatedAt: row?.updated_at ?? null,
       } satisfies TransportLegState
@@ -648,6 +677,10 @@ export function hydrateFromSaved(
       rateTypeId: row.rate_type_id ?? fallback.rateTypeId,
       priceCurrency: row.price_currency ?? fallback.priceCurrency,
       units: units.length > 0 ? units : fallback.units,
+      bookingDate: row.booking_date ?? fallback.bookingDate,
+      confirmationDate: row.confirmation_date ?? fallback.confirmationDate,
+      paymentMadeDate: row.payment_made_date ?? fallback.paymentMadeDate,
+      paidWith: row.paid_with ?? fallback.paidWith,
       origin: row.origin ?? fallback.origin,
       updatedAt: row.updated_at ?? null,
     } satisfies SuiteLegState
@@ -682,6 +715,10 @@ export interface PackageSelectionsPatchBody {
     notes?: string | null
     /** Hotel legs only — the server rejects it on any other supplier kind. */
     luggageStorageAvailable?: boolean
+    bookingDate?: string | null
+    confirmationDate?: string | null
+    paymentMadeDate?: string | null
+    paidWith?: string | null
     units?: Array<{
       id?: string
       suiteTypeId: string | null
@@ -716,6 +753,10 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
           routeId: state.routeId,
           rateTypeId: state.rateTypeId,
           priceCurrency: state.priceCurrency,
+          bookingDate: state.bookingDate,
+          confirmationDate: state.confirmationDate,
+          paymentMadeDate: state.paymentMadeDate,
+          paidWith: state.paidWith,
         }
       }
       return {
@@ -752,6 +793,10 @@ export function toPackageSelectionsPatch(states: ApplyLegState[]): PackageSelect
         ...(state.supplierKind === "hotel_property"
           ? { luggageStorageAvailable: state.luggageStorageAvailable }
           : {}),
+        bookingDate: state.bookingDate,
+        confirmationDate: state.confirmationDate,
+        paymentMadeDate: state.paymentMadeDate,
+        paidWith: state.paidWith,
         units: state.units.map((unit, index) => ({
           id: unit.id.startsWith("draft-") ? undefined : unit.id,
           suiteTypeId: unit.suiteTypeId,

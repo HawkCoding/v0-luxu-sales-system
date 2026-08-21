@@ -109,6 +109,10 @@ function makeLegState(
     rateTypeId: null,
     priceCurrency: "ZAR",
     requests,
+    bookingDate: null,
+    confirmationDate: null,
+    paymentMadeDate: null,
+    paidWith: null,
     origin: "consultant",
     ...overrides,
   }

@@ -27,6 +27,7 @@ import {
 } from "@/lib/packages/apply-dialog-state"
 import { resolveTransferPickupDate } from "@/lib/packages/transfer-dates"
 import { AnchorDateSection } from "@/components/packages/anchor-date-section"
+import { ServiceAdminDates } from "@/components/packages/service-admin-dates"
 import { dateOnly } from "@/lib/packages/trip-date-range"
 import { getBillableRentalDays } from "@/lib/packages/rental-days"
 import { findRateCardCandidates, selectRateCard } from "@/lib/rate-cards/resolve"
@@ -654,6 +655,16 @@ export function TransportLegEditor({
             </div>
           ))
         : null}
+
+      <ServiceAdminDates
+        value={{
+          bookingDate: value.bookingDate,
+          confirmationDate: value.confirmationDate,
+          paymentMadeDate: value.paymentMadeDate,
+          paidWith: value.paidWith,
+        }}
+        onChange={(next) => onChange({ ...value, ...next })}
+      />
     </div>
   )
 }

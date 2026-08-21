@@ -32,6 +32,7 @@ import { distributePassengerTotals, type PassengerTotals } from "@/lib/packages/
 import { addDays, resolveHotelStayDates } from "@/lib/packages/hotel-dates"
 import { resolveTransferPickupDate } from "@/lib/packages/transfer-dates"
 import { AnchorDateSection } from "@/components/packages/anchor-date-section"
+import { ServiceAdminDates } from "@/components/packages/service-admin-dates"
 import {
   createDraftUnit,
   isRouteReversible,
@@ -1530,6 +1531,16 @@ export function SuiteLegEditor({
               onChange={(event) => onChange({ ...value, notes: event.target.value || null })}
             />
           </div>
+
+          <ServiceAdminDates
+            value={{
+              bookingDate: value.bookingDate,
+              confirmationDate: value.confirmationDate,
+              paymentMadeDate: value.paymentMadeDate,
+              paidWith: value.paidWith,
+            }}
+            onChange={(next) => onChange({ ...value, ...next })}
+          />
         </>
       ) : null}
     </div>
