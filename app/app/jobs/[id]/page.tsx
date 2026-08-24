@@ -29,6 +29,7 @@ import {
   PIPELINE_STAGES,
   type PipelineStage,
 } from "@/lib/types"
+import { formatMoney } from "@/lib/money"
 import { useRole } from "@/lib/role-context"
 import { useAuth } from "@/lib/auth-context"
 import { AlertCircle, ArrowLeft, CheckCircle2, ChevronRight, ChevronLeft as ChevronLeftIcon, UserRound, XCircle, Target, UserPlus, UserMinus } from "lucide-react"
@@ -751,6 +752,11 @@ export default function JobDetailPage() {
               {job.isRepeatClientAtCreation ? (
                 <Badge variant="outline" className="text-xs">Repeat Client</Badge>
               ) : null}
+              {(job.overpaidAmount ?? 0) > 0 ? (
+                <Badge variant="destructive" className="text-xs">
+                  Overpaid {formatMoney(job.overpaidAmount ?? 0, billingCurrency)}
+                </Badge>
+              ) : null}
               {(() => {
                 const outcome = (job.outcome as Outcome | undefined) ?? "Open"
                 const colors: Record<Outcome, string> = {
@@ -1080,6 +1086,7 @@ export default function JobDetailPage() {
             mutate={mutate}
             stage={currentStage}
             currency={billingCurrency}
+            overpaidAmount={job.overpaidAmount}
           />
         </TabsContent>
         <TabsContent value="correspondence">

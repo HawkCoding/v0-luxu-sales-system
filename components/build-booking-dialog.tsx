@@ -67,8 +67,10 @@ import {
   type ApplyLegState,
   type HotelAnchorContext,
   type SavedPackageState,
+  type SavedSelectionRow,
   type TransferAnchorContext,
 } from "@/lib/packages/apply-dialog-state"
+import { Skeleton } from "@/components/ui/skeleton"
 
 interface BuildBookingDialogProps {
   jobId: string
@@ -104,6 +106,33 @@ interface ServiceRow {
   supplierId: string
   supplierKind: SupplierKind
   supplierName: string
+}
+
+/**
+ * Step 1 renders nothing but a supplier name and kind per row, and GET /api/jobs/[id]/services now
+ * carries both -- so the list can paint off that fast read instead of blocking on the much heavier
+ * GET /build-booking payload (every route, rate card and suite type for every supplier), which only
+ * step 2 actually consumes.
+ *
+ * A row whose supplier didn't resolve is dropped rather than rendered as "Unknown": build-booking's
+ * response replaces this list wholesale when it lands, so a placeholder would only ever flicker.
+ */
+function savedSelectionsToServiceRows(selections: readonly SavedSelectionRow[]): ServiceRow[] {
+  return selections
+    .filter(
+      (row): row is SavedSelectionRow & { supplier_id: string; supplier_kind: SupplierKind } =>
+        Boolean(row.supplier_id) &&
+        Boolean(row.supplier_name) &&
+        Boolean(row.supplier_kind && row.supplier_kind in SUPPLIER_KIND_LABELS),
+    )
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    .map((row) => ({
+      key: row.package_leg_id,
+      legId: row.package_leg_id,
+      supplierId: row.supplier_id,
+      supplierKind: row.supplier_kind,
+      supplierName: row.supplier_name as string,
+    }))
 }
 
 interface BuildBookingResponse {
@@ -174,6 +203,10 @@ export function BuildBookingDialog({
   const [pickerKind, setPickerKind] = useState<SupplierKind>("train_operator")
   const [pickerSupplierId, setPickerSupplierId] = useState("")
   const [packageDetail, setPackageDetail] = useState<PackageDetail | null>(null)
+  /** True while the open-time load is in flight. Step 1 used to render "No services added yet"
+   *  for the whole wait, which on a booking that does have services reads as broken rather than
+   *  slow. */
+  const [initialLoading, setInitialLoading] = useState(false)
   const [building, setBuilding] = useState(false)
   const [savedState, setSavedState] = useState<SavedPackageState | null>(null)
   /** Who accepted the built service list and when — until this was surfaced, a confirmed list was
@@ -382,10 +415,21 @@ export function BuildBookingDialog({
 
   // Load the booking's saved services when the dialog opens, so re-opening pre-fills everything
   // the last build persisted.
+  //
+  // The two halves run concurrently. /build-booking is by far the slowest request here and used to
+  // be chained behind the saved-state read for no reason -- it takes no input from it. Step 1 now
+  // paints off the saved-state response, which carries the supplier names and kinds it needs, while
+  // the payload step 2 consumes keeps loading in the background.
   useEffect(() => {
     if (!open) return
     let cancelled = false
-    void (async () => {
+    // The parallel fetch introduces a race the chained version couldn't have: either half may land
+    // first. packageDetail's leg list is the authoritative one, so once it has populated the list
+    // the saved-state fallback must not overwrite it with its own rows.
+    let detailPopulatedServices = false
+    setInitialLoading(true)
+
+    const savedTask = (async () => {
       try {
         const [servicesRes, transportRes] = await Promise.all([
           fetch(`/api/jobs/${jobId}/services`),
@@ -395,6 +439,7 @@ export function BuildBookingDialog({
         const saved: SavedPackageState | null = servicesRes.ok
           ? ((await servicesRes.json()) as SavedPackageState)
           : null
+        if (cancelled) return
         setSavedState(saved)
         setConfirmedStamp(
           saved?.servicesConfirmedAt
@@ -404,29 +449,9 @@ export function BuildBookingDialog({
         setExistingTransportRequests(
           transportRes.ok ? ((await transportRes.json()) as BookingTransportRequest[]) : [],
         )
-
-        // The GET here is cheap and returns packageDetail: null when nothing has been built yet,
-        // so there is no need to gate it behind savedState the way a real catalogue package id
-        // once required.
-        const buildRes = await fetch(`/api/jobs/${jobId}/build-booking`)
-        if (!cancelled && buildRes.ok) {
-          const built = (await buildRes.json()) as { packageDetail: PackageDetail | null }
-          if (built.packageDetail) {
-            setPackageDetail(built.packageDetail)
-            setServices(
-              built.packageDetail.legs
-                .slice()
-                .sort((a, b) => a.sortOrder - b.sortOrder)
-                .map((leg) => ({
-                  key: leg.id,
-                  legId: leg.id,
-                  supplierId: leg.supplierId,
-                  supplierKind: leg.supplierKind,
-                  supplierName: leg.supplierName,
-                })),
-            )
-          }
-        }
+        if (cancelled || detailPopulatedServices || !saved) return
+        const rows = savedSelectionsToServiceRows(saved.selections)
+        if (rows.length > 0) setServices(rows)
       } catch {
         if (!cancelled) {
           setSavedState(null)
@@ -434,6 +459,39 @@ export function BuildBookingDialog({
         }
       }
     })()
+
+    const buildTask = (async () => {
+      try {
+        // Returns packageDetail: null when nothing has been built yet, so there is no need to gate
+        // it behind savedState the way a real catalogue package id once required.
+        const buildRes = await fetch(`/api/jobs/${jobId}/build-booking`)
+        if (cancelled || !buildRes.ok) return
+        const built = (await buildRes.json()) as { packageDetail: PackageDetail | null }
+        if (cancelled || !built.packageDetail) return
+        setPackageDetail(built.packageDetail)
+        detailPopulatedServices = true
+        setServices(
+          built.packageDetail.legs
+            .slice()
+            .sort((a, b) => a.sortOrder - b.sortOrder)
+            .map((leg) => ({
+              key: leg.id,
+              legId: leg.id,
+              supplierId: leg.supplierId,
+              supplierKind: leg.supplierKind,
+              supplierName: leg.supplierName,
+            })),
+        )
+      } catch {
+        // Step 1 still renders from the saved-state read above, and the Next click rebuilds
+        // packageDetail server-side regardless -- nothing here is the only path to it.
+      }
+    })()
+
+    void Promise.all([savedTask, buildTask]).then(() => {
+      if (!cancelled) setInitialLoading(false)
+    })
+
     return () => {
       cancelled = true
     }
@@ -538,6 +596,7 @@ export function BuildBookingDialog({
   function reset() {
     setStep("services")
     setServices([])
+    setInitialLoading(false)
     setPickerKind("train_operator")
     setPickerSupplierId("")
     setPackageDetail(null)
@@ -1022,7 +1081,16 @@ export function BuildBookingDialog({
             </div>
 
             <div className="space-y-2">
-              {services.length === 0 ? (
+              {initialLoading && services.length === 0 ? (
+                <div className="space-y-2" aria-busy="true">
+                  <span className="sr-only" role="status">
+                    Loading this booking&apos;s services…
+                  </span>
+                  {[0, 1, 2].map((row) => (
+                    <Skeleton key={row} className="h-[58px] w-full rounded-lg" />
+                  ))}
+                </div>
+              ) : services.length === 0 ? (
                 <p className="py-4 text-center text-sm text-muted-foreground">No services added yet</p>
               ) : (
                 services.map((service, index) => (

@@ -18,11 +18,16 @@ import { useAuth } from "@/lib/auth-context"
 import { formatDisplayDate } from "@/lib/date-format"
 import { BASE_CURRENCY, formatMoney } from "@/lib/money"
 import { getPipelineStageLabel } from "@/lib/types"
+import { ListFilterBar } from "@/components/list-filter-bar"
+import { useFilterParams } from "@/hooks/use-filter-params"
+import { matchesSearch } from "@/lib/list-filters"
+
+const DEFAULT_FILTERS = { q: "" }
 
 export default function PaymentsPage() {
   const { data, isLoading, mutate } = useData(["bookings", "customers", "payments", "quotes"])
   const { user } = useAuth()
-  const [search, setSearch] = useState("")
+  const { values, setValue, clear, hasActive } = useFilterParams(DEFAULT_FILTERS)
   const [addOpen, setAddOpen] = useState(false)
   const [allocateOpen, setAllocateOpen] = useState(false)
   const [allocatingPayment, setAllocatingPayment] = useState<any>(null)
@@ -57,11 +62,9 @@ export default function PaymentsPage() {
     }
   }).sort((a: any, b: any) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
 
-  const filtered = payments.filter((p: any) => {
-    if (!search) return true
-    return [p.jobNumber, p.customerName, p.reference, p.method]
-      .some((f: string) => f?.toLowerCase().includes(search.toLowerCase()))
-  })
+  const filtered = payments.filter((p: any) =>
+    matchesSearch([p.jobNumber, p.customerName, p.reference, p.method], values.q),
+  )
 
   const total = filtered.reduce((s: number, p: any) => s + p.amount, 0)
 
@@ -249,10 +252,18 @@ export default function PaymentsPage() {
         </div>
       </div>
 
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input placeholder="Search payments..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9 h-10 text-sm" />
-      </div>
+      <ListFilterBar
+        searchValue={values.q}
+        onSearchChange={(v) => setValue("q", v, { debounceMs: 250 })}
+        searchPlaceholder="Search payments..."
+        chips={[]}
+        onClearAll={clear}
+        resultCount={filtered.length}
+        totalCount={payments.length}
+        noun="payment"
+        hasActiveFilters={hasActive}
+        className="max-w-md"
+      />
 
       <div className="space-y-3">
         {filtered.map((p: any) => {

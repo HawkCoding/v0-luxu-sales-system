@@ -1,4 +1,4 @@
-export type Json =
+﻿export type Json =
   | string
   | number
   | boolean
@@ -1100,6 +1100,7 @@ export type Database = {
           outcome_reason_id: string | null
           outcome_set_at: string | null
           outcome_set_by: string | null
+          overpaid_amount: number
           owner_user_id: string | null
           package_travel_date: string | null
           promotion_code: string | null
@@ -1173,6 +1174,7 @@ export type Database = {
           outcome_reason_id?: string | null
           outcome_set_at?: string | null
           outcome_set_by?: string | null
+          overpaid_amount?: number
           owner_user_id?: string | null
           package_travel_date?: string | null
           promotion_code?: string | null
@@ -1246,6 +1248,7 @@ export type Database = {
           outcome_reason_id?: string | null
           outcome_set_at?: string | null
           outcome_set_by?: string | null
+          overpaid_amount?: number
           owner_user_id?: string | null
           package_travel_date?: string | null
           promotion_code?: string | null

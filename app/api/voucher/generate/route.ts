@@ -10,8 +10,9 @@ import {
   scopeLegIdsFilter,
   type AcceptedQuoteScope,
 } from "@/lib/quotes/accepted-quote-scope"
+import { projectPassengerTotals, resolveSupplierAgeBuckets } from "@/lib/packages/passenger-totals"
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
-import { checkVoucherReadiness } from "@/lib/voucher/check-readiness"
+import { checkVoucherReadiness, type ReadinessWarning } from "@/lib/voucher/check-readiness"
 import { loadLegReferenceRows, missingLegReferenceLabels } from "@/lib/voucher/leg-references"
 import { composeEmail } from "@/lib/templates/compose-email"
 import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
@@ -43,6 +44,7 @@ type CustomerRecord = {
 }
 
 type SupplierRecord = {
+  id: string
   name: string | null
   description: string | null
 }
@@ -59,6 +61,7 @@ type BookingVoucherRecord = {
   no_of_suites: number
   no_of_adults: number
   no_of_children: number
+  child_ages: number[] | null
   customer: CustomerRecord | CustomerRecord[] | null
   route: { name: string | null; supplier: SupplierRecord | SupplierRecord[] | null } | null
 }
@@ -72,6 +75,42 @@ function firstRecord<T>(value: T | T[] | null | undefined): T | null {
 
 function sanitizePathPart(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "voucher"
+}
+
+/**
+ * Whether a leg's guest counts were actually captured.
+ *
+ * `sumUnitGuestBreakdown` returns an object whenever the leg has unit rows at all, so a room
+ * created but never given an occupancy sums to `{0, 0, 0}` — truthy, yet nothing was captured.
+ * Treating that as a completed breakdown let a voucher print "Adults 0" to the guest with no
+ * warning raised. Judge it on the counts, not on the object's existence.
+ */
+function hasCapturedGuestBreakdown(
+  breakdown: { adults: number; children: number; infants: number } | null | undefined,
+): boolean {
+  if (!breakdown) return false
+  return breakdown.adults + breakdown.children + breakdown.infants > 0
+}
+
+/**
+ * Guests named on the roster versus the passenger counts the booking is priced from. These are
+ * captured separately and never reconciled automatically (see lib/packages/roster-pax.ts), so the
+ * voucher can otherwise print a list of two names above "Number of Guests: 1" — one berth booked,
+ * two people at the platform. Compared on head count only: the printed line is a head count, and
+ * bucketing the roster by age would need the age-band settings this route has no other use for.
+ */
+function guestCountMismatchWarning(
+  travellerCount: number,
+  pricedGuestCount: number,
+): ReadinessWarning | null {
+  // No roster captured yet is not a mismatch -- there is nothing to disagree with.
+  if (travellerCount === 0 || travellerCount === pricedGuestCount) return null
+  return {
+    code: "guest_count_mismatch",
+    message: `The guest list has ${travellerCount} ${travellerCount === 1 ? "guest" : "guests"}, but this booking is priced for ${pricedGuestCount}. The voucher prints the priced count.`,
+    fixHint:
+      "Reconcile the two on the Reservation tab — either correct the guest list or apply it to the passenger counts.",
+  }
 }
 
 function buildGuestNames(customer: CustomerRecord | null, travellers: { prefix: string | null; first_name: string; last_name: string }[]): string {
@@ -116,7 +155,7 @@ export async function POST(req: Request) {
     supabase
       .from("bookings")
       .select(
-        "id, booking_number, customer_invoice_number, stage, invoice_balance, consultant, assigned_salesperson_id, departure_date, no_of_suites, no_of_adults, no_of_children, customer:customers(first_name, last_name, email, phone, title), route:routes(name, supplier:suppliers(name, description))",
+        "id, booking_number, customer_invoice_number, stage, invoice_balance, consultant, assigned_salesperson_id, departure_date, no_of_suites, no_of_adults, no_of_children, child_ages, customer:customers(first_name, last_name, email, phone, title), route:routes(name, supplier:suppliers(id, name, description))",
       )
       .eq("id", parsed.data.jobId)
       .single(),
@@ -216,7 +255,7 @@ export async function POST(req: Request) {
       startTime: block.serviceData.startTime,
       endTime: block.serviceData.endTime,
       arrivalDate: block.serviceData.arrivalDate,
-      hasGuestBreakdown: Boolean(block.serviceData.guestBreakdown),
+      hasGuestBreakdown: hasCapturedGuestBreakdown(block.serviceData.guestBreakdown),
       cabin: block.serviceData.cabin,
       handLuggageKg: block.serviceData.handLuggageKg,
       checkedLuggageKg: block.serviceData.checkedLuggageKg,
@@ -249,6 +288,27 @@ export async function POST(req: Request) {
   const allTravellers = travellers ?? []
   const template = normalizeTemplate(templateRaw as VoucherTemplateRow | null)
 
+  // Infant status only exists as a derived bucket (child_ages vs. the supplier's age buckets) --
+  // no_of_children alone can't tell an infant from an older child. Classify against the same
+  // supplier the pricing engine used, so the voucher never disagrees with what was quoted.
+  const ageBuckets = await resolveSupplierAgeBuckets(supabase, supplierRecord?.id ?? null)
+  const passengerTotals = projectPassengerTotals(
+    {
+      noOfAdults: booking.no_of_adults,
+      noOfChildren: booking.no_of_children,
+      childAges: booking.child_ages ?? [],
+    },
+    ageBuckets,
+  )
+
+  // `checkVoucherReadiness` only sees per-block data, so a booking-level disagreement between the
+  // guest list and the priced pax has to be appended here. Advisory like every other warning --
+  // the voucher still generates, and reconciling the two stays an explicit consultant action.
+  const readinessWarnings: ReadinessWarning[] = [
+    ...readiness.warnings,
+    guestCountMismatchWarning(allTravellers.length, booking.no_of_adults + booking.no_of_children),
+  ].filter((warning): warning is ReadinessWarning => warning !== null)
+
   // The number printed on the voucher and quoted back by the office is the salesperson-entered
   // customer invoice number — the same reference the invoice, its emails, and the bank payment
   // reference use. It falls back to the internal LTT-…-INV number only when it has not been
@@ -265,7 +325,7 @@ export async function POST(req: Request) {
     departure: formatDisplayDateLong(booking.departure_date),
     arrival: "",
     suiteType,
-    numberOfGuests: booking.no_of_adults + booking.no_of_children,
+    passengerTotals,
     specialRequests: reservationDetails?.voucher_special_requests ?? "",
     customerEmail: customer.email,
     customerPhone: customer.phone ?? "",
@@ -324,7 +384,7 @@ export async function POST(req: Request) {
 
   const { data: existingDocument, error: existingDocumentError } = await supabase
     .from("documents")
-    .select("id")
+    .select("id, status")
     .eq("booking_id", booking.id)
     .eq("kind", "voucher_pdf")
     .order("created_at", { ascending: false })
@@ -333,10 +393,14 @@ export async function POST(req: Request) {
 
   if (existingDocumentError) return safeSupabaseError("voucher:document-existing", existingDocumentError)
 
+  // Regenerating must not un-send an already-sent voucher. `sent` is the record that the guest was
+  // emailed their travel document -- resetting it to `generated` erased that from the Documents tab
+  // while the correspondence row still said an email went out. A later regeneration is a new render
+  // of the same document, not a retraction of the send.
   const documentPayload = {
     booking_id: booking.id,
     kind: "voucher_pdf" as const,
-    status: "generated" as const,
+    status: existingDocument?.status === "sent" ? ("sent" as const) : ("generated" as const),
     storage_path: `${VOUCHER_BUCKET}/${storagePath}`,
   }
 
@@ -473,7 +537,7 @@ export async function POST(req: Request) {
       sentAt: voucherWrite.data.sent_at,
       serviceBlockCount: serviceBlocks.length,
     },
-    readinessWarnings: readiness.warnings,
+    readinessWarnings,
     voucher: {
       filename,
       contentType: "application/pdf",

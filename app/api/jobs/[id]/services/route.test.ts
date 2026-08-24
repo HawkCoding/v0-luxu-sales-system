@@ -56,6 +56,8 @@ interface MockState {
     manual_tour_price_set_at?: string | null
     manual_tour_price_set_by?: string | null
   }>
+  /** Rows the GET's services-with-supplier select returns, embedded join included. */
+  getServiceRows?: Array<Record<string, unknown>>
 }
 
 function buildSupabase(state: MockState = {}) {
@@ -108,8 +110,19 @@ function buildSupabase(state: MockState = {}) {
                 })),
               }
             }
-            // GET / reload: services-with-units select
-            return { eq: vi.fn(async () => ({ data: [], error: null })) }
+            // GET / reload: services-with-units select. GET chains .order("sort_order") off .eq()
+            // so step 1's list agrees with the leg order step 2 renders; the PATCH reload awaits
+            // .eq() directly. The query object has to be both chainable and awaitable.
+            const rows = columns.includes("suppliers(name, kind)") ? state.getServiceRows ?? [] : []
+            return {
+              eq: vi.fn(() => {
+                const query: Record<string, unknown> = {}
+                query.order = vi.fn(async () => ({ data: rows, error: null }))
+                query.then = (resolve: (value: unknown) => unknown) =>
+                  Promise.resolve({ data: [], error: null }).then(resolve)
+                return query
+              }),
+            }
           }),
           update: vi.fn((payload: Record<string, unknown>) => ({
             eq: vi.fn(() => ({
@@ -225,6 +238,63 @@ describe("GET /api/jobs/[id]/services", () => {
     const body = await res.json()
     expect(body.packageId).toBeNull()
     expect(body.selections).toEqual([])
+  })
+
+  // Build Booking's step 1 renders its service list off this response rather than waiting on the
+  // far heavier GET /build-booking payload, so the supplier's name and kind have to arrive here.
+  it("flattens the embedded supplier join onto each selection", async () => {
+    mockAuth({
+      getServiceRows: [
+        {
+          id: SERVICE_A,
+          supplier_id: "sup-a",
+          sort_order: 0,
+          units: [],
+          suppliers: { name: "Rovos Rail", kind: "train_operator" },
+        },
+      ],
+    })
+    const res = await GET(new Request("http://localhost"), makeParams())
+    const body = await res.json()
+
+    expect(body.packageId).toBe(BOOKING_ID)
+    expect(body.selections[0]).toMatchObject({
+      package_leg_id: SERVICE_A,
+      sort_order: 0,
+      supplier_name: "Rovos Rail",
+      supplier_kind: "train_operator",
+    })
+    // Flattened to scalars, never passed through as a nested object -- every existing consumer of
+    // `selections` reads flat snake_case fields.
+    expect(body.selections[0]).not.toHaveProperty("suppliers")
+  })
+
+  // PostgREST has shipped an embedded to-one relation as a single-element array in the past.
+  it("normalises a supplier join that arrives as an array", async () => {
+    mockAuth({
+      getServiceRows: [
+        {
+          id: SERVICE_A,
+          supplier_id: "sup-a",
+          sort_order: 0,
+          units: [],
+          suppliers: [{ name: "The Blue Train", kind: "train_operator" }],
+        },
+      ],
+    })
+    const res = await GET(new Request("http://localhost"), makeParams())
+    const body = await res.json()
+    expect(body.selections[0].supplier_name).toBe("The Blue Train")
+  })
+
+  it("nulls the supplier fields when the join resolves to nothing", async () => {
+    mockAuth({
+      getServiceRows: [{ id: SERVICE_A, supplier_id: "sup-a", sort_order: 0, units: [], suppliers: null }],
+    })
+    const res = await GET(new Request("http://localhost"), makeParams())
+    const body = await res.json()
+    expect(body.selections[0].supplier_name).toBeNull()
+    expect(body.selections[0].supplier_kind).toBeNull()
   })
 })
 

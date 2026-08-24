@@ -19,6 +19,11 @@ import { clientInvoiceNumber } from "@/lib/invoices/invoice-status"
 
 export const runtime = "nodejs"
 
+// TODO(itinerary): Itinerary PDF attachment disabled 2026-08-24 per business decision —
+// vouchers should go out without it for now. Generation code (lib/itinerary/*) is untouched
+// and fully working. To re-enable: flip ITINERARY_ATTACHMENT_ENABLED back to true.
+const ITINERARY_ATTACHMENT_ENABLED = false
+
 interface RouteParams {
   params: Promise<{ id: string }>
 }
@@ -156,44 +161,47 @@ export async function POST(_req: Request, { params }: RouteParams) {
     return jsonError("Voucher PDF is not available — generate it first", 400)
   }
 
-  // Latest itinerary PDF for the booking — required so the customer receives
-  // voucher + itinerary in one email. Built silently here if it doesn't exist
+  // Latest itinerary PDF for the booking — attached alongside the voucher when
+  // ITINERARY_ATTACHMENT_ENABLED is on. Built silently here if it doesn't exist
   // yet; there's no customer-facing itinerary step anymore.
-  const { data: itineraryDoc, error: itineraryError } = await supabase
-    .from("documents")
-    .select("id, storage_path, created_at")
-    .eq("booking_id", booking.id)
-    .eq("kind", "itinerary_pdf")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle()
+  let itineraryBlob: Blob | null = null
 
-  if (itineraryError) return safeSupabaseError("voucher-prepare-send:itinerary", itineraryError)
+  if (ITINERARY_ATTACHMENT_ENABLED) {
+    const { data: itineraryDoc, error: itineraryError } = await supabase
+      .from("documents")
+      .select("id, storage_path, created_at")
+      .eq("booking_id", booking.id)
+      .eq("kind", "itinerary_pdf")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
 
-  let itineraryRef = parseStoragePath(itineraryDoc?.storage_path ?? null)
-  if (!itineraryRef) {
-    try {
-      const ensured = await ensureItineraryPdf(supabase, { bookingId: booking.id })
-      itineraryRef = parseStoragePath(ensured.storagePath)
-    } catch (error) {
-      console.error("voucher-prepare-send:ensure-itinerary", error)
+    if (itineraryError) return safeSupabaseError("voucher-prepare-send:itinerary", itineraryError)
+
+    let itineraryRef = parseStoragePath(itineraryDoc?.storage_path ?? null)
+    if (!itineraryRef) {
+      try {
+        const ensured = await ensureItineraryPdf(supabase, { bookingId: booking.id })
+        itineraryRef = parseStoragePath(ensured.storagePath)
+      } catch (error) {
+        console.error("voucher-prepare-send:ensure-itinerary", error)
+        return jsonError("Itinerary PDF could not be generated — voucher not sent", 500)
+      }
+    }
+    if (!itineraryRef) {
       return jsonError("Itinerary PDF could not be generated — voucher not sent", 500)
     }
-  }
-  if (!itineraryRef) {
-    return jsonError("Itinerary PDF could not be generated — voucher not sent", 500)
+
+    const itineraryDownload = await supabase.storage.from(itineraryRef.bucket).download(itineraryRef.path)
+    if (itineraryDownload.error || !itineraryDownload.data) {
+      return jsonError("Itinerary PDF could not be retrieved from storage", 500)
+    }
+    itineraryBlob = itineraryDownload.data
   }
 
-  const [voucherDownload, itineraryDownload] = await Promise.all([
-    supabase.storage.from(voucherRef.bucket).download(voucherRef.path),
-    supabase.storage.from(itineraryRef.bucket).download(itineraryRef.path),
-  ])
-
+  const voucherDownload = await supabase.storage.from(voucherRef.bucket).download(voucherRef.path)
   if (voucherDownload.error || !voucherDownload.data) {
     return jsonError("Voucher PDF could not be retrieved from storage", 500)
-  }
-  if (itineraryDownload.error || !itineraryDownload.data) {
-    return jsonError("Itinerary PDF could not be retrieved from storage", 500)
   }
 
   const customerName = formatCustomerSalutation(customer)
@@ -217,7 +225,9 @@ export async function POST(_req: Request, { params }: RouteParams) {
   if (!composed) return jsonError("Voucher email template could not be resolved", 500)
 
   const voucherBase64 = Buffer.from(await voucherDownload.data.arrayBuffer()).toString("base64")
-  const itineraryBase64 = Buffer.from(await itineraryDownload.data.arrayBuffer()).toString("base64")
+  const itineraryBase64 = itineraryBlob
+    ? Buffer.from(await itineraryBlob.arrayBuffer()).toString("base64")
+    : null
 
   const filenameNumber = sanitizeFilenamePart(clientInvoiceNumber(booking))
 
@@ -242,11 +252,15 @@ export async function POST(_req: Request, { params }: RouteParams) {
         contentBase64: voucherBase64,
         contentType: "application/pdf",
       },
-      {
-        filename: `itinerary-${filenameNumber}.pdf`,
-        contentBase64: itineraryBase64,
-        contentType: "application/pdf",
-      },
+      ...(itineraryBase64
+        ? [
+            {
+              filename: `itinerary-${filenameNumber}.pdf`,
+              contentBase64: itineraryBase64,
+              contentType: "application/pdf",
+            },
+          ]
+        : []),
     ],
   })
 }

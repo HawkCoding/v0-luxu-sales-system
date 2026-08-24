@@ -4,18 +4,19 @@ import { useData } from "@/lib/use-data"
 import { Card, CardContent } from "@/components/ui/card"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Calendar } from "@/components/ui/calendar"
-import { AlertCircle, Search, Globe, Filter, X, UserPlus, Star } from "lucide-react"
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { AlertCircle, Search, Globe, UserPlus, Star } from "lucide-react"
 import { useEffect, useState } from "react"
-import { CONSULTANTS, type ConsultantAbbreviation } from "@/lib/types"
-import { formatDisplayDate } from "@/lib/date-format"
+import { CONSULTANTS } from "@/lib/types"
 import { useRole } from "@/lib/role-context"
 import Link from "next/link"
-import { useSearchParams } from "next/navigation"
+import { FacetedFilter } from "@/components/ui/faceted-filter"
+import { DateRangePicker } from "@/components/ui/date-range-picker"
+import { ListFilterBar, type FilterChip } from "@/components/list-filter-bar"
+import { useFilterParams } from "@/hooks/use-filter-params"
+import { matchesSearch, isWithinDateRange } from "@/lib/list-filters"
+import { formatDisplayDateShort } from "@/lib/date-format"
 import { CustomerDetailView } from "@/components/customer-detail-view"
 import { CreateCustomerDialog } from "@/components/create-customer-dialog"
 import {
@@ -37,6 +38,15 @@ import {
 
 const PAGE_SIZE = 100
 
+// Key names match the pre-existing `?search=` link-in param other pages/emails already use.
+const DEFAULT_FILTERS = {
+  search: "",
+  consultant: "",
+  supplier: "",
+  createdFrom: "",
+  createdTo: "",
+}
+
 function getCustomerIdFromPath(pathname: string): string | null {
   const match = pathname.match(/^\/app\/customers\/([^/]+)\/?$/)
   return match ? match[1] : null
@@ -45,12 +55,7 @@ function getCustomerIdFromPath(pathname: string): string | null {
 export default function CustomersPage() {
   const { data, isLoading, error, mutate } = useData(["bookings", "customers"])
   const { can } = useRole()
-  const searchParams = useSearchParams()
-  const [search, setSearch] = useState("")
-  const [consultantFilter, setConsultantFilter] = useState<"all" | ConsultantAbbreviation>("all")
-  const [supplierFilter, setSupplierFilter] = useState("all")
-  const [createdDateFrom, setCreatedDateFrom] = useState<Date | undefined>(undefined)
-  const [createdDateTo, setCreatedDateTo] = useState<Date | undefined>(undefined)
+  const { values, setValue, clear, hasActive } = useFilterParams(DEFAULT_FILTERS)
   const [page, setPage] = useState(1)
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
@@ -64,11 +69,6 @@ export default function CustomersPage() {
     window.addEventListener("popstate", handlePopState)
     return () => window.removeEventListener("popstate", handlePopState)
   }, [])
-
-  useEffect(() => {
-    const searchFromQuery = searchParams.get("search")?.trim() ?? ""
-    if (searchFromQuery.length > 0) setSearch(searchFromQuery)
-  }, [searchParams])
 
   const bookings = data?.bookings ?? []
   const customers = (data?.customers ?? []).map((c: any) => {
@@ -99,22 +99,12 @@ export default function CustomersPage() {
   ).sort((a, b) => a.localeCompare(b))
 
   const filtered = customers.filter((c: any) => {
-    // Search filter (name, email, phone)
-    const matchSearch = !search || [c.firstName, c.lastName, c.email, c.phone, c.country]
-      .some((f: string) => f?.toLowerCase().includes(search.toLowerCase()))
+    const matchSearch = matchesSearch([c.firstName, c.lastName, c.email, c.phone, c.country], values.search)
+    const matchConsultant = !values.consultant || c.consultants.includes(values.consultant)
+    const matchSupplier = !values.supplier || c.suppliers.includes(values.supplier)
+    const matchCreated = isWithinDateRange(c.createdAt, values.createdFrom, values.createdTo)
 
-    // Consultant filter
-    const matchConsultant = consultantFilter === "all" || c.consultants.includes(consultantFilter)
-
-    // Supplier filter
-    const matchSupplier = supplierFilter === "all" || c.suppliers.includes(supplierFilter)
-
-    // Created date range filter
-    const createdDate = new Date(c.createdAt)
-    const matchCreatedDateFrom = !createdDateFrom || createdDate >= createdDateFrom
-    const matchCreatedDateTo = !createdDateTo || createdDate <= createdDateTo
-
-    return matchSearch && matchConsultant && matchSupplier && matchCreatedDateFrom && matchCreatedDateTo
+    return matchSearch && matchConsultant && matchSupplier && matchCreated
   })
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
@@ -139,7 +129,7 @@ export default function CustomersPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [search, consultantFilter, supplierFilter, createdDateFrom, createdDateTo])
+  }, [values.search, values.consultant, values.supplier, values.createdFrom, values.createdTo])
 
   useEffect(() => {
     if (page > totalPages) {
@@ -189,15 +179,28 @@ export default function CustomersPage() {
     window.scrollTo({ top: 0, behavior: "smooth" })
   }
 
-  const hasActiveFilters = search || consultantFilter !== "all" || supplierFilter !== "all" || 
-    createdDateFrom || createdDateTo
+  const hasActiveFilters = hasActive
+  const clearFilters = clear
 
-  const clearFilters = () => {
-    setSearch("")
-    setConsultantFilter("all")
-    setSupplierFilter("all")
-    setCreatedDateFrom(undefined)
-    setCreatedDateTo(undefined)
+  const consultantOptions = CONSULTANTS.map((c) => ({ value: c.key, label: `${c.key} - ${c.name}` }))
+
+  const chips: FilterChip[] = []
+  if (values.consultant) {
+    const label = consultantOptions.find((o) => o.value === values.consultant)?.label ?? values.consultant
+    chips.push({ key: "consultant", label: `Consultant: ${label}`, onRemove: () => setValue("consultant", undefined) })
+  }
+  if (values.supplier) {
+    chips.push({ key: "supplier", label: `Supplier: ${values.supplier}`, onRemove: () => setValue("supplier", undefined) })
+  }
+  if (values.createdFrom || values.createdTo) {
+    chips.push({
+      key: "created",
+      label: `Created: ${values.createdFrom ? formatDisplayDateShort(values.createdFrom) : "…"} – ${values.createdTo ? formatDisplayDateShort(values.createdTo) : "…"}`,
+      onRemove: () => {
+        setValue("createdFrom", undefined)
+        setValue("createdTo", undefined)
+      },
+    })
   }
 
   return (
@@ -220,130 +223,64 @@ export default function CustomersPage() {
         ) : null}
       </div>
 
-      {/* Filter Bar */}
-      <Card className="border-2 border-primary/10 bg-primary/5">
-        <CardContent className="p-4">
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                <Filter className="w-4 h-4" />
-                Filters
-              </div>
-              {hasActiveFilters && (
-                <Button variant="ghost" size="sm" onClick={clearFilters} className="h-8 text-xs">
-                  <X className="w-3.5 h-3.5 mr-1.5" />
-                  Clear filters
-                </Button>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-              {/* Search */}
-              <div className="relative lg:col-span-2">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search name, email, or phone..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="pl-8 h-9 text-sm"
-                />
-              </div>
-
-              {/* Consultant Filter */}
-              <div>
-                <Select value={consultantFilter} onValueChange={(v) => setConsultantFilter(v as any)}>
-                  <SelectTrigger className="h-9 text-sm">
-                    <SelectValue placeholder="Consultant" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Consultants</SelectItem>
-                    {CONSULTANTS.map(c => (
-                      <SelectItem key={c.key} value={c.key}>{c.key} - {c.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Supplier Filter */}
-              <div>
-                <Select value={supplierFilter} onValueChange={setSupplierFilter}>
-                  <SelectTrigger className="h-9 text-sm">
-                    <SelectValue placeholder="Supplier" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Suppliers</SelectItem>
-                    {supplierOptions.map((name) => (
-                      <SelectItem key={name} value={name}>
-                        {name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* Date Range Row */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {/* Created Date Range */}
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-                  Created Date Range
-                </label>
-                <div className="flex items-center gap-2">
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" size="sm" className="h-9 text-xs flex-1 justify-start">
-                        {createdDateFrom ? formatDisplayDate(createdDateFrom) : "From"}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={createdDateFrom}
-                        onSelect={setCreatedDateFrom}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                  <span className="text-muted-foreground">-</span>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" size="sm" className="h-9 text-xs flex-1 justify-start">
-                        {createdDateTo ? formatDisplayDate(createdDateTo) : "To"}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={createdDateTo}
-                        onSelect={setCreatedDateTo}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <ListFilterBar
+        searchValue={values.search}
+        onSearchChange={(v) => setValue("search", v, { debounceMs: 250 })}
+        searchPlaceholder="Search name, email, or phone..."
+        chips={chips}
+        onClearAll={clearFilters}
+        resultCount={filtered.length}
+        totalCount={customers.length}
+        noun="customer"
+        hasActiveFilters={hasActiveFilters}
+      >
+        <FacetedFilter
+          label="Consultant"
+          options={consultantOptions}
+          value={values.consultant || undefined}
+          onChange={(v) => setValue("consultant", v)}
+        />
+        <FacetedFilter
+          label="Supplier"
+          options={supplierOptions.map((name) => ({ value: name, label: name }))}
+          value={values.supplier || undefined}
+          onChange={(v) => setValue("supplier", v)}
+        />
+        <DateRangePicker
+          placeholder="Created date"
+          value={{ from: values.createdFrom || undefined, to: values.createdTo || undefined }}
+          onChange={(range) => {
+            setValue("createdFrom", range.from)
+            setValue("createdTo", range.to)
+          }}
+        />
+      </ListFilterBar>
 
       {/* Customer Cards */}
       <div className="space-y-2">
         {filtered.length === 0 && (
-          <Card className="border-dashed">
-            <CardContent className="p-12">
-              <div className="text-center space-y-2">
-                <Search className="w-12 h-12 text-muted-foreground/40 mx-auto" />
-                <p className="text-base font-medium text-foreground">No customers found</p>
-                <p className="text-sm text-muted-foreground">
-                  Try adjusting your filters or search criteria
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+          <Empty className="border border-dashed">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <Search className="w-6 h-6" />
+              </EmptyMedia>
+              <EmptyTitle>No customers found</EmptyTitle>
+              <EmptyDescription>
+                {hasActiveFilters
+                  ? "No customers match your filters."
+                  : "No customers yet."}
+              </EmptyDescription>
+            </EmptyHeader>
+            {hasActiveFilters ? (
+              <EmptyContent>
+                <Button variant="outline" size="sm" onClick={clearFilters}>
+                  Clear all filters
+                </Button>
+              </EmptyContent>
+            ) : null}
+          </Empty>
         )}
-        
+
         {paginatedCustomers.map((c: any) => (
           <Link
             key={c.id}
@@ -370,7 +307,7 @@ export default function CustomersPage() {
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center flex-shrink-0">
                       <span className="text-xs font-semibold text-foreground" style={{ fontFamily: "var(--font-inter)" }}>
-                        {c.firstName[0]}{c.lastName[0]}
+                        {c.firstName?.[0]}{c.lastName?.[0]}
                       </span>
                     </div>
                     <div className="min-w-0 flex-1">

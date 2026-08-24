@@ -39,9 +39,12 @@ interface JobPaymentsTabProps {
   /** The booking's billing currency — an invoice is always raised in its quote's currency, and
    *  a payment is always made in its invoice's, so one code covers the whole tab. */
   currency?: string
+  /** Received above the accepted quote total. The balance clamps at zero, so without this
+   *  an overpayment is indistinguishable from paying to the cent. */
+  overpaidAmount?: number | null
 }
 
-export function JobPaymentsTab({ payments, jobId, mutate, stage, currency = BASE_CURRENCY }: JobPaymentsTabProps) {
+export function JobPaymentsTab({ payments, jobId, mutate, stage, currency = BASE_CURRENCY, overpaidAmount }: JobPaymentsTabProps) {
   const { can } = useRole()
   const [open, setOpen] = useState(false)
   const todayLocal = new Date().toISOString().slice(0, 10)
@@ -51,6 +54,7 @@ export function JobPaymentsTab({ payments, jobId, mutate, stage, currency = BASE
   const stageAllowsRecording = stage ? PAYMENT_ENABLED_STAGES.has(stage) : true
 
   const totalPaid = payments.reduce((s, p) => s + p.amount, 0)
+  const isOverpaid = (overpaidAmount ?? 0) > 0
 
   const isFormDirty =
     form.amount !== "" || form.method !== "EFT" || form.reference !== "" || form.notes !== "" || form.paymentDate !== todayLocal
@@ -108,6 +112,11 @@ export function JobPaymentsTab({ payments, jobId, mutate, stage, currency = BASE
               {formatMoney(totalPaid, currency)}
             </span>
           </p>
+          {isOverpaid && (
+            <p className="mt-1 text-sm font-medium text-payment-red">
+              Overpaid by {formatMoney(overpaidAmount ?? 0, currency)} — more received than the quote total. Reconcile or refund.
+            </p>
+          )}
         </div>
         {canRecordPayment && (
           <Dialog

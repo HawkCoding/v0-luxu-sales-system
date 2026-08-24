@@ -6,7 +6,7 @@ import { CalendarCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Calendar, getCalendarNavMonthBounds } from '@/components/ui/calendar'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { formatDisplayDate } from '@/lib/date-format'
+import { formatDisplayDate, parseDateOnly, toDateOnlyIso } from '@/lib/date-format'
 import { cn } from '@/lib/utils'
 
 interface DatePickerProps {
@@ -25,26 +25,6 @@ interface DatePickerProps {
   minDate?: string | null
   /** Accessible name when no visible <Label> is wired to `id`. */
   'aria-label'?: string
-}
-
-const DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
-
-function parseDateOnly(value: string | null | undefined): Date | undefined {
-  if (!value) return undefined
-  const match = DATE_ONLY_PATTERN.exec(value)
-  if (!match) return undefined
-
-  const [, year, month, day] = match
-  const parsed = new Date(Number(year), Number(month) - 1, Number(day))
-  if (Number.isNaN(parsed.getTime())) return undefined
-  return parsed
-}
-
-function toDateOnlyIso(value: Date): string {
-  const year = value.getFullYear()
-  const month = String(value.getMonth() + 1).padStart(2, '0')
-  const day = String(value.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
 }
 
 export function DatePicker({

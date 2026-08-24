@@ -12,7 +12,7 @@ function createVoucherData() {
     departure: "15 April 2026",
     arrival: "17 April 2026",
     suiteType: "Royal Double Suite",
-    numberOfGuests: 2,
+    passengerTotals: { adultCount: 2, childCount: 0, infantCount: 0 },
     specialRequests: "Anniversary celebration",
     customerEmail: "john@example.com",
     customerPhone: "+27 82 555 1234",

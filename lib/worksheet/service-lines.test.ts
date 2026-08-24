@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   buildWorksheetServiceLines,
+  scopeWorksheetRows,
   type WorksheetServiceRow,
   type WorksheetTransportRow,
 } from "@/lib/worksheet/service-lines"
@@ -372,5 +373,66 @@ describe("buildWorksheetServiceLines", () => {
     })
 
     expect(line.description).toBe("")
+  })
+})
+
+describe("scopeWorksheetRows", () => {
+  const quotedTrain = service({ id: "leg-train", service_date: "2026-10-26" })
+  const quotedHotel = service({ id: "leg-hotel", service_date: "2026-10-28" })
+  // Priced into an earlier quote revision, dropped from the accepted one, still live in the builder.
+  const unquotedTransferLeg = service({ id: "leg-transfer", service_date: "2026-10-29" })
+
+  const legTransfer = transport({ service_id: "leg-transfer", sort_order: 0 })
+  const hotelTransfer = transport({ service_id: "leg-hotel", sort_order: 1 })
+  const manualTransfer = transport({ service_id: null, sort_order: 2 })
+
+  const allServices = [quotedTrain, quotedHotel, unquotedTransferLeg]
+  const allTransport = [legTransfer, hotelTransfer, manualTransfer]
+
+  it("drops a live builder leg the accepted quote never priced", () => {
+    const scoped = scopeWorksheetRows(
+      allServices,
+      allTransport,
+      new Set(["leg-train", "leg-hotel"]),
+    )
+
+    expect(scoped.services.map((s) => s.id)).toEqual(["leg-train", "leg-hotel"])
+  })
+
+  it("keeps a trip whose leg is in scope and drops one whose leg is not", () => {
+    const scoped = scopeWorksheetRows(
+      allServices,
+      allTransport,
+      new Set(["leg-train", "leg-hotel"]),
+    )
+
+    expect(scoped.transportRequests).toEqual([hotelTransfer])
+  })
+
+  it("drops an unlinked trip when scoped — it was never priced into any quote", () => {
+    const scoped = scopeWorksheetRows(allServices, allTransport, new Set(["leg-train"]))
+
+    expect(scoped.transportRequests).toEqual([])
+  })
+
+  it("leaves everything unfiltered when there is no accepted quote", () => {
+    const scoped = scopeWorksheetRows(allServices, allTransport, undefined)
+
+    expect(scoped.services).toEqual(allServices)
+    expect(scoped.transportRequests).toEqual(allTransport)
+  })
+
+  it("leaves everything unfiltered when the accepted quote priced no legs (manual quote)", () => {
+    const scoped = scopeWorksheetRows(allServices, allTransport, new Set<string>())
+
+    expect(scoped.services).toEqual(allServices)
+    expect(scoped.transportRequests).toEqual(allTransport)
+  })
+
+  it("does not mutate the rows it was given", () => {
+    scopeWorksheetRows(allServices, allTransport, new Set(["leg-train"]))
+
+    expect(allServices).toHaveLength(3)
+    expect(allTransport).toHaveLength(3)
   })
 })

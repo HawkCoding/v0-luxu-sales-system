@@ -3,26 +3,38 @@
 import { useData } from "@/lib/use-data"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Calendar } from "@/components/ui/calendar"
-import { Download, FileText, Loader2, Search, Filter, X } from "lucide-react"
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { Download, FileText, Loader2 } from "lucide-react"
 import Link from "next/link"
 import { useState } from "react"
 import { toast } from "sonner"
-import { CONSULTANTS, type ConsultantAbbreviation } from "@/lib/types"
-import { formatDisplayDate } from "@/lib/date-format"
+import { CONSULTANTS } from "@/lib/types"
+import { FacetedFilter } from "@/components/ui/faceted-filter"
+import { DateRangePicker } from "@/components/ui/date-range-picker"
+import { ListFilterBar, type FilterChip } from "@/components/list-filter-bar"
+import { useFilterParams } from "@/hooks/use-filter-params"
+import { matchesSearch, isWithinDateRange } from "@/lib/list-filters"
+import { formatDisplayDate, formatDisplayDateShort } from "@/lib/date-format"
+
+const DOC_TYPE_OPTIONS = [
+  { value: "quote_pdf", label: "Quote PDF" },
+  { value: "voucher_pdf", label: "Voucher PDF" },
+  { value: "invoice_pdf", label: "Invoice PDF" },
+]
+
+const DEFAULT_FILTERS = {
+  q: "",
+  type: "",
+  supplier: "",
+  consultant: "",
+  generatedFrom: "",
+  generatedTo: "",
+}
 
 export default function DocumentsPage() {
   const { data, isLoading } = useData(["bookings", "customers", "documents"])
-  const [search, setSearch] = useState("")
-  const [docTypeFilter, setDocTypeFilter] = useState("all")
-  const [supplierFilter, setSupplierFilter] = useState("all")
-  const [consultantFilter, setConsultantFilter] = useState<"all" | ConsultantAbbreviation>("all")
-  const [generatedDateFrom, setGeneratedDateFrom] = useState<Date | undefined>(undefined)
-  const [generatedDateTo, setGeneratedDateTo] = useState<Date | undefined>(undefined)
+  const { values, setValue, clear, hasActive } = useFilterParams(DEFAULT_FILTERS)
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
 
   const handleDownload = async (event: React.MouseEvent, documentId: string) => {
@@ -66,44 +78,46 @@ export default function DocumentsPage() {
     }
   }).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
 
-  const filtered = docs.filter((d: any) => {
-    // Search filter (job number or customer name/email)
-    const matchSearch = !search || 
-      [d.jobNumber, d.customerName, d.customerEmail]
-        .some((f: string) => f?.toLowerCase().includes(search.toLowerCase()))
-    
-    // Document type filter
-    const matchDocType = docTypeFilter === "all" || d.kind === docTypeFilter
-    
-    // Supplier filter
-    const matchSupplier = supplierFilter === "all" || d.supplier === supplierFilter
-    
-    // Consultant filter
-    const matchConsultant = consultantFilter === "all" || d.consultant === consultantFilter
-    
-    // Generated date range filter
-    const generatedDate = new Date(d.generatedAt)
-    const matchGeneratedDateFrom = !generatedDateFrom || generatedDate >= generatedDateFrom
-    const matchGeneratedDateTo = !generatedDateTo || generatedDate <= generatedDateTo
-    
-    return matchSearch && matchDocType && matchSupplier && matchConsultant && 
-      matchGeneratedDateFrom && matchGeneratedDateTo
-  })
-
   const supplierOptions = Array.from(
     new Set(docs.map((d: any) => d.supplier).filter(Boolean) as string[]),
   ).sort((a, b) => a.localeCompare(b))
 
-  const hasActiveFilters = search || docTypeFilter !== "all" || supplierFilter !== "all" ||
-    consultantFilter !== "all" || generatedDateFrom || generatedDateTo
+  const consultantOptions = CONSULTANTS.map((c) => ({ value: c.key, label: `${c.key} - ${c.name}` }))
 
-  const clearFilters = () => {
-    setSearch("")
-    setDocTypeFilter("all")
-    setSupplierFilter("all")
-    setConsultantFilter("all")
-    setGeneratedDateFrom(undefined)
-    setGeneratedDateTo(undefined)
+  const filtered = docs.filter((d: any) => {
+    const matchSearch = matchesSearch([d.jobNumber, d.customerName, d.customerEmail], values.q)
+    const matchDocType = !values.type || d.kind === values.type
+    const matchSupplier = !values.supplier || d.supplier === values.supplier
+    const matchConsultant = !values.consultant || d.consultant === values.consultant
+    const matchGenerated = isWithinDateRange(d.generatedAt, values.generatedFrom, values.generatedTo)
+
+    return matchSearch && matchDocType && matchSupplier && matchConsultant && matchGenerated
+  })
+
+  const hasActiveFilters = hasActive
+  const clearFilters = clear
+
+  const chips: FilterChip[] = []
+  if (values.type) {
+    const label = DOC_TYPE_OPTIONS.find((o) => o.value === values.type)?.label ?? values.type
+    chips.push({ key: "type", label: `Type: ${label}`, onRemove: () => setValue("type", undefined) })
+  }
+  if (values.supplier) {
+    chips.push({ key: "supplier", label: `Supplier: ${values.supplier}`, onRemove: () => setValue("supplier", undefined) })
+  }
+  if (values.consultant) {
+    const label = consultantOptions.find((o) => o.value === values.consultant)?.label ?? values.consultant
+    chips.push({ key: "consultant", label: `Consultant: ${label}`, onRemove: () => setValue("consultant", undefined) })
+  }
+  if (values.generatedFrom || values.generatedTo) {
+    chips.push({
+      key: "generated",
+      label: `Generated: ${values.generatedFrom ? formatDisplayDateShort(values.generatedFrom) : "…"} – ${values.generatedTo ? formatDisplayDateShort(values.generatedTo) : "…"}`,
+      onRemove: () => {
+        setValue("generatedFrom", undefined)
+        setValue("generatedTo", undefined)
+      },
+    })
   }
 
   return (
@@ -115,145 +129,70 @@ export default function DocumentsPage() {
         </p>
       </div>
 
-      {/* Filter Bar */}
-      <Card className="border-2 border-primary/10 bg-primary/5">
-        <CardContent className="p-4">
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                <Filter className="w-4 h-4" />
-                Filters
-              </div>
-              {hasActiveFilters && (
-                <Button variant="ghost" size="sm" onClick={clearFilters} className="h-8 text-xs">
-                  <X className="w-3.5 h-3.5 mr-1.5" />
-                  Clear filters
-                </Button>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-              {/* Search */}
-              <div className="relative lg:col-span-2">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search job number or customer..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="pl-8 h-9 text-sm"
-                />
-              </div>
-
-              {/* Document Type Filter */}
-              <div>
-                <Select value={docTypeFilter} onValueChange={setDocTypeFilter}>
-                  <SelectTrigger className="h-9 text-sm">
-                    <SelectValue placeholder="Document Type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Types</SelectItem>
-                    <SelectItem value="quote_pdf">Quote PDF</SelectItem>
-                    <SelectItem value="voucher_pdf">Voucher PDF</SelectItem>
-                    <SelectItem value="invoice_pdf">Invoice PDF</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Supplier Filter */}
-              <div>
-                <Select value={supplierFilter} onValueChange={setSupplierFilter}>
-                  <SelectTrigger className="h-9 text-sm">
-                    <SelectValue placeholder="Supplier" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Suppliers</SelectItem>
-                    {supplierOptions.map((name) => (
-                      <SelectItem key={name} value={name}>
-                        {name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* Second Row */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-              {/* Consultant Filter */}
-              <div>
-                <Select value={consultantFilter} onValueChange={(v) => setConsultantFilter(v as any)}>
-                  <SelectTrigger className="h-9 text-sm">
-                    <SelectValue placeholder="Consultant" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Consultants</SelectItem>
-                    {CONSULTANTS.map(c => (
-                      <SelectItem key={c.key} value={c.key}>{c.key} - {c.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Generated Date Range */}
-              <div className="lg:col-span-3">
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-                  Generated Date Range
-                </label>
-                <div className="flex items-center gap-2">
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" size="sm" className="h-9 text-xs flex-1 justify-start">
-                        {generatedDateFrom ? formatDisplayDate(generatedDateFrom) : "From"}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={generatedDateFrom}
-                        onSelect={setGeneratedDateFrom}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                  <span className="text-muted-foreground">-</span>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button variant="outline" size="sm" className="h-9 text-xs flex-1 justify-start">
-                        {generatedDateTo ? formatDisplayDate(generatedDateTo) : "To"}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <Calendar
-                        mode="single"
-                        selected={generatedDateTo}
-                        onSelect={setGeneratedDateTo}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      <ListFilterBar
+        searchValue={values.q}
+        onSearchChange={(v) => setValue("q", v, { debounceMs: 250 })}
+        searchPlaceholder="Search job number or customer..."
+        chips={chips}
+        onClearAll={clearFilters}
+        resultCount={filtered.length}
+        totalCount={docs.length}
+        noun="document"
+        hasActiveFilters={hasActiveFilters}
+      >
+        <FacetedFilter
+          label="Type"
+          options={DOC_TYPE_OPTIONS}
+          value={values.type || undefined}
+          onChange={(v) => setValue("type", v)}
+        />
+        <FacetedFilter
+          label="Supplier"
+          options={supplierOptions.map((name) => ({ value: name, label: name }))}
+          value={values.supplier || undefined}
+          onChange={(v) => setValue("supplier", v)}
+        />
+        <FacetedFilter
+          label="Consultant"
+          options={consultantOptions}
+          value={values.consultant || undefined}
+          onChange={(v) => setValue("consultant", v)}
+        />
+        <DateRangePicker
+          placeholder="Generated date"
+          value={{ from: values.generatedFrom || undefined, to: values.generatedTo || undefined }}
+          onChange={(range) => {
+            setValue("generatedFrom", range.from)
+            setValue("generatedTo", range.to)
+          }}
+        />
+      </ListFilterBar>
 
       {/* Document Cards */}
       <div className="space-y-2">
         {filtered.length === 0 && (
-          <Card className="border-dashed">
-            <CardContent className="p-12">
-              <div className="text-center space-y-2">
-                <FileText className="w-12 h-12 text-muted-foreground/40 mx-auto" />
-                <p className="text-base font-medium text-foreground">No documents found</p>
-                <p className="text-sm text-muted-foreground">
-                  Try adjusting your filters or search criteria
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+          <Empty className="border border-dashed">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <FileText className="w-6 h-6" />
+              </EmptyMedia>
+              <EmptyTitle>No documents found</EmptyTitle>
+              <EmptyDescription>
+                {hasActiveFilters
+                  ? "No documents match your filters."
+                  : "No documents have been generated yet."}
+              </EmptyDescription>
+            </EmptyHeader>
+            {hasActiveFilters ? (
+              <EmptyContent>
+                <Button variant="outline" size="sm" onClick={clearFilters}>
+                  Clear all filters
+                </Button>
+              </EmptyContent>
+            ) : null}
+          </Empty>
         )}
-        
+
         {filtered.map((d: any) => (
           <Link key={d.id} href={`/app/bookings/${d.jobId}`}>
             <Card className="hover:shadow-sm transition-shadow cursor-pointer">

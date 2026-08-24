@@ -7,6 +7,8 @@ export interface BookingPaymentState {
   totalPaid: number
   depositPaid: boolean
   invoiceBalance: number
+  /** Amount received above the accepted quote total. Zero unless the booking is overpaid. */
+  overpaidAmount: number
 }
 
 export interface PaymentSyncAuditContext {
@@ -74,7 +76,7 @@ export async function syncBookingPaymentState(
       .maybeSingle(),
     supabase
       .from("bookings")
-      .select("deposit_paid, deposit_paid_at, invoice_balance, stage, deposit_confirmed_manually")
+      .select("deposit_paid, deposit_paid_at, invoice_balance, overpaid_amount, stage, deposit_confirmed_manually")
       .eq("id", bookingId)
       .single(),
   ])
@@ -87,6 +89,10 @@ export async function syncBookingPaymentState(
   const quoteTotal = Number(quote.total)
   const totalPaid = (payments ?? []).reduce((sum, p) => sum + Number(p.amount ?? 0), 0)
   const invoiceBalance = Math.max(0, Math.round((quoteTotal - totalPaid) * 100) / 100)
+  // The balance clamps at zero, so the excess would otherwise be invisible — a
+  // typo'd extra digit or a double EFT looks exactly like paying to the cent.
+  const overpaidAmount = Math.max(0, Math.round((totalPaid - quoteTotal) * 100) / 100)
+  const previousOverpaidAmount = Number(currentBooking?.overpaid_amount ?? 0)
 
   // A full-payment invoice has no separate deposit — its full amount is the
   // threshold for both deposit_paid and (via invoiceBalance below) final_paid.
@@ -102,6 +108,7 @@ export async function syncBookingPaymentState(
 
   const bookingUpdates: Record<string, unknown> = {
     invoice_balance: invoiceBalance,
+    overpaid_amount: overpaidAmount,
     deposit_paid: isDepositPaid,
     updated_at: new Date().toISOString(),
   }
@@ -118,7 +125,12 @@ export async function syncBookingPaymentState(
     currentBooking?.stage ?? "enquiry",
     "final_paid",
   ).includes("final_paid")
-  const autoAdvancedToFinalPaid = invoiceBalance === 0 && crossesToFinalPaid
+  // A cancelled booking is off the ladder — getCrossedForwardStages treats `lost`
+  // as a reopen and reports every stage as crossed, so without this a payment
+  // write would silently un-cancel it into final_paid while outcome stays
+  // "Cancelled" and cancelled_at stays set.
+  const stageIsCancelled = currentBooking?.stage === "lost"
+  const autoAdvancedToFinalPaid = invoiceBalance === 0 && crossesToFinalPaid && !stageIsCancelled
   if (autoAdvancedToFinalPaid) {
     bookingUpdates.stage = "final_paid"
     bookingUpdates.final_paid_at = new Date().toISOString()
@@ -138,6 +150,20 @@ export async function syncBookingPaymentState(
       action: "booking_paid_in_full",
       before: { stage: currentBooking?.stage ?? null },
       after: { stage: "final_paid", invoice_balance: invoiceBalance },
+    })
+  }
+
+  // Only on a change — this sync runs on every payment write, and an unchanged
+  // overage must not append a duplicate entry each time.
+  if (overpaidAmount !== previousOverpaidAmount) {
+    await writeAuditLog(supabase, {
+      actor: actorName,
+      actorUserId,
+      entityType: "Booking",
+      entityId: bookingId,
+      action: "payment_overpaid",
+      before: { overpaid_amount: previousOverpaidAmount },
+      after: { overpaid_amount: overpaidAmount, total_paid: totalPaid, quote_total: quoteTotal },
     })
   }
 
@@ -208,5 +234,5 @@ export async function syncBookingPaymentState(
     })
   }
 
-  return { totalPaid, depositPaid: isDepositPaid, invoiceBalance }
+  return { totalPaid, depositPaid: isDepositPaid, invoiceBalance, overpaidAmount }
 }

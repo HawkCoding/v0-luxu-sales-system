@@ -51,7 +51,7 @@ const voucherData = {
   departure: "2026-09-01",
   arrival: "2026-09-04",
   suiteType: "Royal Suite",
-  numberOfGuests: 2,
+  passengerTotals: { adultCount: 2, childCount: 0, infantCount: 0 },
   specialRequests: "None",
   customerEmail: "guest@example.com",
   customerPhone: "+27 82 000 0000",

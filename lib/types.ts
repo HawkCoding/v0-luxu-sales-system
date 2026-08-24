@@ -204,6 +204,8 @@ export interface Booking {
   closedAt: string | null
   depositPaid: boolean
   invoiceBalance: number | null
+  /** Received above the accepted quote total. Zero unless the booking is overpaid. */
+  overpaidAmount?: number | null
   cancelledAt: string | null
   cancelledAtDisplay?: string
   refundStatus: "refunded" | "not_refunded" | null
@@ -268,6 +270,10 @@ export const SUPPLIER_KIND_LABELS: Record<SupplierKind, string> = {
 export interface SupplierVocabulary {
   suiteType: string
   suiteTypePlural: string
+  /** What one bookable unit is called in prose ("room 1 needs a type"). `suiteType` is the
+   *  configuration label ("Room Type"); this is the thing itself. */
+  unitNoun: string
+  unitNounPlural: string
   package: string
   packagePlural: string
   route: string
@@ -301,6 +307,8 @@ export interface SupplierVocabulary {
 const JOURNEY_SUPPLIER_VOCABULARY: SupplierVocabulary = {
   suiteType: "Suite Type",
   suiteTypePlural: "Suite Types",
+  unitNoun: "suite",
+  unitNounPlural: "suites",
   package: "Package",
   packagePlural: "Packages",
   route: "Route",
@@ -333,6 +341,8 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
   hotel_property: {
     suiteType: "Room Type",
     suiteTypePlural: "Room Types",
+    unitNoun: "room",
+    unitNounPlural: "rooms",
     package: "Season",
     packagePlural: "Seasons",
     route: "Meal Plan",
@@ -362,6 +372,8 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
   transfers: {
     suiteType: "Vehicle Type",
     suiteTypePlural: "Vehicle Types",
+    unitNoun: "vehicle",
+    unitNounPlural: "vehicles",
     package: "Service",
     packagePlural: "Services",
     route: "Service",
@@ -385,6 +397,8 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
   vehicle_rental: {
     suiteType: "Vehicle Type",
     suiteTypePlural: "Vehicle Types",
+    unitNoun: "vehicle",
+    unitNounPlural: "vehicles",
     package: "Rental Service",
     packagePlural: "Rental Services",
     route: "Rental Route",
@@ -414,6 +428,8 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
   tour_operator: {
     suiteType: "Tour Type",
     suiteTypePlural: "Tour Types",
+    unitNoun: "tour",
+    unitNounPlural: "tours",
     package: "Event",
     packagePlural: "Events",
     route: "Itinerary",
@@ -437,6 +453,8 @@ export const SUPPLIER_VOCABULARY: Record<SupplierKind, SupplierVocabulary> = {
   airline: {
     suiteType: "Cabin",
     suiteTypePlural: "Cabins",
+    unitNoun: "cabin",
+    unitNounPlural: "cabins",
     package: "Season",
     packagePlural: "Seasons",
     route: "Route",
@@ -1001,6 +1019,7 @@ export interface Job {
   updatedAtDisplay?: string
   depositPaid?: boolean | null
   invoiceBalance?: number | null
+  overpaidAmount?: number | null
   customerInvoiceNumber?: string | null
   cancelReason?: string | null
   cancelledAt?: string | null

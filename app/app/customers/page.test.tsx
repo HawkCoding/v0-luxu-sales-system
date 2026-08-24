@@ -16,6 +16,8 @@ vi.mock("@/lib/role-context", () => ({
 
 vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
+  usePathname: () => "/app/customers",
+  useRouter: () => ({ replace: () => {} }),
 }))
 
 vi.mock("next/link", () => ({
@@ -36,22 +38,12 @@ vi.mock("@/components/create-customer-dialog", () => ({
   CreateCustomerDialog: () => null,
 }))
 
-vi.mock("@/components/ui/select", () => ({
-  Select: ({ children }: { children: React.ReactNode }) => children,
-  SelectContent: ({ children }: { children: React.ReactNode }) => children,
-  SelectItem: ({ children }: { children: React.ReactNode }) => children,
-  SelectTrigger: ({ children }: { children: React.ReactNode }) => children,
-  SelectValue: ({ placeholder }: { placeholder?: string }) => <span>{placeholder}</span>,
+vi.mock("@/components/ui/faceted-filter", () => ({
+  FacetedFilter: ({ label }: { label: string }) => <span>{label}</span>,
 }))
 
-vi.mock("@/components/ui/popover", () => ({
-  Popover: ({ children }: { children: React.ReactNode }) => children,
-  PopoverContent: ({ children }: { children: React.ReactNode }) => children,
-  PopoverTrigger: ({ children }: { children: React.ReactNode }) => children,
-}))
-
-vi.mock("@/components/ui/calendar", () => ({
-  Calendar: () => null,
+vi.mock("@/components/ui/date-range-picker", () => ({
+  DateRangePicker: ({ placeholder }: { placeholder?: string }) => <span>{placeholder}</span>,
 }))
 
 vi.mock("@/components/ui/dialog", () => ({

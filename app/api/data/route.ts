@@ -292,6 +292,7 @@ export async function GET(req: Request) {
       closedAt: b.closed_at,
       depositPaid: b.deposit_paid,
       invoiceBalance: b.invoice_balance,
+      overpaidAmount: b.overpaid_amount,
       cancelledAt: b.cancelled_at,
       cancelledAtDisplay: formatDisplayDateTime(b.cancelled_at),
       refundStatus: b.refund_status,

@@ -1,5 +1,7 @@
 import type { Enquiry, VoucherTemplate } from "./types"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "./types"
+import type { PassengerTotals } from "./packages/passenger-totals"
+import { formatGuestCountText } from "./voucher/guest-count-text"
 import { tintWithWhite } from "./voucher/pdf/design-tokens"
 import { voucherProviderContactLine, voucherRowsForBlock } from "./voucher/service-block-rows"
 
@@ -130,7 +132,7 @@ export interface VoucherData {
   departure: string
   arrival: string
   suiteType: string
-  numberOfGuests: number
+  passengerTotals: PassengerTotals
   specialRequests: string
   customerEmail: string
   customerPhone: string
@@ -241,13 +243,9 @@ function cellRow(
 }
 
 function buildGuestInfoSection(data: VoucherData): string {
-  const childText = data.enquiry.noOfChildren
-    ? `, ${data.enquiry.noOfChildren} ${data.enquiry.noOfChildren === 1 ? "child" : "children"}`
-    : ""
-
   const rows = [
     infoRow("Guest Names", data.guestNames, { shaded: true }),
-    infoRow("Number of Guests", `${data.numberOfGuests} (${data.enquiry.noOfAdults} adults${childText})`),
+    infoRow("Number of Guests", formatGuestCountText(data.passengerTotals)),
     infoRow("Consultant", data.consultantName, { shaded: true }),
   ]
   if (data.specialRequests) rows.push(infoRow("Special Requests", data.specialRequests))

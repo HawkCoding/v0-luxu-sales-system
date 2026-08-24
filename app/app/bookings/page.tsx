@@ -3,42 +3,42 @@
 import { useData, useAssignableUsers } from "@/lib/use-data"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Search, CalendarCheck, Filter, X } from "lucide-react"
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
+import { Skeleton } from "@/components/ui/skeleton"
+import { CalendarCheck } from "lucide-react"
 import Link from "next/link"
-import { useState } from "react"
 import { getPipelineStageLabel } from "@/lib/types"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Calendar } from "@/components/ui/calendar"
-import { formatDisplayDate } from "@/lib/date-format"
+import { FacetedFilter } from "@/components/ui/faceted-filter"
+import { DateRangePicker } from "@/components/ui/date-range-picker"
+import { ListFilterBar, type FilterChip } from "@/components/list-filter-bar"
+import { useFilterParams } from "@/hooks/use-filter-params"
+import { matchesSearch, isWithinDateRange } from "@/lib/list-filters"
+import { formatDisplayDate, formatDisplayDateShort } from "@/lib/date-format"
 import { isVisibleInBookings } from "@/lib/booking-visibility"
 import { BASE_CURRENCY, formatMoney } from "@/lib/money"
+
+const PAYMENT_STATUS_OPTIONS = [
+  { value: "Not Paid", label: "Not Paid" },
+  { value: "Deposit Paid", label: "Deposit Paid" },
+  { value: "Full Paid", label: "Full Paid" },
+]
+
+const DEFAULT_FILTERS = {
+  q: "",
+  supplier: "",
+  payment: "",
+  consultant: "",
+  createdFrom: "",
+  createdTo: "",
+  departFrom: "",
+  departTo: "",
+}
 
 export default function BookingsPage() {
   const { data, isLoading, error, mutate } = useData(["bookings", "customers", "payments", "quotes"])
   const { data: assignableData } = useAssignableUsers()
-  const [search, setSearch] = useState("")
-  const [supplierFilter, setSupplierFilter] = useState("all")
-  const [paymentStatusFilter, setPaymentStatusFilter] = useState("all")
-  const [consultantFilter, setConsultantFilter] = useState<"all" | "unassigned" | string>("all")
-  const [createdDateFrom, setCreatedDateFrom] = useState<Date | undefined>(undefined)
-  const [createdDateTo, setCreatedDateTo] = useState<Date | undefined>(undefined)
-  const [departureDateFrom, setDepartureDateFrom] = useState<Date | undefined>(undefined)
-  const [departureDateTo, setDepartureDateTo] = useState<Date | undefined>(undefined)
-
-  if (isLoading) {
-    return (
-      <div className="p-6">
-        <div className="animate-pulse space-y-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-32 bg-secondary rounded-lg" />
-          ))}
-        </div>
-      </div>
-    )
-  }
+  const { values, setValue, clear, hasActive } = useFilterParams(DEFAULT_FILTERS)
 
   if (error) {
     return (
@@ -61,8 +61,18 @@ export default function BookingsPage() {
     )
   }
 
-  if (!data) {
-    return null
+  if (isLoading || !data) {
+    return (
+      <div className="p-6 space-y-5 max-w-7xl mx-auto">
+        <Skeleton className="h-9 w-64" />
+        <Skeleton className="h-24 w-full" />
+        <div className="space-y-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-32 w-full" />
+          ))}
+        </div>
+      </div>
+    )
   }
 
   // Bookings list starts once a quote has been sent, excluding enquiry and lost jobs.
@@ -101,68 +111,67 @@ export default function BookingsPage() {
     new Set(bookings.map((b: any) => b.supplier).filter(Boolean) as string[]),
   ).sort((a, b) => a.localeCompare(b))
 
+  const consultantOptions = [
+    { value: "unassigned", label: "Unassigned" },
+    ...(assignableData?.users ?? []).map((u: any) => ({ value: u.userId, label: u.name })),
+  ]
+
   // Apply filters
   const filtered = bookings.filter((booking: any) => {
-    // Search filter (job number, customer name, email)
-    const matchSearch =
-      !search ||
-      booking.bookingNumber.toLowerCase().includes(search.toLowerCase()) ||
-      booking.customerName.toLowerCase().includes(search.toLowerCase()) ||
-      booking.customerEmail.toLowerCase().includes(search.toLowerCase())
+    const matchSearch = matchesSearch(
+      [booking.bookingNumber, booking.customerName, booking.customerEmail],
+      values.q,
+    )
 
-    // Supplier filter
-    const matchSupplier = supplierFilter === "all" || booking.supplier === supplierFilter
-
-    // Payment status filter
-    const matchPaymentStatus =
-      paymentStatusFilter === "all" || booking.paymentStatus === paymentStatusFilter
-
-    // Consultant filter
+    const matchSupplier = !values.supplier || booking.supplier === values.supplier
+    const matchPayment = !values.payment || booking.paymentStatus === values.payment
     const matchConsultant =
-      consultantFilter === "all" ||
-      (consultantFilter === "unassigned"
+      !values.consultant ||
+      (values.consultant === "unassigned"
         ? !booking.assignedSalespersonId
-        : booking.assignedSalespersonId === consultantFilter)
+        : booking.assignedSalespersonId === values.consultant)
 
-    // Created date range filter
-    const createdDate = new Date(booking.createdAt)
-    const matchCreatedDateFrom = !createdDateFrom || createdDate >= createdDateFrom
-    const matchCreatedDateTo = !createdDateTo || createdDate <= createdDateTo
-
-    // Departure date range filter
-    const departureDate = booking.departureDate ? new Date(booking.departureDate) : null
-    const matchDepartureDateFrom = !departureDateFrom || (departureDate && departureDate >= departureDateFrom)
-    const matchDepartureDateTo = !departureDateTo || (departureDate && departureDate <= departureDateTo)
+    const matchCreated = isWithinDateRange(booking.createdAt, values.createdFrom, values.createdTo)
+    const matchDepart = isWithinDateRange(booking.departureDate, values.departFrom, values.departTo)
 
     return (
-      matchSearch &&
-      matchSupplier &&
-      matchPaymentStatus &&
-      matchConsultant &&
-      matchCreatedDateFrom &&
-      matchCreatedDateTo &&
-      matchDepartureDateFrom &&
-      matchDepartureDateTo
+      matchSearch && matchSupplier && matchPayment && matchConsultant && matchCreated && matchDepart
     )
   })
 
-  const hasActiveFilters =
-    supplierFilter !== "all" ||
-    paymentStatusFilter !== "all" ||
-    consultantFilter !== "all" ||
-    createdDateFrom ||
-    createdDateTo ||
-    departureDateFrom ||
-    departureDateTo
+  const hasActiveFilters = hasActive
+  const clearFilters = clear
 
-  const clearFilters = () => {
-    setSupplierFilter("all")
-    setPaymentStatusFilter("all")
-    setConsultantFilter("all")
-    setCreatedDateFrom(undefined)
-    setCreatedDateTo(undefined)
-    setDepartureDateFrom(undefined)
-    setDepartureDateTo(undefined)
+  const chips: FilterChip[] = []
+  if (values.supplier) {
+    chips.push({ key: "supplier", label: `Supplier: ${values.supplier}`, onRemove: () => setValue("supplier", undefined) })
+  }
+  if (values.payment) {
+    chips.push({ key: "payment", label: `Payment: ${values.payment}`, onRemove: () => setValue("payment", undefined) })
+  }
+  if (values.consultant) {
+    const label = consultantOptions.find((o) => o.value === values.consultant)?.label ?? values.consultant
+    chips.push({ key: "consultant", label: `Consultant: ${label}`, onRemove: () => setValue("consultant", undefined) })
+  }
+  if (values.createdFrom || values.createdTo) {
+    chips.push({
+      key: "created",
+      label: `Created: ${values.createdFrom ? formatDisplayDateShort(values.createdFrom) : "…"} – ${values.createdTo ? formatDisplayDateShort(values.createdTo) : "…"}`,
+      onRemove: () => {
+        setValue("createdFrom", undefined)
+        setValue("createdTo", undefined)
+      },
+    })
+  }
+  if (values.departFrom || values.departTo) {
+    chips.push({
+      key: "depart",
+      label: `Departs: ${values.departFrom ? formatDisplayDateShort(values.departFrom) : "…"} – ${values.departTo ? formatDisplayDateShort(values.departTo) : "…"}`,
+      onRemove: () => {
+        setValue("departFrom", undefined)
+        setValue("departTo", undefined)
+      },
+    })
   }
 
   return (
@@ -179,169 +188,52 @@ export default function BookingsPage() {
         </div>
       </div>
 
-      {/* Filters */}
-      <Card className="border-2">
-        <CardContent className="p-5">
-          <div className="space-y-4">
-            {/* Search Bar */}
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                placeholder="Search by job number, customer name, or email..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-10 h-10"
-              />
-            </div>
-
-            {/* Filter Controls */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
-              {/* Supplier Filter */}
-              <Select value={supplierFilter} onValueChange={setSupplierFilter}>
-                <SelectTrigger className="h-10">
-                  <SelectValue placeholder="Supplier" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Suppliers</SelectItem>
-                  {supplierOptions.map((name) => (
-                    <SelectItem key={name} value={name}>
-                      {name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              {/* Payment Status Filter */}
-              <Select value={paymentStatusFilter} onValueChange={setPaymentStatusFilter}>
-                <SelectTrigger className="h-10">
-                  <SelectValue placeholder="Payment Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Statuses</SelectItem>
-                  <SelectItem value="Deposit Paid">Deposit Paid</SelectItem>
-                  <SelectItem value="Full Paid">Full Paid</SelectItem>
-                </SelectContent>
-              </Select>
-
-              {/* Consultant Filter */}
-              <Select value={consultantFilter} onValueChange={(v) => setConsultantFilter(v as any)}>
-                <SelectTrigger className="h-10">
-                  <SelectValue placeholder="Consultant" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Consultants</SelectItem>
-                  <SelectItem value="unassigned">Unassigned</SelectItem>
-                  {(assignableData?.users ?? []).map((u) => (
-                    <SelectItem key={u.userId} value={u.userId}>
-                      {u.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              {/* Created Date Range */}
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" className="h-10 justify-start text-left font-normal">
-                    <CalendarCheck className="mr-2 h-4 w-4" />
-                    {createdDateFrom || createdDateTo ? (
-                      <span className="text-xs">
-                        {createdDateFrom && formatDisplayDate(createdDateFrom)}
-                        {createdDateFrom && createdDateTo && " - "}
-                        {createdDateTo && formatDisplayDate(createdDateTo)}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">Created Date</span>
-                    )}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-4" align="start">
-                  <div className="space-y-3">
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground">From</label>
-                      <Calendar
-                        mode="single"
-                        selected={createdDateFrom}
-                        onSelect={setCreatedDateFrom}
-                        className="rounded-md border"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground">To</label>
-                      <Calendar
-                        mode="single"
-                        selected={createdDateTo}
-                        onSelect={setCreatedDateTo}
-                        className="rounded-md border"
-                      />
-                    </div>
-                  </div>
-                </PopoverContent>
-              </Popover>
-
-              {/* Departure Date Range */}
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" className="h-10 justify-start text-left font-normal">
-                    <CalendarCheck className="mr-2 h-4 w-4" />
-                    {departureDateFrom || departureDateTo ? (
-                      <span className="text-xs">
-                        {departureDateFrom && formatDisplayDate(departureDateFrom)}
-                        {departureDateFrom && departureDateTo && " - "}
-                        {departureDateTo && formatDisplayDate(departureDateTo)}
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">Departure Date</span>
-                    )}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-4" align="start">
-                  <div className="space-y-3">
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground">From</label>
-                      <Calendar
-                        mode="single"
-                        selected={departureDateFrom}
-                        onSelect={setDepartureDateFrom}
-                        className="rounded-md border"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground">To</label>
-                      <Calendar
-                        mode="single"
-                        selected={departureDateTo}
-                        onSelect={setDepartureDateTo}
-                        className="rounded-md border"
-                      />
-                    </div>
-                  </div>
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            {/* Clear Filters */}
-            {hasActiveFilters && (
-              <div className="flex items-center justify-between pt-2 border-t">
-                <p className="text-sm text-muted-foreground">
-                  {filtered.length} of {bookings.length} bookings
-                </p>
-                <Button variant="ghost" size="sm" onClick={clearFilters} className="gap-2">
-                  <X className="w-4 h-4" />
-                  Clear Filters
-                </Button>
-              </div>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Results Count */}
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          Showing {filtered.length} {filtered.length === 1 ? "booking" : "bookings"}
-        </p>
-      </div>
+      <ListFilterBar
+        searchValue={values.q}
+        onSearchChange={(v) => setValue("q", v, { debounceMs: 250 })}
+        searchPlaceholder="Search by job number, customer name, or email..."
+        chips={chips}
+        onClearAll={clearFilters}
+        resultCount={filtered.length}
+        totalCount={bookings.length}
+        noun="booking"
+        hasActiveFilters={hasActiveFilters}
+      >
+        <FacetedFilter
+          label="Supplier"
+          options={supplierOptions.map((name) => ({ value: name, label: name }))}
+          value={values.supplier || undefined}
+          onChange={(v) => setValue("supplier", v)}
+        />
+        <FacetedFilter
+          label="Payment"
+          options={PAYMENT_STATUS_OPTIONS}
+          value={values.payment || undefined}
+          onChange={(v) => setValue("payment", v)}
+        />
+        <FacetedFilter
+          label="Consultant"
+          options={consultantOptions}
+          value={values.consultant || undefined}
+          onChange={(v) => setValue("consultant", v)}
+        />
+        <DateRangePicker
+          placeholder="Created date"
+          value={{ from: values.createdFrom || undefined, to: values.createdTo || undefined }}
+          onChange={(range) => {
+            setValue("createdFrom", range.from)
+            setValue("createdTo", range.to)
+          }}
+        />
+        <DateRangePicker
+          placeholder="Departure date"
+          value={{ from: values.departFrom || undefined, to: values.departTo || undefined }}
+          onChange={(range) => {
+            setValue("departFrom", range.from)
+            setValue("departTo", range.to)
+          }}
+        />
+      </ListFilterBar>
 
       {/* Bookings List */}
       <div className="space-y-3">
@@ -355,7 +247,7 @@ export default function BookingsPage() {
                       <CalendarCheck className="w-5 h-5 text-primary" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <span className="text-base font-semibold text-foreground">
                           {booking.bookingNumber}
                         </span>
@@ -364,6 +256,9 @@ export default function BookingsPage() {
                             {booking.consultant}
                           </Badge>
                         )}
+                        <Badge variant="outline" className="text-xs">
+                          {booking.lifecycleStatus}
+                        </Badge>
                         <Badge
                           variant={
                             booking.paymentStatus === "Full Paid"
@@ -374,7 +269,7 @@ export default function BookingsPage() {
                           }
                           className="text-xs"
                         >
-                          {booking.lifecycleStatus}
+                          {booking.paymentStatus}
                         </Badge>
                         {booking.supplier && (
                           <Badge variant="outline" className="text-xs">
@@ -420,19 +315,26 @@ export default function BookingsPage() {
         ))}
 
         {filtered.length === 0 && (
-          <Card className="border-dashed">
-            <CardContent className="p-12">
-              <div className="text-center space-y-2">
-                <CalendarCheck className="w-12 h-12 text-muted-foreground/40 mx-auto" />
-                <p className="text-base font-medium text-foreground">No bookings found</p>
-                <p className="text-sm text-muted-foreground">
-                  {hasActiveFilters
-                    ? "Try adjusting your filters to see more results"
-                    : "No jobs have moved beyond enquiry yet"}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+          <Empty className="border border-dashed">
+            <EmptyHeader>
+              <EmptyMedia variant="icon">
+                <CalendarCheck className="w-6 h-6" />
+              </EmptyMedia>
+              <EmptyTitle>No bookings found</EmptyTitle>
+              <EmptyDescription>
+                {hasActiveFilters
+                  ? "No bookings match your filters."
+                  : "No jobs have moved beyond enquiry yet."}
+              </EmptyDescription>
+            </EmptyHeader>
+            {hasActiveFilters ? (
+              <EmptyContent>
+                <Button variant="outline" size="sm" onClick={clearFilters}>
+                  Clear all filters
+                </Button>
+              </EmptyContent>
+            ) : null}
+          </Empty>
         )}
       </div>
     </div>

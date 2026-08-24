@@ -5257,7 +5257,10 @@ export function SupplierDetailView({
                     />
                   ) : (
                     <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                      {`No ${activeVocabulary.suiteTypePlural.toLowerCase()} added yet.`}
+                      <p className="font-medium text-foreground">
+                        {`No ${activeVocabulary.suiteTypePlural.toLowerCase()} yet.`}
+                      </p>
+                      <p>{`Use "Add ${activeVocabulary.suiteType.toLowerCase()}" above to add the first one.`}</p>
                     </div>
                   )
                 ) : supplier.suiteTypes.length > 0 ? (
@@ -5282,8 +5285,31 @@ export function SupplierDetailView({
                     })}
                   </div>
                 ) : (
-                  <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                    {`No ${activeVocabulary.suiteTypePlural.toLowerCase()} configured.`}
+                  <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground space-y-2">
+                    <div>
+                      <p className="font-medium text-foreground">
+                        {`No ${activeVocabulary.suiteTypePlural.toLowerCase()} yet.`}
+                      </p>
+                      <p>
+                        {canEdit
+                          ? `Add a ${activeVocabulary.suiteType.toLowerCase()} before this supplier can be priced or booked.`
+                          : `A manager needs to add one before this supplier can be priced or booked.`}
+                      </p>
+                    </div>
+                    {canEdit && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setIsEditing(true)
+                          addSuiteType()
+                        }}
+                      >
+                        <Plus className="mr-2 h-4 w-4" />
+                        {`Add ${activeVocabulary.suiteType.toLowerCase()}`}
+                      </Button>
+                    )}
                   </div>
                 )}
               </div>

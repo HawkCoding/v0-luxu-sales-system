@@ -143,10 +143,21 @@ type BookingServiceUpdate = Database["public"]["Tables"]["booking_services"]["Up
 type BookingServiceUnitInsert = Database["public"]["Tables"]["booking_service_units"]["Insert"]
 
 const SERVICES_WITH_UNITS_SELECT =
-  "id, booking_id, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, date_anchor, rate_type_id, notes, selected, origin, price_currency, updated_at, " +
+  "id, booking_id, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, date_anchor, rate_type_id, notes, selected, origin, sort_order, price_currency, updated_at, " +
   "departure_time, arrival_date, arrival_time, flight_number, departure_airport_code, arrival_airport_code, hand_luggage_kg, checked_luggage_kg, " +
   "luggage_storage_available, booking_date, confirmation_date, payment_made_date, paid_with, " +
   "units:booking_service_units(id, suite_type_id, bedroom_type_id, bedroom_layout_id, bathroom_type_id, adult_count, child_count, infant_count, sort_order, manual_adult_price, manual_child_price, manual_infant_price, manual_room_price, manual_room_price_set_at, complimentary_first_night)"
+
+/**
+ * GET only. Build Booking's step 1 lists a booking's services by supplier name and kind, which is
+ * all it renders -- so carrying the name/kind here lets the dialog paint that list off this read
+ * instead of waiting on the far heavier GET /build-booking payload (every route, rate card and
+ * suite type for every supplier on the booking) that step 2 actually needs.
+ *
+ * Deliberately separate from SERVICES_WITH_UNITS_SELECT so PATCH's reload response below keeps its
+ * existing shape -- a read-path speedup has no business changing what a write returns.
+ */
+const SERVICES_WITH_SUPPLIER_SELECT = `${SERVICES_WITH_UNITS_SELECT}, suppliers(name, kind)`
 
 interface ServiceUnitRow {
   id: string
@@ -193,9 +204,21 @@ interface ServiceWithUnitsRow {
   paid_with: string | null
   selected: boolean
   origin: "auto" | "consultant"
+  sort_order: number
   price_currency: string
   updated_at: string
   units: ServiceUnitRow[]
+}
+
+interface SupplierJoinRow {
+  name: string
+  kind: SupplierKind
+}
+
+interface ServiceWithSupplierRow extends ServiceWithUnitsRow {
+  /** PostgREST returns an embedded to-one relation as an object, but has shipped it as a
+   *  single-element array in the past -- normalise rather than trust one shape. */
+  suppliers: SupplierJoinRow | SupplierJoinRow[] | null
 }
 
 /** Saved-state read, shaped exactly like GET /api/jobs/[id]/package so the dialog's
@@ -233,12 +256,16 @@ export async function GET(_req: Request, { params }: RouteParams) {
 
   const { data: services, error: servicesError } = await supabase
     .from("booking_services")
-    .select(SERVICES_WITH_UNITS_SELECT)
+    .select(SERVICES_WITH_SUPPLIER_SELECT)
     .eq("booking_id", id)
+    // Was unordered, so the returned service order was whatever Postgres happened to give back.
+    // Build Booking's step 1 renders this list directly, and it has to agree with the leg order
+    // step 2 shows (which does sort by sort_order).
+    .order("sort_order", { ascending: true })
 
   if (servicesError) return safeSupabaseError("services:get-services", servicesError)
 
-  const serviceRows = (services ?? []) as unknown as ServiceWithUnitsRow[]
+  const serviceRows = (services ?? []) as unknown as ServiceWithSupplierRow[]
 
   return Response.json({
     // No catalogue package concept here; the presence of service rows is the signal instead.
@@ -247,7 +274,17 @@ export async function GET(_req: Request, { params }: RouteParams) {
     tripEndDate: booking.trip_end_date,
     servicesConfirmedAt: booking.services_confirmed_at,
     servicesConfirmedByName,
-    selections: serviceRows.map((row) => ({ ...row, package_leg_id: row.id })),
+    // The join is flattened to two scalars rather than passed through as a nested object: every
+    // existing consumer of `selections` reads flat snake_case fields, so this stays additive.
+    selections: serviceRows.map(({ suppliers, ...row }) => {
+      const supplier = Array.isArray(suppliers) ? suppliers[0] ?? null : suppliers
+      return {
+        ...row,
+        package_leg_id: row.id,
+        supplier_name: supplier?.name ?? null,
+        supplier_kind: supplier?.kind ?? null,
+      }
+    }),
   })
 }
 
