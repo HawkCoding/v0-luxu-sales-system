@@ -61,6 +61,38 @@ export interface BuildWorksheetServiceLinesInput {
 }
 
 /**
+ * Narrows the worksheet's rows to the legs the accepted quote priced.
+ *
+ * The worksheet describes what the customer actually bought, so it scopes the same way the voucher
+ * and itinerary do. Left unscoped it listed legs dropped from the quote at revision time but never
+ * removed from the builder — ops saw a service to run that the guest holds no voucher for and never
+ * paid for, with nothing marking the difference.
+ *
+ * `scopedLegIds` is `undefined` when there is no accepted quote, or when the accepted quote prices
+ * no legs at all (a manual or extras-only quote). Both mean "don't filter" rather than "show
+ * nothing" — the same convention `buildVoucherServiceBlocks` and `loadLegReferenceRows` use.
+ */
+export function scopeWorksheetRows(
+  services: readonly WorksheetServiceRow[],
+  transportRequests: readonly WorksheetTransportRow[],
+  scopedLegIds: ReadonlySet<string> | undefined,
+): { services: WorksheetServiceRow[]; transportRequests: WorksheetTransportRow[] } {
+  if (!scopedLegIds || scopedLegIds.size === 0) {
+    return { services: [...services], transportRequests: [...transportRequests] }
+  }
+
+  return {
+    // A booking_services row is its own leg, so its id is what a quote's pricing snapshot recorded.
+    services: services.filter((row) => scopedLegIds.has(row.id)),
+    // A captured trip follows the leg it belongs to. An unlinked trip was never priced into any
+    // quote, so a scoped worksheet drops it.
+    transportRequests: transportRequests.filter((request) =>
+      request.service_id ? scopedLegIds.has(request.service_id) : false,
+    ),
+  }
+}
+
+/**
  * End date of a service. Every kind derives it differently and none of them store it directly
  * (except a flight, whose overnight arrival no offset could know) — the rules mirror
  * `buildVoucherServiceBlocks` so the worksheet and the voucher never disagree about a date.

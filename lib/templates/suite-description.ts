@@ -179,19 +179,16 @@ export function buildSuiteTokens(selections: SuiteSelection[]): SuiteTokens {
 }
 
 /**
- * selectedVariants holds exactly what was chosen for the unit, so it's read first.
- * Older quotes built before that field existed only have suiteVariants — the suite
- * type's full list of offered options — where a group only tells us what was
- * *chosen* when it happens to hold exactly one value; anything else would render
- * "Twin, Double bedded …" and is treated as unknown instead.
+ * selectedVariants holds exactly what was chosen for the unit — the only source read here.
+ * suiteVariants (the suite type's full list of offered options) is deliberately never consulted:
+ * a suite type happening to offer just one bathroom doesn't mean the consultant picked it, and
+ * inferring a selection from it rendered configuration nobody chose (e.g. "with a shower" on a
+ * unit whose bathroom type was left unset). Older quotes built before selectedVariants existed
+ * have no chosen config to read here, so they render the suite type alone.
  */
 function chosenVariant(snapshot: PricingSnapshot, label: string): string | null {
   const selected = snapshot.selectedVariants?.find((variant) => variant.label === label)
-  if (selected) return clean(selected.values[0]) || null
-
-  const group = snapshot.suiteVariants?.find((variant) => variant.label === label)
-  if (!group || group.values.length !== 1) return null
-  return clean(group.values[0]) || null
+  return selected ? clean(selected.values[0]) || null : null
 }
 
 /** Derives suite selections from quote line-item pricing snapshots. */

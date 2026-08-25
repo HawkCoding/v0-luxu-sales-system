@@ -21,7 +21,6 @@ import {
 } from "lucide-react"
 import { SortableList } from "@/components/ui/sortable-list"
 import { BulletLineList } from "@/components/supplier/bullet-line-list"
-import { InclusionPreview } from "@/components/supplier/inclusion-preview"
 import { splitBulletLines } from "@/lib/inclusions/bullet-lines"
 import { isOngoingRateCard } from "@/lib/rate-cards/resolve"
 import { SuiteVocabularyCard, type EditableVocabularyValue } from "@/components/supplier/suite-vocabulary-card"
@@ -72,6 +71,10 @@ import {
   SupplierStationAddressEditor,
   type EditableStationAddress,
 } from "@/components/supplier-station-address-editor"
+import {
+  InclusionLineEditor,
+  type EditableInclusionLine,
+} from "@/components/supplier/inclusion-line-editor"
 import { useRole } from "@/lib/role-context"
 import {
   parseStaleVersionConflictPayload,
@@ -232,9 +235,15 @@ export interface SupplierFormState {
   /** HH:MM; empty string = unset. Check-in/check-out (hotels) or departure/arrival (trains). */
   defaultTimeStart: string
   defaultTimeEnd: string
-  /** One client-facing bullet per line; split into a string[] on save. */
+  /** Legacy one-bullet-per-line text; no longer written on save, kept only so an unmigrated
+   * supplier (no tagged rows yet) still shows something while inclusionLines below is empty. */
   inclusions: string
   exclusions: string
+  /** Tagged inclusion/exclusion rows -- the editor's actual write path. */
+  inclusionLines: EditableInclusionLine[]
+  /** Train operators only: routes.durationDays threshold for "long journey". Null = no concept. */
+  longJourneyMinDays: number | null
+  trainOnlyNote: string
   /** This supplier's base rate -- the baseline its rate adjustments are measured off. */
   baseRateTypeId: string | null
   /** The rate its quotes use; null means "quote at the base rate". */
@@ -370,6 +379,19 @@ function createEmptySuiteType(sortOrder = 0): EditableSuiteType {
   }
 }
 
+/** `supplier.inclusionLines`, one list, back into the flat `# heading` / plain-item shape
+ * `BulletLineList` renders -- lets the read-only card reuse that renderer without needing to know
+ * about tagged rows. Ignores journey/rate tags: this preview has no quote to filter against, so it
+ * shows every line regardless of when it would actually apply. */
+function inclusionLinesToRawList(
+  lines: readonly { list: "inclusions" | "exclusions"; kind: "heading" | "item"; text: string }[],
+  list: "inclusions" | "exclusions",
+): string[] {
+  return lines
+    .filter((line) => line.list === list)
+    .map((line) => (line.kind === "heading" ? `# ${line.text}` : line.text))
+}
+
 function createEmptyPackage(): EditablePackage {
   return {
     id: makeClientId(),
@@ -432,6 +454,16 @@ function buildFormState(supplier: SupplierDetail): SupplierFormState {
     defaultTimeEnd: (supplier.defaultTimeEnd ?? "").slice(0, 5),
     inclusions: (supplier.inclusions ?? []).join("\n"),
     exclusions: (supplier.exclusions ?? []).join("\n"),
+    inclusionLines: (supplier.inclusionLines ?? []).map((line) => ({
+      id: line.id,
+      list: line.list,
+      kind: line.kind,
+      text: line.text,
+      journeyTag: line.journeyTag,
+      rateTag: line.rateTag,
+    })),
+    longJourneyMinDays: supplier.longJourneyMinDays ?? null,
+    trainOnlyNote: supplier.trainOnlyNote ?? "",
     baseRateTypeId: supplier.baseRateTypeId ?? null,
     quoteRateTypeId: supplier.quoteRateTypeId ?? null,
     rateAdjustments: (supplier.rateAdjustments ?? []).map((adjustment) => ({
@@ -4197,6 +4229,18 @@ export function SupplierDetailView({
           defaultTimeEnd: form.defaultTimeEnd || null,
           inclusions: splitBulletLines(form.inclusions),
           exclusions: splitBulletLines(form.exclusions),
+          inclusionLines: form.inclusionLines
+            .filter((line) => line.text.trim().length > 0)
+            .map((line) => ({
+              id: line.id,
+              list: line.list,
+              kind: line.kind,
+              text: line.text.trim(),
+              journeyTag: line.journeyTag,
+              rateTag: line.rateTag,
+            })),
+          longJourneyMinDays: form.kind === "train_operator" ? form.longJourneyMinDays : null,
+          trainOnlyNote: form.kind === "train_operator" ? form.trainOnlyNote.trim() || null : null,
           rateAdjustments: form.rateAdjustments,
           baseRateTypeId: form.baseRateTypeId,
           quoteRateTypeId: form.quoteRateTypeId,
@@ -4833,45 +4877,46 @@ export function SupplierDetailView({
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Label htmlFor="supplier-inclusions">What's included</Label>
-                      <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-700">
-                        External
-                      </span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      One per line. Listed under this supplier in the quote itinerary. Start a line
-                      with <span className="font-mono font-semibold">#</span> to make it a
-                      subheading instead of a bullet.
-                    </p>
-                    <BufferedTextarea
-                      id="supplier-inclusions"
-                      value={form.inclusions}
-                      onValueChange={(value) => updateField("inclusions", value)}
-                      rows={5}
-                      placeholder={
-                        "# Onboard\nHigh Tea\n24-hour Butler service\nWi-Fi\n# Off-train\nVehicle transfer between the Hotel and Station"
+                    <InclusionLineEditor
+                      key={supplierSlug}
+                      idPrefix="supplier-inclusions"
+                      list="inclusions"
+                      lines={form.inclusionLines}
+                      showTags={form.kind === "train_operator"}
+                      onChange={(next) => updateField("inclusionLines", next)}
+                      header={
+                        <div className="flex items-center gap-2">
+                          <Label>What&apos;s included</Label>
+                          <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-700">
+                            External
+                          </span>
+                        </div>
+                      }
+                      helpText={
+                        form.kind === "train_operator"
+                          ? "Listed under this supplier in the quote itinerary. A subheading's Journey/Rate tag is inherited by the items beneath it, unless an item sets its own."
+                          : "Listed under this supplier in the quote itinerary."
                       }
                     />
-                    <InclusionPreview value={form.inclusions} />
                   </div>
 
                   <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Label htmlFor="supplier-exclusions">What's excluded</Label>
-                      <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-700">
-                        External
-                      </span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      One per line. Pooled into the quote&apos;s exclusions section.
-                    </p>
-                    <BufferedTextarea
-                      id="supplier-exclusions"
-                      value={form.exclusions}
-                      onValueChange={(value) => updateField("exclusions", value)}
-                      rows={5}
-                      placeholder={"French Champagne, caviar, telephone calls, and gratuities"}
+                    <InclusionLineEditor
+                      key={supplierSlug}
+                      idPrefix="supplier-exclusions"
+                      list="exclusions"
+                      lines={form.inclusionLines}
+                      showTags={form.kind === "train_operator"}
+                      onChange={(next) => updateField("inclusionLines", next)}
+                      header={
+                        <div className="flex items-center gap-2">
+                          <Label>What&apos;s excluded</Label>
+                          <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-700">
+                            External
+                          </span>
+                        </div>
+                      }
+                      helpText="Pooled into the quote's exclusions section."
                     />
                   </div>
                 </div>
@@ -4990,11 +5035,17 @@ export function SupplierDetailView({
                           External
                         </span>
                       </div>
-                      {supplier.inclusions.length > 0 ? (
-                        <BulletLineList values={supplier.inclusions} />
-                      ) : (
-                        <p className="text-sm text-muted-foreground">Nothing listed.</p>
-                      )}
+                      {(() => {
+                        const rawInclusions =
+                          supplier.inclusionLines.length > 0
+                            ? inclusionLinesToRawList(supplier.inclusionLines, "inclusions")
+                            : supplier.inclusions
+                        return rawInclusions.length > 0 ? (
+                          <BulletLineList values={rawInclusions} />
+                        ) : (
+                          <p className="text-sm text-muted-foreground">Nothing listed.</p>
+                        )
+                      })()}
                     </div>
                     <div className="rounded-lg border border-emerald-100 bg-emerald-50/50 p-4">
                       <div className="mb-2 flex items-center gap-2">
@@ -5003,11 +5054,17 @@ export function SupplierDetailView({
                           External
                         </span>
                       </div>
-                      {supplier.exclusions.length > 0 ? (
-                        <BulletLineList values={supplier.exclusions} flatten />
-                      ) : (
-                        <p className="text-sm text-muted-foreground">Nothing listed.</p>
-                      )}
+                      {(() => {
+                        const rawExclusions =
+                          supplier.inclusionLines.length > 0
+                            ? inclusionLinesToRawList(supplier.inclusionLines, "exclusions")
+                            : supplier.exclusions
+                        return rawExclusions.length > 0 ? (
+                          <BulletLineList values={rawExclusions} flatten />
+                        ) : (
+                          <p className="text-sm text-muted-foreground">Nothing listed.</p>
+                        )
+                      })()}
                     </div>
                   </div>
                   <div className="rounded-lg bg-secondary/40 p-4">
@@ -5136,6 +5193,68 @@ export function SupplierDetailView({
                 </div>
               ) : null}
 
+              {(isEditing ? form.kind : supplier.kind) === "train_operator" ? (
+                <div className="rounded-lg border p-4 space-y-4">
+                  {isEditing ? (
+                    <>
+                      <div className="grid gap-3 sm:grid-cols-[minmax(0,16rem)_1fr] sm:items-end">
+                        <div className="space-y-2">
+                          <Label htmlFor="supplier-long-journey-min-days">
+                            Long journey from (days)
+                          </Label>
+                          <NumericInput
+                            id="supplier-long-journey-min-days"
+                            min="1"
+                            step="1"
+                            value={form.longJourneyMinDays}
+                            onValueChange={(value) => updateField("longJourneyMinDays", value)}
+                          />
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          A route&apos;s Duration (days) at or above this counts as a &quot;long&quot;
+                          journey for quote inclusions. Leave blank if this train has no short/long
+                          distinction.
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="supplier-train-only-note">Train-only note</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Shown at the end of the quote email only when this quote prices the train
+                          and nothing else — an offer to arrange hotels, transfers or flights too.
+                        </p>
+                        <BufferedTextarea
+                          id="supplier-train-only-note"
+                          value={form.trainOnlyNote}
+                          onValueChange={(value) => updateField("trainOnlyNote", value)}
+                          rows={3}
+                          placeholder="We have quoted you for the train only. If you would like to request any other services, we offer those as well."
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-foreground">Long journey threshold</p>
+                          <p className="text-sm text-muted-foreground">
+                            Routes at or above this many days count as a long journey.
+                          </p>
+                        </div>
+                        <Badge variant="outline">
+                          {supplier.longJourneyMinDays ? `${supplier.longJourneyMinDays} days` : "Not set"}
+                        </Badge>
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">Train-only note</p>
+                        <p className="text-sm text-muted-foreground">
+                          {supplier.trainOnlyNote || "Not set."}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : null}
+
               {/* Trains carry their times per route (see RouteEditorRow) — a supplier-wide pair
                   would claim every route departs at the same hour. */}
               {form.kind === "hotel_property" ? (
@@ -5257,7 +5376,10 @@ export function SupplierDetailView({
                     />
                   ) : (
                     <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                      {`No ${activeVocabulary.suiteTypePlural.toLowerCase()} added yet.`}
+                      <p className="font-medium text-foreground">
+                        {`No ${activeVocabulary.suiteTypePlural.toLowerCase()} yet.`}
+                      </p>
+                      <p>{`Use "Add ${activeVocabulary.suiteType.toLowerCase()}" above to add the first one.`}</p>
                     </div>
                   )
                 ) : supplier.suiteTypes.length > 0 ? (
@@ -5282,8 +5404,31 @@ export function SupplierDetailView({
                     })}
                   </div>
                 ) : (
-                  <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-                    {`No ${activeVocabulary.suiteTypePlural.toLowerCase()} configured.`}
+                  <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground space-y-2">
+                    <div>
+                      <p className="font-medium text-foreground">
+                        {`No ${activeVocabulary.suiteTypePlural.toLowerCase()} yet.`}
+                      </p>
+                      <p>
+                        {canEdit
+                          ? `Add a ${activeVocabulary.suiteType.toLowerCase()} before this supplier can be priced or booked.`
+                          : `A manager needs to add one before this supplier can be priced or booked.`}
+                      </p>
+                    </div>
+                    {canEdit && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setIsEditing(true)
+                          addSuiteType()
+                        }}
+                      >
+                        <Plus className="mr-2 h-4 w-4" />
+                        {`Add ${activeVocabulary.suiteType.toLowerCase()}`}
+                      </Button>
+                    )}
                   </div>
                 )}
               </div>

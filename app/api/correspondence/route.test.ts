@@ -130,10 +130,18 @@ function buildAuth(options: AuthOptions = {}) {
   const quoteSelect = vi.fn((columns: string) => {
     // The pricing_incomplete send gate — a quote whose lines aren't all priced must not become a
     // client document quoting a total that summed the unpriced ones as zero.
-    if (columns === "status") {
+    if (columns === "status" || columns.includes("journey_class")) {
       return {
         eq: vi.fn(() => ({
-          maybeSingle: vi.fn(async () => ({ data: { status: quoteStatus }, error: null })),
+          maybeSingle: vi.fn(async () => ({
+            data: {
+              status: quoteStatus,
+              journey_class: null,
+              rate_audience: null,
+              show_train_only_note: null,
+            },
+            error: null,
+          })),
         })),
       }
     }
@@ -255,6 +263,13 @@ function buildAuth(options: AuthOptions = {}) {
             eq: vi.fn(() => ({
               order: vi.fn(async () => ({ data: [], error: null })),
             })),
+          })),
+        }
+      }
+      if (table === "quote_line_items") {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(async () => ({ data: [], error: null })),
           })),
         }
       }

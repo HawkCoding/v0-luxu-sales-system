@@ -11,6 +11,7 @@ import {
   hasComplimentaryNight,
   isComplimentaryRoom,
   isComplimentaryTransport,
+  isDeliberateZeroCommission,
   isMissingPricing,
   stayNights,
 } from "@/lib/quotes/pricing-engine"
@@ -345,7 +346,7 @@ export function JobQuotesTab({
                             isMissingPricing(li) ? "text-destructive font-medium" : "text-muted-foreground"
                           }`}
                         >
-                          {li.unitPrice === 0 && !isComplimentary
+                          {li.unitPrice === 0 && !isComplimentary && !isDeliberateZeroCommission(li)
                             ? isMissingPricing(li)
                               ? "TBD"
                               : "Included"

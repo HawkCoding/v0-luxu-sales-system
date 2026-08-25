@@ -20,6 +20,7 @@ import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import type { PricingSnapshot } from "@/lib/types"
 import { getDocumentTextSettings } from "@/lib/settings-access"
+import { loadQuoteConfig, loadQuoteDisplayTokens, overridesFromQuoteRow } from "@/lib/quotes/load-quote-config"
 
 // Composes the quote email from the editable quote_email template (Templates
 // page) with the line-item summary injected as the {{quoteSummaryTable}} block.
@@ -55,7 +56,7 @@ export async function POST(req: Request, { params }: RouteParams) {
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, booking_id, quote_number, validity_until, subtotal, total, currency, created_at, booking:bookings(booking_number, no_of_adults, no_of_children, assigned_salesperson_id, route:routes(name, supplier:suppliers(name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(name), customer:customers(title, first_name, last_name))",
+      "id, booking_id, quote_number, validity_until, subtotal, total, currency, created_at, journey_class, rate_audience, show_train_only_note, booking:bookings(booking_number, no_of_adults, no_of_children, assigned_salesperson_id, route:routes(name, supplier:suppliers(name)), hotel_supplier:suppliers!bookings_hotel_supplier_id_fkey(name), customer:customers(title, first_name, last_name))",
     )
     .eq("id", id)
     .single()
@@ -122,6 +123,14 @@ export async function POST(req: Request, { params }: RouteParams) {
   const firstNightComplimentaryLegIds = firstNightComplimentaryLegIdsFromLineItems(lineItems)
   const complimentaryTransportRequestIds = complimentaryTransportRequestIdsFromLineItems(lineItems)
 
+  // Which journey/rate bullets to show, and whether the train-only note applies -- resolved once
+  // so the email, the PDF stapled to it, and the voucher/itinerary later can never disagree.
+  const quoteConfig = await loadQuoteConfig(supabase, {
+    lineItems: snapshotCarriers,
+    overrides: overridesFromQuoteRow(quote),
+  })
+  const quoteDisplayTokens = await loadQuoteDisplayTokens(supabase, quoteConfig)
+
   // Itinerary degrades to an omitted section rather than failing the preview.
   let itineraryBlocks: VoucherServiceBlock[] = []
   try {
@@ -132,6 +141,7 @@ export async function POST(req: Request, { params }: RouteParams) {
       complimentaryLegIds,
       firstNightComplimentaryLegIds,
       complimentaryTransportRequestIds,
+      inclusionFilter: { journeyClass: quoteConfig.journeyClass, rateAudience: quoteConfig.rateAudience },
     })
     itineraryBlocks = blocks
   } catch {
@@ -181,14 +191,16 @@ export async function POST(req: Request, { params }: RouteParams) {
       supplierName,
       clientSurname,
       total: formatMoney(quote.total, quote.currency),
+      rateLabel: quoteDisplayTokens.rateLabel ?? "",
       ...buildSuiteTokens(
         suiteSelectionsFromSnapshots(
           lineItems.map((li) => li.pricing_snapshot as PricingSnapshot | null),
         ),
       ),
     },
-    blocks: { ...shared.blocks, quoteSummaryTable },
+    blocks: { ...shared.blocks, quoteSummaryTable, trainOnlyNote: quoteDisplayTokens.trainOnlyNote ?? "" },
     senderProfileId: booking?.assigned_salesperson_id ?? user.id,
+    templateSupplierId: quoteConfig.primarySupplierId,
   })
 
   if (!composed) {
@@ -205,5 +217,14 @@ export async function POST(req: Request, { params }: RouteParams) {
     warnings: composed.warnings,
     signatureProfileId: composed.signatureProfileId,
     signatureBrandId: composed.signatureBrandId,
+    config: {
+      primarySupplierId: quoteConfig.primarySupplierId,
+      primarySupplierName: quotedSupplierName,
+      journeyClass: quoteConfig.journeyClass,
+      rateAudience: quoteConfig.rateAudience,
+      trainOnly: quoteConfig.trainOnly,
+      auto: quoteConfig.auto,
+      unresolved: quoteConfig.unresolved,
+    },
   })
 }

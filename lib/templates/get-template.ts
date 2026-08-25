@@ -67,15 +67,36 @@ export const DEFAULT_TEMPLATES: Record<SystemTemplateKey, { subject: string; bod
  * Fetch the active template for a key. System keys always resolve — falling
  * back to the code-level default when the DB row is missing or inactive.
  * Custom keys return null when not found.
+ *
+ * `supplierId`, when given, tries the (key, supplierId) variant row first
+ * (e.g. a Rovos-specific quote_email body) and falls back to the untagged
+ * (key, null) row — so a train with no variant of its own keeps using the
+ * shared default without any special-casing at the call site.
  */
 export async function getTemplate(
   supabase: SupabaseClient<Database>,
   key: string,
+  supplierId?: string | null,
 ): Promise<EmailTemplate | null> {
+  if (supplierId) {
+    const { data: variant } = await supabase
+      .from("templates")
+      .select("key, subject, body_html")
+      .eq("key", key)
+      .eq("supplier_id", supplierId)
+      .eq("active", true)
+      .maybeSingle()
+
+    if (variant) {
+      return { key: variant.key, subject: variant.subject, bodyHtml: variant.body_html }
+    }
+  }
+
   const { data } = await supabase
     .from("templates")
     .select("key, subject, body_html")
     .eq("key", key)
+    .is("supplier_id", null)
     .eq("active", true)
     .maybeSingle()
 

@@ -331,7 +331,8 @@ describe("buildPackageQuoteLineItems", () => {
 
     expect(lineItems).toHaveLength(2)
     const [comped, charged] = lineItems
-    expect(comped.unitPrice).toBe(0)
+    expect(comped.unitPrice).toBe(500)
+    expect(comped.total).toBe(0)
     expect(comped.pricingSnapshot?.isComplimentaryTransport).toBe(true)
     expect(comped.pricingSnapshot?.transportRequestId).toBe("request-comped")
     expect(isMissingPricing(comped)).toBe(false)
@@ -374,6 +375,7 @@ describe("buildPackageQuoteLineItems", () => {
 
     expect(lineItems).toHaveLength(1)
     expect(lineItems[0].unitPrice).toBe(0)
+    expect(lineItems[0].total).toBe(0)
     expect(lineItems[0].pricingSnapshot?.isComplimentaryTransport).toBe(true)
   })
 
@@ -1097,6 +1099,53 @@ describe("buildPackageQuoteLineItems", () => {
     expect(doubleLine?.description).not.toContain("Crosswise")
     expect(twinLine?.qty).toBe(2)
     expect(doubleLine?.qty).toBe(2)
+  })
+
+  it("describes a unit by suite type alone when no bed/layout/bathroom was picked", async () => {
+    const trainLeg = leg({
+      id: "leg-train",
+      supplierKind: "train_operator",
+      routes: [route("route-pta", "supplier-leg-train", "PTA-VFA")],
+      suiteTypes: [suiteType("suite-dlx", "supplier-leg-train", "Deluxe Suite")],
+      rateCards: [
+        rateCard({ id: "rc-train", routeId: "route-pta", suiteTypeId: "suite-dlx", pricePerPerson: 10000 }),
+      ],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase({
+        booking: { id: JOB_ID, no_of_adults: 2, no_of_children: 0, no_of_suites: 1, child_ages: [], departure_date: "2026-09-01" },
+        // Suite type offers several options on every axis — none of them should leak into the
+        // description when the unit itself left every axis unset (Not set in Build Booking step 2).
+        bedroomTypes: [
+          { id: "bed-twin", name: "Twin" },
+          { id: "bed-double", name: "Double" },
+        ],
+        bedroomLayouts: [
+          { id: "layout-crosswise", name: "Crosswise" },
+          { id: "layout-lshape", name: "L-Shape" },
+        ],
+        bathroomTypes: [{ id: "bath-shower", name: "Shower" }],
+      }),
+      packageDetail: detail([trainLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-train",
+          selected: true,
+          units: [{ suiteTypeId: "suite-dlx", adultCount: 2, childCount: 0, infantCount: 0 }],
+        },
+      ],
+    })
+
+    const adultLine = lineItems.find((li) => li.description.includes("Adult"))
+    expect(adultLine?.description).toContain("Deluxe Suite")
+    expect(adultLine?.description).not.toContain("Twin")
+    expect(adultLine?.description).not.toContain("Double")
+    expect(adultLine?.description).not.toContain("Crosswise")
+    expect(adultLine?.description).not.toContain("L-Shape")
+    expect(adultLine?.description).not.toContain("Shower")
   })
 
   it("names each passenger kind's own room config when only one room supplies that kind", async () => {

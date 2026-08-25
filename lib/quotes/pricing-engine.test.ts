@@ -56,6 +56,26 @@ describe("isMissingPricing", () => {
     })
     expect(isMissingPricing(comped)).toBe(false)
   })
+
+  it("does not flag a commission line deliberately set to 0%", () => {
+    const zeroCommission = line({
+      description: "Commission",
+      unitPrice: 0,
+      pricingSnapshot: {
+        commission: { type: "percent", value: 0, amount: 0, source: "line" },
+      } as QuoteLineItem["pricingSnapshot"],
+    })
+    expect(isMissingPricing(zeroCommission)).toBe(false)
+  })
+
+  it("flags a commission line that was never configured", () => {
+    const unconfigured = line({
+      description: "Commission",
+      unitPrice: 0,
+      pricingSnapshot: { commission: null } as QuoteLineItem["pricingSnapshot"],
+    })
+    expect(isMissingPricing(unconfigured)).toBe(true)
+  })
 })
 
 describe("isComplimentaryTransport", () => {

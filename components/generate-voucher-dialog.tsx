@@ -190,8 +190,7 @@ export function GenerateVoucherDialog({
         <DialogHeader>
           <DialogTitle>Generate travel voucher</DialogTitle>
           <DialogDescription>
-            The voucher email for {displayNumber} carries both the travel voucher and the client
-            itinerary — the itinerary is generated automatically if it doesn't exist yet.
+            The voucher email for {displayNumber} carries the travel voucher.
           </DialogDescription>
         </DialogHeader>
 

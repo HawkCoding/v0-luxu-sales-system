@@ -28,6 +28,9 @@ function buildFallback(overrides: Partial<SupplierFormState> = {}): SupplierForm
     defaultTimeEnd: "",
     inclusions: "",
     exclusions: "",
+    inclusionLines: [],
+    longJourneyMinDays: null,
+    trainOnlyNote: "",
     baseRateTypeId: null,
     quoteRateTypeId: null,
     rateAdjustments: [],
@@ -65,11 +68,13 @@ describe("SUPPLIER_DRAFT_SCHEMA_VERSION", () => {
         "description",
         "emails",
         "exclusions",
+        "inclusionLines",
         "inclusions",
         "infantMaxAge",
         "kind",
         "location",
         "locationId",
+        "longJourneyMinDays",
         "name",
         "notes",
         "packages",
@@ -81,10 +86,11 @@ describe("SUPPLIER_DRAFT_SCHEMA_VERSION", () => {
         "stationAddresses",
         "streetAddress",
         "suiteTypes",
+        "trainOnlyNote",
         "website",
       ].sort(),
     )
-    expect(SUPPLIER_DRAFT_SCHEMA_VERSION).toBe(2)
+    expect(SUPPLIER_DRAFT_SCHEMA_VERSION).toBe(3)
   })
 })
 

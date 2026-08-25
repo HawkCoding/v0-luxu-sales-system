@@ -13,7 +13,7 @@ export function sampleVoucherData(): VoucherData {
     departure: "10 March 2026 at 11h00",
     arrival: "13 March 2026 at 16h00",
     suiteType: "Double Deluxe Suite",
-    numberOfGuests: 2,
+    passengerTotals: { adultCount: 2, childCount: 1, infantCount: 1 },
     specialRequests: "Anniversary celebration",
     customerEmail: "guest@example.com",
     customerPhone: "+27 82 000 0000",

@@ -150,6 +150,26 @@ export function formatDisplayDateShort(value: string | Date | null | undefined):
   return `${pad(parts.day)} ${SHORT_MONTH_NAMES[parts.month - 1]} ${parts.year}`
 }
 
+/**
+ * Parses a date-only ISO string ("2026-07-04") into a local-midnight `Date`, for handing to
+ * `react-day-picker`'s `Calendar` (which works in local wall-clock time, not `APP_TIME_ZONE`).
+ * Returns undefined for null/undefined/malformed input rather than throwing.
+ */
+export function parseDateOnly(value: string | null | undefined): Date | undefined {
+  if (!value) return undefined
+  const match = DATE_ONLY_PATTERN.exec(value)
+  if (!match) return undefined
+
+  const [, year, month, day] = match
+  if (!isRealDate(Number(year), Number(month), Number(day))) return undefined
+  return new Date(Number(year), Number(month) - 1, Number(day))
+}
+
+/** The inverse of `parseDateOnly` — a local-midnight `Date` back to "YYYY-MM-DD". */
+export function toDateOnlyIso(value: Date): string {
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`
+}
+
 const DMY_NUMERIC_PATTERN = /^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$/
 const DMY_NAMED_MONTH_PATTERN = /^(\d{1,2})[\s\-/]+([A-Za-z]{3,})[\s\-/]+(\d{4})$/
 

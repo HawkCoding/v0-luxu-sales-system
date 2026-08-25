@@ -38,6 +38,9 @@ export interface ComposeOptions extends ComposeTokens {
   senderProfileId?: string | null
   /** Division brand to render in the signature; omitted resolves to the first enabled brand. */
   signatureBrandId?: string | null
+  /** Train (or other primary) supplier to pick a template variant for — see getTemplate. Omitted
+   * or unmatched falls back to the shared (key, null) template. */
+  templateSupplierId?: string | null
 }
 
 /** Compose from an already-fetched template (e.g. once per worker run). */
@@ -89,7 +92,7 @@ export async function composeEmail(
   key: string,
   options: ComposeOptions,
 ): Promise<ComposedEmail | null> {
-  const template = await getTemplate(supabase, key)
+  const template = await getTemplate(supabase, key, options.templateSupplierId)
   if (!template) return null
   return composeFromTemplate(template, options)
 }

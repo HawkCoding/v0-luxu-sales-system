@@ -1283,22 +1283,28 @@ export function SuiteLegEditor({
               <div key={unit.id} className="grid gap-3 rounded-md border p-3 md:grid-cols-2 xl:grid-cols-3">
                 <div className="space-y-1.5">
                   <Label>{vocab.suiteType}</Label>
-                  <Select
-                    value={unit.suiteTypeId ?? NONE_VALUE}
-                    onValueChange={(next) => updateUnit(unit.id, { suiteTypeId: next === NONE_VALUE ? null : next })}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue className="truncate" placeholder="Select type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NONE_VALUE}>Not set</SelectItem>
-                      {activeSuiteTypes.map((suiteType) => (
-                        <SelectItem key={suiteType.id} value={suiteType.id}>
-                          {suiteType.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  {activeSuiteTypes.length === 0 ? (
+                    <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                      {`No ${vocab.suiteTypePlural.toLowerCase()} set up for ${leg.supplierName} — add one under Suppliers first.`}
+                    </p>
+                  ) : (
+                    <Select
+                      value={unit.suiteTypeId ?? NONE_VALUE}
+                      onValueChange={(next) => updateUnit(unit.id, { suiteTypeId: next === NONE_VALUE ? null : next })}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue className="truncate" placeholder="Select type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NONE_VALUE}>Not set</SelectItem>
+                        {activeSuiteTypes.map((suiteType) => (
+                          <SelectItem key={suiteType.id} value={suiteType.id}>
+                            {suiteType.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                   {leg.pricingMode !== "manual" &&
                   unit.suiteTypeId &&
                   (pricesByTypeOnly || value.routeId) &&

@@ -232,7 +232,7 @@ exports[`generateVoucherHTML > matches the voucher HTML snapshot with special re
 
       <div class="info-row">
         <div class="info-label">Number of Guests</div>
-        <div class="info-value">2 (2 adults)</div>
+        <div class="info-value">2 adults</div>
       </div>
 
       <div class="info-row info-row-shaded">

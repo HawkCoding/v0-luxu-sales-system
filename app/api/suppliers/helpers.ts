@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import type { ZodIssue } from "zod"
 import { createSessionClient } from "@/lib/supabase/server"
 import { buildSupplierSlugBase } from "@/lib/suppliers"
 import { SUPPLIER_KIND_LABELS, type SupplierKind } from "@/lib/types"
@@ -20,6 +21,7 @@ export type RefTableName =
   | "bedroom_types"
   | "bedroom_layouts"
   | "bathroom_types"
+  | "supplier_inclusion_lines"
 
 /**
  * A company can hold one record per category, so the same name legitimately repeats. Falling
@@ -106,6 +108,32 @@ export function normalizeText(value: string): string | null {
 
 export function normalizeNullableDate(value: string | null): string | null {
   return value && value.trim() ? value : null
+}
+
+/** "inclusionLines" -> "Inclusion Lines", "text" -> "Text". */
+function humanizeKey(key: string): string {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/^./, (char) => char.toUpperCase())
+}
+
+/**
+ * Zod's default message ("String must contain at most 300 character(s)") names no field, so a
+ * validation failure on a nested array -- inclusion lines, routes, station addresses -- was
+ * unattributable: the caller had no way to tell which of dozens of rows was over the limit.
+ * Prefixes the human-readable path ("Inclusion Lines #13 Text: ...") for those. Custom messages
+ * (`ctx.addIssue` in schemas.ts, e.g. "Each city may only have one station address") are already
+ * hand-written as a complete, standalone sentence -- left alone so this doesn't make a fine
+ * message worse by dumping a raw path in front of it.
+ */
+export function describeValidationIssue(issue: ZodIssue): string {
+  if (issue.code === "custom") return issue.message
+  const location = issue.path
+    .map((segment) =>
+      typeof segment === "number" ? `#${segment + 1}` : humanizeKey(String(segment)),
+    )
+    .join(" ")
+  return location ? `${location}: ${issue.message}` : issue.message
 }
 
 export function buildErrorResponse(message: string, status = 400) {
@@ -258,6 +286,7 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     { data: emails, error: emailsError },
     { data: routes, error: routesError },
     { data: stationAddresses, error: stationAddressesError },
+    { data: inclusionLines, error: inclusionLinesError },
   ] = await Promise.all([
     supabase
       .from("suite_types")
@@ -282,6 +311,12 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
       .from("supplier_station_addresses")
       .select("*")
       .eq("supplier_id", supplierId),
+    supabase
+      .from("supplier_inclusion_lines")
+      .select("*")
+      .eq("supplier_id", supplierId)
+      .order("list", { ascending: true })
+      .order("sort_order", { ascending: true }),
   ])
 
   if (suiteTypesError) {
@@ -341,6 +376,20 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
             details: (routesError as { details?: string }).details,
           },
         },
+        { status: 500 },
+      ),
+    }
+  }
+
+  if (inclusionLinesError) {
+    console.error("Failed to load supplier inclusion lines", {
+      supplierId,
+      supplierSlug: slug,
+      error: inclusionLinesError,
+    })
+    return {
+      error: NextResponse.json(
+        { error: "Failed to load supplier inclusion lines" },
         { status: 500 },
       ),
     }
@@ -600,6 +649,7 @@ export async function loadSupplierDetail(supabase: SessionClient, slug: string) 
     emails: emails ?? [],
     routes: routes ?? [],
     stationAddresses: stationAddresses ?? [],
+    inclusionLines: inclusionLines ?? [],
     rateCards: rateCards ?? [],
     locations: locations ?? [],
     vehicleRentalRouteDetails: vehicleRentalRouteDetails ?? [],

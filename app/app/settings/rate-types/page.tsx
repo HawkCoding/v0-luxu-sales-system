@@ -16,7 +16,19 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import type { RateType } from "@/lib/types"
+
+const AUDIENCE_LABELS: Record<"international" | "resident", string> = {
+  international: "International",
+  resident: "Resident",
+}
 
 interface RateTypesResponse {
   rateTypes: RateType[]
@@ -34,6 +46,8 @@ export default function RateTypesPage() {
   const [adding, setAdding] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState("")
+  const [editAudience, setEditAudience] = useState<"any" | "international" | "resident">("any")
+  const [editClientLabel, setEditClientLabel] = useState("")
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -82,19 +96,33 @@ export default function RateTypesPage() {
   const startEdit = (rt: RateType) => {
     setEditingId(rt.id)
     setEditName(rt.name)
+    setEditAudience(rt.audience ?? "any")
+    setEditClientLabel(rt.clientLabel ?? "")
   }
 
   const cancelEdit = () => {
     setEditingId(null)
     setEditName("")
+    setEditAudience("any")
+    setEditClientLabel("")
   }
 
   const saveEdit = async (id: string) => {
     const trimmed = editName.trim()
     if (!trimmed) return
-    await patch(id, { name: trimmed }, "Rate type renamed")
+    await patch(
+      id,
+      {
+        name: trimmed,
+        audience: editAudience === "any" ? null : editAudience,
+        clientLabel: editClientLabel.trim() || null,
+      },
+      "Rate type updated",
+    )
     setEditingId(null)
     setEditName("")
+    setEditAudience("any")
+    setEditClientLabel("")
   }
 
   const create = async () => {
@@ -169,87 +197,136 @@ export default function RateTypesPage() {
           ) : (
             <ul className="space-y-2">
               {active.map((rt) => (
-                <li key={rt.id} className="flex items-center justify-between gap-3 py-1">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="font-mono text-xs px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground shrink-0">
-                      {rt.code}
-                    </span>
-                    {editingId === rt.id ? (
-                      <Input
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") void saveEdit(rt.id)
-                          if (e.key === "Escape") cancelEdit()
-                        }}
-                        maxLength={100}
-                        className="h-8 w-48"
-                        autoFocus
-                      />
-                    ) : (
-                      <span className="text-foreground truncate">{rt.name}</span>
-                    )}
-                    {rt.isStandard && (
-                      <Badge variant="secondary" className="text-xs shrink-0">
-                        Standard
-                      </Badge>
-                    )}
-                  </div>
-                  {canEdit && (
-                    <div className="flex items-center gap-1 shrink-0">
+                <li
+                  key={rt.id}
+                  className={editingId === rt.id ? "flex flex-col gap-2 py-1.5" : "flex items-center justify-between gap-3 py-1"}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-mono text-xs px-1.5 py-0.5 rounded bg-secondary text-secondary-foreground shrink-0">
+                        {rt.code}
+                      </span>
                       {editingId === rt.id ? (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={busyId === rt.id || !editName.trim()}
-                            onClick={() => void saveEdit(rt.id)}
-                            aria-label={`Save name for ${rt.name}`}
-                          >
-                            {busyId === rt.id ? (
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                              <Check className="w-4 h-4" />
-                            )}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={busyId === rt.id}
-                            onClick={cancelEdit}
-                            aria-label="Cancel rename"
-                          >
-                            <X className="w-4 h-4" />
-                          </Button>
-                        </>
+                        <Input
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") void saveEdit(rt.id)
+                            if (e.key === "Escape") cancelEdit()
+                          }}
+                          maxLength={100}
+                          className="h-8 w-48"
+                          autoFocus
+                        />
                       ) : (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            disabled={busyId === rt.id}
-                            onClick={() => startEdit(rt)}
-                            aria-label={`Rename ${rt.name}`}
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </Button>
-                          {!rt.isDefault && !rt.isStandard && (
+                        <span className="text-foreground truncate">{rt.name}</span>
+                      )}
+                      {rt.isStandard && (
+                        <Badge variant="secondary" className="text-xs shrink-0">
+                          Standard
+                        </Badge>
+                      )}
+                      {editingId !== rt.id && rt.audience && (
+                        <Badge variant="outline" className="text-xs shrink-0">
+                          {AUDIENCE_LABELS[rt.audience]}
+                        </Badge>
+                      )}
+                    </div>
+                    {canEdit && (
+                      <div className="flex items-center gap-1 shrink-0">
+                        {editingId === rt.id ? (
+                          <>
                             <Button
                               variant="ghost"
                               size="sm"
-                              disabled={busyId === rt.id}
-                              onClick={() => void patch(rt.id, { archived: true }, "Rate type archived")}
-                              aria-label={`Archive ${rt.name}`}
+                              disabled={busyId === rt.id || !editName.trim()}
+                              onClick={() => void saveEdit(rt.id)}
+                              aria-label={`Save ${rt.name}`}
                             >
                               {busyId === rt.id ? (
                                 <Loader2 className="w-4 h-4 animate-spin" />
                               ) : (
-                                <Archive className="w-4 h-4" />
+                                <Check className="w-4 h-4" />
                               )}
                             </Button>
-                          )}
-                        </>
-                      )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={busyId === rt.id}
+                              onClick={cancelEdit}
+                              aria-label="Cancel edit"
+                            >
+                              <X className="w-4 h-4" />
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={busyId === rt.id}
+                              onClick={() => startEdit(rt)}
+                              aria-label={`Edit ${rt.name}`}
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </Button>
+                            {!rt.isDefault && !rt.isStandard && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                disabled={busyId === rt.id}
+                                onClick={() => void patch(rt.id, { archived: true }, "Rate type archived")}
+                                aria-label={`Archive ${rt.name}`}
+                              >
+                                {busyId === rt.id ? (
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <Archive className="w-4 h-4" />
+                                )}
+                              </Button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  {editingId === rt.id && (
+                    <div className="flex items-center gap-2 pl-9">
+                      <div className="space-y-1">
+                        <Label htmlFor={`rt-audience-${rt.id}`} className="text-xs text-muted-foreground">
+                          Audience
+                        </Label>
+                        <Select
+                          value={editAudience}
+                          onValueChange={(value) => setEditAudience(value as typeof editAudience)}
+                        >
+                          <SelectTrigger id={`rt-audience-${rt.id}`} className="h-8 w-36">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="any">Any</SelectItem>
+                            <SelectItem value="international">International</SelectItem>
+                            <SelectItem value="resident">Resident</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1 flex-1">
+                        <Label htmlFor={`rt-client-label-${rt.id}`} className="text-xs text-muted-foreground">
+                          Client-facing name
+                        </Label>
+                        <Input
+                          id={`rt-client-label-${rt.id}`}
+                          value={editClientLabel}
+                          onChange={(e) => setEditClientLabel(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") void saveEdit(rt.id)
+                            if (e.key === "Escape") cancelEdit()
+                          }}
+                          placeholder={rt.name}
+                          maxLength={100}
+                          className="h-8"
+                        />
+                      </div>
                     </div>
                   )}
                 </li>

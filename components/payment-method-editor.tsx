@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { toast } from "sonner"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -40,7 +40,7 @@ const FIELDS: Array<{ key: FieldKey; label: string }> = [
   { key: "bankAccountNumber", label: "Account number" },
   { key: "bankBranchCode", label: "Branch code" },
   { key: "bankSwiftCode", label: "SWIFT/BIC" },
-  { key: "companyAddress", label: "Company address" },
+  { key: "companyAddress", label: "Address" },
   { key: "companyRegNumber", label: "Company registration number" },
   { key: "companyVatNumber", label: "VAT number" },
   { key: "companyTel", label: "Telephone" },
@@ -66,11 +66,18 @@ const API_KEY_MAP: Record<FieldKey, string> = {
   companyWebsite: "company_website",
 }
 
-/** Fixed-slot form for one payment method's 13 bank/company fields, saved field-by-field on blur. */
+/**
+ * Fixed-slot form for one payment method's 13 bank/company fields, saved
+ * field-by-field on blur.
+ *
+ * Drafts live in local state and are seeded from `method` on mount only —
+ * callers must render this with `key={method.id}` so switching methods
+ * remounts with fresh drafts. Re-seeding from the prop on every change
+ * instead would clobber whatever the user is typing the moment a previously
+ * blurred field's PATCH resolves.
+ */
 export function PaymentMethodEditor({ method, canEdit, onUpdated }: PaymentMethodEditorProps) {
   const [values, setValues] = useState(method)
-
-  useEffect(() => setValues(method), [method])
 
   async function saveField(key: FieldKey) {
     const current = values[key] ?? ""

@@ -243,6 +243,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     depositPaid: booking.deposit_paid ?? false,
     reservationFormReceivedAt: booking.reservation_form_received_at ?? null,
     invoiceBalance: booking.invoice_balance !== null ? Number(booking.invoice_balance) : null,
+    overpaidAmount: booking.overpaid_amount !== null ? Number(booking.overpaid_amount) : 0,
     outcome: (booking.outcome as string) ?? "Open",
     outcomeReasonId: booking.outcome_reason_id ?? null,
     outcomeNotes: booking.outcome_notes ?? null,

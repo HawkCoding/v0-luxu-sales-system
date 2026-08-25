@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useTemplates, useVoucherTemplate } from "@/lib/use-data"
+import { useActiveSuppliers, useTemplates, useVoucherTemplate } from "@/lib/use-data"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -28,6 +28,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import type { Template } from "@/lib/types"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { useDirtyCloseGuard } from "@/hooks/use-dirty-close-guard"
 import { DiscardChangesDialog } from "@/components/discard-changes-dialog"
 import { VOUCHER_TEMPLATE_DEFAULTS } from "@/lib/types"
@@ -91,6 +98,7 @@ const VOUCHER_PLACEHOLDERS = [
 export default function TemplatesPage() {
   const { data: templates, isLoading, mutate } = useTemplates()
   const { data: voucherTemplate, isLoading: voucherLoading } = useVoucherTemplate()
+  const { data: suppliers } = useActiveSuppliers()
   const { can } = useRole()
   const [editing, setEditing] = useState<Template | null>(null)
   const [editSubject, setEditSubject] = useState("")
@@ -108,6 +116,9 @@ export default function TemplatesPage() {
   const [previewWarnings, setPreviewWarnings] = useState<string[]>([])
   const [previewLoading, setPreviewLoading] = useState(false)
   const [orderedTemplates, setOrderedTemplates] = useState<Template[]>([])
+  const [addingVariantFor, setAddingVariantFor] = useState<Template | null>(null)
+  const [variantSupplierId, setVariantSupplierId] = useState("")
+  const [creatingVariant, setCreatingVariant] = useState(false)
 
   useEffect(() => {
     if (templates) setOrderedTemplates(templates as Template[])
@@ -296,6 +307,62 @@ export default function TemplatesPage() {
     }
   }
 
+  // Per-train variants (e.g. a Rovos-specific quote_email body) reuse their parent's system key,
+  // distinguished only by supplierId. SortableList drags parents only -- a variant's position is
+  // fixed under its parent card, so it is filtered out of the draggable list and grouped by key.
+  const parentTemplates = orderedTemplates.filter((t) => !t.supplierId)
+  const variantsByKey = new Map<string, Template[]>()
+  for (const t of orderedTemplates) {
+    if (!t.supplierId) continue
+    const list = variantsByKey.get(t.key) ?? []
+    list.push(t)
+    variantsByKey.set(t.key, list)
+  }
+  for (const list of variantsByKey.values()) {
+    list.sort((a, b) => a.name.localeCompare(b.name))
+  }
+  const supplierNameById = new Map((suppliers ?? []).map((s) => [s.id, s.name]))
+  const trainOperators = (suppliers ?? [])
+    .filter((s) => s.kind === "train_operator")
+    .sort((a, b) => a.name.localeCompare(b.name))
+
+  const openAddVariant = (parent: Template) => {
+    setAddingVariantFor(parent)
+    setVariantSupplierId("")
+  }
+
+  const handleCreateVariant = async () => {
+    if (!addingVariantFor || !variantSupplierId) return
+    const supplierName = supplierNameById.get(variantSupplierId) ?? "Train"
+    setCreatingVariant(true)
+    try {
+      const res = await fetch("/api/templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key: addingVariantFor.key,
+          supplierId: variantSupplierId,
+          name: `${addingVariantFor.name} — ${supplierName}`,
+          subject: addingVariantFor.subject,
+          bodyHtml: addingVariantFor.bodyHtml,
+        }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        toast.error(body.error ?? "Failed to create variant")
+        return
+      }
+      toast.success(`${supplierName} variant created — starts as a copy, edit it to diverge`)
+      mutate()
+      setAddingVariantFor(null)
+      setVariantSupplierId("")
+    } catch {
+      toast.error("Failed to create variant")
+    } finally {
+      setCreatingVariant(false)
+    }
+  }
+
   return (
     <div className="p-6 space-y-4 max-w-5xl">
       <div className="flex items-start justify-between">
@@ -339,7 +406,7 @@ export default function TemplatesPage() {
           </Card>
 
           <SortableList
-            items={orderedTemplates}
+            items={parentTemplates}
             onReorder={handleReorder}
             disabled={!can("edit:templates")}
             renderItem={({ item: t, dragHandle }) => (
@@ -384,8 +451,49 @@ export default function TemplatesPage() {
                     </div>
                   </div>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-3">
                   <p className="text-xs text-muted-foreground"><span className="font-medium">Subject:</span> {t.subject}</p>
+
+                  {t.isSystem && (
+                    <div className="space-y-2 border-l-2 pl-3">
+                      {(variantsByKey.get(t.key) ?? []).map((variant) => (
+                        <div key={variant.id} className="flex items-center justify-between gap-2 rounded-md bg-secondary/40 px-2.5 py-1.5">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-xs font-medium truncate">
+                              {supplierNameById.get(variant.supplierId ?? "") ?? "Unknown train"}
+                            </span>
+                            <Badge variant="secondary" className="text-[10px]">v{variant.version}</Badge>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <Button variant="ghost" size="sm" onClick={() => setPreview(variant)}>
+                              <Eye className="w-3.5 h-3.5" />
+                            </Button>
+                            {can("edit:templates") && (
+                              <Button variant="ghost" size="sm" onClick={() => startEdit(variant)}>
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </Button>
+                            )}
+                            {can("edit:templates") && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setPendingDelete(variant)}
+                                aria-label={`Delete ${supplierNameById.get(variant.supplierId ?? "") ?? "train"} variant`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                      {can("edit:templates") && (
+                        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => openAddVariant(t)}>
+                          <Plus className="w-3.5 h-3.5 mr-1" />
+                          Add train variant
+                        </Button>
+                      )}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}
@@ -558,6 +666,51 @@ export default function TemplatesPage() {
             <div className="flex justify-end gap-2">
               <Button variant="outline" size="sm" onClick={() => editCloseGuard.handleOpenChange(false)}>Cancel</Button>
               <Button size="sm" onClick={handleSave} disabled={saving || editSubject.trim().length < 1}>{saving ? "Saving..." : "Save"}</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Train Variant Dialog */}
+      <Dialog open={!!addingVariantFor} onOpenChange={(open) => !open && setAddingVariantFor(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add train variant</DialogTitle>
+            <DialogDescription>
+              {addingVariantFor
+                ? `Starts as a copy of "${addingVariantFor.name}" — edit it afterwards to diverge in wording. A train with no variant of its own keeps using the shared template.`
+                : null}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Train</label>
+              <Select value={variantSupplierId} onValueChange={setVariantSupplierId}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Select a train operator" />
+                </SelectTrigger>
+                <SelectContent>
+                  {trainOperators.length === 0 ? (
+                    <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                      No train operator suppliers found.
+                    </div>
+                  ) : (
+                    trainOperators.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setAddingVariantFor(null)}>
+                Cancel
+              </Button>
+              <Button size="sm" onClick={handleCreateVariant} disabled={creatingVariant || !variantSupplierId}>
+                {creatingVariant ? "Adding..." : "Add variant"}
+              </Button>
             </div>
           </div>
         </DialogContent>

@@ -1,5 +1,6 @@
 import { Text, View } from "@react-pdf/renderer"
 import type { VoucherData } from "@/lib/generate-voucher"
+import { formatGuestCountText } from "@/lib/voucher/guest-count-text"
 import type { voucherStyles } from "../styles"
 import { InfoRow } from "./info-row"
 
@@ -11,10 +12,6 @@ interface GuestInfoProps {
 }
 
 export function GuestInfo({ data, styles }: GuestInfoProps) {
-  const childText = data.enquiry.noOfChildren
-    ? `, ${data.enquiry.noOfChildren} ${data.enquiry.noOfChildren === 1 ? "child" : "children"}`
-    : ""
-
   // Alternating bands, the way the legacy voucher shaded every other row of its guest table.
   let rowIndex = 0
   const nextShaded = () => rowIndex++ % 2 === 0
@@ -25,7 +22,7 @@ export function GuestInfo({ data, styles }: GuestInfoProps) {
       <InfoRow label="Guest Names" value={data.guestNames} styles={styles} shaded={nextShaded()} />
       <InfoRow
         label="Number of Guests"
-        value={`${data.numberOfGuests} (${data.enquiry.noOfAdults} adults${childText})`}
+        value={formatGuestCountText(data.passengerTotals)}
         styles={styles}
         shaded={nextShaded()}
       />

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
+import { filterInclusionLines, type SupplierInclusionLine } from "@/lib/inclusions/filter-lines"
 import { buildQuoteSummaryBlock, type QuoteSummaryInput } from "./quote-summary-block"
 
 const itineraryBlocks: VoucherServiceBlock[] = [
@@ -213,5 +214,84 @@ describe("buildQuoteSummaryBlock", () => {
     expect(html).toContain("TOTAL:")
     expect(html).not.toContain("Guests:")
     expect(html).not.toContain("per person")
+  })
+})
+
+// Rovos-style journey/rate tagged bullets, run through the real filter (lib/inclusions/filter-lines.ts)
+// and converted the way lib/voucher/build-service-blocks.ts's resolveInclusionList does (`#` prefix
+// for a heading), so this exercises the whole tag -> filter -> raw-list -> render pipeline into the
+// {{quoteSummaryTable}} block, not just this file's own rendering of an already-filtered array.
+const ROVOS_INCLUSION_LINES: SupplierInclusionLine[] = [
+  { kind: "heading", text: "Short Journeys", journeyTag: "short", rateTag: null },
+  { kind: "item", text: "Accommodation onboard the train", journeyTag: "short", rateTag: null },
+  { kind: "item", text: "Complimentary night pre/post departure", journeyTag: "short", rateTag: "international" },
+  { kind: "heading", text: "Long Journeys", journeyTag: "long", rateTag: null },
+  { kind: "item", text: "Accommodation onboard the train", journeyTag: "long", rateTag: null },
+  { kind: "item", text: "Guided excursions (where applicable)", journeyTag: "long", rateTag: null },
+]
+
+function toRawInclusions(lines: { kind: "heading" | "item"; text: string }[]): string[] {
+  return lines.map((line) => (line.kind === "heading" ? `# ${line.text}` : line.text))
+}
+
+describe("buildQuoteSummaryBlock — Rovos-style journey/rate tagged inclusions", () => {
+  it("a short-journey SADC (resident) rate omits the complimentary night", () => {
+    const filtered = filterInclusionLines(ROVOS_INCLUSION_LINES, {
+      journeyClass: "short",
+      rateAudience: "resident",
+    })
+    const html = buildQuoteSummaryBlock({
+      ...base,
+      itineraryBlocks: [
+        {
+          ...itineraryBlocks[0],
+          serviceData: { ...itineraryBlocks[0].serviceData, inclusions: toRawInclusions(filtered) },
+        },
+      ],
+    })
+
+    expect(html).toContain("Short Journeys")
+    expect(html).not.toContain("Long Journeys")
+    expect(html).not.toContain("Complimentary night")
+  })
+
+  it("a long-journey international rate shows the long-journey list and the complimentary night is irrelevant to it", () => {
+    const filtered = filterInclusionLines(ROVOS_INCLUSION_LINES, {
+      journeyClass: "long",
+      rateAudience: "international",
+    })
+    const html = buildQuoteSummaryBlock({
+      ...base,
+      itineraryBlocks: [
+        {
+          ...itineraryBlocks[0],
+          serviceData: { ...itineraryBlocks[0].serviceData, inclusions: toRawInclusions(filtered) },
+        },
+      ],
+    })
+
+    expect(html).toContain("Long Journeys")
+    expect(html).toContain("Guided excursions")
+    expect(html).not.toContain("Short Journeys")
+    expect(html).not.toContain("Complimentary night")
+  })
+
+  it("a short-journey international rate keeps the complimentary night", () => {
+    const filtered = filterInclusionLines(ROVOS_INCLUSION_LINES, {
+      journeyClass: "short",
+      rateAudience: "international",
+    })
+    const html = buildQuoteSummaryBlock({
+      ...base,
+      itineraryBlocks: [
+        {
+          ...itineraryBlocks[0],
+          serviceData: { ...itineraryBlocks[0].serviceData, inclusions: toRawInclusions(filtered) },
+        },
+      ],
+    })
+
+    expect(html).toContain("Short Journeys")
+    expect(html).toContain("Complimentary night pre/post departure")
   })
 })

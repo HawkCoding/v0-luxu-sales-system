@@ -1,9 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Database } from "@/lib/supabase/types"
 import { clientInvoiceNumber } from "@/lib/invoices/invoice-status"
+import { resolveAcceptedQuoteScope, scopeLegIdsFilter } from "@/lib/quotes/accepted-quote-scope"
 import { firstRecord } from "@/lib/utils"
 import {
   buildWorksheetServiceLines,
+  scopeWorksheetRows,
   type WorksheetServiceRow,
   type WorksheetTransportRow,
 } from "@/lib/worksheet/service-lines"
@@ -66,6 +68,7 @@ export async function buildWorksheetView(
     { data: transportRequests },
     { data: invoices },
     { data: payments },
+    quoteScope,
   ] = await Promise.all([
     supabase
       .from("bookings")
@@ -117,6 +120,7 @@ export async function buildWorksheetView(
       .select("received_at, method, reference, amount")
       .eq("booking_id", bookingId)
       .order("received_at"),
+    resolveAcceptedQuoteScope(supabase, bookingId),
   ])
 
   if (bookingError || !bookingRaw) throw new Error("Booking not found")
@@ -159,10 +163,16 @@ export async function buildWorksheetView(
     remarks: (t.is_primary || i === 0) ? remark : null,
   }))
 
-  const serviceRows = (services ?? []) as unknown as WorksheetServiceRow[]
+  // Scope the sheet to what the customer actually bought — see `scopeWorksheetRows`.
+  const { services: serviceRows, transportRequests: transportRows } = scopeWorksheetRows(
+    (services ?? []) as unknown as WorksheetServiceRow[],
+    (transportRequests ?? []) as unknown as WorksheetTransportRow[],
+    scopeLegIdsFilter(quoteScope),
+  )
+
   const serviceLines = buildWorksheetServiceLines({
     services: serviceRows,
-    transportRequests: (transportRequests ?? []) as unknown as WorksheetTransportRow[],
+    transportRequests: transportRows,
   })
 
   // The header's "Service" cell names the rail operator this job is built around — in practice

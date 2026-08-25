@@ -20,6 +20,9 @@ export type ReadinessWarningCode =
   | "guest_counts_missing"
   | "flight_times_incomplete"
   | "flight_details_incomplete"
+  /** Raised by the caller, not by `buildWarnings` -- it compares the booking's roster against its
+   * priced pax, which is booking-level rather than per-block. See app/api/voucher/generate. */
+  | "guest_count_mismatch"
 
 export interface ReadinessWarning {
   code: ReadinessWarningCode

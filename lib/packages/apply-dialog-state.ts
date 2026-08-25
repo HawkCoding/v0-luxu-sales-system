@@ -6,6 +6,7 @@ import type {
   ServiceDateAnchor,
   SupplierKind,
 } from "@/lib/types"
+import { SUPPLIER_VOCABULARY } from "@/lib/types"
 import type { PassengerTotals } from "@/lib/packages/passenger-totals"
 import { findAnchorTrainLeg, resolveHotelStayDates } from "@/lib/packages/hotel-dates"
 import type { AnchorLegDates } from "@/lib/packages/transfer-dates"
@@ -209,6 +210,12 @@ export interface SavedSelectionRow {
   /** booking_services.updated_at, echoed back on the next PATCH as the optimistic-lock token.
    *  Absent for catalogue selection rows, which have no such column. */
   updated_at?: string | null
+  /** Set by GET /api/jobs/[id]/services only, so Build Booking's step 1 can render its service
+   *  list off that read instead of blocking on the much larger GET /build-booking payload.
+   *  Absent on catalogue selection rows and on the PATCH reload response. */
+  sort_order?: number
+  supplier_name?: string | null
+  supplier_kind?: string | null
 }
 
 export interface SavedPackageState {
@@ -1120,14 +1127,20 @@ export function validateConfigureState(
       }
     }
 
-    if (state.units.length === 0) {
-      errors.push(`${legLabel}: add at least one ${leg.supplierKind === "hotel_property" ? "room" : "suite"}`)
+    const unitVocab = SUPPLIER_VOCABULARY[leg.supplierKind]
+    if (leg.suiteTypes.length === 0) {
+      // Nothing to pick a type from yet -- skip the per-unit "needs a type" noise below and
+      // point straight at the supplier, same as the routes/meal-plans check above.
+      errors.push(
+        `${legLabel}: no ${unitVocab.unitNounPlural} set up for this supplier — add one in Suppliers first`,
+      )
+    } else if (state.units.length === 0) {
+      errors.push(`${legLabel}: add at least one ${unitVocab.unitNoun}`)
     }
     state.units.forEach((unit, index) => {
+      if (leg.suiteTypes.length === 0) return
       if (!unit.suiteTypeId) {
-        errors.push(
-          `${legLabel}: ${leg.supplierKind === "hotel_property" ? "room" : "suite"} ${index + 1} needs a type`,
-        )
+        errors.push(`${legLabel}: ${unitVocab.unitNoun} ${index + 1} needs a type`)
       } else if (
         leg.pricingMode !== "manual" &&
         (unit.manualRoomPrice ?? null) === null &&
@@ -1183,10 +1196,10 @@ export function validateConfigureState(
           summed.infantCount !== totals.infantCount
         ) {
           errors.push(
-            `${legLabel}: suites hold ${summed.adultCount} adults, ${summed.childCount} children, ` +
+            `${legLabel}: ${unitVocab.unitNounPlural} hold ${summed.adultCount} adults, ${summed.childCount} children, ` +
               `${summed.infantCount} infants but the booking is for ${totals.adultCount} adults, ` +
               `${totals.childCount} children, ${totals.infantCount} infants. Update the booking's ` +
-              `travellers above, or adjust the suite split.`,
+              `travellers above, or adjust the ${unitVocab.unitNoun} split.`,
           )
         }
       }

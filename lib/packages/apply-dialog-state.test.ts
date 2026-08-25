@@ -936,6 +936,66 @@ describe("validateConfigureState", () => {
     expect(errors.some((e) => e.includes("suites hold") && e.includes("but the booking is for"))).toBe(true) // split defaulted to 0s
   })
 
+  it("uses the supplier's own noun for a missing unit type — cabin for airline, room for hotel", () => {
+    const airlineLeg = leg({
+      id: "leg-airline-cabin",
+      supplierKind: "airline",
+      sortOrder: 5,
+      routes: [
+        {
+          id: "route-air",
+          supplierId: "supplier-leg-airline-cabin",
+          name: "CPT-JNB",
+          originLocationId: null,
+          destinationLocationId: null,
+          active: true,
+          createdAt: "",
+          updatedAt: "",
+        },
+      ],
+      suiteTypes: [
+        { id: "cabin-1", supplierId: "supplier-leg-airline-cabin", name: "Business", active: true, createdAt: "", updatedAt: "" },
+      ],
+    })
+    const airlinePkg = detail([airlineLeg])
+    const states = buildDefaultLegStates(airlinePkg, { tripStartDate: null })
+    suiteState(states, "leg-airline-cabin").selected = true
+
+    const errors = validateConfigureState(airlinePkg, states)
+    expect(errors.some((e) => e.includes("cabin 1 needs a type"))).toBe(true)
+    expect(errors.some((e) => e.includes("suite") || e.includes("room"))).toBe(false)
+  })
+
+  it("flags a supplier with no unit types at all, instead of asking to pick one", () => {
+    const bareAirlineLeg = leg({
+      id: "leg-airline-bare",
+      supplierKind: "airline",
+      sortOrder: 6,
+      routes: [
+        {
+          id: "route-air-bare",
+          supplierId: "supplier-leg-airline-bare",
+          name: "CPT-JNB",
+          originLocationId: null,
+          destinationLocationId: null,
+          active: true,
+          createdAt: "",
+          updatedAt: "",
+        },
+      ],
+    })
+    const barePkg = detail([bareAirlineLeg])
+    const states = buildDefaultLegStates(barePkg, { tripStartDate: null })
+    suiteState(states, "leg-airline-bare").selected = true
+
+    const errors = validateConfigureState(barePkg, states)
+    expect(
+      errors.some((e) => e.includes("no cabins set up for this supplier — add one in Suppliers first")),
+    ).toBe(true)
+    // Nothing to pick a type from yet, so the per-unit "needs a type" noise is skipped.
+    expect(errors.some((e) => e.includes("needs a type"))).toBe(false)
+  })
+
   it("does not require routes on transport legs but still flags missing vehicle categories", () => {
     const noRouteLeg = leg({ id: "leg-no-route", supplierKind: "transfers", sortOrder: 4 })
     const noRoutePkg = detail([noRouteLeg])

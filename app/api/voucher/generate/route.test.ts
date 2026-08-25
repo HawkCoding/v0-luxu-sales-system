@@ -90,11 +90,19 @@ interface BookingOpts {
   invoiceBalance: number | null
   customerInvoiceNumber?: string | null
   existingDocumentId?: string
+  /** Status already on the existing voucher_pdf row — a regeneration must not downgrade `sent`. */
+  existingDocumentStatus?: string
   existingVoucherId?: string
+  /** Passenger counts the booking is priced from, for the roster-vs-pax warning. */
+  noOfAdults?: number
+  noOfChildren?: number
+  /** Guest roster rows, for the roster-vs-pax warning. */
+  travellers?: Array<{ prefix: string | null; first_name: string; last_name: string }>
   blocks?: Array<{
     serviceType: "train" | "hotel" | "transfer" | "tour" | "airline" | "additional_service"
     title: string
     displayOrder: number
+    serviceData?: Record<string, unknown>
   }>
 }
 
@@ -103,7 +111,11 @@ function buildAuth({
   invoiceBalance,
   customerInvoiceNumber = null,
   existingDocumentId,
+  existingDocumentStatus = "generated",
   existingVoucherId,
+  noOfAdults = 2,
+  noOfChildren = 0,
+  travellers = [],
   blocks,
 }: BookingOpts) {
   const documentWrite = {
@@ -128,6 +140,7 @@ function buildAuth({
   }
 
   const insertedBlocks: unknown[] = []
+  const documentWrites: Array<Record<string, unknown>> = []
   let deleteBlocksCalled = false
 
   buildBlocksMock.mockResolvedValue({
@@ -165,8 +178,8 @@ function buildAuth({
           consultant: "LB",
           departure_date: "2026-06-01",
           no_of_suites: 1,
-          no_of_adults: 2,
-          no_of_children: 0,
+          no_of_adults: noOfAdults,
+          no_of_children: noOfChildren,
           additional_services_details: null,
           customer: { first_name: "Ada", last_name: "Lovelace", email: "ada@example.test", phone: "123", title: "Ms" },
           route: { name: "Pretoria to Cape Town", supplier: { name: "Blue Train" } },
@@ -174,10 +187,25 @@ function buildAuth({
       }
 
       if (table === "quotes") {
-        return { select: vi.fn(() => ({ eq: vi.fn(async () => ({ data: [], error: null })) })) }
+        // resolveAcceptedQuoteScope is mocked separately (scopeMocks); this only backs
+        // loadQuoteConfigForBooking's own accepted-quote lookup. No accepted quote found is a
+        // safe default — these tests don't assert on journey/rate filtering.
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                order: vi.fn(() => ({
+                  limit: vi.fn(() => ({
+                    maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+                  })),
+                })),
+              })),
+            })),
+          })),
+        }
       }
       if (table === "booking_suites") return createSelectResult([{ suite_type_name: "Luxury" }])
-      if (table === "travellers") return createSelectResult([])
+      if (table === "travellers") return createSelectResult(travellers)
       if (table === "booking_reservation_details") return createSelectResult(null)
       if (table === "voucher_template") return createSelectResult(null)
 
@@ -190,7 +218,9 @@ function buildAuth({
       }
 
       if (table === "documents") {
-        const existingDoc = existingDocumentId ? { id: existingDocumentId } : null
+        const existingDoc = existingDocumentId
+          ? { id: existingDocumentId, status: existingDocumentStatus }
+          : null
         return {
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
@@ -203,18 +233,24 @@ function buildAuth({
               })),
             })),
           })),
-          insert: vi.fn(() => ({
-            select: vi.fn(() => ({
-              single: vi.fn(async () => documentWrite),
-            })),
-          })),
-          update: vi.fn(() => ({
-            eq: vi.fn(() => ({
+          insert: vi.fn((payload: Record<string, unknown>) => {
+            documentWrites.push(payload)
+            return {
               select: vi.fn(() => ({
                 single: vi.fn(async () => documentWrite),
               })),
-            })),
-          })),
+            }
+          }),
+          update: vi.fn((payload: Record<string, unknown>) => {
+            documentWrites.push(payload)
+            return {
+              eq: vi.fn(() => ({
+                select: vi.fn(() => ({
+                  single: vi.fn(async () => documentWrite),
+                })),
+              })),
+            }
+          }),
         }
       }
 
@@ -292,6 +328,7 @@ function buildAuth({
 
   return {
     insertedBlocks,
+    documentWrites,
     get deleteBlocksCalled() {
       return deleteBlocksCalled
     },
@@ -330,6 +367,128 @@ describe("POST /api/voucher/generate", () => {
         excursions: [],
       },
     ])
+  })
+
+  it("warns when a leg's units exist but every guest count on them is zero", async () => {
+    buildAuth({
+      stage: "final_paid",
+      invoiceBalance: 0,
+      blocks: [
+        {
+          serviceType: "hotel",
+          title: "DaVinci Hotel & Suites",
+          displayOrder: 0,
+          // A room row was created but nobody was ever counted into it. The summed object exists,
+          // so the old `Boolean(...)` check treated this as a captured breakdown and stayed silent
+          // while the voucher printed "Adults 0" to the guest.
+          serviceData: { guestBreakdown: { adults: 0, children: 0, infants: 0 } },
+        },
+      ],
+    })
+
+    const res = await POST(postJson({ jobId: BOOKING_ID }))
+    const body = (await res.json()) as { readinessWarnings: Array<{ code: string; message: string }> }
+
+    expect(res.status).toBe(200)
+    const warning = body.readinessWarnings.find((w) => w.code === "guest_counts_missing")
+    expect(warning?.message).toContain("DaVinci Hotel & Suites")
+  })
+
+  it("does not warn about guest counts when the leg's units carry real occupancy", async () => {
+    buildAuth({
+      stage: "final_paid",
+      invoiceBalance: 0,
+      blocks: [
+        {
+          serviceType: "hotel",
+          title: "DaVinci Hotel & Suites",
+          displayOrder: 0,
+          serviceData: { guestBreakdown: { adults: 2, children: 0, infants: 0 } },
+        },
+      ],
+    })
+
+    const res = await POST(postJson({ jobId: BOOKING_ID }))
+    const body = (await res.json()) as { readinessWarnings: Array<{ code: string }> }
+
+    expect(res.status).toBe(200)
+    expect(body.readinessWarnings.some((w) => w.code === "guest_counts_missing")).toBe(false)
+  })
+
+  it("warns when the guest roster and the priced passenger counts disagree", async () => {
+    buildAuth({
+      stage: "final_paid",
+      invoiceBalance: 0,
+      noOfAdults: 1,
+      noOfChildren: 0,
+      travellers: [
+        { prefix: "Ms", first_name: "Jacomien", last_name: "Lombard" },
+        { prefix: "Mr", first_name: "Pieter", last_name: "Lombard" },
+      ],
+    })
+
+    const res = await POST(postJson({ jobId: BOOKING_ID }))
+    const body = (await res.json()) as { readinessWarnings: Array<{ code: string; message: string }> }
+
+    // Advisory only — two names above "Number of Guests: 1" is worth flagging, not worth blocking.
+    expect(res.status).toBe(200)
+    const warning = body.readinessWarnings.find((w) => w.code === "guest_count_mismatch")
+    expect(warning?.message).toContain("2")
+    expect(warning?.message).toContain("priced for 1")
+  })
+
+  it("stays quiet when the roster matches the priced pax, and when no roster is captured yet", async () => {
+    buildAuth({
+      stage: "final_paid",
+      invoiceBalance: 0,
+      noOfAdults: 2,
+      travellers: [
+        { prefix: "Ms", first_name: "Jacomien", last_name: "Lombard" },
+        { prefix: "Mr", first_name: "Pieter", last_name: "Lombard" },
+      ],
+    })
+    const matched = (await (await POST(postJson({ jobId: BOOKING_ID }))).json()) as {
+      readinessWarnings: Array<{ code: string }>
+    }
+    expect(matched.readinessWarnings.some((w) => w.code === "guest_count_mismatch")).toBe(false)
+
+    // An empty roster is not a disagreement — there is nothing yet to disagree with.
+    buildAuth({ stage: "final_paid", invoiceBalance: 0, noOfAdults: 2, travellers: [] })
+    const empty = (await (await POST(postJson({ jobId: BOOKING_ID }))).json()) as {
+      readinessWarnings: Array<{ code: string }>
+    }
+    expect(empty.readinessWarnings.some((w) => w.code === "guest_count_mismatch")).toBe(false)
+  })
+
+  it("keeps an already-sent voucher document sent when it is regenerated", async () => {
+    const ctx = buildAuth({
+      stage: "closed",
+      invoiceBalance: 0,
+      existingDocumentId: "document-1",
+      existingDocumentStatus: "sent",
+      existingVoucherId: "voucher-1",
+    })
+
+    const res = await POST(postJson({ jobId: BOOKING_ID }))
+
+    expect(res.status).toBe(200)
+    // Regenerating re-renders the document; it does not retract the email that already went out.
+    expect(ctx.documentWrites.at(-1)).toMatchObject({ kind: "voucher_pdf", status: "sent" })
+  })
+
+  it("marks a regenerated voucher document generated when it was never sent", async () => {
+    const ctx = buildAuth({
+      stage: "final_paid",
+      invoiceBalance: 0,
+      existingDocumentId: "document-1",
+      existingDocumentStatus: "generated",
+      existingVoucherId: "voucher-1",
+    })
+
+    const res = await POST(postJson({ jobId: BOOKING_ID }))
+
+    expect(res.status).toBe(200)
+    expect(ctx.documentWrites.at(-1)).toMatchObject({ kind: "voucher_pdf", status: "generated" })
   })
 
   it("scopes the voucher to the accepted quote's legs and drops transport requests tied to no leg", async () => {

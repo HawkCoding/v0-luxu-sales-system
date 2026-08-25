@@ -226,11 +226,15 @@ function describeBlock(block: VoucherServiceBlock): string {
         [
           start ? `Check in from ${start}` : null,
           // The stay length above is always the full stay; a gifted first night is a callout, not
-          // a shorter itinerary. A fully comped stay keeps the older, blunter wording.
+          // a shorter itinerary. A fully comped stay keeps the older, blunter wording. A 1-night
+          // stay has no second, charged night to distinguish "first" from, so it collapses to the
+          // same blunter wording rather than saying "FIRST NIGHT" of a stay that has only one.
           d.isComplimentary
             ? "COMPLIMENTARY"
             : d.isFirstNightComplimentary
-              ? "FIRST NIGHT COMPLIMENTARY"
+              ? d.nights === 1
+                ? "COMPLIMENTARY"
+                : "FIRST NIGHT COMPLIMENTARY"
               : null,
         ],
       )

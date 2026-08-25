@@ -182,7 +182,7 @@ describe("POST /api/vouchers/[id]/prepare-send", () => {
     })
   })
 
-  it("returns the composed email with voucher AND itinerary attachments", async () => {
+  it("returns the composed email with only the voucher attachment (itinerary attachment disabled)", async () => {
     const { download } = buildSupabase()
 
     const res = await POST(new Request("http://localhost"), routeParams())
@@ -191,10 +191,10 @@ describe("POST /api/vouchers/[id]/prepare-send", () => {
     expect(res.status).toBe(200)
     expect(body.email.subject).toContain("Travel Voucher")
     expect(body.email.to).toBe("guest@example.test")
-    expect(body.attachments).toHaveLength(2)
+    expect(body.attachments).toHaveLength(1)
     expect(body.attachments[0].filename).toBe("voucher-INV-2026-0042.pdf")
-    expect(body.attachments[1].filename).toBe("itinerary-INV-2026-0042.pdf")
-    expect(download).toHaveBeenCalledTimes(2)
+    expect(download).toHaveBeenCalledTimes(1)
+    expect(itineraryMocks.ensureItineraryPdf).not.toHaveBeenCalled()
     expect(composeMocks.composeEmail).toHaveBeenCalledWith(
       expect.anything(),
       "voucher_email",
@@ -222,28 +222,14 @@ describe("POST /api/vouchers/[id]/prepare-send", () => {
     )
   })
 
-  it("silently generates the itinerary PDF and proceeds when none exists yet", async () => {
-    const { download } = buildSupabase({ itineraryStoragePath: null })
-
-    const res = await POST(new Request("http://localhost"), routeParams())
-    const body = await res.json()
-
-    expect(res.status).toBe(200)
-    expect(itineraryMocks.ensureItineraryPdf).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ bookingId: BOOKING_ID }),
-    )
-    expect(body.attachments).toHaveLength(2)
-    expect(download).toHaveBeenCalledTimes(2)
-  })
-
-  it("blocks the send when the itinerary PDF cannot be generated", async () => {
+  it("does not fail the send even when itinerary generation would have errored (attachment disabled)", async () => {
     buildSupabase({ itineraryStoragePath: null })
     itineraryMocks.ensureItineraryPdf.mockRejectedValue(new Error("render failed"))
 
     const res = await POST(new Request("http://localhost"), routeParams())
 
-    expect(res.status).toBe(500)
+    expect(res.status).toBe(200)
+    expect(itineraryMocks.ensureItineraryPdf).not.toHaveBeenCalled()
   })
 
   it("blocks when voucher readiness fails (unpaid balance)", async () => {
