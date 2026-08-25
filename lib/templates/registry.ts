@@ -118,6 +118,21 @@ const guestInfo: TemplateTokenSpec = {
   sample:
     "<p>Mr John Smith ID: 8001015800083</p><p>Mrs Jane Smith ID: 8203125800084</p>",
 }
+const rateLabel: TemplateTokenSpec = {
+  name: "rateLabel",
+  description:
+    "Client-facing name of the rate quoted on the train leg (rate_types.client_label, falling back to its internal name)",
+  kind: "scalar",
+  sample: "SADC Resident special",
+}
+const trainOnlyNote: TemplateTokenSpec = {
+  name: "trainOnlyNote",
+  description:
+    "Closing note offering to arrange hotels/transfers/flights, shown only when the quote prices the train and nothing else (suppliers.train_only_note)",
+  kind: "block",
+  sample:
+    "<p>We have quoted you for the train only. If you would like to request any other services, we offer those as well.</p>",
+}
 
 // Every token below is resolvable in every template type (lib/templates/resolve-shared-tokens.ts
 // fills anything the current pipeline stage can't supply yet with "—"), so all types share one
@@ -183,6 +198,8 @@ const ALL_TOKENS: TemplateTokenSpec[] = [
   { name: "voucherNumber", description: "Voucher reference — the customer invoice number", kind: "scalar", sample: "180226-01" },
   guestInfo,
   bankingDetails,
+  rateLabel,
+  trainOnlyNote,
 ]
 
 export const TEMPLATE_TOKENS: Record<SystemTemplateKey, TemplateTokenSpec[]> = Object.fromEntries(

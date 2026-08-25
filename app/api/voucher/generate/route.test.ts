@@ -187,7 +187,22 @@ function buildAuth({
       }
 
       if (table === "quotes") {
-        return { select: vi.fn(() => ({ eq: vi.fn(async () => ({ data: [], error: null })) })) }
+        // resolveAcceptedQuoteScope is mocked separately (scopeMocks); this only backs
+        // loadQuoteConfigForBooking's own accepted-quote lookup. No accepted quote found is a
+        // safe default — these tests don't assert on journey/rate filtering.
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                order: vi.fn(() => ({
+                  limit: vi.fn(() => ({
+                    maybeSingle: vi.fn(async () => ({ data: null, error: null })),
+                  })),
+                })),
+              })),
+            })),
+          })),
+        }
       }
       if (table === "booking_suites") return createSelectResult([{ suite_type_name: "Luxury" }])
       if (table === "travellers") return createSelectResult(travellers)

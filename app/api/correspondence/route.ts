@@ -23,6 +23,8 @@ import {
   scopeLegIdsFilter,
 } from "@/lib/quotes/accepted-quote-scope"
 import { loadLegReferenceRows, missingLegReferenceLabels } from "@/lib/voucher/leg-references"
+import { loadQuoteConfig, overridesFromQuoteRow } from "@/lib/quotes/load-quote-config"
+import type { PricingSnapshot } from "@/lib/types"
 
 export const runtime = "nodejs"
 
@@ -240,7 +242,7 @@ export async function POST(req: Request) {
   if (parsed.data.kind === "quote" && parsed.data.quoteId) {
     const { data: quoteRow, error: quoteStatusError } = await supabase
       .from("quotes")
-      .select("status")
+      .select("status, journey_class, rate_audience, show_train_only_note")
       .eq("id", parsed.data.quoteId)
       .maybeSingle()
 
@@ -251,6 +253,31 @@ export async function POST(req: Request) {
         "This quote still has unpriced lines — price them before sending, or the total will be short.",
         409,
       )
+    }
+
+    // A train whose journey length or rate audience can't be resolved (e.g. a Rovos route with no
+    // duration_days recorded) must not silently pick a side — the send is refused until a
+    // consultant sets it explicitly on the quote's config panel, or the missing data is filled in.
+    const { data: configLineItems, error: configLineItemsError } = await supabase
+      .from("quote_line_items")
+      .select("pricing_snapshot")
+      .eq("quote_id", parsed.data.quoteId)
+
+    if (configLineItemsError) {
+      return safeSupabaseError("correspondence:load-quote-config", configLineItemsError)
+    }
+
+    const quoteConfig = await loadQuoteConfig(supabase, {
+      lineItems: (configLineItems ?? []).map((li) => ({
+        pricingSnapshot: li.pricing_snapshot as PricingSnapshot | null,
+      })),
+      overrides: overridesFromQuoteRow(quoteRow),
+    })
+
+    if (quoteConfig.unresolved.length > 0) {
+      return jsonError("This quote needs configuration before it can be sent", 409, {
+        failures: quoteConfig.unresolved,
+      })
     }
   }
 

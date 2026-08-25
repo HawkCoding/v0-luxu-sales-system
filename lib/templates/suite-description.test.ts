@@ -226,7 +226,7 @@ describe("suiteSelectionsFromSnapshots", () => {
   it("reads the chosen variant from each group", () => {
     const selections = suiteSelectionsFromSnapshots([
       snapshot({
-        suiteVariants: [
+        selectedVariants: [
           { label: "Bedroom Type", values: ["Twin"] },
           { label: "Bathroom Type", values: ["Shower"] },
         ],
@@ -251,9 +251,9 @@ describe("suiteSelectionsFromSnapshots", () => {
     expect(buildSuiteTokens(selections).suiteType).toBe("Deluxe Suite")
   })
 
-  it("ignores a group listing every option the suite type offers", () => {
-    // The fallback path in build-from-package.ts populates suiteVariants with
-    // all available options, which says nothing about what was chosen.
+  it("never reads suiteVariants as a selection, even a single-value group", () => {
+    // suiteVariants lists every option the suite type offers, not what was chosen — not even
+    // when a group happens to hold exactly one value, since that value still wasn't picked.
     const selections = suiteSelectionsFromSnapshots([
       snapshot({
         suiteVariants: [
@@ -263,7 +263,7 @@ describe("suiteSelectionsFromSnapshots", () => {
       }),
     ])
 
-    expect(buildSuiteTokens(selections).suiteDescription).toBe("a Deluxe Suite with a shower")
+    expect(buildSuiteTokens(selections).suiteDescription).toBe("a Deluxe Suite")
   })
 
   it("skips snapshots without a suite type", () => {

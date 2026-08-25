@@ -648,6 +648,13 @@ export interface RateType {
   sortOrder: number
   isDefault: boolean
   isStandard: boolean
+  /** Seeds quotes.rate_audience's Auto default (lib/quotes/quote-config.ts) -- a starting
+   * position the send-dialog toggle can still override, not a lock. Null defaults to
+   * "international" at resolve time. */
+  audience: "international" | "resident" | null
+  /** Client-facing name for the {{rateLabel}} token, e.g. "SADC Resident special" for a rate whose
+   * internal name is "Rovos Rail SADC". Falls back to `name` when null. */
+  clientLabel: string | null
   archivedAt: string | null
   createdAt: string
   updatedAt: string
@@ -883,10 +890,19 @@ export interface Supplier {
   childMaxAge: number | null
   defaultTimeStart: string | null
   defaultTimeEnd: string | null
-  /** Client-facing bullets shown under this supplier's leg in the quote itinerary. */
+  /** Client-facing bullets shown under this supplier's leg in the quote itinerary. Superseded by
+   * the tagged rows on SupplierDetail.inclusionLines; kept as an unread fallback for one release. */
   inclusions: string[]
-  /** Client-facing exclusions pooled into the quote's "Your Package Excludes" section. */
+  /** Client-facing exclusions pooled into the quote's "Your Package Excludes" section. Same
+   * fallback note as inclusions above. */
   exclusions: string[]
+  /** Train operators only: the route.durationDays threshold at/above which a journey on this
+   * supplier is "long" rather than "short" (see lib/quotes/quote-config.ts). Null means this
+   * supplier has no short/long concept -- every quote's journeyClass resolves null. */
+  longJourneyMinDays: number | null
+  /** {{trainOnlyNote}} template block, shown only when a quote prices this supplier's train and
+   * nothing else. */
+  trainOnlyNote: string | null
   /** Printed under this supplier's heading on the voucher, alongside phone/location. */
   streetAddress: string | null
   emergencyPhone: string | null
@@ -918,6 +934,22 @@ export interface SupplierRateAdjustment {
   discountPct: number
 }
 
+/**
+ * One row of a supplier's tagged inclusion/exclusion list (see
+ * lib/inclusions/filter-lines.ts). journeyTag/rateTag null means the row shows
+ * regardless of the quote's resolved journey class / rate audience; an item
+ * with no tag of its own inherits the nearest preceding heading's tag.
+ */
+export interface SupplierInclusionLine {
+  id: string
+  list: "inclusions" | "exclusions"
+  kind: "heading" | "item"
+  text: string
+  journeyTag: "short" | "long" | null
+  rateTag: "international" | "resident" | null
+  sortOrder: number
+}
+
 export interface SupplierDetail extends Supplier {
   /** Populated alongside `parentSupplierId` so the editor can say "Inherited from Toyota (Hotel)"
    * and link through to it, without a second round trip. */
@@ -939,6 +971,9 @@ export interface SupplierDetail extends Supplier {
    * suite resolver the server uses, so both agree by construction. See lib/suites/.
    */
   suiteAliases: SupplierSuiteAlias[]
+  /** Tagged inclusion/exclusion rows -- the structured replacement for the flat `inclusions` /
+   * `exclusions` arrays above, which stay populated for one release as an unread fallback. */
+  inclusionLines: SupplierInclusionLine[]
   rateTypes: RateType[]
   /** Non-default rates that apply to this supplier and their markdown. */
   rateAdjustments: SupplierRateAdjustment[]
@@ -1231,6 +1266,9 @@ export interface Template {
   active: boolean
   isSystem: boolean
   sortOrder: number
+  /** Set only on a per-train variant of a system key (e.g. a Rovos-specific quote_email body) --
+   * null on every other template, including the shared/default row for that same key. */
+  supplierId: string | null
 }
 
 export interface Correspondence {

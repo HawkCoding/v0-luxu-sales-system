@@ -11,6 +11,10 @@ const patchSchema = z
     sortOrder: z.number().int().nonnegative().optional(),
     isDefault: z.literal(true).optional(),
     archived: z.boolean().optional(),
+    /** Seeds quotes.rate_audience's Auto default for a train priced at this rate. Null clears it. */
+    audience: z.enum(["international", "resident"]).nullable().optional(),
+    /** Client-facing {{rateLabel}} text, e.g. "SADC Resident special". Null falls back to `name`. */
+    clientLabel: z.string().trim().max(100).nullable().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, { message: "No fields to update" })
 
@@ -122,6 +126,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (parsed.data.isDefault === true) updates.is_default = true
   if (typeof parsed.data.archived === "boolean") {
     updates.archived_at = parsed.data.archived ? new Date().toISOString() : null
+  }
+  if (parsed.data.audience !== undefined) updates.audience = parsed.data.audience
+  if (parsed.data.clientLabel !== undefined) {
+    updates.client_label = parsed.data.clientLabel?.trim() || null
   }
 
   const { data, error } = await supabase

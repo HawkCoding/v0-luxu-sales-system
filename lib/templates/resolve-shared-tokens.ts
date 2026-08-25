@@ -33,6 +33,11 @@ import {
 import { buildVoucherServiceBlocks } from "@/lib/voucher/build-service-blocks"
 import { getPaymentMethod } from "@/lib/payment-methods"
 import { getDocumentTextSettings } from "@/lib/settings-access"
+import {
+  loadQuoteConfig,
+  loadQuoteDisplayTokens,
+  overridesFromQuoteRow,
+} from "@/lib/quotes/load-quote-config"
 
 const PLACEHOLDER = "—"
 
@@ -123,6 +128,9 @@ interface QuoteRow {
   currency: string | null
   created_at: string | null
   status: string | null
+  journey_class: string | null
+  rate_audience: string | null
+  show_train_only_note: boolean | null
 }
 
 interface InvoiceRow {
@@ -171,7 +179,9 @@ export async function resolveSharedEmailTokens(
       safeQuery<QuoteRow[]>(() =>
         supabase
           .from("quotes")
-          .select("id, quote_number, validity_until, total, currency, created_at, status")
+          .select(
+            "id, quote_number, validity_until, total, currency, created_at, status, journey_class, rate_audience, show_train_only_note",
+          )
           .eq("booking_id", bookingId),
       ),
       safeQuery<InvoiceRow[]>(() =>
@@ -242,6 +252,8 @@ export async function resolveSharedEmailTokens(
   const quoteCurrency = normaliseCurrency(latestQuote?.currency)
 
   let quoteSummaryTable = PLACEHOLDER
+  let rateLabel: string | null = null
+  let trainOnlyNote: string | null = null
   if (latestQuote) {
     try {
       const { data: lineItems } = await supabase
@@ -254,6 +266,16 @@ export async function resolveSharedEmailTokens(
       const firstNightComplimentaryLegIds = firstNightComplimentaryLegIdsFromLineItems(lineItems)
       const complimentaryTransportRequestIds = complimentaryTransportRequestIdsFromLineItems(lineItems)
 
+      const quoteConfig = await loadQuoteConfig(supabase, {
+        lineItems: (lineItems ?? []).map((li) => ({
+          pricingSnapshot: li.pricing_snapshot as PricingSnapshot | null,
+        })),
+        overrides: overridesFromQuoteRow(latestQuote),
+      })
+      const displayTokens = await loadQuoteDisplayTokens(supabase, quoteConfig)
+      rateLabel = displayTokens.rateLabel
+      trainOnlyNote = displayTokens.trainOnlyNote
+
       const { blocks: itineraryBlocks } = await buildVoucherServiceBlocks(supabase, {
         bookingId,
         additionalServicesDetails: null,
@@ -261,6 +283,7 @@ export async function resolveSharedEmailTokens(
         complimentaryLegIds,
         firstNightComplimentaryLegIds,
         complimentaryTransportRequestIds,
+        inclusionFilter: { journeyClass: quoteConfig.journeyClass, rateAudience: quoteConfig.rateAudience },
       })
 
       const journey = deriveJourneyFromBlocks(itineraryBlocks) ?? { start: null, end: null }
@@ -359,12 +382,14 @@ export async function resolveSharedEmailTokens(
       latestVoucher?.voucher_number ?? (booking?.booking_number ? clientInvoiceNumber(booking) : null),
     ),
     lastSentDate: orPlaceholder(lastQuoteSentAt ? formatDisplayDateLong(lastQuoteSentAt.sent_at) : null),
+    rateLabel: orPlaceholder(rateLabel),
   }
 
   const blocks: Record<string, string> = {
     bankingDetails: orPlaceholder(buildBankingDetailsBlock(paymentMethod.banking, tokens.invoiceNumber)),
     guestInfo,
     quoteSummaryTable,
+    trainOnlyNote: trainOnlyNote ?? "",
   }
 
   return { tokens, blocks }

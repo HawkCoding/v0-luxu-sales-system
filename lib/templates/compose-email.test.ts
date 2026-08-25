@@ -275,6 +275,7 @@ describe("composeEmail", () => {
       from: vi.fn(() => ({
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),
+        is: vi.fn().mockReturnThis(),
         maybeSingle: vi.fn(async () => ({ data: row, error: null })),
       })),
     }

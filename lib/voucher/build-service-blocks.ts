@@ -15,6 +15,8 @@ import { resolveDirectedArrivalName, resolveDirectedRouteName } from "@/lib/rout
 import { resolveRouteSchedule, toHoursMinutes } from "@/lib/routes/route-schedule"
 import { formatSuitePhrase, type SuiteSelection } from "@/lib/templates/suite-description"
 import { firstRecord } from "@/lib/utils"
+import { filterInclusionLines, type SupplierInclusionLine } from "@/lib/inclusions/filter-lines"
+import type { JourneyClass, RateAudience } from "@/lib/quotes/quote-config"
 
 /** Kinds whose suite/room name gets a noun appended when the type name doesn't already carry
  * one (see formatSuitePhrase). Tour, airline and transfer labels feed different sentences
@@ -80,6 +82,10 @@ interface BuildContext {
    * a booking carries the whole party, since a captured transport request has no notion of which
    * travellers are actually on which flight. */
   travellerNames?: string[]
+  /** The quote's resolved journey class / rate audience, used to filter every leg's tagged
+   * inclusion/exclusion bullets. Omitted by internal-only surfaces that never render bullets
+   * (worksheet, invoice view) — see `resolveInclusionList`. */
+  inclusionFilter?: InclusionFilterContext
 }
 
 /** A train supplier's boarding/alighting address in one city — see `resolveStationPoints`. */
@@ -311,6 +317,45 @@ function cleanList(values: string[] | null | undefined): string[] {
   return (values ?? []).map((value) => value.trim()).filter(Boolean)
 }
 
+/** The quote's resolved journey class / rate audience (lib/quotes/quote-config.ts), used to
+ * filter a Rovos-style tagged inclusion list down to the bullets that actually apply. Omitted by
+ * callers that don't render client-facing bullets at all (worksheet, invoice view) — a supplier
+ * with tagged rows then renders every row untagged-or-not, same as before this feature existed. */
+export interface InclusionFilterContext {
+  journeyClass: JourneyClass | null
+  rateAudience: RateAudience
+}
+
+interface FetchedInclusionLine extends SupplierInclusionLine {
+  supplierId: string
+  list: "inclusions" | "exclusions"
+}
+
+function bulletLinesToRawList(lines: readonly { kind: "heading" | "item"; text: string }[]): string[] {
+  return lines.map((line) => (line.kind === "heading" ? `# ${line.text}` : line.text))
+}
+
+/**
+ * One supplier's client-facing bullet list, in the flat `string[]` shape every downstream reader
+ * (lib/quotes/quote-presentation.ts, the voucher PDF) already expects — `#` marks a subheading.
+ * Prefers the tagged supplier_inclusion_lines rows, filtered to the quote's journey/rate context;
+ * falls back to the legacy flat array for a supplier that has no tagged rows yet (not yet
+ * backfilled, or created before the tagged-rows editor shipped).
+ */
+function resolveInclusionList(
+  list: "inclusions" | "exclusions",
+  supplierId: string | null | undefined,
+  linesBySupplier: Map<string, FetchedInclusionLine[]> | undefined,
+  legacy: string[] | null | undefined,
+  inclusionFilter: InclusionFilterContext | undefined,
+): string[] {
+  const rows = (supplierId ? linesBySupplier?.get(supplierId) : undefined)?.filter((row) => row.list === list) ?? []
+  if (rows.length === 0) return cleanList(legacy)
+
+  const bullets = inclusionFilter ? filterInclusionLines(rows, inclusionFilter) : rows
+  return bulletLinesToRawList(bullets)
+}
+
 /** "Twin bedded Deluxe Suite with a shower" — a unit's suite type, prefixed with its bed
  * configuration and suffixed with its bathroom (and bedroom layout), when the unit has those
  * selected, and the supplier-kind noun appended ("Suite"/"Room") when the type name doesn't
@@ -484,6 +529,10 @@ interface TransportBlockContext {
   travellerNames: string[] | null
   /** Request ids marked complimentary — see `BuildContext.complimentaryTransportRequestIds`. */
   complimentaryTransportRequestIds?: Set<string>
+  /** Tagged inclusion/exclusion rows for every supplier on this booking, and the quote's resolved
+   * journey/rate context to filter them by. See `resolveInclusionList`. */
+  inclusionLinesBySupplier?: Map<string, FetchedInclusionLine[]>
+  inclusionFilter?: InclusionFilterContext
 }
 
 /** One captured transfer/rental/flight trip → one client-facing block. Flights reuse this same
@@ -569,8 +618,20 @@ function transportRequestBlock(
       passengerCount: request.passenger_count,
       notes: request.notes,
       footnote: request.voucher_footnote,
-      inclusions: cleanList(blockContext.supplier?.inclusions),
-      exclusions: cleanList(blockContext.supplier?.exclusions),
+      inclusions: resolveInclusionList(
+        "inclusions",
+        request.supplier_id,
+        blockContext.inclusionLinesBySupplier,
+        blockContext.supplier?.inclusions,
+        blockContext.inclusionFilter,
+      ),
+      exclusions: resolveInclusionList(
+        "exclusions",
+        request.supplier_id,
+        blockContext.inclusionLinesBySupplier,
+        blockContext.supplier?.exclusions,
+        blockContext.inclusionFilter,
+      ),
       isComplimentary: blockContext.complimentaryTransportRequestIds?.has(request.id) ?? false,
     },
     displayOrder: blockContext.displayOrder,
@@ -623,6 +684,41 @@ export async function buildVoucherServiceBlocks(
 
   if (transportError) throw transportError
   const transportRequests = (transportRows ?? []) as unknown as TransportRequestJoinRow[]
+
+  // Tagged inclusion/exclusion rows for every supplier touched by this booking, so a Rovos-style
+  // journey/rate-tagged list can be filtered per leg. See resolveInclusionList.
+  const inclusionSupplierIds = new Set<string>()
+  for (const row of serviceRows ?? []) {
+    if (row.supplier_id) inclusionSupplierIds.add(row.supplier_id)
+  }
+  for (const row of transportRows ?? []) {
+    if (row.supplier_id) inclusionSupplierIds.add(row.supplier_id)
+  }
+
+  const inclusionLinesBySupplier = new Map<string, FetchedInclusionLine[]>()
+  if (inclusionSupplierIds.size > 0) {
+    const { data: inclusionRows, error: inclusionError } = await supabase
+      .from("supplier_inclusion_lines")
+      .select("supplier_id, list, kind, text, journey_tag, rate_tag, sort_order")
+      .in("supplier_id", [...inclusionSupplierIds])
+      .order("sort_order", { ascending: true })
+
+    if (inclusionError) throw inclusionError
+
+    for (const row of inclusionRows ?? []) {
+      const line: FetchedInclusionLine = {
+        supplierId: row.supplier_id,
+        list: row.list as "inclusions" | "exclusions",
+        kind: row.kind as "heading" | "item",
+        text: row.text,
+        journeyTag: row.journey_tag as JourneyClass | null,
+        rateTag: row.rate_tag as RateAudience | null,
+      }
+      const existing = inclusionLinesBySupplier.get(row.supplier_id)
+      if (existing) existing.push(line)
+      else inclusionLinesBySupplier.set(row.supplier_id, [line])
+    }
+  }
 
   const selections = ((serviceRows ?? []) as unknown as BookingServiceJoinRow[])
     .map(serviceRowToSelectionRow)
@@ -685,6 +781,8 @@ export async function buildVoucherServiceBlocks(
             supplierReference: request.supplier_reference ?? null,
             travellerNames: context.travellerNames ?? null,
             complimentaryTransportRequestIds: context.complimentaryTransportRequestIds,
+            inclusionLinesBySupplier,
+            inclusionFilter: context.inclusionFilter,
           }),
         )
       }
@@ -776,8 +874,20 @@ export async function buildVoucherServiceBlocks(
       durationDays,
       notes: row.notes ?? null,
       footnote: row.voucher_footnote ?? null,
-      inclusions: cleanList(supplier?.inclusions),
-      exclusions: cleanList(supplier?.exclusions),
+      inclusions: resolveInclusionList(
+        "inclusions",
+        row.supplier_id,
+        inclusionLinesBySupplier,
+        supplier?.inclusions,
+        context.inclusionFilter,
+      ),
+      exclusions: resolveInclusionList(
+        "exclusions",
+        row.supplier_id,
+        inclusionLinesBySupplier,
+        supplier?.exclusions,
+        context.inclusionFilter,
+      ),
       // The party's preferences apply to the whole trip, so they're repeated on every block of the
       // category that acts on them: meal-seating/smoking on trains, dietary/occasion on hotels.
       guestBreakdown: isTrain || isHotel ? sumUnitGuestBreakdown(row.units) : null,
@@ -839,6 +949,8 @@ export async function buildVoucherServiceBlocks(
           fallbackRoute: null,
           supplierReference: request.supplier_reference ?? null,
           travellerNames: context.travellerNames ?? null,
+          inclusionLinesBySupplier,
+          inclusionFilter: context.inclusionFilter,
         }),
       )
     })

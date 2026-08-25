@@ -323,22 +323,38 @@ export default function PaymentMethodsPage() {
                     Name
                   </Label>
                   <Input
+                    // Uncontrolled, so it must remount when the selection
+                    // changes — otherwise the previous method's name stays in
+                    // the box and the next blur renames the wrong record.
+                    key={selected.id}
                     id="payment-method-name"
                     className="mt-1 max-w-sm"
                     defaultValue={selected.name}
+                    maxLength={120}
                     onBlur={async (event) => {
-                      const next = event.target.value.trim()
-                      if (!next || next === selected.name) return
-                      const res = await fetch(`/api/settings/payment-methods/${selected.id}`, {
-                        method: "PATCH",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ name: next }),
-                      })
-                      if (!res.ok) {
-                        toast.error("Failed to rename")
+                      const input = event.target
+                      const next = input.value.trim()
+                      if (!next || next === selected.name) {
+                        input.value = selected.name
                         return
                       }
-                      await load()
+                      try {
+                        const res = await fetch(`/api/settings/payment-methods/${selected.id}`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ name: next }),
+                        })
+                        if (!res.ok) {
+                          input.value = selected.name
+                          toast.error("Failed to rename")
+                          return
+                        }
+                        const updated = (await res.json()) as AdminPaymentMethod
+                        setMethods((prev) => prev.map((m) => (m.id === updated.id ? updated : m)))
+                      } catch {
+                        input.value = selected.name
+                        toast.error("Failed to rename")
+                      }
                     }}
                   />
                 </div>
@@ -346,6 +362,7 @@ export default function PaymentMethodsPage() {
             </CardHeader>
             <CardContent>
               <PaymentMethodEditor
+                key={selected.id}
                 method={selected}
                 canEdit={canEdit}
                 onUpdated={(updated) => setMethods((prev) => prev.map((m) => (m.id === updated.id ? updated : m)))}

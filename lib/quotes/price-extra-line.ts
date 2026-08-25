@@ -218,9 +218,10 @@ export async function priceExtraLineItems(
   const card = selected.card
   const rateTypeInherited = selected.inherited
 
+  // Still loaded for the suiteVariants snapshot stamp below — the catalogue context is legitimate
+  // there, just never used to describe the line: an extra has no config selection at all, so
+  // appending its variant list would render options nobody picked.
   const variantGroups = await loadVariantGroups(supabase, suiteTypeId)
-  const variantSuffix =
-    variantGroups.length > 0 ? ` — ${variantGroups.flatMap((group) => group.values).join(", ")}` : ""
 
   const commission = resolveCommission({ lineOverride: commissionOverride })
 
@@ -273,7 +274,7 @@ export async function priceExtraLineItems(
     const total = Math.round((lineSubtotal + commissionAmount) * 100) / 100
 
     lineItems.push({
-      description: `${lineDescription}${variantSuffix}`,
+      description: lineDescription,
       supplierDescription: supplierRow.name,
       qty,
       unitPrice,

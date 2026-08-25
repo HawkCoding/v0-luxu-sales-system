@@ -16,6 +16,7 @@ import { formatCustomerSalutation } from "@/lib/person-name-format"
 import { logError } from "@/lib/error-log"
 import { QUOTE_REFERENCE_ENABLED } from "@/lib/feature-flags"
 import type { PricingSnapshot } from "@/lib/types"
+import { loadQuoteConfig, overridesFromQuoteRow } from "@/lib/quotes/load-quote-config"
 
 export const QUOTE_BUCKET = "quotes"
 
@@ -72,7 +73,7 @@ export async function ensureQuotePdf(
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, booking_id, quote_number, status, validity_until, subtotal, total, currency, created_at, pdf_document_id, booking:bookings(id, booking_number, no_of_adults, no_of_children, customer:customers(title, first_name, last_name))",
+      "id, booking_id, quote_number, status, validity_until, subtotal, total, currency, created_at, pdf_document_id, journey_class, rate_audience, show_train_only_note, booking:bookings(id, booking_number, no_of_adults, no_of_children, customer:customers(title, first_name, last_name))",
     )
     .eq("id", quoteId)
     .single()
@@ -133,6 +134,19 @@ export async function ensureQuotePdf(
   const firstNightComplimentaryLegIds = firstNightComplimentaryLegIdsFromLineItems(lineItems)
   const complimentaryTransportRequestIds = complimentaryTransportRequestIdsFromLineItems(lineItems)
 
+  // Same journey/rate resolution the quote email uses, so the PDF stapled to a
+  // send never disagrees with the body text.
+  const quoteConfig = await loadQuoteConfig(supabase, {
+    lineItems: (lineItems ?? []).map((li) => ({ pricingSnapshot: li.pricing_snapshot as PricingSnapshot | null })),
+    overrides: overridesFromQuoteRow(quote),
+  })
+
+  // A train whose journey length or rate audience can't be resolved must not silently pick a
+  // side on a client document — refuse rather than guess. See the quote's config panel.
+  if (quoteConfig.unresolved.length > 0) {
+    throw new Error(quoteConfig.unresolved[0])
+  }
+
   // Itinerary degrades to an empty section rather than blocking the PDF —
   // correspondence relies on a quote email never going out without its PDF.
   let itineraryBlocks: VoucherServiceBlock[] = []
@@ -144,6 +158,7 @@ export async function ensureQuotePdf(
       complimentaryLegIds,
       firstNightComplimentaryLegIds,
       complimentaryTransportRequestIds,
+      inclusionFilter: { journeyClass: quoteConfig.journeyClass, rateAudience: quoteConfig.rateAudience },
     })
     itineraryBlocks = blocks
   } catch (err) {

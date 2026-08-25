@@ -30,6 +30,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
+import { formatMoney } from "@/lib/money"
 import { replaceContentSlot } from "@/lib/templates/content-slot"
 import { replaceSignatureSlot } from "@/lib/templates/signature-slot"
 import { formatQuoteDisplayLabel } from "@/lib/quotes/quote-number"
@@ -63,6 +64,16 @@ interface QuotePreviewSendDialogProps {
   onOpenChange?: (open: boolean) => void
 }
 
+interface QuoteConfigPreview {
+  primarySupplierId: string | null
+  primarySupplierName: string | null
+  journeyClass: "short" | "long" | null
+  rateAudience: "international" | "resident"
+  trainOnly: boolean
+  auto: { journeyClass: boolean; rateAudience: boolean; trainOnly: boolean }
+  unresolved: string[]
+}
+
 interface PreviewResponse {
   html?: string
   bodyContentHtml?: string
@@ -71,10 +82,58 @@ interface PreviewResponse {
   warnings?: string[]
   signatureProfileId?: string | null
   signatureBrandId?: string | null
+  config?: QuoteConfigPreview
   error?: string
 }
 
 type PaneView = "both" | "editor" | "preview"
+
+function ConfigToggleRow({
+  label,
+  value,
+  auto,
+  disabled,
+  options,
+  onChange,
+}: {
+  label: string
+  value: string | null
+  auto: boolean
+  disabled: boolean
+  options: { value: string; label: string }[]
+  onChange: (value: string) => void
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="flex items-center gap-1.5 text-foreground">
+        {label}
+        {auto && (
+          <span className="rounded bg-muted px-1 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
+            Auto
+          </span>
+        )}
+      </span>
+      <div className="flex overflow-hidden rounded-md border">
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange(option.value)}
+            className={cn(
+              "px-2 py-1 text-xs transition-colors",
+              value === option.value
+                ? "bg-primary text-primary-foreground"
+                : "bg-background text-muted-foreground hover:bg-muted",
+            )}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 export function QuotePreviewSendDialog({
   quote,
@@ -99,6 +158,8 @@ export function QuotePreviewSendDialog({
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [libraryAttachmentIds, setLibraryAttachmentIds] = useState<string[]>([])
+  const [config, setConfig] = useState<QuoteConfigPreview | null>(null)
+  const [savingConfig, setSavingConfig] = useState(false)
   const optimisticSend = useOptimisticSend()
   // What the server last rendered, so a hand-edit can be told apart from the template's own wording
   // -- reopening this dialog re-fetches the preview (moveStage/signature defaults can have changed),
@@ -168,11 +229,44 @@ export function QuotePreviewSendDialog({
       setContent(renderedContent)
       setLibraryAttachmentIds([])
       setWarnings(payload.warnings ?? [])
+      setConfig(payload.config ?? null)
     } catch (previewError) {
       const message = previewError instanceof Error ? previewError.message : "Failed to render quote preview"
       setError(message)
     } finally {
       setLoadingPreview(false)
+    }
+  }
+
+  /** Flips one config axis and re-renders the preview so the email, and the PDF it will attach,
+   * agree with what the panel now shows. The other two axes keep whatever they were (Auto or an
+   * existing override) — only the touched axis becomes an explicit override. */
+  async function updateConfig(
+    patch: Partial<{ journeyClass: "short" | "long" | null; rateAudience: "international" | "resident" | null; showTrainOnlyNote: boolean | null }>,
+  ) {
+    if (!config) return
+    const body = {
+      journeyClass: config.auto.journeyClass ? null : config.journeyClass,
+      rateAudience: config.auto.rateAudience ? null : config.rateAudience,
+      showTrainOnlyNote: config.auto.trainOnly ? null : config.trainOnly,
+      ...patch,
+    }
+    setSavingConfig(true)
+    try {
+      const response = await fetch(`/api/quotes/${quote.id}/config`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string }
+        throw new Error(payload.error ?? "Failed to save quote configuration")
+      }
+      await loadPreview()
+    } catch (configError) {
+      toast.error(configError instanceof Error ? configError.message : "Failed to save quote configuration")
+    } finally {
+      setSavingConfig(false)
     }
   }
 
@@ -186,6 +280,11 @@ export function QuotePreviewSendDialog({
   async function handleSend() {
     if (emailImportNeedsReview) {
       toast.error("Resolve Needs Review before sending this quote")
+      return
+    }
+
+    if (config && config.unresolved.length > 0) {
+      toast.error(config.unresolved[0] ?? "This quote needs configuration before it can be sent")
       return
     }
 
@@ -291,6 +390,80 @@ export function QuotePreviewSendDialog({
               </Button>
             </div>
             <div className="min-h-0 flex-1 space-y-4 md:overflow-y-auto md:pr-1">
+              <div className="space-y-1 text-right">
+                <div className="flex justify-end gap-8 text-xs">
+                  <span className="text-muted-foreground">Subtotal</span>
+                  <span className="text-foreground font-medium w-28">
+                    {formatMoney(quote.subtotal, quote.currency)}
+                  </span>
+                </div>
+                <div className="flex justify-end gap-8 text-sm font-semibold">
+                  <span className="text-foreground">Total</span>
+                  <span className="text-foreground w-28">{formatMoney(quote.total, quote.currency)}</span>
+                </div>
+              </div>
+              {config && (config.primarySupplierId || config.unresolved.length > 0) && (
+                <div className="space-y-2 rounded-md border p-3 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold uppercase tracking-wider text-muted-foreground">
+                      This quote
+                    </span>
+                    {savingConfig && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+                  </div>
+                  {config.primarySupplierName && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Train</span>
+                      <span className="font-medium">{config.primarySupplierName}</span>
+                    </div>
+                  )}
+                  {(config.journeyClass !== null || config.unresolved.length > 0) && (
+                    <ConfigToggleRow
+                      label="Journey"
+                      auto={config.auto.journeyClass}
+                      disabled={savingConfig}
+                      options={[
+                        { value: "short", label: "Short" },
+                        { value: "long", label: "Long" },
+                      ]}
+                      value={config.journeyClass}
+                      onChange={(value) => void updateConfig({ journeyClass: value as "short" | "long" })}
+                    />
+                  )}
+                  <ConfigToggleRow
+                    label="Rate"
+                    auto={config.auto.rateAudience}
+                    disabled={savingConfig}
+                    options={[
+                      { value: "international", label: "Intl" },
+                      { value: "resident", label: "Local" },
+                    ]}
+                    value={config.rateAudience}
+                    onChange={(value) => void updateConfig({ rateAudience: value as "international" | "resident" })}
+                  />
+                  <label className="flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 text-foreground">
+                      Train-only note
+                      {config.auto.trainOnly && (
+                        <span className="rounded bg-muted px-1 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">
+                          Auto
+                        </span>
+                      )}
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={config.trainOnly}
+                      disabled={savingConfig}
+                      onChange={(event) => void updateConfig({ showTrainOnlyNote: event.target.checked })}
+                      className="h-3.5 w-3.5"
+                    />
+                  </label>
+                  {config.unresolved.length > 0 && (
+                    <p className="rounded bg-destructive/10 px-2 py-1 text-destructive">
+                      {config.unresolved[0]}
+                    </p>
+                  )}
+                </div>
+              )}
               <div className="space-y-1.5">
                 <Label htmlFor={`quote-subject-${quote.id}`}>Subject</Label>
                 <Input
@@ -388,7 +561,16 @@ export function QuotePreviewSendDialog({
           <Button variant="outline" onClick={() => closeGuard.handleOpenChange(false)} disabled={sending}>
             Cancel
           </Button>
-          <Button onClick={handleSend} disabled={sending || loadingPreview || !finalHtml || !subject.trim()}>
+          <Button
+            onClick={handleSend}
+            disabled={
+              sending ||
+              loadingPreview ||
+              !finalHtml ||
+              !subject.trim() ||
+              Boolean(config && config.unresolved.length > 0)
+            }
+          >
             {sending ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Send className="mr-1.5 h-4 w-4" />}
             Send
           </Button>

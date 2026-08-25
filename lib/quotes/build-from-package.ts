@@ -273,17 +273,10 @@ export async function buildPackageQuoteLineItems({
     }
   }
 
-  function formatVariantSuffix(suiteTypeId: string | null | undefined): string {
-    if (!suiteTypeId) return ""
-    const groups = variantSnapshotBySuiteTypeId.get(suiteTypeId)
-    if (!groups || groups.length === 0) return ""
-    const flatValues = groups.flatMap((group) => group.values)
-    return flatValues.join(", ")
-  }
-
   // Load display names for the SPECIFIC bedroom/layout/bathroom a unit selected (as opposed to
-  // variantSnapshotBySuiteTypeId, which lists everything a suite type could offer) — used to
-  // describe a train/hotel unit's exact configuration rather than every option available.
+  // variantSnapshotBySuiteTypeId, which lists everything a suite type could offer). These are the
+  // only names that ever reach a line description: a unit with nothing picked is described by its
+  // suite type alone, never by the catalogue of options it could have had.
   const bedroomTypeIds = new Set<string>()
   const bedroomLayoutIds = new Set<string>()
   const bathroomTypeIds = new Set<string>()
@@ -524,11 +517,7 @@ export async function buildPackageQuoteLineItems({
     const convertedUnitPrice = converted.amount
     const wasConverted = lineSourceCurrency !== targetCurrency
 
-    const variantValues = hideRoomConfig
-      ? ""
-      : variantNames && variantNames.length > 0
-        ? variantNames.join(", ")
-        : formatVariantSuffix(suiteTypeId ?? null)
+    const variantValues = hideRoomConfig ? "" : (variantNames ?? []).join(", ")
     const variantSuffixBody = hideVariantSuffix
       ? ""
       : [suiteTypeName, variantValues].filter((part) => part && part.length > 0).join(" ")
@@ -537,7 +526,10 @@ export async function buildPackageQuoteLineItems({
     const effectiveUnitPrice = singleSupplementPct
       ? Math.round(convertedUnitPrice * (1 + singleSupplementPct / 100) * 100) / 100
       : convertedUnitPrice
-    const total = Math.round(effectiveUnitPrice * qty * 100) / 100
+    // A comped trip prices at 0 regardless of what the rate card says — unitPrice above stays
+    // the real rate so the line still shows what the trip would have cost (see build-booking-
+    // dialog.tsx / job-quotes-tab.tsx), but nothing is actually charged.
+    const total = isComplimentaryTransport ? 0 : Math.round(effectiveUnitPrice * qty * 100) / 100
     const supplementSuffix = singleSupplementPct ? formatSingleSupplementSuffix(singleSupplementPct) : ""
     const passengerSuffix = passengerLabel ? ` - ${passengerLabel}` : ""
 
@@ -1039,7 +1031,9 @@ export async function buildPackageQuoteLineItems({
             addLineItem({
               description: transportDescription,
               qty,
-              unitPrice: isComplimentary ? 0 : overridePrice ?? 0,
+              // Complimentary keeps the real rate on display (matches the hotel first-night
+              // treatment) — only the charged total is forced to 0, in addLineItem below.
+              unitPrice: isComplimentary ? overridePrice ?? validRateCard?.pricePerPerson ?? 0 : overridePrice ?? 0,
               supplierDescription,
               suiteTypeId,
               suiteTypeName,

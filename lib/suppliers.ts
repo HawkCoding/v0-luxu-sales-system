@@ -11,6 +11,7 @@ import type {
   ServiceDateAnchor,
   SupplierDetail,
   SupplierEmail,
+  SupplierInclusionLine,
   SupplierKind,
   SupplierRateAdjustment,
   SupplierRateCard,
@@ -45,6 +46,7 @@ type SupplierRow = Omit<
   quote_rate_type_id?: string | null
 }
 type SupplierEmailRow = Database["public"]["Tables"]["supplier_emails"]["Row"]
+type SupplierInclusionLineRow = Database["public"]["Tables"]["supplier_inclusion_lines"]["Row"]
 type SupplierStationAddressRow = Database["public"]["Tables"]["supplier_station_addresses"]["Row"]
 type RateTypeRow = Database["public"]["Tables"]["rate_types"]["Row"]
 type SupplierRateAdjustmentRow = Database["public"]["Tables"]["supplier_rate_adjustments"]["Row"]
@@ -139,6 +141,8 @@ export function mapSupplier(row: SupplierRow): Supplier {
     defaultTimeEnd: row.default_time_end ?? null,
     inclusions: row.inclusions ?? [],
     exclusions: row.exclusions ?? [],
+    longJourneyMinDays: row.long_journey_min_days ?? null,
+    trainOnlyNote: row.train_only_note ?? null,
     streetAddress: row.street_address ?? null,
     emergencyPhone: row.emergency_phone ?? null,
     defaultContactName: row.default_contact_name ?? null,
@@ -338,9 +342,24 @@ export function mapRateType(row: RateTypeRow): RateType {
     sortOrder: row.sort_order ?? 0,
     isDefault: row.is_default,
     isStandard: row.is_standard ?? false,
+    audience: row.audience === "international" || row.audience === "resident" ? row.audience : null,
+    clientLabel: row.client_label ?? null,
     archivedAt: row.archived_at ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  }
+}
+
+export function mapSupplierInclusionLine(row: SupplierInclusionLineRow): SupplierInclusionLine {
+  return {
+    id: row.id,
+    list: row.list === "exclusions" ? "exclusions" : "inclusions",
+    kind: row.kind === "heading" ? "heading" : "item",
+    text: row.text,
+    journeyTag: row.journey_tag === "short" || row.journey_tag === "long" ? row.journey_tag : null,
+    rateTag:
+      row.rate_tag === "international" || row.rate_tag === "resident" ? row.rate_tag : null,
+    sortOrder: row.sort_order ?? 0,
   }
 }
 
@@ -377,6 +396,7 @@ export interface SupplierDetailMapInput {
   rateAdjustments?: SupplierRateAdjustmentRow[]
   suiteAliases?: SuiteVocabAliasRow[]
   stationAddresses?: SupplierStationAddressRow[]
+  inclusionLines?: SupplierInclusionLineRow[]
   /** The sibling record this supplier inherits its contacts from, when parent_supplier_id is set. */
   parentSupplier?: { name: string; kind: SupplierKind; slug: string } | null
 }
@@ -527,6 +547,7 @@ export function mapSupplierDetail(
     suiteAliases: (variants.suiteAliases ?? [])
       .map(mapSuiteAlias)
       .filter((alias): alias is SupplierSuiteAlias => alias !== null),
+    inclusionLines: (variants.inclusionLines ?? []).map(mapSupplierInclusionLine),
     rateTypes: rateTypes,
     rateAdjustments: (variants.rateAdjustments ?? []).map((row) => ({
       rateTypeId: row.rate_type_id,

@@ -25,6 +25,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "Quote PDF could not be generated"
     if (message === "Quote not found") return jsonError(message, 404)
+    if (message.startsWith("Journey length not recorded")) return jsonError(message, 409)
     console.error("quote-pdf:ensure", err)
     return jsonError(message, 500)
   }

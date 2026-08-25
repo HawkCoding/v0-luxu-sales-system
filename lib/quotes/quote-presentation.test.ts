@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import type { VoucherServiceBlock } from "@/lib/generate-voucher"
 import { sortItineraryBlocksChronologically } from "@/lib/itinerary/sort-blocks"
 import type { QuoteLineItem } from "@/lib/types"
+import { filterInclusionLines, type SupplierInclusionLine } from "@/lib/inclusions/filter-lines"
 import {
   buildQuoteItineraryLines,
   collectQuoteExclusions,
@@ -225,6 +226,19 @@ describe("buildQuoteItineraryLines", () => {
 
     expect(lines[0].text).toBe(
       "Two nights at the Irene Country Lodge, Pretoria in a Guest room with a lake view incl. breakfast | Check in from 14h00 – FIRST NIGHT COMPLIMENTARY",
+    )
+  })
+
+  it("collapses first-night-comp wording to COMPLIMENTARY for a 1-night stay", () => {
+    const lines = buildQuoteItineraryLines([
+      {
+        ...hotelBlock,
+        serviceData: { ...hotelBlock.serviceData, nights: 1, isFirstNightComplimentary: true },
+      },
+    ])
+
+    expect(lines[0].text).toBe(
+      "One night at the Irene Country Lodge, Pretoria in a Guest room with a lake view incl. breakfast | Check in from 14h00 – COMPLIMENTARY",
     )
   })
 
@@ -582,5 +596,78 @@ describe("collectQuoteExclusions", () => {
 
   it("omits the standing exclusion when it is empty", () => {
     expect(collectQuoteExclusions([hotelBlock], "")).toEqual([])
+  })
+})
+
+// Rovos-style journey/rate tagged bullets, run through the real filter (lib/inclusions/filter-lines.ts)
+// and converted the same way lib/voucher/build-service-blocks.ts's resolveInclusionList does (`#`
+// prefix for a heading), so this exercises the whole tag -> filter -> raw-list -> render pipeline
+// rather than just this file's own rendering of an already-filtered array.
+const ROVOS_INCLUSION_LINES: SupplierInclusionLine[] = [
+  { kind: "heading", text: "Short Journeys", journeyTag: "short", rateTag: null },
+  { kind: "item", text: "Accommodation onboard the train", journeyTag: "short", rateTag: null },
+  { kind: "item", text: "All meals, all beverages", journeyTag: "short", rateTag: null },
+  { kind: "item", text: "Complimentary night pre/post departure", journeyTag: "short", rateTag: "international" },
+  { kind: "item", text: "Vehicle transfer between the Hotel and Station", journeyTag: "short", rateTag: "international" },
+  { kind: "heading", text: "Long Journeys", journeyTag: "long", rateTag: null },
+  { kind: "item", text: "Accommodation onboard the train", journeyTag: "long", rateTag: null },
+  { kind: "item", text: "All meals, all beverages", journeyTag: "long", rateTag: null },
+  { kind: "item", text: "Guided excursions (where applicable)", journeyTag: "long", rateTag: null },
+]
+
+function toRawInclusions(lines: { kind: "heading" | "item"; text: string }[]): string[] {
+  return lines.map((line) => (line.kind === "heading" ? `# ${line.text}` : line.text))
+}
+
+describe("buildQuoteItineraryLines — Rovos-style journey/rate tagged inclusions", () => {
+  it("a short-journey SADC (resident) rate drops the complimentary night and hotel transfer", () => {
+    const filtered = filterInclusionLines(ROVOS_INCLUSION_LINES, {
+      journeyClass: "short",
+      rateAudience: "resident",
+    })
+    const [boarding] = buildQuoteItineraryLines([
+      { ...trainBlock, serviceData: { ...trainBlock.serviceData, inclusions: toRawInclusions(filtered) } },
+    ])
+
+    expect(boarding.bullets).toEqual([
+      { kind: "heading", text: "Short Journeys" },
+      { kind: "item", text: "Accommodation onboard the train" },
+      { kind: "item", text: "All meals, all beverages" },
+    ])
+  })
+
+  it("a long-journey international rate includes the long-journey list, not the short one", () => {
+    const filtered = filterInclusionLines(ROVOS_INCLUSION_LINES, {
+      journeyClass: "long",
+      rateAudience: "international",
+    })
+    const [boarding] = buildQuoteItineraryLines([
+      { ...trainBlock, serviceData: { ...trainBlock.serviceData, inclusions: toRawInclusions(filtered) } },
+    ])
+
+    expect(boarding.bullets).toEqual([
+      { kind: "heading", text: "Long Journeys" },
+      { kind: "item", text: "Accommodation onboard the train" },
+      { kind: "item", text: "All meals, all beverages" },
+      { kind: "item", text: "Guided excursions (where applicable)" },
+    ])
+  })
+
+  it("a short-journey international rate keeps the complimentary night and hotel transfer", () => {
+    const filtered = filterInclusionLines(ROVOS_INCLUSION_LINES, {
+      journeyClass: "short",
+      rateAudience: "international",
+    })
+    const [boarding] = buildQuoteItineraryLines([
+      { ...trainBlock, serviceData: { ...trainBlock.serviceData, inclusions: toRawInclusions(filtered) } },
+    ])
+
+    expect(boarding.bullets).toEqual([
+      { kind: "heading", text: "Short Journeys" },
+      { kind: "item", text: "Accommodation onboard the train" },
+      { kind: "item", text: "All meals, all beverages" },
+      { kind: "item", text: "Complimentary night pre/post departure" },
+      { kind: "item", text: "Vehicle transfer between the Hotel and Station" },
+    ])
   })
 })

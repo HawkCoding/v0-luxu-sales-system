@@ -103,10 +103,22 @@ const routeDirectionModeSchema = z.enum(["one_way", "round_trip"])
 
 /** Client-facing inclusion/exclusion bullets; blanks are dropped so the UI can post empty rows. */
 const bulletListSchema = z
-  .array(z.string().trim().max(300))
-  .max(30)
+  .array(z.string().trim().max(1000))
+  .max(200)
   .transform((values) => values.filter(Boolean))
   .default([])
+
+/** One row of the tagged inclusion/exclusion editor (see lib/inclusions/filter-lines.ts).
+ * `sortOrder` is not accepted from the client -- each list's array position on the wire is its
+ * order, the same convention the plain-textarea editor used for line order. */
+export const supplierInclusionLineSchema = z.object({
+  id: z.string().uuid().optional(),
+  list: z.enum(["inclusions", "exclusions"]),
+  kind: z.enum(["heading", "item"]),
+  text: z.string().trim().max(1000),
+  journeyTag: z.enum(["short", "long"]).nullable().default(null),
+  rateTag: z.enum(["international", "resident"]).nullable().default(null),
+})
 
 export const rateAdjustmentSchema = z.object({
   rateTypeId: z.string().uuid(),
@@ -421,6 +433,11 @@ export const supplierSaveSchema = z.object({
   defaultTimeEnd: z.string().regex(TIME_PATTERN, "Expected HH:MM").nullable().optional(),
   inclusions: bulletListSchema,
   exclusions: bulletListSchema,
+  inclusionLines: z.array(supplierInclusionLineSchema).max(200).default([]),
+  /** Train operators only: routes.durationDays threshold for "long journey" inclusions. Null (the
+   * default) means this supplier has no short/long concept. */
+  longJourneyMinDays: z.number().int().min(1).max(365).nullable().optional(),
+  trainOnlyNote: z.string().trim().max(2000).nullable().optional(),
   active: z.boolean(),
   /** The sibling record (same company, different category) this supplier inherits its contact
    * details from. `null` unlinks and keeps the last mirrored values as this record's own. Omit the
@@ -582,6 +599,9 @@ export const supplierDraftSaveSchema = z.object({
   defaultTimeEnd: z.string().regex(TIME_PATTERN, "Expected HH:MM").nullable().optional(),
   inclusions: bulletListSchema,
   exclusions: bulletListSchema,
+  inclusionLines: z.array(supplierInclusionLineSchema).max(200).default([]),
+  longJourneyMinDays: z.number().int().min(1).max(365).nullable().optional(),
+  trainOnlyNote: z.string().trim().max(2000).nullable().optional(),
   active: z.boolean().default(true),
   /** See `parentSupplierId` on supplierSaveSchema. */
   parentSupplierId: z.string().uuid().nullable().optional(),

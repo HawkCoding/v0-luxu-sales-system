@@ -2,8 +2,10 @@ import { z } from "zod"
 import { requireAnyRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { humanizeTemplateKey } from "@/lib/templates/humanize-key"
+import { SYSTEM_TEMPLATE_KEYS } from "@/lib/templates/registry"
 
-const TEMPLATE_COLUMNS = "id, key, name, subject, body_html, version, active, is_system, sort_order"
+const TEMPLATE_COLUMNS =
+  "id, key, name, subject, body_html, version, active, is_system, sort_order, supplier_id"
 
 const templatePatchSchema = z
   .object({
@@ -48,6 +50,7 @@ export async function GET() {
       active: t.active,
       isSystem: t.is_system,
       sortOrder: t.sort_order,
+      supplierId: t.supplier_id,
     })),
   )
 }
@@ -56,6 +59,16 @@ const templateCreateSchema = z.object({
   name: z.string().trim().min(2, "Name must be at least 2 characters").max(120),
   subject: z.string().trim().min(1, "Subject is required").max(500),
   bodyHtml: z.string().max(200_000).default(""),
+  /**
+   * Set only to create a per-train variant of a system template (e.g. a Rovos-specific
+   * quote_email body) -- `key` names the system key to vary and `supplierId` the train_operator
+   * supplier it applies to. Uniqueness is (key, supplierId) at the DB level, not the slugified-name
+   * scheme below, which is for standalone custom templates only.
+   */
+  key: z.enum(SYSTEM_TEMPLATE_KEYS).optional(),
+  supplierId: z.string().uuid().optional(),
+}).refine((v) => (v.supplierId === undefined) === (v.key === undefined), {
+  message: "key and supplierId must be given together",
 })
 
 // Slugify a display name into a stable, unique template key (custom templates
@@ -89,28 +102,46 @@ export async function POST(req: Request) {
   if (!parsed.success) return jsonZodError(parsed.error)
 
   const { supabase, profile, user } = auth.value
+  const isVariant = parsed.data.key !== undefined
 
-  // Resolve a unique key for the new custom template.
-  const slugBase = slugifyKey(parsed.data.name)
-  const { data: existingKeys } = await supabase
-    .from("templates")
-    .select("key")
-    .or(`key.eq.${slugBase},key.like.${slugBase}_%`)
-  const used = new Set((existingKeys ?? []).map((row) => row.key))
-  let key = slugBase
-  let suffix = 2
-  while (used.has(key)) {
-    key = `${slugBase}_${suffix}`
-    suffix += 1
+  let key: string
+  let nextSortOrder: number
+  if (isVariant) {
+    // A variant reuses the system key -- (key, supplierId) is the DB's own uniqueness check
+    // (ux_templates_key_supplier), so a duplicate surfaces as a 23505 below rather than needing
+    // the slug dance. Sort order groups it with its parent key.
+    key = parsed.data.key!
+    const { data: siblingRow } = await supabase
+      .from("templates")
+      .select("sort_order")
+      .eq("key", key)
+      .order("sort_order", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    nextSortOrder = (siblingRow?.sort_order ?? -1) + 1
+  } else {
+    // Resolve a unique key for the new custom template.
+    const slugBase = slugifyKey(parsed.data.name)
+    const { data: existingKeys } = await supabase
+      .from("templates")
+      .select("key")
+      .or(`key.eq.${slugBase},key.like.${slugBase}_%`)
+    const used = new Set((existingKeys ?? []).map((row) => row.key))
+    key = slugBase
+    let suffix = 2
+    while (used.has(key)) {
+      key = `${slugBase}_${suffix}`
+      suffix += 1
+    }
+
+    const { data: maxRow } = await supabase
+      .from("templates")
+      .select("sort_order")
+      .order("sort_order", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    nextSortOrder = (maxRow?.sort_order ?? -1) + 1
   }
-
-  const { data: maxRow } = await supabase
-    .from("templates")
-    .select("sort_order")
-    .order("sort_order", { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  const nextSortOrder = (maxRow?.sort_order ?? -1) + 1
 
   const { data: created, error } = await supabase
     .from("templates")
@@ -121,13 +152,23 @@ export async function POST(req: Request) {
       body_html: parsed.data.bodyHtml,
       version: 1,
       active: true,
+      // A variant is deletable even though it reuses a system key -- only the untagged parent row
+      // (supplier_id null) is protected, since that is the one every other train falls back to.
+      // is_system here only governs the DELETE guard (app/api/templates/[id]/route.ts) and the
+      // "System" badge; getTemplate()'s (key, supplierId) lookup does not consult it at all.
       is_system: false,
       sort_order: nextSortOrder,
+      supplier_id: isVariant ? parsed.data.supplierId : null,
     })
     .select(TEMPLATE_COLUMNS)
     .single()
 
-  if (error || !created) return safeSupabaseError("templates:create", error)
+  if (error || !created) {
+    if (error?.code === "23505") {
+      return jsonError("A variant already exists for this template and train.", 409)
+    }
+    return safeSupabaseError("templates:create", error)
+  }
 
   await supabase.from("audit_logs").insert({
     actor: profile.actorName,
@@ -135,7 +176,7 @@ export async function POST(req: Request) {
     entity_type: "Template",
     entity_id: created.id,
     action: "template_created",
-    after_json: { key: created.key },
+    after_json: { key: created.key, supplierId: created.supplier_id },
   })
 
   return Response.json(
@@ -149,6 +190,7 @@ export async function POST(req: Request) {
       active: created.active,
       isSystem: created.is_system,
       sortOrder: created.sort_order,
+      supplierId: created.supplier_id,
     },
     { status: 201 },
   )
@@ -216,5 +258,6 @@ export async function PATCH(req: Request) {
     active: updated.active,
     isSystem: updated.is_system,
     sortOrder: updated.sort_order,
+    supplierId: updated.supplier_id,
   })
 }

@@ -80,6 +80,15 @@ export function isFreeInfant(lineItem: QuoteLineItem): boolean {
   return lineItem.pricingSnapshot?.passengerKind === "infant"
 }
 
+/**
+ * True when the Commission line was deliberately set to 0 rather than left unconfigured — a
+ * breakdown only exists once a type was chosen in Build Booking (see buildCommissionBreakdown),
+ * so its presence distinguishes "commission of 0" from "no commission set yet".
+ */
+export function isDeliberateZeroCommission(lineItem: QuoteLineItem): boolean {
+  return lineItem.pricingSnapshot?.commission?.type != null
+}
+
 /** True when a line is zero-priced for a reason the quote still needs resolved. */
 export function isMissingPricing(lineItem: QuoteLineItem): boolean {
   return (
@@ -91,6 +100,7 @@ export function isMissingPricing(lineItem: QuoteLineItem): boolean {
     // finished line, not an unpriced one.
     !hasComplimentaryNight(lineItem) &&
     !isComplimentaryTransport(lineItem) &&
-    !isFreeInfant(lineItem)
+    !isFreeInfant(lineItem) &&
+    !isDeliberateZeroCommission(lineItem)
   )
 }

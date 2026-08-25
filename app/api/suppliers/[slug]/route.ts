@@ -7,6 +7,7 @@ import {
   allowedRoles,
   checkDeletionDependencies,
   deleteInChunks,
+  describeValidationIssue,
   loadSupplierDetail,
   makeUuid,
   normalizeNullableDate,
@@ -173,6 +174,7 @@ export async function GET(
         rateTypes: detail.rateTypes,
         rateAdjustments: detail.rateAdjustments,
         stationAddresses: detail.stationAddresses,
+        inclusionLines: detail.inclusionLines,
         parentSupplier: detail.parentSupplier,
       },
     ),
@@ -292,11 +294,13 @@ export async function PATCH(
       ? supplierDraftSaveSchema.safeParse(body)
       : supplierSaveSchema.safeParse(body)
     if (!result.success) {
-      // Surface the first field-level message ("Each city may only have one station address" and
-      // friends) instead of a bare "Invalid request payload" the caller can do nothing with.
+      // Surface the first field-level message, prefixed with which field/row it's about
+      // ("Inclusion Lines #13 Text: String must contain at most 1000 character(s)") instead of a
+      // bare Zod string the caller can't act on.
+      const firstIssue = result.error.issues[0]
       return NextResponse.json(
         {
-          error: result.error.issues[0]?.message ?? "Invalid request payload",
+          error: firstIssue ? describeValidationIssue(firstIssue) : "Invalid request payload",
           details: result.error.issues,
         },
         { status: 400 },
@@ -952,8 +956,12 @@ export async function PATCH(
     child_max_age: parsed.childMaxAge ?? null,
     default_time_start: parsed.defaultTimeStart ?? null,
     default_time_end: parsed.defaultTimeEnd ?? null,
-    inclusions: parsed.inclusions,
-    exclusions: parsed.exclusions,
+    // The flat inclusions/exclusions arrays are no longer written from this route -- the tagged
+    // supplier_inclusion_lines rows below are the editor's write path now. The columns stay as an
+    // unread fallback (see lib/voucher/build-service-blocks.ts) so they are left alone here rather
+    // than wiped on every save.
+    long_journey_min_days: parsed.kind === "train_operator" ? parsed.longJourneyMinDays ?? null : null,
+    train_only_note: parsed.kind === "train_operator" ? normalizeOptionalText(parsed.trainOnlyNote) : null,
     base_rate_type_id: requestedBaseRateTypeId,
     // Normalised: nominating the base rate is the same as nominating nothing.
     quote_rate_type_id: rateTiers.quoteRateTypeId,
@@ -1045,6 +1053,61 @@ export async function PATCH(
         { error: "Failed to update supplier emails" },
         { status: 500 },
       )
+    }
+  }
+
+  // Replace the tagged inclusion/exclusion rows wholesale (delete-then-upsert, same convention as
+  // supplier_emails above). sort_order is each row's position within its own list on the wire --
+  // the client sends inclusions and exclusions as two ordered arrays, so it is recomputed here per
+  // list rather than trusted from the payload.
+  {
+    const listCounters: Record<"inclusions" | "exclusions", number> = { inclusions: 0, exclusions: 0 }
+    const normalizedInclusionLines = parsed.inclusionLines
+      .filter((line) => line.text.trim().length > 0)
+      .map((line) => ({
+        id: line.id ?? makeUuid(),
+        supplier_id: supplierId,
+        list: line.list,
+        kind: line.kind,
+        text: line.text.trim(),
+        journey_tag: line.journeyTag ?? null,
+        rate_tag: line.rateTag ?? null,
+        sort_order: listCounters[line.list]++,
+      }))
+
+    const existingInclusionLineIds = new Set(existingDetail.inclusionLines.map((row) => row.id))
+    const incomingInclusionLineIds = new Set(normalizedInclusionLines.map((row) => row.id))
+    const inclusionLineIdsToDelete = [...existingInclusionLineIds].filter(
+      (id) => !incomingInclusionLineIds.has(id),
+    )
+
+    if (inclusionLineIdsToDelete.length > 0) {
+      const { error: deleteInclusionLinesError } = await deleteInChunks(
+        supabase,
+        "supplier_inclusion_lines",
+        inclusionLineIdsToDelete,
+      )
+      if (deleteInclusionLinesError) {
+        logSupplierMutationError("supplier-inclusion-lines-delete", supplierId, deleteInclusionLinesError)
+        return NextResponse.json(
+          { error: "Failed to remove old supplier inclusion lines" },
+          { status: 500 },
+        )
+      }
+    }
+
+    if (normalizedInclusionLines.length > 0) {
+      const { error: inclusionLinesUpsertError } = await supabase
+        .from("supplier_inclusion_lines")
+        .upsert(normalizedInclusionLines, { onConflict: "id" })
+
+      if (inclusionLinesUpsertError) {
+        logSupplierMutationError("supplier-inclusion-lines-upsert", supplierId, inclusionLinesUpsertError)
+        return NextResponse.json(
+          { error: "Failed to update supplier inclusion lines" },
+          { status: 500 },
+        )
+      }
     }
   }
 
@@ -1518,6 +1581,7 @@ export async function PATCH(
         rateTypes: updatedDetail.rateTypes,
         rateAdjustments: updatedDetail.rateAdjustments,
         stationAddresses: updatedDetail.stationAddresses,
+        inclusionLines: updatedDetail.inclusionLines,
         parentSupplier: updatedDetail.parentSupplier,
       },
     ),

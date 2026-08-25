@@ -26,6 +26,7 @@ import { resolveConsultant } from "@/lib/consultant/resolve-consultant"
 import { clientInvoiceNumber } from "@/lib/invoices/invoice-status"
 import { VOUCHER_TEMPLATE_DEFAULTS, type VoucherTemplate } from "@/lib/types"
 import type { Database, Json } from "@/lib/supabase/types"
+import { loadQuoteConfigForBooking } from "@/lib/quotes/load-quote-config"
 
 export const runtime = "nodejs"
 
@@ -204,6 +205,7 @@ export async function POST(req: Request) {
     return safeSupabaseError("voucher:resolve-accepted-quote", error)
   }
   const scopedLegIds = scopeLegIdsFilter(quoteScope)
+  const quoteConfig = await loadQuoteConfigForBooking(supabase, booking.id)
 
   let legReferenceRows: Awaited<ReturnType<typeof loadLegReferenceRows>> = []
   try {
@@ -221,6 +223,7 @@ export async function POST(req: Request) {
       bookingId: booking.id,
       legIds: scopedLegIds,
       includeUnlinkedTransportRequests: false,
+      inclusionFilter: { journeyClass: quoteConfig.journeyClass, rateAudience: quoteConfig.rateAudience },
       reservationDetails: reservationDetails
         ? {
             dietary: reservationDetails.dietary,

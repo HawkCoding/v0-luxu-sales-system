@@ -14,6 +14,10 @@ vi.mock("../helpers", () => ({
   allowedRoles: new Set(["admin", "manager", "consultant"]),
   deleteInChunks: helperMocks.deleteInChunks,
   checkDeletionDependencies: helperMocks.checkDeletionDependencies,
+  describeValidationIssue: (issue: { code: string; path: (string | number)[]; message: string }) =>
+    issue.code !== "custom" && issue.path.length > 0
+      ? `${issue.path.join(" ")}: ${issue.message}`
+      : issue.message,
   loadSupplierDetail: helperMocks.loadSupplierDetail,
   makeUuid: helperMocks.makeUuid,
   requireAuthenticatedUser: helperMocks.requireAuthenticatedUser,
@@ -85,6 +89,7 @@ function mockSupplierDetail(overrides: Partial<typeof supplierRow> = {}) {
     suiteTypeBedroomLayouts: [],
     suiteTypeBathroomTypes: [],
     rateTypes: [],
+    inclusionLines: [],
   })
 }
 
@@ -998,6 +1003,7 @@ describe("PATCH /api/suppliers/[slug]", () => {
       suiteTypeBedroomLayouts: [],
       suiteTypeBathroomTypes: [],
       rateTypes: [],
+      inclusionLines: [],
     })
 
     helperMocks.supabaseFrom.mockImplementation((table: string) => {
@@ -1112,6 +1118,7 @@ describe("PATCH /api/suppliers/[slug]", () => {
         suiteTypeBedroomLayouts: [],
         suiteTypeBathroomTypes: [],
         rateTypes: [],
+        inclusionLines: [],
       })
       helperMocks.supabaseFrom.mockImplementation((table: string) => {
         if (table === "profiles") return profileQuery("manager")
@@ -1296,6 +1303,7 @@ describe("PATCH /api/suppliers/[slug]", () => {
         suiteTypeBedroomLayouts: [],
         suiteTypeBathroomTypes: [],
         rateTypes: [],
+        inclusionLines: [],
       })
 
       helperMocks.supabaseFrom.mockImplementation((table: string) => {
@@ -1551,6 +1559,7 @@ describe("PATCH /api/suppliers/[slug]", () => {
         suiteTypeBedroomLayouts: [],
         suiteTypeBathroomTypes: [],
         rateTypes: [],
+        inclusionLines: [],
       })
 
       helperMocks.supabaseFrom.mockImplementation((table: string) => {
@@ -1661,6 +1670,7 @@ describe("PATCH /api/suppliers/[slug]", () => {
         suiteTypeBedroomLayouts: [],
         suiteTypeBathroomTypes: [],
         rateTypes: [],
+        inclusionLines: [],
       })
 
       helperMocks.supabaseFrom.mockImplementation((table: string) => {
@@ -1795,6 +1805,7 @@ describe("PATCH /api/suppliers/[slug]", () => {
         suiteTypeBedroomLayouts: [],
         suiteTypeBathroomTypes: [],
         rateTypes: [],
+        inclusionLines: [],
       })
 
       helperMocks.supabaseFrom.mockImplementation((table: string) => {
