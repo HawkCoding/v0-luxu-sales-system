@@ -1,14 +1,17 @@
 import { z } from "zod"
 import { requireAnyRole } from "@/lib/api/auth"
 import { jsonError, jsonZodError } from "@/lib/api/responses"
-import { createSessionClient } from "@/lib/supabase/server"
 import { composeFromTemplate } from "@/lib/templates/compose-email"
 import { getSampleTokens } from "@/lib/templates/registry"
+import { resolveSharedEmailTokens } from "@/lib/templates/resolve-shared-tokens"
+import { formatCustomerSalutation } from "@/lib/person-name-format"
+import { firstRecord } from "@/lib/utils"
 
 const previewSchema = z.object({
   key: z.string().min(1).max(120),
   subject: z.string().max(500),
   bodyHtml: z.string().max(200_000),
+  bookingId: z.string().uuid().optional(),
 })
 
 // Render a full branded preview of a template using the registry's sample
@@ -30,14 +33,33 @@ export async function POST(req: Request) {
   const parsed = previewSchema.safeParse(raw)
   if (!parsed.success) return jsonZodError(parsed.error)
 
-  const { key, subject, bodyHtml } = parsed.data
+  const { key, subject, bodyHtml, bookingId } = parsed.data
   const sample = getSampleTokens(key)
+  const supabase = auth.value.supabase
 
-  // Sample values are static, so the supplier token would otherwise show a
-  // spelling that exists nowhere in Suppliers. Preview with a real record so
-  // managers see the exact name, spacing and capitalisation customers get.
-  if (sample.tokens.supplierName) {
-    const supabase = await createSessionClient()
+  let source: { bookingNumber: string; customerName: string } | null = null
+  let tokens = sample.tokens
+  let blocks = sample.blocks
+
+  if (bookingId) {
+    const { data: booking } = await supabase
+      .from("bookings")
+      .select("booking_number, customer:customers(title, first_name, last_name)")
+      .eq("id", bookingId)
+      .maybeSingle()
+    if (!booking) return jsonError("Booking not found", 404)
+
+    const shared = await resolveSharedEmailTokens(supabase, bookingId)
+    tokens = { ...sample.tokens, ...shared.tokens }
+    blocks = { ...sample.blocks, ...shared.blocks }
+    source = {
+      bookingNumber: booking.booking_number,
+      customerName: formatCustomerSalutation(firstRecord(booking.customer)),
+    }
+  } else if (sample.tokens.supplierName) {
+    // Sample values are static, so the supplier token would otherwise show a
+    // spelling that exists nowhere in Suppliers. Preview with a real record so
+    // managers see the exact name, spacing and capitalisation customers get.
     const { data: supplier } = await supabase
       .from("suppliers")
       .select("name")
@@ -46,17 +68,18 @@ export async function POST(req: Request) {
       .order("name")
       .limit(1)
       .maybeSingle()
-    if (supplier?.name) sample.tokens.supplierName = supplier.name
+    if (supplier?.name) tokens = { ...tokens, supplierName: supplier.name }
   }
 
   const composed = await composeFromTemplate(
     { subject, bodyHtml },
-    { ...sample, senderProfileId: auth.value.user.id },
+    { tokens, blocks, senderProfileId: auth.value.user.id },
   )
 
   return Response.json({
     subject: composed.subject,
     html: composed.bodyHtml,
     warnings: composed.warnings,
+    source,
   })
 }

@@ -496,6 +496,7 @@ export type Database = {
           manual_tour_price_set_at: string | null
           manual_tour_price_set_by: string | null
           origin: Database["public"]["Enums"]["service_origin"]
+          rate_type_id: string | null
           service_id: string
           sort_order: number
           suite_type_id: string | null
@@ -521,6 +522,7 @@ export type Database = {
           manual_tour_price_set_at?: string | null
           manual_tour_price_set_by?: string | null
           origin?: Database["public"]["Enums"]["service_origin"]
+          rate_type_id?: string | null
           service_id: string
           sort_order?: number
           suite_type_id?: string | null
@@ -546,6 +548,7 @@ export type Database = {
           manual_tour_price_set_at?: string | null
           manual_tour_price_set_by?: string | null
           origin?: Database["public"]["Enums"]["service_origin"]
+          rate_type_id?: string | null
           service_id?: string
           sort_order?: number
           suite_type_id?: string | null
@@ -571,6 +574,13 @@ export type Database = {
             columns: ["bedroom_type_id"]
             isOneToOne: false
             referencedRelation: "bedroom_types"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_service_units_rate_type_id_fkey"
+            columns: ["rate_type_id"]
+            isOneToOne: false
+            referencedRelation: "rate_types"
             referencedColumns: ["id"]
           },
           {
@@ -900,21 +910,27 @@ export type Database = {
       }
       booking_transport_requests: {
         Row: {
+          adult_count: number | null
           booking_id: string
+          child_count: number | null
           complimentary: boolean
           created_at: string
           date_anchor: string | null
           dropoff_point: string
           flight_number: string | null
           id: string
+          infant_count: number | null
           luggage_count: number | null
           notes: string | null
           passenger_count: number | null
           pickup_at: string | null
           pickup_point: string
           price_override: number | null
+          price_override_child: number | null
+          price_override_infant: number | null
           price_override_set_at: string | null
           price_override_set_by: string | null
+          pricing_basis: Database["public"]["Enums"]["transport_pricing_basis"]
           route_id: string | null
           service_id: string | null
           service_type: string
@@ -927,21 +943,27 @@ export type Database = {
           voucher_footnote: string | null
         }
         Insert: {
+          adult_count?: number | null
           booking_id: string
+          child_count?: number | null
           complimentary?: boolean
           created_at?: string
           date_anchor?: string | null
           dropoff_point: string
           flight_number?: string | null
           id?: string
+          infant_count?: number | null
           luggage_count?: number | null
           notes?: string | null
           passenger_count?: number | null
           pickup_at?: string | null
           pickup_point: string
           price_override?: number | null
+          price_override_child?: number | null
+          price_override_infant?: number | null
           price_override_set_at?: string | null
           price_override_set_by?: string | null
+          pricing_basis: Database["public"]["Enums"]["transport_pricing_basis"]
           route_id?: string | null
           service_id?: string | null
           service_type: string
@@ -954,21 +976,27 @@ export type Database = {
           voucher_footnote?: string | null
         }
         Update: {
+          adult_count?: number | null
           booking_id?: string
+          child_count?: number | null
           complimentary?: boolean
           created_at?: string
           date_anchor?: string | null
           dropoff_point?: string
           flight_number?: string | null
           id?: string
+          infant_count?: number | null
           luggage_count?: number | null
           notes?: string | null
           passenger_count?: number | null
           pickup_at?: string | null
           pickup_point?: string
           price_override?: number | null
+          price_override_child?: number | null
+          price_override_infant?: number | null
           price_override_set_at?: string | null
           price_override_set_by?: string | null
+          pricing_basis?: Database["public"]["Enums"]["transport_pricing_basis"]
           route_id?: string | null
           service_id?: string | null
           service_type?: string
@@ -1635,6 +1663,7 @@ export type Database = {
           file_size: number
           id: string
           name: string
+          route_id: string | null
           storage_path: string
           supplier_id: string | null
           supplier_kind: string | null
@@ -1648,6 +1677,7 @@ export type Database = {
           file_size?: number
           id?: string
           name: string
+          route_id?: string | null
           storage_path: string
           supplier_id?: string | null
           supplier_kind?: string | null
@@ -1661,12 +1691,20 @@ export type Database = {
           file_size?: number
           id?: string
           name?: string
+          route_id?: string | null
           storage_path?: string
           supplier_id?: string | null
           supplier_kind?: string | null
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "email_attachment_library_route_id_fkey"
+            columns: ["route_id"]
+            isOneToOne: false
+            referencedRelation: "routes"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "email_attachment_library_supplier_id_fkey"
             columns: ["supplier_id"]
@@ -3667,11 +3705,13 @@ export type Database = {
           phone: string | null
           pricing_mode: Database["public"]["Enums"]["supplier_pricing_mode"]
           quote_rate_type_id: string | null
+          quote_suite_detail: string
           single_supplement_pct: number
           slug: string
           status: string
           street_address: string | null
           train_only_note: string | null
+          transfer_pricing_basis: Database["public"]["Enums"]["transport_pricing_basis"]
           updated_at: string
           website: string | null
         }
@@ -3701,11 +3741,13 @@ export type Database = {
           phone?: string | null
           pricing_mode?: Database["public"]["Enums"]["supplier_pricing_mode"]
           quote_rate_type_id?: string | null
+          quote_suite_detail?: string
           single_supplement_pct?: number
           slug: string
           status?: string
           street_address?: string | null
           train_only_note?: string | null
+          transfer_pricing_basis?: Database["public"]["Enums"]["transport_pricing_basis"]
           updated_at?: string
           website?: string | null
         }
@@ -3735,11 +3777,13 @@ export type Database = {
           phone?: string | null
           pricing_mode?: Database["public"]["Enums"]["supplier_pricing_mode"]
           quote_rate_type_id?: string | null
+          quote_suite_detail?: string
           single_supplement_pct?: number
           slug?: string
           status?: string
           street_address?: string | null
           train_only_note?: string | null
+          transfer_pricing_basis?: Database["public"]["Enums"]["transport_pricing_basis"]
           updated_at?: string
           website?: string | null
         }
@@ -4189,6 +4233,7 @@ export type Database = {
         | "airline"
         | "vehicle_rental"
       supplier_pricing_mode: "rate_card" | "manual"
+      transport_pricing_basis: "per_vehicle" | "per_person"
       user_role: "admin" | "manager" | "consultant" | "readonly"
     }
     CompositeTypes: {
@@ -4387,6 +4432,7 @@ export const Constants = {
         "vehicle_rental",
       ],
       supplier_pricing_mode: ["rate_card", "manual"],
+      transport_pricing_basis: ["per_vehicle", "per_person"],
       user_role: ["admin", "manager", "consultant", "readonly"],
     },
   },

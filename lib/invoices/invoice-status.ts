@@ -44,16 +44,31 @@ export function resolveInvoiceStatusLabel(
 }
 
 /**
- * Final payment falls due 60 days before departure (sales team rule). Returns
- * null when the booking has no departure date yet; the PDF then prints "Now".
+ * Subtracts `months` calendar months from `date`, clamping the day to the
+ * last day of the target month instead of rolling into the following month
+ * (e.g. 31 Jan minus 2 months lands on 30 Nov, not 1 Dec).
+ */
+function subtractCalendarMonthsClamped(date: Date, months: number): Date {
+  const day = date.getUTCDate()
+  const targetMonthStart = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - months, 1))
+  const daysInTargetMonth = new Date(
+    Date.UTC(targetMonthStart.getUTCFullYear(), targetMonthStart.getUTCMonth() + 1, 0),
+  ).getUTCDate()
+  targetMonthStart.setUTCDate(Math.min(day, daysInTargetMonth))
+  return targetMonthStart
+}
+
+/**
+ * Final payment falls due 2 calendar months before departure, same
+ * day-of-month (sales team rule). Returns null when the booking has no
+ * departure date yet; the PDF then prints "Now".
  */
 export function computeFinalDueDate(departureDate: string | null | undefined): string | null {
   const day = departureDate?.slice(0, 10)
   if (!day) return null
   const parsed = new Date(`${day}T00:00:00Z`)
   if (Number.isNaN(parsed.getTime())) return null
-  parsed.setUTCDate(parsed.getUTCDate() - 60)
-  return parsed.toISOString().slice(0, 10)
+  return subtractCalendarMonthsClamped(parsed, 2).toISOString().slice(0, 10)
 }
 
 /** True when the computed final due date is today or already past. */

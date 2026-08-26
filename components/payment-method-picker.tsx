@@ -14,6 +14,7 @@ interface PaymentMethodPickerProps {
   /** Called with the freshly rendered block HTML whenever the salesperson switches methods. */
   onBlockHtmlChange: (html: string) => void
   invoiceNumber?: string
+  customerSurname?: string
   disabled?: boolean
 }
 
@@ -29,6 +30,7 @@ export function PaymentMethodPicker({
   initialPaymentMethodId,
   onBlockHtmlChange,
   invoiceNumber,
+  customerSurname,
   disabled,
 }: PaymentMethodPickerProps) {
   const { data } = usePaymentMethods()
@@ -50,7 +52,11 @@ export function PaymentMethodPicker({
       const res = await fetch("/api/payment-methods/render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paymentMethodId, invoiceNumber: invoiceNumber ?? "" }),
+        body: JSON.stringify({
+          paymentMethodId,
+          invoiceNumber: invoiceNumber ?? "",
+          customerSurname: customerSurname ?? "",
+        }),
       })
       if (!res.ok) return
       const payload = (await res.json()) as { html: string }

@@ -16,6 +16,7 @@ interface SendPaymentConfirmationButtonProps {
   onOpenChange?: (open: boolean) => void
   /** Set false to hide the built-in trigger button and rely on `open`/`onOpenChange`. */
   trigger?: boolean
+  customerSurname?: string
   /** Called when the email could not be prepared, so a caller driving this
    *  dialog from a stage move can abandon that move instead of hanging. */
   onError?: (message: string) => void
@@ -50,6 +51,7 @@ export function SendPaymentConfirmationButton({
   onOpenChange,
   trigger = true,
   onError,
+  customerSurname,
 }: SendPaymentConfirmationButtonProps) {
   const [preparing, setPreparing] = useState(false)
   const [prepared, setPrepared] = useState<PreparedEmail | null>(null)
@@ -119,6 +121,7 @@ export function SendPaymentConfirmationButton({
           signatureProfileId={prepared.email.signatureProfileId}
           signatureBrandId={prepared.email.signatureBrandId}
           paymentMethodId={prepared.email.paymentMethodId}
+          customerSurname={customerSurname}
           kind="payment_received"
           to={prepared.email.to}
           attachments={prepared.attachment ? [prepared.attachment] : undefined}

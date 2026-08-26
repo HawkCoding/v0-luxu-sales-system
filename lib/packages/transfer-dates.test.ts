@@ -11,6 +11,7 @@ function leg(id: string, supplierKind: SupplierKind, sortOrder: number): Package
     supplierDescription: null,
     supplierKind,
     pricingMode: "rate_card",
+    transferPricingBasis: "per_vehicle",
     baseRateTypeId: null,
     quoteRateTypeId: null,
     inheritedRateTypeName: null,

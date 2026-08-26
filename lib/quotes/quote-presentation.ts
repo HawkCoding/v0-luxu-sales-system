@@ -243,10 +243,14 @@ function describeBlock(block: VoucherServiceBlock): string {
       // durationDays counts the departure day, so a 3-day journey is 2 nights on board.
       const nights = d.durationDays && d.durationDays > 1 ? d.durationDays - 1 : null
       const onBoard = nights ? `${formatNights(nights)} on` : "On board"
+      // itinerarySuiteType is the supplier's chosen quote wording (type name alone, by default);
+      // suiteType (the full configuration) is the fallback for blocks built before that field
+      // existed. The voucher/invoice keep reading suiteType directly, unaffected by this.
+      const suiteLabel = d.itinerarySuiteType ?? d.suiteType
       return joinSentence(
         [
           `${onBoard} the ${supplier || "train"}`,
-          d.suiteType ? `in a ${d.suiteType}` : null,
+          suiteLabel ? `in a ${suiteLabel}` : null,
           "on an all-inclusive basis",
           d.route ? `— ${toProseRoute(d.route)}` : null,
         ],

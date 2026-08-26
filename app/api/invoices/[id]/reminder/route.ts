@@ -2,7 +2,7 @@ import { requireRole } from "@/lib/api/auth"
 import { jsonError, safeSupabaseError } from "@/lib/api/responses"
 import { formatDisplayDateLong } from "@/lib/date-format"
 import { formatMoney } from "@/lib/money"
-import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
+import { buildBankingDetailsBlock, buildPaymentReference } from "@/lib/invoices/banking-details-block"
 import { buildUnifiedTotals } from "@/lib/invoices/build-unified-totals"
 import { calculateInvoiceBalance } from "@/lib/invoices/calculate-balance"
 import { ensureInvoicePdf } from "@/lib/invoices/ensure-invoice-pdf"
@@ -151,7 +151,10 @@ export async function POST(_req: Request, { params }: RouteParams) {
       dueDate: formatDisplayDateLong(invoice.due_date),
       daysOverdue: overdue > 0 ? String(overdue) : "—",
     },
-    blocks: { ...shared.blocks, bankingDetails: buildBankingDetailsBlock(banking, displayInvoiceNumber) },
+    blocks: {
+      ...shared.blocks,
+      bankingDetails: buildBankingDetailsBlock(banking, buildPaymentReference(displayInvoiceNumber, customer?.last_name)),
+    },
     senderProfileId: booking.assigned_salesperson_id ?? auth.value.user.id,
   })
 

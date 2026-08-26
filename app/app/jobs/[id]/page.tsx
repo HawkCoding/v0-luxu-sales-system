@@ -1069,6 +1069,7 @@ export default function JobDetailPage() {
             <SendPaymentConfirmationButton
               jobId={id}
               hasPayments={payments.length > 0}
+              customerSurname={customer?.lastName ?? ""}
               mutate={async () => {
                 if (currentStage === "deposit_requested") {
                   await moveStageTo("deposit_paid")
@@ -1162,6 +1163,7 @@ export default function JobDetailPage() {
                   invoiceId={invoice.id}
                   invoiceNumber={invoice.invoiceNumber}
                   bookingId={id}
+                  customerSurname={customer?.lastName ?? ""}
                   onSent={async () => {
                     await mutate()
                   }}
@@ -1179,6 +1181,7 @@ export default function JobDetailPage() {
             bookingNumber={job.jobNumber}
             invoiceNumber={currentInvoiceNumber || undefined}
             customerName={`${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()}
+            customerSurname={customer?.lastName ?? ""}
             quotes={quotes}
             defaultDepositPercentage={settings?.defaultDepositPercentage ?? 25}
             departureDate={enquiry?.departureDate ?? null}
@@ -1247,6 +1250,7 @@ export default function JobDetailPage() {
         bookingNumber={job.jobNumber}
         invoiceNumber={currentInvoiceNumber || undefined}
         customerName={`${customer?.firstName ?? ""} ${customer?.lastName ?? ""}`.trim()}
+        customerSurname={customer?.lastName ?? ""}
         quotes={quotes}
         defaultDepositPercentage={settings?.defaultDepositPercentage ?? 25}
         departureDate={enquiry?.departureDate ?? null}
@@ -1270,6 +1274,7 @@ export default function JobDetailPage() {
         trigger={false}
         jobId={id}
         hasPayments={payments.length > 0}
+        customerSurname={customer?.lastName ?? ""}
         onError={() => {
           setPaymentConfirmationOpen(false)
           resetPendingTransition()
@@ -1291,6 +1296,7 @@ export default function JobDetailPage() {
         trigger={false}
         jobId={id}
         hasPayments={payments.length > 0}
+        customerSurname={customer?.lastName ?? ""}
         onError={() => {
           setDepositPaymentConfirmationOpen(false)
           resetPendingTransition()

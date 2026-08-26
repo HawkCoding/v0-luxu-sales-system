@@ -43,7 +43,7 @@ describe("buildUnifiedTotals", () => {
     expect(totals.fullPayment).toBe(true)
   })
 
-  it("uses the given fullDueDate override instead of the 60-day rule", () => {
+  it("uses the given fullDueDate override instead of the 2-month rule", () => {
     const totals = buildUnifiedTotals({
       balance: makeBalance(),
       departureDate: "2026-08-01",

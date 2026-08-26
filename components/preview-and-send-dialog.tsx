@@ -61,6 +61,8 @@ interface PreviewAndSendDialogProps {
   paymentMethodId?: string | null
   /** Customer-facing invoice number, used as the bank reference line when the payment method is switched. */
   invoiceNumber?: string
+  /** Customer surname, appended after the invoice number in the bank reference line. */
+  customerSurname?: string
   attachments?: Array<{
     filename: string
     contentBase64: string
@@ -88,6 +90,7 @@ export function PreviewAndSendDialog({
   signatureBrandId = null,
   paymentMethodId = null,
   invoiceNumber,
+  customerSurname,
   attachments,
   onSent,
 }: PreviewAndSendDialogProps) {
@@ -272,6 +275,7 @@ export function PreviewAndSendDialog({
               contentHtml={content ?? ""}
               initialPaymentMethodId={paymentMethodId}
               invoiceNumber={invoiceNumber}
+              customerSurname={customerSurname}
               onBlockHtmlChange={(html) => setContent((prev) => replaceBankingBlock(prev ?? "", html) ?? prev)}
               disabled={sending}
             />

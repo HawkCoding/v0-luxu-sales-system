@@ -138,6 +138,18 @@ describe("describeInvoiceLine", () => {
     )
   })
 
+  it("appends (Infant) on a per-person transfer's infant line — same path, no source change needed", () => {
+    const snapshot = makeSnapshot({
+      supplierName: "Ulysses Tours & Transfers",
+      routeName: "Cape Town Station to The President Hotel",
+      serviceType: "transfer",
+      passengerKind: "infant",
+    })
+    expect(describeInvoiceLine("Ulysses Tours & Transfers - Transfer - Infant", snapshot)).toBe(
+      "Transfer Cape Town Station to The President Hotel (Infant)",
+    )
+  })
+
   it("explains a hotel line billed for fewer nights than the stay", () => {
     const snapshot = makeSnapshot({
       supplierName: "Table Bay Hotel",

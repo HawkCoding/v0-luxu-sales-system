@@ -9,10 +9,11 @@ function round2(value: number): number {
 /**
  * The one money ladder every issue of the booking's invoice shows: the client
  * receives a single invoice whose deposit, final-due and received figures are
- * refreshed on each send. Final payment falls due 60 days before departure.
+ * refreshed on each send. Final payment falls due 2 calendar months before
+ * departure, same day-of-month.
  *
  * `mode: "full"` is for bookings paying the whole amount in one go (made
- * inside 60 days of departure, or opted into by the salesperson) — the
+ * inside 2 months of departure, or opted into by the salesperson) — the
  * deposit row is suppressed and the full total is shown on one due line.
  */
 export function buildUnifiedTotals(input: {
@@ -21,7 +22,7 @@ export function buildUnifiedTotals(input: {
   depositPercentage: number | null
   depositAmount: number | null
   mode?: "deposit" | "full"
-  /** Full-payment mode only: overrides the derived 60-days-before due date. */
+  /** Full-payment mode only: overrides the derived 2-months-before due date. */
   fullDueDate?: string | null
 }): InvoiceTotals {
   const { balance } = input

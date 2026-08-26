@@ -64,6 +64,7 @@ function unit(partial: Partial<BookingServiceUnitRow> & Pick<BookingServiceUnitR
     manual_tour_price_set_at: null,
     manual_tour_price_set_by: null,
     complimentary_first_night: false,
+    rate_type_id: null,
     sort_order: 0,
     origin: "consultant",
     created_at: "2026-01-01T00:00:00Z",

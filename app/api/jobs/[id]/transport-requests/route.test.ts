@@ -21,11 +21,15 @@ const BOOKING_ID = "00000000-0000-4000-8000-00000000aaaa"
 
 /** Column list from the PUT handler's existing-provenance pre-fetch, kept here to distinguish it
  * from the list/reload query below (same table, no .order() call). */
-const PROVENANCE_COLUMNS = "id, price_override, price_override_set_at, price_override_set_by"
+const PROVENANCE_COLUMNS =
+  "id, price_override, price_override_set_at, price_override_set_by, pricing_basis, price_override_child, price_override_infant"
 
-function buildSupabase(options: { savedRows?: unknown[]; existingRows?: unknown[] } = {}) {
+function buildSupabase(
+  options: { savedRows?: unknown[]; existingRows?: unknown[]; suppliers?: unknown[] } = {},
+) {
   const savedRows = options.savedRows ?? [{ id: "tr1" }]
   const existingRows = options.existingRows ?? []
+  const suppliers = options.suppliers ?? []
   const replaceTransportRequests = vi.fn(async (_args: unknown) => ({ error: null }))
 
   return {
@@ -66,6 +70,13 @@ function buildSupabase(options: { savedRows?: unknown[]; existingRows?: unknown[
         return {
           select: vi.fn(() => ({
             eq: vi.fn(async () => ({ data: [], error: null })),
+          })),
+        }
+      }
+      if (table === "suppliers") {
+        return {
+          select: vi.fn(() => ({
+            in: vi.fn(async () => ({ data: suppliers, error: null })),
           })),
         }
       }
@@ -195,7 +206,10 @@ describe("PUT /api/jobs/[id]/transport-requests", () => {
     expect(res.status).toBe(400)
   })
 
-  it("threads packageLegId through to the replace RPC, normalizing omitted to null", async () => {
+  it("threads serviceId through to the replace RPC, normalizing omitted to null", async () => {
+    // packageLegId is still accepted on the wire (schema back-compat) but has been inert since
+    // package_leg_id was dropped from booking_transport_requests in
+    // 20260811140000_drop_catalogue_packages.sql -- serviceId is its live replacement.
     const supabase = buildSupabase()
     authMocks.requireRole.mockResolvedValue({
       ok: true,
@@ -205,12 +219,12 @@ describe("PUT /api/jobs/[id]/transport-requests", () => {
         profile: { clearanceLevel: "consultant", actorName: "Jane", name: "Jane", surname: "D", email: "u@example.com" },
       },
     })
-    const LEG_ID = "00000000-0000-4000-8000-0000000000a1"
+    const SERVICE_ID = "00000000-0000-4000-8000-0000000000a1"
     const req = new Request("http://localhost", {
       method: "PUT",
       body: JSON.stringify({
         transportRequests: [
-          { serviceType: "transfer", packageLegId: LEG_ID, pickupPoint: "A", dropoffPoint: "B" },
+          { serviceType: "transfer", serviceId: SERVICE_ID, pickupPoint: "A", dropoffPoint: "B" },
           { serviceType: "transfer", pickupPoint: "C", dropoffPoint: "D" },
         ],
       }),
@@ -221,8 +235,8 @@ describe("PUT /api/jobs/[id]/transport-requests", () => {
     expect(supabase.replaceTransportRequests).toHaveBeenCalledWith({
       p_booking_id: BOOKING_ID,
       p_transport_requests: [
-        expect.objectContaining({ package_leg_id: LEG_ID }),
-        expect.objectContaining({ package_leg_id: null }),
+        expect.objectContaining({ service_id: SERVICE_ID }),
+        expect.objectContaining({ service_id: null }),
       ],
       p_rental_details: [],
     })
@@ -480,6 +494,240 @@ describe("PUT /api/jobs/[id]/transport-requests", () => {
       expect(rows[0].price_override).toBeNull()
       expect(rows[0].price_override_set_at).toBeNull()
       expect(rows[0].price_override_set_by).toBeNull()
+    })
+  })
+
+  describe("per-person pricing basis", () => {
+    it("rejects per_person pricing on a vehicle rental", async () => {
+      authMocks.requireRole.mockResolvedValue({
+        ok: true,
+        value: {
+          supabase: buildSupabase(),
+          user: { id: "u1", email: "u@example.com" },
+          profile: { clearanceLevel: "consultant", actorName: "Jane", name: "Jane", surname: "D", email: "u@example.com" },
+        },
+      })
+      const req = new Request("http://localhost", {
+        method: "PUT",
+        body: JSON.stringify({
+          transportRequests: [{
+            serviceType: "rental",
+            pricingBasis: "per_person",
+            pickupPoint: "A",
+            dropoffPoint: "B",
+            pickupAt: "2026-06-01T10:00:00.000Z",
+            rentalDetails: { returnAt: "2026-06-03T10:00:00.000Z" },
+          }],
+        }),
+        headers: { "Content-Type": "application/json" },
+      })
+      const res = await PUT(req, { params })
+      expect(res.status).toBe(400)
+    })
+
+    it("rejects a child fare override on a row explicitly marked per_vehicle", async () => {
+      authMocks.requireRole.mockResolvedValue({
+        ok: true,
+        value: {
+          supabase: buildSupabase(),
+          user: { id: "u1", email: "u@example.com" },
+          profile: { clearanceLevel: "consultant", actorName: "Jane", name: "Jane", surname: "D", email: "u@example.com" },
+        },
+      })
+      const req = new Request("http://localhost", {
+        method: "PUT",
+        body: JSON.stringify({
+          transportRequests: [{
+            serviceType: "transfer",
+            pricingBasis: "per_vehicle",
+            pickupPoint: "A",
+            dropoffPoint: "B",
+            priceOverrideChild: 250,
+          }],
+        }),
+        headers: { "Content-Type": "application/json" },
+      })
+      const res = await PUT(req, { params })
+      expect(res.status).toBe(400)
+    })
+
+    it("rejects a child fare override that resolves to per_vehicle via the supplier default", async () => {
+      const SUPPLIER_ID = "00000000-0000-4000-8000-0000000000c1"
+      authMocks.requireRole.mockResolvedValue({
+        ok: true,
+        value: {
+          supabase: buildSupabase({ suppliers: [{ id: SUPPLIER_ID, transfer_pricing_basis: "per_vehicle" }] }),
+          user: { id: "u1", email: "u@example.com" },
+          profile: { clearanceLevel: "consultant", actorName: "Jane", name: "Jane", surname: "D", email: "u@example.com" },
+        },
+      })
+      const req = new Request("http://localhost", {
+        method: "PUT",
+        body: JSON.stringify({
+          transportRequests: [{
+            serviceType: "transfer",
+            supplierId: SUPPLIER_ID,
+            pickupPoint: "A",
+            dropoffPoint: "B",
+            priceOverrideChild: 250,
+          }],
+        }),
+        headers: { "Content-Type": "application/json" },
+      })
+      const res = await PUT(req, { params })
+      expect(res.status).toBe(400)
+    })
+
+    it("stamps a brand-new row's basis from its supplier's current default when the payload omits it", async () => {
+      const SUPPLIER_ID = "00000000-0000-4000-8000-0000000000c2"
+      const supabase = buildSupabase({ suppliers: [{ id: SUPPLIER_ID, transfer_pricing_basis: "per_person" }] })
+      authMocks.requireRole.mockResolvedValue({
+        ok: true,
+        value: {
+          supabase,
+          user: { id: "u1", email: "u@example.com" },
+          profile: { clearanceLevel: "consultant", actorName: "Jane", name: "Jane", surname: "D", email: "u@example.com" },
+        },
+      })
+      const req = new Request("http://localhost", {
+        method: "PUT",
+        body: JSON.stringify({
+          transportRequests: [{
+            serviceType: "transfer",
+            supplierId: SUPPLIER_ID,
+            pickupPoint: "A",
+            dropoffPoint: "B",
+            adultCount: 4,
+          }],
+        }),
+        headers: { "Content-Type": "application/json" },
+      })
+      const res = await PUT(req, { params })
+      expect(res.status).toBe(200)
+      const { p_transport_requests: rows } = supabase.replaceTransportRequests.mock.calls[0][0] as {
+        p_transport_requests: Record<string, unknown>[]
+      }
+      expect(rows[0].pricing_basis).toBe("per_person")
+      expect(rows[0].adult_count).toBe(4)
+      // total seats is server-derived once any count is typed, not taken from the payload
+      expect(rows[0].passenger_count).toBe(4)
+    })
+
+    it("keeps an existing per-person row per-person even when the supplier has since flipped to per_vehicle", async () => {
+      const REQUEST_ID = "00000000-0000-4000-8000-0000000000c3"
+      const SUPPLIER_ID = "00000000-0000-4000-8000-0000000000c4"
+      // The saved row carries pricing_basis itself; the supplier's CURRENT default (fetched only
+      // for genuinely new rows) is irrelevant here and deliberately not even provided.
+      const supabase = buildSupabase({
+        existingRows: [{
+          id: REQUEST_ID,
+          price_override: null,
+          price_override_set_at: null,
+          price_override_set_by: null,
+          pricing_basis: "per_person",
+          price_override_child: null,
+          price_override_infant: null,
+        }],
+      })
+      authMocks.requireRole.mockResolvedValue({
+        ok: true,
+        value: {
+          supabase,
+          user: { id: "u1", email: "u@example.com" },
+          profile: { clearanceLevel: "consultant", actorName: "Jane", name: "Jane", surname: "D", email: "u@example.com" },
+        },
+      })
+      const req = new Request("http://localhost", {
+        method: "PUT",
+        body: JSON.stringify({
+          transportRequests: [{
+            id: REQUEST_ID,
+            serviceType: "transfer",
+            supplierId: SUPPLIER_ID,
+            pickupPoint: "A",
+            dropoffPoint: "B",
+            adultCount: 3,
+          }],
+        }),
+        headers: { "Content-Type": "application/json" },
+      })
+      const res = await PUT(req, { params })
+      expect(res.status).toBe(200)
+      const { p_transport_requests: rows } = supabase.replaceTransportRequests.mock.calls[0][0] as {
+        p_transport_requests: Record<string, unknown>[]
+      }
+      expect(rows[0].pricing_basis).toBe("per_person")
+      expect(rows[0].adult_count).toBe(3)
+    })
+
+    it("saves child/infant overrides and derives passenger_count on a per-person row", async () => {
+      const supabase = buildSupabase()
+      authMocks.requireRole.mockResolvedValue({
+        ok: true,
+        value: {
+          supabase,
+          user: { id: "u1", email: "u@example.com" },
+          profile: { clearanceLevel: "consultant", actorName: "Jane", name: "Jane", surname: "D", email: "u@example.com" },
+        },
+      })
+      const req = new Request("http://localhost", {
+        method: "PUT",
+        body: JSON.stringify({
+          transportRequests: [{
+            serviceType: "transfer",
+            pricingBasis: "per_person",
+            pickupPoint: "A",
+            dropoffPoint: "B",
+            adultCount: 2,
+            childCount: 1,
+            infantCount: 1,
+            priceOverrideChild: 250,
+          }],
+        }),
+        headers: { "Content-Type": "application/json" },
+      })
+      const res = await PUT(req, { params })
+      expect(res.status).toBe(200)
+      const { p_transport_requests: rows } = supabase.replaceTransportRequests.mock.calls[0][0] as {
+        p_transport_requests: Record<string, unknown>[]
+      }
+      expect(rows[0].price_override_child).toBe(250)
+      expect(rows[0].price_override_infant).toBeNull()
+      expect(rows[0].passenger_count).toBe(4)
+      expect(typeof rows[0].price_override_set_at).toBe("string")
+    })
+
+    it("ignores a stray per-vehicle passengerCount but leaves it stored (never read at pricing time)", async () => {
+      const supabase = buildSupabase()
+      authMocks.requireRole.mockResolvedValue({
+        ok: true,
+        value: {
+          supabase,
+          user: { id: "u1", email: "u@example.com" },
+          profile: { clearanceLevel: "consultant", actorName: "Jane", name: "Jane", surname: "D", email: "u@example.com" },
+        },
+      })
+      const req = new Request("http://localhost", {
+        method: "PUT",
+        body: JSON.stringify({
+          transportRequests: [{
+            serviceType: "transfer",
+            pricingBasis: "per_vehicle",
+            pickupPoint: "A",
+            dropoffPoint: "B",
+            passengerCount: 6,
+          }],
+        }),
+        headers: { "Content-Type": "application/json" },
+      })
+      const res = await PUT(req, { params })
+      expect(res.status).toBe(200)
+      const { p_transport_requests: rows } = supabase.replaceTransportRequests.mock.calls[0][0] as {
+        p_transport_requests: Record<string, unknown>[]
+      }
+      expect(rows[0].pricing_basis).toBe("per_vehicle")
+      expect(rows[0].passenger_count).toBe(6)
+      expect(rows[0].adult_count).toBeNull()
     })
   })
 })

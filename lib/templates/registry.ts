@@ -187,7 +187,7 @@ const ALL_TOKENS: TemplateTokenSpec[] = [
   { name: "depositPercentage", description: "Deposit percentage applied", kind: "scalar", sample: "25" },
   {
     name: "finalDueDate",
-    description: "Date the final payment is due (60 days before departure, or \"Now\")",
+    description: "Date the final payment is due (2 months before departure, or \"Now\")",
     kind: "scalar",
     sample: "14 July 2026",
   },

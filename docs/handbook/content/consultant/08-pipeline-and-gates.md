@@ -127,7 +127,7 @@ gives you a **Go to … tab** button for the ones marked with a tab name.
 
 > [!NOTE]
 > A full-payment invoice — one invoice covering the whole trip, used when a booking is
-> made inside 60 days of departure — satisfies the deposit-invoice gates exactly as a
+> made inside 2 months of departure — satisfies the deposit-invoice gates exactly as a
 > deposit invoice does. You will not be asked for a second invoice later.
 
 ## Reading the modal

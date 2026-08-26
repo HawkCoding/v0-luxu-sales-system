@@ -72,6 +72,7 @@ function leg(partial: Partial<PackageLeg> & { id: string; supplierKind: Supplier
     supplierName: `Supplier ${partial.id}`,
     supplierDescription: null,
     pricingMode: "rate_card",
+    transferPricingBasis: "per_vehicle",
     baseRateTypeId: null,
     quoteRateTypeId: null,
     inheritedRateTypeName: null,
@@ -377,6 +378,357 @@ describe("buildPackageQuoteLineItems", () => {
     expect(lineItems[0].unitPrice).toBe(0)
     expect(lineItems[0].total).toBe(0)
     expect(lineItems[0].pricingSnapshot?.isComplimentaryTransport).toBe(true)
+  })
+
+  describe("per-person transfer pricing", () => {
+    const perPersonLeg = (overrides: Partial<PackageLeg> = {}) =>
+      leg({
+        id: "leg-transfer",
+        supplierKind: "transfers",
+        transferPricingBasis: "per_person",
+        routes: [route("route-t", "supplier-leg-transfer", "Airport transfers")],
+        suiteTypes: [suiteType("vehicle-van", "supplier-leg-transfer", "Van")],
+        rateCards: [
+          rateCard({
+            id: "rc-van",
+            routeId: "route-t",
+            suiteTypeId: "vehicle-van",
+            pricePerPerson: 400,
+            childPrice: 200,
+            infantPrice: null,
+          }),
+        ],
+        ...overrides,
+      })
+
+    it("prices a per-person transfer as three passenger-kind lines instead of one flat line", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({
+          transportRequests: [
+            {
+              id: "request-1",
+              service_type: "transfer",
+              route_id: null,
+              suite_type_id: "vehicle-van",
+              service_id: "leg-transfer",
+              pickup_point: "Airport",
+              dropoff_point: "Hotel",
+              pickup_at: null,
+              pricing_basis: "per_person",
+              adult_count: 6,
+              child_count: 2,
+              infant_count: 1,
+              rental_details: null,
+            },
+          ],
+        }),
+        packageDetail: detail([perPersonLeg()]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [{ legId: "leg-transfer", selected: true, suiteTypeId: "vehicle-van" }],
+      })
+
+      expect(lineItems).toHaveLength(3)
+      const [adultLine, childLine, infantLine] = lineItems
+      expect(adultLine.qty).toBe(6)
+      expect(adultLine.unitPrice).toBe(400)
+      expect(adultLine.total).toBe(2400)
+      expect(adultLine.pricingSnapshot?.passengerKind).toBe("adult")
+      expect(childLine.qty).toBe(2)
+      expect(childLine.unitPrice).toBe(200)
+      expect(childLine.total).toBe(400)
+      // No infant rate on the card means infants travel free, same rule as train/tour fares.
+      expect(infantLine.qty).toBe(1)
+      expect(infantLine.unitPrice).toBe(0)
+      expect(infantLine.total).toBe(0)
+      expect(isMissingPricing(infantLine)).toBe(false)
+    })
+
+    it("keeps pricing a saved row per person even after its supplier flips back to per_vehicle", async () => {
+      // Decision: a transfer keeps the basis it was created under. leg.transferPricingBasis is
+      // the supplier's CURRENT default (per_vehicle here); the row's own pricing_basis wins.
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({
+          transportRequests: [
+            {
+              id: "request-1",
+              service_type: "transfer",
+              route_id: null,
+              suite_type_id: "vehicle-van",
+              service_id: "leg-transfer",
+              pickup_point: "Airport",
+              dropoff_point: "Hotel",
+              pickup_at: null,
+              pricing_basis: "per_person",
+              adult_count: 4,
+              child_count: 0,
+              infant_count: 0,
+              rental_details: null,
+            },
+          ],
+        }),
+        packageDetail: detail([perPersonLeg({ transferPricingBasis: "per_vehicle" })]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [{ legId: "leg-transfer", selected: true, suiteTypeId: "vehicle-van" }],
+      })
+
+      // Adult line only -- child/infant counts are 0, so those lines are skipped (see below).
+      expect(lineItems).toHaveLength(1)
+      expect(lineItems[0].qty).toBe(4)
+      expect(lineItems[0].unitPrice).toBe(400)
+      expect(lineItems[0].pricingSnapshot?.transferPricingBasis).toBe("per_person")
+    })
+
+    it("falls back to the booking's projected totals when a per-person row has no counts of its own", async () => {
+      // buildSupabase's default booking is 2 adults + 1 child (age 8, so still a child).
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({
+          transportRequests: [
+            {
+              id: "request-1",
+              service_type: "transfer",
+              route_id: null,
+              suite_type_id: "vehicle-van",
+              service_id: "leg-transfer",
+              pickup_point: "Airport",
+              dropoff_point: "Hotel",
+              pickup_at: null,
+              pricing_basis: "per_person",
+              adult_count: null,
+              child_count: null,
+              infant_count: null,
+              rental_details: null,
+            },
+          ],
+        }),
+        packageDetail: detail([perPersonLeg()]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [{ legId: "leg-transfer", selected: true, suiteTypeId: "vehicle-van" }],
+      })
+
+      expect(lineItems).toHaveLength(2)
+      expect(lineItems[0].qty).toBe(2)
+      expect(lineItems[1].qty).toBe(1)
+    })
+
+    it("emits no line for a passenger kind with an explicit zero count", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({
+          transportRequests: [
+            {
+              id: "request-1",
+              service_type: "transfer",
+              route_id: null,
+              suite_type_id: "vehicle-van",
+              service_id: "leg-transfer",
+              pickup_point: "Airport",
+              dropoff_point: "Hotel",
+              pickup_at: null,
+              pricing_basis: "per_person",
+              adult_count: 3,
+              child_count: 0,
+              infant_count: 0,
+              rental_details: null,
+            },
+          ],
+        }),
+        packageDetail: detail([perPersonLeg()]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [{ legId: "leg-transfer", selected: true, suiteTypeId: "vehicle-van" }],
+      })
+
+      expect(lineItems).toHaveLength(1)
+      expect(lineItems[0].pricingSnapshot?.passengerKind).toBe("adult")
+    })
+
+    it("prices a complimentary per-person transfer at 0 on every line, keeping the real rates on display", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({
+          transportRequests: [
+            {
+              id: "request-1",
+              service_type: "transfer",
+              route_id: null,
+              suite_type_id: "vehicle-van",
+              service_id: "leg-transfer",
+              pickup_point: "Airport",
+              dropoff_point: "Hotel",
+              pickup_at: null,
+              pricing_basis: "per_person",
+              adult_count: 2,
+              child_count: 1,
+              infant_count: 1,
+              complimentary: true,
+              rental_details: null,
+            },
+          ],
+        }),
+        packageDetail: detail([perPersonLeg()]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [{ legId: "leg-transfer", selected: true, suiteTypeId: "vehicle-van" }],
+      })
+
+      expect(lineItems).toHaveLength(3)
+      for (const line of lineItems) {
+        expect(line.total).toBe(0)
+        expect(line.pricingSnapshot?.isComplimentaryTransport).toBe(true)
+      }
+      expect(lineItems[0].unitPrice).toBe(400)
+      expect(lineItems[1].unitPrice).toBe(200)
+      expect(lineItems[2].unitPrice).toBe(0)
+    })
+
+    it("applies a child fare override to only the child line, leaving adult and infant on the card", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({
+          transportRequests: [
+            {
+              id: "request-1",
+              service_type: "transfer",
+              route_id: null,
+              suite_type_id: "vehicle-van",
+              service_id: "leg-transfer",
+              pickup_point: "Airport",
+              dropoff_point: "Hotel",
+              pickup_at: null,
+              pricing_basis: "per_person",
+              adult_count: 2,
+              child_count: 1,
+              infant_count: 1,
+              price_override_child: 250,
+              price_override_set_at: "2026-08-20T09:00:00Z",
+              rental_details: null,
+            },
+          ],
+        }),
+        packageDetail: detail([perPersonLeg()]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [{ legId: "leg-transfer", selected: true, suiteTypeId: "vehicle-van" }],
+      })
+
+      expect(lineItems).toHaveLength(3)
+      const [adultLine, childLine, infantLine] = lineItems
+      expect(adultLine.unitPrice).toBe(400)
+      expect(adultLine.pricingSnapshot?.manualTransportPrice).toBeUndefined()
+      expect(childLine.unitPrice).toBe(250)
+      expect(childLine.pricingSnapshot?.manualTransportPrice).toBe(250)
+      expect(childLine.pricingSnapshot?.manualTransportPriceBase).toBe(200)
+      expect(infantLine.unitPrice).toBe(0)
+      expect(infantLine.pricingSnapshot?.manualTransportPrice).toBeUndefined()
+    })
+
+    it("prices two vehicles on the same leg as two independent sets of lines, never merged", async () => {
+      const { lineItems } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({
+          transportRequests: [
+            {
+              id: "request-1",
+              service_type: "transfer",
+              route_id: null,
+              suite_type_id: "vehicle-van",
+              service_id: "leg-transfer",
+              pickup_point: "Airport",
+              dropoff_point: "Hotel",
+              pickup_at: null,
+              pricing_basis: "per_person",
+              adult_count: 4,
+              child_count: 0,
+              infant_count: 0,
+              rental_details: null,
+            },
+            {
+              id: "request-2",
+              service_type: "transfer",
+              route_id: null,
+              suite_type_id: "vehicle-van",
+              service_id: "leg-transfer",
+              pickup_point: "Airport",
+              dropoff_point: "Hotel",
+              pickup_at: null,
+              pricing_basis: "per_person",
+              adult_count: 3,
+              child_count: 0,
+              infant_count: 0,
+              rental_details: null,
+            },
+          ],
+        }),
+        packageDetail: detail([perPersonLeg()]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [{ legId: "leg-transfer", selected: true, suiteTypeId: "vehicle-van" }],
+      })
+
+      // Two adult-only lines (4 and 3), never merged into a single qty-7 line.
+      expect(lineItems).toHaveLength(2)
+      expect(lineItems.map((line) => line.qty)).toEqual([4, 3])
+    })
+
+    it("sums to the same subtotal a per-vehicle flat rate would have charged for the equivalent headcount", async () => {
+      const flatLeg = leg({
+        id: "leg-flat",
+        supplierKind: "transfers",
+        routes: [route("route-flat", "supplier-leg-flat", "Airport transfers")],
+        suiteTypes: [suiteType("vehicle-bus", "supplier-leg-flat", "Bus")],
+        rateCards: [
+          rateCard({ id: "rc-bus", routeId: "route-flat", suiteTypeId: "vehicle-bus", pricePerPerson: 2400 }),
+        ],
+      })
+      const { lineItems: flatLines } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({
+          transportRequests: [
+            {
+              service_type: "transfer",
+              route_id: null,
+              suite_type_id: "vehicle-bus",
+              service_id: "leg-flat",
+              pickup_point: "Airport",
+              dropoff_point: "Hotel",
+              pickup_at: null,
+              rental_details: null,
+            },
+          ],
+        }),
+        packageDetail: detail([flatLeg]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [{ legId: "leg-flat", selected: true, suiteTypeId: "vehicle-bus" }],
+      })
+
+      const { lineItems: perPersonLines } = await buildPackageQuoteLineItems({
+        supabase: buildSupabase({
+          transportRequests: [
+            {
+              service_type: "transfer",
+              route_id: null,
+              suite_type_id: "vehicle-van",
+              service_id: "leg-transfer",
+              pickup_point: "Airport",
+              dropoff_point: "Hotel",
+              pickup_at: null,
+              pricing_basis: "per_person",
+              adult_count: 6,
+              child_count: 0,
+              infant_count: 0,
+              rental_details: null,
+            },
+          ],
+        }),
+        packageDetail: detail([perPersonLeg()]),
+        jobId: JOB_ID,
+        travelDate: "2026-09-01",
+        selections: [{ legId: "leg-transfer", selected: true, suiteTypeId: "vehicle-van" }],
+      })
+
+      const sum = (lines: typeof flatLines) => lines.reduce((total, line) => total + line.total, 0)
+      expect(sum(flatLines)).toBe(2400)
+      expect(sum(perPersonLines)).toBe(2400)
+    })
   })
 
   it("prices a vehicle rental override per day, using the billable day count", async () => {
@@ -782,6 +1134,96 @@ describe("buildPackageQuoteLineItems", () => {
     expect(lineItems[0].pricingSnapshot?.manualTourPrice).toBe(2000)
     expect(lineItems[0].pricingSnapshot?.manualTourPriceBase).toBe(850)
     expect(lineItems[0].pricingSnapshot?.manualTourPriceSetByName).toBe("Carmen de Jager")
+  })
+
+  it("prices each tour type off its own independent headcount, never summed against the booking total", async () => {
+    // The booking mock (buildSupabase) carries 2 adults -- two tour rows of 2 adults each would
+    // sum to 4 and throw on every other passenger-split kind. Tours are independent activities
+    // the same 2 travellers can join twice, so this must price both lines without complaint.
+    const tourLeg = leg({
+      id: "leg-tour",
+      supplierKind: "tour_operator",
+      routes: [
+        route("route-falls", "supplier-leg-tour", "Tour of the Falls"),
+        route("route-cruise", "supplier-leg-tour", "Sundowner Cruise"),
+      ],
+      suiteTypes: [
+        suiteType("tour-falls", "supplier-leg-tour", "Tour of the Falls"),
+        suiteType("tour-cruise", "supplier-leg-tour", "Sundowner Cruise"),
+      ],
+      rateCards: [
+        rateCard({ id: "rc-falls", routeId: null, suiteTypeId: "tour-falls", pricePerPerson: 850 }),
+        rateCard({ id: "rc-cruise", routeId: null, suiteTypeId: "tour-cruise", pricePerPerson: 450 }),
+      ],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase(),
+      packageDetail: detail([tourLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-tour",
+          selected: true,
+          units: [
+            { suiteTypeId: "tour-falls", adultCount: 2, childCount: 0, infantCount: 0 },
+            { suiteTypeId: "tour-cruise", adultCount: 2, childCount: 0, infantCount: 0 },
+          ],
+        },
+      ],
+    })
+
+    const totalsBySuiteType = new Map(lineItems.map((li) => [li.pricingSnapshot?.suiteTypeId, li]))
+    expect(totalsBySuiteType.get("tour-falls")?.unitPrice).toBe(850)
+    expect(totalsBySuiteType.get("tour-falls")?.qty).toBe(2)
+    expect(totalsBySuiteType.get("tour-cruise")?.unitPrice).toBe(450)
+    expect(totalsBySuiteType.get("tour-cruise")?.qty).toBe(2)
+  })
+
+  it("keeps two tour units of the same type separate when they're priced at different rate types", async () => {
+    const tourLeg = leg({
+      id: "leg-tour",
+      supplierKind: "tour_operator",
+      routes: [route("route-falls", "supplier-leg-tour", "Tour of the Falls")],
+      suiteTypes: [suiteType("tour-falls", "supplier-leg-tour", "Tour of the Falls")],
+      rateCards: [
+        rateCard({
+          id: "rc-falls-rack",
+          routeId: null,
+          suiteTypeId: "tour-falls",
+          rateTypeId: "rate-rack",
+          pricePerPerson: 850,
+        }),
+        rateCard({
+          id: "rc-falls-sto",
+          routeId: null,
+          suiteTypeId: "tour-falls",
+          rateTypeId: "rate-sto",
+          pricePerPerson: 650,
+        }),
+      ],
+    })
+
+    const { lineItems } = await buildPackageQuoteLineItems({
+      supabase: buildSupabase(),
+      packageDetail: detail([tourLeg]),
+      jobId: JOB_ID,
+      travelDate: "2026-09-01",
+      selections: [
+        {
+          legId: "leg-tour",
+          selected: true,
+          units: [
+            { suiteTypeId: "tour-falls", adultCount: 2, childCount: 0, infantCount: 0, rateTypeId: "rate-rack" },
+            { suiteTypeId: "tour-falls", adultCount: 1, childCount: 0, infantCount: 0, rateTypeId: "rate-sto" },
+          ],
+        },
+      ],
+    })
+
+    const pricesCharged = lineItems.map((li) => li.unitPrice).sort((a, b) => a - b)
+    expect(pricesCharged).toEqual([650, 850])
   })
 
   it("lets a tour override price a unit no rate card covers", async () => {

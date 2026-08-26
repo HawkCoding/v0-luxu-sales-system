@@ -11,6 +11,7 @@ function buildFallback(overrides: Partial<SupplierFormState> = {}): SupplierForm
     name: "Rovos Rail",
     kind: "train_operator",
     pricingMode: "rate_card",
+    transferPricingBasis: "per_vehicle",
     emails: [{ id: "email-1", email: "res@rovos.test", label: "Reservations" }],
     phone: "",
     website: "",
@@ -31,6 +32,7 @@ function buildFallback(overrides: Partial<SupplierFormState> = {}): SupplierForm
     inclusionLines: [],
     longJourneyMinDays: null,
     trainOnlyNote: "",
+    quoteSuiteDetail: "type_only",
     baseRateTypeId: null,
     quoteRateTypeId: null,
     rateAdjustments: [],
@@ -81,16 +83,18 @@ describe("SUPPLIER_DRAFT_SCHEMA_VERSION", () => {
         "phone",
         "pricingMode",
         "quoteRateTypeId",
+        "quoteSuiteDetail",
         "rateAdjustments",
         "singleSupplementPct",
         "stationAddresses",
         "streetAddress",
         "suiteTypes",
         "trainOnlyNote",
+        "transferPricingBasis",
         "website",
       ].sort(),
     )
-    expect(SUPPLIER_DRAFT_SCHEMA_VERSION).toBe(3)
+    expect(SUPPLIER_DRAFT_SCHEMA_VERSION).toBe(5)
   })
 })
 

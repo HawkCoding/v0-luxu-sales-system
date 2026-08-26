@@ -4,7 +4,7 @@ import { jsonError, jsonZodError, safeSupabaseError } from "@/lib/api/responses"
 import { formatMoney } from "@/lib/money"
 import { formatDisplayDate, formatDisplayDateLong } from "@/lib/date-format"
 import { calculateDepositAmount, normalizeDepositPercentage } from "@/lib/pipeline/constants"
-import { buildBankingDetailsBlock } from "@/lib/invoices/banking-details-block"
+import { buildBankingDetailsBlock, buildPaymentReference } from "@/lib/invoices/banking-details-block"
 import { buildUnifiedTotals } from "@/lib/invoices/build-unified-totals"
 import { calculateInvoiceBalance } from "@/lib/invoices/calculate-balance"
 import { ensureInvoicePdf } from "@/lib/invoices/ensure-invoice-pdf"
@@ -116,7 +116,7 @@ export async function POST(req: Request) {
 
   const now = new Date()
   // The sales team's payment terms: deposit due within 72 hours of the
-  // confirmation invoice. Full-payment invoices (booking made inside 60 days
+  // confirmation invoice. Full-payment invoices (booking made inside 2 months
   // of departure) default to 48 hours, but the salesperson can override.
   const dueDate = isFullPayment ? parsed.data.dueDate ?? addDays(now, 2) : addDays(now, 3)
   const amount = isFullPayment ? quote.total : calculateDepositAmount(quote.total, depositPercentage)
@@ -214,6 +214,7 @@ export async function POST(req: Request) {
 
   const customer = Array.isArray(booking.customer) ? booking.customer[0] : booking.customer
   const customerName = formatCustomerSalutation(customer)
+  const paymentReference = buildPaymentReference(displayInvoiceNumber, customer?.last_name)
 
   const totals = buildUnifiedTotals({
     balance,
@@ -281,7 +282,7 @@ export async function POST(req: Request) {
         },
         blocks: {
           ...shared.blocks,
-          bankingDetails: buildBankingDetailsBlock(banking, displayInvoiceNumber),
+          bankingDetails: buildBankingDetailsBlock(banking, paymentReference),
           guestInfo: buildGuestInfoBlock({
             customerName: customerName || "Valued Guest",
             customerEmail: customer?.email ?? null,
@@ -306,7 +307,7 @@ export async function POST(req: Request) {
         },
         blocks: {
           ...shared.blocks,
-          bankingDetails: buildBankingDetailsBlock(banking, displayInvoiceNumber),
+          bankingDetails: buildBankingDetailsBlock(banking, paymentReference),
           guestInfo: buildGuestInfoBlock({
             customerName: customerName || "Valued Guest",
             customerEmail: customer?.email ?? null,

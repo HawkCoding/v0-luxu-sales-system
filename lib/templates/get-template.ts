@@ -39,7 +39,7 @@ export const DEFAULT_TEMPLATES: Record<SystemTemplateKey, { subject: string; bod
   full_payment_request: {
     subject: "Invoice {{invoiceNumber}}",
     bodyHtml:
-      "<p>Dear {{customerName}},</p><p>As this reservation falls within 60 days of departure, full payment of <strong>{{amountDue}}</strong> is required to secure your booking, due by <strong>{{dueDate}}</strong>. Invoice <strong>{{invoiceNumber}}</strong> is attached.</p>{{guestInfo}}{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
+      "<p>Dear {{customerName}},</p><p>As this reservation falls within 2 months of departure, full payment of <strong>{{amountDue}}</strong> is required to secure your booking, due by <strong>{{dueDate}}</strong>. Invoice <strong>{{invoiceNumber}}</strong> is attached.</p>{{guestInfo}}{{bankingDetails}}<p>Kind regards,<br/>Luxus Travel &amp; Tours</p>",
   },
   final_invoice: {
     subject: "Final Invoice {{invoiceNumber}}",

@@ -178,6 +178,35 @@ describe("seedUnitsForServices", () => {
     expect(units.map((unit) => unit.adult_count)).toEqual([2, 1])
   })
 
+  it("gives every tour unit the full headcount instead of splitting it across them", async () => {
+    // Same shape as "spreads the headcount evenly" above, but for a tour operator -- two tour
+    // types captured from the enquiry are two different activities the same 3 travellers do,
+    // not 3 people split across them, so each unit must carry the whole headcount.
+    const seed = baseSeed()
+    seed.bookings = [{ id: BOOKING_ID, no_of_adults: 3, no_of_children: 0, child_ages: null }]
+    seed.booking_suites[0] = { ...seed.booking_suites[0], suite_type_id: "suite-type-tour" }
+    seed.booking_suites[1] = {
+      ...seed.booking_suites[1],
+      suite_type_id: "suite-type-tour",
+      bedroom_type_id: null,
+      bathroom_type_id: null,
+    }
+    seed.suite_types = [{ id: "suite-type-tour", supplier_id: "supplier-tour" }]
+    const { supabase, store } = createSupabaseMock(seed)
+    const services: SeedLeg[] = [{ id: "svc-tour", supplier_id: "supplier-tour", kind: "tour_operator" }]
+
+    await seedUnitsForServices(supabase as never, BOOKING_ID, services, {
+      tripStartDate: null,
+      tripEndDate: null,
+    })
+
+    const units = store.rows("booking_service_units").sort(
+      (a, b) => (a.sort_order as number) - (b.sort_order as number),
+    )
+    expect(units).toHaveLength(2)
+    expect(units.map((unit) => unit.adult_count)).toEqual([3, 3])
+  })
+
   it("buckets children by age so the split matches what the pricing engine expects", async () => {
     const seed = baseSeed()
     seed.bookings = [{ id: BOOKING_ID, no_of_adults: 2, no_of_children: 2, child_ages: [1, 8] }]

@@ -756,6 +756,46 @@ describe("buildVoucherServiceBlocks", () => {
 
     expect(blocks).toHaveLength(1)
     expect(blocks[0].serviceData.suiteType).toBe("Twin bedded Deluxe Suite with a shower")
+    // Default supplier setting: the quote itinerary sentence states the type name alone, while
+    // suiteType above keeps the full configuration for the voucher/invoice.
+    expect(blocks[0].serviceData.itinerarySuiteType).toBe("Deluxe Suite")
+  })
+
+  it("states the full configuration on the quote itinerary sentence when the supplier opts in", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [
+          {
+            id: "leg-train",
+            selected: true,
+            supplier_id: "supplier-train",
+            route_id: "route-train",
+            suite_type_id: "suite-deluxe",
+            service_date: "2026-09-01",
+            nights: null,
+            notes: null,
+            sort_order: 0, label: "Rovos Rail",
+            suppliers: supplier({ kind: "train_operator", name: "Rovos Rail", quote_suite_detail: "full" }),
+            routes: { name: "Pretoria ↔ Cape Town", duration_days: 3 },
+            suite_types: null,
+            units: [
+              {
+                suite_type_id: "suite-deluxe",
+                sort_order: 0,
+                suite_types: { name: "Deluxe Suite" },
+                bedroom_types: { name: "Twin" },
+                bedroom_layouts: null,
+                bathroom_types: { name: "Shower" },
+              },
+            ],
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceData.suiteType).toBe("Twin bedded Deluxe Suite with a shower")
+    expect(blocks[0].serviceData.itinerarySuiteType).toBe("Twin bedded Deluxe Suite with a shower")
   })
 
   it("appends the Suite noun to a train unit's type name when it isn't already nouned", async () => {
@@ -1489,6 +1529,104 @@ describe("buildVoucherServiceBlocks", () => {
     )
 
     expect(blocks[0].serviceData.passengerCount).toBe(3)
+  })
+
+  it("sets a per-person transfer's guestBreakdown from its own typed counts", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [transferSelection()],
+        transportRequests: [
+          {
+            id: "req-pax",
+            service_id: "leg-transfer",
+            service_type: "transfer",
+            pickup_point: "Airport",
+            dropoff_point: "Hotel",
+            pickup_at: null,
+            flight_number: null,
+            passenger_count: null,
+            notes: null,
+            sort_order: 0,
+            suppliers: supplier(),
+            suite_types: null,
+            rental_details: null,
+            pricing_basis: "per_person",
+            adult_count: 2,
+            child_count: 1,
+            infant_count: 1,
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceData.guestBreakdown).toEqual({ adults: 2, children: 1, infants: 1 })
+  })
+
+  it("falls back to the booking's projected totals when a per-person transfer has no typed counts", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [transferSelection()],
+        transportRequests: [
+          {
+            id: "req-pax",
+            service_id: "leg-transfer",
+            service_type: "transfer",
+            pickup_point: "Airport",
+            dropoff_point: "Hotel",
+            pickup_at: null,
+            flight_number: null,
+            passenger_count: null,
+            notes: null,
+            sort_order: 0,
+            suppliers: supplier(),
+            suite_types: null,
+            rental_details: null,
+            pricing_basis: "per_person",
+            adult_count: null,
+            child_count: null,
+            infant_count: null,
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    // The generic mock's bookings row is empty, so the booking-wide projected fallback is 0/0/0.
+    expect(blocks[0].serviceData.guestBreakdown).toEqual({ adults: 0, children: 0, infants: 0 })
+  })
+
+  it("leaves guestBreakdown null for a per-vehicle transfer, keeping the plain passengerCount", async () => {
+    const { blocks } = await buildVoucherServiceBlocks(
+      buildSupabase({
+        selections: [transferSelection()],
+        transportRequests: [
+          {
+            id: "req-pax",
+            service_id: "leg-transfer",
+            service_type: "transfer",
+            pickup_point: "Airport",
+            dropoff_point: "Hotel",
+            pickup_at: null,
+            flight_number: null,
+            passenger_count: 4,
+            notes: null,
+            sort_order: 0,
+            suppliers: supplier(),
+            suite_types: null,
+            rental_details: null,
+            pricing_basis: "per_vehicle",
+            adult_count: null,
+            child_count: null,
+            infant_count: null,
+          },
+        ],
+      }),
+      { bookingId: BOOKING_ID },
+    )
+
+    expect(blocks[0].serviceData.guestBreakdown).toBeNull()
+    expect(blocks[0].serviceData.passengerCount).toBe(4)
   })
 
   it("routes meal-seating/smoking to train blocks and dietary/occasion to hotel blocks", async () => {

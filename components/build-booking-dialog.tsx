@@ -27,7 +27,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { useActiveSuppliers, useRateTypes } from "@/lib/use-data"
 import type { BookingTransportRequest, CommissionKind, PackageDetail, QuoteLineItem, SupplierKind } from "@/lib/types"
-import { SUPPLIER_KIND_LABELS } from "@/lib/types"
+import { SUPPLIER_KIND_LABELS, SUPPLIER_VOCABULARY } from "@/lib/types"
 import { PresenceAvatars } from "@/components/presence-avatars"
 import { isMissingPricing } from "@/lib/quotes/pricing-engine"
 import type { IncompleteLeg } from "@/lib/quotes/build-from-package"
@@ -57,6 +57,7 @@ import {
   buildDefaultLegStates,
   hydrateFromSaved,
   PASSENGER_SPLIT_SUPPLIER_KINDS,
+  PASSENGER_SUM_SUPPLIER_KINDS,
   toApplySelections,
   toHotelAnchorContext,
   toPackageSelectionsPatch,
@@ -575,7 +576,7 @@ export function BuildBookingDialog({
     return legStates.flatMap((state) => {
       if (state.kind !== "suite" || !state.selected) return []
       const leg = legById.get(state.legId)
-      if (!leg || !PASSENGER_SPLIT_SUPPLIER_KINDS.has(leg.supplierKind)) return []
+      if (!leg || !PASSENGER_SUM_SUPPLIER_KINDS.has(leg.supplierKind)) return []
       const totals = totalsBySupplierId[leg.supplierId]
       if (!totals) return []
       const summed = state.units.reduce(
@@ -589,7 +590,15 @@ export function BuildBookingDialog({
       if (summed.adultCount === totals.adultCount && summed.childCount === totals.childCount && summed.infantCount === totals.infantCount) {
         return []
       }
-      return [{ legId: leg.id, label: leg.label ?? leg.supplierName, supplierId: leg.supplierId, summed }]
+      return [
+        {
+          legId: leg.id,
+          label: leg.label ?? leg.supplierName,
+          supplierId: leg.supplierId,
+          summed,
+          unitNounPlural: SUPPLIER_VOCABULARY[leg.supplierKind].unitNounPlural,
+        },
+      ]
     })
   }, [sortedLegs, legStates, totalsBySupplierId])
 
@@ -1208,6 +1217,7 @@ export function BuildBookingDialog({
                         quoteCurrency={quoteCurrency}
                         fxRates={fxRates}
                         travelDate={travelDate}
+                        expectedTotals={totalsBySupplierId[leg.supplierId] ?? null}
                       />
                     ) : (
                       <SuiteLegEditor
@@ -1278,14 +1288,14 @@ export function BuildBookingDialog({
                   <h3 className="text-sm font-semibold">Travellers</h3>
                 </div>
                 <div className="space-y-2">
-                  {mismatchedSplitLegs.map(({ legId, label, supplierId, summed }) => {
+                  {mismatchedSplitLegs.map(({ legId, label, supplierId, summed, unitNounPlural }) => {
                     const totals = totalsBySupplierId[supplierId]
                     const delta = totals ? resolveAdultsOnlyDelta(totals, summed) : null
                     const nextAdults = delta !== null ? bookingCounts.noOfAdults + delta : null
                     return (
                       <div key={legId} className="flex flex-wrap items-center justify-between gap-2 text-sm">
                         <p>
-                          {label}: suites hold {summed.adultCount} adults, {summed.childCount} children,{" "}
+                          {label}: {unitNounPlural} hold {summed.adultCount} adults, {summed.childCount} children,{" "}
                           {summed.infantCount} infants — booking is {totals?.adultCount} adults,{" "}
                           {totals?.childCount} children, {totals?.infantCount} infants.
                         </p>

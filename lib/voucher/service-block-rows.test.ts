@@ -369,6 +369,22 @@ describe("voucherRowsForBlock", () => {
     expect(rows.find((r) => r.label === "No of Guests")?.value).toBe("2 Adults")
   })
 
+  it("transfer block: prints the 3-cell Guests breakdown instead of No of Guests when set", () => {
+    const rows = voucherRowsForBlock(
+      block({
+        serviceType: "transfer",
+        serviceData: { passengerCount: 4, guestBreakdown: { adults: 2, children: 1, infants: 1 }, pickup: "Hotel" },
+      }),
+    )
+    expect(rows.find((r) => r.label === "No of Guests")).toBeUndefined()
+    const guestsRow = rows.find((r) => r.label === "Guests")
+    expect(guestsRow?.cells).toEqual([
+      { label: "Adults", value: 2 },
+      { label: "Children", value: 1 },
+      { label: "Infant", value: 1 },
+    ])
+  })
+
   it("transfer block: falls back to the leg's route name when the trip has no pickup or drop-off", () => {
     const rows = voucherRowsForBlock(
       block({ serviceType: "transfer", serviceData: { route: "Cape Town Station > Portswood Hotel" } }),

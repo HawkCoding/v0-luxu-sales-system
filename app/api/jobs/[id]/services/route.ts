@@ -25,6 +25,7 @@ export const runtime = "nodejs"
 
 import { isOptionalPackageLegKind, type SupplierKind } from "@/lib/types"
 import { normaliseCurrency } from "@/lib/money"
+import { PASSENGER_SUM_SUPPLIER_KINDS } from "@/lib/packages/apply-dialog-state"
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/
 const timePattern = /^([01]\d|2[0-3]):[0-5]\d$/
@@ -49,7 +50,6 @@ const FLIGHT_SCHEDULE_FIELDS = [
   "checkedLuggageKg",
 ] as const
 
-const PASSENGER_SPLIT_SUPPLIER_KINDS = new Set(["train_operator", "tour_operator", "airline"])
 const TRANSPORT_SUPPLIER_KINDS = new Set(["transfers", "vehicle_rental"])
 
 const selectionUnitSchema = z.object({
@@ -75,6 +75,9 @@ const selectionUnitSchema = z.object({
   /** Tour legs only: this unit's typed flat price, replacing its rate-card-computed total.
    * Rejected on any other supplier kind — see the guard in PATCH. */
   manualTourPrice: z.number().nonnegative().nullable().optional(),
+  /** Tour legs only: this unit's own rate type, overriding the leg-level rateTypeId below.
+   * Rejected on any other supplier kind — see the guard in PATCH. */
+  rateTypeId: z.string().uuid().nullable().optional(),
 })
 
 const updateServiceSchema = z.object({
@@ -146,7 +149,7 @@ const SERVICES_WITH_UNITS_SELECT =
   "id, booking_id, supplier_id, route_id, route_reversed, suite_type_id, service_date, nights, date_anchor, rate_type_id, notes, selected, origin, sort_order, price_currency, updated_at, " +
   "departure_time, arrival_date, arrival_time, flight_number, departure_airport_code, arrival_airport_code, hand_luggage_kg, checked_luggage_kg, " +
   "luggage_storage_available, booking_date, confirmation_date, payment_made_date, paid_with, " +
-  "units:booking_service_units(id, suite_type_id, bedroom_type_id, bedroom_layout_id, bathroom_type_id, adult_count, child_count, infant_count, sort_order, manual_adult_price, manual_child_price, manual_infant_price, manual_room_price, manual_room_price_set_at, complimentary_first_night)"
+  "units:booking_service_units(id, suite_type_id, bedroom_type_id, bedroom_layout_id, bathroom_type_id, adult_count, child_count, infant_count, sort_order, manual_adult_price, manual_child_price, manual_infant_price, manual_room_price, manual_room_price_set_at, complimentary_first_night, rate_type_id)"
 
 /**
  * GET only. Build Booking's step 1 lists a booking's services by supplier name and kind, which is
@@ -175,6 +178,7 @@ interface ServiceUnitRow {
   manual_room_price: number | null
   manual_room_price_set_at: string | null
   complimentary_first_night: boolean
+  rate_type_id: string | null
 }
 
 interface ServiceWithUnitsRow {
@@ -507,6 +511,19 @@ export async function PATCH(req: Request, { params }: RouteParams) {
       })
     }
 
+    // A per-unit rate type only means something for a tour: every other passenger-split kind
+    // (trains, airlines) shares one rate type across the whole leg (see updateServiceSchema's
+    // leg-level rateTypeId), so a unit-level one there would silently be ignored.
+    if (
+      supplierKind !== "tour_operator" &&
+      selection.units.some((unit) => unit.rateTypeId !== null && unit.rateTypeId !== undefined)
+    ) {
+      return jsonError("A per-unit rate type is only available on tour services", 400, {
+        packageLegId: selection.packageLegId,
+        supplierKind,
+      })
+    }
+
     for (const [unitIndex, unit] of selection.units.entries()) {
       const suiteTypeId = unit.suiteTypeId
       if (!suiteTypeId) continue
@@ -520,7 +537,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
       }
     }
 
-    if (supplierKind && PASSENGER_SPLIT_SUPPLIER_KINDS.has(supplierKind) && selection.units.length > 0) {
+    if (supplierKind && PASSENGER_SUM_SUPPLIER_KINDS.has(supplierKind) && selection.units.length > 0) {
       const totals = await computeLegPassengerTotals(supabase, {
         noOfAdults: booking.no_of_adults,
         noOfChildren: booking.no_of_children,
@@ -669,6 +686,7 @@ export async function PATCH(req: Request, { params }: RouteParams) {
           tourPrice === null ? null : tourUnchanged ? previousTour?.setAt ?? savedAt : savedAt,
         manual_tour_price_set_by:
           tourPrice === null ? null : tourUnchanged ? previousTour?.setBy ?? user.id : user.id,
+        rate_type_id: unit.rateTypeId ?? null,
         origin: "consultant" as const,
       }
     })

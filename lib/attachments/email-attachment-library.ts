@@ -49,6 +49,9 @@ export interface LibraryAttachmentOption {
   supplierName: string | null
   /** Supplier category the file is scoped to, or null. Exclusive with supplierId. */
   supplierKind: string | null
+  /** Route the file is pinned to, or null. Only ever set alongside supplierId. */
+  routeId: string | null
+  routeName: string | null
   emailKinds: string[]
   /** True when the file's email_kinds contains the kind being sent. */
   defaultSelected: boolean

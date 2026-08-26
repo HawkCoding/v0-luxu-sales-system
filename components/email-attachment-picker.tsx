@@ -78,8 +78,10 @@ export function EmailAttachmentPicker({
             >
               <Paperclip className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
               {option.name}
-              {option.supplierName ? (
-                <span className="text-xs text-muted-foreground">({option.supplierName})</span>
+              {option.routeName ?? option.supplierName ? (
+                <span className="text-xs text-muted-foreground">
+                  ({option.routeName ?? option.supplierName})
+                </span>
               ) : null}
             </Label>
           </div>
