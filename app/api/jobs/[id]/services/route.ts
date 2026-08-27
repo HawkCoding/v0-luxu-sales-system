@@ -162,6 +162,17 @@ const SERVICES_WITH_UNITS_SELECT =
  */
 const SERVICES_WITH_SUPPLIER_SELECT = `${SERVICES_WITH_UNITS_SELECT}, suppliers(name, kind)`
 
+/**
+ * GET only. Build Booking's step 1 lists a booking's services by supplier name and kind, which is
+ * all it renders -- so carrying the name/kind here lets the dialog paint that list off this read
+ * instead of waiting on the far heavier GET /build-booking payload (every route, rate card and
+ * suite type for every supplier on the booking) that step 2 actually needs.
+ *
+ * Deliberately separate from SERVICES_WITH_UNITS_SELECT so PATCH's reload response below keeps its
+ * existing shape -- a read-path speedup has no business changing what a write returns.
+ */
+const SERVICES_WITH_SUPPLIER_SELECT = `${SERVICES_WITH_UNITS_SELECT}, suppliers(name, kind)`
+
 interface ServiceUnitRow {
   id: string
   suite_type_id: string | null
